@@ -646,10 +646,10 @@ fn pty_reader_loop(
 
     // Offload the blocking read to a dedicated thread so the main
     // loop can use recv_timeout for the quiet-window flush. Bound the
-    // channel (32 slots ≈ 256 KiB headroom) so a flooding child can't
+    // channel (64 slots ≈ 512 KiB headroom) so a flooding child can't
     // grow it unbounded — the SyncSender blocks when full, propagating
     // backpressure to the PTY buffer and ultimately to the child process.
-    let (data_tx, data_rx) = std_mpsc::sync_channel::<Option<Vec<u8>>>(32);
+    let (data_tx, data_rx) = std_mpsc::sync_channel::<Option<Vec<u8>>>(64);
     std::thread::spawn(move || {
         use std::io::Read;
         let mut reader = reader;
