@@ -41,14 +41,22 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            # publish :latest on every version-tag push (github.ref is always
+            # refs/tags/vX.Y.Z here; the previous refs/heads/main check was
+            # never true in this workflow and suppressed :latest entirely)
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
 
       - name: Resolve Claude Code version
         id: claude_ver
+        # Bind the workflow_dispatch input to an env var before the shell sees it
+        # to prevent shell injection — direct ${{ }} expansion happens before the
+        # shell runs, so an attacker-controlled value like `"; cmd; echo "` would
+        # execute arbitrary code.  Using env: isolates it as a plain variable.
+        env:
+          CLAUDE_VERSION_INPUT: ${{ github.event.inputs.claude_version }}
         run: |
-          INPUT="${{ github.event.inputs.claude_version }}"
-          if [ -n "$INPUT" ] && [ "$INPUT" != "latest" ]; then
-            echo "version=$INPUT" >> $GITHUB_OUTPUT
+          if [ -n "$CLAUDE_VERSION_INPUT" ] && [ "$CLAUDE_VERSION_INPUT" != "latest" ]; then
+            echo "version=$CLAUDE_VERSION_INPUT" >> $GITHUB_OUTPUT
           else
             echo "version=$(npm view @anthropic-ai/claude-code version)" >> $GITHUB_OUTPUT
           fi
