@@ -39,6 +39,7 @@ import { useAgentStream } from "./useAgentStream";
 import { useActivityLog } from "./hooks/useActivityLog";
 import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
+// SNAPSHOT_SCHEMA_VERSION re-exported from useHistoryPagination; imported here for the write path.
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useScrollToNode } from "./hooks/useScrollToNode";
@@ -298,6 +299,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // restore.
         onContinuationModts: (ms) => model.continuedFromMsAtom._set(ms),
         onHistoryReady: () => historyReadyFn?.(),
+        // Schema v2: apply DocumentState + pane overlay after NDJSON replay.
+        onSnapshotOverlay: ({ documentState, detailsOpen }) => {
+            const [, setDocState] = agentAtoms().documentStateAtom;
+            setDocState((prev) => ({ ...prev, ...documentState }));
+            if (typeof detailsOpen === "boolean") {
+                const [, setDetailsOpen] = agentAtoms().detailsOpenAtom;
+                setDetailsOpen(detailsOpen);
+            }
+        },
         log,
     });
 
@@ -325,9 +335,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // LAST and overwrite the close-time snapshot, losing recent nodes.
     let inFlightSnapshot: Promise<void> = Promise.resolve();
     const writeSnapshotNow = () => {
-        const nodes = getDocument();
-        if (!nodes) return;
+        // Schema v2: capture the lightweight overlay state (DocumentState +
+        // pane flags) synchronously before the async RPC chain so we snapshot
+        // the values at trigger time, not after a potential 3 s round-trip.
+        // nodes[] is NOT included — the NDJSON output log is the source of
+        // truth and is replayed on restore. This keeps the payload under 1 KB
+        // regardless of conversation length, eliminating the renderer OOM.
+        // See docs/specs/SPEC_WRITE_STATE_NDJSON_RESTORE_2026_06_12.md.
+        const [docState] = agentAtoms().documentStateAtom;
+        const [detailsOpen] = agentAtoms().detailsOpenAtom;
+        const capturedDocState = docState();
+        const capturedDetailsOpen = detailsOpen();
         const capturedOffset = history.historyOffset();
+
         inFlightSnapshot = inFlightSnapshot.then(async () => {
             let highWaterMark = 0;
             try {
@@ -344,15 +364,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 savedAt: new Date().toISOString(),
                 highWaterMark,
                 historyOffset: capturedOffset,
-                nodes,
+                documentState: {
+                    collapsedNodeIds: capturedDocState ? [...capturedDocState.collapsedNodes] : [],
+                    pinnedNodeIds: capturedDocState ? [...capturedDocState.pinnedNodes] : [],
+                    scrollPosition: capturedDocState?.scrollPosition ?? 0,
+                    filter: capturedDocState?.filter ?? {
+                        showThinking: false,
+                        showSuccessfulTools: true,
+                        showFailedTools: true,
+                        showIncoming: true,
+                        showOutgoing: true,
+                    },
+                },
+                paneState: {
+                    detailsOpen: capturedDetailsOpen ?? false,
+                },
             };
-            // Option E (PR #1007 backend, this PR frontend): write
-            // the snapshot to the agent-anchored zone
-            // `agent:<defId>:current` so the next pane that opens for
-            // this AgentDefinition picks up where this one left off.
-            // `agentId` is the definition slug/UUID from block meta —
-            // non-empty here by the AgentViewWrapper `Show when=...`
-            // gate above.
             await RpcApi.AgentSessionWriteStateCommand(TabRpcClient, {
                 definition_id: agentId,
                 content: JSON.stringify(snapshot),
