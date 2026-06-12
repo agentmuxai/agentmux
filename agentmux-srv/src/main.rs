@@ -538,6 +538,19 @@ async fn main() {
     // Auto-seed agent definitions on first launch (or empty DB)
     backend::agent_seed::auto_seed_on_startup(&wstore);
 
+    // Phase 0 container startup check — warn if Docker is unavailable.
+    // Container-type agent panes require Docker; host agents are unaffected.
+    // Non-fatal: server starts normally even without Docker.
+    tokio::spawn(async {
+        match backend::container::ContainerManager::connect() {
+            Ok(mgr) => match mgr.check_available().await {
+                Ok(()) => tracing::info!("Docker daemon available — container agent panes enabled"),
+                Err(e) => tracing::warn!(error = %e, "Docker daemon not reachable; container agent panes will fail to start"),
+            },
+            Err(e) => tracing::warn!(error = %e, "Docker not available; container agent panes disabled"),
+        }
+    });
+
     // Phase 3a — `db_agents` consolidation backfill. Marker-file gated
     // under the data dir; idempotent across restarts. WRITE-ONLY in
     // Phase 3a: dual-write keeps `db_agents` fresh; reads still hit
