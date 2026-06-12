@@ -176,9 +176,11 @@ interface ChunkListProps {
     chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
-    // Leading-\r spinner collapse is handled in the Rust layer
-    // (spawn_publisher_loop in bash_wrap.rs) — no \r ever reaches the
-    // frontend for spinner frames. The cap is the only transform needed.
+    // All CR/spinner handling is in the Rust layer: pending_cr_override slots
+    // in pty_reader_loop and stream_reader collapse throttled spinner frames
+    // before they become LineEvents; spawn_publisher_loop strips any leading \r
+    // before publishing. No \r reaches the frontend. The cap is the only
+    // transform needed here.
     const cap = createChunkCapper();
     const capped = () => cap(props.chunks);
     return (
