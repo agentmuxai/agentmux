@@ -207,22 +207,31 @@ async fn drain_and_collect(
     let exit = child.wait().await.map_err(|e| format!("wait: {e}"))?;
 
     match result {
-        Ok(mut accumulated) if exit.success() => {
-            // Exited 0 but the stream never emitted Done (claude
-            // reported an error on stdout, or died mid-write).
-            // Classify it rather than returning empty defaults silently.
-            if accumulated.response.is_empty() && accumulated.transcript.is_empty() {
-                return Err(explain_failure(exit.code(), exit_signal(&exit), stderr_rx).await);
+        Ok(mut accumulated) => {
+            // A run is a failure if the process exited non-zero OR claude
+            // reported an error on stdout (a terminal error `result`
+            // frame) even while exiting 0 — otherwise downstream blocks
+            // could treat a failed run as successful. (codex P1 #1353.)
+            let reported_error = accumulated.error_frame.take();
+            if exit.success() && reported_error.is_none() {
+                // Genuine success — but a stream that produced nothing is
+                // itself a (classified) failure, not a silent empty result.
+                if accumulated.response.is_empty() && accumulated.transcript.is_empty() {
+                    return Err(
+                        explain_failure(exit.code(), exit_signal(&exit), None, stderr_rx).await,
+                    );
+                }
+                accumulated.transcript.shrink_to_fit();
+                return Ok(accumulated);
             }
-            accumulated.transcript.shrink_to_fit();
-            Ok(accumulated)
+            // Non-zero exit, or a stdout-reported error on exit 0: classify
+            // from the exit status + result frame + captured stderr so the
+            // caller sees a real cause, not "exited with status N".
+            Err(explain_failure(exit.code(), exit_signal(&exit), reported_error, stderr_rx).await)
         }
-        // Non-zero exit: classify from the exit status + captured stderr
-        // so the caller sees a real cause, not "exited with status N".
-        Ok(_) => Err(explain_failure(exit.code(), exit_signal(&exit), stderr_rx).await),
         // Stream read error: still enrich with the exit/stderr cause.
         Err(e) => {
-            let cause = explain_failure(exit.code(), exit_signal(&exit), stderr_rx).await;
+            let cause = explain_failure(exit.code(), exit_signal(&exit), None, stderr_rx).await;
             Err(format!("{cause}\n(stream read: {e})"))
         }
     }
@@ -235,11 +244,12 @@ async fn drain_and_collect(
 async fn explain_failure(
     exit_code: Option<i32>,
     signal: Option<i32>,
+    result_frame: Option<serde_json::Value>,
     stderr_rx: oneshot::Receiver<Vec<u8>>,
 ) -> String {
     let bytes = stderr_rx.await.unwrap_or_default();
     let stderr = String::from_utf8_lossy(&bytes);
-    let failure = classify(exit_code, signal, &stderr, None);
+    let failure = classify(exit_code, signal, &stderr, result_frame.as_ref());
     tracing::warn!(
         code = ?failure.code,
         exit_code = ?exit_code,
@@ -313,6 +323,15 @@ pub(crate) async fn drain_async_reader<R: tokio::io::AsyncBufRead + Unpin>(
         let Ok(frame) = serde_json::from_str::<serde_json::Value>(trimmed) else {
             continue;
         };
+        // Capture a terminal *error* result frame so the collector can
+        // fail the run even when claude reports the error on stdout and
+        // exits 0 (the translator still emits a hollow `Done`).
+        // codex P1 on #1353.
+        if frame.get("type").and_then(|v| v.as_str()) == Some("result")
+            && super::failure::is_error_result_frame(&frame)
+        {
+            accumulated.error_frame = Some(frame.clone());
+        }
         for event in translator.translate(frame) {
             // Capture terminal values before forwarding so a closed
             // receiver doesn't lose the accumulated result.
@@ -683,6 +702,79 @@ mod tests {
         append_capped_tail(&mut buf, b"abcdefghij", cap);
         trim_to_tail(&mut buf, cap);
         assert_eq!(&buf, b"ghij");
+    }
+
+    #[tokio::test]
+    async fn drain_captures_error_result_frame() {
+        // An error result frame on stdout must be captured so the
+        // collector can fail the run even on exit 0. codex P1 #1353.
+        let bytes =
+            b"{\"type\":\"result\",\"is_error\":true,\"subtype\":\"error_during_execution\",\"error\":{\"message\":\"overloaded_error\"}}\n"
+                .to_vec();
+        let (mut w, r) = tokio::io::duplex(4096);
+        tokio::spawn(async move {
+            w.write_all(&bytes).await.unwrap();
+            w.shutdown().await.unwrap();
+        });
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let result = drain_async_reader(BufReader::new(r), &tx)
+            .await
+            .expect("drain ok");
+        assert!(
+            result.error_frame.is_some(),
+            "error result frame should be captured"
+        );
+    }
+
+    /// End-to-end (Unix): claude can report an error on stdout and still
+    /// exit 0; the runner must NOT treat that as success. codex P1 #1353.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stdout_error_result_with_exit_zero_is_a_failure() {
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = std::env::temp_dir()
+            .join(format!("amux-stub-claude-okerr-{}.sh", uuid::Uuid::new_v4()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh").unwrap();
+            // Emit an error result frame on stdout, then exit 0. The JSON
+            // lives in a `let` so its braces are data, not writeln! format
+            // placeholders (no escaping, no print_literal lint).
+            let frame = r#"{"type":"result","is_error":true,"subtype":"error_during_execution","error":{"message":"overloaded_error: upstream busy"}}"#;
+            writeln!(f, "echo '{frame}'").unwrap();
+            writeln!(f, "exit 0").unwrap();
+            let mut perms = std::fs::metadata(&path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).unwrap();
+        }
+
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let handle = run_agent_with_bin(
+            path.to_str().unwrap(),
+            AgentRef::default(),
+            AgentTask {
+                prompt: "hi".to_string(),
+                context: serde_json::Map::new(),
+                max_turns: None,
+            },
+            tx,
+        )
+        .await
+        .expect("spawn ok");
+
+        let err = handle
+            .final_result
+            .await
+            .expect("oneshot ok")
+            .expect_err("stdout-reported error with exit 0 must fail");
+        assert!(
+            err.to_lowercase().contains("overloaded"),
+            "should classify the stdout error; got: {err}"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

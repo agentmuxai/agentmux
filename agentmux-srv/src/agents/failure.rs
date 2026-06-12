@@ -4,12 +4,12 @@
 //! Classification of agent (Claude CLI) run failures into a small,
 //! stable taxonomy with a human-readable explanation.
 //!
-//! `classify()` is a **pure** function — exit code + terminating signal
-//! + the tail of the child's stderr + an optional terminal `result`
-//! frame go in; an [`AgentFailure`] comes out. It does no IO and is
-//! exhaustively unit-tested against the real Anthropic error phrasings,
-//! so the "why" behind a non-zero exit can be surfaced to the user
-//! instead of a bare `exit 1`.
+//! `classify()` is a **pure** function: it takes the exit code, the
+//! terminating signal, the tail of the child's stderr, and an optional
+//! terminal `result` frame, and returns an [`AgentFailure`]. It does no
+//! IO and is exhaustively unit-tested against the real Anthropic error
+//! phrasings, so the "why" behind a non-zero exit can be surfaced to the
+//! user instead of a bare `exit 1`.
 //!
 //! See `docs/specs/SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md`. This
 //! is the P1 (capture + classify) slice; live-stream emission and UI
@@ -106,7 +106,7 @@ pub fn classify(
     stderr: &str,
     result_frame: Option<&Value>,
 ) -> AgentFailure {
-    let frame_is_error = result_frame.is_some_and(frame_is_error);
+    let frame_reported_error = result_frame.is_some_and(is_error_result_frame);
     let frame_text = result_frame.map(frame_error_text).unwrap_or_default();
 
     let combined = if frame_text.is_empty() {
@@ -153,7 +153,7 @@ pub fn classify(
     if hay.contains("rate limited")
         || hay.contains("temporarily limiting requests")
         || hay.contains("rate_limit")
-        || hay.contains("429")
+        || mentions_http_status(&hay, "429")
     {
         return build(
             FailureClass::RateLimited,
@@ -165,7 +165,7 @@ pub fn classify(
             &tail,
         );
     }
-    if hay.contains("overloaded") || hay.contains("529") {
+    if hay.contains("overloaded") || mentions_http_status(&hay, "529") {
         return build(
             FailureClass::Overloaded,
             "API temporarily overloaded",
@@ -181,7 +181,7 @@ pub fn classify(
         || hay.contains("invalid x-api-key")
         || hay.contains("unauthorized")
         || hay.contains("please run /login")
-        || hay.contains("401")
+        || mentions_http_status(&hay, "401")
     {
         return build(
             FailureClass::Auth,
@@ -255,7 +255,7 @@ pub fn classify(
     }
 
     // Fallbacks.
-    if frame_is_error {
+    if frame_reported_error {
         return build(
             FailureClass::UnknownNonZero,
             "Agent reported an error",
@@ -329,7 +329,7 @@ fn frame_error_text(frame: &Value) -> String {
 }
 
 /// True if a terminal `result` frame represents a failure.
-fn frame_is_error(frame: &Value) -> bool {
+pub(crate) fn is_error_result_frame(frame: &Value) -> bool {
     frame.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false)
         || frame
             .get("subtype")
@@ -355,6 +355,28 @@ fn tail_lines(s: &str, max_lines: usize, max_chars: usize) -> String {
     } else {
         joined
     }
+}
+
+/// True if `hay` mentions HTTP status `code` in a status-like context
+/// (e.g. "http 429", "status 429", "error 429", "[429]"). Anchoring on a
+/// context word avoids the false positives a bare substring would hit —
+/// an ISO date like `2026-04-29` contains "429". (reagent P2 on #1353.)
+fn mentions_http_status(hay: &str, code: &str) -> bool {
+    [
+        format!("http {code}"),
+        format!("http/1.1 {code}"),
+        format!("http/2 {code}"),
+        format!("status {code}"),
+        format!("status: {code}"),
+        format!("status code {code}"),
+        format!("code {code}"),
+        format!("code: {code}"),
+        format!("error {code}"),
+        format!("[{code}]"),
+        format!("({code})"),
+    ]
+    .iter()
+    .any(|p| hay.contains(p.as_str()))
 }
 
 #[cfg(test)]
@@ -387,6 +409,37 @@ mod tests {
             None,
         );
         assert_eq!(f.code, FailureClass::RateLimited);
+    }
+
+    #[test]
+    fn iso_date_in_stderr_does_not_false_positive() {
+        // "2026-04-29" contains "429"; "2026-04-01" -> "401";
+        // "2026-05-29" -> "529". A bare substring match would misclassify
+        // these; anchored matching must not. (reagent P2 on #1353.)
+        for stderr in [
+            "panic at 2026-04-29T10:00:00: unexpected eof",
+            "build 2026-04-01 failed: assertion",
+            "ts=2026-05-29 fatal: segfault",
+        ] {
+            let f = classify(Some(2), None, stderr, None);
+            assert_eq!(
+                f.code,
+                FailureClass::UnknownNonZero,
+                "stderr {stderr:?} must not match an HTTP status"
+            );
+        }
+    }
+
+    #[test]
+    fn anchored_http_status_still_classifies() {
+        assert_eq!(
+            classify(Some(1), None, "Error: HTTP 429 Too Many Requests", None).code,
+            FailureClass::RateLimited
+        );
+        assert_eq!(
+            classify(Some(1), None, "request failed with status 401", None).code,
+            FailureClass::Auth
+        );
     }
 
     #[test]
