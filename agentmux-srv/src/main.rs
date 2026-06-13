@@ -464,9 +464,10 @@ async fn main() {
                     // (shared/agents), which no longer contains any instance. In
                     // dev this is ~/.agentmux/dev/<branch>/agents, in installed/
                     // portable it is channels/<ch>/agents; either way it is the
-                    // correct per-channel anchor. (Cross-channel rows surfaced
-                    // from OTHER channels still re-join under this channel's dir
-                    // until P0.4 encodes the source base per record.)
+                    // correct per-channel anchor. This base is the fallback for
+                    // legacy v1/v2 records only; v3 records carry their own
+                    // source_agents_base (P0.4) and reconstruct against that,
+                    // so cross-channel rows resolve to their real workspace.
                     if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
                         if !base.is_empty() {
                             wstore_raw

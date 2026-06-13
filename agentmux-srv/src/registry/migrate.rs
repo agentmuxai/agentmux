@@ -253,27 +253,26 @@ pub fn backfill_source_bases_once(
     }
 
     let (sources, mut incomplete) = enumerate_sources(home);
+
+    // Dedup EXACTLY like migrate_from_sqlite_once: for an id present in more
+    // than one DB the latest-`started_at` row wins. This anchors
+    // source_agents_base on the SAME channel the record's existing working_dir
+    // was stripped against (the migration used that same winning row), instead
+    // of whichever DB read_dir happened to return first (codex/reagent P2).
+    let mut winners: HashMap<String, (i64, PathBuf)> = HashMap::new();
     for src in sources {
         stats.dbs_scanned += 1;
         match read_named_rows(&src.db_path, &src.agents_root) {
             Ok(rows) => {
                 for row in rows {
-                    let Some(mut rec) = pending.remove(&row.id) else {
+                    if !pending.contains_key(&row.id) {
                         continue;
-                    };
-                    rec.data.source_agents_base =
-                        Some(row.agents_root.to_string_lossy().to_string());
-                    rec.schema_version = rec.data.min_schema_version();
-                    if let Err(e) = registry.upsert(&rec) {
-                        tracing::warn!(
-                            instance_id = %row.id,
-                            error = %e,
-                            "source-base backfill: upsert failed — will retry next launch"
-                        );
-                        pending.insert(row.id.clone(), rec);
-                        incomplete = true;
-                    } else {
-                        stats.records_updated += 1;
+                    }
+                    match winners.get(&row.id) {
+                        Some((ts, _)) if *ts >= row.started_at => {}
+                        _ => {
+                            winners.insert(row.id.clone(), (row.started_at, row.agents_root));
+                        }
                     }
                 }
             }
@@ -285,6 +284,27 @@ pub fn backfill_source_bases_once(
                 );
                 incomplete = true;
             }
+        }
+    }
+
+    // Apply the winning channel's agents dir to each record (only the source
+    // base; everything else is preserved from the existing record).
+    for (id, (_, agents_root)) in winners {
+        let Some(mut rec) = pending.remove(&id) else {
+            continue;
+        };
+        rec.data.source_agents_base = Some(agents_root.to_string_lossy().to_string());
+        rec.schema_version = rec.data.min_schema_version();
+        if let Err(e) = registry.upsert(&rec) {
+            tracing::warn!(
+                instance_id = %id,
+                error = %e,
+                "source-base backfill: upsert failed — will retry next launch"
+            );
+            pending.insert(id, rec);
+            incomplete = true;
+        } else {
+            stats.records_updated += 1;
         }
     }
 
@@ -1258,6 +1278,42 @@ mod tests {
         seed_pre_v3_record(&reg, "inst-late", None);
         let s2 = backfill_source_bases_once(home.path(), &reg).unwrap();
         assert_eq!(s2.records_updated, 0, "marker short-circuits subsequent runs");
+    }
+
+    #[test]
+    fn backfill_anchors_on_latest_started_at_channel() {
+        // An id present in two channels must anchor source_agents_base on the
+        // SAME (latest-started_at) channel the migration's working_dir came
+        // from — not whichever DB the filesystem returned first.
+        let (home, reg) = fresh_home();
+        std::fs::write(reg.root().join(MARKER), b"x").unwrap();
+        seed_pre_v3_record(&reg, "inst-dup", None);
+        let wda = channel_agents(home.path(), "chan-a").join("demo");
+        let wdb = channel_agents(home.path(), "chan-b").join("demo");
+        std::fs::create_dir_all(&wda).unwrap();
+        std::fs::create_dir_all(&wdb).unwrap();
+        // chan-a older (100), chan-b newer (200) — chan-b must win.
+        make_channel_db(
+            home.path(),
+            "chan-a",
+            "0.1",
+            &[("inst-dup", "demo", 100, &wda.to_string_lossy())],
+        );
+        make_channel_db(
+            home.path(),
+            "chan-b",
+            "0.1",
+            &[("inst-dup", "demo", 200, &wdb.to_string_lossy())],
+        );
+
+        let stats = backfill_source_bases_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.records_updated, 1);
+        let recs = reg.list_active().unwrap();
+        assert_eq!(
+            recs[0].data.source_agents_base.as_deref(),
+            Some(channel_agents(home.path(), "chan-b").to_string_lossy().as_ref()),
+            "anchors on the latest-started_at channel (chan-b)"
+        );
     }
 
     #[test]
