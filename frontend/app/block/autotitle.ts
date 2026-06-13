@@ -97,6 +97,13 @@ export function detectAgentTextColor(envVars: Record<string, string> | undefined
 
 /**
  * Detect agent identity from environment variable in block metadata
+ *
+ * "Terminal" is rejected: it is the default title for plain terminal panes,
+ * not an agent identity. Shell profiles have been observed exporting
+ * AGENTMUX_AGENT_ID="Terminal" (+ AGENTMUX_AGENT_COLOR="#000000") as a
+ * "label my plain panes" hack, which turned every plain terminal into a
+ * pseudo-agent and painted its focused border black. See
+ * reports/ANALYSIS_WIN11_PANE_BORDER_HIGHLIGHT_2026-06-12 (agenty workspace).
  */
 export function detectAgentFromEnv(envVars: Record<string, string> | undefined): string | null {
     if (!envVars) {
@@ -105,10 +112,100 @@ export function detectAgentFromEnv(envVars: Record<string, string> | undefined):
 
     const value = envVars[AGENT_ENV_VAR];
     if (!isBlank(value)) {
-        return value!.trim();
+        const trimmed = value!.trim();
+        if (trimmed === "" || trimmed.toLowerCase() === "terminal") {
+            return null;
+        }
+        return trimmed;
     }
 
     return null;
+}
+
+/**
+ * Minimum WCAG relative luminance for an agent color to be used as the
+ * focused pane ring. Rejects degenerate values (#000, near-black) that would
+ * make the focused border invisible against the dark pane chrome — those
+ * panes fall back to the theme accent ring instead. Deliberately low so
+ * dark-but-visible agent palettes (e.g. AgentA's #1e3a5f, L≈0.041) pass.
+ */
+const MIN_FOCUS_RING_LUMINANCE = 0.03;
+
+interface ParsedRgba {
+    r: number; // 0-255
+    g: number;
+    b: number;
+    a: number; // 0-1
+}
+
+/**
+ * Parse a CSS color in #rgb/#rgba/#rrggbb/#rrggbbaa or rgb()/rgba() form.
+ * Named colors and other syntaxes return null (callers treat that as
+ * "not usable", falling back to the theme accent).
+ */
+function parseCssColor(color: string | null | undefined): ParsedRgba | null {
+    if (isBlank(color)) {
+        return null;
+    }
+    const c = color!.trim().toLowerCase();
+
+    const hexMatch = c.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/);
+    if (hexMatch) {
+        let hex = hexMatch[1];
+        if (hex.length <= 4) {
+            hex = hex.split("").map((ch) => ch + ch).join("");
+        }
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) / 255 : 1;
+        return { r, g, b, a };
+    }
+
+    const fnMatch = c.match(/^rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/);
+    if (fnMatch) {
+        const r = Number(fnMatch[1]);
+        const g = Number(fnMatch[2]);
+        const b = Number(fnMatch[3]);
+        let a = 1;
+        if (fnMatch[4] != null) {
+            a = fnMatch[4].endsWith("%") ? Number(fnMatch[4].slice(0, -1)) / 100 : Number(fnMatch[4]);
+        }
+        if ([r, g, b, a].some((n) => Number.isNaN(n))) {
+            return null;
+        }
+        return { r, g, b, a };
+    }
+
+    return null;
+}
+
+/** WCAG 2.x relative luminance (0 = black, 1 = white). */
+function relativeLuminance({ r, g, b }: ParsedRgba): number {
+    const lin = (v: number) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/**
+ * Whether an agent color is usable as the focused pane ring.
+ *
+ * The focused border is the selection affordance — an identity color may tint
+ * it, but must never erase it. Rejects unparseable colors, (near-)transparent
+ * colors, and near-black colors whose ring would be invisible on the dark
+ * pane chrome. Callers fall back to the theme accent when this returns false.
+ */
+export function isUsableFocusRingColor(color: string | null | undefined): boolean {
+    const rgba = parseCssColor(color);
+    if (!rgba) {
+        return false;
+    }
+    if (rgba.a < 0.5) {
+        return false;
+    }
+    return relativeLuminance(rgba) >= MIN_FOCUS_RING_LUMINANCE;
 }
 
 /**
