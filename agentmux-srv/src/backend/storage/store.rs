@@ -51,12 +51,16 @@ pub struct Store {
     /// stops coinciding with the channel agents dir, and using it to strip /
     /// re-join `working_directory` would drop every live instance.
     ///
-    /// `None` for in-memory test stores and odd envs — the accessor then
-    /// falls back to the registry's parent, which equals the channel agents
-    /// dir in the pre-re-root layout, so existing mirror tests are unchanged.
-    /// Set explicitly from `AGENTMUX_AGENTS_DIR` in `main.rs` (never read from
-    /// ambient env inside the Store, so tests running inside an AgentMux pane
-    /// don't pick up the host's `AGENTMUX_AGENTS_DIR`). See
+    /// `None` for in-memory test stores and — for now — production too: the
+    /// accessor falls back to the registry's parent, which equals the channel
+    /// agents dir in the pre-re-root layout for installed/portable builds, so
+    /// behavior is unchanged. It is wired from `AGENTMUX_AGENTS_DIR` in P0.3b,
+    /// atomically with the re-root to the global shared registry (setting it
+    /// before the re-root would diverge in dev mode, where
+    /// `AGENTMUX_AGENTS_DIR` ≠ the channel-local registry parent). When set,
+    /// it must be passed in explicitly — never read from ambient env inside
+    /// the Store — so tests running inside an AgentMux pane don't pick up the
+    /// host's `AGENTMUX_AGENTS_DIR`. See
     /// `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (P0.3).
     registry_agents_base: Mutex<Option<PathBuf>>,
 }
@@ -154,8 +158,9 @@ impl Store {
     }
 
     /// Set the channel agents dir that instance `working_directory` values
-    /// are stored relative to (see the `registry_agents_base` field).
-    /// Called once from `main.rs` with `AGENTMUX_AGENTS_DIR`.
+    /// are stored relative to (see the `registry_agents_base` field). Wired
+    /// from `AGENTMUX_AGENTS_DIR` in `main.rs` in P0.3b (atomically with the
+    /// registry re-root); until then it is exercised only by tests.
     pub fn set_registry_agents_base(&self, base: PathBuf) {
         *self
             .registry_agents_base

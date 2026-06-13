@@ -420,19 +420,17 @@ async fn main() {
                 if migration_ok {
                     tracing::info!(root = %root.display(), "registry: shared agent registry attached");
                     wstore_raw.set_registry(Arc::new(reg));
-                    // Anchor instance `working_directory` relative paths on the
-                    // current channel's agents dir (AGENTMUX_AGENTS_DIR). The
-                    // registry-mirror write path and the listnamedagents read
-                    // path both strip/re-join against this base; it must track
-                    // the channel — not the registry's own parent — so the
-                    // paths keep resolving once P0.3 re-roots the registry to
-                    // the global ~/.agentmux/shared/agents/registry/.
-                    if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
-                        if !base.is_empty() {
-                            wstore_raw
-                                .set_registry_agents_base(std::path::PathBuf::from(base));
-                        }
-                    }
+                    // NB: the channel agents base (AGENTMUX_AGENTS_DIR) is NOT
+                    // wired here yet — it is set in P0.3b, atomically with the
+                    // re-root to the global ~/.agentmux/shared/agents/registry/.
+                    // Setting it before the re-root would change DEV behavior:
+                    // there AGENTMUX_AGENTS_DIR (~/.agentmux/dev/<branch>/agents)
+                    // differs from the channel-local reg.agents_root()
+                    // (~/.agentmux/agents), so the mirror would start writing
+                    // branch-local rows into the shared dev registry and leak
+                    // workspaces across branches (codex P2 on #1387). Until
+                    // then `registry_agents_base()` falls back to the registry
+                    // parent — exactly today's behavior in every mode.
                 }
             }
             Err(e) => tracing::warn!(
