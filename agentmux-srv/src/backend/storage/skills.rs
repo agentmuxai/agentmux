@@ -32,37 +32,48 @@ pub struct AgentSkill {
 
 impl Store {
     /// List all skills for an agent, ordered by created_at ascending.
-    pub fn agent_skill_list(&self, agent_id: &str) -> Result<Vec<AgentSkill>, StoreError> {
-        let skills: Vec<AgentSkill> = {
-            let conn = self.conn.lock().unwrap();
-            let mut stmt = conn.prepare(
-                "SELECT id, agent_id, name, trigger, skill_type, description, content, created_at
-                 FROM db_agent_skills WHERE agent_id=?1 ORDER BY created_at ASC",
-            )?;
-            let rows = stmt.query_map(params![agent_id], |row| {
-                Ok(AgentSkill {
-                    id: row.get(0)?,
-                    agent_id: row.get(1)?,
-                    name: row.get(2)?,
-                    trigger: row.get(3)?,
-                    skill_type: row.get(4)?,
-                    description: row.get(5)?,
-                    content: row.get(6)?,
-                    created_at: row.get(7)?,
-                })
-            })?;
-            let mut skills = Vec::new();
-            for row in rows {
-                skills.push(row?);
-            }
-            skills
-        };
-        if !skills.is_empty() {
-            return Ok(skills);
+    /// LOCAL channel's skills only — NO cross-channel fallback. Used by the
+    /// def-registry mirror (which always operates on a local agent) and by
+    /// `agent_skill_list`.
+    pub(super) fn agent_skill_list_local(
+        &self,
+        agent_id: &str,
+    ) -> Result<Vec<AgentSkill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, name, trigger, skill_type, description, content, created_at
+             FROM db_agent_skills WHERE agent_id=?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(AgentSkill {
+                id: row.get(0)?,
+                agent_id: row.get(1)?,
+                name: row.get(2)?,
+                trigger: row.get(3)?,
+                skill_type: row.get(4)?,
+                description: row.get(5)?,
+                content: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        let mut skills = Vec::new();
+        for row in rows {
+            skills.push(row?);
         }
-        // Cross-channel fallback: a user agent from another channel has its
-        // skills on the global definition record, not in this channel's
-        // SQLite. (P0.2c.)
+        Ok(skills)
+    }
+
+    pub fn agent_skill_list(&self, agent_id: &str) -> Result<Vec<AgentSkill>, StoreError> {
+        let local = self.agent_skill_list_local(agent_id)?;
+        if !local.is_empty() {
+            return Ok(local);
+        }
+        // Fall back to the global record ONLY for a cross-channel agent
+        // (absent from local SQLite); a locally-known agent with genuinely no
+        // skills must return empty, not resurrect them. (reagent P1 on #1385.)
+        if self.agent_def_exists_local(agent_id)? {
+            return Ok(local);
+        }
         if let Some(reg) = self.shared_def_registry() {
             if let Ok(Some(rec)) = reg.get(agent_id) {
                 return Ok(rec
@@ -82,7 +93,7 @@ impl Store {
                     .collect());
             }
         }
-        Ok(skills)
+        Ok(local)
     }
 
     /// Get a single skill by id.

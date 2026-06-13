@@ -431,6 +431,20 @@ impl Store {
         Ok(count)
     }
 
+    /// Whether a definition with `id` exists in the LOCAL channel's SQLite
+    /// (`db_agents`). Gates the cross-channel content/skills fallback: a
+    /// locally-known agent with genuinely empty content/skills must NOT
+    /// resurrect them from the global record. (reagent P1 on #1385.)
+    pub(super) fn agent_def_exists_local(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
+    }
+
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
     pub fn agent_def_delete_seeded(&self) -> Result<usize, StoreError> {
         // Reagent P1 round 4 on #1013: capture the cascaded instance ids

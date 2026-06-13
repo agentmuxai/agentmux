@@ -144,8 +144,11 @@ impl Store {
         if def.is_seeded != 0 {
             return;
         }
-        let content = self.agent_content_get_all(def_id).unwrap_or_default();
-        let skills = self.agent_skill_list(def_id).unwrap_or_default();
+        // LOCAL-only reads: the mirror operates on a local agent, so it must
+        // never read the global record (that would re-mirror just-deleted
+        // content/skills back, defeating the deletion). (reagent P1 on #1385.)
+        let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
+        let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
         let rec = agent_definition_to_record(&def, &content, &skills);
         if let Err(e) = reg.upsert(&rec) {
             tracing::warn!(def_id, error = %e, "def registry: mirror upsert failed");
@@ -222,5 +225,84 @@ mod tests {
         let skills = store.agent_skill_list("remote-1").unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "greet");
+    }
+
+    fn local_def(id: &str, name: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: name.to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+        }
+    }
+
+    fn skill(id: &str, agent_id: &str, name: &str) -> AgentSkill {
+        AgentSkill {
+            id: id.to_string(),
+            agent_id: agent_id.to_string(),
+            name: name.to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: String::new(),
+            content: String::new(),
+            created_at: 1,
+        }
+    }
+
+    #[test]
+    fn local_skill_delete_does_not_resurrect_from_global() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(def_store.clone());
+
+        // Create a LOCAL user agent with one skill (mirrored to global).
+        let mut def = local_def("local-1", "Local");
+        store.agent_def_insert(&mut def).unwrap();
+        store
+            .agent_skill_insert(&skill("sk-1", "local-1", "greet"))
+            .unwrap();
+        assert_eq!(
+            def_store.get("local-1").unwrap().unwrap().data.skills.len(),
+            1,
+            "skill mirrored to global"
+        );
+
+        // Delete the skill in this (local) channel.
+        store.agent_skill_delete("sk-1").unwrap();
+
+        // Local read must NOT resurrect the deleted skill from the global
+        // record (the agent is local, just skill-less now). (reagent P1.)
+        assert!(
+            store.agent_skill_list("local-1").unwrap().is_empty(),
+            "deleted local skill must not reappear from the global record"
+        );
+        // And the deletion propagated to the global record (the mirror used a
+        // local-only read, so it didn't re-write the stale skill).
+        assert!(
+            def_store.get("local-1").unwrap().unwrap().data.skills.is_empty(),
+            "deletion must propagate cross-channel"
+        );
     }
 }

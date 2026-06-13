@@ -76,37 +76,49 @@ impl Store {
     }
 
     /// Get all content blobs for an agent.
+    /// LOCAL channel's content blobs only — NO cross-channel fallback. Used
+    /// by the def-registry mirror (which always operates on a local agent, so
+    /// must never read the global record) and by `agent_content_get_all`.
+    pub(super) fn agent_content_get_all_local(
+        &self,
+        agent_id: &str,
+    ) -> Result<Vec<AgentContent>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT agent_id, content_type, content, updated_at
+             FROM db_agent_content WHERE agent_id=?1 ORDER BY content_type ASC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(AgentContent {
+                agent_id: row.get(0)?,
+                content_type: row.get(1)?,
+                content: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        let mut contents = Vec::new();
+        for row in rows {
+            contents.push(row?);
+        }
+        Ok(contents)
+    }
+
     pub fn agent_content_get_all(
         &self,
         agent_id: &str,
     ) -> Result<Vec<AgentContent>, StoreError> {
-        let contents: Vec<AgentContent> = {
-            let conn = self.conn.lock().unwrap();
-            let mut stmt = conn.prepare(
-                "SELECT agent_id, content_type, content, updated_at
-                 FROM db_agent_content WHERE agent_id=?1 ORDER BY content_type ASC",
-            )?;
-            let rows = stmt.query_map(params![agent_id], |row| {
-                Ok(AgentContent {
-                    agent_id: row.get(0)?,
-                    content_type: row.get(1)?,
-                    content: row.get(2)?,
-                    updated_at: row.get(3)?,
-                })
-            })?;
-            let mut contents = Vec::new();
-            for row in rows {
-                contents.push(row?);
-            }
-            contents
-        };
-        if !contents.is_empty() {
-            return Ok(contents);
+        let local = self.agent_content_get_all_local(agent_id)?;
+        if !local.is_empty() {
+            return Ok(local);
         }
-        // Cross-channel fallback: a user agent created in another channel has
-        // its content on the global definition record, not in this channel's
-        // SQLite. Surface it so the agent launches with its instructions.
-        // (P0.2c — closes the content/skills cross-channel gap.)
+        // Local is empty. Fall back to the global record ONLY for a
+        // cross-channel agent (one absent from local SQLite). A locally-known
+        // agent with genuinely empty content must return empty — otherwise
+        // deleting its content would resurrect it from the global record.
+        // (reagent P1 on #1385.)
+        if self.agent_def_exists_local(agent_id)? {
+            return Ok(local);
+        }
         if let Some(reg) = self.shared_def_registry() {
             if let Ok(Some(rec)) = reg.get(agent_id) {
                 return Ok(rec
@@ -122,7 +134,7 @@ impl Store {
                     .collect());
             }
         }
-        Ok(contents)
+        Ok(local)
     }
 
     /// Delete a specific content blob. Returns true if a row was deleted.
