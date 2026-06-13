@@ -174,10 +174,11 @@ pub fn migrate_from_sqlite_once(
         stats.records_written += 1;
     }
 
-    // Only finalize the migration when every DB we encountered was readable.
-    // On any per-DB error, defer the marker so a future launch retries AND
-    // signal `complete = false` so main.rs leaves the registry detached for
-    // this session (reads fall back to SQLite — preferred over a partial view).
+    // `complete` is true only when every DB we encountered was readable. It
+    // gates ONLY the one-shot marker: on any skipped DB the marker is deferred
+    // so a future launch retries that source. It does NOT detach the registry —
+    // main.rs attaches whenever the migration returns Ok and serves the records
+    // that did read (codex P1 on #1389); see the field doc above.
     stats.complete = !any_db_failed;
     if stats.complete {
         write_marker(&marker_path, &stats)?;
@@ -226,10 +227,19 @@ fn enumerate_sources(home: &Path) -> Vec<SqliteSource> {
     out
 }
 
+/// Instance-internal subdirectories (`DataPaths::ensure_dirs`) — never branch
+/// or sub-hash containers. The dev walk must NOT descend into these: an agent
+/// workspace under `<instance>/agents/<slug>/` can itself contain a nested
+/// AgentMux `data/db/objects.db` (e.g. an agent that ran its own instance),
+/// which must not be mistaken for a migration source (reagent P2 on #1389).
+const DEV_INTERNAL_DIRS: &[&str] =
+    &["data", "agents", "logs", "cef-cache", "runtime", "config"];
+
 /// Recursively locate dev instance dirs (those with `data/db/objects.db`) and
-/// anchor each on its sibling `agents/` dir. Bounded depth guards against
-/// pathological trees; an instance dir is a leaf (we stop descending once a
-/// DB is found).
+/// anchor each on its sibling `agents/` dir. An instance dir is a leaf (we stop
+/// descending once a DB is found), and descent skips instance-internal dirs so
+/// the walk only traverses branch / sub-hash containers. Bounded depth is a
+/// backstop against pathological/looping trees.
 fn collect_dev_sources(dir: &Path, out: &mut Vec<SqliteSource>, depth: usize) {
     if depth > 4 {
         return;
@@ -244,10 +254,18 @@ fn collect_dev_sources(dir: &Path, out: &mut Vec<SqliteSource>, depth: usize) {
     }
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                collect_dev_sources(&p, out, depth + 1);
+            if !e.path().is_dir() {
+                continue;
             }
+            // Skip instance internals (esp. `agents/`) so we never walk into an
+            // agent's workspace and pick up a nested objects.db as a source.
+            if e.file_name()
+                .to_str()
+                .is_some_and(|n| DEV_INTERNAL_DIRS.contains(&n))
+            {
+                continue;
+            }
+            collect_dev_sources(&e.path(), out, depth + 1);
         }
     }
 }
@@ -621,6 +639,60 @@ mod tests {
         let recs = reg.list_active().unwrap();
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].data.working_dir, "devagent");
+    }
+
+    #[test]
+    fn migrate_dev_ignores_nested_agent_workspace_db() {
+        // An agent running inside a dev instance can create its OWN nested
+        // AgentMux data dir under <instance>/agents/<slug>/. The dev walk must
+        // NOT descend into agents/ and pick that nested objects.db up as a
+        // migration source (reagent P2 on #1389).
+        let (home, reg) = fresh_home();
+        let inst_dir = home.path().join("dev").join("mybranch").join("sub");
+        // NO instance-level DB — only a nested one inside an agent workspace.
+        let nested_inst = inst_dir.join("agents").join("nestedmux");
+        let nested_wd = nested_inst.join("agents").join("inner");
+        std::fs::create_dir_all(&nested_wd).unwrap();
+        make_db_at(
+            &nested_inst,
+            &[("inst-nested", "Nested", 100, &nested_wd.to_string_lossy(), false)],
+        );
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(
+            stats.dbs_scanned, 0,
+            "must not descend into agent workspaces under dev/"
+        );
+        assert!(reg.list_active().unwrap().is_empty());
+    }
+
+    #[test]
+    fn migrate_dev_picks_instance_db_and_ignores_nested() {
+        // With an instance-level DB present, the walk stops at the instance dir
+        // (leaf) and never descends into its agents/ — so a nested workspace DB
+        // is ignored even when the real instance DB exists.
+        let (home, reg) = fresh_home();
+        let inst_dir = home.path().join("dev").join("mybranch").join("sub");
+        let wd = inst_dir.join("agents").join("realagent");
+        std::fs::create_dir_all(&wd).unwrap();
+        make_db_at(
+            &inst_dir,
+            &[("inst-real", "Real", 100, &wd.to_string_lossy(), false)],
+        );
+        let nested_inst = inst_dir.join("agents").join("nestedmux");
+        let nested_wd = nested_inst.join("agents").join("inner");
+        std::fs::create_dir_all(&nested_wd).unwrap();
+        make_db_at(
+            &nested_inst,
+            &[("inst-nested", "Nested", 200, &nested_wd.to_string_lossy(), false)],
+        );
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.dbs_scanned, 1, "only the instance-level dev DB is a source");
+        let recs = reg.list_active().unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].data.instance_id, "inst-real");
+        assert_eq!(recs[0].data.working_dir, "realagent");
     }
 
     #[test]
