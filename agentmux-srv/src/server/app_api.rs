@@ -1047,27 +1047,49 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Fast path: output.idx enables O(1) seek — avoids loading the full
                 // file to slice by line number for large sessions.
+                //
+                // Safety invariants checked before using the index:
+                //   1. idx[0] must be 0: idx is only valid when it was created from an
+                //      empty output file.  If idx[0] != 0 the index started mid-session
+                //      and its entries don't map to absolute line numbers → fall back.
+                //   2. u64::MAX sentinel: written when an idx append failed to preserve
+                //      entry-count alignment.  Any sentinel in the requested range → fall
+                //      back so no wrong line is served.
+                //   3. offset >= total_lines: the idx knows total_lines, so return empty
+                //      immediately rather than falling through to the full read_file load.
                 if cmd.filename == "output" {
                     let idx_result: Option<BlockfileReadRangeResult> = (|| {
-                        // limit == 0 is a valid no-op; answer immediately without touching output.
-                        if limit == 0 {
-                            let idx_stat = filestore.stat(&cmd.block_id, "output.idx").ok()??;
-                            let total_lines = (idx_stat.size / 8) as u64;
-                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines });
-                        }
                         let idx_stat = filestore.stat(&cmd.block_id, "output.idx").ok()??;
                         let total_lines = (idx_stat.size / 8) as u64;
-                        if total_lines == 0 || (offset as u64) >= total_lines {
-                            return None;
+
+                        // Guard 1: idx[0] == 0 means the index covers from the very first
+                        // line.  idx[0] != 0 means it was created on a pre-existing session
+                        // and entry positions do not correspond to absolute line numbers.
+                        if total_lines > 0 {
+                            let (_, first) = filestore
+                                .read_at(&cmd.block_id, "output.idx", 0, 8)
+                                .ok()?;
+                            let first_entry = u64::from_le_bytes(first.try_into().ok()?);
+                            if first_entry != 0 { return None; }
                         }
+
+                        // Guard 3: offset past end — return empty without touching output.
+                        if total_lines == 0 || (offset as u64) >= total_lines {
+                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines });
+                        }
+                        // limit == 0 — also return empty immediately.
+                        if limit == 0 {
+                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines });
+                        }
+
                         let (_, sb) = filestore
                             .read_at(&cmd.block_id, "output.idx", offset as i64 * 8, 8)
                             .ok()?;
-                        // u64::MAX is the sentinel written when a previous idx append failed;
-                        // bail to the full-scan path so no wrong line is served.
+                        // Guard 2: u64::MAX sentinel → idx desync, fall back to full scan.
                         let byte_start_raw = u64::from_le_bytes(sb.try_into().ok()?);
                         if byte_start_raw == u64::MAX { return None; }
                         let byte_start = byte_start_raw as i64;
+
                         let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
                             filestore.stat(&cmd.block_id, "output").ok()??.size
                         } else {

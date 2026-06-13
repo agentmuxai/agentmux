@@ -1325,7 +1325,15 @@ fn append_output_idx(fs: &FileStore, block_id: &str, start_byte: u64, data: &[u8
             .flatten()
             .collect();
         if let Err(e2) = fs.append_data(block_id, IDX, &sentinels) {
-            tracing::warn!(block_id = %block_id, error = %e2, "output.idx sentinel write also failed; idx may be desync'd");
+            // Both the real write and the sentinel write failed (correlated fault —
+            // disk-full or store lock).  idx now has fewer entries than output lines;
+            // subsequent appends will write correct byte offsets at shifted positions,
+            // causing the fast-path to serve wrong lines.  The read-path guard
+            // (idx[0] == 0) still holds for sessions started from empty, so absolute
+            // wrong-line serving only affects this session going forward until the idx
+            // is rebuilt.  A FileStore::delete_file primitive would allow hard reset;
+            // absent that, operators can delete the idx row directly from SQLite.
+            tracing::warn!(block_id = %block_id, error = %e2, "output.idx sentinel write also failed; idx is desync'd — fast-path disabled via idx[0] guard once session restarts");
         }
     }
 }
