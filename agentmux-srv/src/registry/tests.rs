@@ -21,6 +21,7 @@ fn record(id: &str, name: &str, ts: i64) -> NamedAgentRecord {
             definition_id: "claude-code".to_string(),
             identity_id: Some("agenta".to_string()),
             memory_id: Some("default".to_string()),
+            session_id: None,
             working_dir: format!("{name}-0512a"),
             created_at_ms: ts,
             last_launched_at_ms: ts,

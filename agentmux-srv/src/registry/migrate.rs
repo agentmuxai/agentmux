@@ -275,23 +275,28 @@ fn row_to_record(row: &RowSnapshot, agents_root: &Path) -> Option<NamedAgentReco
     if rel_str.is_empty() || rel_str == "." {
         return None;
     }
+    let data = NamedAgentRecordV1 {
+        instance_id: row.id.clone(),
+        instance_name: row.instance_name.clone(),
+        definition_id: row.definition_id.clone(),
+        identity_id: empty_to_none(&row.identity_id),
+        memory_id: empty_to_none(&row.memory_id),
+        // This per-channel SQLite consolidation does not carry session_id
+        // yet; the global migration (P0.3) reads it from db_agent_instances.
+        // Until then these stay session-less (v1) and v1-binary-readable.
+        session_id: None,
+        working_dir: rel_str,
+        created_at_ms: row.created_at,
+        last_launched_at_ms: row.started_at,
+        // We don't know what version originally inserted these rows.
+        // Tag them so post-migration audits can tell. PR C will
+        // never overwrite a record so these stay forever.
+        created_by_version: "(legacy)".to_string(),
+        last_launched_by_version: "(legacy)".to_string(),
+    };
     Some(NamedAgentRecord {
-        schema_version: MAX_SUPPORTED_SCHEMA,
-        data: NamedAgentRecordV1 {
-            instance_id: row.id.clone(),
-            instance_name: row.instance_name.clone(),
-            definition_id: row.definition_id.clone(),
-            identity_id: empty_to_none(&row.identity_id),
-            memory_id: empty_to_none(&row.memory_id),
-            working_dir: rel_str,
-            created_at_ms: row.created_at,
-            last_launched_at_ms: row.started_at,
-            // We don't know what version originally inserted these rows.
-            // Tag them so post-migration audits can tell. PR C will
-            // never overwrite a record so these stay forever.
-            created_by_version: "(legacy)".to_string(),
-            last_launched_by_version: "(legacy)".to_string(),
-        },
+        schema_version: data.min_schema_version(),
+        data,
     })
 }
 
@@ -454,6 +459,7 @@ mod tests {
                 definition_id: "claude-code".to_string(),
                 identity_id: None,
                 memory_id: None,
+                session_id: None,
                 working_dir: "demo".to_string(),
                 created_at_ms: 50,
                 last_launched_at_ms: 500,
@@ -495,6 +501,7 @@ mod tests {
                 definition_id: "claude-code".to_string(),
                 identity_id: None,
                 memory_id: None,
+                session_id: None,
                 working_dir: "demo".to_string(),
                 created_at_ms: 50,
                 last_launched_at_ms: 50,

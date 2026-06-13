@@ -2653,6 +2653,7 @@ mod tests {
                 definition_id: "claude-code".to_string(),
                 identity_id: None,
                 memory_id: None,
+                session_id: None,
                 working_dir: "cross-ver".to_string(),
                 created_at_ms: 100,
                 last_launched_at_ms: 100,
