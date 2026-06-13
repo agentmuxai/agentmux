@@ -214,6 +214,24 @@ import_into() {
 
         local src_win; src_win=$(win_path "$src_db")
 
+        # Resilience: one unreadable / locked / corrupt / table-less source DB
+        # must never abort the whole import. Under `set -euo pipefail` the first
+        # sqlite error would propagate and silently drop every agent in DBs not
+        # yet scanned (observed: a stale `*.bak` channel mid-scan dropped a real
+        # agent whose data lived in a later-sorted DB). Probe the source first.
+        # Old pre-agent-schema versions (no db_agent_definitions table) are
+        # expected and numerous — skip those silently; WARN only on genuine
+        # problems (corruption, locks).
+        local _probe_err
+        if ! _probe_err=$(sqlite3 "$src_win" \
+            "SELECT 1 FROM db_agent_definitions LIMIT 1;" 2>&1 >/dev/null); then
+            case "$_probe_err" in
+                *"no such table"*) : ;;  # pre-agent-schema DB — nothing to import
+                *) echo "  WARN  skipping unreadable source DB (${_probe_err%%$'\n'*}): $src_db" >&2 ;;
+            esac
+            continue
+        fi
+
         # Detect which newer columns exist in the source schema so the SELECTs
         # below never reference a missing column. This MUST run BEFORE the agents
         # query: referencing an absent column (e.g. `slug` on a very old DB) makes
@@ -242,8 +260,12 @@ import_into() {
 
         # Use char(1) (ASCII unit-separator) instead of '|' so agent names that
         # contain a pipe character don't corrupt the field split.
+        # sqlite3.exe emits CRLF on Windows; the trailing CR contaminates the
+        # last char(1)-delimited field (the slug), which silently breaks the
+        # on-disk session lookup below. Strip CR so every field is clean.
         agents=$(db_query "$src_db" \
-            "SELECT id||char(1)||name||char(1)||COALESCE(${_col_slug},'') FROM db_agent_definitions WHERE $where;" 2>/dev/null)
+            "SELECT id||char(1)||name||char(1)||COALESCE(${_col_slug},'') FROM db_agent_definitions WHERE $where;" 2>/dev/null \
+            | tr -d '\r') || agents=""
         [ -z "$agents" ] && continue
 
         while IFS=$'\x01' read -r def_id agent_name agent_slug; do
@@ -266,7 +288,12 @@ import_into() {
             # when importing across versions with different db_agent_definitions schemas.
             # Uses detected column names so source DBs lacking updated_at/user_hidden
             # fall back to created_at/0 rather than aborting the import.
-            sqlite3 "$src_win" \
+            # A schema mismatch in this single source DB (e.g. an old or `*.bak`
+            # DB missing a column named below) must skip THIS agent, not abort
+            # the whole import. Capture stderr and continue on failure rather
+            # than letting `set -e` propagate the error and drop later agents.
+            local _def_copy_err
+            if ! _def_copy_err=$(sqlite3 "$src_win" \
                 "ATTACH '$tgt_win' AS dst;
                  INSERT OR IGNORE INTO dst.db_agent_definitions
                    (id, slug, name, icon, provider, description,
@@ -279,7 +306,11 @@ import_into() {
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label,
                     ${_col_updated_at}, ${_col_user_hidden}
-                 FROM db_agent_definitions WHERE id='$def_id';"
+                 FROM db_agent_definitions WHERE id='$def_id';" 2>&1); then
+                echo "  WARN  $agent_name — definition copy failed; skipping (${_def_copy_err%%$'\n'*})" >&2
+                ((skipped++)) || true
+                continue
+            fi
 
             # Verify the definition was actually inserted.
             # db_agent_definitions has a UNIQUE index on slug — an INSERT OR IGNORE
@@ -350,7 +381,10 @@ import_into() {
                 lookup_slug=$(printf '%s' "$agent_name" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')
             fi
             local resolved sess_id="" work_dir="" src_jsonl=""
-            resolved=$(best_session_for_slug "$lookup_slug")
+            # best_session_for_slug returns non-zero when the agent has no
+            # on-disk session (a normal case); `|| resolved=""` keeps that from
+            # aborting the whole import under `set -e`.
+            resolved=$(best_session_for_slug "$lookup_slug") || resolved=""
             if [ -n "$resolved" ]; then
                 # Tab-delimited fields; filesystem paths never contain a literal
                 # tab, so the split is unambiguous.
@@ -419,8 +453,11 @@ import_into() {
 
     echo ""
     echo "Imported: $imported  Skipped: $skipped"
-    [ "$imported" -gt 0 ] && \
+    # Use an `if` (not `&&`) so a zero-import run doesn't make this function —
+    # and the whole script under `set -e` — exit non-zero.
+    if [ "$imported" -gt 0 ]; then
         echo "Reopen the agent pane in the $target_version build to see the changes."
+    fi
 }
 
 # ── arg parsing ──────────────────────────────────────────────────────────────
