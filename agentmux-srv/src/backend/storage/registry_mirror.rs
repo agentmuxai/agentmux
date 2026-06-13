@@ -30,7 +30,7 @@ fn agent_instance_to_record(
     inst: &AgentInstance,
     agents_root: &Path,
 ) -> Result<crate::registry::NamedAgentRecord, String> {
-    use crate::registry::{NamedAgentRecord, NamedAgentRecordV1, MAX_SUPPORTED_SCHEMA};
+    use crate::registry::{NamedAgentRecord, NamedAgentRecordV1};
     let rel = relative_workdir(&inst.working_directory, agents_root).ok_or_else(|| {
         format!(
             "working_directory {:?} is not under {:?}",
@@ -39,20 +39,26 @@ fn agent_instance_to_record(
         )
     })?;
     let version = env!("CARGO_PKG_VERSION").to_string();
+    let data = NamedAgentRecordV1 {
+        instance_id: inst.id.clone(),
+        instance_name: inst.instance_name.clone(),
+        definition_id: inst.definition_id.clone(),
+        identity_id: empty_to_none(&inst.identity_id),
+        memory_id: empty_to_none(&inst.memory_id),
+        // v2: carry the provider session id so a global/cross-channel
+        // record can `--resume` without joining the current channel's SQLite.
+        session_id: empty_to_none(&inst.session_id),
+        working_dir: rel,
+        created_at_ms: inst.created_at,
+        last_launched_at_ms: inst.started_at,
+        created_by_version: version.clone(),
+        last_launched_by_version: version,
+    };
+    // Lazy schema bump: v2 only when session_id is set, so session-less
+    // records stay readable by v1 binaries (see schema::min_schema_version).
     Ok(NamedAgentRecord {
-        schema_version: MAX_SUPPORTED_SCHEMA,
-        data: NamedAgentRecordV1 {
-            instance_id: inst.id.clone(),
-            instance_name: inst.instance_name.clone(),
-            definition_id: inst.definition_id.clone(),
-            identity_id: empty_to_none(&inst.identity_id),
-            memory_id: empty_to_none(&inst.memory_id),
-            working_dir: rel,
-            created_at_ms: inst.created_at,
-            last_launched_at_ms: inst.started_at,
-            created_by_version: version.clone(),
-            last_launched_by_version: version,
-        },
+        schema_version: data.min_schema_version(),
+        data,
     })
 }
 

@@ -15,7 +15,7 @@ use thiserror::Error;
 pub const MIN_SUPPORTED_SCHEMA: u32 = 1;
 /// Highest envelope schema this binary will write or read. Bumped
 /// per release that adds fields.
-pub const MAX_SUPPORTED_SCHEMA: u32 = 1;
+pub const MAX_SUPPORTED_SCHEMA: u32 = 2;
 
 /// On-disk envelope. The `data` field's shape is gated by
 /// `schema_version`; readers should match on the version before
@@ -38,6 +38,13 @@ pub struct NamedAgentRecordV1 {
     pub identity_id: Option<String>,
     /// FK to `db_memory_bundles.id`. None = unbound (= vanilla CLI).
     pub memory_id: Option<String>,
+    /// Provider CLI session id for `--resume` (e.g. a Claude Code session
+    /// uuid). `None` = no session wired yet (fresh stub / legacy record).
+    /// Added in schema v2 so a global/migrated record can resume the
+    /// agent's conversation across channels without a current-channel
+    /// SQLite join. Old (v1) files deserialize this as `None`.
+    #[serde(default)]
+    pub session_id: Option<String>,
     /// Path **relative to `<shared_home>/agents/`** — never absolute.
     /// Keeps the record portable across machines where the home dir
     /// differs.
@@ -46,6 +53,22 @@ pub struct NamedAgentRecordV1 {
     pub last_launched_at_ms: i64,
     pub created_by_version: String,
     pub last_launched_by_version: String,
+}
+
+impl NamedAgentRecordV1 {
+    /// Lowest envelope schema that can faithfully represent this payload.
+    /// Stays v1 unless a v2-only field is populated (currently
+    /// `session_id`), so a v1 binary keeps reading records that don't use
+    /// any v2 feature — only records that actually need v2 are hidden from
+    /// it. Writers should stamp the record with this rather than always
+    /// using `MAX_SUPPORTED_SCHEMA`.
+    pub fn min_schema_version(&self) -> u32 {
+        if self.session_id.is_some() {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -133,6 +156,7 @@ mod tests {
                 definition_id: "claude-code".to_string(),
                 identity_id: None,
                 memory_id: None,
+                session_id: None,
                 working_dir: "demo-0512a".to_string(),
                 created_at_ms: 1,
                 last_launched_at_ms: 1,
@@ -197,5 +221,16 @@ mod tests {
             validate("abc", &r).unwrap_err(),
             ValidationError::MissingField("instance_name")
         ));
+    }
+
+    #[test]
+    fn session_id_drives_min_schema_version() {
+        let mut r = v1_record("abc");
+        assert_eq!(r.data.min_schema_version(), 1, "session-less record is v1");
+        r.data.session_id = Some("sess-xyz".to_string());
+        assert_eq!(r.data.min_schema_version(), 2, "session-wired record is v2");
+        // A v2 record validates under the bumped MAX_SUPPORTED_SCHEMA.
+        r.schema_version = 2;
+        validate("abc", &r).unwrap();
     }
 }
