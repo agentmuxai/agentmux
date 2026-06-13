@@ -125,15 +125,40 @@ pub fn ensure_auth_dir(
 }
 
 /// Get an environment variable value.
+///
+/// Security: refuses keys whose name suggests a secret (cloud keys, API
+/// tokens, passwords, the AgentMux auth key, etc.). `get_env` is reachable by
+/// any IPC caller holding the bearer token — including agent processes and
+/// browser-pane code — so an unrestricted reader is a direct
+/// credential-exfiltration path. The legitimate frontend never depends on this
+/// command in the CEF host (the `getEnv` shim returns "" and resolves real
+/// values from window globals), so the denylist is transparent to the app.
+/// See reports security sweep 2026-06-12 (get-env-unrestricted).
 pub fn get_env(args: &serde_json::Value) -> serde_json::Value {
     let key = args
         .get("key")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
+    if is_sensitive_env_key(key) {
+        tracing::warn!(key = %key, "get_env: refused to expose a secret-looking env var");
+        return serde_json::Value::Null;
+    }
     match std::env::var(key) {
         Ok(val) => serde_json::json!(val),
         Err(_) => serde_json::Value::Null,
     }
+}
+
+/// True if an env-var name looks like it holds a secret and must not be
+/// exposed over the IPC `get_env` command. Substring match on the
+/// upper-cased key so prefixed/suffixed variants (AWS_SECRET_ACCESS_KEY,
+/// GITHUB_TOKEN, AGENTMUX_AUTH_KEY, …) are all caught.
+fn is_sensitive_env_key(key: &str) -> bool {
+    const NEEDLES: [&str; 7] = [
+        "KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH",
+    ];
+    let upper = key.to_ascii_uppercase();
+    NEEDLES.iter().any(|needle| upper.contains(needle))
 }
 
 /// The ephemeral build label of a local portable, read from the
