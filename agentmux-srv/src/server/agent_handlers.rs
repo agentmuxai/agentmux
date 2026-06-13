@@ -1596,12 +1596,28 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                         .map(|m| m.name.clone())
                                         .unwrap_or_else(|| "(missing memory)".to_string())
                                 };
-                                let working_directory = match agents_root.as_ref() {
-                                    Some(root) => root
+                                // Reconstruct the absolute working_directory.
+                                // v3 records carry their SOURCE channel agents
+                                // dir, so a row from another channel resolves
+                                // to its real workspace; legacy (v1/v2) records
+                                // fall back to the current channel base — the
+                                // pre-P0.4 behavior (correct for same-channel
+                                // rows, which is all v1/v2 could represent).
+                                let working_directory = if let Some(src) =
+                                    d.source_agents_base.as_deref()
+                                {
+                                    std::path::Path::new(src)
                                         .join(&d.working_dir)
                                         .to_string_lossy()
-                                        .to_string(),
-                                    None => d.working_dir.clone(),
+                                        .to_string()
+                                } else {
+                                    match agents_root.as_ref() {
+                                        Some(root) => root
+                                            .join(&d.working_dir)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        None => d.working_dir.clone(),
+                                    }
                                 };
                                 // Same-version enrichment: if this id
                                 // also exists in current SQLite, the

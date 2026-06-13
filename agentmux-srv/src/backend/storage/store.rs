@@ -1579,6 +1579,12 @@ mod tests {
         assert_eq!(records[0].data.identity_id, None);
         assert_eq!(records[0].data.memory_id, None);
         assert_eq!(records[0].data.working_dir, "demo-fixture");
+        // P0.4: the live mirror stamps the current channel agents base so a
+        // different channel can reconstruct the absolute working_directory.
+        assert_eq!(
+            records[0].data.source_agents_base.as_deref(),
+            Some(agents_root.to_string_lossy().as_ref())
+        );
     }
 
     #[test]
@@ -2781,6 +2787,7 @@ mod tests {
                 memory_id: None,
                 session_id: None,
                 working_dir: "cross-ver".to_string(),
+                source_agents_base: None,
                 created_at_ms: 100,
                 last_launched_at_ms: 100,
                 created_by_version: "0.33.821".to_string(),

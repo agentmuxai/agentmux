@@ -23,6 +23,7 @@ fn record(id: &str, name: &str, ts: i64) -> NamedAgentRecord {
             memory_id: Some("default".to_string()),
             session_id: None,
             working_dir: format!("{name}-0512a"),
+            source_agents_base: None,
             created_at_ms: ts,
             last_launched_at_ms: ts,
             created_by_version: "0.33.822".to_string(),

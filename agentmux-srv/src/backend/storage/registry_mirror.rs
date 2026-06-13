@@ -49,13 +49,22 @@ fn agent_instance_to_record(
         // record can `--resume` without joining the current channel's SQLite.
         session_id: empty_to_none(&inst.session_id),
         working_dir: rel,
+        // v3: the agents dir `working_dir` is relative to — this row lives in
+        // the CURRENT channel, so its source base is the channel agents dir we
+        // just stripped against. Lets a different channel reconstruct the
+        // absolute path instead of re-joining under its own agents dir (P0.4).
+        source_agents_base: Some(agents_root.to_string_lossy().to_string()),
         created_at_ms: inst.created_at,
         last_launched_at_ms: inst.started_at,
         created_by_version: version.clone(),
         last_launched_by_version: version,
     };
-    // Lazy schema bump: v2 only when session_id is set, so session-less
-    // records stay readable by v1 binaries (see schema::min_schema_version).
+    // Stamp the lowest envelope schema that faithfully represents the payload
+    // (schema::min_schema_version). Since P0.4 always sets source_agents_base,
+    // that is v3 for every live-mirrored record — a pre-v3 reader rejects it
+    // (intended: better to hide than mis-resolve a cross-channel workdir; the
+    // only pre-v3 readers of the GLOBAL registry are pre-P0.4 builds, which
+    // ship together with this).
     Ok(NamedAgentRecord {
         schema_version: data.min_schema_version(),
         data,
