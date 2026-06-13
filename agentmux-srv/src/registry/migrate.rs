@@ -89,14 +89,14 @@ pub fn migrate_from_sqlite_once(
     }
 
     let mut stats = MigrateStats::default();
-    let sources = enumerate_sources(home);
+    let (sources, enum_incomplete) = enumerate_sources(home);
 
     let mut latest_by_id: HashMap<String, RowSnapshot> = HashMap::new();
-    // True iff any DB threw a non-transient-looking error. We use this to skip
-    // writing the marker so the next launch retries — otherwise a brief
-    // filesystem hiccup permanently omits those rows from the registry-backed
-    // dropdown.
-    let mut any_db_failed = false;
+    // True iff any DB threw a non-transient-looking error OR a directory that
+    // should have been enumerable was unreadable. We use this to skip writing
+    // the marker so the next launch retries — otherwise a brief filesystem
+    // hiccup permanently omits those rows from the registry-backed dropdown.
+    let mut any_db_failed = enum_incomplete;
 
     for src in sources {
         stats.dbs_scanned += 1;
@@ -192,19 +192,28 @@ pub fn migrate_from_sqlite_once(
 
 /// Enumerate every per-(channel,version) and per-dev-branch `objects.db` under
 /// `home`, pairing each with the agents dir its rows are anchored on.
-fn enumerate_sources(home: &Path) -> Vec<SqliteSource> {
+///
+/// Returns `(sources, incomplete)`. `incomplete` is true if any directory that
+/// *should* be enumerable failed to read for a reason other than "doesn't
+/// exist" (permissions, a transient FS/network-home hiccup, a non-dir in the
+/// way). The caller treats that like an unreadable DB and DEFERS the one-shot
+/// marker so a future launch retries — otherwise a transiently-unreadable
+/// `versions/` (or `dev/`) would silently finalize the migration and omit that
+/// tree's named agents forever (codex P2 on #1389).
+fn enumerate_sources(home: &Path) -> (Vec<SqliteSource>, bool) {
     let mut out = Vec::new();
+    let mut incomplete = false;
 
     // Installed/portable: home/channels/<ch>/versions/<v>/data/db/objects.db,
     // anchored on home/channels/<ch>/agents.
-    if let Ok(rd) = std::fs::read_dir(home.join("channels")) {
+    if let Some(rd) = read_dir_tracking(&home.join("channels"), &mut incomplete) {
         for ch in rd.flatten() {
             let ch_dir = ch.path();
             if !ch_dir.is_dir() {
                 continue;
             }
             let agents_root = ch_dir.join("agents");
-            if let Ok(vrd) = std::fs::read_dir(ch_dir.join("versions")) {
+            if let Some(vrd) = read_dir_tracking(&ch_dir.join("versions"), &mut incomplete) {
                 for v in vrd.flatten() {
                     let db = v.path().join("data").join("db").join("objects.db");
                     if db.is_file() {
@@ -219,54 +228,73 @@ fn enumerate_sources(home: &Path) -> Vec<SqliteSource> {
     }
 
     // Dev: home/dev/<branch>[/<sub>]/data/db/objects.db, anchored on
-    // <instance_dir>/agents (instance_dir = the dir that holds `data`). The
-    // depth under dev/ varies (branch, sometimes branch/sub-hash), so search
-    // a bounded number of levels for a `data/db/objects.db`.
-    collect_dev_sources(&home.join("dev"), &mut out, 0);
+    // <instance_dir>/agents (instance_dir = the dir that holds `data`).
+    collect_dev_sources(&home.join("dev"), &mut out, &mut incomplete);
 
-    out
+    (out, incomplete)
 }
 
-/// Instance-internal subdirectories (`DataPaths::ensure_dirs`) — never branch
-/// or sub-hash containers. The dev walk must NOT descend into these: an agent
-/// workspace under `<instance>/agents/<slug>/` can itself contain a nested
-/// AgentMux `data/db/objects.db` (e.g. an agent that ran its own instance),
-/// which must not be mistaken for a migration source (reagent P2 on #1389).
-const DEV_INTERNAL_DIRS: &[&str] =
-    &["data", "agents", "logs", "cef-cache", "runtime", "config"];
-
-/// Recursively locate dev instance dirs (those with `data/db/objects.db`) and
-/// anchor each on its sibling `agents/` dir. An instance dir is a leaf (we stop
-/// descending once a DB is found), and descent skips instance-internal dirs so
-/// the walk only traverses branch / sub-hash containers. Bounded depth is a
-/// backstop against pathological/looping trees.
-fn collect_dev_sources(dir: &Path, out: &mut Vec<SqliteSource>, depth: usize) {
-    if depth > 4 {
-        return;
+/// `read_dir` that distinguishes "absent" (fine — nothing to scan) from
+/// "present but unreadable" (sets `incomplete` so the marker defers). Returns
+/// `None` in both error cases; the iterator otherwise.
+fn read_dir_tracking(path: &Path, incomplete: &mut bool) -> Option<std::fs::ReadDir> {
+    match std::fs::read_dir(path) {
+        Ok(rd) => Some(rd),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => {
+            *incomplete = true;
+            None
+        }
     }
+}
+
+/// Locate dev instance dirs (those with `data/db/objects.db`) and anchor each
+/// on its sibling `agents/` dir. The dev layout is at most two levels under
+/// `dev/`: `dev/<branch>/data/...` (older single-level layout) or
+/// `dev/<branch>/<sub-hash>/data/...`. We check exactly those depths and never
+/// descend into an instance's own subdirs — so an agent workspace
+/// (`<instance>/agents/<slug>/`) that holds a nested AgentMux `objects.db` is
+/// never mistaken for a source (reagent P2), and a dev branch whose slug
+/// happens to equal an internal dir name like `data`/`agents` is still scanned
+/// (no name-based skip-list — codex P2).
+fn collect_dev_sources(dev_root: &Path, out: &mut Vec<SqliteSource>, incomplete: &mut bool) {
+    let Some(branches) = read_dir_tracking(dev_root, incomplete) else {
+        return;
+    };
+    for branch in branches.flatten() {
+        let bdir = branch.path();
+        if !bdir.is_dir() {
+            continue;
+        }
+        // Depth 1: the branch dir is itself the instance dir (older layout).
+        // If so it is a leaf — do NOT descend into its agents/ etc.
+        if push_if_instance(&bdir, out) {
+            continue;
+        }
+        // Depth 2: each child (the sub-hash dir) may be the instance dir.
+        if let Some(subs) = read_dir_tracking(&bdir, incomplete) {
+            for sub in subs.flatten() {
+                let sdir = sub.path();
+                if sdir.is_dir() {
+                    push_if_instance(&sdir, out);
+                }
+            }
+        }
+    }
+}
+
+/// Push `dir` as a source iff it holds `data/db/objects.db`. Returns whether it
+/// did (so the caller can treat an instance dir as a leaf).
+fn push_if_instance(dir: &Path, out: &mut Vec<SqliteSource>) -> bool {
     let db = dir.join("data").join("db").join("objects.db");
     if db.is_file() {
         out.push(SqliteSource {
             db_path: db,
             agents_root: dir.join("agents"),
         });
-        return;
-    }
-    if let Ok(rd) = std::fs::read_dir(dir) {
-        for e in rd.flatten() {
-            if !e.path().is_dir() {
-                continue;
-            }
-            // Skip instance internals (esp. `agents/`) so we never walk into an
-            // agent's workspace and pick up a nested objects.db as a source.
-            if e.file_name()
-                .to_str()
-                .is_some_and(|n| DEV_INTERNAL_DIRS.contains(&n))
-            {
-                continue;
-            }
-            collect_dev_sources(&e.path(), out, depth + 1);
-        }
+        true
+    } else {
+        false
     }
 }
 
@@ -693,6 +721,47 @@ mod tests {
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].data.instance_id, "inst-real");
         assert_eq!(recs[0].data.working_dir, "realagent");
+    }
+
+    #[test]
+    fn migrate_dev_branch_named_like_internal_dir_is_scanned() {
+        // A git branch can legitimately be named "data"/"agents"/etc. The dev
+        // scan must NOT skip it (no name-based filter at the branch level —
+        // codex P2 on #1389).
+        let (home, reg) = fresh_home();
+        let inst_dir = home.path().join("dev").join("data").join("sub");
+        let wd = inst_dir.join("agents").join("a1");
+        std::fs::create_dir_all(&wd).unwrap();
+        make_db_at(
+            &inst_dir,
+            &[("inst-d", "D", 100, &wd.to_string_lossy(), false)],
+        );
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.dbs_scanned, 1, "branch named 'data' must still be scanned");
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrate_defers_marker_when_versions_dir_is_unreadable() {
+        // A channel's versions/ that is present but unreadable (here: a FILE in
+        // its place, which makes read_dir fail with a non-NotFound error) must
+        // defer the marker so the channel is retried — not be silently treated
+        // as empty (codex P2 on #1389).
+        let (home, reg) = fresh_home();
+        let ch = home.path().join("channels").join("stable");
+        std::fs::create_dir_all(&ch).unwrap();
+        std::fs::write(ch.join("versions"), b"not a directory").unwrap();
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert!(
+            !stats.complete,
+            "an unreadable versions/ must defer the marker"
+        );
+        assert!(
+            !reg.root().join(MARKER).exists(),
+            "marker deferred so the channel is retried next launch"
+        );
     }
 
     #[test]
