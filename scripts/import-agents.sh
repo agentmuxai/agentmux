@@ -194,7 +194,7 @@ import_into() {
 
     local tgt_win; tgt_win=$(win_path "$target_db")
     local ts; ts=$(now_ms)
-    local imported=0 skipped=0
+    local imported=0 skipped=0 copy_failures=0
 
     echo "Target: $target_db"
     echo ""
@@ -337,12 +337,18 @@ import_into() {
                         continue
                         ;;
                     *)
-                        # Any other failure (locked, read-only, full disk, I/O) is
-                        # target-side too — abort. Silently skipping every agent
-                        # and exiting 0 would mask that the import never happened
-                        # (codex P2 on #1380).
-                        echo "ERROR: import aborted — write failed for '$agent_name': ${_def_copy_err%%$'\n'*}" >&2
-                        exit 1
+                        # Ambiguous copy failure for THIS agent — e.g. a bare
+                        # `database is locked` / I/O error, which SQLite does not
+                        # attribute to source vs target (the source could lock
+                        # racing the up-front probe, or the target — the running
+                        # instance — could hold a transient write lock). Don't
+                        # abort the whole run: that would drop every later source
+                        # DB (codex P2 #345). WARN, record the failure, and skip
+                        # this agent. The end-of-run check exits non-zero so an
+                        # incomplete import is never reported as success.
+                        echo "  WARN  $agent_name — copy failed; skipping (${_def_copy_err%%$'\n'*})" >&2
+                        ((copy_failures++)) || true
+                        continue
                         ;;
                 esac
             fi
@@ -487,11 +493,19 @@ import_into() {
     done < <(all_dbs)
 
     echo ""
-    echo "Imported: $imported  Skipped: $skipped"
+    echo "Imported: $imported  Skipped: $skipped  Failed: $copy_failures"
     # Use an `if` (not `&&`) so a zero-import run doesn't make this function —
     # and the whole script under `set -e` — exit non-zero.
     if [ "$imported" -gt 0 ]; then
         echo "Reopen the agent pane in the $target_version build to see the changes."
+    fi
+    # Any per-agent copy failure (the ambiguous `*)` branch above) means the
+    # import is incomplete. Surface it as a non-zero exit so callers/CI never
+    # mistake a partial import for success — without having aborted the run and
+    # dropped the agents that DID copy.
+    if [ "$copy_failures" -gt 0 ]; then
+        echo "ERROR: $copy_failures agent(s) failed to copy (see WARN lines above); import incomplete." >&2
+        exit 1
     fi
 }
 
