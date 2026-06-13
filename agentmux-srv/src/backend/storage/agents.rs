@@ -683,6 +683,10 @@ impl Store {
         let mut snapshot = agent.clone();
         snapshot.updated_at = stamped_updated_at;
         self.agents_dual_write_definition_upsert(&snapshot)?;
+        // Mirror the freshly-defined agent into the global store (agent.define
+        // path). Without this a define-created agent stays channel-local until
+        // a later edit. (codex P2 on #1385.)
+        self.registry_def_upsert(&agent.id);
 
         Ok(None)
     }
@@ -847,11 +851,14 @@ impl Store {
             for instance_id in &cascaded_instance_ids {
                 self.agents_dual_write_instance_delete(instance_id)?;
             }
-            // Tombstone the global definition record so another channel's
-            // stale SQLite can't resurrect this deleted user agent. (P0.2b.)
-            self.registry_def_retire(id);
         }
-        Ok(rows > 0)
+        // Tombstone the global definition record so another channel's stale
+        // SQLite can't resurrect this deleted user agent — AND so an agent
+        // that exists in THIS channel only via the global overlay (no local
+        // SQLite row, rows == 0) is actually deletable instead of reappearing
+        // on the next agent_def_list. (P0.2b + codex P1 on #1385.)
+        let global_retired = self.registry_def_retire(id);
+        Ok(rows > 0 || global_retired)
     }
 
     // AgentContent / AgentSkill / AgentHistory CRUD moved to

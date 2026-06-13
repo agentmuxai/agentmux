@@ -37,19 +37,51 @@ impl Store {
             "SELECT agent_id, content_type, content, updated_at
              FROM db_agent_content WHERE agent_id=?1 AND content_type=?2",
         )?;
-        let result = stmt.query_row(params![agent_id, content_type], |row| {
-            Ok(AgentContent {
-                agent_id: row.get(0)?,
-                content_type: row.get(1)?,
-                content: row.get(2)?,
-                updated_at: row.get(3)?,
-            })
-        });
-        match result {
-            Ok(content) => Ok(Some(content)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(StoreError::Sqlite(e)),
+        let local = {
+            let result = stmt.query_row(params![agent_id, content_type], |row| {
+                Ok(AgentContent {
+                    agent_id: row.get(0)?,
+                    content_type: row.get(1)?,
+                    content: row.get(2)?,
+                    updated_at: row.get(3)?,
+                })
+            });
+            match result {
+                Ok(content) => Some(content),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(StoreError::Sqlite(e)),
+            }
+        };
+        drop(stmt);
+        drop(conn);
+        if local.is_some() {
+            return Ok(local);
         }
+        // Cross-channel fallback (same gate as agent_content_get_all): only for
+        // an agent absent from local SQLite. Launch reads `env` via this single
+        // path, so without it a cross-channel agent would launch missing its
+        // env vars. (codex P2 on #1385.)
+        if self.agent_def_exists_local(agent_id)? {
+            return Ok(local);
+        }
+        if let Some(reg) = self.shared_def_registry() {
+            if let Ok(Some(rec)) = reg.get(agent_id) {
+                if let Some(c) = rec
+                    .data
+                    .content
+                    .iter()
+                    .find(|c| c.content_type == content_type)
+                {
+                    return Ok(Some(AgentContent {
+                        agent_id: agent_id.to_string(),
+                        content_type: c.content_type.clone(),
+                        content: c.content.clone(),
+                        updated_at: rec.data.updated_at,
+                    }));
+                }
+            }
+        }
+        Ok(local)
     }
 
     /// Upsert a content blob for an agent.

@@ -158,13 +158,19 @@ impl Store {
     /// Mirror a user-agent deletion as a global tombstone (`retired/`) so
     /// another channel's stale SQLite can't resurrect it via `upsert`.
     /// Best-effort.
-    pub(super) fn registry_def_retire(&self, def_id: &str) {
+    pub(super) fn registry_def_retire(&self, def_id: &str) -> bool {
         let Some(reg) = self.shared_def_registry() else {
-            return;
+            return false;
         };
+        // Whether an ACTIVE global record existed — lets the delete path
+        // report success for a cross-channel agent that has no local SQLite
+        // row. (codex P1 on #1385.)
+        let existed = reg.exists(def_id);
         if let Err(e) = reg.retire(def_id) {
             tracing::warn!(def_id, error = %e, "def registry: mirror retire failed");
+            return false;
         }
+        existed
     }
 }
 
@@ -303,6 +309,30 @@ mod tests {
         assert!(
             def_store.get("local-1").unwrap().unwrap().data.skills.is_empty(),
             "deletion must propagate cross-channel"
+        );
+    }
+
+    #[test]
+    fn delete_tombstones_a_cross_channel_only_agent() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        // A user agent that exists ONLY in the global store (no local SQLite row).
+        def_store
+            .upsert(&global_user_agent("remote-1", "Remote"))
+            .unwrap();
+        store.set_def_registry(def_store.clone());
+        // It appears in the roster via the global overlay.
+        assert!(store.agent_def_list().unwrap().iter().any(|d| d.id == "remote-1"));
+
+        // Deleting it (rows == 0 locally) must tombstone the global record and
+        // report success — not silently leave it to reappear. (codex P1.)
+        let deleted = store.agent_def_delete("remote-1").unwrap();
+        assert!(deleted, "cross-channel delete must report success");
+        assert!(!def_store.exists("remote-1"), "global record tombstoned");
+        assert!(
+            !store.agent_def_list().unwrap().iter().any(|d| d.id == "remote-1"),
+            "deleted cross-channel agent must not reappear in the roster"
         );
     }
 }
