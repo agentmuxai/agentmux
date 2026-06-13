@@ -561,7 +561,38 @@ impl Controller for ShellController {
                 // Bundled store — prepended (app-owned, version-locked).
                 if let Some(bundled_bin) = crate::backend::tool_store::bundled_tools_dir() {
                     if bundled_bin.exists() {
+                        // Guardrail: log which agentmux-bashwrap the agent will
+                        // actually run. A stale system-PATH copy silently
+                        // shadowing the bundled one is exactly the exit-130
+                        // trap (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md); this
+                        // one line makes "which binary?" answerable at a glance
+                        // (cross-check the version with `agentmux-bashwrap
+                        // --version`).
+                        let bashwrap_exe = if cfg!(windows) {
+                            "agentmux-bashwrap.exe"
+                        } else {
+                            "agentmux-bashwrap"
+                        };
+                        let bw = bundled_bin.join(bashwrap_exe);
+                        if bw.exists() {
+                            tracing::info!(
+                                target: "agent-tools",
+                                path = %bw.display(),
+                                "agent bashwrap: bundled (version-locked, prepended to PATH)"
+                            );
+                        } else {
+                            tracing::warn!(
+                                target: "agent-tools",
+                                dir = %bundled_bin.display(),
+                                "agent bashwrap: bundled store present but agentmux-bashwrap MISSING — agent will resolve via system PATH (risk of a stale copy; see RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md)"
+                            );
+                        }
                         prepend.push(bundled_bin.to_string_lossy().into_owned());
+                    } else {
+                        tracing::warn!(
+                            target: "agent-tools",
+                            "agent bashwrap: no bundled tools dir — agent will resolve agentmux-bashwrap via system PATH (risk of a stale copy; see RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md)"
+                        );
                     }
                 }
 
