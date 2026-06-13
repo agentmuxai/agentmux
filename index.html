@@ -32,15 +32,31 @@
         opacity: 1 !important;
         z-index: 99999;
       }
+      /* Cross-fade the splash out once the content-reveal gate decides the
+         window has settled (frontend/app/init/startup-splash.ts adds .fading).
+         Higher specificity than the `opacity: 1 !important` above so it wins.
+         Keep the duration in sync with FADE_MS in startup-splash.ts. */
+      #startup-loading.fading {
+        opacity: 0 !important;
+        transition: opacity 200ms ease-out;
+        pointer-events: none;
+      }
       #startup-loading svg {
         width: 96px;
         height: 96px;
         opacity: 0.9;
         animation: startup-pulse 1.8s ease-in-out infinite;
+        /* Composite the pulse on the GPU. Without a dedicated layer Chromium
+           re-rasterizes this large vector SVG (1200×1200 viewBox, many
+           gradients) every animation frame, which reads as a blink/flicker
+           instead of a smooth pulse. `will-change` promotes it to its own
+           layer; the keyframes keep a translateZ so the layer persists at the
+           scale(1) endpoints (a 2D-only transform would drop the layer). */
+        will-change: transform, opacity;
       }
       @keyframes startup-pulse {
-        0%, 100% { opacity: 0.9; transform: scale(1); }
-        50%       { opacity: 0.65; transform: scale(0.97); }
+        0%, 100% { opacity: 0.9; transform: scale(1) translateZ(0); }
+        50%       { opacity: 0.65; transform: scale(0.97) translateZ(0); }
       }
     </style>
     <link rel="stylesheet" href="/fontawesome/css/fontawesome.min.css" />
