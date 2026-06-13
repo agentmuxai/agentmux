@@ -177,16 +177,6 @@ unsafe fn add_sep(menu: Id) {
     msg_id(menu, sel(b"addItem:\0"), sep);
 }
 
-fn is_dev() -> bool {
-    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .map(|d| agentmux_common::RuntimeMode::current(&d))
-    });
-    matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. }))
-}
-
 /// Install the native macOS menu bar. Must run AFTER `cef::initialize` (the
 /// `NSApplication` instance exists by then) and after `set_macos_app_display_name`
 /// (the app-menu title follows the process name).
@@ -197,7 +187,7 @@ pub fn install_menu_bar(state: Arc<AppState>) {
 unsafe fn install_inner(state: Arc<AppState>) {
     let _ = MENU_STATE.set(state);
     let target = make_target();
-    let name = if is_dev() { "AgentMux DEV" } else { "AgentMux" };
+    let name = if agentmux_common::is_dev_self() { "AgentMux DEV" } else { "AgentMux" };
 
     let main = new_menu("MainMenu");
 
