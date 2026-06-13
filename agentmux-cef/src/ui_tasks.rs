@@ -169,7 +169,7 @@ pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
 //
 // Requires CEF Patch: BeginWindowDrag added to CefWindow API (libcef/browser/views/window_impl.cc).
 // Linux: native drag via CefWindow::BeginWindowDrag (Ozone). macOS uses a
-// separate NSWindow-level path (MacWindowDragTask, below) because stock
+// separate host-side move loop (MacWindowDragTask, below) because stock
 // libcef has no drag API and the fork's BeginWindowDrag is Ozone-only.
 #[cfg(target_os = "linux")]
 wrap_task! {

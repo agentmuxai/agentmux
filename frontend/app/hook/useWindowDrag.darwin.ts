@@ -91,8 +91,8 @@ function installCefDragListener() {
             const dx = Math.abs(e.clientX - pressX);
             const dy = Math.abs(e.clientY - pressY);
             if (dx < DRAG_THRESHOLD_PX && dy < DRAG_THRESHOLD_PX) return;
-            // Threshold crossed — hand off to the native AppKit drag. ONE
-            // IPC; the window server takes over until the mouse is released.
+            // Threshold crossed — send ONE IPC. The host then runs a manual
+            // move loop (set_bounds per event) until the mouse is released.
             dragInitiated = true;
             pressArmed = false;
             invokeCommand("start_window_drag", { label: currentWindowLabel() }).catch(() => {
