@@ -26,6 +26,13 @@ pub const DEF_MIN_SUPPORTED_SCHEMA: u32 = 1;
 /// release that adds fields to the definition payload.
 pub const DEF_MAX_SUPPORTED_SCHEMA: u32 = 1;
 
+/// Serde default for `container_volumes` — preserves the db invariant that
+/// an omitted value is the empty JSON array `"[]"`, not `""` (which would
+/// surface via the read-path overlay). (reagent P2 on #1385.)
+fn default_container_volumes() -> String {
+    "[]".to_string()
+}
+
 /// On-disk envelope for a global agent-definition record. Stored at
 /// `<shared>/agents/definitions/<id>.json`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,7 +72,7 @@ pub struct DefSkillBlob {
 /// cross-channel agent to launch with its instructions). New fields go
 /// here under `#[serde(default)]` (so older files still deserialize)
 /// paired with a `DEF_MAX_SUPPORTED_SCHEMA` bump.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct DefinitionRecordV1 {
     pub id: String,
     #[serde(default)]
@@ -110,7 +117,7 @@ pub struct DefinitionRecordV1 {
     pub user_hidden: i64,
     #[serde(default)]
     pub container_image: String,
-    #[serde(default)]
+    #[serde(default = "default_container_volumes")]
     pub container_volumes: String,
     #[serde(default)]
     pub container_name: String,
@@ -261,7 +268,7 @@ mod tests {
         let parsed: DefinitionRecord = serde_json::from_value(raw).unwrap();
         assert_eq!(parsed.data.id, "abc");
         assert_eq!(parsed.data.provider, "claude");
-        // Defaulted field absent from JSON.
-        assert_eq!(parsed.data.container_volumes, "");
+        // Defaulted field absent from JSON now uses the "[]" db invariant.
+        assert_eq!(parsed.data.container_volumes, "[]");
     }
 }

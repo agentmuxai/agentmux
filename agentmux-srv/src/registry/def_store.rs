@@ -140,6 +140,20 @@ impl DefinitionStore {
         self.active_path(id).exists() || self.retired_path(id).exists()
     }
 
+    /// Read a single active definition record by id. `None` if absent;
+    /// invalid/corrupt files surface as an error (caller logs + falls back).
+    pub fn get(&self, id: &str) -> Result<Option<DefinitionRecord>, DefStoreError> {
+        match std::fs::read(self.active_path(id)) {
+            Ok(bytes) => {
+                let rec: DefinitionRecord = serde_json::from_slice(&bytes)?;
+                validate(id, &rec)?;
+                Ok(Some(rec))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Read every valid active definition. Invalid files are skipped +
     /// logged (left on disk for ops triage).
     pub fn list_active(&self) -> Result<Vec<DefinitionRecord>, DefStoreError> {
