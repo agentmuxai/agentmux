@@ -96,7 +96,7 @@ Rollout phases (`SPEC §7`):
 ## 4. Current state — what works, what's broken
 
 ### ✅ Definitions ("New from template")
-The read-merge is correct; the backfill was broken (only 1 of N captured) and is **fixed** in PR #1391 (schema-resilient read, scans `dev/`, recoverable versioned marker). On this machine it recovered the global definitions store 1 → 11. See `docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md`.
+The read-merge is correct; the backfill was broken (only 1 of N captured) and is **fixed** in PR #1391 (schema-resilient read, scans `dev/`, recoverable versioned marker). On this machine it recovered the global definitions store 1 → 11. See the definitions deep-dive that lands with PR #1391.
 
 ### ❌ Instances ("My Agents") — empty
 The instances backfill ran (`dbs_scanned=52, dbs_skipped=0, rows_seen=10`) but wrote **0** records: `records_skipped_unmappable=9`. Root cause is a **path-model mismatch**:
@@ -155,7 +155,7 @@ Log, at startup, which store served My Agents and the counts (`global=N local=M`
 - `agentmux-srv/src/registry/def_migrate.rs` — definition backfill (**fixed in #1391**).
 - `agentmux-srv/src/backend/storage/agents.rs` — `agent_def_list` definition read-merge.
 - `agentmux-srv/src/backend/storage/registry_mirror.rs` / `def_registry_mirror.rs` — live mirrors.
-- Specs: `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`, `SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md`, `SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md`.
-- Analysis: `docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md` (definitions deep-dive).
+- Specs (current — see §0 for the full annotated companion list): `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`, `SPEC_AGENT_ARCHITECTURE_2026_05_27.md`, `SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md`.
+- Analysis: the definitions deep-dive lands with PR #1391 (`docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md` once that PR merges).
 
 *Written 2026-06-13 by AgentX. Architecture overview + improvement proposals — definitions backfill fixed in #1391; instance backfill (I1) not yet implemented.*
