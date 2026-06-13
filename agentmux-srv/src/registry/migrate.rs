@@ -379,7 +379,8 @@ fn enumerate_sources(home: &Path) -> (Vec<SqliteSource>, bool) {
     let mut incomplete = false;
 
     // Installed/portable: home/channels/<ch>/versions/<v>/data/db/objects.db,
-    // anchored on home/channels/<ch>/agents.
+    // paired with home/channels/<ch>/agents as the per-source FALLBACK anchor
+    // (the primary anchor in row_to_record is the global <home>/agents).
     if let Some(rd) = read_dir_tracking(&home.join("channels"), &mut incomplete) {
         for ch in rd.flatten() {
             let ch_dir = ch.path();
@@ -401,8 +402,9 @@ fn enumerate_sources(home: &Path) -> (Vec<SqliteSource>, bool) {
         }
     }
 
-    // Dev: home/dev/<branch>[/<sub>]/data/db/objects.db, anchored on
-    // <instance_dir>/agents (instance_dir = the dir that holds `data`).
+    // Dev: home/dev/<branch>[/<sub>]/data/db/objects.db, paired with
+    // <instance_dir>/agents (instance_dir = the dir that holds `data`) as the
+    // per-source FALLBACK anchor.
     collect_dev_sources(&home.join("dev"), &mut out, &mut incomplete);
 
     (out, incomplete)
@@ -800,10 +802,12 @@ mod tests {
 
     #[test]
     fn migrate_anchors_each_row_on_its_own_channel() {
-        // Landmine #1: two agents in two DIFFERENT channels, each
-        // working_directory absolute under its OWN channel's agents dir. Both
-        // must migrate with the correct relative slug — neither is dropped as
-        // "unmappable" just because the other channel's agents root differs.
+        // Per-channel FALLBACK path: two agents in two DIFFERENT channels, each
+        // working_directory absolute under its OWN channel's agents dir and NOT
+        // under the global `<home>/agents` root. `row_to_record` falls back to
+        // each row's own source-channel agents dir, so both map with the correct
+        // relative slug — neither dropped as "unmappable" because the other
+        // channel's agents root differs.
         let (home, reg) = fresh_home();
         let wd_a = channel_agents(home.path(), "stable").join("alpha");
         let wd_b = channel_agents(home.path(), "local-main-b28b7a").join("beta");
@@ -969,9 +973,10 @@ mod tests {
 
     #[test]
     fn migrate_handles_dev_layout() {
-        // Dev instance lives at home/dev/<branch>/<sub>/data/db/objects.db,
-        // anchored on home/dev/<branch>/<sub>/agents. The recursive dev walk
-        // must find it and strip against the sibling agents dir.
+        // Dev instance lives at home/dev/<branch>/<sub>/data/db/objects.db with
+        // its workspace under the sibling home/dev/<branch>/<sub>/agents (NOT the
+        // global <home>/agents root). The recursive dev walk must find it and the
+        // per-source fallback must strip against that sibling agents dir.
         let (home, reg) = fresh_home();
         let inst_dir = home.path().join("dev").join("mybranch").join("69d7a34a");
         let wd = inst_dir.join("agents").join("devagent");
