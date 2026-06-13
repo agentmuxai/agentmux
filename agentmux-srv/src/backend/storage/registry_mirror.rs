@@ -59,8 +59,12 @@ fn agent_instance_to_record(
         created_by_version: version.clone(),
         last_launched_by_version: version,
     };
-    // Lazy schema bump: v2 only when session_id is set, so session-less
-    // records stay readable by v1 binaries (see schema::min_schema_version).
+    // Stamp the lowest envelope schema that faithfully represents the payload
+    // (schema::min_schema_version). Since P0.4 always sets source_agents_base,
+    // that is v3 for every live-mirrored record — a pre-v3 reader rejects it
+    // (intended: better to hide than mis-resolve a cross-channel workdir; the
+    // only pre-v3 readers of the GLOBAL registry are pre-P0.4 builds, which
+    // ship together with this).
     Ok(NamedAgentRecord {
         schema_version: data.min_schema_version(),
         data,

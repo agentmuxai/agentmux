@@ -413,9 +413,9 @@ fn row_to_record(row: &RowSnapshot) -> Option<NamedAgentRecord> {
         memory_id: empty_to_none(&row.memory_id),
         // The legacy per-channel rows don't carry session_id through this
         // consolidation path; live mirroring (registry_mirror.rs) populates it
-        // on the next launch/update. Until then these stay session-less and
-        // older-binary-readable (v3 from source_agents_base below, but MIN
-        // stays 1 so the field is simply ignored by pre-v3 readers).
+        // on the next launch/update. The record is still stamped v3 because
+        // source_agents_base is set below — so a pre-v3 reader skips it (the
+        // only such readers of the global registry are pre-P0.4 builds).
         session_id: None,
         working_dir: rel_str,
         // v3: anchor on THIS row's own source channel agents dir so a reader
