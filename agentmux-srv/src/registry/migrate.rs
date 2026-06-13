@@ -15,13 +15,18 @@
 //!   <home>/dev/<branch>[/<sub>]/data/db/objects.db         (dev)
 //! ```
 //!
-//! **Landmine #1 — per-source anchoring.** A row's `working_directory` is
-//! absolute under *its own* channel's agents dir (`channels/<ch>/agents`, or
-//! `<instance_dir>/agents` for dev). Stripping every row against a single
-//! global agents root would mark rows from other channels "unmappable", so
-//! each source DB carries the agents dir its rows are anchored on, and
-//! [`row_to_record`] strips against that. See
-//! `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` §11.5.
+//! **Workspace anchoring.** Agent workspaces live GLOBALLY at
+//! `<home>/agents/<name>` (verified on disk: real `working_directory` values
+//! are `~/.agentmux/agents/<name>`, e.g. `…/agents/mazs-0527n`), independent of
+//! channel/version. [`row_to_record`] therefore strips each row's
+//! `working_directory` against the global `<home>/agents` root FIRST, then
+//! falls back to this row's own source-channel agents dir (`channels/<ch>/agents`,
+//! or `<instance_dir>/agents` for dev) for any legacy row that genuinely lived
+//! in-channel — each source DB still carries that per-source dir. The two
+//! subtrees are disjoint, so the fallback never mis-maps a global workspace.
+//! The chosen base is stored absolute in the record, so a reader in ANY channel
+//! round-trips `source_agents_base.join(working_dir)` back to the real
+//! workspace. See `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` §11.5.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -59,8 +64,21 @@ pub struct MigrateStats {
 /// implies the migration question has been asked at least once.
 const MARKER: &str = ".migrated_from_sqlite";
 
-/// A per-(channel,version) / per-dev-branch SQLite source, paired with the
-/// agents dir whose subtree its `working_directory` values are absolute under.
+/// Bumped when the migration's mapping logic changes in a way that must re-run
+/// on registries an older build already finalized. **v2** fixes the workspace
+/// anchor: agent workspaces live globally at `<home>/agents/<name>`, but v1
+/// stripped `working_directory` against the per-channel `channels/<ch>/agents`
+/// dir, so every global workspace came back "unmappable" (`row_to_record`
+/// returned `None`) and "My Agents" stayed empty in every channel. A legacy
+/// marker (no `migration_version:` line) reads as 0 and re-runs exactly once;
+/// `exists_anywhere()` keeps the re-run from duplicating already-written
+/// records.
+const MIGRATION_VERSION: u32 = 2;
+
+/// A per-(channel,version) / per-dev-branch SQLite source, paired with this
+/// source's own agents dir — the per-channel **fallback** anchor `row_to_record`
+/// uses when a row's (normally global) `working_directory` isn't under the
+/// primary `<home>/agents` root.
 struct SqliteSource {
     db_path: PathBuf,
     agents_root: PathBuf,
@@ -79,9 +97,11 @@ pub fn migrate_from_sqlite_once(
     registry: &Registry,
 ) -> Result<MigrateStats, RegistryError> {
     let marker_path = registry.root().join(MARKER);
-    if marker_path.exists() {
-        // Marker present ⇒ a prior run completed; treat as complete so
-        // callers attach the registry.
+    if marker_migration_version(&marker_path) >= MIGRATION_VERSION {
+        // A prior run AT THE CURRENT logic version completed; treat as complete
+        // so callers attach the registry. An older-version (or legacy,
+        // no-version) marker falls through and re-runs once — `exists_anywhere`
+        // below keeps it from duplicating records already written.
         return Ok(MigrateStats {
             complete: true,
             ..MigrateStats::default()
@@ -89,6 +109,19 @@ pub fn migrate_from_sqlite_once(
     }
 
     let mut stats = MigrateStats::default();
+    // Agent workspaces are created GLOBALLY at `<home>/agents/<name>` — verified
+    // on disk: instance `working_directory` values are `~/.agentmux/agents/<name>`
+    // (e.g. `…/agents/mazs-0527n`), NOT under any per-channel `channels/<ch>/agents`
+    // dir, and NOT under the P0.3-re-rooted registry's parent (`<home>/shared/
+    // agents`). `home` is `~/.agentmux` (main.rs derives it as the registry root's
+    // 3rd ancestor: registry → agents → shared → home). Anchor migrated records on
+    // this real workspace root so the reader (`agent_handlers.rs` reconstructs
+    // `source_agents_base.join(working_dir)`) resolves the actual workspace in
+    // EVERY channel. NB this deliberately differs from the live mirror, which
+    // strips against the per-channel `AGENTMUX_AGENTS_DIR` — that anchor never
+    // matched these global workspaces (an earlier draft of this fix wrongly used
+    // the registry's parent and would have left every row unmappable).
+    let global_agents_root = home.join("agents");
     let (sources, enum_incomplete) = enumerate_sources(home);
 
     let mut latest_by_id: HashMap<String, RowSnapshot> = HashMap::new();
@@ -146,7 +179,7 @@ pub fn migrate_from_sqlite_once(
             continue;
         }
         let display_hidden = row.display_hidden;
-        let Some(rec) = row_to_record(&row) else {
+        let Some(rec) = row_to_record(&row, &global_agents_root) else {
             stats.records_skipped_unmappable += 1;
             continue;
         };
@@ -255,10 +288,13 @@ pub fn backfill_source_bases_once(
     let (sources, mut incomplete) = enumerate_sources(home);
 
     // Dedup EXACTLY like migrate_from_sqlite_once: for an id present in more
-    // than one DB the latest-`started_at` row wins. This anchors
-    // source_agents_base on the SAME channel the record's existing working_dir
-    // was stripped against (the migration used that same winning row), instead
-    // of whichever DB read_dir happened to return first (codex/reagent P2).
+    // than one DB the latest-`started_at` row wins. These targets are pre-v3
+    // (base-less) records whose `working_dir` was stripped against a PER-CHANNEL
+    // dir by P0.3b / a pre-P0.4 live mirror, so re-anchor on the winning row's
+    // own channel — not whichever DB read_dir happened to return first
+    // (codex/reagent P2). (The main migration now strips global-first, but it
+    // always SETS a base, so its records are never base-less and never reach
+    // this backfill.)
     let mut winners: HashMap<String, (i64, PathBuf)> = HashMap::new();
     for src in sources {
         stats.dbs_scanned += 1;
@@ -328,7 +364,8 @@ pub fn backfill_source_bases_once(
 }
 
 /// Enumerate every per-(channel,version) and per-dev-branch `objects.db` under
-/// `home`, pairing each with the agents dir its rows are anchored on.
+/// `home`, pairing each with its own agents dir (the per-source fallback anchor;
+/// the primary anchor in `row_to_record` is the global `<home>/agents`).
 ///
 /// Returns `(sources, incomplete)`. `incomplete` is true if any directory that
 /// *should* be enumerable failed to read for a reason other than "doesn't
@@ -342,7 +379,8 @@ fn enumerate_sources(home: &Path) -> (Vec<SqliteSource>, bool) {
     let mut incomplete = false;
 
     // Installed/portable: home/channels/<ch>/versions/<v>/data/db/objects.db,
-    // anchored on home/channels/<ch>/agents.
+    // paired with home/channels/<ch>/agents as the per-source FALLBACK anchor
+    // (the primary anchor in row_to_record is the global <home>/agents).
     if let Some(rd) = read_dir_tracking(&home.join("channels"), &mut incomplete) {
         for ch in rd.flatten() {
             let ch_dir = ch.path();
@@ -364,8 +402,9 @@ fn enumerate_sources(home: &Path) -> (Vec<SqliteSource>, bool) {
         }
     }
 
-    // Dev: home/dev/<branch>[/<sub>]/data/db/objects.db, anchored on
-    // <instance_dir>/agents (instance_dir = the dir that holds `data`).
+    // Dev: home/dev/<branch>[/<sub>]/data/db/objects.db, paired with
+    // <instance_dir>/agents (instance_dir = the dir that holds `data`) as the
+    // per-source FALLBACK anchor.
     collect_dev_sources(&home.join("dev"), &mut out, &mut incomplete);
 
     (out, incomplete)
@@ -435,10 +474,27 @@ fn push_if_instance(dir: &Path, out: &mut Vec<SqliteSource>) -> bool {
     }
 }
 
+/// Read the `migration_version:` line from an existing marker. Returns 0 when
+/// the marker is absent, unreadable, or predates versioning (a legacy
+/// stats-only marker has no such line) — so a logic bump, or any pre-versioning
+/// marker, re-runs the migration exactly once.
+fn marker_migration_version(path: &Path) -> u32 {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return 0;
+    };
+    for line in body.lines() {
+        if let Some(v) = line.strip_prefix("migration_version:") {
+            return v.trim().parse().unwrap_or(0);
+        }
+    }
+    0
+}
+
 fn write_marker(path: &Path, stats: &MigrateStats) -> std::io::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     let body = format!(
-        "migrated_at: {now}\n\
+        "migration_version: {MIGRATION_VERSION}\n\
+         migrated_at: {now}\n\
          dbs_scanned: {}\n\
          dbs_skipped: {}\n\
          rows_seen: {}\n\
@@ -462,9 +518,12 @@ struct RowSnapshot {
     identity_id: String,
     memory_id: String,
     working_directory: String,
-    /// The agents dir this row's `working_directory` is absolute under — the
-    /// source channel's `agents/` (landmine #1). Travels with the row through
-    /// dedup so the winner is stripped against its own channel.
+    /// This row's own source-channel agents dir (`channels/<ch>/agents`, or
+    /// `<instance_dir>/agents` for dev) — the **fallback** anchor.
+    /// `row_to_record` strips `working_directory` against the global
+    /// `<home>/agents` root first and uses this only for a legacy row that
+    /// genuinely lived in-channel. Travels with the row through dedup so any
+    /// such fallback strips against the right channel.
     agents_root: PathBuf,
     started_at: i64,
     created_at: i64,
@@ -533,11 +592,25 @@ fn read_named_rows(
     iter.collect()
 }
 
-fn row_to_record(row: &RowSnapshot) -> Option<NamedAgentRecord> {
+fn row_to_record(row: &RowSnapshot, global_agents_root: &Path) -> Option<NamedAgentRecord> {
     let abs = std::path::Path::new(&row.working_directory);
-    // Strip against THIS row's own source-channel agents dir (landmine #1),
-    // not a single global root — else rows from other channels look unmappable.
-    let rel = abs.strip_prefix(&row.agents_root).ok()?;
+    // Agent workspaces live GLOBALLY at `<home>/agents/<name>` (verified: real
+    // `working_directory` values are `~/.agentmux/agents/<name>`), so anchor on
+    // that global workspace root — `base` is stored absolute in the record, so
+    // the reader reconstructs `base.join(working_dir)` correctly in any channel.
+    // Fall back to THIS row's own source-channel agents dir for any legacy row
+    // whose workspace genuinely lived in-channel (`channels/<ch>/agents`). A
+    // workspace under NEITHER root is skipped (e.g. a user cwd like
+    // `~/projects/foo`), matching the live mirror's relative_workdir.
+    let (rel, base): (&Path, &Path) = abs
+        .strip_prefix(global_agents_root)
+        .ok()
+        .map(|r| (r, global_agents_root))
+        .or_else(|| {
+            abs.strip_prefix(row.agents_root.as_path())
+                .ok()
+                .map(|r| (r, row.agents_root.as_path()))
+        })?;
     let rel_str = rel.to_string_lossy().to_string();
     if rel_str.is_empty() || rel_str == "." {
         return None;
@@ -548,17 +621,18 @@ fn row_to_record(row: &RowSnapshot) -> Option<NamedAgentRecord> {
         definition_id: row.definition_id.clone(),
         identity_id: empty_to_none(&row.identity_id),
         memory_id: empty_to_none(&row.memory_id),
-        // The legacy per-channel rows don't carry session_id through this
-        // consolidation path; live mirroring (registry_mirror.rs) populates it
-        // on the next launch/update. The record is still stamped v3 because
+        // The legacy rows don't carry session_id through this consolidation
+        // path; live mirroring (registry_mirror.rs) populates it on the next
+        // launch/update. The record is still stamped v3 because
         // source_agents_base is set below — so a pre-v3 reader skips it (the
         // only such readers of the global registry are pre-P0.4 builds).
         session_id: None,
         working_dir: rel_str,
-        // v3: anchor on THIS row's own source channel agents dir so a reader
-        // in any channel reconstructs the absolute working_directory correctly
-        // (P0.4), not by re-joining under its own channel's agents dir.
-        source_agents_base: Some(row.agents_root.to_string_lossy().to_string()),
+        // v3: anchor on the global agents root (or, for a legacy in-channel
+        // workspace, that channel's agents dir) so a reader in ANY channel
+        // reconstructs the absolute working_directory correctly (P0.4), not by
+        // re-joining under its own channel's agents dir.
+        source_agents_base: Some(base.to_string_lossy().to_string()),
         created_at_ms: row.created_at,
         last_launched_at_ms: row.started_at,
         // We don't know what version originally inserted these rows. Tag them
@@ -728,10 +802,12 @@ mod tests {
 
     #[test]
     fn migrate_anchors_each_row_on_its_own_channel() {
-        // Landmine #1: two agents in two DIFFERENT channels, each
-        // working_directory absolute under its OWN channel's agents dir. Both
-        // must migrate with the correct relative slug — neither is dropped as
-        // "unmappable" just because the other channel's agents root differs.
+        // Per-channel FALLBACK path: two agents in two DIFFERENT channels, each
+        // working_directory absolute under its OWN channel's agents dir and NOT
+        // under the global `<home>/agents` root. `row_to_record` falls back to
+        // each row's own source-channel agents dir, so both map with the correct
+        // relative slug — neither dropped as "unmappable" because the other
+        // channel's agents root differs.
         let (home, reg) = fresh_home();
         let wd_a = channel_agents(home.path(), "stable").join("alpha");
         let wd_b = channel_agents(home.path(), "local-main-b28b7a").join("beta");
@@ -778,6 +854,96 @@ mod tests {
     }
 
     #[test]
+    fn migrate_anchors_global_workspace_not_per_channel() {
+        // Production reality (verified on disk): agent workspaces live at the
+        // GLOBAL `<home>/agents/<name>` — e.g. `~/.agentmux/agents/qooma-0612g`,
+        // NOT under any channel's `channels/<ch>/agents` dir, and NOT under the
+        // re-rooted registry's parent (`<home>/shared/agents`). v1 stripped
+        // against `channels/<ch>/agents` and dropped every such row as
+        // "unmappable" → "My Agents" empty everywhere. The fix anchors on
+        // `<home>/agents`, so the row migrates and reconstructs in any channel.
+        let (home, reg) = fresh_home();
+        let global_agents = home.path().join("agents"); // the REAL workspace root
+        // Guard against the earlier wrong fix: the workspace root is NOT the
+        // registry's parent (here `<home>/shared/agents`). If someone re-anchors
+        // on `registry.root().parent()`, this row goes unmappable and the asserts
+        // below fail.
+        assert_ne!(
+            global_agents.as_path(),
+            reg.root().parent().unwrap(),
+            "workspace root must differ from the re-rooted registry's parent"
+        );
+        let wd = global_agents.join("qooma-0612g");
+        std::fs::create_dir_all(&wd).unwrap();
+        // The row lives in a CHANNEL's SQLite, but its working_directory points
+        // at the GLOBAL workspace — the actual on-disk shape.
+        make_channel_db(
+            home.path(),
+            "stable",
+            "0.44.2",
+            &[("inst-q", "Qooma", 100, &wd.to_string_lossy())],
+        );
+
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.rows_seen, 1);
+        assert_eq!(
+            stats.records_skipped_unmappable, 0,
+            "a global workspace must NOT be unmappable"
+        );
+        assert_eq!(stats.records_written, 1);
+        let recs = reg.list_active().unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].data.working_dir, "qooma-0612g");
+        assert_eq!(
+            recs[0].data.source_agents_base.as_deref(),
+            Some(global_agents.to_string_lossy().as_ref()),
+            "anchored on the GLOBAL workspace root <home>/agents, not the channel"
+        );
+        assert_eq!(recs[0].schema_version, 3);
+    }
+
+    #[test]
+    fn migrate_legacy_marker_reruns_then_settles() {
+        // A v1 build left a stats-only marker (no `migration_version:` line)
+        // after writing 0 records for a global workspace it judged unmappable.
+        // The fixed build must read that marker as version 0, re-run once, and
+        // capture the row — then settle (a second run is a no-op).
+        let (home, reg) = fresh_home();
+        let global_agents = home.path().join("agents"); // the REAL workspace root
+        let wd = global_agents.join("naki");
+        std::fs::create_dir_all(&wd).unwrap();
+        make_channel_db(
+            home.path(),
+            "stable",
+            "0.44.2",
+            &[("inst-n", "Naki", 100, &wd.to_string_lossy())],
+        );
+        // Simulate the legacy finalized marker: stats-only, no version line.
+        std::fs::write(
+            reg.root().join(MARKER),
+            b"migrated_at: 2026-06-10T00:00:00Z\nrecords_written: 0\n",
+        )
+        .unwrap();
+
+        // Re-run: legacy marker → version 0 < MIGRATION_VERSION → re-runs.
+        let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(
+            stats.records_written, 1,
+            "legacy marker must trigger a one-time re-run"
+        );
+        assert_eq!(reg.list_active().unwrap().len(), 1);
+        assert_eq!(
+            marker_migration_version(&reg.root().join(MARKER)),
+            MIGRATION_VERSION,
+            "marker upgraded to the current version"
+        );
+
+        // Settle: second run sees the current-version marker → no-op.
+        let again = migrate_from_sqlite_once(home.path(), &reg).unwrap();
+        assert_eq!(again.records_written, 0, "settles after the single re-run");
+    }
+
+    #[test]
     fn migrate_picks_latest_started_at_on_dedup() {
         let (home, reg) = fresh_home();
         let wd = channel_agents(home.path(), "stable").join("demo");
@@ -807,9 +973,10 @@ mod tests {
 
     #[test]
     fn migrate_handles_dev_layout() {
-        // Dev instance lives at home/dev/<branch>/<sub>/data/db/objects.db,
-        // anchored on home/dev/<branch>/<sub>/agents. The recursive dev walk
-        // must find it and strip against the sibling agents dir.
+        // Dev instance lives at home/dev/<branch>/<sub>/data/db/objects.db with
+        // its workspace under the sibling home/dev/<branch>/<sub>/agents (NOT the
+        // global <home>/agents root). The recursive dev walk must find it and the
+        // per-source fallback must strip against that sibling agents dir.
         let (home, reg) = fresh_home();
         let inst_dir = home.path().join("dev").join("mybranch").join("69d7a34a");
         let wd = inst_dir.join("agents").join("devagent");
