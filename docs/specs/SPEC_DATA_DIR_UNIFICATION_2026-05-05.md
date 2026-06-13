@@ -1,3 +1,5 @@
+> **⚠️ SUPERSEDED — 2026-06-13.** Retained for its design rationale and the inbound code/doc references that cite it. For the current, code-anchored architecture of agent data & cross-channel persistence, see **[ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md](../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md)**.
+
 # Data Directory Unification Plan — 2026-05-05
 
 **Goal.** Unify the data, cache, config, and work-folder layout for portable, installed, and dev instances under a single `~/.agentmux/` root with explicit version + mode separation. Eliminate the three independent dev-mode detection paths and the silent env-var leakage that lets one instance type collide with another.
