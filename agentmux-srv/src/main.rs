@@ -439,6 +439,24 @@ async fn main() {
     if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
         match registry::DefinitionStore::open(def_dir.clone()) {
             Ok(def_store) => {
+                // P0.2d: one-shot backfill of EXISTING user agents from every
+                // channel's per-version objects.db into the global store, so
+                // agents created before this shipped become cross-channel
+                // without waiting for an edit. Idempotent; read-only on SQLite.
+                // home = def_dir/../../.. (definitions -> agents -> shared -> home).
+                if let Some(home) = def_dir.ancestors().nth(3) {
+                    match registry::migrate_definitions_global_once(home, &def_store) {
+                        Ok(stats) if stats.dbs_scanned > 0 => tracing::info!(
+                            dbs_scanned = stats.dbs_scanned,
+                            dbs_skipped = stats.dbs_skipped,
+                            rows_seen = stats.rows_seen,
+                            records_written = stats.records_written,
+                            "def registry: global definition migration finished"
+                        ),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(error = %e, "def registry: global migration errored (continuing; live mirror backfills on edit)"),
+                    }
+                }
                 wstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
             }
