@@ -17,7 +17,7 @@
 - `docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md` — the **channel** model (Increment A is live; the schema-migration framework + import wizard in B/C are future work, not shipped).
 - `docs/analyses/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — a real, unimplemented dev-isolation bug (orthogonal).
 
-**Superseded docs removed 2026-06-13** (their still-useful facts are folded into this doc; recoverable via git history):
+**Superseded specs — kept in place, banner-marked 2026-06-13.** Each carries a `SUPERSEDED → this doc` header. They are *retained* (not deleted) because live code comments and other kept specs cite them as design rationale — but their architecture has been overtaken; read this doc for the current shape:
 - `SPEC_DATA_DIR_UNIFICATION_2026-05-05` — its design shipped as the `RuntimeMode` + `DataPaths` resolver (PR #695); see §2.
 - `SPEC_SHARED_AGENT_REGISTRY_2026_05_12` — proposed **one** registry record per agent; the implementation **split** into two stores (`definitions/` + `registry/`); see §3a.
 - `SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24` — superseded by the live tracker `SPEC_AGENT_ARCHITECTURE_2026_05_27`.
