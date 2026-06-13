@@ -366,16 +366,17 @@ async fn main() {
     if let Some(root) = registry::resolve_shared_registry_dir() {
         match registry::Registry::open(root.clone()) {
             Ok(reg) => {
-                // PR B — one-shot backfill from every per-version
-                // objects.db into the registry. Idempotent via marker
-                // file in the registry root. Read-only on SQLite.
+                // One-shot backfill from every channel/version + dev objects.db
+                // into the registry. Idempotent via the marker file in the
+                // registry root. Read-only on SQLite.
                 //
-                // Gating: the registry is only attached to wstore if
-                // migration completes (Ok) — that way the read path
-                // never serves a partial view. On Err, mirror writes
-                // are also disabled (registry stays detached); SQLite
-                // remains authoritative and the next launch retries
-                // the migration via the same marker logic.
+                // Attach policy: the registry is attached whenever the migration
+                // RUNS (returns Ok), and intentionally serves the partial set of
+                // readable records — a corrupt/locked DB in an unrelated channel
+                // must not disable cross-channel My Agents (see the Ok arm below,
+                // codex P1 on #1389). On Err (e.g. the registry itself failed) or
+                // when the home can't be resolved, the registry stays detached and
+                // SQLite remains authoritative; the next launch retries.
                 // The generalized migration scans EVERY channel +dev tree under
                 // the true home, so derive ~/.agentmux from the now-global
                 // registry root: registry → agents → shared → <home>.
