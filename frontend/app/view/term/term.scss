@@ -138,39 +138,14 @@
         }
 
         // xterm 6 replaced the native-scrollbar viewport with a custom
-        // scrollable-element + overlay scrollbar DIVs (`.scrollbar.vertical`
-        // > `.slider`). `.xterm-viewport` is now an empty positioning anchor
-        // (scrollHeight === clientHeight always), so the `::-webkit-scrollbar`
-        // rules below are legacy no-ops kept only for the unlikely DOM-renderer
-        // fallback path; the real scrollbar is styled in the `.scrollbar` block.
+        // scrollable-element + overlay scrollbar DIVs. `.xterm-viewport` is now
+        // an empty positioning anchor (scrollHeight === clientHeight always), but
+        // the vendored xterm.css still sets it `overflow-y: scroll`, which would
+        // paint a permanent dead native track down the right edge. Override to
+        // `auto` so the empty viewport shows nothing; the real scrollbar lives in
+        // the `.scrollbar` block below.
         .xterm-viewport {
             overflow-y: auto;
-
-            &::-webkit-scrollbar {
-                width: 14px;
-                height: 14px;
-                cursor: pointer;
-            }
-
-            &::-webkit-scrollbar-track {
-                background-color: transparent;
-                cursor: pointer;
-            }
-
-            &::-webkit-scrollbar-thumb {
-                cursor: pointer;
-                background-color: var(--scrollbar-thumb-color);
-                border-radius: 0;
-                margin: 0 1px 0 1px;
-
-                &:hover {
-                    background-color: var(--scrollbar-thumb-hover-color);
-                }
-
-                &:active {
-                    background-color: var(--scrollbar-thumb-active-color);
-                }
-            }
         }
 
         // xterm 6's overlay scrollbar (`.scrollbar.vertical` > `.slider`) is a
