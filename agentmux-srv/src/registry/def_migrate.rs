@@ -11,12 +11,11 @@
 //! (`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
 //!
 //! Resilience mirrors `scripts/import-agents.sh`: a single unreadable /
-//! locked / old-schema (missing-column) `objects.db` is skipped with a
-//! warning, never aborting the whole pass. The marker is written
-//! unconditionally after a pass — a transiently-skipped DB's agents still go
-//! global on their next edit via the live write-mirror (P0.2b), so nothing
-//! is permanently lost and the migration never loops forever on a permanent
-//! old-schema failure.
+//! locked / old-schema `objects.db` is skipped with a warning, never
+//! aborting the pass. The marker is written unconditionally after a pass —
+//! a transiently-skipped DB's agents still go global on their next edit via
+//! the live write-mirror (P0.2b), so nothing is permanently lost and the
+//! migration never loops forever on a permanent old-schema failure.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -37,6 +36,7 @@ pub struct DefMigrateStats {
     pub dbs_skipped: usize,
     pub rows_seen: usize,
     pub records_written: usize,
+    pub records_skipped_existing: usize,
 }
 
 /// Scan `<home>/channels/*/versions/*/data/db/objects.db` for user agents and
@@ -54,9 +54,12 @@ pub fn migrate_definitions_global_once(
 
     let channels = home.join("channels");
     if channels.is_dir() {
-        // Dedup across channels/versions: keep the row with the highest
-        // `updated_at` per definition id (the most recent edit wins).
-        let mut best: HashMap<String, DefinitionRecord> = HashMap::new();
+        // Dedup across channels/versions: keep the copy with the highest
+        // FRESHNESS = max(def.updated_at, content.updated_at, skill.created_at).
+        // `agent_content_set` bumps the content row's timestamp without
+        // touching the definition row, so comparing definition timestamps
+        // alone could keep a stale content/skills snapshot. (codex P1.)
+        let mut best: HashMap<String, (DefinitionRecord, i64)> = HashMap::new();
         for ch in dir_subdirs(&channels) {
             for v in dir_subdirs(&ch.join("versions")) {
                 let db = v.join("data").join("db").join("objects.db");
@@ -66,15 +69,15 @@ pub fn migrate_definitions_global_once(
                 stats.dbs_scanned += 1;
                 match read_user_definitions(&db) {
                     Ok(recs) => {
-                        for rec in recs {
+                        for (rec, freshness) in recs {
                             stats.rows_seen += 1;
                             let id = rec.data.id.clone();
                             let keep = match best.get(&id) {
-                                Some(existing) => rec.data.updated_at > existing.data.updated_at,
+                                Some((_, f)) => freshness > *f,
                                 None => true,
                             };
                             if keep {
-                                best.insert(id, rec);
+                                best.insert(id, (rec, freshness));
                             }
                         }
                     }
@@ -89,9 +92,24 @@ pub fn migrate_definitions_global_once(
                 }
             }
         }
-        // `upsert` refuses to resurrect a tombstoned id, so an agent the user
-        // deleted (in any channel) stays deleted.
-        for (_id, rec) in best {
+        for (id, (rec, _f)) in best {
+            // Don't downgrade a record the live write-mirror already advanced.
+            // A cross-channel edit updates the global record without touching
+            // any channel's SQLite, so the channel-DB copy this pass found can
+            // be OLDER than what's already global — only backfill agents not
+            // yet present. (reagent P2.) `upsert` also refuses to resurrect a
+            // tombstoned id.
+            match store.get(&id) {
+                Ok(Some(_)) => {
+                    stats.records_skipped_existing += 1;
+                    continue;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(def_id = %id, error = %e, "def migrate: get failed; skipping");
+                    continue;
+                }
+            }
             match store.upsert(&rec) {
                 Ok(()) => stats.records_written += 1,
                 Err(e) => {
@@ -108,7 +126,9 @@ pub fn migrate_definitions_global_once(
     Ok(stats)
 }
 
-fn read_user_definitions(db: &Path) -> Result<Vec<DefinitionRecord>, rusqlite::Error> {
+/// Read all `is_seeded=0` definitions from `db` with their content + skills,
+/// each paired with a freshness timestamp for cross-copy winner selection.
+fn read_user_definitions(db: &Path) -> Result<Vec<(DefinitionRecord, i64)>, rusqlite::Error> {
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let defs: Vec<DefinitionRecordV1> = {
         let mut stmt = conn.prepare(
@@ -156,15 +176,56 @@ fn read_user_definitions(db: &Path) -> Result<Vec<DefinitionRecord>, rusqlite::E
 
     let mut out = Vec::with_capacity(defs.len());
     for mut d in defs {
-        // Content/skills are best-effort: a pre-v2 DB may lack the tables.
-        d.content = read_content(&conn, &d.id).unwrap_or_default();
-        d.skills = read_skills(&conn, &d.id).unwrap_or_default();
-        out.push(DefinitionRecord {
-            schema_version: DEF_MAX_SUPPORTED_SCHEMA,
-            data: d,
-        });
+        // Content/skills tables are absent on pre-v2 DBs — tolerate THAT, but
+        // propagate a genuine error (lock/corrupt) so the whole DB is skipped
+        // rather than silently writing an instruction-less record. (codex P2.)
+        d.content = tolerate_missing_table(read_content(&conn, &d.id))?;
+        d.skills = tolerate_missing_table(read_skills(&conn, &d.id))?;
+        let content_max = max_ts(
+            &conn,
+            "SELECT MAX(updated_at) FROM db_agent_content WHERE agent_id = ?1",
+            &d.id,
+        )?;
+        let skill_max = max_ts(
+            &conn,
+            "SELECT MAX(created_at) FROM db_agent_skills WHERE agent_id = ?1",
+            &d.id,
+        )?;
+        let freshness = d.updated_at.max(content_max).max(skill_max);
+        out.push((
+            DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: d,
+            },
+            freshness,
+        ));
     }
     Ok(out)
+}
+
+/// True iff the error is SQLite "no such table" (a pre-v2 DB missing
+/// db_agent_content / db_agent_skills) — the only failure we treat as "no
+/// rows" rather than a reason to skip the DB.
+fn is_missing_table(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::SqliteFailure(_, Some(msg)) if msg.contains("no such table"))
+}
+
+fn tolerate_missing_table<T: Default>(r: Result<T, rusqlite::Error>) -> Result<T, rusqlite::Error> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(ref e) if is_missing_table(e) => Ok(T::default()),
+        Err(e) => Err(e),
+    }
+}
+
+/// `MAX(col)` over a per-agent table; `0` when the table is missing (pre-v2)
+/// or there are no rows. Other errors propagate (→ DB skipped).
+fn max_ts(conn: &Connection, sql: &str, agent_id: &str) -> Result<i64, rusqlite::Error> {
+    match conn.query_row(sql, [agent_id], |row| row.get::<_, Option<i64>>(0)) {
+        Ok(v) => Ok(v.unwrap_or(0)),
+        Err(ref e) if is_missing_table(e) => Ok(0),
+        Err(e) => Err(e),
+    }
 }
 
 fn read_content(conn: &Connection, agent_id: &str) -> Result<Vec<DefContentBlob>, rusqlite::Error> {
@@ -296,10 +357,10 @@ mod tests {
     }
 
     #[test]
-    fn skips_seeded_and_dedups_by_latest_updated_at() {
+    fn skips_seeded_and_dedups_by_latest_freshness() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        // Same id in two channels with different updated_at → latest wins.
+        // Same id in two channels with different updated_at → freshest wins.
         let db_a = make_channel_db(home, "ch-a", "0.44.1");
         insert_user_agent(&db_a, "dup", "Old", 100);
         let db_b = make_channel_db(home, "ch-b", "0.44.1");
@@ -319,9 +380,68 @@ mod tests {
         assert_eq!(
             store.get("dup").unwrap().unwrap().data.name,
             "New",
-            "latest updated_at wins across channels"
+            "latest freshness wins across channels"
         );
         assert!(store.get("tpl").unwrap().is_none(), "seeded template not migrated");
         assert_eq!(stats.records_written, 1);
+    }
+
+    #[test]
+    fn does_not_downgrade_an_existing_global_record() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // The channel DB has the OLD copy.
+        let db = make_channel_db(home, "ch-a", "0.44.1");
+        insert_user_agent(&db, "dup", "OldName", 100);
+        let store = store_at(home);
+        // The global store already has a NEWER copy (e.g. the live mirror
+        // advanced it via a cross-channel edit that never touched the DB).
+        store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "dup".to_string(),
+                    name: "NewName".to_string(),
+                    provider: "claude".to_string(),
+                    updated_at: 500,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert_eq!(
+            store.get("dup").unwrap().unwrap().data.name,
+            "NewName",
+            "migration must NOT downgrade the newer global record"
+        );
+        assert_eq!(stats.records_written, 0);
+        assert_eq!(stats.records_skipped_existing, 1);
+    }
+
+    #[test]
+    fn winner_selection_includes_content_freshness() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // Copy A: newer DEFINITION timestamp, old content.
+        let db_a = make_channel_db(home, "ch-a", "0.44.2");
+        insert_user_agent(&db_a, "dup", "FromA", 300);
+        // Copy B: older definition timestamp, but content edited later
+        // (agent_content_set bumps content.updated_at, not the def row).
+        let db_b = make_channel_db(home, "ch-b", "0.44.1");
+        insert_user_agent(&db_b, "dup", "FromB", 200);
+        Connection::open(&db_b)
+            .unwrap()
+            .execute(
+                "UPDATE db_agent_content SET content = 'fresh', updated_at = 900 WHERE agent_id = 'dup'",
+                [],
+            )
+            .unwrap();
+
+        let store = store_at(home);
+        migrate_definitions_global_once(home, &store).unwrap();
+        let rec = store.get("dup").unwrap().unwrap();
+        assert_eq!(rec.data.name, "FromB", "copy with freshest content wins");
+        assert_eq!(rec.data.content[0].content, "fresh");
     }
 }
