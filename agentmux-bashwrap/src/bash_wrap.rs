@@ -13,11 +13,12 @@
 //!   bash's startup DSR (`\x1b[6n`) is satisfied by pre-loading the
 //!   master writer with `\x1b[1;1R`; the writer is held alive until
 //!   after child.wait() (dropping it earlier sends CTRL_C_EVENT on
-//!   Windows — ConPTY CONIN lifetime invariant, same as pair.master); and
-//!   the user's command is prefixed `exec </dev/null;` so stdin-
-//!   reading children see EOF rather than blocking on the PTY's
-//!   stdin (ConPTY doesn't EOF on master-writer drop). The pipe
-//!   path remains as a safety net and is the only path that
+//!   Windows — ConPTY CONIN lifetime invariant, same as pair.master).
+//!   The command is run as-is (no stdin redirect): running
+//!   `exec </dev/null;` inside bash closed the child's ConPTY console
+//!   input from the child side, which ConPTY also reports as a
+//!   CTRL_C_EVENT, killing every command with exit 130 before it ran.
+//!   The pipe path remains as a safety net and is the only path that
 //!   preserves the stdout/stderr split — PTY collapses both onto
 //!   one stream. See `docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`.
 //! - Bash is located via `$BASH` → `$AGENTMUX_BASH` → PATH search →
@@ -533,9 +534,8 @@ async fn run_via_pty(
     // CONIN pipe write-end while the pseudoconsole is still attached
     // sends CTRL_C_EVENT to the child (exit 130 / SIGINT). This is
     // the same ConPTY-lifetime invariant as pair.master itself — both
-    // must outlive child.wait(). The `exec </dev/null;` prefix in the
-    // command redirects bash's stdin after startup, so no future writes
-    // to the writer are needed; we just keep the handle open.
+    // must outlive child.wait(). After the DSR response we never write
+    // again; the handle is kept open only to hold CONIN alive.
     let writer = {
         use std::io::Write as _;
         let mut w = pair.master.take_writer().context("PTY take_writer")?;
