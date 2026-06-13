@@ -137,24 +137,21 @@
             caret-color: transparent !important; /* stylelint-disable-line declaration-no-important */
         }
 
+        // xterm 6 replaced the native-scrollbar viewport with a custom
+        // scrollable-element + overlay scrollbar DIVs (`.scrollbar.vertical`
+        // > `.slider`). `.xterm-viewport` is now an empty positioning anchor
+        // (scrollHeight === clientHeight always), so the `::-webkit-scrollbar`
+        // rules below are legacy no-ops kept only for the unlikely DOM-renderer
+        // fallback path; the real scrollbar is styled in the `.scrollbar` block.
         .xterm-viewport {
-            // xterm defaults this to `overflow-y: scroll`, which permanently reserves the
-            // 14px scrollbar gutter even with no scrollback — the dead lane to the right of
-            // the text. `auto` shows the scrollbar only when content overflows; TermWrap.
-            // customFit reserves a matching 14 px (≈1 column) of width only while it is shown.
             overflow-y: auto;
 
             &::-webkit-scrollbar {
-                // Base width — customFit injects a per-terminal <style> rule that overrides
-                // this with 14px + sub-cell remainder so text columns tile flush to the
-                // scrollbar's left edge. cursor:pointer makes the whole track area show a
-                // hand cursor instead of the inherited text I-beam.
                 width: 14px;
                 height: 14px;
                 cursor: pointer;
             }
 
-            // Transparent track so the scrollbar lane shows the terminal background.
             &::-webkit-scrollbar-track {
                 background-color: transparent;
                 cursor: pointer;
@@ -165,6 +162,37 @@
                 background-color: var(--scrollbar-thumb-color);
                 border-radius: 0;
                 margin: 0 1px 0 1px;
+
+                &:hover {
+                    background-color: var(--scrollbar-thumb-hover-color);
+                }
+
+                &:active {
+                    background-color: var(--scrollbar-thumb-active-color);
+                }
+            }
+        }
+
+        // xterm 6's overlay scrollbar (`.scrollbar.vertical` > `.slider`) is a
+        // later sibling of `.xterm-screen` inside `.xterm-scrollable-element`,
+        // so by DOM order it should paint above the text. But `.xterm-link-layer`
+        // (the canvas the WebLinks/FilePath providers hit-test) carries
+        // `z-index: 2`, and an explicit positive z-index beats the scrollbar's
+        // `z-index: auto` regardless of DOM order — so the link layer paints over
+        // the scrollbar and, now that `.xterm-screen` no longer has
+        // `pointer-events: none`, swallows every click in the scrollbar lane.
+        // Lift the scrollbar above the link layer (z:2) and helpers (z:5) so the
+        // thumb is clickable. Verified via elementFromPoint over the scrollbar
+        // lane: link-layer (blocked) → slider (clickable). The scrollbar only
+        // occupies the right 14px, so link hover over the text area is unaffected;
+        // when there is no overflow the scrollbar is `visibility:hidden` and not
+        // hit-tested, so the full width stays available for link hover.
+        .xterm-scrollable-element > .scrollbar {
+            z-index: 10;
+
+            .slider {
+                cursor: pointer;
+                background-color: var(--scrollbar-thumb-color);
 
                 &:hover {
                     background-color: var(--scrollbar-thumb-hover-color);
