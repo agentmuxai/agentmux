@@ -61,13 +61,14 @@ const MARKER: &str = ".migrated_from_sqlite";
 
 /// Bumped when the migration's mapping logic changes in a way that must re-run
 /// on registries an older build already finalized. **v2** fixes the workspace
-/// anchor: agent workspaces are GLOBAL (`<global>/agents/<name>`), but v1
+/// anchor: agent workspaces live globally at `<home>/agents/<name>`, but v1
 /// stripped `working_directory` against the per-channel `channels/<ch>/agents`
 /// dir, so every global workspace came back "unmappable" (`row_to_record`
 /// returned `None`) and "My Agents" stayed empty in every channel. A legacy
 /// marker (no `migration_version:` line) reads as 0 and re-runs exactly once;
 /// `exists_anywhere()` keeps the re-run from duplicating already-written
-/// records. Mirrors the recoverable marker in `def_migrate.rs` (#1391).
+/// records. This is the same recoverable-marker pattern introduced for the
+/// **definitions** migration in PR #1391 (def_migrate.rs).
 const MIGRATION_VERSION: u32 = 2;
 
 /// A per-(channel,version) / per-dev-branch SQLite source, paired with the
@@ -102,13 +103,19 @@ pub fn migrate_from_sqlite_once(
     }
 
     let mut stats = MigrateStats::default();
-    // Agent workspaces are GLOBAL: they live at `<global>/agents/<name>`, a
-    // sibling of this registry (`<global>/agents/registry`). Anchor migrated
-    // records on that global root — exactly what the live mirror does
-    // (registry_mirror.rs strips against the registry's parent). `None` only if
-    // the registry is implausibly at a filesystem root; `row_to_record` then
-    // falls back to per-channel anchoring.
-    let global_agents_root = registry.root().parent().map(|p| p.to_path_buf());
+    // Agent workspaces are created GLOBALLY at `<home>/agents/<name>` — verified
+    // on disk: instance `working_directory` values are `~/.agentmux/agents/<name>`
+    // (e.g. `…/agents/mazs-0527n`), NOT under any per-channel `channels/<ch>/agents`
+    // dir, and NOT under the P0.3-re-rooted registry's parent (`<home>/shared/
+    // agents`). `home` is `~/.agentmux` (main.rs derives it as the registry root's
+    // 3rd ancestor: registry → agents → shared → home). Anchor migrated records on
+    // this real workspace root so the reader (`agent_handlers.rs` reconstructs
+    // `source_agents_base.join(working_dir)`) resolves the actual workspace in
+    // EVERY channel. NB this deliberately differs from the live mirror, which
+    // strips against the per-channel `AGENTMUX_AGENTS_DIR` — that anchor never
+    // matched these global workspaces (an earlier draft of this fix wrongly used
+    // the registry's parent and would have left every row unmappable).
+    let global_agents_root = home.join("agents");
     let (sources, enum_incomplete) = enumerate_sources(home);
 
     let mut latest_by_id: HashMap<String, RowSnapshot> = HashMap::new();
@@ -166,7 +173,7 @@ pub fn migrate_from_sqlite_once(
             continue;
         }
         let display_hidden = row.display_hidden;
-        let Some(rec) = row_to_record(&row, global_agents_root.as_deref()) else {
+        let Some(rec) = row_to_record(&row, &global_agents_root) else {
             stats.records_skipped_unmappable += 1;
             continue;
         };
@@ -458,7 +465,8 @@ fn push_if_instance(dir: &Path, out: &mut Vec<SqliteSource>) -> bool {
 /// Read the `migration_version:` line from an existing marker. Returns 0 when
 /// the marker is absent, unreadable, or predates versioning (a legacy
 /// stats-only marker has no such line) — so a logic bump, or any pre-versioning
-/// marker, re-runs the migration exactly once. Mirrors `def_migrate.rs`.
+/// marker, re-runs the migration exactly once. Same pattern as the definitions
+/// migration's recoverable marker (PR #1391).
 fn marker_migration_version(path: &Path) -> u32 {
     let Ok(body) = std::fs::read_to_string(path) else {
         return 0;
@@ -570,21 +578,20 @@ fn read_named_rows(
     iter.collect()
 }
 
-fn row_to_record(
-    row: &RowSnapshot,
-    global_agents_root: Option<&Path>,
-) -> Option<NamedAgentRecord> {
+fn row_to_record(row: &RowSnapshot, global_agents_root: &Path) -> Option<NamedAgentRecord> {
     let abs = std::path::Path::new(&row.working_directory);
-    // Agent workspaces are GLOBAL (`<global>/agents/<name>`), channel- and
-    // version-independent — the live mirror (registry_mirror.rs) anchors on the
-    // registry's parent (= that global root) for exactly this reason. Anchor the
-    // same way so a migrated record reconstructs its absolute workspace in EVERY
-    // channel. Fall back to THIS row's own source-channel agents dir for legacy
-    // rows whose workspace genuinely lived in-channel (`channels/<ch>/agents`).
-    // A workspace under NEITHER root is skipped — matching the live mirror, which
-    // also keeps a non-global cwd (e.g. `~/projects/foo`) out of the registry.
-    let (rel, base): (&Path, &Path) = global_agents_root
-        .and_then(|g| abs.strip_prefix(g).ok().map(|r| (r, g)))
+    // Agent workspaces live GLOBALLY at `<home>/agents/<name>` (verified: real
+    // `working_directory` values are `~/.agentmux/agents/<name>`), so anchor on
+    // that global workspace root — `base` is stored absolute in the record, so
+    // the reader reconstructs `base.join(working_dir)` correctly in any channel.
+    // Fall back to THIS row's own source-channel agents dir for any legacy row
+    // whose workspace genuinely lived in-channel (`channels/<ch>/agents`). A
+    // workspace under NEITHER root is skipped (e.g. a user cwd like
+    // `~/projects/foo`), matching the live mirror's relative_workdir.
+    let (rel, base): (&Path, &Path) = abs
+        .strip_prefix(global_agents_root)
+        .ok()
+        .map(|r| (r, global_agents_root))
         .or_else(|| {
             abs.strip_prefix(row.agents_root.as_path())
                 .ok()
@@ -832,15 +839,24 @@ mod tests {
 
     #[test]
     fn migrate_anchors_global_workspace_not_per_channel() {
-        // Production reality: agent workspaces are GLOBAL — they live at
-        // `<global>/agents/<name>` (a sibling of the registry), NOT under any
-        // channel's agents dir. v1 stripped against `channels/<ch>/agents` and
-        // dropped every such row as "unmappable" → "My Agents" empty in every
-        // channel. The fix anchors on the global root (the registry's parent),
-        // so the row migrates and reconstructs everywhere.
+        // Production reality (verified on disk): agent workspaces live at the
+        // GLOBAL `<home>/agents/<name>` — e.g. `~/.agentmux/agents/qooma-0612g`,
+        // NOT under any channel's `channels/<ch>/agents` dir, and NOT under the
+        // re-rooted registry's parent (`<home>/shared/agents`). v1 stripped
+        // against `channels/<ch>/agents` and dropped every such row as
+        // "unmappable" → "My Agents" empty everywhere. The fix anchors on
+        // `<home>/agents`, so the row migrates and reconstructs in any channel.
         let (home, reg) = fresh_home();
-        // <home>/shared/agents — the registry's parent, == the global agents root.
-        let global_agents = reg.root().parent().unwrap().to_path_buf();
+        let global_agents = home.path().join("agents"); // the REAL workspace root
+        // Guard against the earlier wrong fix: the workspace root is NOT the
+        // registry's parent (here `<home>/shared/agents`). If someone re-anchors
+        // on `registry.root().parent()`, this row goes unmappable and the asserts
+        // below fail.
+        assert_ne!(
+            global_agents.as_path(),
+            reg.root().parent().unwrap(),
+            "workspace root must differ from the re-rooted registry's parent"
+        );
         let wd = global_agents.join("qooma-0612g");
         std::fs::create_dir_all(&wd).unwrap();
         // The row lives in a CHANNEL's SQLite, but its working_directory points
@@ -865,7 +881,7 @@ mod tests {
         assert_eq!(
             recs[0].data.source_agents_base.as_deref(),
             Some(global_agents.to_string_lossy().as_ref()),
-            "anchored on the GLOBAL agents root, not the source channel"
+            "anchored on the GLOBAL workspace root <home>/agents, not the channel"
         );
         assert_eq!(recs[0].schema_version, 3);
     }
@@ -877,7 +893,7 @@ mod tests {
         // The fixed build must read that marker as version 0, re-run once, and
         // capture the row — then settle (a second run is a no-op).
         let (home, reg) = fresh_home();
-        let global_agents = reg.root().parent().unwrap().to_path_buf();
+        let global_agents = home.path().join("agents"); // the REAL workspace root
         let wd = global_agents.join("naki");
         std::fs::create_dir_all(&wd).unwrap();
         make_channel_db(
