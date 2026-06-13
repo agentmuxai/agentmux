@@ -75,8 +75,10 @@ const MARKER: &str = ".migrated_from_sqlite";
 /// records.
 const MIGRATION_VERSION: u32 = 2;
 
-/// A per-(channel,version) / per-dev-branch SQLite source, paired with the
-/// agents dir whose subtree its `working_directory` values are absolute under.
+/// A per-(channel,version) / per-dev-branch SQLite source, paired with this
+/// source's own agents dir — the per-channel **fallback** anchor `row_to_record`
+/// uses when a row's (normally global) `working_directory` isn't under the
+/// primary `<home>/agents` root.
 struct SqliteSource {
     db_path: PathBuf,
     agents_root: PathBuf,
@@ -286,10 +288,13 @@ pub fn backfill_source_bases_once(
     let (sources, mut incomplete) = enumerate_sources(home);
 
     // Dedup EXACTLY like migrate_from_sqlite_once: for an id present in more
-    // than one DB the latest-`started_at` row wins. This anchors
-    // source_agents_base on the SAME channel the record's existing working_dir
-    // was stripped against (the migration used that same winning row), instead
-    // of whichever DB read_dir happened to return first (codex/reagent P2).
+    // than one DB the latest-`started_at` row wins. These targets are pre-v3
+    // (base-less) records whose `working_dir` was stripped against a PER-CHANNEL
+    // dir by P0.3b / a pre-P0.4 live mirror, so re-anchor on the winning row's
+    // own channel — not whichever DB read_dir happened to return first
+    // (codex/reagent P2). (The main migration now strips global-first, but it
+    // always SETS a base, so its records are never base-less and never reach
+    // this backfill.)
     let mut winners: HashMap<String, (i64, PathBuf)> = HashMap::new();
     for src in sources {
         stats.dbs_scanned += 1;
@@ -359,7 +364,8 @@ pub fn backfill_source_bases_once(
 }
 
 /// Enumerate every per-(channel,version) and per-dev-branch `objects.db` under
-/// `home`, pairing each with the agents dir its rows are anchored on.
+/// `home`, pairing each with its own agents dir (the per-source fallback anchor;
+/// the primary anchor in `row_to_record` is the global `<home>/agents`).
 ///
 /// Returns `(sources, incomplete)`. `incomplete` is true if any directory that
 /// *should* be enumerable failed to read for a reason other than "doesn't
@@ -510,9 +516,12 @@ struct RowSnapshot {
     identity_id: String,
     memory_id: String,
     working_directory: String,
-    /// The agents dir this row's `working_directory` is absolute under — the
-    /// source channel's `agents/` (landmine #1). Travels with the row through
-    /// dedup so the winner is stripped against its own channel.
+    /// This row's own source-channel agents dir (`channels/<ch>/agents`, or
+    /// `<instance_dir>/agents` for dev) — the **fallback** anchor.
+    /// `row_to_record` strips `working_directory` against the global
+    /// `<home>/agents` root first and uses this only for a legacy row that
+    /// genuinely lived in-channel. Travels with the row through dedup so any
+    /// such fallback strips against the right channel.
     agents_root: PathBuf,
     started_at: i64,
     created_at: i64,
