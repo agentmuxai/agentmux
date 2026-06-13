@@ -366,40 +366,51 @@ async fn main() {
     if let Some(root) = registry::resolve_shared_registry_dir() {
         match registry::Registry::open(root.clone()) {
             Ok(reg) => {
-                // PR B — one-shot backfill from every per-version
-                // objects.db into the registry. Idempotent via marker
-                // file in the registry root. Read-only on SQLite.
+                // One-shot backfill from every channel/version + dev objects.db
+                // into the registry. Idempotent via the marker file in the
+                // registry root. Read-only on SQLite.
                 //
-                // Gating: the registry is only attached to wstore if
-                // migration completes (Ok) — that way the read path
-                // never serves a partial view. On Err, mirror writes
-                // are also disabled (registry stays detached); SQLite
-                // remains authoritative and the next launch retries
-                // the migration via the same marker logic.
-                let shared_home = root
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .map(|p| p.to_path_buf());
-                let migration_ok = match shared_home {
+                // Attach policy: the registry is attached whenever the migration
+                // RUNS (returns Ok), and intentionally serves the partial set of
+                // readable records — a corrupt/locked DB in an unrelated channel
+                // must not disable cross-channel My Agents (see the Ok arm below,
+                // codex P1 on #1389). On Err (e.g. the registry itself failed) or
+                // when the home can't be resolved, the registry stays detached and
+                // SQLite remains authoritative; the next launch retries.
+                // The generalized migration scans EVERY channel +dev tree under
+                // the true home, so derive ~/.agentmux from the now-global
+                // registry root: registry → agents → shared → <home>.
+                let home_dir = root.ancestors().nth(3).map(|p| p.to_path_buf());
+                let migration_ok = match home_dir {
                     Some(home) => match registry::migrate_from_sqlite_once(&home, &reg) {
                         Ok(stats) => {
-                            if stats.versions_scanned > 0 || stats.records_written > 0 {
+                            if stats.dbs_scanned > 0
+                                || stats.records_written > 0
+                                || stats.dbs_skipped > 0
+                            {
                                 tracing::info!(
-                                    versions_scanned = stats.versions_scanned,
+                                    dbs_scanned = stats.dbs_scanned,
+                                    dbs_skipped = stats.dbs_skipped,
                                     rows_seen = stats.rows_seen,
                                     records_written = stats.records_written,
                                     records_skipped_existing = stats.records_skipped_existing,
                                     records_skipped_unmappable = stats.records_skipped_unmappable,
                                     complete = stats.complete,
-                                    "registry: one-shot SQLite migration finished"
+                                    "registry: cross-channel SQLite migration finished"
                                 );
                             }
-                            // Gate attach on `complete` — partial
-                            // migration leaves the registry detached
-                            // so the read path serves SQLite (full,
-                            // current-version-only view) rather than
-                            // a half-populated registry.
-                            stats.complete
+                            // Attach the registry whenever the migration ran —
+                            // do NOT gate on `complete`. The scan now spans every
+                            // channel + dev tree, so a single corrupt/locked
+                            // objects.db in an unrelated channel must not disable
+                            // cross-channel My Agents for everyone (codex P1 on
+                            // #1389). The records that DID read are served now,
+                            // and the live mirror backfills the current channel's
+                            // named agents regardless of migration. On any skipped
+                            // DB the migration leaves the marker deferred, so a
+                            // future launch retries that source (idempotent via
+                            // exists_anywhere).
+                            true
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -412,7 +423,7 @@ async fn main() {
                     None => {
                         tracing::warn!(
                             root = %root.display(),
-                            "registry: cannot resolve shared home (root has fewer than 2 ancestors) — leaving registry detached"
+                            "registry: cannot resolve home (root has fewer than 3 ancestors) — leaving registry detached"
                         );
                         false
                     }
@@ -420,17 +431,21 @@ async fn main() {
                 if migration_ok {
                     tracing::info!(root = %root.display(), "registry: shared agent registry attached");
                     wstore_raw.set_registry(Arc::new(reg));
-                    // NB: the channel agents base (AGENTMUX_AGENTS_DIR) is NOT
-                    // wired here yet — it is set in P0.3b, atomically with the
-                    // re-root to the global ~/.agentmux/shared/agents/registry/.
-                    // Setting it before the re-root would change DEV behavior:
-                    // there AGENTMUX_AGENTS_DIR (~/.agentmux/dev/<branch>/agents)
-                    // differs from the channel-local reg.agents_root()
-                    // (~/.agentmux/agents), so the mirror would start writing
-                    // branch-local rows into the shared dev registry and leak
-                    // workspaces across branches (codex P2 on #1387). Until
-                    // then `registry_agents_base()` falls back to the registry
-                    // parent — exactly today's behavior in every mode.
+                    // Now that the registry is GLOBAL for every mode, anchor the
+                    // mirror/read working_directory base on the CURRENT channel's
+                    // agents dir (AGENTMUX_AGENTS_DIR) — NOT the registry's parent
+                    // (shared/agents), which no longer contains any instance. In
+                    // dev this is ~/.agentmux/dev/<branch>/agents, in installed/
+                    // portable it is channels/<ch>/agents; either way it is the
+                    // correct per-channel anchor. (Cross-channel rows surfaced
+                    // from OTHER channels still re-join under this channel's dir
+                    // until P0.4 encodes the source base per record.)
+                    if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
+                        if !base.is_empty() {
+                            wstore_raw
+                                .set_registry_agents_base(std::path::PathBuf::from(base));
+                        }
+                    }
                 }
             }
             Err(e) => tracing::warn!(
@@ -442,11 +457,11 @@ async fn main() {
     } else {
         tracing::warn!("registry: could not resolve shared registry dir — mirror disabled");
     }
-    // Attach the GLOBAL (cross-channel) agent-definition store. Unlike the
-    // instance registry above (channel-scoped), this lives under
-    // ~/.agentmux/shared/ so user agents created in one channel are visible
-    // in every channel. Best-effort: disabled when the shared dir can't be
-    // resolved. See SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md (P0.2).
+    // Attach the GLOBAL (cross-channel) agent-definition store. Sibling of the
+    // instance registry above — since P0.3b both live under ~/.agentmux/shared/
+    // (definitions/ and registry/), so user agents created in one channel are
+    // visible in every channel. Best-effort: disabled when the shared dir can't
+    // be resolved. See SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md (P0.2/P0.3).
     if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
         match registry::DefinitionStore::open(def_dir.clone()) {
             Ok(def_store) => {
