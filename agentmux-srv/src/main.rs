@@ -410,6 +410,33 @@ async fn main() {
                             // DB the migration leaves the marker deferred, so a
                             // future launch retries that source (idempotent via
                             // exists_anywhere).
+                            //
+                            // P0.4 backfill: records written by the P0.3b
+                            // migration (or any pre-v3 mirror) lack
+                            // source_agents_base, so a cross-channel read would
+                            // re-join their working_dir under the wrong channel.
+                            // Re-derive each one's source channel from SQLite and
+                            // set just that field, preserving session_id etc. Own
+                            // marker; runs once even though the migration marker
+                            // is already present.
+                            match registry::backfill_source_bases_once(&home, &reg) {
+                                Ok(bf)
+                                    if bf.records_updated > 0
+                                        || bf.records_unresolved > 0 =>
+                                {
+                                    tracing::info!(
+                                        records_updated = bf.records_updated,
+                                        records_unresolved = bf.records_unresolved,
+                                        complete = bf.complete,
+                                        "registry: source-base backfill finished"
+                                    );
+                                }
+                                Ok(_) => {}
+                                Err(e) => tracing::warn!(
+                                    error = %e,
+                                    "registry: source-base backfill errored (continuing; live mirror backfills on relaunch)"
+                                ),
+                            }
                             true
                         }
                         Err(e) => {

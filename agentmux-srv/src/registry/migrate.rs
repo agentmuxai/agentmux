@@ -190,6 +190,123 @@ pub fn migrate_from_sqlite_once(
     Ok(stats)
 }
 
+/// Marker for the one-shot `source_agents_base` backfill. Separate from
+/// [`MARKER`] so it runs exactly once even on registries the main migration
+/// already finalized before schema v3 existed.
+const SOURCE_BACKFILL_MARKER: &str = ".backfilled_source_bases";
+
+/// Outcome of [`backfill_source_bases_once`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SourceBackfillStats {
+    pub dbs_scanned: usize,
+    pub records_updated: usize,
+    /// Records that lacked a source base but whose source DB wasn't found
+    /// (its channel was deleted) — left as-is; a relaunch's live mirror
+    /// backfills them.
+    pub records_unresolved: usize,
+    pub complete: bool,
+}
+
+/// One-shot backfill of `source_agents_base` onto registry records written
+/// **before** schema v3 — i.e. by P0.3b's global migration (#1389) or any
+/// pre-P0.4 live mirror.
+///
+/// The main [`migrate_from_sqlite_once`] short-circuits on `.migrated_from_sqlite`,
+/// so an already-migrated registry never re-runs `row_to_record` and its
+/// records keep `source_agents_base: None`. A cross-channel `listnamedagents`
+/// read then re-joins `working_dir` under the READER's own channel and resolves
+/// the wrong workspace / `--resume` cwd. This pass re-derives each record's
+/// source channel from the SQLite sources and sets **only** `source_agents_base`,
+/// preserving every live-mirror-enriched field (session_id, identity,
+/// timestamps) — it never blind-upserts the SQLite-derived record. Guarded by
+/// its own marker; idempotent; read-only on SQLite.
+pub fn backfill_source_bases_once(
+    home: &Path,
+    registry: &Registry,
+) -> Result<SourceBackfillStats, RegistryError> {
+    let marker = registry.root().join(SOURCE_BACKFILL_MARKER);
+    if marker.exists() {
+        return Ok(SourceBackfillStats {
+            complete: true,
+            ..Default::default()
+        });
+    }
+
+    let mut stats = SourceBackfillStats::default();
+
+    // Active records still missing a source base, keyed by id. We mutate these
+    // snapshots in place and re-upsert, so the existing session_id/identity/
+    // timestamps survive. (Retired/forgotten records are out of scope — a
+    // relaunch re-mirrors them with the current channel base.)
+    let mut pending: HashMap<String, NamedAgentRecord> = registry
+        .list_active()?
+        .into_iter()
+        .filter(|r| r.data.source_agents_base.is_none())
+        .map(|r| (r.data.instance_id.clone(), r))
+        .collect();
+
+    if pending.is_empty() {
+        // Fresh registry, or every record is already v3 — nothing to do.
+        std::fs::write(&marker, b"backfilled: 0\n")?;
+        stats.complete = true;
+        return Ok(stats);
+    }
+
+    let (sources, mut incomplete) = enumerate_sources(home);
+    for src in sources {
+        stats.dbs_scanned += 1;
+        match read_named_rows(&src.db_path, &src.agents_root) {
+            Ok(rows) => {
+                for row in rows {
+                    let Some(mut rec) = pending.remove(&row.id) else {
+                        continue;
+                    };
+                    rec.data.source_agents_base =
+                        Some(row.agents_root.to_string_lossy().to_string());
+                    rec.schema_version = rec.data.min_schema_version();
+                    if let Err(e) = registry.upsert(&rec) {
+                        tracing::warn!(
+                            instance_id = %row.id,
+                            error = %e,
+                            "source-base backfill: upsert failed — will retry next launch"
+                        );
+                        pending.insert(row.id.clone(), rec);
+                        incomplete = true;
+                    } else {
+                        stats.records_updated += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    db = %src.db_path.display(),
+                    error = %e,
+                    "source-base backfill: DB unreadable — will retry next launch"
+                );
+                incomplete = true;
+            }
+        }
+    }
+
+    // Records still pending have no locatable source DB (channel removed); a
+    // relaunch's live mirror backfills them. Count but don't block.
+    stats.records_unresolved = pending.len();
+
+    // Only finalize when every DB read cleanly — otherwise a transient failure
+    // would permanently strand records that DO have a readable source DB.
+    stats.complete = !incomplete;
+    if stats.complete {
+        std::fs::write(
+            &marker,
+            format!(
+                "backfilled: {}\nunresolved: {}\n",
+                stats.records_updated, stats.records_unresolved
+            ),
+        )?;
+    }
+    Ok(stats)
+}
+
 /// Enumerate every per-(channel,version) and per-dev-branch `objects.db` under
 /// `home`, pairing each with the agents dir its rows are anchored on.
 ///
@@ -1070,5 +1187,91 @@ mod tests {
             !reg.root().join(MARKER).exists(),
             "marker deferred on unreadable DB"
         );
+    }
+
+    // ---- source_agents_base backfill (P0.4) ----
+
+    fn seed_pre_v3_record(reg: &Registry, id: &str, session: Option<&str>) {
+        reg.upsert(&NamedAgentRecord {
+            schema_version: if session.is_some() { 2 } else { 1 },
+            data: NamedAgentRecordV1 {
+                instance_id: id.to_string(),
+                instance_name: "demo".to_string(),
+                definition_id: "claude-code".to_string(),
+                identity_id: Some("ident-1".to_string()),
+                memory_id: None,
+                session_id: session.map(|s| s.to_string()),
+                working_dir: "demo".to_string(),
+                source_agents_base: None,
+                created_at_ms: 10,
+                last_launched_at_ms: 20,
+                created_by_version: "0.43.0".to_string(),
+                last_launched_by_version: "0.43.0".to_string(),
+            },
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn backfill_sets_source_base_preserving_session_and_identity() {
+        let (home, reg) = fresh_home();
+        // Simulate a registry the P0.3b migration already finalized.
+        std::fs::write(reg.root().join(MARKER), b"x").unwrap();
+        seed_pre_v3_record(&reg, "inst-1", Some("sess-keep"));
+        // Its source channel's SQLite still exists.
+        let wd = channel_agents(home.path(), "stable").join("demo");
+        std::fs::create_dir_all(&wd).unwrap();
+        make_channel_db(
+            home.path(),
+            "stable",
+            "0.44.2",
+            &[("inst-1", "demo", 100, &wd.to_string_lossy())],
+        );
+
+        let stats = backfill_source_bases_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.records_updated, 1);
+        assert!(stats.complete);
+        let recs = reg.list_active().unwrap();
+        assert_eq!(recs.len(), 1);
+        let r = &recs[0].data;
+        // Source base now points at the SOURCE channel agents dir...
+        assert_eq!(
+            r.source_agents_base.as_deref(),
+            Some(channel_agents(home.path(), "stable").to_string_lossy().as_ref())
+        );
+        // ...and the live-mirror-enriched fields survived (not clobbered).
+        assert_eq!(r.session_id.as_deref(), Some("sess-keep"));
+        assert_eq!(r.identity_id.as_deref(), Some("ident-1"));
+        assert_eq!(recs[0].schema_version, 3);
+        assert!(reg.root().join(SOURCE_BACKFILL_MARKER).exists());
+    }
+
+    #[test]
+    fn backfill_is_idempotent_via_marker() {
+        let (home, reg) = fresh_home();
+        // Empty registry → nothing pending → marker written.
+        let s1 = backfill_source_bases_once(home.path(), &reg).unwrap();
+        assert_eq!(s1.records_updated, 0);
+        assert!(s1.complete);
+        assert!(reg.root().join(SOURCE_BACKFILL_MARKER).exists());
+        // A record added AFTER the marker must not be picked up (short-circuit).
+        seed_pre_v3_record(&reg, "inst-late", None);
+        let s2 = backfill_source_bases_once(home.path(), &reg).unwrap();
+        assert_eq!(s2.records_updated, 0, "marker short-circuits subsequent runs");
+    }
+
+    #[test]
+    fn backfill_counts_unresolved_when_source_db_gone() {
+        let (home, reg) = fresh_home();
+        std::fs::write(reg.root().join(MARKER), b"x").unwrap();
+        seed_pre_v3_record(&reg, "inst-orphan", None);
+        // No channels/ at all — the source channel is gone.
+        let stats = backfill_source_bases_once(home.path(), &reg).unwrap();
+        assert_eq!(stats.records_updated, 0);
+        assert_eq!(stats.records_unresolved, 1);
+        assert!(stats.complete, "no DB failure → marker written");
+        // Record stays None; the handler falls back to the current channel.
+        let recs = reg.list_active().unwrap();
+        assert!(recs[0].data.source_agents_base.is_none());
     }
 }
