@@ -376,16 +376,16 @@ async fn main() {
                 // are also disabled (registry stays detached); SQLite
                 // remains authoritative and the next launch retries
                 // the migration via the same marker logic.
-                let shared_home = root
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .map(|p| p.to_path_buf());
-                let migration_ok = match shared_home {
+                // The generalized migration scans EVERY channel +dev tree under
+                // the true home, so derive ~/.agentmux from the now-global
+                // registry root: registry → agents → shared → <home>.
+                let home_dir = root.ancestors().nth(3).map(|p| p.to_path_buf());
+                let migration_ok = match home_dir {
                     Some(home) => match registry::migrate_from_sqlite_once(&home, &reg) {
                         Ok(stats) => {
-                            if stats.versions_scanned > 0 || stats.records_written > 0 {
+                            if stats.dbs_scanned > 0 || stats.records_written > 0 {
                                 tracing::info!(
-                                    versions_scanned = stats.versions_scanned,
+                                    dbs_scanned = stats.dbs_scanned,
                                     rows_seen = stats.rows_seen,
                                     records_written = stats.records_written,
                                     records_skipped_existing = stats.records_skipped_existing,
@@ -412,7 +412,7 @@ async fn main() {
                     None => {
                         tracing::warn!(
                             root = %root.display(),
-                            "registry: cannot resolve shared home (root has fewer than 2 ancestors) — leaving registry detached"
+                            "registry: cannot resolve home (root has fewer than 3 ancestors) — leaving registry detached"
                         );
                         false
                     }
@@ -420,17 +420,21 @@ async fn main() {
                 if migration_ok {
                     tracing::info!(root = %root.display(), "registry: shared agent registry attached");
                     wstore_raw.set_registry(Arc::new(reg));
-                    // NB: the channel agents base (AGENTMUX_AGENTS_DIR) is NOT
-                    // wired here yet — it is set in P0.3b, atomically with the
-                    // re-root to the global ~/.agentmux/shared/agents/registry/.
-                    // Setting it before the re-root would change DEV behavior:
-                    // there AGENTMUX_AGENTS_DIR (~/.agentmux/dev/<branch>/agents)
-                    // differs from the channel-local reg.agents_root()
-                    // (~/.agentmux/agents), so the mirror would start writing
-                    // branch-local rows into the shared dev registry and leak
-                    // workspaces across branches (codex P2 on #1387). Until
-                    // then `registry_agents_base()` falls back to the registry
-                    // parent — exactly today's behavior in every mode.
+                    // Now that the registry is GLOBAL for every mode, anchor the
+                    // mirror/read working_directory base on the CURRENT channel's
+                    // agents dir (AGENTMUX_AGENTS_DIR) — NOT the registry's parent
+                    // (shared/agents), which no longer contains any instance. In
+                    // dev this is ~/.agentmux/dev/<branch>/agents, in installed/
+                    // portable it is channels/<ch>/agents; either way it is the
+                    // correct per-channel anchor. (Cross-channel rows surfaced
+                    // from OTHER channels still re-join under this channel's dir
+                    // until P0.4 encodes the source base per record.)
+                    if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
+                        if !base.is_empty() {
+                            wstore_raw
+                                .set_registry_agents_base(std::path::PathBuf::from(base));
+                        }
+                    }
                 }
             }
             Err(e) => tracing::warn!(
