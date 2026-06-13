@@ -42,8 +42,10 @@ pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
 fn resolve_global_shared_root() -> Option<PathBuf> {
     if let Ok(s) = std::env::var("AGENTMUX_HOME_OVERRIDE") {
         if !s.is_empty() {
-            // Test escape hatch: the override IS the shared root.
-            return Some(PathBuf::from(s));
+            // Consistent with data_paths everywhere else: the override is the
+            // ~/.agentmux root, with the shared dir at root/shared. (reagent
+            // P2 on #1385.)
+            return Some(PathBuf::from(s).join("shared"));
         }
     }
     if let Ok(s) = std::env::var("AGENTMUX_SHARED_DIR") {
@@ -138,7 +140,11 @@ mod tests {
         clear();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
         let r = resolve_shared_definitions_dir().unwrap();
-        assert_eq!(r, PathBuf::from("/tmp/test-home/agents/definitions"));
+        // Override is the ~/.agentmux root; shared lives at root/shared.
+        assert_eq!(
+            r,
+            PathBuf::from("/tmp/test-home/shared/agents/definitions")
+        );
         clear();
     }
 }

@@ -806,7 +806,18 @@ impl Store {
             // Mirror the updated definition into the global store. (P0.2b.)
             self.registry_def_upsert(&agent.id);
         }
-        Ok(rows > 0)
+        // Cross-channel edit: an agent surfaced only via the global overlay has
+        // no local SQLite row, so the UPDATE affected 0 rows. Apply the edit to
+        // the global record directly (preserving its content/skills) so editing
+        // a cross-channel agent isn't silently dropped with a "not found" error
+        // — symmetric with the unconditional cross-channel delete. (reagent P1
+        // on #1385.)
+        let updated_global = if rows == 0 {
+            self.registry_def_update_definition_fields(agent)
+        } else {
+            false
+        };
+        Ok(rows > 0 || updated_global)
     }
 
     /// Delete a agent definition by id. Returns true if a row was deleted.

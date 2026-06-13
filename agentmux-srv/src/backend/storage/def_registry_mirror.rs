@@ -172,6 +172,32 @@ impl Store {
         }
         existed
     }
+
+    /// Apply a definition edit directly to the global record's definition
+    /// fields, PRESERVING its existing content + skills. Used when editing a
+    /// cross-channel agent that has no local SQLite row to update. Returns
+    /// whether a global record was found + updated. Best-effort. Tombstoned
+    /// (retired) agents are not resurrected — `get` reads only the active tree.
+    pub(super) fn registry_def_update_definition_fields(&self, agent: &AgentDefinition) -> bool {
+        let Some(reg) = self.shared_def_registry() else {
+            return false;
+        };
+        let mut rec = match reg.get(&agent.id) {
+            Ok(Some(r)) => r,
+            _ => return false,
+        };
+        // Keep the record's content + skills; replace the definition fields.
+        let kept_content = std::mem::take(&mut rec.data.content);
+        let kept_skills = std::mem::take(&mut rec.data.skills);
+        let mut new_rec = agent_definition_to_record(agent, &[], &[]);
+        new_rec.data.content = kept_content;
+        new_rec.data.skills = kept_skills;
+        if let Err(e) = reg.upsert(&new_rec) {
+            tracing::warn!(def_id = %agent.id, error = %e, "def registry: cross-channel update failed");
+            return false;
+        }
+        true
+    }
 }
 
 #[cfg(test)]
@@ -334,5 +360,35 @@ mod tests {
             !store.agent_def_list().unwrap().iter().any(|d| d.id == "remote-1"),
             "deleted cross-channel agent must not reappear in the roster"
         );
+    }
+
+    #[test]
+    fn update_edits_a_cross_channel_only_agent_preserving_content_skills() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        // Global-only agent WITH content + skills.
+        def_store
+            .upsert(&global_user_agent("remote-1", "Remote"))
+            .unwrap();
+        store.set_def_registry(def_store.clone());
+
+        // Edit it (no local SQLite row → UPDATE affects 0 rows).
+        let mut edited = record_to_agent_definition(&global_user_agent("remote-1", "Remote"));
+        edited.name = "Renamed".to_string();
+        let ok = store.agent_def_update(&mut edited).unwrap();
+        assert!(ok, "cross-channel update must report success, not 'not found'");
+
+        // Global record reflects the edit; content + skills are preserved.
+        let rec = def_store.get("remote-1").unwrap().unwrap();
+        assert_eq!(rec.data.name, "Renamed");
+        assert_eq!(rec.data.content.len(), 1, "content preserved");
+        assert_eq!(rec.data.skills.len(), 1, "skills preserved");
+        // The roster shows the new name.
+        assert!(store
+            .agent_def_list()
+            .unwrap()
+            .iter()
+            .any(|d| d.id == "remote-1" && d.name == "Renamed"));
     }
 }
