@@ -164,9 +164,15 @@
         // hit-tested, so the full width stays available for link hover.
         .xterm-scrollable-element > .scrollbar {
             z-index: 10;
+            // Normal arrow over the scrollbar, never the link "hand". xterm adds
+            // `.xterm-cursor-pointer` (cursor: pointer) to the terminal while a link
+            // is under the mouse; the scrollbar sits above the link layer, so force
+            // the default cursor on the whole scrollbar so the lane shows the plain
+            // pointer instead of the hyperlink hand.
+            cursor: default;
 
             .slider {
-                cursor: pointer;
+                cursor: default;
                 background-color: var(--scrollbar-thumb-color);
 
                 &:hover {
