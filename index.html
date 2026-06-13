@@ -32,6 +32,15 @@
         opacity: 1 !important;
         z-index: 99999;
       }
+      /* Cross-fade the splash out once the content-reveal gate decides the
+         window has settled (frontend/app/init/startup-splash.ts adds .fading).
+         Higher specificity than the `opacity: 1 !important` above so it wins.
+         Keep the duration in sync with FADE_MS in startup-splash.ts. */
+      #startup-loading.fading {
+        opacity: 0 !important;
+        transition: opacity 200ms ease-out;
+        pointer-events: none;
+      }
       #startup-loading svg {
         width: 96px;
         height: 96px;
