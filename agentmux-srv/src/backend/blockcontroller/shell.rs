@@ -1287,9 +1287,13 @@ pub fn handle_append_block_file(
 /// offset at which line N begins in `output`.  This lets `blockfile:read_range`
 /// seek to any line in O(1) instead of scanning the whole file.
 ///
-/// Called after every successful `append_data` to "output".  If the idx write
-/// fails it is silently dropped — the fast-path reader falls through to the
-/// full-scan fallback, so correctness is preserved.
+/// **Consistency guarantee**: idx and output must stay entry-for-entry aligned so
+/// that `idx[N]` always points to the start of line N in output.  If the idx write
+/// fails, we attempt to write `u64::MAX` sentinel entries (one per missed line) to
+/// preserve the alignment.  The fast-path reader treats `u64::MAX` as a stale-index
+/// signal and falls back to the full-scan path, keeping reads correct.  If the
+/// sentinel write also fails the idx is potentially desync'd; a future
+/// `FileStore::delete_file` could allow a hard reset in that case.
 fn append_output_idx(fs: &FileStore, block_id: &str, start_byte: u64, data: &[u8]) {
     const IDX: &str = "output.idx";
     if let Ok(None) = fs.stat(block_id, IDX) {
@@ -1308,9 +1312,20 @@ fn append_output_idx(fs: &FileStore, block_id: &str, start_byte: u64, data: &[u8
             line_start = start_byte + i as u64 + 1;
         }
     }
-    if !offsets_buf.is_empty() {
-        if let Err(e) = fs.append_data(block_id, IDX, &offsets_buf) {
-            tracing::warn!(block_id = %block_id, error = %e, "output.idx append failed");
+    if offsets_buf.is_empty() {
+        return;
+    }
+    if let Err(e) = fs.append_data(block_id, IDX, &offsets_buf) {
+        tracing::warn!(block_id = %block_id, error = %e, "output.idx write failed; writing sentinel entries to preserve alignment");
+        // Write u64::MAX per missed line to keep idx entry-count-aligned with output.
+        // The fast-path reader bails on any u64::MAX entry, so no wrong data is served.
+        let line_count = offsets_buf.len() / 8;
+        let sentinels: Vec<u8> = std::iter::repeat(u64::MAX.to_le_bytes())
+            .take(line_count)
+            .flatten()
+            .collect();
+        if let Err(e2) = fs.append_data(block_id, IDX, &sentinels) {
+            tracing::warn!(block_id = %block_id, error = %e2, "output.idx sentinel write also failed; idx may be desync'd");
         }
     }
 }

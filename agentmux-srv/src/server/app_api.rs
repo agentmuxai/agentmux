@@ -1049,6 +1049,12 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // file to slice by line number for large sessions.
                 if cmd.filename == "output" {
                     let idx_result: Option<BlockfileReadRangeResult> = (|| {
+                        // limit == 0 is a valid no-op; answer immediately without touching output.
+                        if limit == 0 {
+                            let idx_stat = filestore.stat(&cmd.block_id, "output.idx").ok()??;
+                            let total_lines = (idx_stat.size / 8) as u64;
+                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines });
+                        }
                         let idx_stat = filestore.stat(&cmd.block_id, "output.idx").ok()??;
                         let total_lines = (idx_stat.size / 8) as u64;
                         if total_lines == 0 || (offset as u64) >= total_lines {
@@ -1057,7 +1063,11 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let (_, sb) = filestore
                             .read_at(&cmd.block_id, "output.idx", offset as i64 * 8, 8)
                             .ok()?;
-                        let byte_start = u64::from_le_bytes(sb.try_into().ok()?) as i64;
+                        // u64::MAX is the sentinel written when a previous idx append failed;
+                        // bail to the full-scan path so no wrong line is served.
+                        let byte_start_raw = u64::from_le_bytes(sb.try_into().ok()?);
+                        if byte_start_raw == u64::MAX { return None; }
+                        let byte_start = byte_start_raw as i64;
                         let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
                             filestore.stat(&cmd.block_id, "output").ok()??.size
                         } else {
@@ -1069,7 +1079,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     8,
                                 )
                                 .ok()?;
-                            u64::from_le_bytes(eb.try_into().ok()?) as i64
+                            let end_raw = u64::from_le_bytes(eb.try_into().ok()?);
+                            if end_raw == u64::MAX { return None; }
+                            end_raw as i64
                         };
                         let read_len = (byte_end - byte_start).max(0);
                         let (_, raw) = filestore
