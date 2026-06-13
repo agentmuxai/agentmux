@@ -49,6 +49,11 @@ fn agent_instance_to_record(
         // record can `--resume` without joining the current channel's SQLite.
         session_id: empty_to_none(&inst.session_id),
         working_dir: rel,
+        // v3: the agents dir `working_dir` is relative to — this row lives in
+        // the CURRENT channel, so its source base is the channel agents dir we
+        // just stripped against. Lets a different channel reconstruct the
+        // absolute path instead of re-joining under its own agents dir (P0.4).
+        source_agents_base: Some(agents_root.to_string_lossy().to_string()),
         created_at_ms: inst.created_at,
         last_launched_at_ms: inst.started_at,
         created_by_version: version.clone(),

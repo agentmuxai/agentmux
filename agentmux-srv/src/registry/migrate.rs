@@ -413,10 +413,15 @@ fn row_to_record(row: &RowSnapshot) -> Option<NamedAgentRecord> {
         memory_id: empty_to_none(&row.memory_id),
         // The legacy per-channel rows don't carry session_id through this
         // consolidation path; live mirroring (registry_mirror.rs) populates it
-        // on the next launch/update. Until then these stay session-less (v1)
-        // and v1-binary-readable.
+        // on the next launch/update. Until then these stay session-less and
+        // older-binary-readable (v3 from source_agents_base below, but MIN
+        // stays 1 so the field is simply ignored by pre-v3 readers).
         session_id: None,
         working_dir: rel_str,
+        // v3: anchor on THIS row's own source channel agents dir so a reader
+        // in any channel reconstructs the absolute working_directory correctly
+        // (P0.4), not by re-joining under its own channel's agents dir.
+        source_agents_base: Some(row.agents_root.to_string_lossy().to_string()),
         created_at_ms: row.created_at,
         last_launched_at_ms: row.started_at,
         // We don't know what version originally inserted these rows. Tag them
@@ -617,6 +622,22 @@ mod tests {
         recs.sort_by(|a, b| a.data.instance_id.cmp(&b.data.instance_id));
         assert_eq!(recs[0].data.working_dir, "alpha");
         assert_eq!(recs[1].data.working_dir, "beta");
+        // P0.4: each record records its OWN source channel agents base, so a
+        // reader in any channel reconstructs the absolute path against the
+        // right channel (not its own). The record is therefore schema v3.
+        assert_eq!(
+            recs[0].data.source_agents_base.as_deref(),
+            Some(channel_agents(home.path(), "stable").to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            recs[1].data.source_agents_base.as_deref(),
+            Some(
+                channel_agents(home.path(), "local-main-b28b7a")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert_eq!(recs[0].schema_version, 3);
     }
 
     #[test]
@@ -780,6 +801,7 @@ mod tests {
                 memory_id: None,
                 session_id: None,
                 working_dir: "demo".to_string(),
+                source_agents_base: None,
                 created_at_ms: 50,
                 last_launched_at_ms: 500,
                 created_by_version: "0.33.823".to_string(),
@@ -823,6 +845,7 @@ mod tests {
                 memory_id: None,
                 session_id: None,
                 working_dir: "demo".to_string(),
+                source_agents_base: None,
                 created_at_ms: 50,
                 last_launched_at_ms: 50,
                 created_by_version: "0.33.823".to_string(),
