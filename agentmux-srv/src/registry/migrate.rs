@@ -67,8 +67,7 @@ const MARKER: &str = ".migrated_from_sqlite";
 /// returned `None`) and "My Agents" stayed empty in every channel. A legacy
 /// marker (no `migration_version:` line) reads as 0 and re-runs exactly once;
 /// `exists_anywhere()` keeps the re-run from duplicating already-written
-/// records. This is the same recoverable-marker pattern introduced for the
-/// **definitions** migration in PR #1391 (def_migrate.rs).
+/// records.
 const MIGRATION_VERSION: u32 = 2;
 
 /// A per-(channel,version) / per-dev-branch SQLite source, paired with the
@@ -465,8 +464,7 @@ fn push_if_instance(dir: &Path, out: &mut Vec<SqliteSource>) -> bool {
 /// Read the `migration_version:` line from an existing marker. Returns 0 when
 /// the marker is absent, unreadable, or predates versioning (a legacy
 /// stats-only marker has no such line) — so a logic bump, or any pre-versioning
-/// marker, re-runs the migration exactly once. Same pattern as the definitions
-/// migration's recoverable marker (PR #1391).
+/// marker, re-runs the migration exactly once.
 fn marker_migration_version(path: &Path) -> u32 {
     let Ok(body) = std::fs::read_to_string(path) else {
         return 0;
