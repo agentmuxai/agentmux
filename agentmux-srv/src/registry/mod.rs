@@ -18,6 +18,8 @@
 #![allow(dead_code, unused_imports)]
 
 mod atomic;
+mod def_schema;
+mod def_store;
 mod migrate;
 mod paths;
 mod schema;
@@ -28,6 +30,11 @@ mod tests;
 
 pub use migrate::{migrate_from_sqlite_once, MigrateStats};
 pub use paths::resolve_shared_registry_dir;
+pub use def_schema::{
+    DefValidationError, DefinitionRecord, DefinitionRecordV1, DEF_MAX_SUPPORTED_SCHEMA,
+    DEF_MIN_SUPPORTED_SCHEMA,
+};
+pub use def_store::{DefStoreError, DefinitionStore};
 pub use schema::{
     NamedAgentRecord, NamedAgentRecordV1, ValidationError, MAX_SUPPORTED_SCHEMA,
     MIN_SUPPORTED_SCHEMA,
