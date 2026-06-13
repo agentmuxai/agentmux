@@ -417,7 +417,7 @@ The handful of existing sites (§1.1) should be migrated as part of this work or
 - Predecessor analysis: `docs/analysis/flyout-menu-hover-delay-2026-05-10.md`
 - Implementation site: `frontend/app/element/flyoutmenu.tsx`, `flyoutmenu.scss`
 - Hamburger caller: `frontend/app/tab/tabbar.tsx`
-- Other submenu caller: `frontend/app/view/chat/data.tsx`
+- Other submenu caller: none — the chat view (formerly the only other `subItems` caller) was removed 2026-06-13
 - Project specs index: `docs/specs/`
 - Floating UI docs: https://floating-ui.com/docs/autoUpdate, https://floating-ui.com/docs/computePosition
 - Web Animation timing primer: https://developer.mozilla.org/en-US/docs/Web/API/HTML_DOM_API/Microtask_guide
