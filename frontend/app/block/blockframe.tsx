@@ -30,7 +30,7 @@ import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { CopyButton } from "../element/copybutton";
-import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle } from "./autotitle";
+import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
@@ -703,13 +703,20 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
     const [frameEl, setFrameEl] = createSignal<HTMLDivElement | undefined>(undefined);
 
-    // Agent color for border — matches header color on agent-loaded terminals
+    // Agent color for border — matches header color on agent-loaded terminals.
+    // Gated by isUsableFocusRingColor: the focused ring is the selection
+    // affordance, so identity colors that would render it invisible
+    // (near-black / transparent / unparseable) fall back to the accent ring.
+    // The header keeps the raw color (see BlockFrame_Header's agentColor).
     const blockAgentColor = createMemo(() => {
         if (!props.preview && blockData()?.meta?.view === "term") {
             const blockEnv = blockData()?.meta?.["cmd:env"] as Record<string, string> | undefined;
             const agentId = detectAgentFromEnv(blockEnv);
             if (agentId) {
-                return detectAgentColor(blockEnv, agentId);
+                const color = detectAgentColor(blockEnv, agentId);
+                if (isUsableFocusRingColor(color)) {
+                    return color;
+                }
             }
         }
         return null;
