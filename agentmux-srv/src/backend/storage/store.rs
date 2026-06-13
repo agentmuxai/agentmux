@@ -8,7 +8,7 @@
 //! SQLite WAL mode + 5s busy timeout (same as Go).
 
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection};
@@ -39,6 +39,26 @@ pub struct Store {
     /// in one channel is visible in every channel (cross-channel agent
     /// persistence, `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
     def_registry: Mutex<Option<Arc<DefinitionStore>>>,
+    /// Base directory that named-instance `working_directory` values are
+    /// expressed **relative to** in the instance registry (write side:
+    /// `registry_mirror`; read side: the `listnamedagents` handler).
+    ///
+    /// This is the **current channel's** agents dir (`channels/<ch>/agents`,
+    /// i.e. `AGENTMUX_AGENTS_DIR`). It must be tracked separately from the
+    /// registry's own file location because P0.3 re-roots the registry to the
+    /// global `~/.agentmux/shared/agents/registry/` — once the registry no
+    /// longer sits under `channels/<ch>/agents/`, its parent (`agents_root()`)
+    /// stops coinciding with the channel agents dir, and using it to strip /
+    /// re-join `working_directory` would drop every live instance.
+    ///
+    /// `None` for in-memory test stores and odd envs — the accessor then
+    /// falls back to the registry's parent, which equals the channel agents
+    /// dir in the pre-re-root layout, so existing mirror tests are unchanged.
+    /// Set explicitly from `AGENTMUX_AGENTS_DIR` in `main.rs` (never read from
+    /// ambient env inside the Store, so tests running inside an AgentMux pane
+    /// don't pick up the host's `AGENTMUX_AGENTS_DIR`). See
+    /// `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (P0.3).
+    registry_agents_base: Mutex<Option<PathBuf>>,
 }
 
 impl Store {
@@ -113,6 +133,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            registry_agents_base: Mutex::new(None),
         })
     }
 
@@ -130,6 +151,36 @@ impl Store {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Set the channel agents dir that instance `working_directory` values
+    /// are stored relative to (see the `registry_agents_base` field).
+    /// Called once from `main.rs` with `AGENTMUX_AGENTS_DIR`.
+    pub fn set_registry_agents_base(&self, base: PathBuf) {
+        *self
+            .registry_agents_base
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(base);
+    }
+
+    /// The base dir for instance `working_directory` relative paths.
+    ///
+    /// Returns the explicitly-set channel agents dir
+    /// ([`set_registry_agents_base`]) when present; otherwise falls back to
+    /// the registry's parent (`agents_root()`), which equals the channel
+    /// agents dir in the pre-re-root layout. Used symmetrically by the write
+    /// mirror and the read handler so the two never disagree on the anchor.
+    pub fn registry_agents_base(&self) -> Option<PathBuf> {
+        if let Some(base) = self
+            .registry_agents_base
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        {
+            return Some(base);
+        }
+        self.registry()
+            .and_then(|r| r.agents_root().map(|p| p.to_path_buf()))
     }
 
     /// Public accessor for the cross-version named-agent registry.
@@ -1521,6 +1572,51 @@ mod tests {
         assert_eq!(records[0].data.instance_name, "demo");
         assert_eq!(records[0].data.identity_id, None);
         assert_eq!(records[0].data.memory_id, None);
+        assert_eq!(records[0].data.working_dir, "demo-fixture");
+    }
+
+    #[test]
+    fn registry_agents_base_falls_back_to_registry_parent() {
+        // With no explicit base, the accessor returns the registry's parent
+        // (= the channel agents dir in the pre-re-root layout). This is why
+        // existing mirror tests are unchanged by the decoupling.
+        let (_tmp, store, _reg) = store_with_registry();
+        let base = store.registry_agents_base().unwrap();
+        assert!(base.ends_with("agents"), "fallback is the registry parent");
+        assert!(!base.ends_with("registry"));
+    }
+
+    #[test]
+    fn registry_agents_base_override_decouples_from_registry_parent() {
+        // Simulates the P0.3 re-root: the registry lives at a GLOBAL root
+        // whose parent (`agents_root()` = shared/agents) is NOT the channel
+        // agents dir. The explicit base (the channel agents dir, i.e.
+        // AGENTMUX_AGENTS_DIR) must win, so a working_directory under the
+        // channel dir still mirrors with the correct relative path instead of
+        // being dropped as "not under the registry parent".
+        let tmp = tempfile::tempdir().unwrap();
+        let global_reg_root = tmp.path().join("shared").join("agents").join("registry");
+        let reg = Arc::new(crate::registry::Registry::open(global_reg_root).unwrap());
+        let store = Store::open_in_memory().unwrap();
+        store.set_registry(reg.clone());
+        let channel_agents = tmp.path().join("channels").join("local-x").join("agents");
+        std::fs::create_dir_all(&channel_agents).unwrap();
+        store.set_registry_agents_base(channel_agents.clone());
+        // Sanity: the override is NOT the registry's parent.
+        assert_ne!(
+            store.registry_agents_base().unwrap(),
+            reg.agents_root().unwrap()
+        );
+        // FK satisfy.
+        let mut agent = sample_agent("def-mirror", "mirror");
+        store.agent_def_insert(&mut agent).unwrap();
+        // Instance working dir under the CHANNEL agents dir.
+        let inst = make_named_inst("inst-base", "demo", &channel_agents);
+        store.instance_create(&inst).unwrap();
+        let records = reg.list_active().unwrap();
+        assert_eq!(records.len(), 1, "instance mirrors via the explicit base");
+        // Relative path stripped against the channel agents dir, not the
+        // registry parent (shared/agents) — which wouldn't contain it.
         assert_eq!(records[0].data.working_dir, "demo-fixture");
     }
 

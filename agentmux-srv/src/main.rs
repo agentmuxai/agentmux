@@ -420,6 +420,19 @@ async fn main() {
                 if migration_ok {
                     tracing::info!(root = %root.display(), "registry: shared agent registry attached");
                     wstore_raw.set_registry(Arc::new(reg));
+                    // Anchor instance `working_directory` relative paths on the
+                    // current channel's agents dir (AGENTMUX_AGENTS_DIR). The
+                    // registry-mirror write path and the listnamedagents read
+                    // path both strip/re-join against this base; it must track
+                    // the channel — not the registry's own parent — so the
+                    // paths keep resolving once P0.3 re-roots the registry to
+                    // the global ~/.agentmux/shared/agents/registry/.
+                    if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
+                        if !base.is_empty() {
+                            wstore_raw
+                                .set_registry_agents_base(std::path::PathBuf::from(base));
+                        }
+                    }
                 }
             }
             Err(e) => tracing::warn!(
