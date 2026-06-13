@@ -15,13 +15,18 @@
 //!   <home>/dev/<branch>[/<sub>]/data/db/objects.db         (dev)
 //! ```
 //!
-//! **Landmine #1 — per-source anchoring.** A row's `working_directory` is
-//! absolute under *its own* channel's agents dir (`channels/<ch>/agents`, or
-//! `<instance_dir>/agents` for dev). Stripping every row against a single
-//! global agents root would mark rows from other channels "unmappable", so
-//! each source DB carries the agents dir its rows are anchored on, and
-//! [`row_to_record`] strips against that. See
-//! `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` §11.5.
+//! **Workspace anchoring.** Agent workspaces live GLOBALLY at
+//! `<home>/agents/<name>` (verified on disk: real `working_directory` values
+//! are `~/.agentmux/agents/<name>`, e.g. `…/agents/mazs-0527n`), independent of
+//! channel/version. [`row_to_record`] therefore strips each row's
+//! `working_directory` against the global `<home>/agents` root FIRST, then
+//! falls back to this row's own source-channel agents dir (`channels/<ch>/agents`,
+//! or `<instance_dir>/agents` for dev) for any legacy row that genuinely lived
+//! in-channel — each source DB still carries that per-source dir. The two
+//! subtrees are disjoint, so the fallback never mis-maps a global workspace.
+//! The chosen base is stored absolute in the record, so a reader in ANY channel
+//! round-trips `source_agents_base.join(working_dir)` back to the real
+//! workspace. See `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` §11.5.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
