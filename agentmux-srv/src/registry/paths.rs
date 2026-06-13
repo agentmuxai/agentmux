@@ -28,13 +28,12 @@ pub fn resolve_shared_registry_dir() -> Option<PathBuf> {
 
 /// Resolve the GLOBAL `<home>/shared/agents/definitions/` directory.
 ///
-/// Unlike [`resolve_shared_registry_dir`] (channel-scoped — its
-/// `AGENTMUX_DATA_DIR` walk-up lands on `channels/<ch>`), the definition
-/// store is **channel-independent**: it lives under the global
-/// `~/.agentmux/shared/` so an agent created in one channel is visible in
-/// every channel (cross-channel agent persistence, P0.2). Resolves via the
-/// launcher-exported `AGENTMUX_SHARED_DIR`, with a test override and a
-/// `~/.agentmux/shared` fallback.
+/// Sibling of [`resolve_shared_registry_dir`]: since P0.3 both the definition
+/// store and the instance registry are **channel-independent**, resolved via
+/// the same [`resolve_global_shared_root`] so an agent created/named in one
+/// channel is visible in every channel (cross-channel agent persistence,
+/// P0.2/P0.3). Resolves via the launcher-exported `AGENTMUX_SHARED_DIR`, with
+/// a test override and a `~/.agentmux/shared` fallback.
 pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("agents").join("definitions"))
 }

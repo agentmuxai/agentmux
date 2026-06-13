@@ -37,14 +37,21 @@ pub struct MigrateStats {
     /// Number of per-(channel,version) / per-dev-branch `objects.db` files
     /// scanned (was "versions" when the scan was single-channel).
     pub dbs_scanned: usize,
+    /// DBs that existed but couldn't be read (corrupt / locked). Counted and
+    /// skipped — they must NOT disable the whole cross-channel registry now
+    /// that the scan spans every channel (codex P1 on #1389).
+    pub dbs_skipped: usize,
     pub rows_seen: usize,
     pub records_written: usize,
     pub records_skipped_existing: usize,
     pub records_skipped_unmappable: usize,
-    /// True iff every DB read cleanly. Callers gate registry attachment on
-    /// this — partial migrations leave the registry detached so reads keep
-    /// falling back to SQLite, and the next launch retries (no marker written
-    /// when `false`).
+    /// True iff every DB read cleanly. Controls only whether the one-shot
+    /// **marker** is written: on any skipped DB the marker is deferred so a
+    /// future launch retries that (possibly transiently-unreadable) DB. It
+    /// does NOT gate registry attachment — `main.rs` attaches whenever the
+    /// migration runs, so one bad DB in an unrelated channel can't disable
+    /// cross-channel My Agents (the readable records are served now; the live
+    /// mirror backfills the current channel regardless).
     pub complete: bool,
 }
 
@@ -122,8 +129,9 @@ pub fn migrate_from_sqlite_once(
                 tracing::warn!(
                     db = %src.db_path.display(),
                     error = %e,
-                    "registry-migrate: DB unreadable — will retry on next launch"
+                    "registry-migrate: DB unreadable — skipping this source; registry still attaches, marker deferred to retry"
                 );
+                stats.dbs_skipped += 1;
                 any_db_failed = true;
             }
         }
@@ -249,11 +257,13 @@ fn write_marker(path: &Path, stats: &MigrateStats) -> std::io::Result<()> {
     let body = format!(
         "migrated_at: {now}\n\
          dbs_scanned: {}\n\
+         dbs_skipped: {}\n\
          rows_seen: {}\n\
          records_written: {}\n\
          records_skipped_existing: {}\n\
          records_skipped_unmappable: {}\n",
         stats.dbs_scanned,
+        stats.dbs_skipped,
         stats.rows_seen,
         stats.records_written,
         stats.records_skipped_existing,
@@ -816,10 +826,14 @@ mod tests {
 
         let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
         assert_eq!(stats.records_written, 1, "good DB still migrated");
+        assert_eq!(stats.dbs_skipped, 1, "bad DB counted, not fatal");
         assert!(
             !reg.root().join(MARKER).exists(),
-            "marker MUST NOT be written when any DB was unreadable"
+            "marker deferred (retry) when a DB was unreadable — but the registry still attaches (see main.rs); good records are already written"
         );
+        // The good record is present regardless of the deferred marker — a bad
+        // unrelated DB must not hide cross-channel agents (codex P1 on #1389).
+        assert_eq!(reg.list_active().unwrap().len(), 1);
 
         // Next launch retries; the good row is idempotency-skipped, and the
         // bad DB now reads (replaced with a valid file under the same wd).
@@ -884,8 +898,9 @@ mod tests {
 
         let stats = migrate_from_sqlite_once(home.path(), &reg).unwrap();
         // Only one had a *file*, and it failed to read — no panic, no rows.
-        // Marker deferred so the next launch retries.
+        // Marker deferred so the next launch retries; the bad DB is counted.
         assert_eq!(stats.dbs_scanned, 1);
+        assert_eq!(stats.dbs_skipped, 1);
         assert_eq!(stats.records_written, 0);
         assert!(
             !reg.root().join(MARKER).exists(),

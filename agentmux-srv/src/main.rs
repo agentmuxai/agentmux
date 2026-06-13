@@ -383,23 +383,33 @@ async fn main() {
                 let migration_ok = match home_dir {
                     Some(home) => match registry::migrate_from_sqlite_once(&home, &reg) {
                         Ok(stats) => {
-                            if stats.dbs_scanned > 0 || stats.records_written > 0 {
+                            if stats.dbs_scanned > 0
+                                || stats.records_written > 0
+                                || stats.dbs_skipped > 0
+                            {
                                 tracing::info!(
                                     dbs_scanned = stats.dbs_scanned,
+                                    dbs_skipped = stats.dbs_skipped,
                                     rows_seen = stats.rows_seen,
                                     records_written = stats.records_written,
                                     records_skipped_existing = stats.records_skipped_existing,
                                     records_skipped_unmappable = stats.records_skipped_unmappable,
                                     complete = stats.complete,
-                                    "registry: one-shot SQLite migration finished"
+                                    "registry: cross-channel SQLite migration finished"
                                 );
                             }
-                            // Gate attach on `complete` — partial
-                            // migration leaves the registry detached
-                            // so the read path serves SQLite (full,
-                            // current-version-only view) rather than
-                            // a half-populated registry.
-                            stats.complete
+                            // Attach the registry whenever the migration ran —
+                            // do NOT gate on `complete`. The scan now spans every
+                            // channel + dev tree, so a single corrupt/locked
+                            // objects.db in an unrelated channel must not disable
+                            // cross-channel My Agents for everyone (codex P1 on
+                            // #1389). The records that DID read are served now,
+                            // and the live mirror backfills the current channel's
+                            // named agents regardless of migration. On any skipped
+                            // DB the migration leaves the marker deferred, so a
+                            // future launch retries that source (idempotent via
+                            // exists_anywhere).
+                            true
                         }
                         Err(e) => {
                             tracing::warn!(
