@@ -65,7 +65,7 @@ pub struct DefSkillBlob {
 /// cross-channel agent to launch with its instructions). New fields go
 /// here under `#[serde(default)]` (so older files still deserialize)
 /// paired with a `DEF_MAX_SUPPORTED_SCHEMA` bump.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct DefinitionRecordV1 {
     pub id: String,
     #[serde(default)]

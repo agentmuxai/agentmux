@@ -15,7 +15,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, StoreObj};
-use crate::registry::Registry;
+use crate::registry::{DefinitionStore, Registry};
 
 use super::error::StoreError;
 use super::migrations::{check_schema_compat, run_object_schema, stamp_version, OBJECT_SCHEMA_VERSION};
@@ -33,6 +33,12 @@ pub struct Store {
     /// `db_agent_instances` parallel-write to this registry when set.
     /// See `docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md`.
     registry: Mutex<Option<Arc<Registry>>>,
+    /// GLOBAL (cross-channel) agent-definition store. `None` for in-memory
+    /// test stores and when the shared dir can't be resolved; `Some` for
+    /// production srv. Definition mutations mirror to it so an agent created
+    /// in one channel is visible in every channel (cross-channel agent
+    /// persistence, `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
+    def_registry: Mutex<Option<Arc<DefinitionStore>>>,
 }
 
 impl Store {
@@ -106,6 +112,7 @@ impl Store {
         Ok(Self {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
+            def_registry: Mutex::new(None),
         })
     }
 
@@ -131,6 +138,23 @@ impl Store {
     /// case by falling back to SQLite.
     pub fn shared_agent_registry(&self) -> Option<Arc<Registry>> {
         self.registry()
+    }
+
+    /// Attach the GLOBAL (cross-channel) agent-definition store. Called
+    /// once on srv startup after `Store::open`, before the store is
+    /// wrapped in `Arc`. Definition mutations then mirror to it.
+    pub fn set_def_registry(&self, def_registry: Arc<DefinitionStore>) {
+        *self.def_registry.lock().unwrap_or_else(|e| e.into_inner()) = Some(def_registry);
+    }
+
+    /// Public accessor for the global agent-definition store. `None` when
+    /// it couldn't be resolved at startup (CI / unusual envs / in-memory
+    /// tests); callers fall back to SQLite.
+    pub fn shared_def_registry(&self) -> Option<Arc<DefinitionStore>> {
+        self.def_registry
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Table name for a StoreObj type: `db_<otype>`.

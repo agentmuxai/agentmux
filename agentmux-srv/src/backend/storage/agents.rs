@@ -362,23 +362,56 @@ impl Store {
     }
 
     pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, slug, name, icon, provider, description,
-                    working_directory, shell, provider_flags, auto_start,
-                    restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_template_id, branch_label, updated_at,
-                    user_hidden, container_image, container_volumes, container_name
-             FROM db_agents
-             ORDER BY updated_at DESC, created_at ASC",
-        )?;
-        let rows = stmt.query_map([], map_agent_definition_row)?;
-        let mut agents = Vec::new();
-        for row in rows {
-            agents.push(row?);
+        // Local SQLite: this channel's templates (seeded) + its own user agents.
+        let local: Vec<AgentDefinition> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare(
+                "SELECT id, slug, name, icon, provider, description,
+                        working_directory, shell, provider_flags, auto_start,
+                        restart_on_crash, idle_timeout_minutes, created_at,
+                        agent_type, environment, agent_bus_id, is_seeded,
+                        accounts, parent_template_id, branch_label, updated_at,
+                        user_hidden, container_image, container_volumes, container_name
+                 FROM db_agents
+                 ORDER BY updated_at DESC, created_at ASC",
+            )?;
+            let rows = stmt.query_map([], map_agent_definition_row)?;
+            let mut agents = Vec::new();
+            for row in rows {
+                agents.push(row?);
+            }
+            agents
+        };
+        // conn dropped. Overlay the GLOBAL cross-channel user-agent roster so
+        // an agent created in another channel appears here too. The global
+        // store wins for user rows (it's authoritative and holds cross-channel
+        // agents); templates (seeded — never in the global store) come from
+        // local SQLite. Falls back to SQLite-only when the global store is
+        // absent or unreadable. (P0.2c.)
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(local);
+        };
+        let global = match reg.list_active() {
+            Ok(recs) => recs,
+            Err(e) => {
+                tracing::warn!(error = %e, "def registry: global list failed, using SQLite only");
+                return Ok(local);
+            }
+        };
+        let mut by_id: std::collections::HashMap<String, AgentDefinition> =
+            local.into_iter().map(|d| (d.id.clone(), d)).collect();
+        for rec in &global {
+            let def = super::def_registry_mirror::record_to_agent_definition(rec);
+            by_id.insert(def.id.clone(), def);
         }
-        Ok(agents)
+        let mut result: Vec<AgentDefinition> = by_id.into_values().collect();
+        // Match the SQL ORDER BY: updated_at DESC, then created_at ASC.
+        result.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then(a.created_at.cmp(&b.created_at))
+        });
+        Ok(result)
     }
 
     /// Count agent rows (used by seed engine to check if seeding is needed).
@@ -520,6 +553,11 @@ impl Store {
         // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
         // db_agents so readers see the new row immediately.
         self.agents_dual_write_definition_upsert(&snapshot)?;
+        // Mirror into the global cross-channel definition store. Content +
+        // skills are inserted after the definition (separate calls), so this
+        // initial record is content-less; agent_content_set / agent_skill_*
+        // re-mirror with the full payload. (P0.2b.)
+        self.registry_def_upsert(&agent.id);
         // Reagent P1 on #1013 round 2: do NOT mutate the caller's
         // `&mut AgentDefinition` here. The PR is supposed to be
         // zero-behaviour-change; the previous version reflected
@@ -670,7 +708,8 @@ impl Store {
         }
         // The hide flag is per-row; the write must still hit the legacy
         // table (cascade source) — dual-write mirrors into `db_agents`
-        // for the next read.
+        // for the next read. (Templates are seeded; they do NOT go to the
+        // global cross-channel def store, so no mirror here.)
         let rows = conn.execute(
             "UPDATE db_agent_definitions SET user_hidden = ?1 WHERE id = ?2",
             params![if hidden { 1_i64 } else { 0_i64 }, id],
@@ -746,6 +785,8 @@ impl Store {
         // db_agents so the next read sees the new name/payload.
         if rows > 0 {
             self.agents_dual_write_definition_upsert(agent)?;
+            // Mirror the updated definition into the global store. (P0.2b.)
+            self.registry_def_upsert(&agent.id);
         }
         Ok(rows > 0)
     }
@@ -792,6 +833,9 @@ impl Store {
             for instance_id in &cascaded_instance_ids {
                 self.agents_dual_write_instance_delete(instance_id)?;
             }
+            // Tombstone the global definition record so another channel's
+            // stale SQLite can't resurrect this deleted user agent. (P0.2b.)
+            self.registry_def_retire(id);
         }
         Ok(rows > 0)
     }
