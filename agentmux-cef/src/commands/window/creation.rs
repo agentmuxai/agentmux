@@ -92,19 +92,16 @@ impl std::error::Error for FrontendUrlError {
 ///   `assets_missing_data_url` rather than navigating to a network
 ///   URL.
 pub(crate) fn resolve_frontend_base_url(ipc_port: u16) -> Result<String, FrontendUrlError> {
-    // Detect dev mode. Two reachable scenarios:
-    //   a) Launcher-managed: AGENTMUX_RUNTIME_MODE is set, from_env()
-    //      returns Some.
-    //   b) Standalone `task dev`: env absent. Fall through to
-    //      RuntimeMode::current() against the host exe path so the
-    //      same `dist/cef-dev/` build dir → Dev classification fires
-    //      that the launcher would have used.
-    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
-        resolve_host_runtime_dir()
-            .ok()
-            .map(|d| agentmux_common::RuntimeMode::current(&d))
-    });
-    if matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. })) {
+    // Detect dev mode by the host exe PATH (`is_dev_self`), NOT
+    // `AGENTMUX_RUNTIME_MODE`. A running `task dev` AgentMux leaks that env
+    // into descendants, so an env-first check would route a *packaged*
+    // build's secondary windows (new window, window pool, tear-off, floating
+    // pane) to the inherited dev Vite server — they return here before the
+    // bundled-asset check below, so there's no `has_frontend` safety net.
+    // Build identity is a property of the binary on disk: `task dev` (with or
+    // without the launcher) runs the host from `dist/cef-dev/` → Dev; a
+    // packaged host → not Dev, regardless of any inherited env.
+    if agentmux_common::is_dev_self() {
         return Ok(format!("http://localhost:{}", dev_vite_port()));
     }
     let runtime_dir = resolve_host_runtime_dir()?;

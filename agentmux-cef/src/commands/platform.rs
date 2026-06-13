@@ -32,16 +32,12 @@ pub fn get_host_name() -> serde_json::Value {
     serde_json::json!(hostname)
 }
 
-/// Check if running in development mode — resolved from the runtime
-/// `RuntimeMode` (launcher-injected env, or the host exe path).
+/// Check if THIS build is a `task dev` build — resolved from the host exe
+/// PATH (`is_dev_self`), NOT `AGENTMUX_RUNTIME_MODE`. A running dev AgentMux
+/// leaks that env into descendant processes, which would otherwise flip a
+/// packaged build to "DEV" (the status-bar badge).
 pub fn get_is_dev() -> serde_json::Value {
-    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .map(|d| agentmux_common::RuntimeMode::current(&d))
-    });
-    serde_json::json!(matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. })))
+    serde_json::json!(agentmux_common::is_dev_self())
 }
 
 /// Get the app data directory path (version-specific).
