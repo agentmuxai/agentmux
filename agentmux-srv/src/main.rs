@@ -457,11 +457,11 @@ async fn main() {
     } else {
         tracing::warn!("registry: could not resolve shared registry dir — mirror disabled");
     }
-    // Attach the GLOBAL (cross-channel) agent-definition store. Unlike the
-    // instance registry above (channel-scoped), this lives under
-    // ~/.agentmux/shared/ so user agents created in one channel are visible
-    // in every channel. Best-effort: disabled when the shared dir can't be
-    // resolved. See SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md (P0.2).
+    // Attach the GLOBAL (cross-channel) agent-definition store. Sibling of the
+    // instance registry above — since P0.3b both live under ~/.agentmux/shared/
+    // (definitions/ and registry/), so user agents created in one channel are
+    // visible in every channel. Best-effort: disabled when the shared dir can't
+    // be resolved. See SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md (P0.2/P0.3).
     if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
         match registry::DefinitionStore::open(def_dir.clone()) {
             Ok(def_store) => {
