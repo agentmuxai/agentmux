@@ -264,8 +264,6 @@ export function generateAutoTitle(block: Block, settingsEnv?: Record<string, str
             return generatePreviewTitle(block);
         case "codeeditor":
             return "Editor";
-        case "chat":
-            return generateChatTitle(block);
         case "help":
             return "Help";
         case "sysinfo":
@@ -339,20 +337,6 @@ function generatePreviewTitle(block: Block): string {
     return "Preview";
 }
 
-
-/**
- * Generate title for chat blocks
- * Uses channel name if available
- */
-function generateChatTitle(block: Block): string {
-    const channel = block.meta!["chat:channel"] as string | undefined;
-
-    if (!isBlank(channel)) {
-        return `Chat: ${channel}`;
-    }
-
-    return "Chat";
-}
 
 /**
  * Generate default title for unknown block types

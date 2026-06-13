@@ -299,20 +299,6 @@ describe("generateAutoTitle", () => {
         assert.equal(title, "Editor");
     });
 
-    test("generates chat title with channel", () => {
-        const block: Block = {
-            otype: "block",
-            oid: "test-123",
-            version: 1,
-            meta: {
-                view: "chat",
-                "chat:channel": "general",
-            } as MetaType,
-        };
-        const title = generateAutoTitle(block);
-        assert.equal(title, "Chat: general");
-    });
-
     test("generates default title for help view", () => {
         const block: Block = {
             otype: "block",
