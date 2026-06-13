@@ -259,13 +259,13 @@ pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
-// macOS: drive the drag at the NSWindow level via AppKit's
-// `performWindowDragWithEvent:`. Stock libcef ships no programmatic drag API
+// macOS: drive the drag with a host-side manual move loop (MacWindowDragTask
+// → run_macos_native_drag_loop). Stock libcef ships no programmatic drag API
 // and the fork's BeginWindowDrag is Ozone-only (no-op on macOS), so rather
-// than chain macOS releases to a patched-Chromium framework we reach the
-// NSWindow ourselves. The header is HTCLIENT (useWindowDrag.darwin.ts sends
-// this IPC only on a left-button drag), so right-click context menus keep
-// working on the same surface.
+// than chain macOS releases to a patched-Chromium framework we pump the drag
+// events ourselves and reposition via CEF set_bounds. The header is HTCLIENT
+// (useWindowDrag.darwin.ts sends this IPC only on a left-button drag), so
+// right-click context menus keep working on the same surface.
 #[cfg(target_os = "macos")]
 pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
     let mut task = MacWindowDragTask::new(state.clone(), label.to_string());
@@ -363,11 +363,20 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
     }
     let nsevent_cls = objc_getClass(b"NSEvent\0".as_ptr() as _);
     let sel_mouse_location = sel_registerName(b"mouseLocation\0".as_ptr() as _);
-    // untilDate: [NSDate distantFuture] — block until the next matching event.
-    let distant_future = msg(
-        objc_getClass(b"NSDate\0".as_ptr() as _),
-        sel_registerName(b"distantFuture\0".as_ptr() as _),
-    );
+    let nsdate_cls = objc_getClass(b"NSDate\0".as_ptr() as _);
+    // untilDate: a SHORT (100ms) timeout, NOT distantFuture. start_window_drag
+    // is async, so the NSLeftMouseUp can be consumed by the normal run loop
+    // before this loop starts pumping; a distantFuture wait would then block
+    // the UI (main) thread forever — a whole-app freeze. The timeout wakes the
+    // loop ~10x/sec so the live-button check below can end the drag. Mirrors
+    // the Windows 100ms SetTimer wake. (Fresh NSDate built each iteration.)
+    let sel_date = sel_registerName(b"dateWithTimeIntervalSinceNow:\0".as_ptr() as _);
+    let msg_date: extern "C" fn(Id, Sel, f64) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    // [NSEvent pressedMouseButtons] — LIVE hardware bitmask (bit 0 = left),
+    // independent of which events have been dispatched; lets us detect a
+    // release we never saw as an event. Mirrors Windows GetAsyncKeyState(VK_LBUTTON).
+    let sel_pressed = sel_registerName(b"pressedMouseButtons\0".as_ptr() as _);
     // inMode: an NSString equal to the event-tracking run-loop mode (run-loop
     // modes compare by string value, so a fresh NSString is fine).
     let mode = msg_str(
@@ -383,15 +392,33 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
     const MASK: u64 = (1 << 6) | (1 << 2);
     const NS_LEFT_MOUSE_UP: u64 = 2; // NSEventTypeLeftMouseUp
 
+    // Bail if the press already ended (fast flick-and-release, or this task was
+    // posted late): the loop below would otherwise wait for a drag/up event
+    // that will never come, freezing the UI thread. Mirrors the Windows
+    // `!lbutton_down()` bail.
+    if msg_uint(nsevent_cls, sel_pressed) & 1 == 0 {
+        tracing::info!("[start_window_drag] macOS: button already up — skipping drag label={}", label);
+        return;
+    }
+
     let origin = window.bounds(); // DIP, top-left, y-down
     let start = msg_point(nsevent_cls, sel_mouse_location); // screen points, y-up
 
     loop {
+        // untilDate: a fresh 100ms deadline each iteration (see above).
+        let until = msg_date(nsdate_cls, sel_date, 0.1);
         // dequeue:YES (1) — consume the event, else the same pending event is
         // returned forever. The renderer doesn't need these mid-drag.
-        let event = msg_next(nsapp, sel_next, MASK, distant_future, mode, 1);
+        let event = msg_next(nsapp, sel_next, MASK, until, mode, 1);
         if event.is_null() {
-            break;
+            // 100ms timeout, no event. Re-check the live button state: if the
+            // left button is up we missed the NSLeftMouseUp (consumed elsewhere
+            // during the async gap) — end the drag instead of blocking forever.
+            // Otherwise the button is still held; keep tracking.
+            if msg_uint(nsevent_cls, sel_pressed) & 1 == 0 {
+                break;
+            }
+            continue;
         }
         if msg_uint(event, sel_type) == NS_LEFT_MOUSE_UP {
             break;

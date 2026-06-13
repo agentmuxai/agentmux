@@ -13,11 +13,11 @@
 // right/middle-click pass straight through to `contextmenu`.
 //
 // On left-mousedown in a `data-drag-region` element + threshold-crossing
-// motion, we send ONE `start_window_drag` IPC. The host turns it into a
-// native AppKit drag (`[NSWindow performWindowDragWithEvent:]`, see
-// agentmux-cef/src/ui_tasks.rs) — the window server moves the window, so
-// there's no per-frame IPC. Mirrors the Linux model (which routes the same
-// IPC to `CefWindow::BeginWindowDrag`); macOS stays on stock libcef.
+// motion, we send ONE `start_window_drag` IPC. The host then runs a manual
+// move loop (run_macos_native_drag_loop in agentmux-cef/src/ui_tasks.rs) that
+// pumps the drag events and repositions the window via CEF set_bounds until
+// mouse-up. Mirrors the Linux model (which routes the same IPC to
+// `CefWindow::BeginWindowDrag`); macOS stays on stock libcef.
 
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 

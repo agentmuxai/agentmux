@@ -17,8 +17,8 @@
     // drag region and right-click can't coexist on the same surface. The
     // header therefore stays HTCLIENT (no app-region): right-click fires
     // everywhere, and a left-button-only JS listener sends
-    // `start_window_drag`, which the host turns into a native AppKit drag
-    // (`[NSWindow performWindowDragWithEvent:]`). So drag AND right-click
+    // `start_window_drag`, which the host handles with a manual move loop
+    // (run_macos_native_drag_loop → CEF set_bounds). So drag AND right-click
     // both work on the same area — no `.tab-bar-fill` opt-out needed.
     // Mirrors the Linux model (window-header.linux.scss).
 }
