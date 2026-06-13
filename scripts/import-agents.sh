@@ -263,9 +263,20 @@ import_into() {
         # sqlite3.exe emits CRLF on Windows; the trailing CR contaminates the
         # last char(1)-delimited field (the slug), which silently breaks the
         # on-disk session lookup below. Strip CR so every field is clean.
-        agents=$(db_query "$src_db" \
-            "SELECT id||char(1)||name||char(1)||COALESCE(${_col_slug},'') FROM db_agent_definitions WHERE $where;" 2>/dev/null \
-            | tr -d '\r') || agents=""
+        # Distinguish a genuine query FAILURE (corruption hit mid-scan, or a
+        # column the WHERE/SELECT names — e.g. is_seeded — missing despite the
+        # table existing, which the up-front probe doesn't catch) from an empty
+        # result. A bare `|| agents=""` would mask the failure as "no agents"
+        # and skip the DB with no WARN (codex P2 on #1380). Capture stdout+stderr
+        # with the exit code; on failure WARN + skip this source DB.
+        local _agents_out
+        if _agents_out=$(sqlite3 "$src_win" \
+            "SELECT id||char(1)||name||char(1)||COALESCE(${_col_slug},'') FROM db_agent_definitions WHERE $where;" 2>&1); then
+            agents=$(printf '%s' "$_agents_out" | tr -d '\r')
+        else
+            echo "  WARN  skipping source DB (agent query failed: ${_agents_out%%$'\n'*}): $src_db" >&2
+            continue
+        fi
         [ -z "$agents" ] && continue
 
         while IFS=$'\x01' read -r def_id agent_name agent_slug; do
