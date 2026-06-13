@@ -14,10 +14,14 @@
 //!   master writer with `\x1b[1;1R`; the writer is held alive until
 //!   after child.wait() (dropping it earlier sends CTRL_C_EVENT on
 //!   Windows — ConPTY CONIN lifetime invariant, same as pair.master).
-//!   The command is run as-is (no stdin redirect): running
-//!   `exec </dev/null;` inside bash closed the child's ConPTY console
-//!   input from the child side, which ConPTY also reports as a
-//!   CTRL_C_EVENT, killing every command with exit 130 before it ran.
+//!   The command is wrapped in a brace group redirected from /dev/null
+//!   (`{ <cmd>; } </dev/null`) so stdin-reading children see EOF instead
+//!   of blocking on the live PTY slave. We must NOT use `exec </dev/null`
+//!   for this: running it inside bash closes the child's ConPTY console
+//!   input from the child side, which ConPTY reports as a CTRL_C_EVENT,
+//!   killing every command with exit 130 before it ran. The group
+//!   redirect points only the group's fd 0 at /dev/null while bash's own
+//!   console fd stays open, so children get EOF and ConPTY never fires.
 //!   The pipe path remains as a safety net and is the only path that
 //!   preserves the stdout/stderr split — PTY collapses both onto
 //!   one stream. See `docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`.
@@ -470,7 +474,17 @@ async fn run_via_pty(
     // dirs to PATH manually (see below) so external commands like
     // `date`, `grep`, `awk` resolve without needing rc-script setup.
     cmd.arg("-c");
-    cmd.arg(command);
+    // Give stdin-reading children (`cat`, `read`, prompted scripts) EOF
+    // instead of leaving them blocked on the live PTY slave, but do NOT use
+    // `exec </dev/null` — running that inside bash closes the child's ConPTY
+    // console-input handle from the child side, which ConPTY reports as a
+    // CTRL_C_EVENT and kills the command with exit 130 before it runs (the
+    // bug this wrapper exists to fix). A brace-group redirect points the
+    // group's fd 0 at /dev/null for the command's duration while bash's own
+    // fd 0 (the console) stays open, so children see EOF and ConPTY never
+    // fires ctrl-c. The leading newline terminates the group list cleanly
+    // regardless of how `command` ends (trailing comment, no newline, etc.).
+    cmd.arg(format!("{{\n{}\n}} </dev/null", command));
 
     // PATH fix-up: bashwrap is a Windows exe, so when MSYS2/Git Bash
     // spawned us it converted PATH to Windows form, which has

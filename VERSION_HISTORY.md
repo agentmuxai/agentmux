@@ -1,9 +1,5 @@
 # AgentMux Version History
 
-## 0.44.2 — 2026-06-12
-
-- fix(bashwrap): remove the `exec </dev/null;` command prefix that closed the child's ConPTY console input from the child side — ConPTY reported it as a CTRL_C_EVENT and killed every streamed bash command with exit 130 before it ran (#1368). Adds `exit_code` / PTY-read diagnostics.
-
 ## 0.44.1 — 2026-06-10
 
 - fix(cef): low-memory pause page Resume button was inert (double-quoted JS string inside a double-quoted onclick attribute) — wire it via a <script> + addEventListener so OOM-paused windows can actually resume
