@@ -129,11 +129,17 @@ impl Store {
         let Some(reg) = self.shared_agent_registry() else {
             return;
         };
-        let Some(agents_root) = reg.agents_root() else {
-            tracing::warn!("registry: agents_root has no parent — skipping mirror");
+        // Anchor the relative working_directory on the CURRENT channel's
+        // agents dir, not the registry's own parent — once P0.3 re-roots the
+        // registry under ~/.agentmux/shared/, its parent no longer coincides
+        // with channels/<ch>/agents/. `registry_agents_base()` returns the
+        // explicit channel dir (AGENTMUX_AGENTS_DIR) and falls back to the
+        // registry parent for tests / pre-re-root layouts.
+        let Some(agents_root) = self.registry_agents_base() else {
+            tracing::warn!("registry: no agents base — skipping mirror");
             return;
         };
-        let rec = match agent_instance_to_record(inst, agents_root) {
+        let rec = match agent_instance_to_record(inst, &agents_root) {
             Ok(rec) => rec,
             Err(e) => {
                 tracing::warn!(

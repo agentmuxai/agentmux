@@ -1529,7 +1529,11 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // here just affects which surface gets surfaced.
                 let rows: Vec<NamedAgentRow> = match wstore.shared_agent_registry() {
                     Some(reg) => {
-                        let agents_root = reg.agents_root().map(|p| p.to_path_buf());
+                        // Re-join relative working_dir against the CURRENT
+                        // channel's agents dir (symmetric with the write
+                        // mirror), not the registry's own parent — P0.3
+                        // re-roots the registry out of channels/<ch>/agents/.
+                        let agents_root = wstore.registry_agents_base();
                         let mut records = reg
                             .list_active()
                             .map_err(|e| format!("listnamedagents: registry: {e}"))?;
