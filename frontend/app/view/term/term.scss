@@ -129,6 +129,20 @@
     }
 
     .terminal {
+        // `.term-connectelem` is a flex row and `.xterm` is a flex item that
+        // otherwise sizes to its content width (cols × cellWidth). That left a
+        // variable strip of free flex space — `connectWidth − cols·cellWidth`,
+        // 0..<1 cell — to the RIGHT of the overlay scrollbar (which is anchored
+        // `right: 0` inside `.xterm-scrollable-element`). The strip's width
+        // changed with zoom (cellWidth changes → remainder changes), so the
+        // scrollbar visibly floated a few px off the pane's right edge. Grow
+        // `.xterm` to fill the connect width so the scrollable-element — and
+        // thus the `right: 0` scrollbar — sit flush against the pane edge. The
+        // text grid (`.xterm-screen`, still cols·cellWidth) stays left-aligned;
+        // the now-interior remainder is terminal background, and the fading
+        // overlay scrollbar covers the rightmost sliver.
+        flex-grow: 1;
+
         // WebView2 renders the native textarea caret even at opacity:0
         // when the terminal background is transparent.
         .xterm-helper-textarea {
