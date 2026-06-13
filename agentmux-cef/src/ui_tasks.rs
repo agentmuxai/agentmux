@@ -154,11 +154,13 @@ pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
 // ── Drag ─────────────────────────────────────────────────────────────────
 // CEF Views does not expose a programmatic drag-initiation API.
 // Begin a native window-move via the underlying CefWindow's BeginWindowDrag().
-// Posted on the CEF UI thread (BeginWindowDrag must be called there). On
-// Linux/Wayland this dispatches WmMoveResizeHandler::DispatchHostWindowDragMovement
-// → xdg_toplevel.move with the most recent input serial; on X11 it dispatches
-// an XEvent for _NET_WM_MOVERESIZE; on macOS it begins a system move loop.
-// The compositor handles the drag until the user releases the mouse button.
+// Posted on the CEF UI thread (BeginWindowDrag must be called there). This is
+// the LINUX path: on Wayland it dispatches
+// WmMoveResizeHandler::DispatchHostWindowDragMovement → xdg_toplevel.move with
+// the most recent input serial; on X11 it dispatches an XEvent for
+// _NET_WM_MOVERESIZE. The compositor handles the drag until the user releases
+// the mouse button. (macOS uses a separate host-side move loop — see
+// MacWindowDragTask below.)
 // Note: views::Widget::RunMoveLoop() is the wrong API on Wayland (returns
 // immediately with a non-zero result) — see retro for details.
 //
