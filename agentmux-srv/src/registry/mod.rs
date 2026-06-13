@@ -29,7 +29,7 @@ mod store;
 mod tests;
 
 pub use migrate::{migrate_from_sqlite_once, MigrateStats};
-pub use paths::resolve_shared_registry_dir;
+pub use paths::{resolve_shared_definitions_dir, resolve_shared_registry_dir};
 pub use def_schema::{
     DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,
     DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,

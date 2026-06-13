@@ -431,6 +431,26 @@ async fn main() {
     } else {
         tracing::warn!("registry: could not resolve shared registry dir — mirror disabled");
     }
+    // Attach the GLOBAL (cross-channel) agent-definition store. Unlike the
+    // instance registry above (channel-scoped), this lives under
+    // ~/.agentmux/shared/ so user agents created in one channel are visible
+    // in every channel. Best-effort: disabled when the shared dir can't be
+    // resolved. See SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md (P0.2).
+    if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
+        match registry::DefinitionStore::open(def_dir.clone()) {
+            Ok(def_store) => {
+                wstore_raw.set_def_registry(Arc::new(def_store));
+                tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
+            }
+            Err(e) => tracing::warn!(
+                dir = %def_dir.display(),
+                error = %e,
+                "def registry: failed to open global definition store — definitions stay channel-local"
+            ),
+        }
+    } else {
+        tracing::warn!("def registry: could not resolve shared definitions dir — global definitions disabled");
+    }
     let wstore = Arc::new(wstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);
