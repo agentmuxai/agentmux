@@ -75,7 +75,18 @@ impl DefinitionStore {
                 Some(b) => b,
                 None => return Ok(()),
             },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => to_pretty(rec)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // Don't resurrect a tombstoned definition: a missing active
+                // file plus an existing `retired/<id>.json` means the agent
+                // was deliberately deleted (possibly in another channel). A
+                // stale cross-channel mirror calling `upsert` must NOT recreate
+                // it; the caller must `unretire` first to bring it back.
+                // (codex P1 on #1384.)
+                if self.retired_path(&rec.data.id).exists() {
+                    return Ok(());
+                }
+                to_pretty(rec)?
+            }
             Err(e) => return Err(e.into()),
         };
         write_atomic(&path, &bytes)?;
@@ -279,6 +290,8 @@ mod tests {
                 container_image: String::new(),
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
+                content: Vec::new(),
+                skills: Vec::new(),
             },
         }
     }
@@ -358,5 +371,23 @@ mod tests {
         let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(after.pointer("/schema_version"), Some(&serde_json::json!(999)));
         assert_eq!(after.pointer("/data/future_only"), Some(&serde_json::json!("field")));
+    }
+
+    #[test]
+    fn upsert_does_not_resurrect_a_tombstoned_definition() {
+        let (_t, s) = store();
+        s.upsert(&rec("aaa", "Demo")).unwrap();
+        s.retire("aaa").unwrap();
+        // A stale cross-channel mirror upserts the same id.
+        s.upsert(&rec("aaa", "Resurrected")).unwrap();
+        // Tombstone respected: still not active, not resurrected.
+        assert!(
+            s.list_active().unwrap().is_empty(),
+            "tombstoned definition must not be resurrected by upsert"
+        );
+        assert!(s.exists_anywhere("aaa"), "tombstone file still present");
+        // An explicit unretire is required to bring it back.
+        s.unretire("aaa").unwrap();
+        assert_eq!(s.list_active().unwrap().len(), 1);
     }
 }

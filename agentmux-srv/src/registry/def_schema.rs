@@ -34,9 +34,37 @@ pub struct DefinitionRecord {
     pub data: DefinitionRecordV1,
 }
 
+/// A content blob (system prompt / mcp / env / soul / startup) attached to
+/// a definition — mirrors a `db_agent_content` row. Carried in the global
+/// record so a cross-channel agent launches with its instructions even
+/// though `db_agent_content` is per-version. (codex P1 on #1384.)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DefContentBlob {
+    pub content_type: String,
+    pub content: String,
+}
+
+/// A skill attached to a definition — mirrors a `db_agent_skills` row.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DefSkillBlob {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub trigger: String,
+    #[serde(default)]
+    pub skill_type: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub content: String,
+}
+
 /// v1 definition payload — a faithful mirror of `AgentDefinition`'s
-/// columns. New fields go here under `#[serde(default)]` (so older files
-/// still deserialize) paired with a `DEF_MAX_SUPPORTED_SCHEMA` bump.
+/// columns, PLUS the per-definition content + skills blobs (which live in
+/// separate per-version tables and must travel with the definition for a
+/// cross-channel agent to launch with its instructions). New fields go
+/// here under `#[serde(default)]` (so older files still deserialize)
+/// paired with a `DEF_MAX_SUPPORTED_SCHEMA` bump.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DefinitionRecordV1 {
     pub id: String,
@@ -86,6 +114,13 @@ pub struct DefinitionRecordV1 {
     pub container_volumes: String,
     #[serde(default)]
     pub container_name: String,
+    /// System-prompt / mcp / env / soul / startup blobs (db_agent_content),
+    /// embedded so a cross-channel agent launches with its instructions.
+    #[serde(default)]
+    pub content: Vec<DefContentBlob>,
+    /// Skills (db_agent_skills) attached to this definition.
+    #[serde(default)]
+    pub skills: Vec<DefSkillBlob>,
 }
 
 #[derive(Debug, Error)]
@@ -163,6 +198,8 @@ mod tests {
                 container_image: String::new(),
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
+                content: Vec::new(),
+                skills: Vec::new(),
             },
         }
     }

@@ -31,8 +31,8 @@ mod tests;
 pub use migrate::{migrate_from_sqlite_once, MigrateStats};
 pub use paths::resolve_shared_registry_dir;
 pub use def_schema::{
-    DefValidationError, DefinitionRecord, DefinitionRecordV1, DEF_MAX_SUPPORTED_SCHEMA,
-    DEF_MIN_SUPPORTED_SCHEMA,
+    DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,
+    DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
 };
 pub use def_store::{DefStoreError, DefinitionStore};
 pub use schema::{
