@@ -59,8 +59,10 @@
         min-height: 0;
         overflow: hidden;
         line-height: 1;
-        margin: 5px;
-        margin-left: var(--space-1);
+        // No inset — the terminal fills the block body edge-to-edge. The old
+        // `margin: 5px` (4px left) painted a frame of the block background
+        // around the terminal on all four sides; we want zero gaps.
+        margin: 0;
     }
 
     .term-htmlelem {
