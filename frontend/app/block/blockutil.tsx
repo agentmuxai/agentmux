@@ -34,7 +34,6 @@ const VIEW_LABELS: Record<string, string> = {
     agent: "Agent",
     "agent-def": "Agent Definition",
     browser: "Browser",
-    chat: "Chat",
     drone: "Drone",
     editor: "Editor",
     help: "Help",
