@@ -308,20 +308,29 @@ import_into() {
                     ${_col_updated_at}, ${_col_user_hidden}
                  FROM db_agent_definitions WHERE id='$def_id';" 2>&1); then
                 case "$_def_copy_err" in
+                    *"dst."*)
+                        # Error names the attached TARGET schema (dst.*): the
+                        # target table is missing/corrupt or the target DB is not
+                        # an AgentMux DB. That's a target-side failure — abort,
+                        # don't mask it as a per-agent source skip (codex P2 on
+                        # #1380: "no such table: dst.db_agent_definitions").
+                        echo "ERROR: import aborted — target DB unusable for '$agent_name': ${_def_copy_err%%$'\n'*}" >&2
+                        exit 1
+                        ;;
                     *"no such column"*|*"no such table"*)
-                        # Source schema mismatch (an old / *.bak DB missing a
-                        # column the SELECT names) — skip THIS agent, continue.
+                        # SOURCE schema mismatch (an old / *.bak source missing a
+                        # column the SELECT names; the up-front probe already
+                        # proved the source TABLE exists) — skip THIS agent.
                         echo "  WARN  $agent_name — source schema mismatch; skipping (${_def_copy_err%%$'\n'*})" >&2
                         ((skipped++)) || true
                         continue
                         ;;
                     *)
-                        # The ATTACH/INSERT also writes the TARGET, so a non-schema
-                        # failure here is a target-side write problem (locked, read-only,
-                        # full disk, I/O). Abort loudly: silently skipping every agent
+                        # Any other failure (locked, read-only, full disk, I/O) is
+                        # target-side too — abort. Silently skipping every agent
                         # and exiting 0 would mask that the import never happened
                         # (codex P2 on #1380).
-                        echo "ERROR: import aborted — target write failed for '$agent_name': ${_def_copy_err%%$'\n'*}" >&2
+                        echo "ERROR: import aborted — write failed for '$agent_name': ${_def_copy_err%%$'\n'*}" >&2
                         exit 1
                         ;;
                 esac
