@@ -534,30 +534,51 @@ impl Controller for ShellController {
             // See specs/SPEC_RETIRE_WSH_2026_04_12.md.
             c.env("AGENTMUX", "1");
 
-            // Append AgentMux-managed tool dirs to PATH so agents can use
-            // jq, rg, etc. without the host having them installed system-wide.
-            // Appended (not prepended) so system PATH always wins.
+            // Wire AgentMux-managed tool dirs into the agent's PATH.
+            //
+            // Two stores, two precedence rules:
+            //
+            //   • Bundled store (`<exe_dir>/tools/bin`) ships the app's OWN
+            //     version-locked binaries — notably `agentmux-bashwrap`, the
+            //     streaming hook that MUST match the running build. It is
+            //     PREPENDED so it wins over any stale copy elsewhere on the
+            //     system PATH. A stale system-PATH `agentmux-bashwrap` (from a
+            //     leftover portable) silently shadowed the fixed one and
+            //     reintroduced the exit-130 bug — see
+            //     docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md. The
+            //     bundled jq/rg winning too is intended: agents get the app's
+            //     curated, deterministic tool versions regardless of host.
+            //
+            //   • User-managed store (`~/.agentmux/tools/bin`) holds tools the
+            //     user installed via /tools. APPENDED so the user's own system
+            //     PATH still wins for those.
             {
                 let sep = if cfg!(windows) { ";" } else { ":" };
                 let current_path = std::env::var("PATH").unwrap_or_default();
-                let mut extra: Vec<String> = Vec::new();
+                let mut prepend: Vec<String> = Vec::new();
+                let mut append: Vec<String> = Vec::new();
 
-                // User-managed store (~/.agentmux/tools/bin/)
-                if let Some(user_bin) = crate::backend::tool_store::user_tools_dir() {
-                    if user_bin.exists() {
-                        extra.push(user_bin.to_string_lossy().into_owned());
-                    }
-                }
-
-                // Bundled store (ships with the app, e.g. runtime/tools/bin/)
+                // Bundled store — prepended (app-owned, version-locked).
                 if let Some(bundled_bin) = crate::backend::tool_store::bundled_tools_dir() {
                     if bundled_bin.exists() {
-                        extra.push(bundled_bin.to_string_lossy().into_owned());
+                        prepend.push(bundled_bin.to_string_lossy().into_owned());
                     }
                 }
 
-                if !extra.is_empty() {
-                    c.env("PATH", format!("{current_path}{sep}{}", extra.join(sep)));
+                // User-managed store — appended (system PATH still wins).
+                if let Some(user_bin) = crate::backend::tool_store::user_tools_dir() {
+                    if user_bin.exists() {
+                        append.push(user_bin.to_string_lossy().into_owned());
+                    }
+                }
+
+                if !prepend.is_empty() || !append.is_empty() {
+                    let mut parts = prepend;
+                    if !current_path.is_empty() {
+                        parts.push(current_path);
+                    }
+                    parts.extend(append);
+                    c.env("PATH", parts.join(sep));
                 }
             }
 
