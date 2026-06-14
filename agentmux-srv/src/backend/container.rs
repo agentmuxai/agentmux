@@ -275,6 +275,38 @@ impl ContainerManager {
         Ok(info.exit_code)
     }
 
+    /// Best-effort interruption of the turn's process(es) inside a container.
+    ///
+    /// Docker/bollard has no "kill exec" API, so we `pkill` the matching process
+    /// via a short detached exec. The persistent-container model runs one turn at
+    /// a time (guarded by `run_lock`), so a single CLI process matches `pattern`
+    /// (the command name, e.g. `claude`). `-f` matches the full command line
+    /// because the CLI runs under `node`, whose process name isn't the CLI's.
+    ///
+    /// Requires `pkill` (procps) in the image. Fire-and-forget (detached); a
+    /// non-match (`pkill` exit 1, e.g. the turn already exited) is not an error.
+    pub async fn signal_exec_process(
+        &self,
+        container_name: &str,
+        pattern: &str,
+        force: bool,
+    ) -> Result<(), ContainerError> {
+        let signal = if force { "-KILL" } else { "-TERM" };
+        let cmd: Vec<&str> = vec!["pkill", signal, "-f", pattern];
+        let exec = self.inner.docker
+            .create_exec(container_name, CreateExecOptions {
+                cmd: Some(cmd),
+                attach_stdout: Some(false),
+                attach_stderr: Some(false),
+                ..Default::default()
+            })
+            .await?;
+        self.inner.docker
+            .start_exec(&exec.id, Some(StartExecOptions { detach: true, ..Default::default() }))
+            .await?;
+        Ok(())
+    }
+
     /// Gracefully stop a container. Uses SIGTERM → SIGKILL after `timeout_secs`.
     pub async fn stop(&self, container_name: &str, timeout_secs: i64) -> Result<(), ContainerError> {
         self.inner.docker

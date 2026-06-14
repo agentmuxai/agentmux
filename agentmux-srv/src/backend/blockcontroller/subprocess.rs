@@ -905,6 +905,11 @@ impl SubprocessController {
         let container_name_for_drain = container_name.clone();
         let base_cmd_for_drain = base_cmd.clone();
 
+        // Command name to pkill if the turn is interrupted (see the kill path in
+        // the reader select below). base_cmd[0] is the container-local CLI (e.g.
+        // `claude`); -f matches its full cmdline inside the container.
+        let kill_pattern = base_cmd.first().cloned().unwrap_or_else(|| "claude".to_string());
+
         // Build final command: append --resume <sid> if we have a prior session.
         let mut cmd = base_cmd;
         {
@@ -997,9 +1002,17 @@ impl SubprocessController {
                 }
             };
 
+            // Install a kill channel so stop_subprocess can interrupt this
+            // in-flight exec. docker exec has no kill API, so the reader below
+            // selects on kill_rx and pkills the in-container process. Stored only
+            // after a successful exec start (the early-return failure path above
+            // leaves kill_tx None — nothing to interrupt). Mirrors spawn_turn.
+            let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
+
             // Update status to running
             {
                 let mut inner = inner_arc.lock().unwrap();
+                inner.kill_tx = Some(kill_tx);
                 Self::set_status(&mut inner, STATUS_RUNNING);
             }
             if let Some(ref b) = broker {
@@ -1071,45 +1084,67 @@ impl SubprocessController {
             tracing::info!(block_id = %block_id, "container exec output reader started");
 
             let mut pinned = std::pin::pin!(output);
+            // Set when the turn is interrupted via stop_subprocess (Esc / agent.stop)
+            // — drives a non-zero exit so an interrupted turn isn't reported as Idle.
+            let mut killed = false;
             loop {
-                match pinned.next().await {
-                    None => {
-                        // Stream ended — flush any remaining partial line.
-                        if !line_buf.trim().is_empty() {
-                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats);
+                tokio::select! {
+                    // Prioritise the kill signal so Esc is responsive even under a
+                    // steady output stream.
+                    biased;
+                    kill = &mut kill_rx => {
+                        let force = kill.unwrap_or(false);
+                        tracing::info!(block_id = %block_id, force, "container turn interrupt — pkill in container");
+                        // Best-effort: actually terminate the in-container process.
+                        // Even if this fails (e.g. no procps on an old image), we
+                        // still break + finalize so AgentMux honours the stop.
+                        if let Err(e) = cm.signal_exec_process(&container_name, &kill_pattern, force).await {
+                            tracing::warn!(block_id = %block_id, error = %e, "container interrupt pkill failed");
                         }
-                        tracing::info!(block_id = %block_id, "container exec output EOF");
+                        killed = true;
                         break;
                     }
-                    Some(Err(e)) => {
-                        tracing::warn!(block_id = %block_id, error = %e, "container exec output read error");
-                        stream_errored = true;
-                        break;
-                    }
-                    Some(Ok(log_output)) => {
-                        let bytes = match log_output {
-                            LogOutput::StdOut { message } => message,
-                            LogOutput::StdErr { message } => {
-                                // Log stderr but don't publish as blockfile output.
-                                let s = String::from_utf8_lossy(&message);
-                                for line in s.lines() {
-                                    if !line.trim().is_empty() {
-                                        tracing::info!(block_id = %block_id, stderr = %line, "container exec stderr");
-                                    }
-                                }
-                                continue;
-                            }
-                            _ => continue,
-                        };
-                        let chunk = String::from_utf8_lossy(&bytes);
-                        for ch in chunk.chars() {
-                            if ch == '\n' {
+                    item = pinned.next() => {
+                        match item {
+                            None => {
+                                // Stream ended — flush any remaining partial line.
                                 if !line_buf.trim().is_empty() {
                                     Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats);
                                 }
-                                line_buf.clear();
-                            } else {
-                                line_buf.push(ch);
+                                tracing::info!(block_id = %block_id, "container exec output EOF");
+                                break;
+                            }
+                            Some(Err(e)) => {
+                                tracing::warn!(block_id = %block_id, error = %e, "container exec output read error");
+                                stream_errored = true;
+                                break;
+                            }
+                            Some(Ok(log_output)) => {
+                                let bytes = match log_output {
+                                    LogOutput::StdOut { message } => message,
+                                    LogOutput::StdErr { message } => {
+                                        // Log stderr but don't publish as blockfile output.
+                                        let s = String::from_utf8_lossy(&message);
+                                        for line in s.lines() {
+                                            if !line.trim().is_empty() {
+                                                tracing::info!(block_id = %block_id, stderr = %line, "container exec stderr");
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    _ => continue,
+                                };
+                                let chunk = String::from_utf8_lossy(&bytes);
+                                for ch in chunk.chars() {
+                                    if ch == '\n' {
+                                        if !line_buf.trim().is_empty() {
+                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats);
+                                        }
+                                        line_buf.clear();
+                                    } else {
+                                        line_buf.push(ch);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1124,7 +1159,11 @@ impl SubprocessController {
             // unavailable code, or a failed inspect is treated as a failure so a
             // crashed / non-zero in-container CLI is never misreported to the
             // client and to the health monitor as a successful (Idle) turn.
-            let exit_code: i32 = if stream_errored {
+            let exit_code: i32 = if killed {
+                // Interrupted by stop_subprocess — report non-zero (matches the
+                // host spawn_turn kill path) so health treats it as not-Idle.
+                -1
+            } else if stream_errored {
                 1
             } else {
                 match cm.inspect_exec(&exec_id).await {
