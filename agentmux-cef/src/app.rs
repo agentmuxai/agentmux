@@ -241,25 +241,108 @@ extern "C" fn write_linux_window_properties(
     1
 }
 
-/// Best-effort detection of a VMware guest. On VMware, CEF's default
-/// ANGLE-on-Vulkan lands on software SwiftShader (no hardware Vulkan ICD) and
-/// Chromium's GPU blocklist disables accelerated WebGL/compositing for the
-/// virtual GPU. We use this to auto-route ANGLE onto the hardware SVGA3D GL
-/// path and override the blocklist (see `on_before_command_line_processing`).
-/// Cached — the DMI files don't change during a run.
+/// GPU capability tier, measured once at startup to drive ANGLE backend
+/// selection. Precedence: hardware Vulkan → hardware GL → software (SwiftShader).
+/// ANGLE is only retargeted, never bypassed. See the GPU block in
+/// `on_before_command_line_processing` and
+/// docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md.
 #[cfg(target_os = "linux")]
-fn is_vmware_guest() -> bool {
-    use std::sync::OnceLock;
-    static VMWARE: OnceLock<bool> = OnceLock::new();
-    *VMWARE.get_or_init(|| {
-        ["/sys/class/dmi/id/sys_vendor", "/sys/class/dmi/id/product_name"]
-            .iter()
-            .any(|p| {
-                std::fs::read_to_string(p)
-                    .map(|s| s.to_ascii_lowercase().contains("vmware"))
-                    .unwrap_or(false)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GpuTier {
+    /// A hardware Vulkan device is present — leave Chromium's default (Vulkan).
+    HwVulkan,
+    /// No hardware Vulkan but a DRM render node exists — route ANGLE to GL and
+    /// override the GPU blocklist (the VMware/SVGA3D case).
+    HwGl,
+    /// Neither — leave Chromium's default (software SwiftShader).
+    Software,
+}
+
+#[cfg(target_os = "linux")]
+impl GpuTier {
+    fn as_str(self) -> &'static str {
+        match self {
+            GpuTier::HwVulkan => "hw-vulkan",
+            GpuTier::HwGl => "hw-gl",
+            GpuTier::Software => "software",
+        }
+    }
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "hw-vulkan" => Some(GpuTier::HwVulkan),
+            "hw-gl" => Some(GpuTier::HwGl),
+            "software" => Some(GpuTier::Software),
+            _ => None,
+        }
+    }
+}
+
+/// Resolve the GPU tier once. `on_before_command_line_processing` runs per
+/// process; the browser process (which starts first, before any child is
+/// spawned) finds `AGENTMUX_GPU_TIER` unset, probes the hardware, and publishes
+/// the result. Child processes (gpu/renderer/utility) inherit that env var and
+/// read it back — so the `VkInstance` probe runs exactly once, in the browser.
+#[cfg(target_os = "linux")]
+fn detect_gpu_tier() -> GpuTier {
+    if let Ok(v) = std::env::var("AGENTMUX_GPU_TIER") {
+        if let Some(t) = GpuTier::from_str(&v) {
+            return t;
+        }
+    }
+    let tier = if has_hardware_vulkan() {
+        GpuTier::HwVulkan
+    } else if has_drm_render_node() {
+        GpuTier::HwGl
+    } else {
+        GpuTier::Software
+    };
+    // Publish for child processes (inherited through the environment on spawn).
+    std::env::set_var("AGENTMUX_GPU_TIER", tier.as_str());
+    tracing::info!(tier = tier.as_str(), "resolved GPU tier for ANGLE selection");
+    tier
+}
+
+/// True if a *hardware* Vulkan device is present. Enumerates Vulkan physical
+/// devices and accepts any whose `device_type` is not `CPU` — llvmpipe/lavapipe/
+/// SwiftShader all report `CPU`. Fully defensive: any load/create/enumerate
+/// failure ⇒ false (we then fall through to the GL check).
+#[cfg(target_os = "linux")]
+fn has_hardware_vulkan() -> bool {
+    use ash::vk;
+    let entry = match unsafe { ash::Entry::load() } {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_0);
+    let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+    let instance = match unsafe { entry.create_instance(&create_info, None) } {
+        Ok(i) => i,
+        Err(_) => return false,
+    };
+    let has_hw = unsafe { instance.enumerate_physical_devices() }
+        .map(|devices| {
+            devices.iter().any(|&d| {
+                unsafe { instance.get_physical_device_properties(d) }.device_type
+                    != vk::PhysicalDeviceType::CPU
             })
-    })
+        })
+        .unwrap_or(false);
+    unsafe { instance.destroy_instance(None) };
+    has_hw
+}
+
+/// True if a DRM render node (`/dev/dri/renderD*`) exists — a kernel GPU with a
+/// render node, i.e. a real hardware GL path (vmwgfx on VMware, i915/amdgpu/
+/// nvidia on bare metal). Heuristic; the spec's §7 upgrade path tightens this to
+/// a `GL_RENDERER` software-marker check.
+#[cfg(target_os = "linux")]
+fn has_drm_render_node() -> bool {
+    std::fs::read_dir("/dev/dri")
+        .map(|rd| {
+            rd.flatten()
+                .any(|e| e.file_name().to_string_lossy().starts_with("renderD"))
+        })
+        .unwrap_or(false)
 }
 
 /// Compute a centered 70% rect for the monitor the window is currently on.
@@ -513,40 +596,46 @@ wrap_app! {
                     cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
                 }
 
-                // ── GPU backend on virtual guests (ANGLE + blocklist) ────────
-                // CEF 148 defaults ANGLE to Vulkan. VMware guests expose no
-                // hardware Vulkan ICD (only software llvmpipe/SwiftShader), so
-                // ANGLE falls to software SwiftShader — its present path stalls
-                // requestAnimationFrame and the xterm terminal paints in bursts
-                // ("type 10 chars, pause, dump"). VMware DOES expose hardware
-                // OpenGL (SVGA3D via Mesa svga), so route ANGLE onto GL. And
-                // once on hardware GL, Chromium's GPU blocklist flags the
-                // virtual GPU as unreliable and disables accelerated WebGL +
-                // gpu_compositing; `--ignore-gpu-blocklist` overrides that
-                // (verified: WebGL2 renders on SVGA3D, GPU process stable, and
-                // xterm auto-upgrades to its WebGL renderer). Both are gated on
-                // VMware detection so real-hardware Linux keeps Chromium's
-                // defaults.
+                // ── ANGLE backend precedence (capability-probed) ─────────────
+                // Precedence: hardware Vulkan → hardware GL → software
+                // (SwiftShader). CEF 148 defaults ANGLE to Vulkan and accepts a
+                // *software* Vulkan ICD over a perfectly good hardware-GL path —
+                // exactly the VMware case (no HW Vulkan, but HW SVGA3D GL), where
+                // the result is SwiftShader: burst-paint terminals + no WebGL. We
+                // measure the GPU tier and retarget ANGLE accordingly; ANGLE is
+                // never bypassed, only pointed at the best real backend. On the
+                // HW-GL rung we also --ignore-gpu-blocklist (Chromium blocklists
+                // the virtual GPU it just lost Vulkan on). No vendor gate: VMware
+                // simply lands in the HW-GL rung by measurement, real GPUs stay
+                // on Vulkan, headless stays software. Win/macOS report hardware
+                // and land in the top rung untouched.
+                // Spec: docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md
                 //
-                // Override: AGENTMUX_ANGLE={gl,vulkan,swiftshader,default} sets
-                // the ANGLE backend explicitly (wins over the VM default);
-                // AGENTMUX_CEF_EXTRA_FLAGS appends arbitrary switches (below).
-                #[cfg(target_os = "linux")]
-                let vm_gpu = is_vmware_guest();
-                #[cfg(not(target_os = "linux"))]
-                let vm_gpu = false;
-
-                let angle = std::env::var("AGENTMUX_ANGLE")
+                // Authority: explicit AGENTMUX_ANGLE env > measured precedence >
+                // Chromium default. AGENTMUX_CEF_EXTRA_FLAGS appends switches.
+                let angle_override = std::env::var("AGENTMUX_ANGLE")
                     .ok()
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| vm_gpu.then(|| "gl".to_string()));
+                    .filter(|s| !s.is_empty());
+
+                #[cfg(target_os = "linux")]
+                let (angle, ignore_blocklist): (Option<String>, bool) = match angle_override {
+                    Some(a) => (Some(a), false),
+                    None => match detect_gpu_tier() {
+                        GpuTier::HwVulkan => (None, false),
+                        GpuTier::HwGl => (Some("gl".to_string()), true),
+                        GpuTier::Software => (None, false),
+                    },
+                };
+                #[cfg(not(target_os = "linux"))]
+                let (angle, ignore_blocklist): (Option<String>, bool) = (angle_override, false);
+
                 if let Some(angle) = angle {
                     cmd.append_switch_with_value(
                         Some(&CefString::from("use-angle")),
                         Some(&CefString::from(angle.as_str())),
                     );
                 }
-                if vm_gpu {
+                if ignore_blocklist {
                     cmd.append_switch(Some(&CefString::from("ignore-gpu-blocklist")));
                 }
 
