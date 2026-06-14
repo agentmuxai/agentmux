@@ -703,7 +703,13 @@ tasks:
                   # docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
                   mkdir -p "$DEV_DIR/runtime/tools/bin"
                   cp target/release/agentmux-bashwrap.exe "$DEV_DIR/runtime/tools/bin/"
-                  echo "Built $DEV_DIR with launcher layout (launcher at root, host + DLLs + srv in runtime/, bashwrap in runtime/tools/bin/)"
+                  # MCP server — the auto-injected .mcp.json uses the bare name
+                  # "command": "agentmux-mcp", resolved via the bundled tools/bin
+                  # that agentmux-srv prepends to the agent PATH (tool_store.rs:84).
+                  # Without this the Shell tool is command-not-found under task dev.
+                  # Built by build:host:windows (-p agentmux-mcp), like bashwrap.
+                  cp target/release/agentmux-mcp.exe "$DEV_DIR/runtime/tools/bin/"
+                  echo "Built $DEV_DIR with launcher layout (launcher at root, host + DLLs + srv in runtime/, bashwrap + mcp in runtime/tools/bin/)"
                 else
                   # Unix flat layout (Phase 1,
                   # SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): launcher
@@ -736,6 +742,12 @@ tasks:
                   # Fail loud: build:host:{darwin,linux} build -p agentmux-bashwrap,
                   # so a missing binary here is a real regression, not "optional".
                   cp target/release/agentmux-bashwrap "$DEV_DIR/tools/bin/"
+                  # MCP server — the auto-injected .mcp.json uses the bare name
+                  # "command": "agentmux-mcp", resolved via the bundled tools/bin
+                  # that agentmux-srv prepends to the agent PATH (tool_store.rs:84).
+                  # Without this the Shell tool is command-not-found under task dev.
+                  # Built by build:host:{darwin,linux} (-p agentmux-mcp), like bashwrap.
+                  cp target/release/agentmux-mcp "$DEV_DIR/tools/bin/"
                   if [ ! -f "$DEV_DIR/agentmux-launcher" ]; then
                     echo "❌ $DEV_DIR/agentmux-launcher not found — build:host:{{OS}} should have staged it"
                     exit 1
