@@ -1,21 +1,36 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! One-shot global migration: backfill user-agent DEFINITIONS (with their
-//! content + skills) from every channel's per-version `objects.db` into the
-//! GLOBAL definition store, so EXISTING agents become cross-channel without
-//! waiting for the next edit. Idempotent via a `.migrated_definitions`
-//! marker in the store root; read-only on every scanned SQLite.
+//! Global migration: backfill user-agent DEFINITIONS (with their content +
+//! skills) from every channel's per-version `objects.db` — and every `dev/`
+//! branch DB — into the GLOBAL definition store, so EXISTING agents become
+//! cross-channel without waiting for the next edit. Read-only on every scanned
+//! SQLite.
+//!
+//! **Version-gated, re-runnable marker** (not strictly one-shot): the
+//! `.migrated_definitions` marker in the store root records the
+//! [`MIGRATION_VERSION`] that last ran. A marker older than the current version
+//! — including the legacy `migrated` text, which parses as version 0 — re-runs
+//! the scan ONCE, so users whose earlier pass was incomplete recover
+//! automatically on the next launch. Bump [`MIGRATION_VERSION`] whenever the
+//! scan logic changes to trigger a one-time re-run for everyone.
+//!
+//! On a re-run, an agent already in the global store is refreshed only when the
+//! scanned copy is strictly fresher than the global record (so a broken earlier
+//! pass's stale/content-less copy is corrected) — never downgraded below what
+//! the live write-mirror has since advanced, and never resurrected if
+//! tombstoned. (codex P1 / reagent P2 #1391.)
 //!
 //! Cross-channel agent persistence, P0.2d
 //! (`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
 //!
-//! Resilience mirrors `scripts/import-agents.sh`: a single unreadable /
-//! locked / old-schema `objects.db` is skipped with a warning, never
-//! aborting the pass. The marker is written unconditionally after a pass —
-//! a transiently-skipped DB's agents still go global on their next edit via
-//! the live write-mirror (P0.2b), so nothing is permanently lost and the
-//! migration never loops forever on a permanent old-schema failure.
+//! Resilience mirrors `scripts/import-agents.sh`: a single unreadable / locked
+//! / old-schema `objects.db` is skipped with a warning, never aborting the
+//! pass. The marker is written after a pass even if some DBs were skipped — a
+//! transiently-skipped DB's agents still go global on their next edit via the
+//! live write-mirror (P0.2b), and a future [`MIGRATION_VERSION`] bump re-scans
+//! everything — so nothing is permanently lost and the migration never loops
+//! forever on a permanent old-schema failure.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -128,17 +143,33 @@ pub fn migrate_definitions_global_once(
             }
         }
     }
-    for (id, (rec, _f)) in best {
-        // Don't downgrade a record the live write-mirror already advanced.
-        // A cross-channel edit updates the global record without touching
-        // any channel's SQLite, so the channel-DB copy this pass found can
-        // be OLDER than what's already global — only backfill agents not
-        // yet present. (reagent P2.) `upsert` also refuses to resurrect a
-        // tombstoned id.
+    for (id, (rec, freshness)) in best {
+        // Decide whether to write based on freshness vs any existing global
+        // record:
+        //   - absent              → backfill (new agent).
+        //   - present & OLDER      → refresh. A broken earlier pass may have
+        //     written a stale or content-less copy globally while a fresher
+        //     channel/dev DB holds the real one; the recovery re-run must
+        //     correct it. (codex P1.)
+        //   - present & not-older  → skip. The live write-mirror advances the
+        //     global record without touching any channel's SQLite, so a
+        //     channel-DB copy can be staler than what's already global — never
+        //     downgrade it. (reagent P2.)
+        // `upsert` additionally refuses to resurrect a tombstoned id.
+        //
+        // Freshness comparison: the scanned side is max(def, content, skill)
+        // timestamps; the in-memory global record only carries `updated_at`
+        // (its content/skill blobs are timestamp-less), so we compare against
+        // that. The asymmetry biases toward refreshing on a recovery run, which
+        // is the safe direction, and still never downgrades a genuinely-newer
+        // global `updated_at`.
         match store.get(&id) {
-            Ok(Some(_)) => {
-                stats.records_skipped_existing += 1;
-                continue;
+            Ok(Some(existing)) => {
+                if freshness <= existing.data.updated_at {
+                    stats.records_skipped_existing += 1;
+                    continue;
+                }
+                // else: scanned copy is strictly fresher → fall through to upsert.
             }
             Ok(None) => {}
             Err(e) => {
@@ -528,6 +559,38 @@ mod tests {
         );
         assert_eq!(stats.records_written, 0);
         assert_eq!(stats.records_skipped_existing, 1);
+    }
+
+    #[test]
+    fn refreshes_a_stale_global_record_on_rerun() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // The channel DB holds a FRESHER copy (updated_at=300).
+        let db = make_channel_db(home, "ch-a", "0.44.1");
+        insert_user_agent(&db, "dup", "FreshName", 300);
+        let store = store_at(home);
+        // The global store holds a STALE copy a broken earlier pass wrote
+        // (older updated_at, e.g. content-less). The recovery re-run must
+        // REFRESH it from the fresher scan rather than skip it. (codex P1.)
+        store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "dup".to_string(),
+                    name: "StaleName".to_string(),
+                    provider: "claude".to_string(),
+                    updated_at: 50,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        let rec = store.get("dup").unwrap().unwrap();
+        assert_eq!(rec.data.name, "FreshName", "stale global record must be refreshed from the fresher scan");
+        assert_eq!(rec.data.content.len(), 1, "content backfilled on refresh");
+        assert_eq!(stats.records_written, 1);
+        assert_eq!(stats.records_skipped_existing, 0);
     }
 
     #[test]
