@@ -1119,6 +1119,17 @@ class RpcApiType {
         return client.rpcCall("agentinput", data, opts);
     }
 
+    // command "shellexec" [call]
+    // Run a shell command in the agent's working directory. Invoked by the
+    // `!cmd` composer prefix. Returns buffered stdout/stderr after completion.
+    ShellExecCommand(
+        client: RpcClient,
+        data: { blockid: string; command: string; working_dir: string },
+        opts?: RpcOpts,
+    ): Promise<{ exit_code: number; stdout: string; stderr: string }> {
+        return client.rpcCall("shellexec", data, opts);
+    }
+
     // command "agentstop" [call]
     AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("agentstop", data, opts);

@@ -240,6 +240,31 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // handled client-side and must not touch the backend queue at
         // all. Unknown `/foo` falls through to a real turn.
         const trimmed = message.trim();
+
+        // Bang commands: `!cmd` runs a shell command in the agent's working
+        // directory and surfaces output in the launch log. Never falls through
+        // to the backend agent queue.
+        // TurnStart was already dispatched by handleSendMessage (agent-view.tsx)
+        // before this function was called. Reset it immediately so the pane does
+        // not stay in Submitting state for the full 30s watchdog window — no
+        // agent turn was initiated, only a sidecar shell exec.
+        if (trimmed.startsWith("!")) {
+            try {
+                await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
+            } finally {
+                // TurnStart was dispatched by handleSendMessage before sendMessage
+                // was called. Reset it so the pane returns to Idle instead of waiting
+                // for the 30s watchdog — but only if the pane was idle when !cmd was
+                // submitted. If wasAlreadyWorking is true, a real agent turn was
+                // already streaming; resetting to Idle here would clobber its UI state
+                // until the next backend event arrives.
+                if (!wasAlreadyWorking) {
+                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                }
+            }
+            return;
+        }
+
         if (trimmed.startsWith("/")) {
             const outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
             if (outcome.kind === "handled") return;
@@ -390,4 +415,41 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         closeHelp,
         availableCommands,
     };
+}
+
+/**
+ * Run a shell command in the agent's working directory via the `shellexec`
+ * RPC and surface stdout/stderr in the launch log.
+ *
+ * Called when the user prefixes a composer message with `!`. The blockId is
+ * passed explicitly (rather than via ctx) because ctx.blockId is a string and
+ * we need it for the RPC payload; ctx provides only the log sink here.
+ */
+async function dispatchBangCommand(
+    command: string,
+    blockId: string,
+    ctx: SlashCommandContext,
+): Promise<void> {
+    if (!command) {
+        ctx.log("system", "!: command required", "warn");
+        return;
+    }
+    const workingDir = (ctx.block()?.meta?.["cmd:cwd"] as string | undefined) ?? "";
+    ctx.log("system", `$ ${command}`);
+    try {
+        const result = await RpcApi.ShellExecCommand(
+            TabRpcClient,
+            { blockid: blockId, command, working_dir: workingDir },
+            // Long timeout: shell commands like `npm test` or `cargo build` can
+            // take minutes. Default 5s RPC timeout would return EC-TIME immediately.
+            { timeout: 300_000 },
+        );
+        if (result.stdout) ctx.log("system", result.stdout.trimEnd());
+        if (result.stderr) ctx.log("system", result.stderr.trimEnd(), "warn");
+        if (result.exit_code !== 0) {
+            ctx.log("system", `exit ${result.exit_code}`, "warn");
+        }
+    } catch (e) {
+        ctx.log("system", `!: ${(e as Error).message ?? String(e)}`, "warn");
+    }
 }
