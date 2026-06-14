@@ -1,5 +1,143 @@
 # AgentMux Version History
 
+## 0.45.0 — 2026-06-14
+
+- fix(container): thread global_output_zone through the container-exec output path (publish_line) so main compiles — semantic merge conflict between #1399 and #1357 (#1401)
+- fix(linux): floater drag uses JS-driven positioning (mirrors macOS) so redock hover + drop work
+- feat(agent-pane): responsive aux info tiers + color system
+- fix(css): pointer cursor on all scrollbar thumbs — global WebKit, xterm, OverlayScrollbars, Monaco
+- fix(scripts): import-agents rehydrates Claude sessions into the isolated CLAUDE_CONFIG_DIR home so resume actually replays the conversation (history store P0)
+- fix(history): scan AgentMux-isolated Claude homes so the history browse surfaces agent conversations, not just global ~/.claude (history P1a)
+- feat(history): clear/delete past sessions — history.Delete + history.Clear RPCs remove native transcripts (history P1b)
+- diag(agent-pane): log parent container + detached child + ancestry the instant replaceChild would throw, to finally name the reconcileArrays crash component
+- fix(agent-pane): disable per-block OverlayScrollbars on streaming markdown — the actual cause of the replaceChild crash (#1326), found via the new diagnostic
+- fix(term): reclaim dead space to the right of terminal text at all zoom levels
+- feat(statusbar): GPU status indicator — enabled/disabled + driver info
+- feat(agent-pane): persistent shell node — ShellNode type, reducer, PersistentShellBlock component and styles (Phase 1 frontend skeleton)
+- fix(agent-pane): idle-send messages no longer flash in the queued zone
+- feat(agent): fork prompt for parallel sessions — detect active panes and offer named fork instead of silent collision
+- fix(layout): resize border no longer triggers pane tear-off
+- **Root cause:** The resize handle (6 px, centered at the pane boundary) overlaps
+- 1.5 px with the top of the adjacent pane's header. In that overlap zone the
+- resize handle wins via `z-index: 3` vs the header's `z-index: auto`, but under
+- WebView2 timing edge cases (layout recomputing during a reactive update,
+- subpixel rounding at the boundary) the header occasionally received the
+- `mousedown` instead — starting a pragmatic-dnd drag that set
+- `_currentDragPayload`, which the `CrossWindowDragMonitor` then interpreted as a
+- tear-off request.
+- **Fixes applied (both in `TileLayout.win32.tsx`):**
+- 1. `ResizeHandle.onPointerDown` now calls `event.preventDefault()` before
+-    `setPointerCapture`. `preventDefault` on `pointerdown` suppresses the
+-    subsequent `mousedown` event; since HTML5 drag-and-drop requires `mousedown`
+-    to start, no drag can initiate from a press on the resize handle even if an
+-    underlying element would otherwise react.
+- 2. `DisplayNode.canDrag` now rejects drags whose initial pointer position
+-    (`input.clientX/Y`) falls within the ±halfSize zone of any resize handle's
+-    `centerPx` (converted to display-container-local coordinates). This is
+-    defense-in-depth for the race: if the pointer barely misses the handle
+-    element and lands on a header pixel near the border, the drag is cancelled
+-    before `onDragStart` ever sets `_currentDragPayload`.
+- Tear-off remains fully functional when dragging from inside the pane header
+- away from the border zone.
+- fix(gpu): bundle SwiftShader software-GL fallback on Windows
+- fix(package): copy SwiftShader DLLs into portable runtime (follow-up to #1344)
+- fix(bashwrap): collapse lone CR sequences so spinner animations don't render as one line per frame
+- feat(container): add container_image, container_volumes, container_name to AgentDefinition schema and RPC types (Phase 0)
+- fix(agents): surface the real cause of a failed agent run (rate-limit/auth/OOM/crash) instead of an opaque exit code
+- fix(gpu): embed supportedOS manifest so Windows reports the true OS version — fixes GPU process crash
+- feat(container): add Dockerfile and CI workflow for agent-claude image
+- feat(agent-pane): context window fill bar in composer strip
+- feat(agent-pane): persistent shell node Phase 2 — backend + MCP tool
+- feat(container): Phase 2 — wire agentinput/agent.send to docker exec for container agents
+- fix(agent): remove bookmark feature; right-click now shows standard tile context menu
+- **What changed:**
+- The bookmark feature has been removed from the agent pane:
+- - **Right-click on agent feed body** now shows the standard split-right / split-left /
+-   float / close tile context menu — matching terminal and other pane types.
+-   Previously `DocumentRow.handleContextMenu` intercepted every right-click on the
+-   feed body and replaced the tile menu with a bookmark-only menu, making the standard
+-   tile actions unreachable from the agent pane body.
+- - **Tool expansion overlay** no longer shows a Bookmark button in the action bar.
+- - **Node hover strip** no longer shows a bookmark icon on row hover.
+- - **Ctrl+B** no longer opens a bookmarks panel in the agent view.
+- - **'b' key** on a focused row no longer triggers a bookmark action.
+- **Files deleted:**
+- - `frontend/app/view/agent/hooks/useBookmarks.ts`
+- - `frontend/app/view/agent/components/BookmarksPanel.tsx`
+- - `frontend/app/view/agent/styles/_bookmarks.scss`
+- **Files modified:** `agent-view.tsx`, `agent-view.scss`, `DocumentRow.tsx`,
+- `NodeHoverStrip.tsx`, `ToolOverlayActions.tsx`, `ToolBlock.tsx`,
+- `ToolBlockOverlay.tsx`, `AgentDocumentView.tsx`, `AgentDocumentVirtualList.tsx`,
+- `useAgentKeyboard.ts`, `types.ts`, `gotypes.d.ts`.
+- fix(agent): remove keyboard hint line; soften input focus border
+- Removes the "Enter to send • Shift+Enter for newline • Esc to clear / stop"
+- hint line from the agent pane composer footer — it consumes vertical space
+- without adding value for returning users.
+- Changes the textarea focus border from full `--accent-color` to
+- `color-mix(in srgb, var(--accent-color) 40%, transparent)` — a lighter
+- variation of the pane-selected border color that stays visually connected
+- to the theme without competing with the pane focus ring.
+- fix(term): make scrollbar thumb always visible and clickable
+- fix(term): fix xterm paste truncation — chunked send, larger input buffer, BPM on by default
+- fix(macos): window drag and right-click context menus now coexist on the title bar
+- The macOS title bar used `-webkit-app-region: drag` so the OS could move the
+- window, but Chromium swallows every event (including `contextmenu`) on those
+- regions — so right-click context menus never fired on empty title-bar space,
+- and the only workaround broke dragging. Switch macOS to the JS-driven drag
+- model already used on Linux: the header stays HTCLIENT (right-click works
+- everywhere) and a left-button-only drag is handed to the host, which runs a
+- manual move loop — pumping the drag events and repositioning the window until
+- the button is released — with no patched libcef.
+- Dragging the window and right-clicking the title bar now both work on the same
+- surface.
+- fix(agent): inject Bash(agentmux-bashwrap *) into permissions.allow so bashwrap exec is not blocked
+- fix(agent): write-state schema v2 — replace nodes[] snapshot with a lightweight overlay + NDJSON restore to eliminate the renderer OOM crash. v2 restore is scoped to same-block reopen (the OOM-critical path); cross-block "structural continuation" falls back to NDJSON replay until a unified per-agent log lands (follow-up).
+- feat(blockfile): output.idx byte-offset index for O(1) line seek
+- Adds a lazily-built, self-validating byte-offset index (`output.idx`) so
+- `blockfile:read_range` can seek directly to a requested line range instead of
+- loading the whole `output` file and slicing by line number.
+- The index is a pure cache of `output` with no incremental mutation: an 8-byte
+- header records the output size it was built for, and the read path rebuilds it
+- (one streaming scan) only when the output size changes. Because it is always
+- derived from the current output in one shot, it cannot desync, mishandle
+- chunk-split lines, or miscount blank lines. It indexes non-blank lines to match
+- the reader's addressing, is gated to non-circular files, and falls back to the
+- previous full-scan path on any error.
+- fix(scroll): stickToBottom can now disengage on short conversations
+- fix(bashwrap): keep CONIN writer alive until after child.wait() — prevents CTRL_C_EVENT exit 130 on Windows
+- fix(term): restore URL hover in terminal pane
+- fix(term): file path links now open in Explorer/Finder on click
+- fix(term): clicking a directory path opens it; file paths reveal in parent
+- fix(block): focused ring falls back to accent when agent color is unusable; 'Terminal' is not an agent id
+- fix(bashwrap): wrap commands in a /dev/null brace-group redirect instead of exec </dev/null — the exec form closed the child's ConPTY console input and ConPTY killed every streamed bash command with exit 130 before it ran; the group redirect gives stdin-readers EOF without firing ctrl-c (#1368)
+- fix(term): xterm-6 terminal scrollbar is clickable and shows the default cursor — lift the overlay scrollbar above the link-layer canvas (z-index) and force cursor:default; retire the dead xterm-5 fit/reservation + native-scrollbar code and add a CDP hit-test smoke guard (#1369, #1370)
+- fix(term): remove the 5px term-connectelem margin that framed every terminal pane with block-background gaps on all four sides — the terminal now fills the block body edge-to-edge
+- fix(security): strip ipc_token from renderer URL and denylist secret keys in get_env
+- fix(term): terminal scrollbar sits flush against the pane's right edge — grow .xterm to fill the flex connect width so the overlay scrollbar (anchored right:0) no longer floats a zoom-varying sub-cell remainder away from the edge
+- chore(srv): remove dead Go-port modules, unused subtle dep, and Tauri event constants
+- chore(cruft): remove dead chat view, orphaned assets, Go-era configs
+- fix(tear-off): keep the pulsing-brain splash covering the whole window bootstrap until content has settled, then cross-fade — instead of removing it mid-mount, which exposed the bare-chrome/empty/piecemeal-mount flashes (most visible on tear-off)
+- chore: adopt Node 24 / npm 11 toolchain; drop unused color dep
+- fix(scripts): import-agents.sh skips bad/old source DBs instead of aborting; strip CRLF from slug
+- fix(dev-badge): show DEV only under task dev, not on portable/release builds — self-identify build type by exe path, not the leaked AGENTMUX_RUNTIME_MODE env
+- fix(build): agents always run the app's own bashwrap, not a stale system-PATH copy — dev build now bundles agentmux-bashwrap into the runtime tools/bin, and the sidecar PREPENDS the bundled (version-locked) tools dir to the agent PATH instead of appending it (was the exit-130 root cause: a stale Downloads-portable bashwrap on the system PATH shadowed the fixed bundled one)
+- feat(registry): add session_id to named-agent record (schema v2, lazy-bump)
+- feat(registry): global agent-definition store (cross-channel P0.2a)
+- feat(registry): cross-channel agent definitions write-mirror + read-first (P0.2b+c)
+- feat(registry): backfill existing agents into global store (cross-channel P0.2d)
+- refactor(registry): decouple instance working-dir base from registry root (cross-channel P0.3a)
+- chore(diag): log which agentmux-bashwrap an agent will run at spawn — info when the bundled (version-locked) binary is used, WARN when it's missing and the agent will fall through to a possibly-stale system-PATH copy. Cross-check with agentmux-bashwrap --version (already supported). Cheap guardrail for the stale-binary trap (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13)
+- feat(registry): re-root instance registry to global shared dir + scan all channels (cross-channel P0.3b)
+- feat(registry): per-record source agents base for cross-channel workdir reconstruction (P0.4)
+- fix(registry): cross-channel agent backfill now captures ALL existing agents — the one-shot definition migration was skipping whole DBs on a missing column (older schemas lack container_*), never scanned dev/ branches, and wrote an unconditional one-shot marker after that incomplete pass. Now: schema-resilient column handling (PRAGMA-introspect, default missing), scans channels AND dev, and a versioned marker that re-runs once so existing users recover their agents (Qooma, etc.) cross-channel+version. See ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13
+- docs(architecture): add canonical code-anchored agent-data + cross-channel overview; mark 5 overtaken specs SUPERSEDED in place (banner → canonical doc) instead of deleting, since live code comments + kept specs cite them as design rationale
+- fix(registry): anchor instance migration on the global agents root so "My Agents" repopulates cross-channel (instances; complements #1391's definitions fix)
+- fix(linux): capability-probed ANGLE backend precedence (hardware Vulkan → hardware GL → SwiftShader) — fixes burst-paint terminals and enables hardware WebGL on VMware/SVGA3D (and any no-Vulkan-but-has-GL) guests, with no vendor gate
+- fix(launcher): isolate each local build as its own AgentMux instance — bake a per-build BUILD_ID into the data-dir channel (data dir + cef-cache + pipe now all per-build) and make a nested portable ignore the leaked ambient AGENTMUX_CHANNEL. Completes #1315 (which fixed only the pipe; cef-cache stayed per-branch). Safe now that agents + auth are global (#1387-#1393).
+- fix(agents): surface cross-channel agents in "My Agents". Fix the live registry mirror to anchor on the GLOBAL workspace root (the live-write twin of #1393 — newly-created agents were silently dropped as "not representable"), and source the My-Agents list from the global registry (deduped by definition+name, enriched with local running state, local-only agents appended) so agents created in any build/channel/version appear.
+- feat(agent): globalize agent transcript so cross-channel agents load their conversation history
+
+
 ## 0.44.1 — 2026-06-10
 
 - fix(cef): low-memory pause page Resume button was inert (double-quoted JS string inside a double-quoted onclick attribute) — wire it via a <script> + addEventListener so OOM-paused windows can actually resume
