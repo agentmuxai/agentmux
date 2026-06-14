@@ -1185,50 +1185,48 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let mut stderr_buf: Vec<u8> = Vec::new();
 
                 use tokio::io::AsyncReadExt as _;
-                // Read one extra sentinel byte per stream. If we receive
-                // MAX_OUTPUT+1 bytes the output was genuinely truncated (we can
-                // tell definitively). If we receive ≤MAX_OUTPUT bytes the read
-                // completed without hitting the cap.
+                // Each stream's capped-read and drain run in the SAME concurrent
+                // branch.  A two-phase approach (cap-read all, then drain all)
+                // deadlocks: when stdout exceeds the cap, its read_to_end returns
+                // but the process is now blocked on write() to a full pipe, so it
+                // never writes to stderr, so stderr's read_to_end never gets EOF.
+                // Both reads block, the drain phase is never reached, and the whole
+                // handler hangs for the full 300 s timeout.
                 //
-                // Use `(&mut pipe).take(n)` rather than `pipe.take(n)` so the
-                // Take adapter borrows the pipe instead of consuming it — the
-                // original handles stay available for the drain phase below.
+                // Solution: read MAX_OUTPUT+1 sentinel bytes per stream (≤ MAX_OUTPUT
+                // → complete; MAX_OUTPUT+1 → truncated), then immediately drain the
+                // remainder.  stdout and stderr pipelines run concurrently with each
+                // other, and with child.wait().
                 let status = tokio::time::timeout(
                     std::time::Duration::from_secs(TIMEOUT_SECS),
                     async {
-                        // Named bindings required: join! futures borrow the
-                        // Take adapters and Sink values across poll points, so
-                        // temporaries created inside join! arms are freed too
-                        // early (E0716). Bind every short-lived value here first.
-                        let mut sout_take = (&mut stdout_pipe).take(MAX_OUTPUT + 1);
-                        let mut serr_take = (&mut stderr_pipe).take(MAX_OUTPUT + 1);
-                        let (sout, serr) = tokio::join!(
-                            sout_take.read_to_end(&mut stdout_buf),
-                            serr_take.read_to_end(&mut stderr_buf),
-                        );
-                        sout.map_err(|e| format!("shellexec: stdout read: {e}"))?;
-                        serr.map_err(|e| format!("shellexec: stderr read: {e}"))?;
-                        // sout_take / serr_take drop here, releasing their borrows
-                        // on stdout_pipe / stderr_pipe so we can use them below.
-                        drop(sout_take);
-                        drop(serr_take);
-
-                        // Drain any remaining output concurrently with child.wait().
-                        // Without draining, a command that emits more than MAX_OUTPUT
-                        // bytes blocks on its write() syscall (the pipe buffer is full
-                        // and nobody is reading) until the RPC timeout fires.  On Unix
-                        // this often manifests as SIGPIPE flipping an otherwise-zero
-                        // exit code.  Draining lets the process flush and exit cleanly
-                        // so the reported exit code is the real one.
-                        let mut sink_out = tokio::io::sink();
-                        let mut sink_err = tokio::io::sink();
-                        let (drain_sout, drain_serr, wait) = tokio::join!(
-                            tokio::io::copy(&mut stdout_pipe, &mut sink_out),
-                            tokio::io::copy(&mut stderr_pipe, &mut sink_err),
+                        let (sout, serr, wait) = tokio::join!(
+                            // stdout branch: cap-read then drain
+                            async {
+                                let mut take = (&mut stdout_pipe).take(MAX_OUTPUT + 1);
+                                take.read_to_end(&mut stdout_buf).await
+                                    .map_err(|e| format!("shellexec: stdout read: {e}"))?;
+                                drop(take); // release &mut borrow so stdout_pipe is usable
+                                let mut sink = tokio::io::sink();
+                                tokio::io::copy(&mut stdout_pipe, &mut sink).await
+                                    .map_err(|e| format!("shellexec: drain stdout: {e}"))?;
+                                Ok::<(), String>(())
+                            },
+                            // stderr branch: cap-read then drain
+                            async {
+                                let mut take = (&mut stderr_pipe).take(MAX_OUTPUT + 1);
+                                take.read_to_end(&mut stderr_buf).await
+                                    .map_err(|e| format!("shellexec: stderr read: {e}"))?;
+                                drop(take);
+                                let mut sink = tokio::io::sink();
+                                tokio::io::copy(&mut stderr_pipe, &mut sink).await
+                                    .map_err(|e| format!("shellexec: drain stderr: {e}"))?;
+                                Ok::<(), String>(())
+                            },
                             child.wait(),
                         );
-                        drain_sout.map_err(|e| format!("shellexec: drain stdout: {e}"))?;
-                        drain_serr.map_err(|e| format!("shellexec: drain stderr: {e}"))?;
+                        sout?;
+                        serr?;
                         wait.map_err(|e| format!("shellexec: wait: {e}"))
                     }
                 )
