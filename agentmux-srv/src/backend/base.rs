@@ -268,6 +268,55 @@ pub fn expand_home_dir_safe(path: &str) -> PathBuf {
     expand_home_dir(path).unwrap_or_else(|_| PathBuf::from(path))
 }
 
+/// Convert an MSYS / Git-Bash POSIX drive path to a native Windows path.
+///
+/// Agents on Windows typically run inside a bash shell (MSYS2 / Git Bash),
+/// so they naturally emit paths like `/c/Users/asafe/project` or the WSL
+/// form `/mnt/c/Users/asafe/project`. Passing one of those straight to
+/// `std::process::Command::current_dir` makes `CreateProcess` fail with
+/// `os error 267` (ERROR_DIRECTORY, "The directory name is invalid").
+///
+/// Recognised forms (case-insensitive drive letter):
+/// - `/c`            → `C:\`
+/// - `/c/Users/x`    → `C:\Users\x`
+/// - `/mnt/c/Users/x`→ `C:\Users\x`
+///
+/// Anything that isn't a POSIX drive path is returned unchanged. This is a
+/// no-op on non-Windows targets (the input is already a valid POSIX path).
+pub fn msys_to_windows_path(path: &str) -> String {
+    #[cfg(windows)]
+    {
+        // Strip an optional WSL `/mnt` prefix so both `/c/...` and
+        // `/mnt/c/...` reduce to the same `/<drive>/<rest>` shape.
+        let stripped = path.strip_prefix("/mnt").unwrap_or(path);
+        let bytes = stripped.as_bytes();
+        let is_drive_path = bytes.len() >= 2
+            && bytes[0] == b'/'
+            && (bytes[1] as char).is_ascii_alphabetic()
+            && (bytes.len() == 2 || bytes[2] == b'/');
+        if is_drive_path {
+            let drive = (bytes[1] as char).to_ascii_uppercase();
+            let rest = stripped[2..].replace('/', "\\"); // "" or "\Users\x"
+            return format!("{drive}:{}", if rest.is_empty() { "\\" } else { &rest });
+        }
+    }
+    let _ = path; // silence unused on non-windows
+    path.to_string()
+}
+
+/// Normalize a user/agent-supplied working directory for use with
+/// `Command::current_dir`: first convert MSYS/Git-Bash POSIX drive paths to
+/// native Windows form (see [`msys_to_windows_path`]), then expand a leading
+/// `~`. Returns `None` for an empty/whitespace input.
+pub fn normalize_working_dir(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let win = msys_to_windows_path(raw);
+    Some(expand_home_dir_safe(&win).to_string_lossy().into_owned())
+}
+
 /// After a lexical join, verify that no symlinked ancestor of the
 /// candidate path escapes `base_canonical`. The lexical helper alone
 /// can't catch this: if `<base>/.claude` is a symlink to `/tmp/outside`
@@ -666,6 +715,27 @@ mod tests {
         // non-ASCII letters do NOT match (they wouldn't be valid drive
         // letters on Windows anyway).
         assert!(!has_drive_letter_prefix("Ω:foo"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_msys_to_windows_path() {
+        assert_eq!(msys_to_windows_path("/c/Users/asafe/p"), "C:\\Users\\asafe\\p");
+        assert_eq!(msys_to_windows_path("/mnt/c/Users/asafe/p"), "C:\\Users\\asafe\\p");
+        assert_eq!(msys_to_windows_path("/d/work"), "D:\\work");
+        assert_eq!(msys_to_windows_path("/c"), "C:\\");
+        // Already-native paths pass through untouched.
+        assert_eq!(msys_to_windows_path("C:\\Users\\asafe"), "C:\\Users\\asafe");
+        // Not a drive path: leading `/usr` is not `/<letter>/`.
+        assert_eq!(msys_to_windows_path("/usr/bin"), "/usr/bin");
+        // `/ab/...` — second segment is multi-char, not a drive.
+        assert_eq!(msys_to_windows_path("/ab/c"), "/ab/c");
+    }
+
+    #[test]
+    fn test_normalize_working_dir_empty() {
+        assert_eq!(normalize_working_dir(""), None);
+        assert_eq!(normalize_working_dir("   "), None);
     }
 
     #[test]
