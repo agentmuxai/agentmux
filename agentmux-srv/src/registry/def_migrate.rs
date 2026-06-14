@@ -1,23 +1,38 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! One-shot global migration: backfill user-agent DEFINITIONS (with their
-//! content + skills) from every channel's per-version `objects.db` into the
-//! GLOBAL definition store, so EXISTING agents become cross-channel without
-//! waiting for the next edit. Idempotent via a `.migrated_definitions`
-//! marker in the store root; read-only on every scanned SQLite.
+//! Global migration: backfill user-agent DEFINITIONS (with their content +
+//! skills) from every channel's per-version `objects.db` — and every `dev/`
+//! branch DB — into the GLOBAL definition store, so EXISTING agents become
+//! cross-channel without waiting for the next edit. Read-only on every scanned
+//! SQLite.
+//!
+//! **Version-gated, re-runnable marker** (not strictly one-shot): the
+//! `.migrated_definitions` marker in the store root records the
+//! [`MIGRATION_VERSION`] that last ran. A marker older than the current version
+//! — including the legacy `migrated` text, which parses as version 0 — re-runs
+//! the scan ONCE, so users whose earlier pass was incomplete recover
+//! automatically on the next launch. Bump [`MIGRATION_VERSION`] whenever the
+//! scan logic changes to trigger a one-time re-run for everyone.
+//!
+//! On a re-run, an agent already in the global store is refreshed only when the
+//! scanned copy is strictly fresher than the global record (so a broken earlier
+//! pass's stale/content-less copy is corrected) — never downgraded below what
+//! the live write-mirror has since advanced, and never resurrected if
+//! tombstoned. (codex P1 / reagent P2 #1391.)
 //!
 //! Cross-channel agent persistence, P0.2d
 //! (`docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
 //!
-//! Resilience mirrors `scripts/import-agents.sh`: a single unreadable /
-//! locked / old-schema `objects.db` is skipped with a warning, never
-//! aborting the pass. The marker is written unconditionally after a pass —
-//! a transiently-skipped DB's agents still go global on their next edit via
-//! the live write-mirror (P0.2b), so nothing is permanently lost and the
-//! migration never loops forever on a permanent old-schema failure.
+//! Resilience mirrors `scripts/import-agents.sh`: a single unreadable / locked
+//! / old-schema `objects.db` is skipped with a warning, never aborting the
+//! pass. The marker is written after a pass even if some DBs were skipped — a
+//! transiently-skipped DB's agents still go global on their next edit via the
+//! live write-mirror (P0.2b), and a future [`MIGRATION_VERSION`] bump re-scans
+//! everything — so nothing is permanently lost and the migration never loops
+//! forever on a permanent old-schema failure.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags};
@@ -29,6 +44,49 @@ use super::def_store::{DefStoreError, DefinitionStore};
 
 const MARKER: &str = ".migrated_definitions";
 
+/// Migration-logic version. Bump whenever the scan changes (new roots, schema
+/// handling, etc.) so existing users re-run the migration ONCE: the marker
+/// stores this number; a marker older than this re-runs. The pre-v2 marker
+/// held the literal text `migrated`, which parses as version 0 → re-runs,
+/// recovering everyone whose first pass was incomplete.
+///
+/// v2 — schema-resilient column handling (missing columns no longer skip a
+/// whole DB), scans `dev/` branches too, and a recoverable versioned marker.
+/// See `docs/analysis/ANALYSIS_CROSS_CHANNEL_AGENT_RETENTION_2026_06_13.md`.
+const MIGRATION_VERSION: u32 = 2;
+
+/// `db_agent_definitions` columns in the order the row mapper expects, paired
+/// with a default SQL literal used when a column is absent on an older DB.
+/// Substituting `<default> AS <col>` keeps the SELECT's column count + order
+/// fixed (so index-based `row.get` stays valid) while tolerating schema drift.
+const DEF_COLUMNS: &[(&str, &str)] = &[
+    ("id", "''"),
+    ("slug", "''"),
+    ("name", "''"),
+    ("icon", "''"),
+    ("provider", "''"),
+    ("description", "''"),
+    ("working_directory", "''"),
+    ("shell", "''"),
+    ("provider_flags", "''"),
+    ("auto_start", "0"),
+    ("restart_on_crash", "0"),
+    ("idle_timeout_minutes", "0"),
+    ("created_at", "0"),
+    ("agent_type", "'host'"),
+    ("environment", "''"),
+    ("agent_bus_id", "''"),
+    ("is_seeded", "0"),
+    ("accounts", "''"),
+    ("parent_id", "''"),
+    ("branch_label", "''"),
+    ("updated_at", "0"),
+    ("user_hidden", "0"),
+    ("container_image", "''"),
+    ("container_volumes", "'[]'"),
+    ("container_name", "''"),
+];
+
 /// Outcome stats — surfaced in the srv log.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefMigrateStats {
@@ -39,107 +97,175 @@ pub struct DefMigrateStats {
     pub records_skipped_existing: usize,
 }
 
-/// Scan `<home>/channels/*/versions/*/data/db/objects.db` for user agents and
-/// backfill them into the global definition `store`. Runs at most once
-/// (marker in `store.root()`).
+/// Scan every channel AND dev-branch `objects.db` under `home` for user agents
+/// and backfill them into the global definition `store`. Re-runs once per
+/// [`MIGRATION_VERSION`] bump (marker in `store.root()`); read-only on every
+/// scanned SQLite, and tolerant of older schemas (missing columns).
 pub fn migrate_definitions_global_once(
     home: &Path,
     store: &DefinitionStore,
 ) -> Result<DefMigrateStats, DefStoreError> {
     let mut stats = DefMigrateStats::default();
     let marker = store.root().join(MARKER);
-    if marker.exists() {
+    if marker_version(&marker) >= MIGRATION_VERSION {
         return Ok(stats);
     }
 
-    let channels = home.join("channels");
-    if channels.is_dir() {
-        // Dedup across channels/versions: keep the copy with the highest
-        // FRESHNESS = max(def.updated_at, content.updated_at, skill.created_at).
-        // `agent_content_set` bumps the content row's timestamp without
-        // touching the definition row, so comparing definition timestamps
-        // alone could keep a stale content/skills snapshot. (codex P1.)
-        let mut best: HashMap<String, (DefinitionRecord, i64)> = HashMap::new();
-        for ch in dir_subdirs(&channels) {
-            for v in dir_subdirs(&ch.join("versions")) {
-                let db = v.join("data").join("db").join("objects.db");
-                if !db.is_file() {
-                    continue;
-                }
-                stats.dbs_scanned += 1;
-                match read_user_definitions(&db) {
-                    Ok(recs) => {
-                        for (rec, freshness) in recs {
-                            stats.rows_seen += 1;
-                            let id = rec.data.id.clone();
-                            let keep = match best.get(&id) {
-                                Some((_, f)) => freshness > *f,
-                                None => true,
-                            };
-                            if keep {
-                                best.insert(id, (rec, freshness));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        stats.dbs_skipped += 1;
-                        tracing::warn!(
-                            db = %db.display(),
-                            error = %e,
-                            "def migrate: skipping unreadable/incompatible objects.db"
-                        );
+    // Dedup across channels/versions/dev-branches: keep the copy with the
+    // highest FRESHNESS = max(def.updated_at, content.updated_at,
+    // skill.created_at). `agent_content_set` bumps the content row's timestamp
+    // without touching the definition row, so comparing definition timestamps
+    // alone could keep a stale content/skills snapshot. (codex P1.)
+    let mut best: HashMap<String, (DefinitionRecord, i64)> = HashMap::new();
+    for db in collect_scan_dbs(home) {
+        stats.dbs_scanned += 1;
+        match read_user_definitions(&db) {
+            Ok(recs) => {
+                for (rec, freshness) in recs {
+                    stats.rows_seen += 1;
+                    let id = rec.data.id.clone();
+                    let keep = match best.get(&id) {
+                        Some((_, f)) => freshness > *f,
+                        None => true,
+                    };
+                    if keep {
+                        best.insert(id, (rec, freshness));
                     }
                 }
             }
+            Err(e) => {
+                stats.dbs_skipped += 1;
+                tracing::warn!(
+                    db = %db.display(),
+                    error = %e,
+                    "def migrate: skipping unreadable/incompatible objects.db"
+                );
+            }
         }
-        for (id, (rec, _f)) in best {
-            // Don't downgrade a record the live write-mirror already advanced.
-            // A cross-channel edit updates the global record without touching
-            // any channel's SQLite, so the channel-DB copy this pass found can
-            // be OLDER than what's already global — only backfill agents not
-            // yet present. (reagent P2.) `upsert` also refuses to resurrect a
-            // tombstoned id.
-            match store.get(&id) {
-                Ok(Some(_)) => {
+    }
+    for (id, (rec, freshness)) in best {
+        // Decide whether to write based on freshness vs any existing global
+        // record:
+        //   - absent              → backfill (new agent).
+        //   - present & OLDER      → refresh. A broken earlier pass may have
+        //     written a stale or content-less copy globally while a fresher
+        //     channel/dev DB holds the real one; the recovery re-run must
+        //     correct it. (codex P1.)
+        //   - present & not-older  → skip. The live write-mirror advances the
+        //     global record without touching any channel's SQLite, so a
+        //     channel-DB copy can be staler than what's already global — never
+        //     downgrade it. (reagent P2.)
+        // `upsert` additionally refuses to resurrect a tombstoned id.
+        //
+        // Freshness comparison: the scanned side is max(def, content, skill)
+        // timestamps; the in-memory global record only carries `updated_at`
+        // (its content/skill blobs are timestamp-less), so we compare against
+        // that. The asymmetry biases toward refreshing on a recovery run, which
+        // is the safe direction, and still never downgrades a genuinely-newer
+        // global `updated_at`.
+        match store.get(&id) {
+            Ok(Some(existing)) => {
+                if freshness <= existing.data.updated_at {
                     stats.records_skipped_existing += 1;
                     continue;
                 }
-                Ok(None) => {}
-                Err(e) => {
-                    tracing::warn!(def_id = %id, error = %e, "def migrate: get failed; skipping");
-                    continue;
-                }
+                // else: scanned copy is strictly fresher → fall through to upsert.
             }
-            match store.upsert(&rec) {
-                Ok(()) => stats.records_written += 1,
-                Err(e) => {
-                    tracing::warn!(error = %e, "def migrate: upsert into global store failed")
-                }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(def_id = %id, error = %e, "def migrate: get failed; skipping");
+                continue;
+            }
+        }
+        match store.upsert(&rec) {
+            Ok(()) => stats.records_written += 1,
+            Err(e) => {
+                tracing::warn!(error = %e, "def migrate: upsert into global store failed")
             }
         }
     }
 
-    // One-shot: write the marker even if some DBs were skipped (the live
-    // write-mirror backfills any skipped-but-current agent on its next edit;
-    // re-running every launch would loop forever on permanent old-schema DBs).
-    write_marker(&marker)?;
+    // Record the migration version. A DB skipped this pass (genuinely
+    // corrupt/locked — now rare since v2 tolerates schema drift) still goes
+    // global on its next edit via the live write-mirror (P0.2b), and a future
+    // MIGRATION_VERSION bump re-scans everything — so nothing is permanently
+    // lost and we never loop on a permanent failure.
+    write_marker(&marker, MIGRATION_VERSION)?;
     Ok(stats)
+}
+
+/// Migration version recorded in the marker; `0` when absent or unparseable
+/// (the legacy `migrated` text → 0 → re-run).
+fn marker_version(marker: &Path) -> u32 {
+    std::fs::read_to_string(marker)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+/// Every `…/data/db/objects.db` under `home/channels/*/versions/*` AND
+/// `home/dev/<branch>[/<sub>]`. The instance migration scans both
+/// (`migrate.rs::enumerate_sources`); the definition migration must too, or
+/// dev-branch agents (e.g. agents created via `task dev`) never go global.
+fn collect_scan_dbs(home: &Path) -> Vec<PathBuf> {
+    let mut dbs = Vec::new();
+    let mut add = |dir: &Path| {
+        let db = dir.join("data").join("db").join("objects.db");
+        if db.is_file() {
+            dbs.push(db);
+        }
+    };
+    // Installed/portable: channels/<ch>/versions/<v>/data/db/objects.db
+    for ch in dir_subdirs(&home.join("channels")) {
+        for v in dir_subdirs(&ch.join("versions")) {
+            add(&v);
+        }
+    }
+    // Dev: dev/<branch>[/<sub>]/data/db/objects.db (both layouts).
+    for br in dir_subdirs(&home.join("dev")) {
+        add(&br);
+        for sub in dir_subdirs(&br) {
+            add(&sub);
+        }
+    }
+    dbs
 }
 
 /// Read all `is_seeded=0` definitions from `db` with their content + skills,
 /// each paired with a freshness timestamp for cross-copy winner selection.
 fn read_user_definitions(db: &Path) -> Result<Vec<(DefinitionRecord, i64)>, rusqlite::Error> {
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    // Schema-resilient: introspect the columns present and substitute a default
+    // literal for any absent on an older DB, so a missing column degrades a
+    // single field rather than skipping the whole DB (the original bug — older
+    // DBs lacked `container_image`/`_volumes`/`_name`). The column order/count
+    // stays fixed, so the index-based row mapper below remains valid.
+    let present = present_columns(&conn, "db_agent_definitions")?;
+    if present.is_empty() {
+        // No db_agent_definitions table here → no user definitions.
+        return Ok(Vec::new());
+    }
+    let select_list = DEF_COLUMNS
+        .iter()
+        .map(|(name, default)| {
+            if present.contains(*name) {
+                (*name).to_string()
+            } else {
+                format!("{default} AS {name}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    // Filter seeded templates only when the column exists (pre-seeded-template
+    // DBs have no templates, so every row is a user agent).
+    let where_clause = if present.contains("is_seeded") {
+        " WHERE is_seeded = 0"
+    } else {
+        ""
+    };
+    let sql = format!("SELECT {select_list} FROM db_agent_definitions{where_clause}");
     let defs: Vec<DefinitionRecordV1> = {
-        let mut stmt = conn.prepare(
-            "SELECT id, slug, name, icon, provider, description, working_directory, shell,
-                    provider_flags, auto_start, restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded, accounts, parent_id,
-                    branch_label, updated_at, user_hidden, container_image, container_volumes,
-                    container_name
-             FROM db_agent_definitions
-             WHERE is_seeded = 0",
-        )?;
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |row| {
             Ok(DefinitionRecordV1 {
                 id: row.get(0)?,
@@ -268,9 +394,17 @@ fn dir_subdirs(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn write_marker(path: &Path) -> Result<(), DefStoreError> {
-    std::fs::write(path, b"migrated\n")?;
+fn write_marker(path: &Path, version: u32) -> Result<(), DefStoreError> {
+    std::fs::write(path, version.to_string().as_bytes())?;
     Ok(())
+}
+
+/// Column names present in `table` (empty set if the table doesn't exist —
+/// `PRAGMA table_info` on a missing table yields no rows, not an error).
+fn present_columns(conn: &Connection, table: &str) -> Result<HashSet<String>, rusqlite::Error> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    rows.collect()
 }
 
 #[cfg(test)]
@@ -278,17 +412,9 @@ mod tests {
     use super::*;
     use rusqlite::params;
 
-    fn make_channel_db(home: &Path, channel: &str, version: &str) -> PathBuf {
-        let db_dir = home
-            .join("channels")
-            .join(channel)
-            .join("versions")
-            .join(version)
-            .join("data")
-            .join("db");
-        std::fs::create_dir_all(&db_dir).unwrap();
-        let db = db_dir.join("objects.db");
-        let conn = Connection::open(&db).unwrap();
+    /// Create the current (v2) schema at `db`.
+    fn create_full_schema(db: &Path) {
+        let conn = Connection::open(db).unwrap();
         conn.execute_batch(
             "CREATE TABLE db_agent_definitions (
                 id TEXT, slug TEXT, name TEXT, icon TEXT, provider TEXT, description TEXT,
@@ -301,7 +427,23 @@ mod tests {
              CREATE TABLE db_agent_skills (id TEXT, agent_id TEXT, name TEXT, trigger TEXT, skill_type TEXT, description TEXT, content TEXT, created_at INTEGER);",
         )
         .unwrap();
+    }
+
+    fn db_at(dir: PathBuf) -> PathBuf {
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("objects.db");
+        create_full_schema(&db);
         db
+    }
+
+    fn make_channel_db(home: &Path, channel: &str, version: &str) -> PathBuf {
+        db_at(home
+            .join("channels")
+            .join(channel)
+            .join("versions")
+            .join(version)
+            .join("data")
+            .join("db"))
     }
 
     fn insert_user_agent(db: &Path, id: &str, name: &str, updated_at: i64) {
@@ -420,6 +562,38 @@ mod tests {
     }
 
     #[test]
+    fn refreshes_a_stale_global_record_on_rerun() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        // The channel DB holds a FRESHER copy (updated_at=300).
+        let db = make_channel_db(home, "ch-a", "0.44.1");
+        insert_user_agent(&db, "dup", "FreshName", 300);
+        let store = store_at(home);
+        // The global store holds a STALE copy a broken earlier pass wrote
+        // (older updated_at, e.g. content-less). The recovery re-run must
+        // REFRESH it from the fresher scan rather than skip it. (codex P1.)
+        store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "dup".to_string(),
+                    name: "StaleName".to_string(),
+                    provider: "claude".to_string(),
+                    updated_at: 50,
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        let rec = store.get("dup").unwrap().unwrap();
+        assert_eq!(rec.data.name, "FreshName", "stale global record must be refreshed from the fresher scan");
+        assert_eq!(rec.data.content.len(), 1, "content backfilled on refresh");
+        assert_eq!(stats.records_written, 1);
+        assert_eq!(stats.records_skipped_existing, 0);
+    }
+
+    #[test]
     fn winner_selection_includes_content_freshness() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
@@ -443,5 +617,91 @@ mod tests {
         let rec = store.get("dup").unwrap().unwrap();
         assert_eq!(rec.data.name, "FromB", "copy with freshest content wins");
         assert_eq!(rec.data.content[0].content, "fresh");
+    }
+
+    #[test]
+    fn migrates_db_missing_container_columns() {
+        // F1: an older DB without container_image/_volumes/_name (and without
+        // the content/skills tables) must NOT be skipped — the missing columns
+        // degrade to defaults.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db_dir = home
+            .join("channels")
+            .join("old-ch")
+            .join("versions")
+            .join("0.40.0")
+            .join("data")
+            .join("db");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        let db = db_dir.join("objects.db");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE db_agent_definitions (
+                id TEXT, slug TEXT, name TEXT, icon TEXT, provider TEXT, description TEXT,
+                working_directory TEXT, shell TEXT, provider_flags TEXT, auto_start INTEGER,
+                restart_on_crash INTEGER, idle_timeout_minutes INTEGER, created_at INTEGER,
+                agent_type TEXT, environment TEXT, agent_bus_id TEXT, is_seeded INTEGER,
+                accounts TEXT, parent_id TEXT, branch_label TEXT, updated_at INTEGER,
+                user_hidden INTEGER);",
+        )
+        .unwrap();
+        // All 22 present columns populated (real old DBs are NOT NULL); only
+        // the container_* columns are absent from the schema entirely.
+        conn.execute(
+            "INSERT INTO db_agent_definitions VALUES
+             ('old-1','old-1','OldAgent','✦','claude','','','','',0,0,0,1,
+              'host','','',0,'','','',50,0)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = store_at(home);
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert_eq!(stats.dbs_skipped, 0, "old-schema DB must not be skipped");
+        assert_eq!(stats.records_written, 1, "old-schema agent migrated");
+        let rec = store.get("old-1").unwrap().unwrap();
+        assert_eq!(rec.data.name, "OldAgent");
+        assert_eq!(rec.data.container_volumes, "[]", "missing column defaulted");
+    }
+
+    #[test]
+    fn scans_dev_branch_agents() {
+        // F2: agents in dev/<branch>/<sub>/ must be migrated too.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db = db_at(
+            home.join("dev")
+                .join("main")
+                .join("abc123")
+                .join("data")
+                .join("db"),
+        );
+        insert_user_agent(&db, "dev-1", "DevAgent", 100);
+
+        let store = store_at(home);
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert_eq!(stats.records_written, 1, "dev-branch agent migrated");
+        assert_eq!(store.get("dev-1").unwrap().unwrap().data.name, "DevAgent");
+    }
+
+    #[test]
+    fn legacy_text_marker_triggers_rerun_then_settles() {
+        // F3/F4: the pre-v2 marker (literal "migrated") parses as version 0 →
+        // re-runs once; afterward the versioned marker makes it idempotent.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db = make_channel_db(home, "ch", "0.44.1");
+        insert_user_agent(&db, "a1", "A", 100);
+        let store = store_at(home);
+        std::fs::write(store.root().join(MARKER), b"migrated\n").unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert_eq!(stats.records_written, 1, "legacy text marker must re-run");
+        assert!(store.get("a1").unwrap().is_some());
+
+        let stats2 = migrate_definitions_global_once(home, &store).unwrap();
+        assert_eq!(stats2.dbs_scanned, 0, "versioned marker → idempotent after");
     }
 }
