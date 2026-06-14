@@ -316,6 +316,19 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 meta.insert("agentName".to_string(), json!(&agent.name));
                 meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "sparkles" } else { &agent.icon }));
                 meta.insert("agentMode".to_string(), json!(if agent.agent_type.is_empty() { "host" } else { &agent.agent_type }));
+                if !agent.container_image.is_empty() {
+                    meta.insert("agent:container_image".to_string(), json!(&agent.container_image));
+                }
+                if agent.container_volumes != "[]" && !agent.container_volumes.is_empty() {
+                    meta.insert("agent:container_volumes".to_string(), json!(&agent.container_volumes));
+                }
+                // Container-local CLI command: the provider's CLI as it resolves
+                // INSIDE the image (on the image's PATH, e.g. `claude`). Distinct
+                // from `cmd` below, which is the host-resolved absolute npm path
+                // (`<config_home>/.../node_modules/.bin/claude`) and does NOT exist
+                // in the container — passing it as docker-exec argv[0] would fail
+                // with "no such file or directory". Container turns use this.
+                meta.insert("agent:container_command".to_string(), json!(provider.cli_command));
                 // Derive output format from provider ID (matches frontend providers/index.ts)
                 let output_format = match provider.id {
                     "claude" => "claude-stream-json",
@@ -457,12 +470,14 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
+    let container_manager = state.container_manager.clone();
 
     engine.register_handler(
         COMMAND_AGENT_SEND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
+            let container_manager = container_manager.clone();
             Box::pin(async move {
                 let cmd: CommandAgentSendData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.send: {e}"))?;
@@ -516,6 +531,13 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .as_any()
                     .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
                 {
+                    // Container agents use per-turn docker exec — incompatible with a
+                    // long-lived persistent subprocess. Fail loudly instead of silently
+                    // spawning the CLI on the host.
+                    let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
+                    if agent_mode == "container" {
+                        return Err("container agents require a subprocess controller; this provider uses a persistent controller".to_string());
+                    }
                     let config = blockcontroller::persistent::PersistentSpawnConfig {
                         cli_command,
                         cli_args,
@@ -539,22 +561,88 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let persisted_session_id = obj::meta_get_string(
                         &block.meta, "agent:sessionid", "",
                     );
-                    let config = blockcontroller::subprocess::SubprocessSpawnConfig {
-                        cli_command,
-                        cli_args,
-                        working_dir,
-                        env_vars,
-                        message: cmd.message,
-                        resume_flag,
-                        session_id_field,
-                        message_id: None,
-                        session_id: if persisted_session_id.is_empty() {
-                            None
-                        } else {
-                            Some(persisted_session_id)
-                        },
-                    };
-                    subprocess_ctrl.spawn_turn(config)?;
+
+                    // Container agent branch: use Docker socket API exec (P1a: no
+                    // secrets in argv). Host agent branch: regular CLI subprocess.
+                    let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
+                    if agent_mode == "container" {
+                        let cm = container_manager.as_deref()
+                            .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
+                        let container_image = obj::meta_get_string(
+                            &block.meta, "agent:container_image", "ghcr.io/agentmuxai/agent-claude:latest",
+                        );
+                        // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
+                        let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
+                        let container_name = crate::backend::container::container_name_for_slug(&agent_id);
+                        let volumes_json = obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
+                        let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
+
+                        // Ensure container is alive (pull image if needed — P1b).
+                        cm.ensure_running(&container_name, &container_image, &volumes, &[]).await
+                            .map_err(|e| format!("container ensure_running failed: {e}"))?;
+
+
+                        tracing::info!(
+                            container = %container_name,
+                            image = %container_image,
+                            "container agent turn: bollard exec (env via Docker socket, not argv)",
+                        );
+
+                        // Env is passed via CreateExecOptions.env (Docker socket API),
+                        // NOT as -e KEY=VALUE argv args — this prevents CWE-214 exposure.
+                        // spawn_container_turn filters config.env_vars (denylist) per
+                        // turn, so cmd:cwd (host path) and host-path vars never reach
+                        // the container, and each queued turn uses its own env.
+
+                        // Base cmd: [container_command, ...cli_args]. The command
+                        // is the provider CLI resolved INSIDE the image (on PATH,
+                        // e.g. `claude`) — NOT `cli_command`/`cmd`, which is the
+                        // host-resolved absolute npm path and does not exist in the
+                        // container (docker exec would fail "no such file or
+                        // directory"). cli_args are format flags + provider flags —
+                        // no host paths, safe as-is. spawn_container_turn appends
+                        // --resume <sid> internally.
+                        let container_command = obj::meta_get_string(
+                            &block.meta, "agent:container_command", "claude",
+                        );
+                        let mut base_cmd = vec![container_command];
+                        base_cmd.extend(cli_args);
+
+                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                            cli_command: String::new(), // unused by spawn_container_turn
+                            cli_args: vec![],           // unused by spawn_container_turn
+                            working_dir: String::new(), // unused — container has own cwd
+                            env_vars,
+                            message: cmd.message,
+                            resume_flag,
+                            session_id_field,
+                            message_id: None,
+                            session_id: if persisted_session_id.is_empty() {
+                                None
+                            } else {
+                                Some(persisted_session_id)
+                            },
+                        };
+                        subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
+                    } else {
+                        // Host agent: regular CLI subprocess (env set on child process, not in argv).
+                        let config = blockcontroller::subprocess::SubprocessSpawnConfig {
+                            cli_command,
+                            cli_args,
+                            working_dir,
+                            env_vars,
+                            message: cmd.message,
+                            resume_flag,
+                            session_id_field,
+                            message_id: None,
+                            session_id: if persisted_session_id.is_empty() {
+                                None
+                            } else {
+                                Some(persisted_session_id)
+                            },
+                        };
+                        subprocess_ctrl.spawn_turn(config)?;
+                    }
                 } else {
                     return Err("NOT_RUNNING: controller type not supported".to_string());
                 }

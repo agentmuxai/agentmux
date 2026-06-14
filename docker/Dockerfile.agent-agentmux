@@ -13,12 +13,16 @@
 FROM node:22-slim
 
 # System dependencies
+# procps provides `pkill`, used by the host to interrupt an in-flight turn:
+# `docker exec` has no kill API, so AgentMux pkills the turn's CLI process
+# inside the container on stop/Esc (see spawn_container_turn).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     git \
     curl \
     jq \
     bash \
+    procps \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

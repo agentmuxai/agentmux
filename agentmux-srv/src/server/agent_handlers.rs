@@ -2937,6 +2937,7 @@ mod recent_sessions_tests {
             saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
+            container_manager: None,
         };
 
         // Seed: 1 SEEDED definition (template), 1 identity bundle, 1
@@ -3222,6 +3223,7 @@ mod recent_sessions_tests {
             saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
+            container_manager: None,
         };
 
         // One seeded template + one already-user-owned definition.

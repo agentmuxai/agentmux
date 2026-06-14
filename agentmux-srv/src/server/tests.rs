@@ -70,6 +70,7 @@ pub(crate) fn test_state() -> AppState {
         saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
         auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
         install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
+        container_manager: None,
     }
 }
 
