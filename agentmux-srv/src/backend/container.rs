@@ -144,8 +144,39 @@ impl ContainerManager {
                 .or_insert_with(|| Arc::new(Mutex::new(())))
                 .clone()
         };
-        let _guard = container_lock.lock().await;
+        let guard = container_lock.lock().await;
 
+        let result = self.ensure_running_locked(container_name, image, volumes, env_vars).await;
+
+        // Release the per-container lock, then evict its map entry when no other
+        // caller is queued on it — otherwise `ensure_locks` grows unbounded (one
+        // entry per distinct container ever seen) over the process lifetime.
+        // A queued caller has already cloned the Arc (strong_count > 2), so we
+        // only drop the entry when it's truly idle (map's ref + our clone == 2),
+        // which can't reintroduce the create-race the lock guards: a new caller
+        // can't clone the old Arc while we hold the map lock, and after eviction
+        // it just creates a fresh one with no contention.
+        drop(guard);
+        {
+            let mut locks = self.inner.ensure_locks.lock().await;
+            if Arc::strong_count(&container_lock) <= 2 {
+                locks.remove(container_name);
+            }
+        }
+
+        result
+    }
+
+    /// Create/reuse logic for [`ensure_running`], run while holding the
+    /// per-container serialization lock. Split out so `ensure_running` can wrap
+    /// it with lock acquisition + map-entry eviction on every exit path.
+    async fn ensure_running_locked(
+        &self,
+        container_name: &str,
+        image: &str,
+        volumes: &[String],
+        env_vars: &[(String, String)],
+    ) -> Result<(), ContainerError> {
         // Always query Docker — do not rely on an in-memory cache. The container
         // can be stopped or removed externally (e.g. `docker rm -f`), and a
         // stale cache entry would cause ensure_running to silently no-op while
