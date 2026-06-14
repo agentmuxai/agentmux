@@ -249,8 +249,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // not stay in Submitting state for the full 30s watchdog window — no
         // agent turn was initiated, only a sidecar shell exec.
         if (trimmed.startsWith("!")) {
-            await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
-            opts.model.dispatchPane({ type: "TurnReset" }, "system");
+            try {
+                await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
+            } finally {
+                // TurnStart was dispatched by handleSendMessage before sendMessage
+                // was called. Always reset it — even if dispatchBangCommand throws —
+                // so the pane returns to Idle instead of waiting for the 30s watchdog.
+                opts.model.dispatchPane({ type: "TurnReset" }, "system");
+            }
             return;
         }
 

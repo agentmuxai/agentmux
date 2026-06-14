@@ -1133,14 +1133,28 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                             expanded.display()
                         ));
                     }
-                    if !expanded.exists() {
-                        return Err(format!(
-                            "shellexec: working directory does not exist: {}",
+                    // Canonicalize to resolve all symlinks before handing the
+                    // path to the shell. Without this a symlinked working_dir
+                    // would silently run the shell in the symlink target
+                    // (potentially outside the agent workspace), matching the
+                    // symlink-escape protection in writeagentconfig.
+                    let canonical = expanded.canonicalize()
+                        .map_err(|e| format!(
+                            "shellexec: cannot resolve working directory '{}': {e}",
                             expanded.display()
-                        ));
-                    }
-                    Some(expanded)
+                        ))?;
+                    Some(canonical)
                 };
+
+                // 300s process timeout matches the frontend's RPC timeout so
+                // the client sees a clean error rather than a silent EC-TIME.
+                const TIMEOUT_SECS: u64 = 300;
+                // 1 MB cap per stream — bounded during read via take() so a
+                // runaway command (`! yes`, `! dd if=/dev/zero`) cannot exhaust
+                // RAM before the timeout fires. The pipes are read concurrently
+                // to prevent deadlock when one buffer fills while the process is
+                // blocked writing to the other.
+                const MAX_OUTPUT: u64 = 1_000_000;
 
                 let mut proc = if cfg!(windows) {
                     let mut c = tokio::process::Command::new("cmd");
@@ -1151,41 +1165,62 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     c.args(["-c", &cmd.command]);
                     c
                 };
+                proc.stdout(std::process::Stdio::piped());
+                proc.stderr(std::process::Stdio::piped());
                 if let Some(ref dir) = cwd {
                     proc.current_dir(dir);
                 }
 
-                // 300s process timeout matches the frontend's RPC timeout so
-                // the client sees a clean error rather than a silent EC-TIME.
-                const TIMEOUT_SECS: u64 = 300;
-                let output = tokio::time::timeout(
+                let mut child = proc.spawn()
+                    .map_err(|e| format!("shellexec: spawn failed: {e}"))?;
+
+                let mut stdout_pipe = child.stdout.take().expect("stdout piped");
+                let mut stderr_pipe = child.stderr.take().expect("stderr piped");
+
+                let mut stdout_buf: Vec<u8> = Vec::new();
+                let mut stderr_buf: Vec<u8> = Vec::new();
+
+                use tokio::io::AsyncReadExt as _;
+                tokio::time::timeout(
                     std::time::Duration::from_secs(TIMEOUT_SECS),
-                    proc.output(),
+                    async {
+                        // Bind Take adapters to named vars — the read_to_end
+                        // futures borrow them, and temporaries in join! arms
+                        // would be dropped before the futures complete (E0716).
+                        let mut sout_take = stdout_pipe.take(MAX_OUTPUT);
+                        let mut serr_take = stderr_pipe.take(MAX_OUTPUT);
+                        let (sout, serr) = tokio::join!(
+                            sout_take.read_to_end(&mut stdout_buf),
+                            serr_take.read_to_end(&mut stderr_buf),
+                        );
+                        sout.map_err(|e| format!("shellexec: stdout read: {e}"))?;
+                        serr.map_err(|e| format!("shellexec: stderr read: {e}"))?;
+                        Ok::<_, String>(())
+                    }
                 )
                 .await
-                .map_err(|_| format!("shellexec: command timed out after {TIMEOUT_SECS}s"))?
-                .map_err(|e| format!("shellexec: spawn failed: {e}"))?;
+                .map_err(|_| format!("shellexec: timed out after {TIMEOUT_SECS}s"))??;
+                // Pipes are consumed/dropped by the join! — child can now exit.
+                let status = child.wait().await
+                    .map_err(|e| format!("shellexec: wait: {e}"))?;
 
-                // Cap each stream at 1 MB to prevent OOM when the user runs
-                // something like `! cat /var/log/large.log`.
-                const MAX_OUTPUT: usize = 1_000_000;
-                let stdout_raw = String::from_utf8_lossy(&output.stdout);
-                let stdout = if stdout_raw.len() > MAX_OUTPUT {
-                    format!("{}…[truncated, {} bytes total]", &stdout_raw[..MAX_OUTPUT], stdout_raw.len())
-                } else {
-                    stdout_raw.into_owned()
-                };
-                let stderr_raw = String::from_utf8_lossy(&output.stderr);
-                let stderr = if stderr_raw.len() > MAX_OUTPUT {
-                    format!("{}…[truncated, {} bytes total]", &stderr_raw[..MAX_OUTPUT], stderr_raw.len())
-                } else {
-                    stderr_raw.into_owned()
+                // Truncate raw bytes before from_utf8_lossy so we never slice
+                // at a mid-codepoint offset (which would panic on a &str index).
+                let truncate_output = |bytes: Vec<u8>| -> String {
+                    let total = bytes.len();
+                    let capped = if total > MAX_OUTPUT as usize { &bytes[..MAX_OUTPUT as usize] } else { &bytes[..] };
+                    let s = String::from_utf8_lossy(capped);
+                    if total > MAX_OUTPUT as usize {
+                        format!("{s}…[truncated, {total} bytes total]")
+                    } else {
+                        s.into_owned()
+                    }
                 };
 
                 let result = ShellExecResult {
-                    exit_code: output.status.code().unwrap_or(1),
-                    stdout,
-                    stderr,
+                    exit_code: status.code().unwrap_or(1),
+                    stdout: truncate_output(stdout_buf),
+                    stderr: truncate_output(stderr_buf),
                 };
                 Ok(Some(serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?))
             })
