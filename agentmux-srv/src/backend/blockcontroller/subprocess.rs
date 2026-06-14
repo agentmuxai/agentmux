@@ -936,10 +936,55 @@ impl SubprocessController {
             let exec_session = match exec_result {
                 Ok(s) => s,
                 Err(e) => {
-                    let mut inner = inner_arc.lock().unwrap();
-                    Self::set_status(&mut inner, STATUS_DONE);
-                    run_lock.store(false, Ordering::SeqCst);
                     tracing::warn!(block_id = %block_id, error = %e, "container exec failed");
+                    // A failed exec must still run the SAME completion + queue
+                    // drain as the normal-exit path below: publish a terminal
+                    // status so the client sees the turn end (exit 1), mark the
+                    // health monitor exited, release run_lock, AND drain any
+                    // queued message — otherwise the run_lock is freed but
+                    // pending_messages is never popped, stranding the queue.
+                    {
+                        let mut inner = inner_arc.lock().unwrap();
+                        inner.proc_exit_code = 1;
+                        Self::set_status(&mut inner, STATUS_DONE);
+                        inner.current_pid = None;
+                        inner.kill_tx = None;
+                    }
+                    health_monitor.set_exited(1);
+                    if let Some(ref b) = broker {
+                        let status = {
+                            let inner = inner_arc.lock().unwrap();
+                            super::BlockControllerRuntimeStatus {
+                                blockid: block_id.clone(),
+                                version: inner.status_version,
+                                shellprocstatus: inner.proc_status.clone(),
+                                shellprocconnname: "local".to_string(),
+                                shellprocexitcode: inner.proc_exit_code,
+                                spawn_ts_ms: None,
+                                is_agent_pane: false,
+                            }
+                        };
+                        super::publish_controller_status(b, &status);
+                    }
+                    run_lock.store(false, Ordering::SeqCst);
+                    let next_config = {
+                        let mut inner = inner_arc.lock().unwrap();
+                        inner.pending_messages.pop_front()
+                    };
+                    if let Some(cfg) = next_config {
+                        if let Some(ctrl) = self_ref_done.upgrade() {
+                            tracing::info!(block_id = %block_id, "draining queued container message after exec failure");
+                            if let Err(e) = ctrl.spawn_container_turn(
+                                cm_for_drain,
+                                container_name_for_drain,
+                                base_cmd_for_drain,
+                                container_env_for_drain,
+                                cfg,
+                            ) {
+                                tracing::warn!(error = %e, "failed to spawn queued container turn");
+                            }
+                        }
+                    }
                     return;
                 }
             };
@@ -966,22 +1011,44 @@ impl SubprocessController {
             }
             health_monitor.set_active_turn(true);
 
+            // Health watchdog: drive check() every 5s while the turn is active,
+            // mirroring spawn_turn. set_active_turn(true) alone never calls
+            // check(), so without this a container turn gets no Stalled/Dead
+            // detection. Self-terminates when the turn ends — completion calls
+            // health_monitor.set_exited(), which clears the active-turn flag.
+            {
+                let health_watchdog = Arc::clone(&health_monitor);
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+                    loop {
+                        interval.tick().await;
+                        if !health_watchdog.is_active_turn() {
+                            break;
+                        }
+                        health_watchdog.check();
+                    }
+                });
+            }
+
             let crate::backend::container::ExecSession { mut input, output } = exec_session;
 
-            // Write JSON message to container stdin, then flush (EOF signals end of input).
-            let message = config.message.clone();
-            let block_id_stdin = block_id.clone();
-            tokio::spawn(async move {
-                let payload = format!("{}\n", message);
+            // Write the turn message to container stdin INLINE — not via a
+            // detached `tokio::spawn`, which may not be scheduled for seconds
+            // under runtime load and would trip the in-container CLI's "no
+            // stdin data received in 3s" abort (the host path uses a dedicated
+            // OS thread for the same reason — see spawn_turn). Awaiting here in
+            // the already-running exec task guarantees the bytes hit the Docker
+            // attach stream immediately. The CLI drains stdin to EOF before it
+            // emits output, so this write cannot deadlock the read loop below.
+            {
+                let payload = format!("{}\n", config.message);
                 if let Err(e) = input.write_all(payload.as_bytes()).await {
-                    tracing::warn!(block_id = %block_id_stdin, "container exec stdin write error: {}", e);
-                    return;
+                    tracing::warn!(block_id = %block_id, "container exec stdin write error: {}", e);
+                } else if let Err(e) = input.flush().await {
+                    tracing::warn!(block_id = %block_id, "container exec stdin flush error: {}", e);
                 }
-                if let Err(e) = input.flush().await {
-                    tracing::warn!(block_id = %block_id_stdin, "container exec stdin flush error: {}", e);
-                }
-                // Drop `input` here → EOF to the container process.
-            });
+                drop(input); // EOF to the container process
+            }
 
             // Read stdout — accumulate bytes into lines.
             let mut line_buf = String::new();

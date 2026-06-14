@@ -482,4 +482,92 @@ mod tests {
     fn test_parse_volume_spec_malformed() {
         assert!(parse_volume_spec("nocodon").is_none());
     }
+
+    /// Docker-gated integration test for the container lifecycle + exec path.
+    /// Requires a reachable Docker daemon (Colima/Docker Desktop), so it is
+    /// `#[ignore]` by default. Run with:
+    ///   DOCKER_HOST=unix://$HOME/.colima/default/docker.sock \
+    ///     cargo test -p agentmux-srv -- --ignored --nocapture itest_container
+    ///
+    /// Validates the foundation Phase 2 rests on against a real daemon:
+    /// `ensure_running` create→reuse, env delivered into the exec via the Docker
+    /// socket (`CreateExecOptions.env`, NOT argv — the CWE-214 guard), and the
+    /// stdin→stdout exec I/O contract `spawn_container_turn` depends on.
+    #[tokio::test]
+    #[ignore]
+    async fn itest_container_lifecycle_exec_env_and_io() {
+        use tokio::io::AsyncWriteExt as _;
+
+        async fn drain_stdout<S>(mut out: S) -> String
+        where
+            S: futures_util::Stream<
+                    Item = Result<bollard::container::LogOutput, bollard::errors::Error>,
+                > + Unpin,
+        {
+            use futures_util::StreamExt as _;
+            let mut s = String::new();
+            while let Some(item) = out.next().await {
+                if let Ok(bollard::container::LogOutput::StdOut { message }) = item {
+                    s.push_str(&String::from_utf8_lossy(&message));
+                }
+            }
+            s
+        }
+
+        let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
+        cm.check_available().await.expect("docker daemon must be reachable");
+
+        let name = "agentmux-itest-1357";
+        // Public, pullable image with a long-lived default CMD (nginx daemon) and
+        // a shell — `create_and_start` sets no cmd, so the image default must keep
+        // PID 1 alive between exec turns (the persistent-container model).
+        let image = "nginx:alpine";
+        let _ = cm.remove(name, true).await; // clean slate; ignore if absent
+
+        // create path: pull + create + start
+        cm.ensure_running(name, image, &[], &[]).await.expect("ensure_running (create)");
+        // reuse path: already running → must no-op, not error or re-create
+        cm.ensure_running(name, image, &[], &[]).await.expect("ensure_running (reuse)");
+
+        // env reaches the in-container process via the Docker socket, not argv.
+        // Drop the (unused) stdin half first: bollard's exec output stream does
+        // not EOF while the write-half is held open — the same reason
+        // spawn_container_turn drops `input` before reading output.
+        let ExecSession { input, output } = cm
+            .exec(
+                name,
+                &["sh".into(), "-c".into(), "printf %s \"$ITEST_KEY\"".into()],
+                None,
+                &[("ITEST_KEY".into(), "val-42".into())],
+            )
+            .await
+            .expect("exec (env)");
+        drop(input);
+        let out = drain_stdout(output).await;
+        assert!(out.contains("val-42"), "env must reach container; got {out:?}");
+
+        // stdin → stdout I/O contract: write a newline-terminated message and
+        // read it back. Use `read` (completes on the first '\n', then the shell
+        // exits) rather than `cat` (which blocks until stdin EOF) — `claude`
+        // likewise consumes newline-delimited JSON without waiting for EOF, and
+        // bollard's hijacked exec stream does not reliably half-close stdin on
+        // `drop(input)`, so an EOF-dependent reader would hang.
+        let ExecSession { mut input, output } = cm
+            .exec(
+                name,
+                &["sh".into(), "-c".into(), "read line; printf 'got:%s' \"$line\"".into()],
+                None,
+                &[],
+            )
+            .await
+            .expect("exec (io)");
+        input.write_all(b"hello-stdin\n").await.expect("write stdin");
+        input.flush().await.expect("flush stdin");
+        drop(input);
+        let out = drain_stdout(output).await;
+        assert!(out.contains("got:hello-stdin"), "stdin must reach the container process; got {out:?}");
+
+        // cleanup
+        cm.remove(name, true).await.expect("remove");
+    }
 }
