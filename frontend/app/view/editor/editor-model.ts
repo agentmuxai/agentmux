@@ -641,27 +641,43 @@ export class EditorViewModel implements ViewModel {
         }
     }
 
-    /** Delete a file or folder, closing any open tabs that were pointing to it. */
-    async deleteFile(path: string, recursive: boolean): Promise<void> {
+    /** Delete a file or folder, closing any open tabs that were pointing to it.
+     *
+     *  When `confirmNeeded` is provided, the caller is responsible for showing
+     *  a confirmation UI. It receives a `proceed` callback — call it to execute
+     *  the delete; not calling it aborts. When omitted, falls back to
+     *  `window.confirm` (for programmatic or non-UI callers). */
+    async deleteFile(
+        path: string,
+        recursive: boolean,
+        confirmNeeded?: (proceed: () => void) => void,
+    ): Promise<void> {
         const label = recursive ? "folder and all its contents" : "file";
         const name = path.split(/[/\\]/).pop() ?? path;
-        if (!window.confirm(`Delete ${name} (${label})? This cannot be undone.`)) return;
-        try {
-            await RpcApi.DeleteEditorFileCommand(TabRpcClient, { path, recursive });
-            // Force-close tabs that pointed at the deleted path or any child.
-            const canon = canonicalizePath(path);
-            for (const tab of snapshot(this.blockId)?.tabs ?? []) {
-                const tabCanon = canonicalizePath(tab.filePath);
-                if (tabCanon === canon || tabCanon.startsWith(canon + "/") || tabCanon.startsWith(canon + "\\")) {
-                    dispatch(this.blockId, { type: "CloseTab", tabId: tab.id, force: true, source: "system" });
+
+        const doDelete = async () => {
+            try {
+                await RpcApi.DeleteEditorFileCommand(TabRpcClient, { path, recursive });
+                const canon = canonicalizePath(path);
+                for (const tab of snapshot(this.blockId)?.tabs ?? []) {
+                    const tabCanon = canonicalizePath(tab.filePath);
+                    if (tabCanon === canon || tabCanon.startsWith(canon + "/") || tabCanon.startsWith(canon + "\\")) {
+                        dispatch(this.blockId, { type: "CloseTab", tabId: tab.id, force: true, source: "system" });
+                    }
                 }
+                const parentPath = path.replace(/[/\\][^/\\]*$/, "") || path;
+                const entryName = path.split(/[/\\]/).pop() ?? "";
+                this.treeModel.removeEntryOptimistic(parentPath, entryName);
+            } catch (e: unknown) {
+                console.error(`[editor] delete failed: ${e instanceof Error ? e.message : String(e)}`);
             }
-            // Remove optimistically from tree + refresh parent.
-            const parentPath = path.replace(/[/\\][^/\\]*$/, "") || path;
-            const entryName = path.split(/[/\\]/).pop() ?? "";
-            this.treeModel.removeEntryOptimistic(parentPath, entryName);
-        } catch (e: unknown) {
-            console.error(`[editor] delete failed: ${e instanceof Error ? e.message : String(e)}`);
+        };
+
+        if (confirmNeeded) {
+            confirmNeeded(() => void doDelete());
+        } else {
+            if (!window.confirm(`Delete ${name} (${label})? This cannot be undone.`)) return;
+            await doDelete();
         }
     }
 

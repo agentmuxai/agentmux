@@ -7,6 +7,7 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
+import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -407,6 +408,11 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     const [ctxMenu, setCtxMenu] = createSignal<{ items: ContextMenuItem[]; x: number; y: number } | null>(null);
     const [renamingPath, setRenamingPath] = createSignal<string | null>(null);
     const [newEntry, setNewEntry] = createSignal<{ parentPath: string; kind: "file" | "dir" } | null>(null);
+    const [deleteConfirm, setDeleteConfirm] = createSignal<{
+        title: string;
+        message: string;
+        onConfirm: () => void;
+    } | null>(null);
 
     const buildContextMenuItems = (path: string | null, isDir: boolean): ContextMenuItem[] => {
         if (!path) {
@@ -424,6 +430,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 { type: "action", label: "Refresh", onSelect: () => void model.treeModel.refresh() },
             ];
         }
+        const name = path.split(/[/\\]/).pop() ?? path;
         if (isDir) {
             return [
                 { type: "action", label: "New File…", onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "file" }); } },
@@ -431,9 +438,21 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 { type: "separator" },
                 { type: "action", label: "Open in Terminal", onSelect: () => void model.openInTerminal(path) },
                 { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },
+                { type: "action", label: "Collapse Folder", onSelect: () => model.treeModel.collapseFolder(path) },
                 { type: "separator" },
                 { type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) },
-                { type: "action", label: "Delete", danger: true, onSelect: () => void model.deleteFile(path, true) },
+                {
+                    type: "action",
+                    label: "Delete",
+                    danger: true,
+                    onSelect: () => void model.deleteFile(path, true, (proceed) => {
+                        setDeleteConfirm({
+                            title: `Delete folder "${name}"?`,
+                            message: `This will permanently delete "${name}" and all its contents. This cannot be undone.`,
+                            onConfirm: proceed,
+                        });
+                    }),
+                },
             ];
         }
         return [
@@ -449,7 +468,18 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },
             { type: "separator" },
             { type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) },
-            { type: "action", label: "Delete", danger: true, onSelect: () => void model.deleteFile(path, false) },
+            {
+                type: "action",
+                label: "Delete",
+                danger: true,
+                onSelect: () => void model.deleteFile(path, false, (proceed) => {
+                    setDeleteConfirm({
+                        title: `Delete "${name}"?`,
+                        message: `This will permanently delete "${name}". This cannot be undone.`,
+                        onConfirm: proceed,
+                    });
+                }),
+            },
         ];
     };
 
@@ -547,6 +577,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         newEntry={newEntry()}
                         onNewEntryConfirm={(parent, name, kind) => void handleNewEntryConfirm(parent, name, kind)}
                         onNewEntryCancel={() => setNewEntry(null)}
+                        onStartRename={(path) => setRenamingPath(path)}
                     />
                     <Show when={!model.filePathAtom()}>
                         <div class="editor-tree-path-input">
@@ -718,6 +749,19 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         x={menu().x}
                         y={menu().y}
                         onClose={() => setCtxMenu(null)}
+                    />
+                )}
+            </Show>
+
+            {/* Delete confirmation modal — replaces window.confirm() */}
+            <Show when={deleteConfirm()}>
+                {(dc) => (
+                    <ConfirmDialog
+                        title={dc().title}
+                        message={dc().message}
+                        confirmLabel="Delete"
+                        onConfirm={() => { dc().onConfirm(); setDeleteConfirm(null); }}
+                        onCancel={() => setDeleteConfirm(null)}
                     />
                 )}
             </Show>
