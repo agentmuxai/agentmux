@@ -26,6 +26,7 @@ pub mod schema;
 pub mod service;
 pub mod session_archive;
 pub mod shellexec;
+pub mod transcript_backfill;
 pub mod shellintegration;
 pub mod sysinfo;
 pub mod storage;
