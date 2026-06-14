@@ -93,6 +93,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentmux-mcp"
+version = "0.44.1"
+dependencies = [
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "agentmux-srv"
 version = "0.44.1"
 dependencies = [
