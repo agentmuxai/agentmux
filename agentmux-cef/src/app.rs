@@ -241,6 +241,110 @@ extern "C" fn write_linux_window_properties(
     1
 }
 
+/// GPU capability tier, measured once at startup to drive ANGLE backend
+/// selection. Precedence: hardware Vulkan → hardware GL → software (SwiftShader).
+/// ANGLE is only retargeted, never bypassed. See the GPU block in
+/// `on_before_command_line_processing` and
+/// docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GpuTier {
+    /// A hardware Vulkan device is present — leave Chromium's default (Vulkan).
+    HwVulkan,
+    /// No hardware Vulkan but a DRM render node exists — route ANGLE to GL and
+    /// override the GPU blocklist (the VMware/SVGA3D case).
+    HwGl,
+    /// Neither — leave Chromium's default (software SwiftShader).
+    Software,
+}
+
+#[cfg(target_os = "linux")]
+impl GpuTier {
+    fn as_str(self) -> &'static str {
+        match self {
+            GpuTier::HwVulkan => "hw-vulkan",
+            GpuTier::HwGl => "hw-gl",
+            GpuTier::Software => "software",
+        }
+    }
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "hw-vulkan" => Some(GpuTier::HwVulkan),
+            "hw-gl" => Some(GpuTier::HwGl),
+            "software" => Some(GpuTier::Software),
+            _ => None,
+        }
+    }
+}
+
+/// Resolve the GPU tier once. `on_before_command_line_processing` runs per
+/// process; the browser process (which starts first, before any child is
+/// spawned) finds `AGENTMUX_GPU_TIER` unset, probes the hardware, and publishes
+/// the result. Child processes (gpu/renderer/utility) inherit that env var and
+/// read it back — so the `VkInstance` probe runs exactly once, in the browser.
+#[cfg(target_os = "linux")]
+fn detect_gpu_tier() -> GpuTier {
+    if let Ok(v) = std::env::var("AGENTMUX_GPU_TIER") {
+        if let Some(t) = GpuTier::from_str(&v) {
+            return t;
+        }
+    }
+    let tier = if has_hardware_vulkan() {
+        GpuTier::HwVulkan
+    } else if has_drm_render_node() {
+        GpuTier::HwGl
+    } else {
+        GpuTier::Software
+    };
+    // Publish for child processes (inherited through the environment on spawn).
+    std::env::set_var("AGENTMUX_GPU_TIER", tier.as_str());
+    tracing::info!(tier = tier.as_str(), "resolved GPU tier for ANGLE selection");
+    tier
+}
+
+/// True if a *hardware* Vulkan device is present. Enumerates Vulkan physical
+/// devices and accepts any whose `device_type` is not `CPU` — llvmpipe/lavapipe/
+/// SwiftShader all report `CPU`. Fully defensive: any load/create/enumerate
+/// failure ⇒ false (we then fall through to the GL check).
+#[cfg(target_os = "linux")]
+fn has_hardware_vulkan() -> bool {
+    use ash::vk;
+    let entry = match unsafe { ash::Entry::load() } {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_0);
+    let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+    let instance = match unsafe { entry.create_instance(&create_info, None) } {
+        Ok(i) => i,
+        Err(_) => return false,
+    };
+    let has_hw = unsafe { instance.enumerate_physical_devices() }
+        .map(|devices| {
+            devices.iter().any(|&d| {
+                unsafe { instance.get_physical_device_properties(d) }.device_type
+                    != vk::PhysicalDeviceType::CPU
+            })
+        })
+        .unwrap_or(false);
+    unsafe { instance.destroy_instance(None) };
+    has_hw
+}
+
+/// True if a DRM render node (`/dev/dri/renderD*`) exists — a kernel GPU with a
+/// render node, i.e. a real hardware GL path (vmwgfx on VMware, i915/amdgpu/
+/// nvidia on bare metal). Heuristic; the spec's §7 upgrade path tightens this to
+/// a `GL_RENDERER` software-marker check.
+#[cfg(target_os = "linux")]
+fn has_drm_render_node() -> bool {
+    std::fs::read_dir("/dev/dri")
+        .map(|rd| {
+            rd.flatten()
+                .any(|e| e.file_name().to_string_lossy().starts_with("renderD"))
+        })
+        .unwrap_or(false)
+}
+
 /// Compute a centered 70% rect for the monitor the window is currently on.
 /// Returns (x, y, width, height) or None if the monitor can't be determined.
 fn get_monitor_centered_70pct(window: &Window) -> Option<(i32, i32, i32, i32)> {
@@ -490,6 +594,71 @@ wrap_app! {
                     let oz_key = CefString::from("ozone-platform");
                     let oz_val = CefString::from(ozone_choice.as_str());
                     cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
+                }
+
+                // ── ANGLE backend precedence (capability-probed) ─────────────
+                // Precedence: hardware Vulkan → hardware GL → software
+                // (SwiftShader). CEF 148 defaults ANGLE to Vulkan and accepts a
+                // *software* Vulkan ICD over a perfectly good hardware-GL path —
+                // exactly the VMware case (no HW Vulkan, but HW SVGA3D GL), where
+                // the result is SwiftShader: burst-paint terminals + no WebGL. We
+                // measure the GPU tier and retarget ANGLE accordingly; ANGLE is
+                // never bypassed, only pointed at the best real backend. On the
+                // HW-GL rung we also --ignore-gpu-blocklist (Chromium blocklists
+                // the virtual GPU it just lost Vulkan on). No vendor gate: VMware
+                // simply lands in the HW-GL rung by measurement, real GPUs stay
+                // on Vulkan, headless stays software. Win/macOS report hardware
+                // and land in the top rung untouched.
+                // Spec: docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md
+                //
+                // Authority: explicit AGENTMUX_ANGLE env > measured precedence >
+                // Chromium default. AGENTMUX_CEF_EXTRA_FLAGS appends switches.
+                let angle_override = std::env::var("AGENTMUX_ANGLE")
+                    .ok()
+                    .filter(|s| !s.is_empty());
+
+                #[cfg(target_os = "linux")]
+                let (angle, ignore_blocklist): (Option<String>, bool) = match angle_override {
+                    Some(a) => (Some(a), false),
+                    None => match detect_gpu_tier() {
+                        GpuTier::HwVulkan => (None, false),
+                        GpuTier::HwGl => (Some("gl".to_string()), true),
+                        GpuTier::Software => (None, false),
+                    },
+                };
+                #[cfg(not(target_os = "linux"))]
+                let (angle, ignore_blocklist): (Option<String>, bool) = (angle_override, false);
+
+                if let Some(angle) = angle {
+                    cmd.append_switch_with_value(
+                        Some(&CefString::from("use-angle")),
+                        Some(&CefString::from(angle.as_str())),
+                    );
+                }
+                if ignore_blocklist {
+                    cmd.append_switch(Some(&CefString::from("ignore-gpu-blocklist")));
+                }
+
+                // ── Arbitrary extra Chromium switches (dev/diagnostics) ───────
+                // AGENTMUX_CEF_EXTRA_FLAGS lets us A/B GPU/compositor flags
+                // without a recompile: space-separated tokens, each either
+                // `--switch`, `--switch=value`, or `switch=value`. Used to hunt
+                // the WebGL / gpu-compositing gate on VM guests. Empty/unset → no-op.
+                if let Ok(extra) = std::env::var("AGENTMUX_CEF_EXTRA_FLAGS") {
+                    for tok in extra.split_whitespace() {
+                        let tok = tok.trim_start_matches("--");
+                        if tok.is_empty() {
+                            continue;
+                        }
+                        if let Some((k, v)) = tok.split_once('=') {
+                            cmd.append_switch_with_value(
+                                Some(&CefString::from(k)),
+                                Some(&CefString::from(v)),
+                            );
+                        } else {
+                            cmd.append_switch(Some(&CefString::from(tok)));
+                        }
+                    }
                 }
 
                 // ── GPU channel + frame-production tuning ─────────────────────

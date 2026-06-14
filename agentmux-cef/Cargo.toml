@@ -97,6 +97,13 @@ winres = "0.1"
 # `spawn_blocking` task that doesn't unwind on outer-task abort).
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Vulkan device enumeration for the startup GPU-tier probe (hardware Vulkan →
+# hardware GL → software precedence). Used only to read physical-device types;
+# the host already bundles libvulkan.so.1. See app.rs `has_hardware_vulkan` and
+# docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md.
+ash = "0.38"
+
 [dev-dependencies]
 # Property tests for the shadow projection (master spec §8.14
 # subscriber idempotency contract). Mirrors agentmux-launcher's
