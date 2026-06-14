@@ -46,21 +46,37 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # `validate_dir <dir>` — print to stdout and exit 0 if `<dir>` has libcef.so +
 # icudtl.dat. Returns 1 (no output) if either file is missing.
-# When the directory does provide both files, also do a size sanity warning.
+# When the directory provides both files, emit a diagnostic keyed on <kind>:
+#   cargo-cache → the cef-dll-sys prebuilt download. It NEVER carries AgentMux's
+#                 BeginWindowDrag patch (regardless of size), so resolving here
+#                 means left-click window drag silently no-ops — the real alarm,
+#                 and it's about provenance, not file size.
+#   override | cef-build → an operator/dev-built tree. A >1 GB libcef.so here is
+#                 just an unstripped build (the dev tree keeps symbols); the
+#                 AppImage packager strips it to ~260 MB at bundle time. That is
+#                 NORMAL — emit at most a soft INFO, never the upstream alarm.
+#                 (Pre-fix this size check false-alarmed "likely unpatched upstream"
+#                 on the correct official build — see the v0.45.0 slim-libcef work.)
 validate_dir() {
-    local dir="$1"
+    local dir="$1" kind="${2:-cef-build}"
     if [ ! -f "$dir/libcef.so" ] || [ ! -f "$dir/icudtl.dat" ]; then
         return 1
     fi
-    local size_bytes
-    size_bytes=$(stat -c %s "$dir/libcef.so" 2>/dev/null || stat -f %z "$dir/libcef.so" 2>/dev/null || echo 0)
-    local size_mb=$((size_bytes / 1024 / 1024))
-    if [ "$size_bytes" -gt 1073741824 ]; then
-        echo "WARNING: libcef.so at $dir is ${size_mb} MB (>1 GB) — likely unpatched upstream debug build." >&2
-        echo "         AgentMux's BeginWindowDrag FFI override will silently no-op (left-click drag broken)." >&2
-        echo "         Build the patched libcef per docs/cef-build/build-patched-libcef.md, then either" >&2
-        echo "         (a) move the result to ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64, or" >&2
+    if [ "$kind" = "cargo-cache" ]; then
+        echo "WARNING: resolved libcef.so to the cef-dll-sys cargo cache at $dir." >&2
+        echo "         This is the upstream prebuilt CEF — it lacks AgentMux's BeginWindowDrag" >&2
+        echo "         patch, so left-click window drag will silently no-op. Build the patched" >&2
+        echo "         libcef (docs/cef-build/build-patched-libcef.md), then either" >&2
+        echo "         (a) place it at ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64, or" >&2
         echo "         (b) export AGENTMUX_CEF_RUNTIME_DIR=/path/to/your/Release_GN_x64." >&2
+    else
+        local size_bytes
+        size_bytes=$(stat -c %s "$dir/libcef.so" 2>/dev/null || stat -f %z "$dir/libcef.so" 2>/dev/null || echo 0)
+        if [ "$size_bytes" -gt 1073741824 ]; then
+            local size_mb=$((size_bytes / 1024 / 1024))
+            echo "INFO: libcef.so at $dir is ${size_mb} MB — an unstripped build; the AppImage" >&2
+            echo "      packager strips it to ~260 MB at bundle time (expected, not a problem)." >&2
+        fi
     fi
     echo "$dir"
     return 0
@@ -73,7 +89,7 @@ validate_dir() {
 #    be used. Falling through would yield a successful but drag-broken bundle.
 #    (Codex P2 on PR #743.)
 if [ -n "${AGENTMUX_CEF_RUNTIME_DIR:-}" ]; then
-    if validate_dir "$AGENTMUX_CEF_RUNTIME_DIR"; then
+    if validate_dir "$AGENTMUX_CEF_RUNTIME_DIR" override; then
         exit 0
     fi
     echo "ERROR: AGENTMUX_CEF_RUNTIME_DIR=$AGENTMUX_CEF_RUNTIME_DIR" >&2
@@ -85,21 +101,27 @@ if [ -n "${AGENTMUX_CEF_RUNTIME_DIR:-}" ]; then
     exit 1
 fi
 
-# 2. Standard cef-build layout under $HOME.
-candidates=("$HOME/cef-build/chromium_git/chromium/src/out/Release_GN_x64")
+# 2. Standard cef-build layout under $HOME (your patched, dev-built tree).
+CEF_BUILD_DIR="$HOME/cef-build/chromium_git/chromium/src/out/Release_GN_x64"
+if validate_dir "$CEF_BUILD_DIR" cef-build; then
+    exit 0
+fi
 
-# 3. Cargo cef-dll-sys cache. Find first match in either debug or release.
+# 3. Cargo cef-dll-sys cache — the upstream prebuilt fallback (no BeginWindowDrag).
+#    Find first match in either debug or release.
+cargo_candidates=()
 while IFS= read -r d; do
-    candidates+=("$d")
+    cargo_candidates+=("$d")
 done < <(find "$REPO_ROOT/target" -maxdepth 6 -type d -name 'cef_linux_x86_64' 2>/dev/null)
 
-for dir in "${candidates[@]}"; do
-    if validate_dir "$dir"; then
+for dir in "${cargo_candidates[@]}"; do
+    if validate_dir "$dir" cargo-cache; then
         exit 0
     fi
 done
 
 echo "ERROR: could not find libcef.so + icudtl.dat in any of these locations:" >&2
-for c in "${candidates[@]}"; do echo "  - $c" >&2; done
+echo "  - $CEF_BUILD_DIR" >&2
+for c in "${cargo_candidates[@]}"; do echo "  - $c" >&2; done
 echo "Build the patched libcef (see docs/cef-build/build-patched-libcef.md) or run \`cargo build -p agentmux-cef\` to populate the cef-dll-sys fallback cache." >&2
 exit 1

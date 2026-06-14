@@ -87,22 +87,24 @@ If you see "class member cannot be redeclared" compile errors later, the patcher
 
 ### 4. Configure the build
 
+The canonical GN args are version-controlled at **`scripts/cef-build/args.gn`** in
+the agentmux repo — the exact configuration that built the shipped v0.45.0 libcef.
+Use the configure script: it regenerates the gitignored C-API wrappers (gotcha #1
+below), installs those args into the build tree, and runs `gn gen`:
+
+```bash
+# Run from your agentmux repo checkout. Defaults to ~/cef-build/chromium_git/chromium/src;
+# set AGENTMUX_CEF_SRC=/path/to/chromium/src if your tree is elsewhere.
+bash scripts/cef-build/configure-cef-build.sh
+```
+
+Equivalent manual steps, if you'd rather drive `gn` yourself:
+
 ```bash
 cd ~/cef-build/chromium_git/chromium/src
-gn gen out/Release_GN_x64 --args='
-  is_debug=false
-  is_official_build=true
-  use_thin_lto=true
-  is_cfi=false
-  chrome_pgo_phase=0
-  symbol_level=1
-  is_component_build=false
-  proprietary_codecs=true
-  ffmpeg_branding="Chrome"
-  use_sysroot=false
-  enable_nacl=false
-  cc_wrapper="ccache"
-'
+( cd cef && python3 tools/translator.py --root-dir . )           # regen wrappers FIRST
+cp /path/to/agentmux/scripts/cef-build/args.gn out/Release_GN_x64/args.gn
+./buildtools/linux64/gn gen out/Release_GN_x64
 ```
 
 > **`is_official_build=true` is the size lever — do not omit it.** It enables
