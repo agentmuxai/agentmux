@@ -1121,7 +1121,16 @@ fn spawn_publisher_loop(
                 if event.kind == "stderr" {
                     buf.extend_from_slice(b"[stderr] ");
                 }
-                buf.extend_from_slice(&event.bytes);
+                // Strip a single leading `\r` carried by a collapsed leading-\r
+                // spinner frame (e.g. a final "\r✔ done\n"), matching the WPS
+                // live path's `strip_prefix('\r')` below, so the model-visible
+                // blob and the live log agree byte-for-byte. The trailing `\n`
+                // is preserved here — it separates lines in the blob.
+                let body: &[u8] = match event.bytes.first() {
+                    Some(&b'\r') => &event.bytes[1..],
+                    _ => &event.bytes,
+                };
+                buf.extend_from_slice(body);
             }
             if let Some(client) = wps.as_ref() {
                 let mut line_bytes: &[u8] = &event.bytes;
@@ -1134,8 +1143,9 @@ fn spawn_publisher_loop(
                     // Leading-\r spinner frame: publish any prior pending frame
                     // before storing the new one, so consecutive \r-prefixed
                     // lines are not silently dropped from the live WPS log.
-                    // (The model-visible buffered blob is unaffected — it
-                    // receives every raw event byte regardless of this slot.)
+                    // (This pending slot only affects the live WPS log; the
+                    // model-visible blob already received this frame's bytes
+                    // above, with the leading \r stripped to match.)
                     if let Some((prior_text, prior_kind)) = pending_cr_line.take() {
                         match publish_line(
                             client,
