@@ -276,6 +276,10 @@ done
 #    be signed here, before the bundle seal.
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
+# agentmux-mcp is a nested Mach-O under MacOS/tools/bin/ (Claude's PATH). It must
+# be signed inside-out before the seal or `codesign --verify --deep --strict`
+# fails on the unsigned binary and hardened-runtime/notarization rejects it.
+"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
 # 5. Seal the .app bundle last. codesign signs the main executable
 #    (agentmux-launcher) as part of sealing; pass the entitlements so the
 #    launcher is hardened-runtime signed identically to the host.
