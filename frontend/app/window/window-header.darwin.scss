@@ -11,21 +11,16 @@
 .window-header {
     --default-indent: 10px;
 
-    // macOS window drag. Chromium for macOS reports
-    // `-webkit-app-region: drag` regions via on_draggable_regions_changed
-    // → cef::Window::set_draggable_regions, which configures the
-    // underlying NSWindow to be movable from those rects. Without this
-    // declaration the borderless main window has no drag handle on
-    // macOS at all — useWindowDrag.darwin.ts only sets a data-attribute
-    // with no native reader. The whole header (excluding tabs / widgets /
-    // traffic lights, which are -webkit-app-region: no-drag) becomes
-    // the drag surface, matching the macOS HIG.
-    //
-    // Linux deliberately does NOT use this (see window-header.linux.scss)
-    // because Chromium/Wayland suppresses all events on drag regions
-    // before they reach the renderer — Linux uses a JS-driven drag IPC
-    // instead.
-    -webkit-app-region: drag;
+    // macOS window drag is JS-driven (useWindowDrag.darwin.ts), NOT
+    // `-webkit-app-region: drag`. Chromium suppresses ALL events on
+    // app-region:drag elements — including `contextmenu` — so a native
+    // drag region and right-click can't coexist on the same surface. The
+    // header therefore stays HTCLIENT (no app-region): right-click fires
+    // everywhere, and a left-button-only JS listener sends
+    // `start_window_drag`, which the host handles with a manual move loop
+    // (run_macos_native_drag_loop → CEF set_bounds). So drag AND right-click
+    // both work on the same area — no `.tab-bar-fill` opt-out needed.
+    // Mirrors the Linux model (window-header.linux.scss).
 }
 
 .config-error-message {

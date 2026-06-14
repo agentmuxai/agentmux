@@ -154,11 +154,13 @@ pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
 // ── Drag ─────────────────────────────────────────────────────────────────
 // CEF Views does not expose a programmatic drag-initiation API.
 // Begin a native window-move via the underlying CefWindow's BeginWindowDrag().
-// Posted on the CEF UI thread (BeginWindowDrag must be called there). On
-// Linux/Wayland this dispatches WmMoveResizeHandler::DispatchHostWindowDragMovement
-// → xdg_toplevel.move with the most recent input serial; on X11 it dispatches
-// an XEvent for _NET_WM_MOVERESIZE; on macOS it begins a system move loop.
-// The compositor handles the drag until the user releases the mouse button.
+// Posted on the CEF UI thread (BeginWindowDrag must be called there). This is
+// the LINUX path: on Wayland it dispatches
+// WmMoveResizeHandler::DispatchHostWindowDragMovement → xdg_toplevel.move with
+// the most recent input serial; on X11 it dispatches an XEvent for
+// _NET_WM_MOVERESIZE. The compositor handles the drag until the user releases
+// the mouse button. (macOS uses a separate host-side move loop — see
+// MacWindowDragTask below.)
 // Note: views::Widget::RunMoveLoop() is the wrong API on Wayland (returns
 // immediately with a non-zero result) — see retro for details.
 //
@@ -168,7 +170,10 @@ pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
 // renderer events) and sends this IPC to initiate native drag.
 //
 // Requires CEF Patch: BeginWindowDrag added to CefWindow API (libcef/browser/views/window_impl.cc).
-#[cfg(not(target_os = "windows"))]
+// Linux: native drag via CefWindow::BeginWindowDrag (Ozone). macOS uses a
+// separate host-side move loop (MacWindowDragTask, below) because stock
+// libcef has no drag API and the fork's BeginWindowDrag is Ozone-only.
+#[cfg(target_os = "linux")]
 wrap_task! {
     pub struct StartWindowDragTask {
         state: Arc<AppState>,
@@ -250,10 +255,200 @@ wrap_task! {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
     let mut task = StartWindowDragTask::new(state.clone(), label.to_string());
     post_task(ThreadId::UI, Some(&mut task));
+}
+
+// macOS: drive the drag with a host-side manual move loop (MacWindowDragTask
+// → run_macos_native_drag_loop). Stock libcef ships no programmatic drag API
+// and the fork's BeginWindowDrag is Ozone-only (no-op on macOS), so rather
+// than chain macOS releases to a patched-Chromium framework we pump the drag
+// events ourselves and reposition via CEF set_bounds. The header is HTCLIENT
+// (useWindowDrag.darwin.ts sends this IPC only on a left-button drag), so
+// right-click context menus keep working on the same surface.
+#[cfg(target_os = "macos")]
+pub fn post_start_drag(state: &Arc<AppState>, label: &str) {
+    let mut task = MacWindowDragTask::new(state.clone(), label.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+#[cfg(target_os = "macos")]
+wrap_task! {
+    pub struct MacWindowDragTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                // Host-side manual move loop (mirrors the Windows path). We do
+                // NOT use performWindowDragWithEvent: — start_window_drag arrives
+                // async over IPC, so [NSApp currentEvent] is not the original
+                // title-bar mouse-down and the AppKit drag may never start.
+                // Instead we pump NSLeftMouseDragged/Up ourselves and reposition
+                // via CEF set_bounds, so the window always tracks the cursor.
+                unsafe { run_macos_native_drag_loop(&window, &self.label) };
+                // Dragging-reset safety net, same as the Linux task — resets the
+                // renderer's dragging flag. (On non-Windows, tryRedockAtCursor is
+                // driven from the DOM mouseup.)
+                crate::events::emit_event_to_top_level_windows(
+                    &self.state,
+                    "window_drag_ended",
+                    &serde_json::json!({ "label": &self.label, "moved": true }),
+                );
+            } else {
+                tracing::warn!("[start_window_drag] no window for label={}", self.label);
+            }
+        }
+    }
+}
+
+/// Host-side manual window-drag loop for macOS, run on the CEF UI thread in
+/// response to the renderer's `start_window_drag` IPC. Mirrors the Windows
+/// `Win32BeginMoveTask` approach instead of AppKit's
+/// `performWindowDragWithEvent:`: that API needs the *original* mouse-down
+/// event, but our IPC is async (renderer mousemove → IPC → post_task), so
+/// `[NSApp currentEvent]` is unreliable and the drag can silently fail to
+/// start. Here we pump `NSLeftMouseDragged`/`NSLeftMouseUp` ourselves and
+/// reposition with CEF `set_bounds`, so the window always tracks the cursor.
+///
+/// Coordinates: CEF window bounds are DIP, top-left origin, y-down — the same
+/// space the other window commands use (DOM `screenX/Y`). `[NSEvent
+/// mouseLocation]` is screen points, bottom-left origin, y-up. Points == DIP on
+/// macOS and we track deltas (absolute origin / screen height cancel out), so
+/// only the vertical axis is flipped (`origin.y - dy`).
+///
+/// Raw libobjc FFI, mirroring `ensure_macos_native_window_buttons` in app.rs.
+/// Like the Windows loop this blocks the UI thread until mouse-up — the
+/// accepted trade-off for a window drag (content freezes briefly, as it does
+/// for any native title-bar drag).
+#[cfg(target_os = "macos")]
+unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
+    use std::ffi::{c_char, c_void};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct NSPoint {
+        x: f64,
+        y: f64,
+    }
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn objc_msgSend();
+    }
+    // objc_msgSend transmuted per call signature (the app.rs idiom). NSPoint is
+    // two doubles → returned in registers on both arm64 and x86_64, so plain
+    // objc_msgSend is correct (no objc_msgSend_stret); that is why we reposition
+    // via CEF set_bounds rather than reading an NSRect frame.
+    let msg: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_str: extern "C" fn(Id, Sel, *const c_char) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_point: extern "C" fn(Id, Sel) -> NSPoint =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_uint: extern "C" fn(Id, Sel) -> u64 = std::mem::transmute(objc_msgSend as *const c_void);
+    let msg_next: extern "C" fn(Id, Sel, u64, Id, Id, i8) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    // -[NSApp sendEvent:] — dispatch a (dequeued) event onward to its window.
+    let msg_send_event: extern "C" fn(Id, Sel, Id) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+
+    // NSApp = [NSApplication sharedApplication]
+    let nsapp = msg(
+        objc_getClass(b"NSApplication\0".as_ptr() as _),
+        sel_registerName(b"sharedApplication\0".as_ptr() as _),
+    );
+    if nsapp.is_null() {
+        tracing::warn!("[start_window_drag] macOS: NSApp nil label={}", label);
+        return;
+    }
+    let nsevent_cls = objc_getClass(b"NSEvent\0".as_ptr() as _);
+    let sel_mouse_location = sel_registerName(b"mouseLocation\0".as_ptr() as _);
+    let nsdate_cls = objc_getClass(b"NSDate\0".as_ptr() as _);
+    // untilDate: a SHORT (100ms) timeout, NOT distantFuture. start_window_drag
+    // is async, so the NSLeftMouseUp can be consumed by the normal run loop
+    // before this loop starts pumping; a distantFuture wait would then block
+    // the UI (main) thread forever — a whole-app freeze. The timeout wakes the
+    // loop ~10x/sec so the live-button check below can end the drag. Mirrors
+    // the Windows 100ms SetTimer wake. (Fresh NSDate built each iteration.)
+    let sel_date = sel_registerName(b"dateWithTimeIntervalSinceNow:\0".as_ptr() as _);
+    let msg_date: extern "C" fn(Id, Sel, f64) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    // [NSEvent pressedMouseButtons] — LIVE hardware bitmask (bit 0 = left),
+    // independent of which events have been dispatched; lets us detect a
+    // release we never saw as an event. Mirrors Windows GetAsyncKeyState(VK_LBUTTON).
+    let sel_pressed = sel_registerName(b"pressedMouseButtons\0".as_ptr() as _);
+    // inMode: an NSString equal to the event-tracking run-loop mode (run-loop
+    // modes compare by string value, so a fresh NSString is fine).
+    let mode = msg_str(
+        objc_getClass(b"NSString\0".as_ptr() as _),
+        sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _),
+        b"NSEventTrackingRunLoopMode\0".as_ptr() as _,
+    );
+    let sel_next =
+        sel_registerName(b"nextEventMatchingMask:untilDate:inMode:dequeue:\0".as_ptr() as _);
+    let sel_type = sel_registerName(b"type\0".as_ptr() as _);
+    let sel_send_event = sel_registerName(b"sendEvent:\0".as_ptr() as _);
+
+    // NSEventMaskLeftMouseDragged (1<<6) | NSEventMaskLeftMouseUp (1<<2).
+    const MASK: u64 = (1 << 6) | (1 << 2);
+    const NS_LEFT_MOUSE_UP: u64 = 2; // NSEventTypeLeftMouseUp
+
+    // Bail if the press already ended (fast flick-and-release, or this task was
+    // posted late): the loop below would otherwise wait for a drag/up event
+    // that will never come, freezing the UI thread. Mirrors the Windows
+    // `!lbutton_down()` bail.
+    if msg_uint(nsevent_cls, sel_pressed) & 1 == 0 {
+        tracing::info!("[start_window_drag] macOS: button already up — skipping drag label={}", label);
+        return;
+    }
+
+    let origin = window.bounds(); // DIP, top-left, y-down
+    let start = msg_point(nsevent_cls, sel_mouse_location); // screen points, y-up
+
+    loop {
+        // untilDate: a fresh 100ms deadline each iteration (see above).
+        let until = msg_date(nsdate_cls, sel_date, 0.1);
+        // dequeue:YES (1) — consume the event, else the same pending event is
+        // returned forever. The renderer doesn't need these mid-drag.
+        let event = msg_next(nsapp, sel_next, MASK, until, mode, 1);
+        if event.is_null() {
+            // 100ms timeout, no event. Re-check the live button state: if the
+            // left button is up we missed the NSLeftMouseUp (consumed elsewhere
+            // during the async gap) — end the drag instead of blocking forever.
+            // Otherwise the button is still held; keep tracking.
+            if msg_uint(nsevent_cls, sel_pressed) & 1 == 0 {
+                break;
+            }
+            continue;
+        }
+        if msg_uint(event, sel_type) == NS_LEFT_MOUSE_UP {
+            // We dequeued this up (dequeue:YES), so the NSView never saw it.
+            // Forward it via -[NSApp sendEvent:] so Chromium balances the
+            // renderer's mousedown (the JS drag listener never preventDefault'd
+            // it) and the DOM `mouseup` fires; otherwise the renderer is left
+            // believing the left button is still down. Mirrors the Windows loop
+            // below, which dispatches/synthesizes WM_LBUTTONUP for the same
+            // reason. The timeout/button-already-up paths need no forward — the
+            // up was already delivered through normal dispatch.
+            msg_send_event(nsapp, sel_send_event, event);
+            break;
+        }
+        let cur = msg_point(nsevent_cls, sel_mouse_location);
+        let dx = (cur.x - start.x).round() as i32;
+        let dy = (cur.y - start.y).round() as i32; // screen y-up
+        window.set_bounds(Some(&Rect {
+            x: origin.x + dx,
+            y: origin.y - dy, // flip screen y-up → CEF y-down
+            width: origin.width,
+            height: origin.height,
+        }));
+    }
+    tracing::info!("[start_window_drag] macOS: drag loop ended label={}", label);
 }
 
 #[cfg(target_os = "windows")]
