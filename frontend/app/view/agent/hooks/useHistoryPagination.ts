@@ -98,6 +98,16 @@ export interface UseHistoryPagination {
     historyTotal: Accessor<number>;
     loadingOlder: Accessor<boolean>;
     loadOlder: () => Promise<void>;
+    /**
+     * True when this pane mounted against a v2 snapshot whose `sourceBlockId`
+     * names a DIFFERENT block (cross-block "structural continuation" — a second
+     * pane for an agent already shown elsewhere). Such a pane is a transient
+     * viewer: it must NOT overwrite the agent-anchored snapshot, or it would
+     * repoint it at its own (near-empty) block and make the original block's
+     * conversation unrestorable. The caller gates `writeSnapshotNow` on this.
+     * Cross-block continuation restore itself is deferred (see spec §15, #1397).
+     */
+    snapshotIsForeignBlock: Accessor<boolean>;
 }
 
 const PAGE_SIZE = 200;
@@ -125,6 +135,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
+    const [snapshotIsForeignBlock, setSnapshotIsForeignBlock] = createSignal(false);
 
     /**
      * Load the previous page of history and prepend to the document.
@@ -298,6 +309,13 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         const crossBlock = typeof snapshot.sourceBlockId === "string"
                             && snapshot.sourceBlockId !== ""
                             && snapshot.sourceBlockId !== opts.blockId;
+                        if (crossBlock) {
+                            // Mark this pane as a transient cross-block viewer so the
+                            // caller suppresses snapshot writes — otherwise it would
+                            // clobber the agent-anchored snapshot that still references
+                            // the block holding the real conversation.
+                            setSnapshotIsForeignBlock(true);
+                        }
                         opts.log(
                             "history",
                             crossBlock
@@ -417,5 +435,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         historyTotal,
         loadingOlder,
         loadOlder,
+        snapshotIsForeignBlock,
     };
 }

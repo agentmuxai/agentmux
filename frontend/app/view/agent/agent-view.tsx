@@ -335,6 +335,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // LAST and overwrite the close-time snapshot, losing recent nodes.
     let inFlightSnapshot: Promise<void> = Promise.resolve();
     const writeSnapshotNow = () => {
+        // Don't let a cross-block continuation pane (one that mounted against a
+        // snapshot whose sourceBlockId names another block) overwrite the
+        // agent-anchored snapshot. It holds no durable history of its own, so a
+        // write would repoint the agent's snapshot at this near-empty block and
+        // make the original block's conversation unrestorable. See spec §15 / #1397.
+        if (history.snapshotIsForeignBlock()) {
+            return;
+        }
         // Schema v2: capture the lightweight overlay state (DocumentState +
         // pane flags) synchronously before the async RPC chain so we snapshot
         // the values at trigger time, not after a potential 3 s round-trip.
