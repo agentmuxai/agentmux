@@ -353,6 +353,9 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
     let msg_uint: extern "C" fn(Id, Sel) -> u64 = std::mem::transmute(objc_msgSend as *const c_void);
     let msg_next: extern "C" fn(Id, Sel, u64, Id, Id, i8) -> Id =
         std::mem::transmute(objc_msgSend as *const c_void);
+    // -[NSApp sendEvent:] — dispatch a (dequeued) event onward to its window.
+    let msg_send_event: extern "C" fn(Id, Sel, Id) =
+        std::mem::transmute(objc_msgSend as *const c_void);
 
     // NSApp = [NSApplication sharedApplication]
     let nsapp = msg(
@@ -389,6 +392,7 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
     let sel_next =
         sel_registerName(b"nextEventMatchingMask:untilDate:inMode:dequeue:\0".as_ptr() as _);
     let sel_type = sel_registerName(b"type\0".as_ptr() as _);
+    let sel_send_event = sel_registerName(b"sendEvent:\0".as_ptr() as _);
 
     // NSEventMaskLeftMouseDragged (1<<6) | NSEventMaskLeftMouseUp (1<<2).
     const MASK: u64 = (1 << 6) | (1 << 2);
@@ -423,6 +427,15 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
             continue;
         }
         if msg_uint(event, sel_type) == NS_LEFT_MOUSE_UP {
+            // We dequeued this up (dequeue:YES), so the NSView never saw it.
+            // Forward it via -[NSApp sendEvent:] so Chromium balances the
+            // renderer's mousedown (the JS drag listener never preventDefault'd
+            // it) and the DOM `mouseup` fires; otherwise the renderer is left
+            // believing the left button is still down. Mirrors the Windows loop
+            // below, which dispatches/synthesizes WM_LBUTTONUP for the same
+            // reason. The timeout/button-already-up paths need no forward — the
+            // up was already delivered through normal dispatch.
+            msg_send_event(nsapp, sel_send_event, event);
             break;
         }
         let cur = msg_point(nsevent_cls, sel_mouse_location);
