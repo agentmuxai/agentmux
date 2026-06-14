@@ -490,6 +490,9 @@ async fn main() {
     // (definitions/ and registry/), so user agents created in one channel are
     // visible in every channel. Best-effort: disabled when the shared dir can't
     // be resolved. See SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md (P0.2/P0.3).
+    // Captured for the transcript backfill below (after the global transcript
+    // store opens): the user-agent definition ids to seed conversations for.
+    let mut backfill_def_ids: Vec<String> = Vec::new();
     if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
         match registry::DefinitionStore::open(def_dir.clone()) {
             Ok(def_store) => {
@@ -511,6 +514,11 @@ async fn main() {
                         Err(e) => tracing::warn!(error = %e, "def registry: global migration errored (continuing; live mirror backfills on edit)"),
                     }
                 }
+                // Capture user-agent ids for the transcript backfill (below).
+                backfill_def_ids = def_store
+                    .list_active()
+                    .map(|v| v.into_iter().map(|r| r.data.id).collect())
+                    .unwrap_or_default();
                 wstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
             }
@@ -565,6 +573,31 @@ async fn main() {
     // the store through `resync_controller` and every controller constructor.
     if let Some(ref fs) = global_transcript_store {
         crate::backend::agent_session::set_global_transcript_store(fs.clone());
+        // One-shot: seed pre-existing agents' conversations into the global zone
+        // so the 9 cross-channel agents (and any created before #1399) load
+        // their history when opened from a fresh channel. Runs before the
+        // frontend connects / controllers auto-start, so it seeds before any new
+        // turn writes. Marker-gated; best-effort. See transcript_backfill.rs.
+        if let Some(tdir) = registry::resolve_shared_transcripts_dir() {
+            if let Some(home) = tdir.ancestors().nth(3) {
+                let s = backend::transcript_backfill::backfill_transcripts_once(
+                    home,
+                    &tdir,
+                    &backfill_def_ids,
+                    fs,
+                );
+                if s.data_dirs_scanned > 0 || s.seeded > 0 {
+                    tracing::info!(
+                        agents = s.agents_seen,
+                        data_dirs_scanned = s.data_dirs_scanned,
+                        seeded = s.seeded,
+                        skipped_no_source = s.skipped_no_source,
+                        skipped_global_richer = s.skipped_global_richer,
+                        "transcript backfill finished"
+                    );
+                }
+            }
+        }
     }
     // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
     // Backed by its own SQLite file (`sagas.db`) so saga writes
