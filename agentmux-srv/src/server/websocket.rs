@@ -1167,6 +1167,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 };
                 proc.stdout(std::process::Stdio::piped());
                 proc.stderr(std::process::Stdio::piped());
+                // kill_on_drop: when the timeout fires the Child future is
+                // dropped; without this flag the OS process keeps running
+                // (e.g. `! sleep 1000` would linger indefinitely).
+                proc.kill_on_drop(true);
                 if let Some(ref dir) = cwd {
                     proc.current_dir(dir);
                 }
@@ -1204,14 +1208,16 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let status = child.wait().await
                     .map_err(|e| format!("shellexec: wait: {e}"))?;
 
-                // Truncate raw bytes before from_utf8_lossy so we never slice
-                // at a mid-codepoint offset (which would panic on a &str index).
-                let truncate_output = |bytes: Vec<u8>| -> String {
-                    let total = bytes.len();
-                    let capped = if total > MAX_OUTPUT as usize { &bytes[..MAX_OUTPUT as usize] } else { &bytes[..] };
-                    let s = String::from_utf8_lossy(capped);
-                    if total > MAX_OUTPUT as usize {
-                        format!("{s}…[truncated, {total} bytes total]")
+                // `take(MAX_OUTPUT)` already caps each buffer at MAX_OUTPUT bytes,
+                // so `bytes.len()` is at most MAX_OUTPUT — checking `> MAX_OUTPUT`
+                // would always be false (dead code). Instead, check for equality:
+                // if we read exactly MAX_OUTPUT bytes the take adapter hit its limit
+                // and there may be more data the user didn't see.
+                let format_output = |bytes: Vec<u8>| -> String {
+                    let len = bytes.len();
+                    let s = String::from_utf8_lossy(&bytes);
+                    if len == MAX_OUTPUT as usize {
+                        format!("{s}…[output capped at {MAX_OUTPUT} bytes]")
                     } else {
                         s.into_owned()
                     }
@@ -1219,8 +1225,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
                 let result = ShellExecResult {
                     exit_code: status.code().unwrap_or(1),
-                    stdout: truncate_output(stdout_buf),
-                    stderr: truncate_output(stderr_buf),
+                    stdout: format_output(stdout_buf),
+                    stderr: format_output(stderr_buf),
                 };
                 Ok(Some(serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?))
             })
