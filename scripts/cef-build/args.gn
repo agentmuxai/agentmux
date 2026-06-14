@@ -1,0 +1,42 @@
+# Canonical GN args for the AgentMux patched libcef.so (Linux x64).
+#
+# This is the EXACT configuration that produced the libcef.so shipped in the
+# v0.45.0 release (stripped 263 MB → 134 MB AppImage — the smallest of the three
+# platforms). Treat it as the source of truth; `docs/cef-build/build-patched-libcef.md`
+# defers to this file. `scripts/cef-build/configure-cef-build.sh` copies it into the
+# build tree's out/Release_GN_x64/args.gn and runs `gn gen`.
+#
+# The first block is CEF's standard GN_DEFINES set (what `cef_create_projects.sh`
+# emits for a non-component Release). The size-reduction block at the bottom is the
+# AgentMux addition — see the comment there.
+
+blink_heap_inside_shared_library=true
+clang_use_chrome_plugins=false
+enable_background_mode=false
+enable_downgrade_processing=false
+enable_linux_installer=false
+enable_resource_allowlist_generation=false
+enable_widevine=true
+forbid_non_component_debug_builds=false
+is_component_build=false
+is_debug=false
+optimize_webui=true
+target_cpu="x64"
+use_qt5=false
+use_qt6=false
+use_sysroot=false
+
+# --- size reduction (added 2026-06-14): official-build optimizations ---
+# is_official_build=true is THE size lever — it enables thin-LTO,
+# identical-code-folding, and full optimization, roughly halving libcef.so
+# (~414 MB → ~263 MB stripped; AppImage ~190 → ~135 MB). Do not omit it.
+# is_cfi / chrome_pgo_phase are disabled only to skip their profile/setup
+# dependencies — they do NOT drive size. Verified on CEF 148.0.7778.180.
+#
+# Gotcha: is_official_build rebuilds V8, so after building you MUST copy the
+# fresh snapshot_blob.bin + v8_context_snapshot.bin alongside libcef.so or the
+# host crashes on a checksum mismatch (the AppImage packager handles this).
+is_official_build=true
+use_thin_lto=true
+is_cfi=false
+chrome_pgo_phase=0
