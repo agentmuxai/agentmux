@@ -1632,6 +1632,77 @@ mod tests {
         assert_eq!(records[0].data.working_dir, "demo-fixture");
     }
 
+    /// Production-shaped store: registry at `<tmp>/shared/agents/registry` (so the
+    /// mirror derives the GLOBAL workspace root `<tmp>/agents` via the registry
+    /// root's 3rd ancestor), with the per-channel base set to
+    /// `<tmp>/channels/<ch>/agents` (= AGENTMUX_AGENTS_DIR).
+    fn store_with_global_registry() -> (tempfile::TempDir, Store, Arc<crate::registry::Registry>) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("agents")).unwrap();
+        let reg_root = tmp.path().join("shared").join("agents").join("registry");
+        let reg = Arc::new(crate::registry::Registry::open(reg_root).unwrap());
+        let store = Store::open_in_memory().unwrap();
+        store.set_registry(reg.clone());
+        let channel_agents = tmp.path().join("channels").join("local-x").join("agents");
+        std::fs::create_dir_all(&channel_agents).unwrap();
+        store.set_registry_agents_base(channel_agents);
+        let mut agent = sample_agent("def-mirror", "mirror");
+        store.agent_def_insert(&mut agent).unwrap();
+        (tmp, store, reg)
+    }
+
+    #[test]
+    fn mirror_anchors_global_workspace() {
+        // The bug this fixes: agent workspaces are GLOBAL (`<home>/agents/<name>`),
+        // NOT under the per-channel agents dir. The live mirror must anchor on the
+        // global root (derived from the registry root) and mirror the agent — not
+        // drop it as "not representable" (the live-write twin of #1393).
+        let (tmp, store, reg) = store_with_global_registry();
+        let global_agents = tmp.path().join("agents"); // <home>/agents
+        let inst = make_named_inst("inst-g", "qooma", &global_agents);
+        store.instance_create(&inst).unwrap();
+        let records = reg.list_active().unwrap();
+        assert_eq!(records.len(), 1, "global workspace must mirror, not be dropped");
+        assert_eq!(records[0].data.working_dir, "qooma-fixture");
+        assert_eq!(
+            records[0].data.source_agents_base.as_deref(),
+            Some(global_agents.to_string_lossy().as_ref()),
+            "anchored on the GLOBAL workspace root, not the channel base"
+        );
+    }
+
+    #[test]
+    fn mirror_per_channel_legacy_workspace_still_works() {
+        // A legacy in-channel workspace (under channels/<ch>/agents, not the global
+        // root) still mirrors via the per-channel fallback.
+        let (tmp, store, reg) = store_with_global_registry();
+        let channel_agents = tmp.path().join("channels").join("local-x").join("agents");
+        let inst = make_named_inst("inst-c", "legacy", &channel_agents);
+        store.instance_create(&inst).unwrap();
+        let records = reg.list_active().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].data.working_dir, "legacy-fixture");
+        assert_eq!(
+            records[0].data.source_agents_base.as_deref(),
+            Some(channel_agents.to_string_lossy().as_ref()),
+            "fell back to the per-channel base"
+        );
+    }
+
+    #[test]
+    fn mirror_skips_workspace_under_neither_root() {
+        // A workspace under neither the global nor the channel root (a user cwd) is
+        // skipped — parity with the migration's skip-unmappable behavior.
+        let (tmp, store, reg) = store_with_global_registry();
+        let outside = tmp.path().join("projects").join("foo");
+        let inst = make_named_inst("inst-o", "stray", &outside);
+        store.instance_create(&inst).unwrap();
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "non-agent workspace must not be mirrored"
+        );
+    }
+
     #[test]
     fn instance_create_unnamed_does_not_mirror() {
         let (tmp, store, reg) = store_with_registry();
