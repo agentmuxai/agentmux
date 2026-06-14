@@ -124,12 +124,14 @@ mod tests {
 
     #[test]
     fn successive_local_builds_produce_different_hashes() {
-        // Two successive `task package` runs on the same branch at the same
-        // semver get different AGENTMUX_BUILD_LABELs (different stamps).
-        // The pipe key uses the label, so each build is its own single-instance
-        // domain — the second launch starts a fresh window rather than joining
-        // the first build's running instance. Regression guard for the
-        // 2026-06-09 isolation bug (retro: retro-local-build-isolation-regression).
+        // The LABEL axis: two successive `task package` runs on the same branch at
+        // the same semver get different AGENTMUX_BUILD_LABELs (different stamps),
+        // and the label is mixed into the pipe key, so the pipe differs even when
+        // the data dir is held equal. As of per-build channels the data dir ALSO
+        // differs per build (see `per_build_channels_isolate_data_dir_*` below), so
+        // isolation no longer rests on this axis alone — but this guards the label
+        // axis in isolation. Releases (no label) carry the semver instead.
+        // Regression guard for the 2026-06-09 bug (retro: retro-local-build-isolation-regression).
         let data_dir = std::path::PathBuf::from(
             "C:\\Users\\test\\.agentmux\\channels\\local-main-b28b7a\\versions\\0.43.1\\data",
         );
@@ -139,5 +141,24 @@ mod tests {
             data_dir_hash16(&data_dir, label_a),
             data_dir_hash16(&data_dir, label_b)
         );
+    }
+
+    #[test]
+    fn per_build_channels_isolate_data_dir_even_at_same_version() {
+        // The DATA-DIR axis added by the per-build channel (package.sh bakes a
+        // BUILD_ID into AGENTMUX_BUILD_CHANNEL_DEFAULT): two builds of the same
+        // branch at the same semver now resolve to distinct CHANNELS (build-id
+        // suffix differs) → distinct data dirs → distinct pipes, independent of
+        // the label. This is what makes cef-cache + data dir + pipe all agree on
+        // the build (the piece PR #1315 missed). pipe_version held equal here to
+        // prove the data-dir alone isolates.
+        let ver = "0.43.1";
+        let a = std::path::PathBuf::from(
+            "C:\\Users\\test\\.agentmux\\channels\\local-main-b28b7a-3f9a2c1d\\versions\\0.43.1\\data",
+        );
+        let b = std::path::PathBuf::from(
+            "C:\\Users\\test\\.agentmux\\channels\\local-main-b28b7a-7e1b0042\\versions\\0.43.1\\data",
+        );
+        assert_ne!(data_dir_hash16(&a, ver), data_dir_hash16(&b, ver));
     }
 }
