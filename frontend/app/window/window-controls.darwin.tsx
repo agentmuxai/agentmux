@@ -34,7 +34,12 @@ const TrafficLights = (): JSX.Element => {
     };
 
     return (
-        <div class="traffic-lights" data-testid="traffic-lights">
+        <div class="traffic-lights" data-testid="traffic-lights" data-drag-region="false">
+            {/* data-drag-region="false": opt the traffic lights out of the
+                JS-driven window drag (useWindowDrag.darwin.ts). They previously
+                relied on -webkit-app-region: no-drag, which only carved them out
+                of the old native drag region; the header is HTCLIENT now, so
+                without this a press-and-move on a button would start a drag. */}
             {/* Close — red */}
             <button
                 class="traffic-btn close-btn"
