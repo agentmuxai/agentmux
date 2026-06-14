@@ -633,3 +633,30 @@ history may stop saving.
 "Archive this session" calls `agent:session:archive` for the current `definition_id`
 and closes the modal.  "Dismiss" closes without action; the modal re-appears after
 5 minutes if the condition persists.
+
+---
+
+## 15. Known limitation: cross-block continuation (follow-up)
+
+The durable NDJSON conversation log is stored **per-block** (`<blockId>/output`),
+while the v2 snapshot is **agent-anchored** (`agent:<defId>:current`, shared
+across every block of the agent). v1 papered over this by embedding the full
+composite `nodes[]` in the agent-anchored snapshot, so a brand-new pane for an
+existing agent ("structural continuation", Option E / PR #1007) could render the
+prior conversation. v2 removed `nodes[]` to fix the OOM, so a single
+`(sourceBlockId, highWaterMark)` cannot describe a conversation that is physically
+split across blocks.
+
+**Scope of this change:** v2 restore is taken only for a **same-block reopen**
+(`sourceBlockId === opts.blockId`) — the case the renderer OOM actually occurs in
+(a long-lived pane snapshotting every 30 s). On a cross-block open, restore falls
+back to NDJSON replay on the new block (no orphaning, no blank pane) and logs the
+reason. This means a fresh continuation pane does not inherit the prior block's
+rendered history under v2.
+
+**Follow-up:** restore full cross-block continuation by mirroring each agent
+output line into a single unified per-agent log (`agent:<defId>:current/output`
+via the existing `append_session_output`, which is currently never called by the
+live path) and having v2 count/read history by `definition_id`. That work must
+also handle the concurrency case of multiple live panes per agent definition
+appending to the same zone. Tracked as a follow-up to PR #1361.

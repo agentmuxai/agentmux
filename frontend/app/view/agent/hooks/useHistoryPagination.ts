@@ -126,15 +126,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
 
-    // Block whose per-block NDJSON `output` holds this pane's durable history.
-    // Defaults to this pane's own block, but a schema-v2 snapshot read from the
-    // agent-anchored zone (`agent:<defId>:current`) carries the `sourceBlockId`
-    // it was written from. On cross-block "structural continuation" (Option E) a
-    // fresh pane gets a new blockId whose per-block output is empty, so history
-    // (initial window AND load-older) must be read from the snapshot's source
-    // block instead. Live new output still streams into this pane's own block.
-    const [historyBlockId, setHistoryBlockId] = createSignal(opts.blockId);
-
     /**
      * Load the previous page of history and prepend to the document.
      * Called by AgentDocumentView when the user scrolls near the top.
@@ -152,7 +143,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             const loadLimit = currentOffset - newOffset;
 
             const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                block_id: historyBlockId(),
+                block_id: opts.blockId,
                 filename: "output",
                 offset: newOffset,
                 limit: loadLimit,
@@ -234,27 +225,31 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     const modts = typeof stateResp.modts === "number" ? stateResp.modts : 0;
 
                     // --- Schema v2: overlay only, reconstruct nodes from NDJSON ---
-                    // Only taken when the snapshot carries a usable high-water mark.
-                    // `writeSnapshotNow` defaults hwm=0 when the line-count RPC fails
-                    // at write time; treating hwm=0 as "empty session" here would
-                    // render a blank pane and hide on-disk history. So when hwm<=0 we
-                    // deliberately fall through to the NDJSON ring-buffer replay below,
-                    // which derives the line count fresh from the backend.
-                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2
+                    // Taken only for a SAME-BLOCK reopen with a usable high-water mark:
+                    //
+                    //  - hwm>0: `writeSnapshotNow` defaults hwm=0 when the line-count RPC
+                    //    fails at write time; treating hwm=0 as "empty session" would
+                    //    render a blank pane and hide on-disk history, so hwm<=0 falls
+                    //    through to the NDJSON replay (which re-derives the count).
+                    //  - sourceBlockId === opts.blockId: the durable NDJSON history is
+                    //    per-block, but the snapshot is agent-anchored (shared across all
+                    //    of an agent's blocks). When a *new* block opens for the same
+                    //    agent (cross-block "structural continuation"), this block's own
+                    //    output is empty, so we must NOT read it as if it were the source.
+                    //    Cross-block continuation needs a unified per-agent log; until
+                    //    that lands (follow-up to PR #1361) we fall through to NDJSON
+                    //    replay on this block rather than restore a fragmented/blank view.
+                    const v2SameBlock = snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2
                         && typeof snapshot.highWaterMark === "number"
-                        && snapshot.highWaterMark > 0) {
+                        && snapshot.highWaterMark > 0
+                        && (typeof snapshot.sourceBlockId !== "string"
+                            || snapshot.sourceBlockId === ""
+                            || snapshot.sourceBlockId === opts.blockId);
+                    if (v2SameBlock) {
                         const hwm: number = snapshot.highWaterMark;
                         const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
-                        // History lives in the block the snapshot was written from.
-                        // For same-pane reopen this equals opts.blockId; for cross-block
-                        // continuation it points at the original block whose output holds
-                        // the conversation. Route load-older to the same block.
-                        const srcBlockId = typeof snapshot.sourceBlockId === "string" && snapshot.sourceBlockId
-                            ? snapshot.sourceBlockId
-                            : opts.blockId;
-                        setHistoryBlockId(srcBlockId);
                         const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                            block_id: srcBlockId,
+                            block_id: opts.blockId,
                             filename: "output",
                             offset: windowStart,
                             limit: hwm - windowStart,
@@ -296,11 +291,18 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         return;
                     }
                     if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2) {
-                        // v2 snapshot with hwm<=0 (write-time count failure). Don't
-                        // render empty — fall through to NDJSON replay.
+                        // v2 snapshot we deliberately didn't fast-path: either hwm<=0
+                        // (write-time count failure) or a cross-block continuation
+                        // (sourceBlockId !== this block). Don't render empty — fall
+                        // through to NDJSON replay on this block.
+                        const crossBlock = typeof snapshot.sourceBlockId === "string"
+                            && snapshot.sourceBlockId !== ""
+                            && snapshot.sourceBlockId !== opts.blockId;
                         opts.log(
                             "history",
-                            "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay",
+                            crossBlock
+                                ? "v2 snapshot is from another block (cross-block continuation not yet supported); falling back to NDJSON replay"
+                                : "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay",
                             "warn",
                         );
                     }
