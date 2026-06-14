@@ -367,6 +367,32 @@
     }
 }
 
+// Inline save-as path input — replaces the tab label when Ctrl+S / Ctrl+Shift+S
+// is pressed on a scratch (unsaved) tab.
+.editor-tab-saveas-input {
+    flex: 1;
+    min-width: 120px;
+    height: 18px;
+    padding: 0 4px;
+    background: var(--input-bg-color, #1e1e2e);
+    border: 1px solid var(--accent-color, #89b4fa);
+    border-radius: 2px;
+    color: var(--main-text-color);
+    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+    font-size: 11px;
+    outline: none;
+
+    &:focus {
+        box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.25);
+    }
+}
+
+.editor-tab--saveas {
+    // Expand slightly to accommodate the path input without the close button
+    // being too cramped.
+    min-width: 180px;
+}
+
 .editor-open-prompt {
     display: flex;
     flex-direction: column;
