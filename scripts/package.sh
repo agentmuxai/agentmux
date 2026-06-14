@@ -128,39 +128,16 @@ else
 fi
 echo "──────────────────────────────────────────────────────────"
 
-# GC: per-build channels accumulate (each build leaves a data dir + cef-cache,
-# tens–hundreds of MB). For LOCAL builds, keep the few most-recent per-build
-# channels for THIS branch and prune older ones so an iterate-rebuild loop doesn't
-# grow the disk without bound. Skips any channel with a file touched in the last
-# 60 min ANYWHERE in its subtree (a running instance writes only into deep subdirs
-# — versions/<v>/{runtime,cef-cache,data/db} — not the channel dir itself), so a
-# live sibling build is never nuked. The pre-per-build shared channel
-# (`local-<slug>-<hash>` with no build-id suffix) does NOT match the glob and is
-# preserved. Best-effort: never fails the build.
-if [ -z "${RELEASE_CHANNEL:-}" ]; then
-    GC_KEEP=${AGENTMUX_LOCAL_CHANNELS_KEEP:-5}
-    CH_ROOT="${HOME}/.agentmux/channels"
-    if [ -d "$CH_ROOT" ] && [ -n "$BRANCH_HASH" ]; then
-        # nullglob → empty array (not a literal unmatched glob) on the first build
-        # of a branch, so `ls` is never invoked on a non-existent path. Without it,
-        # `ls <no-match>` exits 2 and the script's pipefail+errexit kills the build.
-        shopt -s nullglob
-        gc_matches=( "$CH_ROOT"/"local-${BRANCH_SLUG}-${BRANCH_HASH}-"* )
-        shopt -u nullglob
-        if [ "${#gc_matches[@]}" -gt "$GC_KEEP" ]; then
-            # Best-effort: trailing `|| true` so a prune hiccup never fails a build.
-            ls -dt "${gc_matches[@]}" | tail -n +"$((GC_KEEP + 1))" | while IFS= read -r old; do
-                # Liveness guard: scan the WHOLE subtree for recent writes, not the
-                # channel dir's own mtime (a live instance only touches deep
-                # subdirs). Any file <60 min old ⇒ possibly running ⇒ skip.
-                # `-print -quit` stops at the first hit (fast).
-                if [ -z "$(find "$old" -mmin -60 -print -quit 2>/dev/null)" ]; then
-                    rm -rf "$old" 2>/dev/null && echo "  gc      : pruned old build channel $(basename "$old")"
-                fi
-            done || true
-        fi
-    fi
-fi
+# NOTE: per-build channels accumulate on disk (each build leaves a data dir +
+# cef-cache, tens–hundreds of MB). Cleanup is a deliberate FOLLOW-UP, NOT done
+# here: a safe prune needs a REAL liveness signal (is an instance still using this
+# channel?), which only the launcher has — it owns the single-instance pipe, so it
+# can prune a sibling channel iff that channel's pipe is unheld. A time-window
+# mtime heuristic in this build script can't close the race (an idle-but-running
+# instance has no recent writes) and on Unix `rm -rf` would unlink a live
+# instance's open DB → corruption. So pruning belongs in launcher startup, not
+# here. Until then, clean up manually: remove `~/.agentmux/channels/local-*` dirs
+# with no running instance.
 
 # Exported for:
 #   - the cargo builds: AGENTMUX_BUILD_CHANNEL_DEFAULT is read via

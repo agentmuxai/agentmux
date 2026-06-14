@@ -36,7 +36,7 @@ The **cross-channel work (#1387–#1393, shipped 2026-06-13)** moved agents (def
 
 1. **`scripts/package.sh`:** bake a per-build `BUILD_ID` (8-char hash of the full label) into `AGENTMUX_BUILD_CHANNEL_DEFAULT` → channel `local-<slug>-<hash>-<build-id>`. cef-cache + data dir + pipe are now all per-build. (Releases unaffected — `RELEASE_CHANNEL` still wins; ≤55/64 chars.)
 2. **`agentmux-launcher/src/data_dir.rs`:** when launched **nested** (`AGENTMUX` set), resolve path-only and ignore the leaked ambient `AGENTMUX_CHANNEL` — symmetric with dev builds. The launcher's resolved env is already authoritative for the host+srv (`to_env_vars()` overwrites inherited values at every spawn site), so no downstream change is needed. An explicit *standalone* override is still honored.
-3. **GC** in `package.sh`: keep the newest `AGENTMUX_LOCAL_CHANNELS_KEEP` (default 5) per-build channels per branch, prune older (skipping anything touched in the last 30 min) so disk doesn't grow unbounded.
+3. **Disk accumulation cleanup is a deliberate follow-up, not in this PR.** Per-build data dirs + cef-caches accumulate, but a *safe* prune needs a real liveness signal (is an instance still using this channel?) — which only the launcher has (it owns the single-instance pipe, so it can prune a sibling channel iff its pipe is unheld). A build-script mtime heuristic can't tell a live-but-idle instance from a dead one, and on Unix `rm -rf` would unlink a live DB → corruption. So pruning belongs in launcher startup.
 
 ## 5. Isolation invariants (I1–I6)
 
@@ -45,7 +45,7 @@ Verified the change **strengthens** I1 (pipe uniqueness), I4 (forward-only conta
 ## 6. Costs / follow-ups
 
 - **Memories (`db_memory_bundles`) and pane/tab layout do not carry per-build** — they were never globalized. Consistent with how they already don't cross *branches*. Globalizing memories (the same treatment agents got) is a follow-up if cross-build memory matters.
-- **Disk accumulation** is bounded by the GC, not eliminated; `AGENTMUX_LOCAL_CHANNELS_KEEP` tunes it.
+- **Disk accumulation** (per-build channels) is not addressed in this PR — follow-up: prune on launcher startup using the pipe-liveness signal (the only safe way; a build-script time heuristic can corrupt a live instance).
 
 ## 7. Lessons
 
