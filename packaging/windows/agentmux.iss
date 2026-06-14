@@ -29,7 +29,7 @@
 
 [Setup]
 ; Stable AppId — keep constant across versions so upgrades replace in place.
-AppId={{7B4D9E2A-1C63-4F8B-9A57-AGENTMUXCEF01}}
+AppId={{8654EA96-8EAA-4845-ADE9-352ADA712BC0}}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
