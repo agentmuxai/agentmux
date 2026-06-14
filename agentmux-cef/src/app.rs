@@ -241,6 +241,27 @@ extern "C" fn write_linux_window_properties(
     1
 }
 
+/// Best-effort detection of a VMware guest. On VMware, CEF's default
+/// ANGLE-on-Vulkan lands on software SwiftShader (no hardware Vulkan ICD) and
+/// Chromium's GPU blocklist disables accelerated WebGL/compositing for the
+/// virtual GPU. We use this to auto-route ANGLE onto the hardware SVGA3D GL
+/// path and override the blocklist (see `on_before_command_line_processing`).
+/// Cached — the DMI files don't change during a run.
+#[cfg(target_os = "linux")]
+fn is_vmware_guest() -> bool {
+    use std::sync::OnceLock;
+    static VMWARE: OnceLock<bool> = OnceLock::new();
+    *VMWARE.get_or_init(|| {
+        ["/sys/class/dmi/id/sys_vendor", "/sys/class/dmi/id/product_name"]
+            .iter()
+            .any(|p| {
+                std::fs::read_to_string(p)
+                    .map(|s| s.to_ascii_lowercase().contains("vmware"))
+                    .unwrap_or(false)
+            })
+    })
+}
+
 /// Compute a centered 70% rect for the monitor the window is currently on.
 /// Returns (x, y, width, height) or None if the monitor can't be determined.
 fn get_monitor_centered_70pct(window: &Window) -> Option<(i32, i32, i32, i32)> {
@@ -490,6 +511,65 @@ wrap_app! {
                     let oz_key = CefString::from("ozone-platform");
                     let oz_val = CefString::from(ozone_choice.as_str());
                     cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
+                }
+
+                // ── GPU backend on virtual guests (ANGLE + blocklist) ────────
+                // CEF 148 defaults ANGLE to Vulkan. VMware guests expose no
+                // hardware Vulkan ICD (only software llvmpipe/SwiftShader), so
+                // ANGLE falls to software SwiftShader — its present path stalls
+                // requestAnimationFrame and the xterm terminal paints in bursts
+                // ("type 10 chars, pause, dump"). VMware DOES expose hardware
+                // OpenGL (SVGA3D via Mesa svga), so route ANGLE onto GL. And
+                // once on hardware GL, Chromium's GPU blocklist flags the
+                // virtual GPU as unreliable and disables accelerated WebGL +
+                // gpu_compositing; `--ignore-gpu-blocklist` overrides that
+                // (verified: WebGL2 renders on SVGA3D, GPU process stable, and
+                // xterm auto-upgrades to its WebGL renderer). Both are gated on
+                // VMware detection so real-hardware Linux keeps Chromium's
+                // defaults.
+                //
+                // Override: AGENTMUX_ANGLE={gl,vulkan,swiftshader,default} sets
+                // the ANGLE backend explicitly (wins over the VM default);
+                // AGENTMUX_CEF_EXTRA_FLAGS appends arbitrary switches (below).
+                #[cfg(target_os = "linux")]
+                let vm_gpu = is_vmware_guest();
+                #[cfg(not(target_os = "linux"))]
+                let vm_gpu = false;
+
+                let angle = std::env::var("AGENTMUX_ANGLE")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| vm_gpu.then(|| "gl".to_string()));
+                if let Some(angle) = angle {
+                    cmd.append_switch_with_value(
+                        Some(&CefString::from("use-angle")),
+                        Some(&CefString::from(angle.as_str())),
+                    );
+                }
+                if vm_gpu {
+                    cmd.append_switch(Some(&CefString::from("ignore-gpu-blocklist")));
+                }
+
+                // ── Arbitrary extra Chromium switches (dev/diagnostics) ───────
+                // AGENTMUX_CEF_EXTRA_FLAGS lets us A/B GPU/compositor flags
+                // without a recompile: space-separated tokens, each either
+                // `--switch`, `--switch=value`, or `switch=value`. Used to hunt
+                // the WebGL / gpu-compositing gate on VM guests. Empty/unset → no-op.
+                if let Ok(extra) = std::env::var("AGENTMUX_CEF_EXTRA_FLAGS") {
+                    for tok in extra.split_whitespace() {
+                        let tok = tok.trim_start_matches("--");
+                        if tok.is_empty() {
+                            continue;
+                        }
+                        if let Some((k, v)) = tok.split_once('=') {
+                            cmd.append_switch_with_value(
+                                Some(&CefString::from(k)),
+                                Some(&CefString::from(v)),
+                            );
+                        } else {
+                            cmd.append_switch(Some(&CefString::from(tok)));
+                        }
+                    }
                 }
 
                 // ── GPU channel + frame-production tuning ─────────────────────
