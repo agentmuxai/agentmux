@@ -107,6 +107,39 @@ xcrun notarytool log <submission-id> --keychain-profile "notarytool"
 | signature lacks a secure timestamp | ensure `--timestamp` (the packager passes it) |
 | hardened runtime not enabled | ensure `--options runtime` (the packager passes it) |
 
+### Verify the artifact is lean (release-correct)
+
+A release DMG must carry **no source maps, no debug symbols, and the `stable` channel**.
+`task package:macos` strips all three by default — but verify, especially the channel (a
+stray `AGENTMUX_BUILD_CHANNEL_DEFAULT` in the env would bake a dev channel into the build):
+
+```bash
+APP=build/AgentMux.app   # the staged .app (inspect before signing seals it, or mount the DMG)
+find "$APP" -name '*.map' | wc -l                              # → 0   (source maps stripped)
+for b in agentmux-cef agentmux-launcher agentmux-srv-*-darwin.*; do
+  echo "$b DWARF: $(otool -l "$APP/Contents/MacOS/"$b | grep -c __DWARF)"   # → 0   (no debug info)
+done
+strings "$APP/Contents/MacOS/agentmux-cef" | grep -E 'local-[a-z]+-[0-9a-f]{7}'   # → empty (NOT a dev channel)
+```
+
+Where the leanness comes from — so you know what to fix if a check fails:
+
+- **Rust binaries** (cef / srv / launcher): stripped at compile time via `Cargo.toml`
+  `[profile.release] strip = true` (+ `lto = true`, `opt-level = "s"`). Cargo strips
+  `agentmux-srv` even though the packager's `strip -S -x` loop doesn't list it by name.
+- **CEF framework + GL dylibs**: `strip -S -x` in `package-macos.sh` (~240 MB of libcef
+  symbols → halved), keeping the exported symbols cef-rs's loader needs.
+- **Source maps**: `package-macos.sh` deletes `frontend/**/*.map` (~28 MB). `STRIP_MAPS=0`
+  keeps them (debugging only).
+- **Channel**: with `AGENTMUX_BUILD_CHANNEL_DEFAULT` unset, `option_env!` falls back to
+  `stable` → the app opens the real user data dir. `task package:macos` does **not** set it
+  (unlike local `task package`, which bakes a `local-<branch>-<hash>` channel), so a clean
+  release build is `stable`. Building from the release **tag** (below) keeps it that way.
+- **Locales**: non-`en*` Chromium `.lproj` removed (~52 MB).
+
+After stripping + locale trim, the DMG is essentially the irreducible Chromium framework
+(~140 MB for arm64); there is nothing further worth stripping.
+
 ---
 
 ## Upload to the GitHub Release
@@ -125,6 +158,18 @@ tracking issue in the main repo).
 
 ## Notes
 
+- **Build from the release tag, not `main`.** `package:macos` uses the committed version (no
+  bump), and `main` usually has post-release commits that would otherwise ship under the
+  release label. After the `chore: release vX.Y.Z` PR merges:
+  `git fetch origin tag vX.Y.Z && git checkout vX.Y.Z`, then build.
+- **Don't output to `~/Desktop`.** It's a TCC-protected folder; unless the terminal/process
+  has Full Disk Access, the DMG step fails with `rm: …: Operation not permitted`. Pass an
+  unprotected output dir: `task package:macos -- "$PWD/release-artifacts"`.
+- The notarization keychain profile is named **`notarytool`** (the packager's
+  `NOTARY_PROFILE` default) — not `AC_PASSWORD`. Check with
+  `xcrun notarytool history --keychain-profile notarytool`.
+- You can notarize an already-built signed DMG without rebuilding:
+  `xcrun notarytool submit <dmg> --keychain-profile notarytool --wait` → `xcrun stapler staple <dmg>`.
 - Notarization typically takes 1–3 minutes. If it stalls >15 min, check
   [Apple's developer status page](https://developer.apple.com/system-status/).
 - This is **direct distribution** (outside the App Store). Mac App Store distribution needs a
