@@ -1030,9 +1030,18 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                             .map(|(k, v)| (k.clone(), v.clone()))
                             .collect();
 
-                        // Base cmd: [cli_command, ...cli_args] — spawn_container_turn
-                        // appends --resume <sid> internally before starting the exec.
-                        let mut base_cmd = vec![cli_command];
+                        // Base cmd: [container_command, ...cli_args]. The command
+                        // is the provider CLI resolved INSIDE the image (on PATH,
+                        // e.g. `claude`) — NOT `cli_command`/`cmd`, which is the
+                        // host-resolved absolute npm path and does not exist in the
+                        // container (docker exec would fail "no such file or
+                        // directory"). cli_args are format flags (-p, --input-format
+                        // …) + provider flags — no host paths, safe as-is.
+                        // spawn_container_turn appends --resume <sid> internally.
+                        let container_command = crate::backend::obj::meta_get_string(
+                            &block.meta, "agent:container_command", "claude",
+                        );
+                        let mut base_cmd = vec![container_command];
                         base_cmd.extend(cli_args);
 
                         let config = blockcontroller::subprocess::SubprocessSpawnConfig {

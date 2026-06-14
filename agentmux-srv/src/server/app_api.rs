@@ -322,6 +322,13 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if agent.container_volumes != "[]" && !agent.container_volumes.is_empty() {
                     meta.insert("agent:container_volumes".to_string(), json!(&agent.container_volumes));
                 }
+                // Container-local CLI command: the provider's CLI as it resolves
+                // INSIDE the image (on the image's PATH, e.g. `claude`). Distinct
+                // from `cmd` below, which is the host-resolved absolute npm path
+                // (`<config_home>/.../node_modules/.bin/claude`) and does NOT exist
+                // in the container — passing it as docker-exec argv[0] would fail
+                // with "no such file or directory". Container turns use this.
+                meta.insert("agent:container_command".to_string(), json!(provider.cli_command));
                 // Derive output format from provider ID (matches frontend providers/index.ts)
                 let output_format = match provider.id {
                     "claude" => "claude-stream-json",
@@ -590,9 +597,18 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .map(|(k, v)| (k.clone(), v.clone()))
                             .collect();
 
-                        // Base cmd: [cli_command, ...cli_args] — spawn_container_turn
-                        // appends --resume <sid> internally before starting the exec.
-                        let mut base_cmd = vec![cli_command];
+                        // Base cmd: [container_command, ...cli_args]. The command
+                        // is the provider CLI resolved INSIDE the image (on PATH,
+                        // e.g. `claude`) — NOT `cli_command`/`cmd`, which is the
+                        // host-resolved absolute npm path and does not exist in the
+                        // container (docker exec would fail "no such file or
+                        // directory"). cli_args are format flags + provider flags —
+                        // no host paths, safe as-is. spawn_container_turn appends
+                        // --resume <sid> internally.
+                        let container_command = obj::meta_get_string(
+                            &block.meta, "agent:container_command", "claude",
+                        );
+                        let mut base_cmd = vec![container_command];
                         base_cmd.extend(cli_args);
 
                         let config = blockcontroller::subprocess::SubprocessSpawnConfig {
