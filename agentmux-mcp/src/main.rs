@@ -14,7 +14,15 @@
 //! Env vars (inherited from agentmux-srv's agent env injection):
 //!   AGENTMUX_LOCAL_URL   — sidecar HTTP base URL
 //!   AGENTMUX_AUTH_KEY    — X-AuthKey header secret
-//!   AGENTMUX_AGENT_BUS_ID — block UUID for event scoping
+//!   AGENTMUX_AGENT_BUS_ID — block UUID for event scoping (preferred)
+//!   AGENTMUX_BLOCKID      — block UUID, used as the fallback source for the
+//!                           bus id. websocket.rs reliably injects this onto the
+//!                           agent process env (it holds exactly the block UUID
+//!                           the MCP server needs), and the MCP subprocess —
+//!                           spawned by the agent CLI — inherits it. The
+//!                           production `.mcp.json` path never injects
+//!                           AGENTMUX_AGENT_BUS_ID, so this fallback is what
+//!                           makes the Shell tool functional.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -39,7 +47,21 @@ const SHELL_TOOL: &str = r#"{
 async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
     let auth_key = std::env::var("AGENTMUX_AUTH_KEY").unwrap_or_default();
-    let block_id = std::env::var("AGENTMUX_AGENT_BUS_ID").unwrap_or_default();
+    // The "bus id" is the agent's block UUID, used to scope shell events to the
+    // conversation pane. AGENTMUX_AGENT_BUS_ID is the preferred source, but the
+    // production .mcp.json path never injects it (build_mcp_config is called with
+    // an empty bus id and build_config_files_with_bus has no call site). Fall
+    // back to AGENTMUX_BLOCKID, which holds the same block UUID and is reliably
+    // set on the agent process env (websocket.rs) and inherited by this MCP
+    // subprocess. Without this fallback the Shell tool always bailed.
+    let block_id = {
+        let bus = std::env::var("AGENTMUX_AGENT_BUS_ID").unwrap_or_default();
+        if bus.is_empty() {
+            std::env::var("AGENTMUX_BLOCKID").unwrap_or_default()
+        } else {
+            bus
+        }
+    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -157,8 +179,9 @@ async fn call_tool(
             }
             if block_id.is_empty() {
                 anyhow::bail!(
-                    "AGENTMUX_AGENT_BUS_ID is not set — cannot associate \
-                     the shell with a conversation pane"
+                    "neither AGENTMUX_AGENT_BUS_ID nor AGENTMUX_BLOCKID is set \
+                     — cannot associate the shell with a conversation pane. \
+                     Is this agent pane opened via AgentMux?"
                 );
             }
 
