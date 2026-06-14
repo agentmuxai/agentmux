@@ -349,20 +349,45 @@ class TermViewModel implements ViewModel {
     static readonly PASTE_CHUNK_BYTES = 4096;
     static readonly PASTE_CHUNK_DELAY_MS = 5;
 
+    // Serializes ALL input on this block while a chunked paste is in flight:
+    // every blockinput frame is sent with `seq: None`, so PTY order == send
+    // order. A chunked paste sleeps 5 ms between chunks, so a keystroke or a
+    // second paste arriving mid-paste must be queued behind it — otherwise it
+    // would slip between chunks on the wire and corrupt the pasted content.
+    private pasteChain: Promise<void> = Promise.resolve();
+    // >0 while chunked-paste work is queued/running; gates the fast path below.
+    private pasteInFlight = 0;
+    // Monotonic id so concurrent/back-to-back pastes get distinct progress toasts.
+    private pasteSeq = 0;
+
+    private sendSingleFrame(data: string) {
+        const inputdata64 = stringToBase64(data);
+        const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
+        sendWSCommand(cmd);
+    }
+
     sendDataToController(data: string) {
         // Use the blockinput wscommand, not the controllerinput RPC: blockinput
         // is processed inline & synchronously in the WS receive loop, so
         // consecutive keystrokes reach the PTY in TCP order. The RPC path is
         // dispatched concurrently by the engine and can reorder fast typing.
         const encoded = new TextEncoder().encode(data);
-        if (encoded.length <= TermViewModel.PASTE_CHUNK_BYTES) {
-            const inputdata64 = stringToBase64(data);
-            const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
-            sendWSCommand(cmd);
+        const isLarge = encoded.length > TermViewModel.PASTE_CHUNK_BYTES;
+        if (!isLarge && this.pasteInFlight === 0) {
+            // Fast path: small input and no chunked paste in flight → send now.
+            this.sendSingleFrame(data);
         } else {
-            // Large input (paste): send in chunks with inter-chunk delay so the
-            // backend input channel and PTY write buffer are never overwhelmed.
-            void this.sendDataChunked(encoded);
+            // Either a large paste, OR small input that must NOT overtake an
+            // in-flight chunked paste. Queue on pasteChain to preserve wire order.
+            // `.catch` keeps the chain alive if one item fails (a rejected promise
+            // would otherwise skip every subsequent `.then`).
+            this.pasteInFlight++;
+            this.pasteChain = this.pasteChain
+                .then(() => (isLarge ? this.sendDataChunked(encoded) : this.sendSingleFrame(data)))
+                .catch(() => {})
+                .finally(() => {
+                    this.pasteInFlight--;
+                });
         }
     }
 
@@ -370,8 +395,11 @@ class TermViewModel implements ViewModel {
         const chunkSize = TermViewModel.PASTE_CHUNK_BYTES;
         const decoder = new TextDecoder();
         const kb = Math.round(encoded.length / 1024);
-        const toastId = `paste-progress-${this.blockId}`;
-        if (kb >= 8) {
+        // Unique per paste so back-to-back/overlapping pastes don't share (and
+        // prematurely dismiss) one another's progress toast.
+        const toastId = `paste-progress-${this.blockId}-${++this.pasteSeq}`;
+        const showToast = kb >= 8;
+        if (showToast) {
             pushNotification({
                 id: toastId,
                 icon: "clipboard",
@@ -381,17 +409,31 @@ class TermViewModel implements ViewModel {
                 type: "info",
             });
         }
-        for (let offset = 0; offset < encoded.length; offset += chunkSize) {
-            const slice = encoded.slice(offset, offset + chunkSize);
-            const inputdata64 = stringToBase64(decoder.decode(slice));
-            const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
-            sendWSCommand(cmd);
-            if (offset + chunkSize < encoded.length) {
-                await new Promise<void>((r) => setTimeout(r, TermViewModel.PASTE_CHUNK_DELAY_MS));
+        // try/finally so the toast is always removed even if sendWSCommand throws
+        // mid-paste — otherwise the "Pasting…" notification would leak forever.
+        try {
+            for (let offset = 0; offset < encoded.length; offset += chunkSize) {
+                const slice = encoded.subarray(offset, offset + chunkSize);
+                const isLast = offset + chunkSize >= encoded.length;
+                // Stream-decode so a multi-byte UTF-8 character straddling a chunk
+                // boundary is not split into two U+FFFD replacements: with
+                // `{ stream: true }` the decoder defers the trailing partial bytes
+                // to the next chunk. The concatenation of all chunks reconstructs
+                // the original bytes exactly; the final chunk flushes (stream:false).
+                const text = decoder.decode(slice, { stream: !isLast });
+                if (text.length > 0) {
+                    const inputdata64 = stringToBase64(text);
+                    const cmd: BlockInputWSCommand = { wscommand: "blockinput", blockid: this.blockId, inputdata64 };
+                    sendWSCommand(cmd);
+                }
+                if (!isLast) {
+                    await new Promise<void>((r) => setTimeout(r, TermViewModel.PASTE_CHUNK_DELAY_MS));
+                }
             }
-        }
-        if (kb >= 8) {
-            removeNotificationById(toastId);
+        } finally {
+            if (showToast) {
+                removeNotificationById(toastId);
+            }
         }
     }
 

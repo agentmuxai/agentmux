@@ -40,10 +40,17 @@ use crate::backend::storage::store::Store;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::wps;
 
-/// Channel buffer size for shell input.
-/// 256 slots prevents burst-drop on large pastes arriving faster than the
-/// PTY write loop drains. Original Go value was 32 — too small for multi-chunk
-/// pastes.
+/// Cap on the out-of-order input reorder buffer (`input_seq_buf`).
+///
+/// The input channel itself is now **unbounded** (`unbounded_channel`): a
+/// bounded `try_send` silently dropped input on burst (large pastes arriving
+/// faster than the PTY write loop drains — the original truncation bug), and
+/// the proper backpressure remedy (`send().await`) can't be applied here
+/// because `send_input` is a synchronous trait method holding a `std::Mutex`.
+/// An unbounded channel guarantees no input is ever dropped; terminal input is
+/// human-paced (and the frontend now chunks large pastes at 4 KB / 5 ms), and
+/// the PTY drain loop keeps up, so the queue does not grow in practice. This
+/// constant only bounds the reorder buffer (pathological out-of-order seqs).
 const SHELL_INPUT_CH_SIZE: usize = 256;
 
 /// Detect the best available interactive shell on Windows.
@@ -103,11 +110,12 @@ struct ShellControllerInner {
     status_version: i32,
     /// Connection name for the shell process.
     conn_name: String,
-    /// Input channel sender (sends to the PTY input loop).
-    input_tx: Option<mpsc::Sender<BlockInputUnion>>,
+    /// Input channel sender (sends to the PTY input loop). Unbounded so input
+    /// is never dropped on burst — see `SHELL_INPUT_CH_SIZE` doc.
+    input_tx: Option<mpsc::UnboundedSender<BlockInputUnion>>,
     /// Input channel receiver (consumed by the PTY input loop).
     #[allow(dead_code)]
-    input_rx: Option<mpsc::Receiver<BlockInputUnion>>,
+    input_rx: Option<mpsc::UnboundedReceiver<BlockInputUnion>>,
     /// OS PID of the running child process, kept for signal delivery in stop().
     child_pid: Option<u32>,
     /// Unix timestamp (ms) when the process was spawned; None until first spawn.
@@ -348,8 +356,9 @@ impl Controller for ShellController {
         }
         self.publish_status();
 
-        // Create input channel
-        let (input_tx, input_rx) = mpsc::channel(SHELL_INPUT_CH_SIZE);
+        // Create input channel. Unbounded: input must never be silently
+        // dropped on burst (the paste-truncation bug). See SHELL_INPUT_CH_SIZE.
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
         {
             let mut inner = self.inner.lock().unwrap();
             inner.input_tx = Some(input_tx);
@@ -1040,7 +1049,7 @@ impl Controller for ShellController {
             None => return Err("controller is not running".to_string()),
         };
         match seq {
-            None => tx.try_send(input).map_err(|e| format!("send_input: {e}")),
+            None => tx.send(input).map_err(|e| format!("send_input: {e}")),
             Some(s) => {
                 // Detect session reset: seq==0 means the TermViewModel
                 // restarted and its per-block counter is back at zero.
@@ -1060,14 +1069,16 @@ impl Controller for ShellController {
 
                 let next = inner.input_seq_next;
                 if s == next {
-                    // Advance before sending — a try_send failure must not leave the
+                    // Advance before sending — a send failure must not leave the
                     // backend stuck waiting for a seq the frontend will never resend.
                     inner.input_seq_next += 1;
-                    if let Err(e) = tx.try_send(input) {
+                    if let Err(e) = tx.send(input) {
+                        // Unbounded send only fails if the receiver is gone
+                        // (controller stopped) — nothing to do but drop quietly.
                         tracing::warn!(
                             block_id = %self.block_id,
                             seq = s,
-                            "send_input: channel full, dropping in-order packet: {e}"
+                            "send_input: input channel closed, discarding packet: {e}"
                         );
                         return Ok(());
                     }
@@ -1077,11 +1088,11 @@ impl Controller for ShellController {
                         match inner.input_seq_buf.remove(&expected) {
                             Some(buffered) => {
                                 inner.input_seq_next += 1;
-                                if let Err(e) = tx.try_send(buffered) {
+                                if let Err(e) = tx.send(buffered) {
                                     tracing::warn!(
                                         block_id = %self.block_id,
                                         seq = expected,
-                                        "send_input drain: channel full, dropping buffered packet: {e}"
+                                        "send_input drain: input channel closed, discarding buffered packet: {e}"
                                     );
                                 }
                             }
