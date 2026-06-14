@@ -240,6 +240,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // handled client-side and must not touch the backend queue at
         // all. Unknown `/foo` falls through to a real turn.
         const trimmed = message.trim();
+
+        // Bang commands: `!cmd` runs a shell command in the agent's working
+        // directory and surfaces output in the launch log. Never falls through
+        // to the backend agent queue.
+        if (trimmed.startsWith("!")) {
+            await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
+            return;
+        }
+
         if (trimmed.startsWith("/")) {
             const outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
             if (outcome.kind === "handled") return;
@@ -390,4 +399,39 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         closeHelp,
         availableCommands,
     };
+}
+
+/**
+ * Run a shell command in the agent's working directory via the `shellexec`
+ * RPC and surface stdout/stderr in the launch log.
+ *
+ * Called when the user prefixes a composer message with `!`. The blockId is
+ * passed explicitly (rather than via ctx) because ctx.blockId is a string and
+ * we need it for the RPC payload; ctx provides only the log sink here.
+ */
+async function dispatchBangCommand(
+    command: string,
+    blockId: string,
+    ctx: SlashCommandContext,
+): Promise<void> {
+    if (!command) {
+        ctx.log("system", "!: command required", "warn");
+        return;
+    }
+    const workingDir = (ctx.block()?.meta?.["cmd:cwd"] as string | undefined) ?? "";
+    ctx.log("system", `$ ${command}`);
+    try {
+        const result = await RpcApi.ShellExecCommand(TabRpcClient, {
+            blockid: blockId,
+            command,
+            working_dir: workingDir,
+        });
+        if (result.stdout) ctx.log("system", result.stdout.trimEnd());
+        if (result.stderr) ctx.log("system", result.stderr.trimEnd(), "warn");
+        if (result.exit_code !== 0) {
+            ctx.log("system", `exit ${result.exit_code}`, "warn");
+        }
+    } catch (e) {
+        ctx.log("system", `!: ${(e as Error).message ?? String(e)}`, "warn");
+    }
 }

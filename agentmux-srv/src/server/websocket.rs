@@ -27,8 +27,9 @@ use crate::backend::rpc_types::{
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_TOOL_DECISION,
-    COMMAND_WRITE_AGENT_CONFIG,
+    COMMAND_WRITE_AGENT_CONFIG, COMMAND_SHELL_EXEC,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
+    CommandShellExecData, ShellExecResult,
 };
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
@@ -1100,6 +1101,56 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     }
                     None => Ok(None),
                 }
+            })
+        }),
+    );
+
+    // shellexec → run a shell command in the agent's working directory and return output.
+    // Invoked by the `!cmd` prefix in the agent pane composer.
+    engine.register_handler(
+        COMMAND_SHELL_EXEC,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandShellExecData = serde_json::from_value(data)
+                    .map_err(|e| format!("shellexec: {e}"))?;
+                tracing::info!(block_id = %cmd.blockid, command = %cmd.command, "ShellExec");
+
+                let cwd: Option<std::path::PathBuf> = if cmd.working_dir.is_empty() {
+                    None
+                } else {
+                    let expanded = expand_home_dir_safe(&cmd.working_dir);
+                    if expanded.exists() {
+                        Some(expanded)
+                    } else {
+                        return Err(format!(
+                            "shellexec: working directory does not exist: {}",
+                            expanded.display()
+                        ));
+                    }
+                };
+
+                let mut proc = if cfg!(windows) {
+                    let mut c = tokio::process::Command::new("cmd");
+                    c.args(["/C", &cmd.command]);
+                    c
+                } else {
+                    let mut c = tokio::process::Command::new("sh");
+                    c.args(["-c", &cmd.command]);
+                    c
+                };
+                if let Some(ref dir) = cwd {
+                    proc.current_dir(dir);
+                }
+
+                let output = proc.output().await
+                    .map_err(|e| format!("shellexec: spawn failed: {e}"))?;
+
+                let result = ShellExecResult {
+                    exit_code: output.status.code().unwrap_or(1),
+                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                };
+                Ok(Some(serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?))
             })
         }),
     );
