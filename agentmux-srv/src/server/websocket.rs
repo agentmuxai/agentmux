@@ -1113,20 +1113,33 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
             Box::pin(async move {
                 let cmd: CommandShellExecData = serde_json::from_value(data)
                     .map_err(|e| format!("shellexec: {e}"))?;
-                tracing::info!(block_id = %cmd.blockid, command = %cmd.command, "ShellExec");
+                // Log block_id at info; keep the command at debug so secrets
+                // passed as CLI args (API tokens, passwords) don't land in
+                // ~/.agentmux/logs/ in plaintext.
+                tracing::info!(block_id = %cmd.blockid, "ShellExec");
+                tracing::debug!(command = %cmd.command, "ShellExec command");
 
                 let cwd: Option<std::path::PathBuf> = if cmd.working_dir.is_empty() {
                     None
                 } else {
                     let expanded = expand_home_dir_safe(&cmd.working_dir);
-                    if expanded.exists() {
-                        Some(expanded)
-                    } else {
+                    // Reject non-absolute paths to prevent relative traversal
+                    // (e.g. "../etc") from resolving against the sidecar's cwd.
+                    // expand_home_dir_safe turns "~" into an absolute home path;
+                    // anything still relative after expansion is suspicious.
+                    if !expanded.is_absolute() {
+                        return Err(format!(
+                            "shellexec: working_dir must be absolute, got: {}",
+                            expanded.display()
+                        ));
+                    }
+                    if !expanded.exists() {
                         return Err(format!(
                             "shellexec: working directory does not exist: {}",
                             expanded.display()
                         ));
                     }
+                    Some(expanded)
                 };
 
                 let mut proc = if cfg!(windows) {
@@ -1142,13 +1155,37 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     proc.current_dir(dir);
                 }
 
-                let output = proc.output().await
-                    .map_err(|e| format!("shellexec: spawn failed: {e}"))?;
+                // 300s process timeout matches the frontend's RPC timeout so
+                // the client sees a clean error rather than a silent EC-TIME.
+                const TIMEOUT_SECS: u64 = 300;
+                let output = tokio::time::timeout(
+                    std::time::Duration::from_secs(TIMEOUT_SECS),
+                    proc.output(),
+                )
+                .await
+                .map_err(|_| format!("shellexec: command timed out after {TIMEOUT_SECS}s"))?
+                .map_err(|e| format!("shellexec: spawn failed: {e}"))?;
+
+                // Cap each stream at 1 MB to prevent OOM when the user runs
+                // something like `! cat /var/log/large.log`.
+                const MAX_OUTPUT: usize = 1_000_000;
+                let stdout_raw = String::from_utf8_lossy(&output.stdout);
+                let stdout = if stdout_raw.len() > MAX_OUTPUT {
+                    format!("{}…[truncated, {} bytes total]", &stdout_raw[..MAX_OUTPUT], stdout_raw.len())
+                } else {
+                    stdout_raw.into_owned()
+                };
+                let stderr_raw = String::from_utf8_lossy(&output.stderr);
+                let stderr = if stderr_raw.len() > MAX_OUTPUT {
+                    format!("{}…[truncated, {} bytes total]", &stderr_raw[..MAX_OUTPUT], stderr_raw.len())
+                } else {
+                    stderr_raw.into_owned()
+                };
 
                 let result = ShellExecResult {
                     exit_code: output.status.code().unwrap_or(1),
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                    stdout,
+                    stderr,
                 };
                 Ok(Some(serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?))
             })

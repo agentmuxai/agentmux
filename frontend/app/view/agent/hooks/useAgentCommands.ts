@@ -244,8 +244,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // Bang commands: `!cmd` runs a shell command in the agent's working
         // directory and surfaces output in the launch log. Never falls through
         // to the backend agent queue.
+        // TurnStart was already dispatched by handleSendMessage (agent-view.tsx)
+        // before this function was called. Reset it immediately so the pane does
+        // not stay in Submitting state for the full 30s watchdog window — no
+        // agent turn was initiated, only a sidecar shell exec.
         if (trimmed.startsWith("!")) {
             await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
+            opts.model.dispatchPane({ type: "TurnReset" }, "system");
             return;
         }
 
@@ -421,11 +426,13 @@ async function dispatchBangCommand(
     const workingDir = (ctx.block()?.meta?.["cmd:cwd"] as string | undefined) ?? "";
     ctx.log("system", `$ ${command}`);
     try {
-        const result = await RpcApi.ShellExecCommand(TabRpcClient, {
-            blockid: blockId,
-            command,
-            working_dir: workingDir,
-        });
+        const result = await RpcApi.ShellExecCommand(
+            TabRpcClient,
+            { blockid: blockId, command, working_dir: workingDir },
+            // Long timeout: shell commands like `npm test` or `cargo build` can
+            // take minutes. Default 5s RPC timeout would return EC-TIME immediately.
+            { timeout: 300_000 },
+        );
         if (result.stdout) ctx.log("system", result.stdout.trimEnd());
         if (result.stderr) ctx.log("system", result.stderr.trimEnd(), "warn");
         if (result.exit_code !== 0) {
