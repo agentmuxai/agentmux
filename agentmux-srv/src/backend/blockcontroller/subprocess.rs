@@ -1030,7 +1030,7 @@ impl SubprocessController {
                 });
             }
 
-            let crate::backend::container::ExecSession { mut input, output } = exec_session;
+            let crate::backend::container::ExecSession { exec_id, mut input, output } = exec_session;
 
             // Write the turn message to container stdin INLINE — not via a
             // detached `tokio::spawn`, which may not be scheduled for seconds
@@ -1054,6 +1054,11 @@ impl SubprocessController {
             let mut line_buf = String::new();
             let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id.clone());
             let session_id_field = config.session_id_field.clone();
+            // Tracks an aborted output stream (`Some(Err(_))`). The exec may have
+            // exited cleanly with a non-zero code OR the attach stream itself
+            // failed mid-turn; either way the turn did not complete normally, so
+            // this forces a non-zero exit even if inspect_exec can't be reached.
+            let mut stream_errored = false;
 
             tracing::info!(block_id = %block_id, "container exec output reader started");
 
@@ -1070,6 +1075,7 @@ impl SubprocessController {
                     }
                     Some(Err(e)) => {
                         tracing::warn!(block_id = %block_id, error = %e, "container exec output read error");
+                        stream_errored = true;
                         break;
                     }
                     Some(Ok(log_output)) => {
@@ -1104,10 +1110,32 @@ impl SubprocessController {
 
             tracing::info!(block_id = %block_id, "container exec output reader exiting");
 
+            // Determine the real turn exit code. The output stream ending is NOT
+            // the process exit status (unlike the host path's `child.wait()`), so
+            // inspect the exec over the Docker socket. A mid-turn stream error, an
+            // unavailable code, or a failed inspect is treated as a failure so a
+            // crashed / non-zero in-container CLI is never misreported to the
+            // client and to the health monitor as a successful (Idle) turn.
+            let exit_code: i32 = if stream_errored {
+                1
+            } else {
+                match cm.inspect_exec(&exec_id).await {
+                    Ok(Some(code)) => code as i32,
+                    Ok(None) => {
+                        tracing::warn!(block_id = %block_id, "inspect_exec returned no exit code; treating turn as failed");
+                        1
+                    }
+                    Err(e) => {
+                        tracing::warn!(block_id = %block_id, error = %e, "inspect_exec failed; treating turn as failed");
+                        1
+                    }
+                }
+            };
+
             // Mark done
             {
                 let mut inner = inner_arc.lock().unwrap();
-                inner.proc_exit_code = 0;
+                inner.proc_exit_code = exit_code;
                 SubprocessController::set_status(&mut inner, STATUS_DONE);
                 inner.current_pid = None;
                 inner.kill_tx = None;

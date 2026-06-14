@@ -72,6 +72,12 @@ struct ContainerManagerInner {
 /// Env vars are passed via `CreateExecOptions.env` (Docker socket) — they never
 /// appear in process argv, preventing CWE-214 credential exposure via ps/proc.
 pub struct ExecSession {
+    /// Docker exec id — pass to [`ContainerManager::inspect_exec`] after the
+    /// output stream ends to retrieve the process's real exit code. The stream
+    /// ending is NOT the exit status, so callers that care about success/failure
+    /// must inspect the exec (the in-container CLI can exit non-zero while still
+    /// closing stdout cleanly).
+    pub exec_id: String,
     /// Stdin pipe to the container process. Write the JSON message then flush/drop.
     pub input: Pin<Box<dyn AsyncWrite + Send>>,
     /// Multiplexed stdout/stderr stream (LogOutput::StdOut / LogOutput::StdErr).
@@ -209,7 +215,7 @@ impl ContainerManager {
 
         match results {
             StartExecResults::Attached { input, output } => {
-                Ok(ExecSession { input, output })
+                Ok(ExecSession { exec_id: exec.id, input, output })
             }
             StartExecResults::Detached => {
                 Err(ContainerError::Docker(
@@ -220,6 +226,22 @@ impl ContainerManager {
                 ))
             }
         }
+    }
+
+    /// Retrieve the exit code of a finished exec via the Docker socket.
+    ///
+    /// Returns `Ok(Some(code))` once the exec has exited, `Ok(None)` while it is
+    /// still running (no code yet) or if Docker did not report one. Call this
+    /// after the exec's output stream has ended — unlike a child process's
+    /// `wait()`, the attached output stream closing does not carry the exit
+    /// status, so the turn's success/failure can only be known by inspecting.
+    pub async fn inspect_exec(&self, exec_id: &str) -> Result<Option<i64>, ContainerError> {
+        let info = self.inner.docker.inspect_exec(exec_id).await?;
+        // `running == Some(true)` means no meaningful code yet.
+        if info.running == Some(true) {
+            return Ok(None);
+        }
+        Ok(info.exit_code)
     }
 
     /// Gracefully stop a container. Uses SIGTERM → SIGKILL after `timeout_secs`.
@@ -278,7 +300,18 @@ impl ContainerManager {
     ///
     /// Errors only on genuine pull failures (network, auth, no such image).
     async fn pull_image(&self, image: &str) -> Result<(), ContainerError> {
-        tracing::info!(image = image, "pulling image (if not already cached)");
+        // Skip the pull entirely when the image is already present locally.
+        // `create_image` always contacts the registry, so on an offline host the
+        // pull stream errors out even when the image is cached — aborting
+        // container creation even though `docker run` would start it from the
+        // local cache. An `inspect_image` short-circuit makes the cached-offline
+        // path work (and avoids a redundant registry round-trip when online).
+        if self.inner.docker.inspect_image(image).await.is_ok() {
+            tracing::info!(image = image, "image already present locally; skipping pull");
+            return Ok(());
+        }
+
+        tracing::info!(image = image, "pulling image (not cached locally)");
         let mut stream = self.inner.docker.create_image(
             Some(CreateImageOptions {
                 from_image: image,
@@ -533,7 +566,7 @@ mod tests {
         // Drop the (unused) stdin half first: bollard's exec output stream does
         // not EOF while the write-half is held open — the same reason
         // spawn_container_turn drops `input` before reading output.
-        let ExecSession { input, output } = cm
+        let ExecSession { input, output, .. } = cm
             .exec(
                 name,
                 &["sh".into(), "-c".into(), "printf %s \"$ITEST_KEY\"".into()],
@@ -552,7 +585,7 @@ mod tests {
         // likewise consumes newline-delimited JSON without waiting for EOF, and
         // bollard's hijacked exec stream does not reliably half-close stdin on
         // `drop(input)`, so an EOF-dependent reader would hang.
-        let ExecSession { mut input, output } = cm
+        let ExecSession { mut input, output, .. } = cm
             .exec(
                 name,
                 &["sh".into(), "-c".into(), "read line; printf 'got:%s' \"$line\"".into()],
