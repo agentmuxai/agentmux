@@ -14,12 +14,6 @@ use super::wps::{WaveEvent, WpsClient};
 
 // ---- Event type constants ----
 
-#[allow(dead_code)]
-pub const WS_EVENT_TAURI_NEW_WINDOW: &str = "electron:newwindow";
-#[allow(dead_code)]
-pub const WS_EVENT_TAURI_CLOSE_WINDOW: &str = "electron:closewindow";
-#[allow(dead_code)]
-pub const WS_EVENT_TAURI_UPDATE_ACTIVE_TAB: &str = "electron:updateactivetab";
 pub const WS_EVENT_RPC: &str = "rpc";
 
 // ---- Types ----

@@ -1,0 +1,58 @@
+# AgentMux Container Agent Image
+# Independent of claw — AgentMux builds and distributes this image.
+# Published to: ghcr.io/agentmuxai/agent-claude
+#
+# Design decisions:
+#   - node:22-slim (Debian Bookworm): glibc required — Alpine/musl crashes Claude Code
+#   - tini as PID 1 + sleep infinity: container stays alive; agent turns run via
+#     `docker exec`, not as PID 1. tini handles signal forwarding and zombie reaping.
+#   - DISABLE_AUTOUPDATER=1: version pinned at image build time, not runtime
+#   - ~/.claude is a named Docker volume (not host bind mount) — credential isolation
+#   - /workspace is bind-mounted by the AgentMux runtime at container start
+
+FROM node:22-slim
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini \
+    git \
+    curl \
+    jq \
+    bash \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# node:22-slim ships a 'node' user at UID 1000. Rename it to 'agent' for clarity
+# rather than creating a second UID-1000 user (useradd --non-unique is fragile).
+RUN usermod -l agent -d /home/agent -m node \
+    && groupmod -n agent node
+
+# Claude Code — version pinned at build time for reproducible images.
+# Managed by rebuilding with a new CLAUDE_VERSION arg, not npm update.
+ARG CLAUDE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_VERSION}
+
+# Prevent in-container auto-updates — version is managed at the image level.
+ENV DISABLE_AUTOUPDATER=1
+ENV NO_UPDATE_NOTIFIER=1
+
+ENV HOME=/home/agent
+ENV CLAUDE_CONFIG_DIR=/home/agent/.claude
+ENV TERM=xterm-256color
+ENV LANG=C.UTF-8
+
+# Pre-create ~/.claude with agent ownership before switching to the non-root user.
+# Docker initialises a fresh named volume as root:root; without this the agent
+# user cannot write its config/session state on first mount.
+RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
+
+# /workspace is the default mount point for the agent's working directory.
+# AgentMux bind-mounts the host workspace path here at container start.
+WORKDIR /workspace
+USER agent
+
+# tini as PID 1 with sleep infinity keeps the container alive between agent turns.
+# Agent turns are executed via `docker exec`, not by replacing the PID-1 process.
+# SIGTERM from `docker stop` is forwarded by tini and terminates sleep cleanly.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sleep", "infinity"]

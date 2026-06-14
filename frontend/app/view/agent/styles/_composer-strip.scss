@@ -195,3 +195,78 @@
         display: none;
     }
 }
+
+// ── Context Window Fill Bar ────────────────────────────────────────────
+// Rendered inside AgentComposerStrip's right segment by ContextWindowBar.
+
+.ctx-window-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    opacity: 0.75;
+    cursor: default;
+
+    &:hover { opacity: 1; }
+}
+
+.ctx-window-raw {
+    color: var(--color-text-secondary, #888);
+}
+
+.ctx-window-track {
+    position: relative;
+    height: 6px;
+    width: 72px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+}
+
+.ctx-window-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+
+    .ctx-window-track--low &     { background: #4caf50; }
+    .ctx-window-track--mid &     { background: #ffc107; }
+    .ctx-window-track--high &    { background: #ff9800; }
+    .ctx-window-track--critical & {
+        background: #f44336;
+        animation: ctx-pulse 1.2s ease-in-out infinite;
+    }
+}
+
+.ctx-window-label {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    text-align: center;
+    font-size: 9px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 2px;
+}
+
+@keyframes ctx-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.6; }
+}
+
+@include mixins.respect-reduced-motion {
+    // Critical context fill: keep the pulse but slow it down.
+    // Must match specificity of .ctx-window-track--critical .ctx-window-fill
+    // (0,2,0) — a bare .ctx-window-fill (0,1,0) is outranked by the animation
+    // shorthand and the duration override silently loses.
+    .ctx-window-track--critical .ctx-window-fill {
+        animation-duration: 2.4s;
+    }
+}

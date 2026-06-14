@@ -464,11 +464,11 @@ tasks:
             # launcher now drives srv + host on macOS dev too, so build it
             # alongside the host. They co-locate in dist/cef-dev/ (flat
             # layout) — see dev:serve's Unix branch.
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-mcp'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
             - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
-            - echo "✓ Built host + launcher for macOS"
+            - echo "✓ Built host + launcher + bashwrap for macOS"
 
     build:host:linux:
         internal: true
@@ -489,11 +489,11 @@ tasks:
             # + host + srv co-located in dist/cef-dev/) has it — same as
             # build:host:darwin. Without this, dev:serve's launcher-not-found
             # guard hard-fails on Linux.
-            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef && PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-launcher -p agentmux-mcp'
+            - bash -c 'source "$HOME/.cargo/env" 2>/dev/null; PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-cef --features patched-libcef && PATH="$HOME/.cargo/bin:$PATH" cargo build --release -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp'
             - mkdir -p dist/cef
             - cp target/release/agentmux-cef dist/cef/agentmux-cef
             - cp target/release/agentmux-launcher dist/cef/agentmux-launcher
-            - echo "✓ Built host + launcher for Linux"
+            - echo "✓ Built host + launcher + bashwrap for Linux"
 
     bundle:
         desc: Bundle runtime binaries alongside the host executable.
@@ -694,7 +694,16 @@ tasks:
                   # runtime/agentmux-srv-{ver}-windows.x64.exe first
                   # (agentmux-launcher/src/srv_spawner.rs:295-307).
                   cp dist/bin/agentmux-srv-*-windows.x64.exe "$DEV_DIR/runtime/" 2>/dev/null || true
-                  echo "Built $DEV_DIR with launcher layout (launcher at root, host + DLLs + srv in runtime/)"
+                  # Streaming bash wrapper — agents resolve `agentmux-bashwrap`
+                  # via the bundled tools/bin (agentmux-srv prepends it to the
+                  # agent PATH). Without this, dev agents fall through to a
+                  # STALE agentmux-bashwrap elsewhere on the system PATH and
+                  # silently run a pre-fix binary (exit-130). Mirrors
+                  # scripts/package-portable.sh:121. See
+                  # docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
+                  mkdir -p "$DEV_DIR/runtime/tools/bin"
+                  cp target/release/agentmux-bashwrap.exe "$DEV_DIR/runtime/tools/bin/"
+                  echo "Built $DEV_DIR with launcher layout (launcher at root, host + DLLs + srv in runtime/, bashwrap in runtime/tools/bin/)"
                 else
                   # Unix flat layout (Phase 1,
                   # SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30): launcher
@@ -718,6 +727,15 @@ tasks:
                     SRV_SRC="dist/bin/agentmux-srv-{{.VERSION}}-linux.x64"
                   fi
                   cp "$SRV_SRC" "$DEV_DIR/agentmux-srv" 2>/dev/null || true
+                  # Streaming bash wrapper — flat layout means the sidecar's
+                  # bundled_tools_dir is "$DEV_DIR/tools/bin". Without this,
+                  # agents resolve a stale agentmux-bashwrap off the system
+                  # PATH (exit-130). See
+                  # docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
+                  mkdir -p "$DEV_DIR/tools/bin"
+                  # Fail loud: build:host:{darwin,linux} build -p agentmux-bashwrap,
+                  # so a missing binary here is a real regression, not "optional".
+                  cp target/release/agentmux-bashwrap "$DEV_DIR/tools/bin/"
                   if [ ! -f "$DEV_DIR/agentmux-launcher" ]; then
                     echo "❌ $DEV_DIR/agentmux-launcher not found — build:host:{{OS}} should have staged it"
                     exit 1

@@ -1,3 +1,5 @@
+> **⚠️ SUPERSEDED — 2026-06-13.** Retained for its design rationale and the inbound code/doc references that cite it. For the current, code-anchored architecture of agent data & cross-channel persistence, see **[ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md](../architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md)**.
+
 # Data directory status — where AgentMux writes things, 2026-05-09
 
 **Question:** "why are we maintaining things outside of `~/.agentmux/`? I see `ai.agentmux.cef`?"

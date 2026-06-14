@@ -30,7 +30,7 @@ fn agent_instance_to_record(
     inst: &AgentInstance,
     agents_root: &Path,
 ) -> Result<crate::registry::NamedAgentRecord, String> {
-    use crate::registry::{NamedAgentRecord, NamedAgentRecordV1, MAX_SUPPORTED_SCHEMA};
+    use crate::registry::{NamedAgentRecord, NamedAgentRecordV1};
     let rel = relative_workdir(&inst.working_directory, agents_root).ok_or_else(|| {
         format!(
             "working_directory {:?} is not under {:?}",
@@ -39,20 +39,35 @@ fn agent_instance_to_record(
         )
     })?;
     let version = env!("CARGO_PKG_VERSION").to_string();
+    let data = NamedAgentRecordV1 {
+        instance_id: inst.id.clone(),
+        instance_name: inst.instance_name.clone(),
+        definition_id: inst.definition_id.clone(),
+        identity_id: empty_to_none(&inst.identity_id),
+        memory_id: empty_to_none(&inst.memory_id),
+        // v2: carry the provider session id so a global/cross-channel
+        // record can `--resume` without joining the current channel's SQLite.
+        session_id: empty_to_none(&inst.session_id),
+        working_dir: rel,
+        // v3: the agents dir `working_dir` is relative to — this row lives in
+        // the CURRENT channel, so its source base is the channel agents dir we
+        // just stripped against. Lets a different channel reconstruct the
+        // absolute path instead of re-joining under its own agents dir (P0.4).
+        source_agents_base: Some(agents_root.to_string_lossy().to_string()),
+        created_at_ms: inst.created_at,
+        last_launched_at_ms: inst.started_at,
+        created_by_version: version.clone(),
+        last_launched_by_version: version,
+    };
+    // Stamp the lowest envelope schema that faithfully represents the payload
+    // (schema::min_schema_version). Since P0.4 always sets source_agents_base,
+    // that is v3 for every live-mirrored record — a pre-v3 reader rejects it
+    // (intended: better to hide than mis-resolve a cross-channel workdir; the
+    // only pre-v3 readers of the GLOBAL registry are pre-P0.4 builds, which
+    // ship together with this).
     Ok(NamedAgentRecord {
-        schema_version: MAX_SUPPORTED_SCHEMA,
-        data: NamedAgentRecordV1 {
-            instance_id: inst.id.clone(),
-            instance_name: inst.instance_name.clone(),
-            definition_id: inst.definition_id.clone(),
-            identity_id: empty_to_none(&inst.identity_id),
-            memory_id: empty_to_none(&inst.memory_id),
-            working_dir: rel,
-            created_at_ms: inst.created_at,
-            last_launched_at_ms: inst.started_at,
-            created_by_version: version.clone(),
-            last_launched_by_version: version,
-        },
+        schema_version: data.min_schema_version(),
+        data,
     })
 }
 
@@ -123,11 +138,17 @@ impl Store {
         let Some(reg) = self.shared_agent_registry() else {
             return;
         };
-        let Some(agents_root) = reg.agents_root() else {
-            tracing::warn!("registry: agents_root has no parent — skipping mirror");
+        // Anchor the relative working_directory on the CURRENT channel's
+        // agents dir, not the registry's own parent — once P0.3 re-roots the
+        // registry under ~/.agentmux/shared/, its parent no longer coincides
+        // with channels/<ch>/agents/. `registry_agents_base()` returns the
+        // explicit channel dir (AGENTMUX_AGENTS_DIR) and falls back to the
+        // registry parent for tests / pre-re-root layouts.
+        let Some(agents_root) = self.registry_agents_base() else {
+            tracing::warn!("registry: no agents base — skipping mirror");
             return;
         };
-        let rec = match agent_instance_to_record(inst, agents_root) {
+        let rec = match agent_instance_to_record(inst, &agents_root) {
             Ok(rec) => rec,
             Err(e) => {
                 tracing::warn!(

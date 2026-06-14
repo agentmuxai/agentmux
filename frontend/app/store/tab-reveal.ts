@@ -19,10 +19,22 @@
 // handling needed.
 
 import { createSignal } from "solid-js";
+import { fadeOutStartupSplash } from "@/app/init/startup-splash";
 
 const [tabSwitching, setTabSwitching] = createSignal(false);
 
 export { tabSwitching };
+
+/** Lift the reveal gate AND cross-fade the startup splash. The gate's
+ *  "settled" moment is exactly when the window's content is ready to show, so
+ *  it's also when the full-cover brain splash should fade out — keeping it on
+ *  top of the entire bootstrap until then (see startup-splash.ts).
+ *  `fadeOutStartupSplash` is idempotent: a no-op once the splash is gone, so
+ *  calling it on every gate lift (including ordinary tab switches) is safe. */
+function liftGate(): void {
+    setTabSwitching(false);
+    fadeOutStartupSplash();
+}
 
 /** Hard cap on how long the gate stays up. Past this, content reveals
  *  even if the long-task stream hasn't gone quiet — protects against
@@ -83,7 +95,7 @@ export function holdRevealGate(): void {
     cancelPendingDetector();
     activeFallbackTimer = setTimeout(() => {
         activeFallbackTimer = null;
-        setTabSwitching(false);
+        liftGate();
     }, MAX_GATE_MS);
 }
 
@@ -108,7 +120,7 @@ export function scheduleRevealLift(): void {
         // shorter SETTLE_MS which would reveal mid-mount.
         activeFallbackTimer = setTimeout(() => {
             activeFallbackTimer = null;
-            setTabSwitching(false);
+            liftGate();
         }, MAX_GATE_MS);
         return;
     }
@@ -131,7 +143,7 @@ export function scheduleRevealLift(): void {
         // rather than revealing mid-mount at SETTLE_MS.
         activeFallbackTimer = setTimeout(() => {
             activeFallbackTimer = null;
-            setTabSwitching(false);
+            liftGate();
         }, MAX_GATE_MS);
         return;
     }
@@ -157,7 +169,7 @@ export function scheduleRevealLift(): void {
         if (settledSinceLastBusy || hardCapHit) {
             observer.disconnect();
             activeObserver = null;
-            setTabSwitching(false);
+            liftGate();
             return;
         }
         requestAnimationFrame(tick);

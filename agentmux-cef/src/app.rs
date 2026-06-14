@@ -706,16 +706,13 @@ wrap_browser_process_handler! {
             // in dev mode — in release builds, localhost:5173 doesn't exist and
             // would show a raw browser error page.
             let base_url = if base_url.is_empty() {
-                // Use the launcher's mode if it set the env, else
-                // fall back to detecting from the host exe path
-                // (covers standalone `task dev` runs).
-                let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
-                    std::env::current_exe()
-                        .ok()
-                        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                        .map(|d| agentmux_common::RuntimeMode::current(&d))
-                });
-                let is_dev = matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. }));
+                // Dev builds (`task dev`, with or without the launcher) load the
+                // Vite dev server; packaged builds use the bundled frontend.
+                // Identify by the host exe PATH (`is_dev_self`), not
+                // `AGENTMUX_RUNTIME_MODE` — a parent dev AgentMux leaks that env
+                // into descendants, which would wrongly flip a packaged build to
+                // dev. (`has_frontend` below still wins, so this is also robust.)
+                let is_dev = agentmux_common::is_dev_self();
                 let exe_dir = std::env::current_exe()
                     .ok()
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()));

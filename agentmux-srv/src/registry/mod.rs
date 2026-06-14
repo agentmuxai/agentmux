@@ -18,6 +18,9 @@
 #![allow(dead_code, unused_imports)]
 
 mod atomic;
+mod def_migrate;
+mod def_schema;
+mod def_store;
 mod migrate;
 mod paths;
 mod schema;
@@ -26,8 +29,16 @@ mod store;
 #[cfg(test)]
 mod tests;
 
-pub use migrate::{migrate_from_sqlite_once, MigrateStats};
-pub use paths::resolve_shared_registry_dir;
+pub use migrate::{
+    backfill_source_bases_once, migrate_from_sqlite_once, MigrateStats, SourceBackfillStats,
+};
+pub use paths::{resolve_shared_definitions_dir, resolve_shared_registry_dir};
+pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
+pub use def_schema::{
+    DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,
+    DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
+};
+pub use def_store::{DefStoreError, DefinitionStore};
 pub use schema::{
     NamedAgentRecord, NamedAgentRecordV1, ValidationError, MAX_SUPPORTED_SCHEMA,
     MIN_SUPPORTED_SCHEMA,

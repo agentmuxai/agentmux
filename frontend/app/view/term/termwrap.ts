@@ -190,10 +190,6 @@ export class TermWrap {
         // Mount terminal to DOM
         this.terminal.open(this.connectElem);
 
-        // Re-fit when the vertical scrollbar appears/disappears (the scrollbar lane is only
-        // reserved while visible — see customFit). Set up after open() so .xterm-viewport exists.
-        this.setupScrollbarRefit();
-
         // Enable cursor blink only while this pane is focused.  The textarea is
         // available after open(); focus/blur fire naturally as the user switches panes.
         this.terminal.textarea?.addEventListener("focus", () => {
@@ -593,18 +589,6 @@ export class TermWrap {
 
     // ── Private helpers ────────────────────────────────────────────────
 
-    // Width, in px, the vertical scrollbar occupies when present. Matches term.scss's
-    // `.xterm-viewport::-webkit-scrollbar { width: 14px }` and FitAddon's hardcoded
-    // `overviewRuler.width || 14`. Chromium has no zero-cost overlay scrollbar — a visible
-    // scrollbar always steals this much layout (`overflow: overlay` is deprecated and
-    // aliases to `auto`), so the lane is only reclaimable while the scrollbar is hidden.
-    private static readonly SCROLLBAR_WIDTH = 14; // px
-
-    // True after the most recent customFit observed a visible vertical scrollbar. The
-    // ResizeObserver on the viewport (setupScrollbarRefit) uses this to re-fit only when
-    // the scrollbar toggles, not on every size tick.
-    private lastScrollbarVisible: boolean = false;
-
     private customFit() {
         const dims = this.fitAddon.proposeDimensions();
         // proposeDimensions can return {cols: NaN, rows: NaN} when the DOM cell measurement
@@ -615,51 +599,24 @@ export class TermWrap {
         const core = (this.terminal as any)._core;
         const cellWidth: number = core?._renderService?.dimensions?.css?.cell?.width ?? 0;
         if (cellWidth > 0 && this.connectElem) {
-            // FitAddon subtracts SCROLLBAR_WIDTH from the available width whenever
-            // scrollback > 0 — even when no scrollbar is showing. That always-reserved-but-
-            // often-empty lane is the zoom-dependent "dead gap" to the right of the text
-            // (docs/analysis/ANALYSIS_TERM_SCROLLBAR_GAP_ROOTCAUSE_2026_06_10.md). Recompute
-            // cols from the real container width, reserving the lane ONLY when the scrollbar
-            // is actually present:
-            //   • no scrollbar  → reserve 0  → grid fills the full width (gap → 0)
-            //   • scrollbar     → reserve 14 → the scrollbar fills its lane (gap → 0)
-            // The residual sub-cell remainder (< cellWidth, irreducible — no partial columns)
-            // is painted the terminal background by .block-frame-default-inner, so it is
-            // invisible at every zoom. Reclaiming the lane unconditionally is not an option:
-            // a visible Chromium scrollbar always costs 14px, which would clip the last
-            // column when the scrollbar appears.
+            // FitAddon unconditionally subtracts a 14px scrollbar gutter from the available
+            // width (`scrollback > 0 ? overviewRuler.width || 14 : 0`), leaving a permanent
+            // dead lane to the right of the text
+            // (docs/analysis/ANALYSIS_TERM_SCROLLBAR_GAP_ROOTCAUSE_2026_06_10.md). xterm 6's
+            // scrollbar is a transform-driven OVERLAY (.xterm-scrollable-element > .scrollbar)
+            // that floats over the content and reserves no layout, so that gutter is pure
+            // waste. Recompute cols from the full container width to reclaim it. The overlay
+            // scrollbar fades in over the rightmost column when there's scrollback and is
+            // lifted above the link layer in term.scss so it stays clickable.
             const cs = getComputedStyle(this.connectElem); // perf:allow-layout-read — customFit runs on resize/init/refit, never the keystroke path
             const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
-            const viewport = this.terminal.element?.querySelector(".xterm-viewport") as HTMLElement | null;
-            const scrollbarVisible = !!viewport && viewport.scrollHeight > viewport.clientHeight; // perf:allow-layout-read — resize/fit path, not per-keystroke
-            this.lastScrollbarVisible = scrollbarVisible;
-            const reservation = scrollbarVisible ? TermWrap.SCROLLBAR_WIDTH : 0;
-            const availPx = this.connectElem.clientWidth - padX - reservation; // perf:allow-layout-read — resize/fit path, not per-keystroke
+            const availPx = this.connectElem.clientWidth - padX; // perf:allow-layout-read — resize/fit path, not per-keystroke
             dims.cols = Math.max(2, Math.floor(availPx / cellWidth));
         }
         if (this.terminal.rows !== dims.rows || this.terminal.cols !== dims.cols) {
             core?._renderService?.clear?.();
             this.terminal.resize(dims.cols, dims.rows);
         }
-    }
-
-    // The scrollbar can toggle mid-session as scrollback grows past the viewport without any
-    // change to the pane size, so the connectElem-level resize path never fires. Watch the
-    // viewport directly and re-fit when vertical overflow appears/disappears, so the column
-    // count tracks the scrollbar lane. Gated on a state change to avoid a resize feedback loop.
-    private setupScrollbarRefit() {
-        const viewport = this.terminal.element?.querySelector(".xterm-viewport") as HTMLElement | null;
-        if (!viewport || typeof ResizeObserver === "undefined") return;
-        const ro = new ResizeObserver(() => {
-            if (this.disposed || !this.terminal) return;
-            const visible = viewport.scrollHeight > viewport.clientHeight; // perf:allow-layout-read — ResizeObserver callback, not the keystroke path
-            if (visible !== this.lastScrollbarVisible) {
-                this.lastScrollbarVisible = visible;
-                this.handleResize_debounced();
-            }
-        });
-        ro.observe(viewport);
-        this.toDispose.push({ dispose: () => ro.disconnect() });
     }
 
     private loadRendererAddon(useWebGl: boolean) {

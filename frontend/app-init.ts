@@ -560,7 +560,9 @@ export async function initApp() {
         }
     }
 
-    // Safety net: if body is still hidden after 30s, force it visible
+    // Safety net: if body is still hidden after 30s, force it visible and
+    // drop the splash. The reveal gate (MAX_GATE_MS = 800ms) normally fades
+    // the splash long before this; this only fires if init wedged.
     setTimeout(() => {
         if (document.body.style.visibility === "hidden") {
             console.warn("[initApp] Safety timeout: forcing body visible after 30s");
@@ -569,6 +571,7 @@ export async function initApp() {
             document.body.style.opacity = "1";
             document.body.classList.remove("is-transparent");
         }
+        import("@/app/init/startup-splash").then((m) => m.fadeOutStartupSplash());
     }, 30_000);
 }
 
@@ -918,11 +921,13 @@ async function initWave(initOpts: AgentMuxInitOpts) {
         }
     }
 
-    // Hide startup loading message
-    const startupLoading = document.getElementById("startup-loading");
-    if (startupLoading) {
-        startupLoading.remove();
-    }
+    // NOTE: the startup splash (#startup-loading, the pulsing brain) is no
+    // longer removed here. Removing it mid-mount exposed the bare chrome →
+    // empty → piecemeal-mount cascade behind it (very visible on tear-off).
+    // It is now cross-faded out by the content-reveal gate's "settled" moment
+    // (tab-reveal.ts `liftGate` → startup-splash.ts `fadeOutStartupSplash`),
+    // so the brain covers the whole bootstrap and the transition reads as
+    // brain → content with nothing uncovered in between.
 
     getApi().setWindowInitStatus("wave-ready");
 }

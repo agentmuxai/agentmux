@@ -432,6 +432,33 @@ pub fn build_settings_with_hooks(
     }
     settings_obj.insert("hooks".to_string(), Value::Object(hooks_obj));
 
+    // Claude Code requires the bashwrap exec command (produced by the hook rewrite)
+    // to be in permissions.allow — otherwise it raises a permissions error and the
+    // agent cannot run any bash commands. Merge with any user-supplied allow list
+    // rather than overwriting it.
+    {
+        // Space before * enforces a command-name boundary: matches
+        // "agentmux-bashwrap <args>" only, not other executables that
+        // happen to share the prefix (e.g. agentmux-bashwrapXYZ).
+        let bashwrap_allow = Value::String("Bash(agentmux-bashwrap *)".to_string());
+        let mut allow_arr = match settings_obj.get("permissions") {
+            Some(Value::Object(perms)) => match perms.get("allow") {
+                Some(Value::Array(arr)) => arr.clone(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        if !allow_arr.iter().any(|v| v == &bashwrap_allow) {
+            allow_arr.push(bashwrap_allow);
+        }
+        let mut perms_obj = match settings_obj.remove("permissions") {
+            Some(Value::Object(obj)) => obj,
+            _ => serde_json::Map::new(),
+        };
+        perms_obj.insert("allow".to_string(), Value::Array(allow_arr));
+        settings_obj.insert("permissions".to_string(), Value::Object(perms_obj));
+    }
+
     match serde_json::to_string_pretty(&Value::Object(settings_obj)) {
         Ok(s) => Some(s),
         Err(e) => {
