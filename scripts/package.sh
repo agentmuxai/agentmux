@@ -9,13 +9,9 @@
 # Usage:
 #   bash scripts/package.sh [--fresh] [output-dir]
 #
-#   --fresh      Give this build a throwaway data dir instead of the
-#                branch's persistent one. Normally every local build of a
-#                given branch shares one data dir (so your test session —
-#                agents, panes, auth — survives an iterate-rebuild loop).
-#                --fresh suffixes the channel with the build stamp so this
-#                one build starts clean. (Triggers a recompile of the
-#                crates that bake the channel — occasional, expected.)
+#   --fresh      No-op (accepted for back-compat). Every local build is now
+#                already its own isolated data dir — see CHANNEL below — so
+#                there is nothing left for --fresh to do.
 #   output-dir   Where the portable lands (default ~/Desktop).
 #
 # What gets stamped:
@@ -27,14 +23,18 @@
 #                never collide with or reorder a release). Names the
 #                portable folder + ZIP so builds are unique on disk and
 #                you can tell them apart at a glance.
-#   - CHANNEL  : local-<branch>[-<stamp> if --fresh] — the data-dir key.
-#                Branch-scoped so rebuilds of the same branch reuse one
-#                data dir. Baked into the binary at compile time via
+#   - CHANNEL  : local-<slug>-<branch-hash>-<build-id> — the data-dir key.
+#                PER-BUILD: the build-id (hash of the full label) makes each
+#                build its own data dir + cef-cache + single-instance pipe, so a
+#                freshly-built binary launches as its own instance instead of
+#                joining a still-running sibling build. Baked at compile time via
 #                AGENTMUX_BUILD_CHANNEL_DEFAULT (see agentmux-common/build.rs).
-#   - AGENTMUX_BUILD_LABEL: the full label (including stamp) baked into
-#                the launcher for use as the single-instance pipe key, so
-#                two successive local builds never share a pipe and each
-#                local build starts its own window.
+#                Safe now that agents + auth are global (#1387-#1393); only pane
+#                layout + memories start fresh. Releases override to "stable".
+#   - AGENTMUX_BUILD_LABEL: the full label (including stamp) baked into the
+#                launcher's single-instance pipe key. With per-build channels the
+#                data dir already forces a unique pipe; the label is still the
+#                pipe key for RELEASE builds (which share the "stable" channel).
 
 set -euo pipefail
 
@@ -131,20 +131,34 @@ echo "────────────────────────�
 # GC: per-build channels accumulate (each build leaves a data dir + cef-cache,
 # tens–hundreds of MB). For LOCAL builds, keep the few most-recent per-build
 # channels for THIS branch and prune older ones so an iterate-rebuild loop doesn't
-# grow the disk without bound. Skips anything modified in the last 30 min (a crude
-# "might still be running" guard) so a live sibling build is never nuked. The
-# pre-per-build shared channel (`local-<slug>-<hash>` with no build-id suffix) does
-# NOT match the glob and is preserved. Best-effort: never fails the build.
+# grow the disk without bound. Skips any channel with a file touched in the last
+# 60 min ANYWHERE in its subtree (a running instance writes only into deep subdirs
+# — versions/<v>/{runtime,cef-cache,data/db} — not the channel dir itself), so a
+# live sibling build is never nuked. The pre-per-build shared channel
+# (`local-<slug>-<hash>` with no build-id suffix) does NOT match the glob and is
+# preserved. Best-effort: never fails the build.
 if [ -z "${RELEASE_CHANNEL:-}" ]; then
     GC_KEEP=${AGENTMUX_LOCAL_CHANNELS_KEEP:-5}
     CH_ROOT="${HOME}/.agentmux/channels"
     if [ -d "$CH_ROOT" ] && [ -n "$BRANCH_HASH" ]; then
-        ls -dt "$CH_ROOT/local-${BRANCH_SLUG}-${BRANCH_HASH}-"* 2>/dev/null \
-            | tail -n +$((GC_KEEP + 1)) \
-            | while IFS= read -r old; do
-                [ -n "$(find "$old" -maxdepth 0 -mmin -30 2>/dev/null)" ] && continue
-                rm -rf "$old" 2>/dev/null && echo "  gc      : pruned old build channel $(basename "$old")"
-              done
+        # nullglob → empty array (not a literal unmatched glob) on the first build
+        # of a branch, so `ls` is never invoked on a non-existent path. Without it,
+        # `ls <no-match>` exits 2 and the script's pipefail+errexit kills the build.
+        shopt -s nullglob
+        gc_matches=( "$CH_ROOT"/"local-${BRANCH_SLUG}-${BRANCH_HASH}-"* )
+        shopt -u nullglob
+        if [ "${#gc_matches[@]}" -gt "$GC_KEEP" ]; then
+            # Best-effort: trailing `|| true` so a prune hiccup never fails a build.
+            ls -dt "${gc_matches[@]}" | tail -n +"$((GC_KEEP + 1))" | while IFS= read -r old; do
+                # Liveness guard: scan the WHOLE subtree for recent writes, not the
+                # channel dir's own mtime (a live instance only touches deep
+                # subdirs). Any file <60 min old ⇒ possibly running ⇒ skip.
+                # `-print -quit` stops at the first hit (fast).
+                if [ -z "$(find "$old" -mmin -60 -print -quit 2>/dev/null)" ]; then
+                    rm -rf "$old" 2>/dev/null && echo "  gc      : pruned old build channel $(basename "$old")"
+                fi
+            done || true
+        fi
     fi
 fi
 
