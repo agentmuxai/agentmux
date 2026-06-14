@@ -569,7 +569,7 @@ export class EditorViewModel implements ViewModel {
         try {
             // Flush the live in-memory buffer to the scratch file on disk first.
             // MoveScratchFileCommand copies from disk, so without this step any
-            // edits since the last auto-save would be silently discarded.
+            // edits typed since the last auto-save would be silently discarded.
             const liveContent = this._contentByTab.get(tab.id);
             if (liveContent !== undefined) {
                 await RpcApi.WriteEditorFileCommand(TabRpcClient, {
@@ -587,10 +587,7 @@ export class EditorViewModel implements ViewModel {
                 newPath: result.file_path,
                 source: "user",
             });
-            // Clear cached buffer so openFile reloads from disk and syncs the
-            // contentHash. Without this the early-return guard at openFile:372
-            // (contentLoaded && _contentByTab.has) skips the hash update.
-            this._contentByTab.delete(tab.id);
+            // Re-load content from the new path to sync the hash.
             await this.openFile(result.file_path);
         } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e);
