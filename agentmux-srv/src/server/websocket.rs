@@ -1428,7 +1428,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 if !canonical_old.starts_with(&canonical_home) {
                     return Err("renameeditorfile: path outside home directory".to_string());
                 }
-                if cmd.new_name.contains('/') || cmd.new_name.contains('\\') || cmd.new_name == ".." || cmd.new_name.is_empty() {
+                if cmd.new_name.contains('/') || cmd.new_name.contains('\\') || cmd.new_name.contains('\0') || cmd.new_name == ".." || cmd.new_name == "." || cmd.new_name.is_empty() {
                     return Err("renameeditorfile: new_name must be a plain filename".to_string());
                 }
                 let new_path = canonical_old.parent()
@@ -1518,8 +1518,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let home = dirs::home_dir().ok_or("deleteeditorfile: cannot determine home")?;
                 let canonical_home = home.canonicalize().map_err(|e| format!("deleteeditorfile: home: {e}"))?;
                 let canonical = path.canonicalize().map_err(|e| format!("deleteeditorfile: {e}"))?;
-                if !canonical.starts_with(&canonical_home) {
-                    return Err("deleteeditorfile: path outside home directory".to_string());
+                if !canonical.starts_with(&canonical_home) || canonical == canonical_home {
+                    return Err("deleteeditorfile: path outside or is the home directory".to_string());
                 }
                 // Use symlink_metadata (not metadata) to detect symlinks without following them.
                 // Deleting via `canonical` would delete the symlink TARGET; we always remove the

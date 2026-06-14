@@ -28,7 +28,8 @@
     cursor: default;
     gap: 16px;
 
-    &:hover:not(.ctx-menu-item--disabled) {
+    &:hover:not(.ctx-menu-item--disabled),
+    &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {
         background: #313244;
     }
 
@@ -40,7 +41,8 @@
     &.ctx-menu-item--danger {
         color: #f38ba8;
 
-        &:hover:not(.ctx-menu-item--disabled) {
+        &:hover:not(.ctx-menu-item--disabled),
+        &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {
             background: rgba(243, 139, 168, 0.15);
         }
     }

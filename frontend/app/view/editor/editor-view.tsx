@@ -411,10 +411,15 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     const buildContextMenuItems = (path: string | null, isDir: boolean): ContextMenuItem[] => {
         if (!path) {
             // Background right-click → tree-level actions.
-            const homeRoot = model.treeModel.rootsAtom().find((r) => r.isHome)?.path ?? "";
+            const homeRoot = model.treeModel.rootsAtom().find((r) => r.isHome)?.path;
+            if (!homeRoot) {
+                return [
+                    { type: "action", label: "Refresh", onSelect: () => void model.treeModel.refresh() },
+                ];
+            }
             return [
-                { type: "action", label: "New File…", onSelect: () => setNewEntry({ parentPath: homeRoot, kind: "file" }) },
-                { type: "action", label: "New Folder…", onSelect: () => setNewEntry({ parentPath: homeRoot, kind: "dir" }) },
+                { type: "action", label: "New File…", onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "file" }); } },
+                { type: "action", label: "New Folder…", onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "dir" }); } },
                 { type: "separator" },
                 { type: "action", label: "Refresh", onSelect: () => void model.treeModel.refresh() },
             ];
