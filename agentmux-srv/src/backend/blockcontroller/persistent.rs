@@ -343,6 +343,11 @@ impl PersistentSubprocessController {
         let filestore_read = self.filestore.clone();
         let health_read = Arc::clone(&self.health_monitor);
         let session_id_field = config.session_id_field.clone();
+        // Resolve the agent's GLOBAL transcript zone (`agent:<defId>:current`)
+        // once, from the block's `agentId` meta, so every `output` line is also
+        // mirrored to the cross-channel store. `None` for non-agent blocks.
+        let global_output_zone =
+            super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
 
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -431,6 +436,7 @@ impl PersistentSubprocessController {
                         PERSISTENT_OUTPUT_SUBJECT,
                         line_with_newline.as_bytes(),
                         filestore_read.as_ref(),
+                        global_output_zone.as_deref(),
                     );
                 } else {
                     tracing::warn!(block_id = %block_id_read, "persistent stdout: no broker available");

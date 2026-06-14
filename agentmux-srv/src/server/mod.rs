@@ -53,6 +53,13 @@ pub struct AppState {
     pub app_path: String,
     pub wstore: Arc<Store>,
     pub filestore: Arc<FileStore>,
+    /// GLOBAL, channel-independent transcript store backing the
+    /// `agent:<defId>:current` zone. `None` when the shared root can't be
+    /// resolved (global transcripts disabled — falls back to per-channel
+    /// `filestore`). Lets an agent's conversation load when opened from any
+    /// build/channel, finishing the cross-channel arc started by #1387–#1396.
+    /// See `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
+    pub global_transcript_store: Option<Arc<FileStore>>,
     pub event_bus: Arc<EventBus>,
     pub broker: Arc<Broker>,
     pub reactive_handler: &'static ReactiveHandler,

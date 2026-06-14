@@ -38,6 +38,23 @@ pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("agents").join("definitions"))
 }
 
+/// Resolve the GLOBAL `<home>/shared/agents/transcripts/` directory.
+///
+/// Sibling of [`resolve_shared_registry_dir`] / [`resolve_shared_definitions_dir`]:
+/// the agent's *conversation transcript* is the last per-channel agent surface
+/// (definitions, instances, workspaces, and auth all became global in
+/// #1387–#1396). Backing the `agent:<defId>:current` FileStore zone with a store
+/// rooted here makes a conversation load when you open the agent from *any*
+/// build/channel — the open path reads the same zone regardless of which channel
+/// wrote it. See `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
+///
+/// Returns `None` only if the global shared root can't be resolved — caller
+/// treats this as "global transcripts disabled" and falls back to the
+/// per-channel store.
+pub fn resolve_shared_transcripts_dir() -> Option<PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("agents").join("transcripts"))
+}
+
 /// The global, channel-independent `<home>/shared` root.
 fn resolve_global_shared_root() -> Option<PathBuf> {
     if let Ok(s) = std::env::var("AGENTMUX_HOME_OVERRIDE") {

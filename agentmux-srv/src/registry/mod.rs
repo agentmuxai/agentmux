@@ -32,7 +32,9 @@ mod tests;
 pub use migrate::{
     backfill_source_bases_once, migrate_from_sqlite_once, MigrateStats, SourceBackfillStats,
 };
-pub use paths::{resolve_shared_definitions_dir, resolve_shared_registry_dir};
+pub use paths::{
+    resolve_shared_definitions_dir, resolve_shared_registry_dir, resolve_shared_transcripts_dir,
+};
 pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
 pub use def_schema::{
     DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,

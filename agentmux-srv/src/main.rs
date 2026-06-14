@@ -528,6 +528,44 @@ async fn main() {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
     }));
+    // GLOBAL transcript store — backs the `agent:<defId>:current` zone so a
+    // conversation loads when the agent is opened from any build/channel
+    // (finishes the cross-channel arc #1387–#1396). A second FileStore over an
+    // independent SQLite/WAL file is safe alongside the per-channel one. This is
+    // best-effort: if the shared root can't be resolved, or the store can't be
+    // opened, we log and fall back to the per-channel `filestore` (global
+    // transcripts disabled) — never fatal, unlike the per-channel store above.
+    // See `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
+    let global_transcript_store: Option<Arc<FileStore>> =
+        match registry::resolve_shared_transcripts_dir() {
+            Some(dir) => {
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to create dir — disabled, falling back to per-channel store");
+                    None
+                } else {
+                    match FileStore::open(&dir.join("filestore.db")) {
+                        Ok(fs) => {
+                            tracing::info!(dir = %dir.display(), "global transcripts: store attached");
+                            Some(Arc::new(fs))
+                        }
+                        Err(e) => {
+                            tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to open store — disabled, falling back to per-channel store");
+                            None
+                        }
+                    }
+                }
+            }
+            None => {
+                tracing::warn!("global transcripts: could not resolve shared transcripts dir — disabled, falling back to per-channel store");
+                None
+            }
+        };
+    // Install the process-global handle so the block-controller stdout-reader
+    // hot path can mirror agent `output` into the global zone without threading
+    // the store through `resync_controller` and every controller constructor.
+    if let Some(ref fs) = global_transcript_store {
+        crate::backend::agent_session::set_global_transcript_store(fs.clone());
+    }
     // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
     // Backed by its own SQLite file (`sagas.db`) so saga writes
     // commit independently of the wstore connection. Failure here
@@ -910,6 +948,7 @@ async fn main() {
         app_path: config.app_path.clone(),
         wstore,
         filestore,
+        global_transcript_store,
         event_bus,
         broker,
         reactive_handler,
