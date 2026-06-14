@@ -1,6 +1,32 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// Same supportedOS manifest as the host (agentmux-cef/build.rs) — the launcher
+// is the top-level exe and child processes can inherit OS-version behavior, so
+// keep both manifested to report the true Windows version. See the host
+// build.rs for the GPU-init rationale.
+#[cfg(target_os = "windows")]
+const WINDOWS_APP_MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>
+"#;
+
 fn main() {
     // AGENTMUX_BUILD_LABEL is injected by package.sh and includes a per-build
     // timestamp stamp. Tracking it here forces a recompile of agentmux-launcher
@@ -22,6 +48,7 @@ fn main() {
         if icon_path.exists() {
             res.set_icon(icon_path.to_str().unwrap());
         }
+        res.set_manifest(WINDOWS_APP_MANIFEST);
         res.compile().expect("winres compile failed");
 
         // Decode the brain logo PNG (transparent background, 256×256) to

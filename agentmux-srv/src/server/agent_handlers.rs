@@ -57,6 +57,8 @@ use crate::backend::rpc_types::{
     CommandAgentSessionArchiveData, AgentSessionArchiveResult,
     CommandAgentSessionListArchivesData, AgentArchiveRow,
     COMMAND_FORK_AGENT_DEFINITION,
+    COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
+    CommandForkAgentDefinitionSuggestData, ForkAgentDefinitionSuggestResult,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
     CommandLinkAgentIdentityData, CommandUnlinkAgentIdentityData,
@@ -177,6 +179,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     branch_label: String::new(),
                     updated_at: now,
                     user_hidden: 0,
+                    container_image: String::new(),
+                    container_volumes: "[]".to_string(),
+                    container_name: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
@@ -248,6 +253,15 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // (`agentdefhide` / `agentdefunhide`). Phase 2 of
                     // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
                     user_hidden: old.user_hidden,
+                    // Preserve existing container config when the caller omits the field
+                    // (cmd.container_image defaults to "" via #[serde(default)]). Callers
+                    // that only update name/icon/etc. (AgentDefForm) don't carry container
+                    // fields, so falling back to old values prevents silently wiping a
+                    // container agent's image and volumes — same guard as `accounts` above.
+                    container_image: if cmd.container_image.is_empty() { old.container_image.clone() } else { cmd.container_image },
+                    container_volumes: if cmd.container_volumes == "[]" { old.container_volumes.clone() } else { cmd.container_volumes },
+                    // container_name is server-managed; preserve the existing value.
+                    container_name: old.container_name.clone(),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -387,6 +401,11 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // (Q2 Decision Y) — hide applies only to seeded
                     // templates, never to user-owned agents.
                     user_hidden: 0,
+                    // Inherit container config from template so container-type
+                    // templates propagate their image to user-cloned agents.
+                    container_image: template.container_image.clone(),
+                    container_volumes: template.container_volumes.clone(),
+                    container_name: String::new(),
                 };
                 wstore
                     .agent_def_insert(&mut new_def)
@@ -829,6 +848,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     branch_label: String::new(),
                     updated_at: now,
                     user_hidden: 0,
+                    container_image: String::new(),
+                    container_volumes: "[]".to_string(),
+                    container_name: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
@@ -961,6 +983,9 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         branch_label: String::new(),
                         updated_at: now,
                         user_hidden: 0,
+                        container_image: String::new(),
+                        container_volumes: "[]".to_string(),
+                        container_name: String::new(),
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
@@ -1504,7 +1529,11 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // here just affects which surface gets surfaced.
                 let rows: Vec<NamedAgentRow> = match wstore.shared_agent_registry() {
                     Some(reg) => {
-                        let agents_root = reg.agents_root().map(|p| p.to_path_buf());
+                        // Re-join relative working_dir against the CURRENT
+                        // channel's agents dir (symmetric with the write
+                        // mirror), not the registry's own parent — P0.3
+                        // re-roots the registry out of channels/<ch>/agents/.
+                        let agents_root = wstore.registry_agents_base();
                         let mut records = reg
                             .list_active()
                             .map_err(|e| format!("listnamedagents: registry: {e}"))?;
@@ -1567,12 +1596,28 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                         .map(|m| m.name.clone())
                                         .unwrap_or_else(|| "(missing memory)".to_string())
                                 };
-                                let working_directory = match agents_root.as_ref() {
-                                    Some(root) => root
+                                // Reconstruct the absolute working_directory.
+                                // v3 records carry their SOURCE channel agents
+                                // dir, so a row from another channel resolves
+                                // to its real workspace; legacy (v1/v2) records
+                                // fall back to the current channel base — the
+                                // pre-P0.4 behavior (correct for same-channel
+                                // rows, which is all v1/v2 could represent).
+                                let working_directory = if let Some(src) =
+                                    d.source_agents_base.as_deref()
+                                {
+                                    std::path::Path::new(src)
                                         .join(&d.working_dir)
                                         .to_string_lossy()
-                                        .to_string(),
-                                    None => d.working_dir.clone(),
+                                        .to_string()
+                                } else {
+                                    match agents_root.as_ref() {
+                                        Some(root) => root
+                                            .join(&d.working_dir)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        None => d.working_dir.clone(),
+                                    }
                                 };
                                 // Same-version enrichment: if this id
                                 // also exists in current SQLite, the
@@ -1758,18 +1803,130 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty());
 
-                let instances = wstore
-                    // Picker "My Agents": include continuations.
-                    // Under Option E a continuation row is the most-
-                    // recent named instance of an agent the user
-                    // actively used — exactly what we want surfaced.
-                    .instance_list_named(
-                        raw_limit,
-                        None,
-                        identity_filter,
-                        /* include_continuations */ true,
-                    )
-                    .map_err(|e| format!("listrecentsessions: {e}"))?;
+                // "My Agents" sources from the cross-version REGISTRY when it's
+                // available, so agents created in ANY build / channel / version
+                // appear here — not just this instance's local SQLite sessions
+                // (the live mirror, registry_mirror.rs, keeps the registry current
+                // for global workspaces). Falls back to local SQLite when the
+                // registry couldn't be resolved (CI / odd envs). Cross-channel rows
+                // arrive as synthetic instances (no live block); the per-instance
+                // snapshot enrichment below lights up the ones that ALSO ran here.
+                let instances: Vec<AgentInstance> = match wstore.shared_agent_registry() {
+                    Some(reg) => {
+                        let agents_root = wstore.registry_agents_base();
+                        let mut records = reg
+                            .list_active()
+                            .map_err(|e| format!("listrecentsessions: registry: {e}"))?;
+                        if let Some(idf) = identity_filter {
+                            records.retain(|r| r.data.identity_id.as_deref() == Some(idf));
+                        }
+                        // Dedup by (definition_id, instance_name) keeping the newest
+                        // launch — the registry read path lacks SQLite's chain-root
+                        // collapse, so two fresh heads of one logical agent would
+                        // otherwise double up. Sort newest-first within each group,
+                        // collapse, then re-sort by recency.
+                        records.sort_by(|a, b| {
+                            a.data
+                                .definition_id
+                                .cmp(&b.data.definition_id)
+                                .then_with(|| a.data.instance_name.cmp(&b.data.instance_name))
+                                .then_with(|| {
+                                    b.data.last_launched_at_ms.cmp(&a.data.last_launched_at_ms)
+                                })
+                        });
+                        records.dedup_by(|a, b| {
+                            a.data.definition_id == b.data.definition_id
+                                && a.data.instance_name == b.data.instance_name
+                        });
+                        records.sort_by(|a, b| {
+                            b.data.last_launched_at_ms.cmp(&a.data.last_launched_at_ms)
+                        });
+                        records.truncate(raw_limit);
+                        // Local agents in PICKER mode (include_continuations=true):
+                        // collapses each chain to one row AND surfaces orphan
+                        // continuations (head hard-deleted) as their own root, so
+                        // they don't vanish from "My Agents" (reagent P2). Indexed by
+                        // (definition_id, instance_name) — the SAME key the registry
+                        // dedup uses — keeping the newest, so overlay AND the
+                        // local-only append agree on identity (reagent P1).
+                        let local = wstore
+                            .instance_list_named(raw_limit, None, identity_filter, true)
+                            .unwrap_or_default();
+                        let mut local_by_key: std::collections::HashMap<
+                            (String, String),
+                            AgentInstance,
+                        > = std::collections::HashMap::new();
+                        for li in local {
+                            let key = (li.definition_id.clone(), li.instance_name.clone());
+                            match local_by_key.get(&key) {
+                                Some(e) if e.started_at >= li.started_at => {}
+                                _ => {
+                                    local_by_key.insert(key, li);
+                                }
+                            }
+                        }
+                        let mut out: Vec<AgentInstance> = records
+                            .into_iter()
+                            .map(|rec| {
+                                let d = rec.data;
+                                let key = (d.definition_id.clone(), d.instance_name.clone());
+                                if let Some(li) = local_by_key.get(&key) {
+                                    return li.clone();
+                                }
+                                // Reconstruct the absolute workdir from the record's
+                                // source base (v3) or the current channel (legacy).
+                                let working_directory = match d.source_agents_base.as_deref() {
+                                    Some(src) => std::path::Path::new(src)
+                                        .join(&d.working_dir)
+                                        .to_string_lossy()
+                                        .to_string(),
+                                    None => match agents_root.as_ref() {
+                                        Some(root) => root
+                                            .join(&d.working_dir)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        None => d.working_dir.clone(),
+                                    },
+                                };
+                                AgentInstance {
+                                    id: d.instance_id,
+                                    definition_id: d.definition_id,
+                                    parent_instance_id: String::new(),
+                                    block_id: String::new(),
+                                    session_id: d.session_id.unwrap_or_default(),
+                                    status: "available".to_string(),
+                                    github_context: String::new(),
+                                    started_at: d.last_launched_at_ms,
+                                    ended_at: 0,
+                                    created_at: d.created_at_ms,
+                                    identity_id: d.identity_id.unwrap_or_default(),
+                                    memory_id: d.memory_id.unwrap_or_default(),
+                                    instance_name: d.instance_name,
+                                    working_directory,
+                                    display_hidden: false,
+                                }
+                            })
+                            .collect();
+                        // APPEND local-only agents — those whose (definition_id,
+                        // instance_name) no registry record represents (created
+                        // before the live mirror could register them, or orphan
+                        // continuations). Keyed identically to the dedup, so a deduped
+                        // agent's local head never re-appears as a duplicate row.
+                        let have_keys: std::collections::HashSet<(String, String)> = out
+                            .iter()
+                            .map(|i| (i.definition_id.clone(), i.instance_name.clone()))
+                            .collect();
+                        for (key, li) in local_by_key {
+                            if !have_keys.contains(&key) {
+                                out.push(li);
+                            }
+                        }
+                        out
+                    }
+                    None => wstore
+                        .instance_list_named(raw_limit, None, identity_filter, true)
+                        .map_err(|e| format!("listrecentsessions: {e}"))?,
+                };
 
                 let defs = wstore
                     .agent_def_list()
@@ -1892,11 +2049,13 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
 
                 // Find the source definition by id.
-                let source = wstore
+                let all_defs = wstore
                     .agent_def_list()
-                    .map_err(|e| format!("forkagentdefinition: {e}"))?
-                    .into_iter()
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+                let source = all_defs
+                    .iter()
                     .find(|a| a.id == cmd.source_id)
+                    .cloned()
                     .ok_or_else(|| format!("forkagentdefinition: source not found: {}", cmd.source_id))?;
 
                 // Build a new definition that shares the source's content but
@@ -1906,20 +2065,29 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
-                let branch_slug_part = if cmd.branch_label.is_empty() {
-                    "fork".to_string()
+
+                // branch_label is the fork's full display name when provided.
+                // When empty, auto-generate "Name #N" based on existing fork count.
+                let fork_name = if cmd.branch_label.is_empty() {
+                    let existing_fork_count = all_defs
+                        .iter()
+                        .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
+                        .count();
+                    format!("{} #{}", source.name, existing_fork_count + 2)
                 } else {
-                    crate::backend::storage::store::derive_slug(&cmd.branch_label)
+                    cmd.branch_label.clone()
                 };
+                let branch_label = if cmd.branch_label.is_empty() {
+                    fork_name.clone()
+                } else {
+                    cmd.branch_label.clone()
+                };
+                let branch_slug_part = crate::backend::storage::store::derive_slug(&branch_label);
                 let mut fork = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
                     // Empty slug → agent_def_insert derives + resolves collisions.
                     slug: format!("{}-{}", source.slug, branch_slug_part),
-                    name: if cmd.branch_label.is_empty() {
-                        format!("{} (fork)", source.name)
-                    } else {
-                        format!("{} [{}]", source.name, cmd.branch_label)
-                    },
+                    name: fork_name,
                     icon: source.icon.clone(),
                     provider: source.provider.clone(),
                     description: source.description.clone(),
@@ -1936,9 +2104,14 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     is_seeded: 0,
                     accounts: String::new(),
                     parent_id: source.id.clone(),
-                    branch_label: cmd.branch_label.clone(),
+                    branch_label: branch_label.clone(),
                     updated_at: now,
                     user_hidden: 0,
+                    // Forks inherit container config from source so forked container agents
+                    // retain their image and volumes.
+                    container_image: source.container_image.clone(),
+                    container_volumes: source.container_volumes.clone(),
+                    container_name: String::new(),
                 };
                 wstore
                     .agent_def_insert(&mut fork)
@@ -1989,6 +2162,37 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 });
 
                 Ok(Some(serde_json::to_value(&fork).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // ---- Definition fork suggest (read-only — no mutation) ----
+
+    let wstore_sug = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_sug.clone();
+            Box::pin(async move {
+                let cmd: CommandForkAgentDefinitionSuggestData = serde_json::from_value(data)
+                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
+
+                let all = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
+                let source = all
+                    .iter()
+                    .find(|a| a.id == cmd.source_id)
+                    .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
+
+                let existing_fork_count = all
+                    .iter()
+                    .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
+                    .count();
+                let suggested_label = format!("{} #{}", source.name, existing_fork_count + 2);
+
+                let result = ForkAgentDefinitionSuggestResult { suggested_label };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
             })
         }),
     );
@@ -2769,6 +2973,9 @@ mod recent_sessions_tests {
             branch_label: String::new(),
             updated_at: 0,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         let mut def_mut = def.clone();
         wstore.agent_def_insert(&mut def_mut).unwrap();
@@ -3039,6 +3246,9 @@ mod recent_sessions_tests {
             branch_label: String::new(),
             updated_at: 1_700_000_000_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut tpl).unwrap();
 
@@ -3065,6 +3275,9 @@ mod recent_sessions_tests {
             branch_label: String::new(),
             updated_at: 1_700_000_001_000,
             user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
         };
         wstore.agent_def_insert(&mut user_a).unwrap();
 

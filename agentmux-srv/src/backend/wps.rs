@@ -40,6 +40,14 @@ pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
 pub const EVENT_BLOCK_STATS: &str = "blockstats";
 pub const EVENT_AGENT_HEALTH: &str = "agenthealth";
+/// Fired by `handle_shell_create` when a persistent shell is launched.
+/// Frontend creates the ShellNode row on receipt.
+/// Payload: `{ shell_id, cmd, cwd?, title, timestamp }`.
+pub const EVENT_SHELL_NODE_CREATE: &str = "shell_node_create";
+/// Fired per stdout/stderr line and on process exit by `ShellNodeRunner`.
+/// `op: "chunk"` carries `{ shell_id, kind, content, timestamp }`;
+/// `op: "exit"` carries `{ shell_id, exit_code, timestamp }`.
+pub const EVENT_SHELL_CHUNK: &str = "shell_chunk";
 
 // File operation constants
 #[allow(dead_code)]

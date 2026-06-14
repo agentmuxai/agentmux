@@ -213,6 +213,27 @@ pub fn is_dev_build_exe(exe_dir: &Path) -> bool {
     exe_dir_is_dev_build(exe_dir)
 }
 
+/// True iff THIS binary is a source-tree / `task dev` build, determined from
+/// the binary's path + portable marker via [`RuntimeMode::current_path_only`]
+/// — NOT from `AGENTMUX_RUNTIME_MODE`. A running `task dev` AgentMux exports
+/// `AGENTMUX_RUNTIME_MODE=dev:<branch>` into its environment, which every
+/// descendant process inherits; a packaged build launched from a terminal /
+/// agent pane inside a dev instance would otherwise mis-identify as Dev (e.g.
+/// the "DEV" status-bar badge on a release build). Build identity is a
+/// property of the binary on disk, not of whoever launched it.
+///
+/// Use for **build-identity** self-checks (the DEV badge, the "AgentMux DEV"
+/// menu name, the dev-only frontend fallback). For intra-instance plumbing
+/// that must agree with the launcher's already-made decision, use
+/// [`RuntimeMode::from_env`] instead.
+pub fn is_dev_self() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .map(|d| matches!(RuntimeMode::current_path_only(&d), RuntimeMode::Dev { .. }))
+        .unwrap_or(false)
+}
+
 fn parse_mode_string(s: &str) -> Option<RuntimeMode> {
     let trimmed = s.trim();
     if trimmed.eq_ignore_ascii_case("installed") {
@@ -807,6 +828,32 @@ mod tests {
                     }
                 );
             });
+        });
+    }
+
+    /// Regression for "DEV badge on every build": a packaged build launched as
+    /// a descendant of a `task dev` AgentMux inherits
+    /// `AGENTMUX_RUNTIME_MODE=dev:main`. Build identity (badge, menu name,
+    /// dev-frontend fallback) goes through `current_path_only` / `is_dev_self`,
+    /// which must ignore that env and classify purely by the binary's path.
+    #[test]
+    fn current_path_only_ignores_leaked_dev_env() {
+        let _g = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        with_env("AGENTMUX_RUNTIME_MODE", Some("dev:main"), || {
+            // A non-dev exe dir: no portable marker, not a dev-build path.
+            let installed = std::path::Path::new("/Applications/AgentMux.app/Contents/MacOS");
+            assert!(
+                matches!(
+                    RuntimeMode::current_path_only(installed),
+                    RuntimeMode::Installed
+                ),
+                "current_path_only must ignore a leaked AGENTMUX_RUNTIME_MODE=dev:main"
+            );
+            // Contrast: current() DOES still honor an explicit env override.
+            assert!(
+                matches!(RuntimeMode::current(installed), RuntimeMode::Dev { .. }),
+                "current() still honors an explicit AGENTMUX_RUNTIME_MODE override"
+            );
         });
     }
 }

@@ -189,4 +189,156 @@
     .agent-recent-sessions-ts-value {
         font-size: 10px;
     }
+
+    // Active-pane indicator — green dot appended to the agent name
+    .agent-active-badge {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #34d399;
+        flex-shrink: 0;
+        align-self: center;
+        box-shadow: 0 0 4px rgba(52, 211, 153, 0.5);
+    }
+
+    .agent-recent-sessions-entry--active {
+        border-color: color-mix(in srgb, #34d399 40%, var(--border-color));
+        background: color-mix(in srgb, #34d399 4%, transparent);
+    }
+
+    // Fork prompt — inline block below the row button
+    .agent-fork-prompt {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-2) 10px;
+        border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+        border-top: none;
+        background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+    }
+
+    .agent-fork-prompt-msg {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        line-height: 1.4;
+    }
+
+    .agent-fork-prompt-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+    }
+
+    // Base fork button
+    .agent-fork-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        border-radius: 0;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+        white-space: nowrap;
+
+        &:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
+        &:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 1px;
+        }
+    }
+
+    .agent-fork-btn--primary {
+        background: var(--accent-color);
+        color: var(--button-color, #fff);
+        border-color: var(--accent-color);
+
+        &:not(:disabled):hover {
+            background: color-mix(in srgb, var(--accent-color) 85%, #fff);
+        }
+    }
+
+    .agent-fork-btn--secondary {
+        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        color: var(--main-text-color);
+        border-color: var(--border-color);
+
+        &:not(:disabled):hover {
+            background: color-mix(in srgb, var(--main-text-color) 14%, transparent);
+        }
+    }
+
+    .agent-fork-btn--ghost {
+        background: transparent;
+        color: var(--secondary-text-color);
+        border-color: transparent;
+        padding: 3px 6px;
+
+        &:not(:disabled):hover {
+            color: var(--main-text-color);
+            background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+        }
+    }
+
+    // Naming sub-section
+    .agent-fork-naming {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+    }
+
+    .agent-fork-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--secondary-text-color);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .agent-fork-input-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+    }
+
+    .agent-fork-input {
+        flex: 1;
+        min-width: 0;
+        height: 28px;
+        padding: 0 var(--space-2);
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--main-text-color);
+        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        border: 1px solid var(--border-color);
+        border-radius: 0;
+        outline: none;
+
+        &::placeholder {
+            color: color-mix(in srgb, var(--secondary-text-color) 60%, transparent);
+        }
+
+        &:focus {
+            border-color: color-mix(in srgb, var(--accent-color) 70%, transparent);
+            background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .agent-fork-error {
+        font-size: 11px;
+        color: var(--error-color, #f87171);
+    }
 }

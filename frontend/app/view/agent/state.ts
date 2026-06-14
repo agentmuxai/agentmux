@@ -56,6 +56,12 @@ export interface AgentAtoms {
     currentToolAtom: SignalPair<string | null>;
     turnTokensAtom: SignalPair<TurnTokens | null>;
     /**
+     * Total input-token count from the last message_start event — equals
+     * the full context fill (all conversation history) sent to the model
+     * on that turn. Persists through TurnEnd; clears on TurnReset (session wipe).
+     */
+    contextTokensAtom: SignalPair<number | null>;
+    /**
      * Messages sent by the user that the backend hasn't picked up yet.
      * Rendered in a pending zone between the conversation and the composer.
      * When the backend emits `agent-message-accepted` for a given id, the
@@ -108,6 +114,17 @@ export interface PendingMessage {
     id: string;
     text: string;
     createdAt: number;
+    /**
+     * True when this message was queued while a turn was already in-flight
+     * (Submitting | Streaming | Interrupting). False for messages that
+     * initiated the current turn (idle sends).
+     *
+     * The PendingMessagesPanel gates its visibility on this flag so that
+     * idle-send messages never flash in the amber queued zone — only messages
+     * genuinely sitting behind a running turn should appear there.
+     * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+     */
+    enqueuedWhileBusy: boolean;
 }
 
 /**
@@ -137,6 +154,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         sessionStatsAtom: createSignal<SessionStats | null>(null),
         currentToolAtom: createSignal<string | null>(null),
         turnTokensAtom: createSignal<TurnTokens | null>(null),
+        contextTokensAtom: createSignal<number | null>(null),
         pendingMessagesAtom: createSignal<PendingMessage[]>([]),
         // gap1 (#993) reshaped InitPhase from string union to discriminated
         // union; turnPhase from PR B is now the sole working-state encoding

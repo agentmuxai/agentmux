@@ -440,6 +440,7 @@ export function update(
                     sessionStats: null,
                     currentTool: null,
                     turnTokens: null,
+                    lastContextTokens: 0,
                     // TurnReset is a wholesale clear → Idle. The
                     // working/stopping cascade lives entirely on
                     // turnPhase since PR G.
@@ -483,7 +484,7 @@ export function update(
                 output: state.turnTokens?.output ?? 0,
             };
             const nextState = bumpEvent(
-                { ...state, turnTokens: next },
+                { ...state, turnTokens: next, lastContextTokens: command.input },
                 nowMs,
                 0,
             );
@@ -729,7 +730,12 @@ export function update(
                     ...state,
                     pending: [
                         ...state.pending,
-                        { id: command.id, text: command.text, createdAt: command.at },
+                        {
+                            id: command.id,
+                            text: command.text,
+                            createdAt: command.at,
+                            enqueuedWhileBusy: command.enqueuedWhileBusy,
+                        },
                     ],
                 },
                 events: [{ type: "pending-queued", id: command.id }],

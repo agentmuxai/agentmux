@@ -230,6 +230,16 @@ export interface AgentPaneState {
      * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
      */
     composerUnreadCount: number;
+
+    /**
+     * Input-token count from the most recent message_start — the full
+     * context fill sent to the model on that turn. Unlike `turnTokens`,
+     * this field is NOT cleared at TurnEnd so the context-window bar
+     * stays visible between turns showing the last known fill level.
+     * Cleared only when the pane is created (initialState) or on an
+     * explicit TurnReset (session wipe).
+     */
+    lastContextTokens: number | null;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -237,6 +247,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     sessionStats: null,
     currentTool: null,
     turnTokens: null,
+    lastContextTokens: null,
     pending: [],
     initPhase: { kind: "InitPending" },
     lastEventMs: null,
@@ -434,7 +445,21 @@ export type AgentPaneCommand =
     | { type: "StreamStalled"; at: number }
 
     // ── Pending message queue (composer side) ─────────────────────
-    | { type: "PendingMessageQueued"; id: string; text: string; at: number }
+    | {
+          type: "PendingMessageQueued";
+          id: string;
+          text: string;
+          at: number;
+          /**
+           * True when the user sent this message while a turn was already
+           * in-flight (isWorking was true before TurnStart). False for
+           * idle sends. Stored on the PendingMessage entry and used by
+           * PendingMessagesPanel to gate visibility — idle-send messages
+           * must never flash in the amber queued zone.
+           * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
+           */
+          enqueuedWhileBusy: boolean;
+      }
     /** Backend acknowledged the message — remove from pending. */
     | { type: "PendingMessageAccepted"; id: string }
     /** RPC failed — remove the entry so user doesn't see a ghost row. */

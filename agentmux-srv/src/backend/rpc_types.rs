@@ -342,6 +342,9 @@ pub const COMMAND_LIST_RECENT_SESSIONS: &str = "listrecentsessions";
 
 // Agent definition branching
 pub const COMMAND_FORK_AGENT_DEFINITION: &str = "forkagentdefinition";
+/// Returns the suggested branch label for a fork without mutating anything.
+/// Called when the user clicks "Open new session" to pre-fill the name input.
+pub const COMMAND_FORK_AGENT_DEFINITION_SUGGEST: &str = "forkagentdefinitionsuggest";
 
 /// Two-tier picker (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
 /// Clone a seeded template into a new user-owned agent definition with
@@ -831,6 +834,12 @@ pub struct CommandAgentDefineData {
     pub env: Option<std::collections::HashMap<String, String>>,
     pub if_exists: Option<String>,
     pub create_instance_stub: Option<bool>,
+    /// Docker image for container-type agents. Empty string for host agents.
+    #[serde(default)]
+    pub container_image: String,
+    /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
+    #[serde(default = "default_container_volumes")]
+    pub container_volumes: String,
 }
 
 /// Response from agent.define.
@@ -1474,6 +1483,10 @@ fn default_agent_type() -> String {
     "standalone".to_string()
 }
 
+fn default_container_volumes() -> String {
+    "[]".to_string()
+}
+
 fn default_agent_icon() -> String {
     "✦".to_string()
 }
@@ -1509,6 +1522,12 @@ pub struct CommandUpdateAgentDefinitionData {
     /// `AgentDefinition.accounts`). Written by the Agent pane's Identity tab.
     #[serde(default)]
     pub accounts: String,
+    /// Docker image for container-type agents. Empty string for host agents.
+    #[serde(default)]
+    pub container_image: String,
+    /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
+    #[serde(default = "default_container_volumes")]
+    pub container_volumes: String,
 }
 
 /// Input for deleteagent
@@ -2003,8 +2022,20 @@ pub struct CommandDeleteAgentInstanceData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandForkAgentDefinitionData {
     pub source_id: String,
+    /// When non-empty this becomes the fork's display name directly.
+    /// When empty, the handler auto-generates "Name #N".
     #[serde(default)]
     pub branch_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandForkAgentDefinitionSuggestData {
+    pub source_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ForkAgentDefinitionSuggestResult {
+    pub suggested_label: String,
 }
 
 // ====================================================================

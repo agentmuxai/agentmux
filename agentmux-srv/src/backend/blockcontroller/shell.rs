@@ -534,30 +534,82 @@ impl Controller for ShellController {
             // See specs/SPEC_RETIRE_WSH_2026_04_12.md.
             c.env("AGENTMUX", "1");
 
-            // Append AgentMux-managed tool dirs to PATH so agents can use
-            // jq, rg, etc. without the host having them installed system-wide.
-            // Appended (not prepended) so system PATH always wins.
+            // Wire AgentMux-managed tool dirs into the agent's PATH.
+            //
+            // Two stores, two precedence rules:
+            //
+            //   • Bundled store (`<exe_dir>/tools/bin`) ships the app's OWN
+            //     version-locked binaries — notably `agentmux-bashwrap`, the
+            //     streaming hook that MUST match the running build. It is
+            //     PREPENDED so it wins over any stale copy elsewhere on the
+            //     system PATH. A stale system-PATH `agentmux-bashwrap` (from a
+            //     leftover portable) silently shadowed the fixed one and
+            //     reintroduced the exit-130 bug — see
+            //     docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md. The
+            //     bundled jq/rg winning too is intended: agents get the app's
+            //     curated, deterministic tool versions regardless of host.
+            //
+            //   • User-managed store (`~/.agentmux/tools/bin`) holds tools the
+            //     user installed via /tools. APPENDED so the user's own system
+            //     PATH still wins for those.
             {
                 let sep = if cfg!(windows) { ";" } else { ":" };
                 let current_path = std::env::var("PATH").unwrap_or_default();
-                let mut extra: Vec<String> = Vec::new();
+                let mut prepend: Vec<String> = Vec::new();
+                let mut append: Vec<String> = Vec::new();
 
-                // User-managed store (~/.agentmux/tools/bin/)
-                if let Some(user_bin) = crate::backend::tool_store::user_tools_dir() {
-                    if user_bin.exists() {
-                        extra.push(user_bin.to_string_lossy().into_owned());
-                    }
-                }
-
-                // Bundled store (ships with the app, e.g. runtime/tools/bin/)
+                // Bundled store — prepended (app-owned, version-locked).
                 if let Some(bundled_bin) = crate::backend::tool_store::bundled_tools_dir() {
                     if bundled_bin.exists() {
-                        extra.push(bundled_bin.to_string_lossy().into_owned());
+                        // Guardrail: log which agentmux-bashwrap the agent will
+                        // actually run. A stale system-PATH copy silently
+                        // shadowing the bundled one is exactly the exit-130
+                        // trap (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md); this
+                        // one line makes "which binary?" answerable at a glance
+                        // (cross-check the version with `agentmux-bashwrap
+                        // --version`).
+                        let bashwrap_exe = if cfg!(windows) {
+                            "agentmux-bashwrap.exe"
+                        } else {
+                            "agentmux-bashwrap"
+                        };
+                        let bw = bundled_bin.join(bashwrap_exe);
+                        if bw.exists() {
+                            tracing::info!(
+                                target: "agent-tools",
+                                path = %bw.display(),
+                                "agent bashwrap: bundled (version-locked, prepended to PATH)"
+                            );
+                        } else {
+                            tracing::warn!(
+                                target: "agent-tools",
+                                dir = %bundled_bin.display(),
+                                "agent bashwrap: bundled store present but agentmux-bashwrap MISSING — agent will resolve via system PATH (risk of a stale copy; see RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md)"
+                            );
+                        }
+                        prepend.push(bundled_bin.to_string_lossy().into_owned());
+                    } else {
+                        tracing::warn!(
+                            target: "agent-tools",
+                            "agent bashwrap: no bundled tools dir — agent will resolve agentmux-bashwrap via system PATH (risk of a stale copy; see RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md)"
+                        );
                     }
                 }
 
-                if !extra.is_empty() {
-                    c.env("PATH", format!("{current_path}{sep}{}", extra.join(sep)));
+                // User-managed store — appended (system PATH still wins).
+                if let Some(user_bin) = crate::backend::tool_store::user_tools_dir() {
+                    if user_bin.exists() {
+                        append.push(user_bin.to_string_lossy().into_owned());
+                    }
+                }
+
+                if !prepend.is_empty() || !append.is_empty() {
+                    let mut parts = prepend;
+                    if !current_path.is_empty() {
+                        parts.push(current_path);
+                    }
+                    parts.extend(append);
+                    c.env("PATH", parts.join(sep));
                 }
             }
 
@@ -1224,6 +1276,104 @@ pub fn handle_append_block_file(
                 "filestore append_data failed"
             );
         }
+        // Note: output.idx is NOT updated incrementally here. It is a lazily-built,
+        // self-validating cache rebuilt by the read path whenever output grows (see
+        // `rebuild_output_idx` below, invoked from the blockfile:read_range handler
+        // in app_api.rs). This avoids every incremental-index failure mode (desync on
+        // write failure, chunk-split lines, blank-line miscounting) at the cost of one
+        // rescan per output-size change.
+    }
+}
+
+/// Magic header size for `output.idx`: the first 8 bytes are the `output` byte-size
+/// the index was built for. The index is valid iff this equals `output`'s current
+/// size; otherwise it is stale and must be rebuilt.
+pub(crate) const OUTPUT_IDX_HEADER_LEN: i64 = 8;
+
+/// Rebuild `output.idx` from `output` in a single streaming scan and atomically
+/// replace it. The index is the byte offset of every **non-blank** line, matching
+/// the reader's line addressing (`String::lines().filter(!trim().is_empty())`).
+///
+/// Layout: `[covered_size: u64-LE][offset_0: u64-LE][offset_1]...`. `covered_size`
+/// records the `output` size this index reflects so the read path can detect
+/// staleness in O(1) and rebuild only when `output` actually grew.
+///
+/// The scan streams `output` in 1 MiB windows so memory stays O(one line + offsets)
+/// rather than loading the whole (potentially multi-GB) file. Line splitting is
+/// done on raw bytes; since UTF-8 continuation bytes never collide with `\n`, lines
+/// are never split mid-codepoint, so per-line `from_utf8_lossy` matches the reader.
+///
+/// Returns the number of indexed (non-blank) lines on success, or `None` if
+/// `output` is unreadable or the index write fails (caller falls back to slow path).
+pub(crate) fn rebuild_output_idx(
+    fs: &FileStore,
+    block_id: &str,
+    output_size: u64,
+) -> Option<u64> {
+    const IDX: &str = "output.idx";
+    const WIN: i64 = 1 << 20; // 1 MiB read window
+
+    // Offsets buffer starts with the covered-size header.
+    let mut buf: Vec<u8> = Vec::new();
+    buf.extend_from_slice(&output_size.to_le_bytes());
+
+    let mut line_count: u64 = 0;
+    let mut cursor: u64 = 0; // byte offset where the current line begins
+    let mut line_buf: Vec<u8> = Vec::new(); // bytes of the current line, excluding '\n'
+    let mut read_pos: i64 = 0;
+
+    let flush_line = |line_buf: &mut Vec<u8>,
+                      cursor: &mut u64,
+                      buf: &mut Vec<u8>,
+                      line_count: &mut u64,
+                      had_newline: bool| {
+        // The reader strips a trailing '\r' (CRLF) and treats trim-empty as blank.
+        let is_blank = String::from_utf8_lossy(line_buf).trim().is_empty();
+        if !is_blank {
+            buf.extend_from_slice(&cursor.to_le_bytes());
+            *line_count += 1;
+        }
+        // Advance cursor past this line's bytes (+1 for the consumed '\n').
+        *cursor += line_buf.len() as u64 + if had_newline { 1 } else { 0 };
+        line_buf.clear();
+    };
+
+    while read_pos < output_size as i64 {
+        let (_, chunk) = fs.read_at(block_id, "output", read_pos, WIN).ok()?;
+        if chunk.is_empty() {
+            break;
+        }
+        for &b in &chunk {
+            if b == b'\n' {
+                flush_line(&mut line_buf, &mut cursor, &mut buf, &mut line_count, true);
+            } else {
+                line_buf.push(b);
+            }
+        }
+        read_pos += chunk.len() as i64;
+    }
+    // Trailing line with no final '\n'.
+    if !line_buf.is_empty() {
+        flush_line(&mut line_buf, &mut cursor, &mut buf, &mut line_count, false);
+    }
+
+    if let Ok(None) = fs.stat(block_id, IDX) {
+        let _ = fs.make_file(
+            block_id,
+            IDX,
+            std::collections::HashMap::new(),
+            crate::backend::storage::filestore::FileOpts::default(),
+        );
+    }
+    match fs.write_file(block_id, IDX, &buf) {
+        Ok(()) => {
+            tracing::info!(block_id = %block_id, lines = line_count, covered = output_size, "output.idx rebuilt");
+            Some(line_count)
+        }
+        Err(e) => {
+            tracing::warn!(block_id = %block_id, error = %e, "output.idx rebuild write failed");
+            None
+        }
     }
 }
 
@@ -1559,6 +1709,78 @@ mod tests {
         let _history = broker.read_event_history(wps::EVENT_BLOCK_FILE, "block:block-1", 10);
         // Note: events are only persisted if persist > 0, so we verify via the publish mechanism
         // The broker successfully processed without panic, which verifies correctness
+    }
+
+    /// Helper: read all non-blank line offsets back out of a rebuilt output.idx,
+    /// returning (covered_size, offsets).
+    #[cfg(test)]
+    fn read_idx(fs: &FileStore, block_id: &str) -> (u64, Vec<u64>) {
+        let raw = fs.read_file(block_id, "output.idx").unwrap().unwrap();
+        let covered = u64::from_le_bytes(raw[0..8].try_into().unwrap());
+        let offsets = raw[8..]
+            .chunks_exact(8)
+            .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+            .collect();
+        (covered, offsets)
+    }
+
+    #[test]
+    fn test_rebuild_output_idx_basic() {
+        use crate::backend::storage::filestore::FileStore;
+        let fs = FileStore::open_in_memory().expect("filestore");
+        let bid = "idx-block";
+        let data = b"line0\nline1\nline2\n";
+        fs.make_file(bid, "output", Default::default(), Default::default()).unwrap();
+        fs.append_data(bid, "output", data).unwrap();
+
+        let n = rebuild_output_idx(&fs, bid, data.len() as u64).unwrap();
+        assert_eq!(n, 3);
+        let (covered, offsets) = read_idx(&fs, bid);
+        assert_eq!(covered, data.len() as u64);
+        // "line0\n"=0, "line1\n"=6, "line2\n"=12
+        assert_eq!(offsets, vec![0, 6, 12]);
+    }
+
+    #[test]
+    fn test_rebuild_output_idx_blank_and_crlf_and_no_trailing_nl() {
+        use crate::backend::storage::filestore::FileStore;
+        let fs = FileStore::open_in_memory().expect("filestore");
+        let bid = "idx-block2";
+        // Blank line (just spaces), a CRLF line, a blank line, and a final line
+        // with no trailing newline. Non-blank lines start at: 0 ("a\n"),
+        // 8 ("b\r\n" after "a\n   \n"=6 ... let's compute precisely below).
+        // bytes: "a\n"   (0..2)
+        //        "   \n" (2..6)   blank
+        //        "b\r\n" (6..9)   non-blank -> offset 6
+        //        "\n"    (9..10)  blank
+        //        "tail"  (10..14) non-blank, no trailing nl -> offset 10
+        let data = b"a\n   \nb\r\n\ntail";
+        fs.make_file(bid, "output", Default::default(), Default::default()).unwrap();
+        fs.append_data(bid, "output", data).unwrap();
+
+        let n = rebuild_output_idx(&fs, bid, data.len() as u64).unwrap();
+        assert_eq!(n, 3, "a, b(crlf), tail are the 3 non-blank lines");
+        let (_covered, offsets) = read_idx(&fs, bid);
+        assert_eq!(offsets, vec![0, 6, 10]);
+
+        // Sanity: the recorded offsets really do start the expected non-blank lines.
+        let full = fs.read_file(bid, "output").unwrap().unwrap();
+        assert_eq!(&full[0..1], b"a");
+        assert_eq!(&full[6..7], b"b");
+        assert_eq!(&full[10..14], b"tail");
+    }
+
+    #[test]
+    fn test_rebuild_output_idx_empty() {
+        use crate::backend::storage::filestore::FileStore;
+        let fs = FileStore::open_in_memory().expect("filestore");
+        let bid = "idx-empty";
+        fs.make_file(bid, "output", Default::default(), Default::default()).unwrap();
+        let n = rebuild_output_idx(&fs, bid, 0).unwrap();
+        assert_eq!(n, 0);
+        let (covered, offsets) = read_idx(&fs, bid);
+        assert_eq!(covered, 0);
+        assert!(offsets.is_empty());
     }
 
     #[test]

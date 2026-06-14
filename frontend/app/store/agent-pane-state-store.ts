@@ -66,6 +66,14 @@ export interface AgentPaneProjections {
      * Reducer-owned (PR #1068). Drives the chevron's unread badge.
      */
     composerUnreadCount?: (next: number) => void;
+    /**
+     * Current input-token count as of the last message_start — equals the
+     * total context fill (all conversation history) sent to the model.
+     * Driven by the same TokensIn command as turnTokens.input; fires once
+     * per turn at message_start. Persists through TurnEnd so the bar stays
+     * visible between turns. Clears only on TurnReset (session wipe).
+     */
+    contextTokens?: (next: number | null) => void;
 }
 
 interface Slot {
@@ -178,6 +186,10 @@ export function dispatch(
     proj("sessionStats", prev.sessionStats, slot.state.sessionStats, slot.proj.sessionStats);
     proj("currentTool", prev.currentTool, slot.state.currentTool, slot.proj.currentTool);
     proj("turnTokens", prev.turnTokens, slot.state.turnTokens, slot.proj.turnTokens);
+    proj("contextTokens",
+        prev.lastContextTokens ?? null,
+        slot.state.lastContextTokens ?? null,
+        slot.proj.contextTokens);
     proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
     proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
@@ -246,6 +258,20 @@ export function snapshot(blockId: string): AgentPaneState | null {
 /** Test/dev helper. */
 export function __resetAllSlots(): void {
     slots.clear();
+}
+
+/**
+ * Returns a map of definition_id → blockId for all currently-open agent panes.
+ * Used by AgentPicker to detect when a definition is already open so it can
+ * show the fork prompt instead of silently reattaching.
+ */
+export function getOpenDefinitionMap(): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const [blockId, slot] of slots) {
+        const defId = slot.state.streaming.agentId;
+        if (defId) result.set(defId, blockId);
+    }
+    return result;
 }
 
 export type { AgentPaneCommand, AgentPaneEvent, AgentPaneState };

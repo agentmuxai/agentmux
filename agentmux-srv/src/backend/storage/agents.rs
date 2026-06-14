@@ -98,6 +98,22 @@ pub struct AgentDefinition {
     /// removal path is `deleteagent`, not hide.
     #[serde(default)]
     pub user_hidden: i64,
+    /// Docker image to use when `agent_type == "container"`.
+    /// e.g. `"ghcr.io/agentmuxai/agent-claude:latest"`.
+    /// Empty string for host agents. Schema v6.
+    #[serde(default)]
+    pub container_image: String,
+    /// JSON array of volume mount specs for container agents.
+    /// Each element is a string in Docker bind-mount format:
+    /// `"source:target"` or `"source:target:options"`.
+    /// Empty JSON array (`"[]"`) for host agents. Schema v6.
+    #[serde(default = "default_container_volumes")]
+    pub container_volumes: String,
+    /// Stable Docker container name managed by the server.
+    /// Set to `"agentmux-<slug>"` on first container spawn;
+    /// empty for host agents. Schema v6.
+    #[serde(default)]
+    pub container_name: String,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -131,6 +147,10 @@ pub fn derive_slug(name: &str) -> String {
 
 fn default_agent_type() -> String {
     "standalone".to_string()
+}
+
+fn default_container_volumes() -> String {
+    "[]".to_string()
 }
 
 /// Instance lifecycle status. Serialised lowercase to match the DB text.
@@ -298,7 +318,7 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
-                    user_hidden
+                    user_hidden, container_image, container_volumes, container_name
              FROM db_agent_definitions
              WHERE is_seeded = 0 AND parent_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -330,7 +350,7 @@ impl Store {
                     restart_on_crash, idle_timeout_minutes, created_at,
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
-                    user_hidden
+                    user_hidden, container_image, container_volumes, container_name
              FROM db_agent_definitions
              WHERE id = ?1",
         )?;
@@ -342,23 +362,56 @@ impl Store {
     }
 
     pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, slug, name, icon, provider, description,
-                    working_directory, shell, provider_flags, auto_start,
-                    restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_template_id, branch_label, updated_at,
-                    user_hidden
-             FROM db_agents
-             ORDER BY updated_at DESC, created_at ASC",
-        )?;
-        let rows = stmt.query_map([], map_agent_definition_row)?;
-        let mut agents = Vec::new();
-        for row in rows {
-            agents.push(row?);
+        // Local SQLite: this channel's templates (seeded) + its own user agents.
+        let local: Vec<AgentDefinition> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare(
+                "SELECT id, slug, name, icon, provider, description,
+                        working_directory, shell, provider_flags, auto_start,
+                        restart_on_crash, idle_timeout_minutes, created_at,
+                        agent_type, environment, agent_bus_id, is_seeded,
+                        accounts, parent_template_id, branch_label, updated_at,
+                        user_hidden, container_image, container_volumes, container_name
+                 FROM db_agents
+                 ORDER BY updated_at DESC, created_at ASC",
+            )?;
+            let rows = stmt.query_map([], map_agent_definition_row)?;
+            let mut agents = Vec::new();
+            for row in rows {
+                agents.push(row?);
+            }
+            agents
+        };
+        // conn dropped. Overlay the GLOBAL cross-channel user-agent roster so
+        // an agent created in another channel appears here too. The global
+        // store wins for user rows (it's authoritative and holds cross-channel
+        // agents); templates (seeded — never in the global store) come from
+        // local SQLite. Falls back to SQLite-only when the global store is
+        // absent or unreadable. (P0.2c.)
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(local);
+        };
+        let global = match reg.list_active() {
+            Ok(recs) => recs,
+            Err(e) => {
+                tracing::warn!(error = %e, "def registry: global list failed, using SQLite only");
+                return Ok(local);
+            }
+        };
+        let mut by_id: std::collections::HashMap<String, AgentDefinition> =
+            local.into_iter().map(|d| (d.id.clone(), d)).collect();
+        for rec in &global {
+            let def = super::def_registry_mirror::record_to_agent_definition(rec);
+            by_id.insert(def.id.clone(), def);
         }
-        Ok(agents)
+        let mut result: Vec<AgentDefinition> = by_id.into_values().collect();
+        // Match the SQL ORDER BY: updated_at DESC, then created_at ASC.
+        result.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then(a.created_at.cmp(&b.created_at))
+        });
+        Ok(result)
     }
 
     /// Count agent rows (used by seed engine to check if seeding is needed).
@@ -376,6 +429,20 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(count)
+    }
+
+    /// Whether a definition with `id` exists in the LOCAL channel's SQLite
+    /// (`db_agents`). Gates the cross-channel content/skills fallback: a
+    /// locally-known agent with genuinely empty content/skills must NOT
+    /// resurrect them from the global record. (reagent P1 on #1385.)
+    pub(super) fn agent_def_exists_local(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(exists)
     }
 
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
@@ -452,9 +519,10 @@ impl Store {
             "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
              working_directory, shell, provider_flags, auto_start, restart_on_crash,
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
+             is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
+             container_image, container_volumes, container_name)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22)",
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
             params![
                 agent.id,
                 agent.slug,
@@ -485,6 +553,9 @@ impl Store {
                 // caller-supplied value here is safe even when a stray
                 // 1 sneaks through.
                 agent.user_hidden,
+                agent.container_image,
+                agent.container_volumes,
+                agent.container_name,
             ],
         )?;
         // Persist the stamped updated_at before we leave the lock so the
@@ -496,6 +567,11 @@ impl Store {
         // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
         // db_agents so readers see the new row immediately.
         self.agents_dual_write_definition_upsert(&snapshot)?;
+        // Mirror into the global cross-channel definition store. Content +
+        // skills are inserted after the definition (separate calls), so this
+        // initial record is content-less; agent_content_set / agent_skill_*
+        // re-mirror with the full payload. (P0.2b.)
+        self.registry_def_upsert(&agent.id);
         // Reagent P1 on #1013 round 2: do NOT mutate the caller's
         // `&mut AgentDefinition` here. The PR is supposed to be
         // zero-behaviour-change; the previous version reflected
@@ -535,7 +611,7 @@ impl Store {
                         restart_on_crash, idle_timeout_minutes, created_at,
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
-                        user_hidden
+                        user_hidden, container_image, container_volumes, container_name
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
@@ -583,10 +659,11 @@ impl Store {
                    (id, slug, name, icon, provider, description,
                     working_directory, shell, provider_flags, auto_start, restart_on_crash,
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden)
+                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
+                    container_image, container_volumes, container_name)
                  VALUES
                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22)",
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
                 params![
                     agent.id, agent.slug, agent.name, agent.icon, agent.provider,
                     agent.description, agent.working_directory, agent.shell,
@@ -596,6 +673,7 @@ impl Store {
                     agent.accounts, agent.parent_id, agent.branch_label,
                     agent.created_at, // updated_at = created_at for new rows
                     agent.user_hidden,
+                    agent.container_image, agent.container_volumes, agent.container_name,
                 ],
             )?;
             agent.created_at
@@ -605,6 +683,10 @@ impl Store {
         let mut snapshot = agent.clone();
         snapshot.updated_at = stamped_updated_at;
         self.agents_dual_write_definition_upsert(&snapshot)?;
+        // Mirror the freshly-defined agent into the global store (agent.define
+        // path). Without this a define-created agent stays channel-local until
+        // a later edit. (codex P2 on #1385.)
+        self.registry_def_upsert(&agent.id);
 
         Ok(None)
     }
@@ -644,7 +726,8 @@ impl Store {
         }
         // The hide flag is per-row; the write must still hit the legacy
         // table (cascade source) — dual-write mirrors into `db_agents`
-        // for the next read.
+        // for the next read. (Templates are seeded; they do NOT go to the
+        // global cross-channel def store, so no mirror here.)
         let rows = conn.execute(
             "UPDATE db_agent_definitions SET user_hidden = ?1 WHERE id = ?2",
             params![if hidden { 1_i64 } else { 0_i64 }, id],
@@ -687,7 +770,8 @@ impl Store {
                 "UPDATE db_agent_definitions SET name=?1, icon=?2, provider=?3, description=?4,
                  working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
                  restart_on_crash=?9, idle_timeout_minutes=?10,
-                 agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15
+                 agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
+                 container_image=?17, container_volumes=?18, container_name=?19
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -705,7 +789,10 @@ impl Store {
                     agent.agent_bus_id,
                     agent.accounts,
                     now,
-                    agent.id
+                    agent.id,
+                    agent.container_image,
+                    agent.container_volumes,
+                    agent.container_name,
                 ],
             )?
         };
@@ -716,8 +803,21 @@ impl Store {
         // db_agents so the next read sees the new name/payload.
         if rows > 0 {
             self.agents_dual_write_definition_upsert(agent)?;
+            // Mirror the updated definition into the global store. (P0.2b.)
+            self.registry_def_upsert(&agent.id);
         }
-        Ok(rows > 0)
+        // Cross-channel edit: an agent surfaced only via the global overlay has
+        // no local SQLite row, so the UPDATE affected 0 rows. Apply the edit to
+        // the global record directly (preserving its content/skills) so editing
+        // a cross-channel agent isn't silently dropped with a "not found" error
+        // — symmetric with the unconditional cross-channel delete. (reagent P1
+        // on #1385.)
+        let updated_global = if rows == 0 {
+            self.registry_def_update_definition_fields(agent)
+        } else {
+            false
+        };
+        Ok(rows > 0 || updated_global)
     }
 
     /// Delete a agent definition by id. Returns true if a row was deleted.
@@ -763,7 +863,13 @@ impl Store {
                 self.agents_dual_write_instance_delete(instance_id)?;
             }
         }
-        Ok(rows > 0)
+        // Tombstone the global definition record so another channel's stale
+        // SQLite can't resurrect this deleted user agent — AND so an agent
+        // that exists in THIS channel only via the global overlay (no local
+        // SQLite row, rows == 0) is actually deletable instead of reappearing
+        // on the next agent_def_list. (P0.2b + codex P1 on #1385.)
+        let global_retired = self.registry_def_retire(id);
+        Ok(rows > 0 || global_retired)
     }
 
     // AgentContent / AgentSkill / AgentHistory CRUD moved to
@@ -1759,5 +1865,8 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         branch_label: row.get(19)?,
         updated_at: row.get(20)?,
         user_hidden: row.get(21)?,
+        container_image: row.get(22)?,
+        container_volumes: row.get(23)?,
+        container_name: row.get(24)?,
     })
 }
