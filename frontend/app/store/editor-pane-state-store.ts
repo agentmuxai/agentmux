@@ -54,6 +54,15 @@ export interface EditorTab {
      *  Double-click opens as pinned. Editing or explicit pin promotes a
      *  preview to pinned. Matches VS Code semantics. */
     isPreview: boolean;
+    /** Scratch/untitled buffer — backed by a cache file in
+     *  ~/.agentmux/cache/scratch/. True while the file hasn't been
+     *  promoted to a real user-chosen path via Save As. */
+    isScratch?: boolean;
+    /** UUID of the backing scratch cache file. Set iff isScratch is true. */
+    scratchId?: string;
+    /** Label to show in the tab instead of the bare filename. Used for
+     *  scratch buffers ("Untitled-1") and may be set by pane.open callers. */
+    displayName?: string;
 }
 
 export interface ClosedTab {
@@ -111,6 +120,23 @@ export type EditorPaneCommand =
            *  appends a non-preview tab. Activating an already-open tab
            *  is unchanged regardless of mode. */
           mode?: "preview" | "pinned";
+          source?: EditorCommandSource;
+      }
+    | {
+          type: "OpenScratch";
+          /** Real path of the backing cache file (in ~/.agentmux/cache/scratch/). */
+          filePath: string;
+          scratchId: string;
+          displayName: string;
+          language?: string;
+          source?: EditorCommandSource;
+      }
+    | {
+          type: "PromoteScratch";
+          /** Scratch tab to promote. */
+          tabId: string;
+          /** The user-chosen real path the scratch was moved to. */
+          newPath: string;
           source?: EditorCommandSource;
       }
     | { type: "CloseTab"; tabId: string; force?: boolean; source?: EditorCommandSource }
@@ -676,6 +702,58 @@ export function update(
                     },
                 ],
             };
+        }
+
+        case "OpenScratch": {
+            const canon = canonicalizePath(command.filePath);
+            // If a scratch tab already points to this file, just activate it.
+            const existing = state.tabs.find((t) => t.filePath === canon && t.isScratch);
+            if (existing) {
+                return {
+                    state: { ...state, activeTabId: existing.id },
+                    events: [{ type: "TabActivated", tabId: existing.id, filePath: existing.filePath }],
+                };
+            }
+            const tab: EditorTab = {
+                id: newTabId(),
+                filePath: canon,
+                language: command.language ?? "markdown",
+                readOnly: false,
+                dirty: false,
+                contentHash: "",
+                loadError: null,
+                contentLoaded: false,
+                isPreview: false,
+                isScratch: true,
+                scratchId: command.scratchId,
+                displayName: command.displayName,
+            };
+            const nextTabs = [...state.tabs, tab];
+            return {
+                state: { ...state, tabs: nextTabs, activeTabId: tab.id },
+                events: [{ type: "TabOpened", tabId: tab.id, filePath: tab.filePath, atIndex: nextTabs.length - 1 }],
+            };
+        }
+
+        case "PromoteScratch": {
+            const idx = findTabIndex(state, command.tabId);
+            if (idx < 0) return { state, events: [] };
+            const tab = state.tabs[idx];
+            const nextTab: EditorTab = {
+                ...tab,
+                filePath: canonicalizePath(command.newPath),
+                language: deriveLanguage(command.newPath),
+                isScratch: false,
+                scratchId: undefined,
+                displayName: undefined,
+                dirty: false,
+            };
+            const nextTabs = [
+                ...state.tabs.slice(0, idx),
+                nextTab,
+                ...state.tabs.slice(idx + 1),
+            ];
+            return { state: { ...state, tabs: nextTabs }, events: [{ type: "TabSaved", tabId: tab.id }] };
         }
 
         case "RenameFile": {

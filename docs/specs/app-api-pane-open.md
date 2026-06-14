@@ -1,8 +1,24 @@
 # App API — `pane.open` Spec
 
-Status: Proposed
+Status: Partially Implemented (MVP shipped; idempotency, `is_new`, and `mode` pending)
 Date: 2026-04-20
+Updated: 2026-06-14
 Depends on: `app-api-extension.md`, `app-api-status.md`
+
+## Implementation Status (as of 2026-06-14)
+
+| Feature | Status |
+|---------|--------|
+| Basic `pane.open` handler in `app_api.rs` | ✅ Shipped (skeleton) |
+| `view`, `file`, `url`, `cwd`, `title`, `tab_id`, `split_direction`, `split_reference_block_id`, `focus` | ✅ Shipped in `CommandPaneOpenData` |
+| Idempotency (focus existing pane on same file) | ❌ Not implemented |
+| Path sandboxing / allowed-roots validation | ❌ Not implemented |
+| `is_new` (scratch/untitled file creation) | ❌ Not implemented — see `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md` |
+| `mode: "preview" \| "pinned"` | ❌ Not implemented |
+| `language` hint | ❌ Not implemented |
+| `amux open <path>` CLI bridge | ❌ Not implemented — see `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.md` |
+
+> **Note:** The view name in the live RPC is `"editor"` (not `"codeeditor"` as written below in the original design). All future code should use `"editor"`. The spec body below is being kept historically accurate and updated with corrections inline.
 
 ## Motivation
 
@@ -55,22 +71,26 @@ log while I work" flows become one-shot.
 ```typescript
 {
   // What to show
-  view: "preview" | "codeeditor" | "term" | "web" | "sysinfo" | "help";
+  // NOTE: live RPC uses "editor" not "codeeditor" — codeeditor is deprecated
+  view: "preview" | "editor" | "term" | "web" | "sysinfo" | "help";
 
   // View-specific arguments (mutually exclusive by view)
-  file?: string;      // absolute or workspace-relative path; required for preview/codeeditor
+  file?: string;      // absolute or workspace-relative path; required for editor/preview unless is_new=true
+  is_new?: boolean;   // PENDING: if true, open a scratch/untitled buffer (no file path required)
+  language?: string;  // PENDING: hint for syntax highlighting ("markdown", "typescript", etc.)
   url?: string;       // required for web
   cwd?: string;       // optional for term (defaults to current pane's cwd)
 
   // Placement
   placement?: {
-    tab?: "current" | "new" | string;   // default "current"; string = tab name
-    split?: "right" | "below" | "tab";  // default "right" when tab=current
-    focus?: boolean;                    // default true
+    tab?: "current" | "new" | string;                       // default "current"; string = tab name
+    split?: "right" | "below" | "left" | "above" | "tab";  // default "right" when tab=current
+    focus?: boolean;                                         // default true
   };
 
   // Behavior
-  idempotent?: boolean;  // default true for file/url views, false for term
+  idempotent?: boolean;  // PENDING: default true for file/url views, false for term
+  mode?: "preview" | "pinned";  // PENDING: default "pinned"; "preview" = single-click VS Code style tab
   title?: string;        // optional explicit pane title
 }
 ```
@@ -148,18 +168,21 @@ Update the agent startup/system prompt generation to mention
 `pane.open` alongside `agent.send` / `agent.open`, with a one-line
 example. Without discoverability, no agent will know to call it.
 
-## Open questions
+## Open questions (resolved 2026-06-14)
 
-- Should we ship a thin shell wrapper (`agentmux pane open <file>`)
-  so shell-based agents can call this without writing a WebSocket
-  client? Aligns with the "CLI tool" gap noted in `app-api-status.md`.
-- Placement grammar: do we need `split: "left" | "above"` for
-  completeness, or is "right / below / new tab" sufficient for agent
-  use cases?
-- Should `pane.open` accept multiple files and open them as a group
-  (common when writing a spec + opening the affected source files)?
-- Permission model: do we want a per-agent capability check before
-  honoring `pane.open`, or is the existing App API authkey sufficient?
+- **Shell wrapper:** Yes — `amux open <file>` is Phase 1 of the agent CLI bridge.
+  Design finalized in `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.md`.
+  Pending spec approval before implementation.
+- **Placement grammar:** Extended to include `"left"` and `"above"` (added above).
+  Full four-direction split is necessary for agent-driven layouts.
+- **Multiple files:** Yes — a future `files: string[]` variant should open them as
+  a tab group. Not in scope for Phase 1 (single-file only).
+- **Permission model:** Existing App API authkey is sufficient for Phase 1. Per-agent
+  capability flags are a Phase 3+ concern alongside the MCP façade.
+- **`is_new` flow:** Scratch file semantics are specified in
+  `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md`. The `pane.open` protocol simply
+  accepts `is_new: true` (no `file` field) and delegates scratch file creation to
+  the `ScratchFileService`.
 
 ## Affected files
 

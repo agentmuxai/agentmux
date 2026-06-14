@@ -1223,6 +1223,72 @@ class RpcApiType {
         return client.rpcCall("geteditorroots", data, opts);
     }
 
+    // command "openinshell" [call] — reveal a path in the OS file manager.
+    // Spec: specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
+    OpenInShellCommand(
+        client: RpcClient,
+        data: { path: string },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("openinshell", data, opts);
+    }
+
+    // command "renameeditorfile" [call] — rename a file or folder in the editor tree.
+    RenameEditorFileCommand(
+        client: RpcClient,
+        data: { old_path: string; new_name: string },
+        opts?: RpcOpts,
+    ): Promise<{ new_path: string }> {
+        return client.rpcCall("renameeditorfile", data, opts);
+    }
+
+    // command "createeditorfile" [call] — create an empty file in the editor tree.
+    CreateEditorFileCommand(
+        client: RpcClient,
+        data: { parent_path: string; name: string },
+        opts?: RpcOpts,
+    ): Promise<{ file_path: string }> {
+        return client.rpcCall("createeditorfile", data, opts);
+    }
+
+    // command "createeditordir" [call] — create a directory in the editor tree.
+    CreateEditorDirCommand(
+        client: RpcClient,
+        data: { parent_path: string; name: string },
+        opts?: RpcOpts,
+    ): Promise<{ dir_path: string }> {
+        return client.rpcCall("createeditordir", data, opts);
+    }
+
+    // command "deleteeditorfile" [call] — delete a file or directory.
+    DeleteEditorFileCommand(
+        client: RpcClient,
+        data: { path: string; recursive: boolean },
+        opts?: RpcOpts,
+    ): Promise<void> {
+        return client.rpcCall("deleteeditorfile", data, opts);
+    }
+
+    // command "createscratchfile" [call] — create a scratch buffer file in
+    // ~/.agentmux/cache/scratch/. Returns the backing path + scratch_id.
+    // Spec: specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
+    CreateScratchFileCommand(
+        client: RpcClient,
+        data: { display_name?: string } = {},
+        opts?: RpcOpts,
+    ): Promise<{ scratch_id: string; file_path: string; display_name: string }> {
+        return client.rpcCall("createscratchfile", data, opts);
+    }
+
+    // command "movescratchfile" [call] — promote a scratch buffer to a real path (Save As).
+    MoveScratchFileCommand(
+        client: RpcClient,
+        data: { scratch_id: string; destination_path: string },
+        opts?: RpcOpts,
+    ): Promise<{ file_path: string }> {
+        return client.rpcCall("movescratchfile", data, opts);
+    }
+
     // ── LSP — Phase 1 of SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md ──────
     // Backend is a dumb proxy: lspstart spawns (or attaches to) the
     // server for (workspace, language); lspsend forwards an arbitrary

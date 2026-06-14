@@ -6,6 +6,7 @@
 // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
+import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -402,6 +403,70 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         }
     };
 
+    // ── File-tree context menu ────────────────────────────────────────
+    const [ctxMenu, setCtxMenu] = createSignal<{ items: ContextMenuItem[]; x: number; y: number } | null>(null);
+    const [renamingPath, setRenamingPath] = createSignal<string | null>(null);
+    const [newEntry, setNewEntry] = createSignal<{ parentPath: string; kind: "file" | "dir" } | null>(null);
+
+    const buildContextMenuItems = (path: string | null, isDir: boolean): ContextMenuItem[] => {
+        if (!path) {
+            // Background right-click → tree-level actions.
+            const homeRoot = model.treeModel.rootsAtom().find((r) => r.isHome)?.path ?? "";
+            return [
+                { type: "action", label: "New File…", onSelect: () => setNewEntry({ parentPath: homeRoot, kind: "file" }) },
+                { type: "action", label: "New Folder…", onSelect: () => setNewEntry({ parentPath: homeRoot, kind: "dir" }) },
+                { type: "separator" },
+                { type: "action", label: "Refresh", onSelect: () => void model.treeModel.refresh() },
+            ];
+        }
+        if (isDir) {
+            return [
+                { type: "action", label: "New File…", onSelect: () => setNewEntry({ parentPath: path, kind: "file" }) },
+                { type: "action", label: "New Folder…", onSelect: () => setNewEntry({ parentPath: path, kind: "dir" }) },
+                { type: "separator" },
+                { type: "action", label: "Open in Terminal", onSelect: () => void model.openInTerminal(path) },
+                { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },
+                { type: "separator" },
+                { type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) },
+                { type: "action", label: "Delete", danger: true, onSelect: () => void model.deleteFile(path, true) },
+            ];
+        }
+        return [
+            { type: "action", label: "Open", onSelect: () => void model.openFile(path) },
+            { type: "separator" },
+            { type: "action", label: "Copy Path", onSelect: () => void copyToClipboard(path) },
+            { type: "action", label: "Copy Relative Path", onSelect: () => {
+                const root = model.treeModel.rootsAtom().find((r) => path.startsWith(r.path));
+                const rel = root ? path.slice(root.path.length).replace(/^[/\\]/, "") : path;
+                void copyToClipboard(rel);
+            }},
+            { type: "separator" },
+            { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },
+            { type: "separator" },
+            { type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) },
+            { type: "action", label: "Delete", danger: true, onSelect: () => void model.deleteFile(path, false) },
+        ];
+    };
+
+    const handleTreeContextMenu = (path: string | null, isDir: boolean, e: MouseEvent) => {
+        setCtxMenu({ items: buildContextMenuItems(path, isDir), x: e.clientX, y: e.clientY });
+    };
+
+    const handleRenameConfirm = async (path: string, newName: string) => {
+        setRenamingPath(null);
+        await model.renameFile(path, newName);
+    };
+
+    const handleNewEntryConfirm = async (parentPath: string, name: string, kind: "file" | "dir") => {
+        setNewEntry(null);
+        try {
+            if (kind === "file") await model.createFile(parentPath, name);
+            else await model.createDir(parentPath, name);
+        } catch {
+            // Error already logged in model; tree will re-sync on next refresh.
+        }
+    };
+
     // ── LSP install banner state ──────────────────────────────────────
     // Dismissed-for-session list keyed by language. Allows the operator
     // to silence the banner per session; it returns on next launch if the
@@ -470,6 +535,13 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         onFileClick={(path) => void model.openFilePreview(path)}
                         onFileDblClick={(path) => void model.openFile(path)}
                         onToggleHidden={() => void model.toggleShowHidden()}
+                        onContextMenu={handleTreeContextMenu}
+                        renamingPath={renamingPath()}
+                        onRenameConfirm={(path, name) => void handleRenameConfirm(path, name)}
+                        onRenameCancel={() => setRenamingPath(null)}
+                        newEntry={newEntry()}
+                        onNewEntryConfirm={(parent, name, kind) => void handleNewEntryConfirm(parent, name, kind)}
+                        onNewEntryCancel={() => setNewEntry(null)}
                     />
                     <Show when={!model.filePathAtom()}>
                         <div class="editor-tree-path-input">
@@ -632,6 +704,18 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                     </div>
                 </Show>
             </div>
+
+            {/* File-tree context menu — rendered via Portal above everything */}
+            <Show when={ctxMenu()}>
+                {(menu) => (
+                    <ContextMenu
+                        items={menu().items}
+                        x={menu().x}
+                        y={menu().y}
+                        onClose={() => setCtxMenu(null)}
+                    />
+                )}
+            </Show>
         </div>
     );
 }

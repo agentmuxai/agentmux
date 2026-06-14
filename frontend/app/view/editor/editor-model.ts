@@ -39,6 +39,7 @@ const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
 const META_LEGACY_FILE = "file";
+const META_SCRATCH = "editor:scratch";
 const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;
 const TREE_WIDTH_MAX = 600;
@@ -280,6 +281,9 @@ export class EditorViewModel implements ViewModel {
         const legacyFile = meta?.[META_LEGACY_FILE];
         if (typeof legacyFile === "string" && legacyFile) {
             void this.openFile(legacyFile);
+        } else if (meta?.[META_SCRATCH] === true && snapshot(blockId)?.tabs.length === 0) {
+            // Widget default: open a scratch buffer when no file was persisted.
+            void this.openScratch();
         }
     }
 
@@ -504,6 +508,170 @@ export class EditorViewModel implements ViewModel {
                 error: `Save failed: ${message}`,
                 source: "system",
             });
+        }
+    }
+
+    // ── Scratch buffer ──────────────────────────────────────────────────
+
+    /** Open (or focus) a scratch buffer. Called from the constructor when
+     *  editor:scratch is true and no other file is open. */
+    async openScratch(): Promise<void> {
+        // Reuse an existing scratch tab if one is already open in this pane.
+        const existing = snapshot(this.blockId)?.tabs.find((t) => t.isScratch);
+        if (existing) {
+            dispatch(this.blockId, { type: "SwitchTab", tabId: existing.id, source: "system" });
+            return;
+        }
+        try {
+            const result = await RpcApi.CreateScratchFileCommand(TabRpcClient, {});
+            const events = dispatch(this.blockId, {
+                type: "OpenScratch",
+                filePath: result.file_path,
+                scratchId: result.scratch_id,
+                displayName: result.display_name,
+                language: "markdown",
+                source: "system",
+            });
+            const opened = events.find((e) => e.type === "TabOpened" || e.type === "TabActivated");
+            if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) return;
+            const tabId = opened.tabId;
+            this._contentByTab.set(tabId, "");
+            this._contentVersion[1]((v) => v + 1);
+            dispatch(this.blockId, {
+                type: "TabContentLoaded",
+                tabId,
+                contentHash: "",
+                readOnly: false,
+                source: "system",
+            });
+        } catch {
+            // Scratch creation failed — editor opens in empty state, user can
+            // open a file manually.
+        }
+    }
+
+    /** Promote the active scratch tab to a real path (Save As). */
+    async saveFileAs(destPath: string): Promise<void> {
+        const tab = this.activeTabAtom();
+        if (!tab?.isScratch || !tab.scratchId) return;
+        try {
+            const result = await RpcApi.MoveScratchFileCommand(TabRpcClient, {
+                scratch_id: tab.scratchId,
+                destination_path: destPath,
+            });
+            dispatch(this.blockId, {
+                type: "PromoteScratch",
+                tabId: tab.id,
+                newPath: result.file_path,
+                source: "user",
+            });
+            // Re-load content from the new path to sync the hash.
+            await this.openFile(result.file_path);
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            dispatch(this.blockId, {
+                type: "TabContentLoadFailed",
+                tabId: tab.id,
+                error: `Save As failed: ${message}`,
+                source: "system",
+            });
+        }
+    }
+
+    // ── File tree mutations ─────────────────────────────────────────────
+
+    /** Rename a file/folder. Updates open tabs and refreshes the tree. */
+    async renameFile(path: string, newName: string): Promise<void> {
+        try {
+            const result = await RpcApi.RenameEditorFileCommand(TabRpcClient, {
+                old_path: path,
+                new_name: newName,
+            });
+            dispatch(this.blockId, {
+                type: "RenameFile",
+                oldPath: path,
+                newPath: result.new_path,
+                source: "system",
+            });
+            // Refresh the parent directory.
+            const parentPath = path.replace(/[/\\][^/\\]*$/, "") || path;
+            void this.treeModel.refreshPath(parentPath);
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            // Surface the error via the active tab's loadError if there is one,
+            // otherwise just log — rename failures are rare and recoverable.
+            console.error(`[editor] rename failed: ${msg}`);
+        }
+    }
+
+    /** Delete a file or folder, closing any open tabs that were pointing to it. */
+    async deleteFile(path: string, recursive: boolean): Promise<void> {
+        const label = recursive ? "folder and all its contents" : "file";
+        const name = path.split(/[/\\]/).pop() ?? path;
+        if (!window.confirm(`Delete ${name} (${label})? This cannot be undone.`)) return;
+        try {
+            await RpcApi.DeleteEditorFileCommand(TabRpcClient, { path, recursive });
+            // Force-close tabs that pointed at the deleted path or any child.
+            const canon = canonicalizePath(path);
+            for (const tab of snapshot(this.blockId)?.tabs ?? []) {
+                const tabCanon = canonicalizePath(tab.filePath);
+                if (tabCanon === canon || tabCanon.startsWith(canon + "/") || tabCanon.startsWith(canon + "\\")) {
+                    dispatch(this.blockId, { type: "CloseTab", tabId: tab.id, force: true, source: "system" });
+                }
+            }
+            // Remove optimistically from tree + refresh parent.
+            const parentPath = path.replace(/[/\\][^/\\]*$/, "") || path;
+            const entryName = path.split(/[/\\]/).pop() ?? "";
+            this.treeModel.removeEntryOptimistic(parentPath, entryName);
+        } catch (e: unknown) {
+            console.error(`[editor] delete failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+
+    /** Create an empty file in the tree. Opens it as a preview tab on success. */
+    async createFile(parentPath: string, name: string): Promise<void> {
+        try {
+            const result = await RpcApi.CreateEditorFileCommand(TabRpcClient, { parent_path: parentPath, name });
+            this.treeModel.addEntryOptimistic(parentPath, { name, is_dir: false, is_symlink: false });
+            await this.openFilePreview(result.file_path);
+        } catch (e: unknown) {
+            console.error(`[editor] create file failed: ${e instanceof Error ? e.message : String(e)}`);
+            throw e;
+        }
+    }
+
+    /** Create a directory in the tree. Ensures it's visible. */
+    async createDir(parentPath: string, name: string): Promise<void> {
+        try {
+            await RpcApi.CreateEditorDirCommand(TabRpcClient, { parent_path: parentPath, name });
+            this.treeModel.addEntryOptimistic(parentPath, { name, is_dir: true, is_symlink: false });
+        } catch (e: unknown) {
+            console.error(`[editor] create dir failed: ${e instanceof Error ? e.message : String(e)}`);
+            throw e;
+        }
+    }
+
+    /** Reveal a path in the OS file manager. */
+    async revealInExplorer(path: string): Promise<void> {
+        try {
+            await RpcApi.OpenInShellCommand(TabRpcClient, { path });
+        } catch {
+            // Non-fatal — some platforms may not support this.
+        }
+    }
+
+    /** Open the folder in a terminal pane (split right of the current pane). */
+    async openInTerminal(folderPath: string): Promise<void> {
+        try {
+            // pane.open with view=term and cwd=folderPath (App API Tier 1).
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (RpcApi as any).OpenPaneCommand?.(TabRpcClient, {
+                view: "term",
+                cwd: folderPath,
+                split_direction: "right",
+            });
+        } catch {
+            // pane.open might not be registered yet — fail silently.
         }
     }
 

@@ -1372,6 +1372,263 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         }),
     );
 
+    // ── Editor file-tree mutations ─────────────────────────────────────
+    // Spec: specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
+    // All handlers validate the target path is under the user's home directory
+    // before performing any mutation — same policy as writeeditorfile.
+
+    // openinshell → reveal a path in the OS file manager
+    engine.register_handler(
+        "openinshell",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { path: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("openinshell: {e}"))?;
+                let expanded = expand_home_dir_safe(&cmd.path);
+                let path = expanded.as_path();
+                let home = dirs::home_dir()
+                    .ok_or("openinshell: cannot determine home directory")?;
+                let canonical_home = home.canonicalize()
+                    .map_err(|e| format!("openinshell: home: {e}"))?;
+                let canonical = path.canonicalize()
+                    .map_err(|e| format!("openinshell: {e}"))?;
+                if !canonical.starts_with(&canonical_home) {
+                    return Err(format!("openinshell: path outside home directory"));
+                }
+                #[cfg(target_os = "windows")]
+                { let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{}", canonical.display())).spawn(); }
+                #[cfg(target_os = "macos")]
+                { let _ = std::process::Command::new("open").arg("-R").arg(&canonical).spawn(); }
+                #[cfg(target_os = "linux")]
+                {
+                    let target = if canonical.is_dir() { canonical.clone() } else { canonical.parent().unwrap_or(&canonical).to_path_buf() };
+                    let _ = std::process::Command::new("xdg-open").arg(&target).spawn();
+                }
+                Ok(None)
+            })
+        }),
+    );
+
+    // renameeditorfile → rename a file or folder (name only, same parent directory)
+    engine.register_handler(
+        "renameeditorfile",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { old_path: String, new_name: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("renameeditorfile: {e}"))?;
+                let expanded = expand_home_dir_safe(&cmd.old_path);
+                let old_path = expanded.as_path();
+                let home = dirs::home_dir().ok_or("renameeditorfile: cannot determine home")?;
+                let canonical_home = home.canonicalize().map_err(|e| format!("renameeditorfile: home: {e}"))?;
+                let canonical_old = old_path.canonicalize().map_err(|e| format!("renameeditorfile: {e}"))?;
+                if !canonical_old.starts_with(&canonical_home) {
+                    return Err("renameeditorfile: path outside home directory".to_string());
+                }
+                if cmd.new_name.contains('/') || cmd.new_name.contains('\\') || cmd.new_name == ".." || cmd.new_name.is_empty() {
+                    return Err("renameeditorfile: new_name must be a plain filename".to_string());
+                }
+                let new_path = canonical_old.parent()
+                    .ok_or("renameeditorfile: no parent directory")?
+                    .join(&cmd.new_name);
+                if new_path.exists() {
+                    return Err(format!("renameeditorfile: destination already exists"));
+                }
+                std::fs::rename(&canonical_old, &new_path)
+                    .map_err(|e| format!("renameeditorfile: {e}"))?;
+                Ok(Some(serde_json::json!({ "new_path": new_path.to_string_lossy() })))
+            })
+        }),
+    );
+
+    // createeditorfile → create an empty file inside an existing directory
+    engine.register_handler(
+        "createeditorfile",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { parent_path: String, name: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("createeditorfile: {e}"))?;
+                let expanded = expand_home_dir_safe(&cmd.parent_path);
+                let parent = expanded.as_path();
+                let home = dirs::home_dir().ok_or("createeditorfile: cannot determine home")?;
+                let canonical_home = home.canonicalize().map_err(|e| format!("createeditorfile: home: {e}"))?;
+                let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditorfile: {e}"))?;
+                if !canonical_parent.starts_with(&canonical_home) {
+                    return Err("createeditorfile: path outside home directory".to_string());
+                }
+                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.is_empty() {
+                    return Err("createeditorfile: name must be a plain filename".to_string());
+                }
+                let file_path = canonical_parent.join(&cmd.name);
+                if file_path.exists() {
+                    return Err("createeditorfile: file already exists".to_string());
+                }
+                std::fs::write(&file_path, "").map_err(|e| format!("createeditorfile: {e}"))?;
+                Ok(Some(serde_json::json!({ "file_path": file_path.to_string_lossy() })))
+            })
+        }),
+    );
+
+    // createeditordir → create a directory inside an existing directory
+    engine.register_handler(
+        "createeditordir",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { parent_path: String, name: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("createeditordir: {e}"))?;
+                let expanded = expand_home_dir_safe(&cmd.parent_path);
+                let parent = expanded.as_path();
+                let home = dirs::home_dir().ok_or("createeditordir: cannot determine home")?;
+                let canonical_home = home.canonicalize().map_err(|e| format!("createeditordir: home: {e}"))?;
+                let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditordir: {e}"))?;
+                if !canonical_parent.starts_with(&canonical_home) {
+                    return Err("createeditordir: path outside home directory".to_string());
+                }
+                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.is_empty() {
+                    return Err("createeditordir: name must be a plain name".to_string());
+                }
+                let dir_path = canonical_parent.join(&cmd.name);
+                if dir_path.exists() {
+                    return Err("createeditordir: already exists".to_string());
+                }
+                std::fs::create_dir(&dir_path).map_err(|e| format!("createeditordir: {e}"))?;
+                Ok(Some(serde_json::json!({ "dir_path": dir_path.to_string_lossy() })))
+            })
+        }),
+    );
+
+    // deleteeditorfile → delete a file or directory
+    engine.register_handler(
+        "deleteeditorfile",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { path: String, recursive: bool }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("deleteeditorfile: {e}"))?;
+                let expanded = expand_home_dir_safe(&cmd.path);
+                let path = expanded.as_path();
+                let home = dirs::home_dir().ok_or("deleteeditorfile: cannot determine home")?;
+                let canonical_home = home.canonicalize().map_err(|e| format!("deleteeditorfile: home: {e}"))?;
+                let canonical = path.canonicalize().map_err(|e| format!("deleteeditorfile: {e}"))?;
+                if !canonical.starts_with(&canonical_home) {
+                    return Err("deleteeditorfile: path outside home directory".to_string());
+                }
+                if canonical.is_dir() {
+                    if cmd.recursive {
+                        std::fs::remove_dir_all(&canonical).map_err(|e| format!("deleteeditorfile: {e}"))?;
+                    } else {
+                        std::fs::remove_dir(&canonical).map_err(|e| format!("deleteeditorfile: directory not empty: {e}"))?;
+                    }
+                } else {
+                    std::fs::remove_file(&canonical).map_err(|e| format!("deleteeditorfile: {e}"))?;
+                }
+                Ok(None)
+            })
+        }),
+    );
+
+    // ── Scratch file service ────────────────────────────────────────────
+    // Spec: specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
+
+    // createscratchfile → create a scratch buffer file in ~/.agentmux/cache/scratch/
+    engine.register_handler(
+        "createscratchfile",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { display_name: Option<String> }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("createscratchfile: {e}"))?;
+                let home = dirs::home_dir()
+                    .ok_or("createscratchfile: cannot determine home directory")?;
+                let scratch_dir = home.join(".agentmux").join("cache").join("scratch");
+                std::fs::create_dir_all(&scratch_dir)
+                    .map_err(|e| format!("createscratchfile: create dir: {e}"))?;
+                let scratch_id = uuid::Uuid::new_v4().to_string();
+                let display_name = cmd.display_name.unwrap_or_else(|| "Untitled".to_string());
+                let file_path = scratch_dir.join(format!("{}.md", scratch_id));
+                std::fs::write(&file_path, "")
+                    .map_err(|e| format!("createscratchfile: {e}"))?;
+                let created_at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                let meta = serde_json::json!({
+                    "display_name": display_name,
+                    "scratch_id": scratch_id,
+                    "created_at": created_at,
+                });
+                let meta_path = scratch_dir.join(format!("{}.md.meta", scratch_id));
+                std::fs::write(&meta_path, meta.to_string())
+                    .map_err(|e| format!("createscratchfile: meta: {e}"))?;
+                Ok(Some(serde_json::json!({
+                    "scratch_id": scratch_id,
+                    "file_path": file_path.to_string_lossy(),
+                    "display_name": display_name,
+                })))
+            })
+        }),
+    );
+
+    // movescratchfile → promote a scratch buffer to a real user-chosen path (Save As)
+    engine.register_handler(
+        "movescratchfile",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Cmd { scratch_id: String, destination_path: String }
+                let cmd: Cmd = serde_json::from_value(data)
+                    .map_err(|e| format!("movescratchfile: {e}"))?;
+                let home = dirs::home_dir()
+                    .ok_or("movescratchfile: cannot determine home")?;
+                let canonical_home = home.canonicalize()
+                    .map_err(|e| format!("movescratchfile: home: {e}"))?;
+                // Validate scratch_id has no path components.
+                if cmd.scratch_id.contains('/') || cmd.scratch_id.contains('\\') || cmd.scratch_id.contains("..") {
+                    return Err("movescratchfile: invalid scratch_id".to_string());
+                }
+                let scratch_dir = home.join(".agentmux").join("cache").join("scratch");
+                let scratch_path = scratch_dir.join(format!("{}.md", cmd.scratch_id));
+                if !scratch_path.exists() {
+                    return Err(format!("movescratchfile: scratch file not found"));
+                }
+                // Validate + resolve destination.
+                let expanded_dest = expand_home_dir_safe(&cmd.destination_path);
+                let dest_path = expanded_dest.as_path();
+                let canonical_dest = dest_path.parent()
+                    .and_then(|p| p.canonicalize().ok())
+                    .map(|p| p.join(dest_path.file_name().unwrap_or_default()))
+                    .ok_or_else(|| "movescratchfile: invalid destination path".to_string())?;
+                if !canonical_dest.starts_with(&canonical_home) {
+                    return Err("movescratchfile: destination outside home directory".to_string());
+                }
+                if let Some(parent) = canonical_dest.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("movescratchfile: create dirs: {e}"))?;
+                }
+                std::fs::copy(&scratch_path, &canonical_dest)
+                    .map_err(|e| format!("movescratchfile: {e}"))?;
+                // Mark sidecar as saved.
+                let meta_path = scratch_dir.join(format!("{}.md.meta", cmd.scratch_id));
+                if let Ok(bytes) = std::fs::read_to_string(&meta_path) {
+                    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&bytes) {
+                        json["saved_to"] = serde_json::json!(canonical_dest.to_string_lossy());
+                        let _ = std::fs::write(&meta_path, json.to_string());
+                    }
+                }
+                Ok(Some(serde_json::json!({ "file_path": canonical_dest.to_string_lossy() })))
+            })
+        }),
+    );
+
     // ── LSP RPCs ───────────────────────────────────────────────────
     // Three handlers backing the editor pane's LSP integration:
     //   * lspstart — spawn (or attach to) the server for a file
