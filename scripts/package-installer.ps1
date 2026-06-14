@@ -57,7 +57,21 @@ if (-not $PortableDir -or -not (Test-Path $PortableDir)) {
 }
 if (-not (Test-Path (Join-Path $PortableDir "agentmux.exe")))       { throw "portable missing agentmux.exe: $PortableDir" }
 if (-not (Test-Path (Join-Path $PortableDir "runtime\libcef.dll"))) { throw "portable missing runtime\libcef.dll: $PortableDir" }
-Write-Host "  portable : $PortableDir"
+
+# Guard: the bundled binary version MUST match package.json. The host exe is named
+# agentmux-<ver>.exe, so its filename is the binaries' version of record. The portable
+# is resolved by newest-mtime, so a lingering older build would otherwise silently yield
+# an AgentMux-<pkgver>-x64-setup.exe wrapping a different binary version. Mirrors
+# scripts/package-msix.ps1's skew guard.
+$hostExe = Get-ChildItem (Join-Path $PortableDir 'runtime') -Filter 'agentmux-*.exe' -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -match '^agentmux-(\d+\.\d+\.\d+)\.exe$' } | Select-Object -First 1
+if (-not $hostExe) { throw "No runtime\agentmux-<version>.exe in portable: $PortableDir — is this a CEF portable build?" }
+$portableVersion = [regex]::Match($hostExe.Name, '^agentmux-(\d+\.\d+\.\d+)\.exe$').Groups[1].Value
+if ($portableVersion -ne $version) {
+  throw "Version skew: package.json is $version but the portable bundles agentmux-$portableVersion.exe ($($hostExe.FullName)). Rebuild with 'task package:release' or pass an explicit -PortableDir."
+}
+
+Write-Host "  portable : $PortableDir (binver $portableVersion)"
 Write-Host "  output   : $OutputDir`n"
 
 # ── build ────────────────────────────────────────────────────────────────────
