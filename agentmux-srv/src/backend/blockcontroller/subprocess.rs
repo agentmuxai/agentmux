@@ -1085,6 +1085,12 @@ impl SubprocessController {
             // this forces a non-zero exit even if inspect_exec can't be reached.
             let mut stream_errored = false;
 
+            // Resolve the agent's GLOBAL transcript zone once (see persistent.rs)
+            // so every container-exec `output` line is also mirrored to the
+            // cross-channel store. `None` for non-agent blocks.
+            let global_output_zone =
+                super::shell::resolve_global_output_zone(&wstore, &block_id);
+
             tracing::info!(block_id = %block_id, "container exec output reader started");
 
             let mut pinned = std::pin::pin!(output);
@@ -1113,7 +1119,7 @@ impl SubprocessController {
                             None => {
                                 // Stream ended — flush any remaining partial line.
                                 if !line_buf.trim().is_empty() {
-                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats);
+                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats, global_output_zone.as_deref());
                                 }
                                 tracing::info!(block_id = %block_id, "container exec output EOF");
                                 break;
@@ -1142,7 +1148,7 @@ impl SubprocessController {
                                 for ch in chunk.chars() {
                                     if ch == '\n' {
                                         if !line_buf.trim().is_empty() {
-                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats);
+                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats, global_output_zone.as_deref());
                                         }
                                         line_buf.clear();
                                     } else {
@@ -1255,6 +1261,7 @@ impl SubprocessController {
         filestore: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
         health: &Arc<super::health::HealthMonitor>,
         stats: &mut super::session_stats::SessionStatsAccumulator,
+        global_output_zone: Option<&str>,
     ) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -1312,6 +1319,7 @@ impl SubprocessController {
                 SUBPROCESS_OUTPUT_SUBJECT,
                 line_with_newline.as_bytes(),
                 filestore.as_ref(),
+                global_output_zone,
             );
         }
     }
