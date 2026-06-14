@@ -303,6 +303,7 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
                             <option value="high">High</option>
+                            <option value="xhigh">X-High (coding/agentic)</option>
                             <option value="max">Max (Opus only)</option>
                         </select>
                     </div>
