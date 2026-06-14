@@ -63,6 +63,7 @@ SRV="dist/bin/agentmux-srv-${VERSION}-darwin.${ARCH}"
 require() { [ -e "$1" ] || { echo "❌ missing required artifact: $1 — run the build steps first" >&2; exit 1; }; }
 require dist/cef/agentmux-cef
 require dist/cef/agentmux-launcher
+require target/release/agentmux-mcp
 require "$SRV"
 require dist/frontend/index.html
 require dist/schema/settings.json
@@ -84,6 +85,11 @@ cp "$SRV" "$APP/Contents/MacOS/$(basename "$SRV")"
 # host-as-entry-point build. The launcher runs as an accessory (no Dock tile of
 # its own); the host sets the regular policy and owns the one tile.
 cp dist/cef/agentmux-launcher "$APP/Contents/MacOS/agentmux-launcher"
+
+# Bundled tools — agentmux-srv adds <exe_dir>/tools/bin to Claude's PATH.
+# On macOS, exe_dir = Contents/MacOS, so tools land at Contents/MacOS/tools/bin/.
+mkdir -p "$APP/Contents/MacOS/tools/bin"
+cp target/release/agentmux-mcp "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
 
 # Frontend is a tree of resource files (HTML/CSS/fonts), NOT code. codesign
 # only allows executables under Contents/MacOS/ — a resource dir there breaks
@@ -270,6 +276,10 @@ done
 #    be signed here, before the bundle seal.
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
+# agentmux-mcp is a nested Mach-O under MacOS/tools/bin/ (Claude's PATH). It must
+# be signed inside-out before the seal or `codesign --verify --deep --strict`
+# fails on the unsigned binary and hardened-runtime/notarization rejects it.
+"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
 # 5. Seal the .app bundle last. codesign signs the main executable
 #    (agentmux-launcher) as part of sealing; pass the entitlements so the
 #    launcher is hardened-runtime signed identically to the host.

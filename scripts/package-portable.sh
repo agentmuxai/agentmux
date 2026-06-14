@@ -28,7 +28,7 @@ ZIPPATH="$OUTDIR/agentmux-$LABEL-x64-portable.zip"
 echo "Packaging AgentMux $LABEL Portable..."
 
 # Verify required files
-for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe target/release/agentmux-bashwrap.exe; do
+for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-srv-$VERSION-windows.x64.exe dist/frontend/index.html target/release/agentmux-launcher.exe target/release/agentmux-bashwrap.exe target/release/agentmux-mcp.exe; do
     if [ ! -f "$f" ]; then
         echo "ERROR: $f not found — build first" >&2
         exit 1
@@ -119,6 +119,12 @@ cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 # to PATH for Claude's env, so the wrapper must land in tools/bin.
 # See docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md.
 cp target/release/agentmux-bashwrap.exe "$PORTABLE/runtime/tools/bin/"
+
+# MCP server binary — auto-injected into .mcp.json (agent_config.rs
+# "command": "agentmux-mcp"). agentmux-srv adds tools/bin to Claude's
+# PATH so the binary is found without an absolute path.
+# See docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.2.
+cp target/release/agentmux-mcp.exe "$PORTABLE/runtime/tools/bin/"
 
 # wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md. No binary
 # to ship anymore; AGENTMUX env var is now a plain "1" sentinel.

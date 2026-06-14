@@ -656,10 +656,10 @@ pub fn tear_off_sc_move_handshake(
 
     #[cfg(not(target_os = "windows"))]
     let handshake_ms: f64 = {
-        // Phase 7 adds macOS (NSWindow performWindowDragWithEvent) +
-        // Linux (_NET_WM_MOVERESIZE / xdg_toplevel.move) equivalents.
-        // For now the non-Windows path is a no-op so the IPC contract
-        // exists and the rest of the pipeline can be cross-platform.
+        // macOS (host-side manual move loop) and Linux (BeginWindowDrag →
+        // _NET_WM_MOVERESIZE / xdg_toplevel.move) have their own drag paths;
+        // this handshake-timing value stays a no-op on non-Windows so the IPC
+        // contract exists and the rest of the pipeline can be cross-platform.
         let _ = (state, &dest_label);
         0.0
     };

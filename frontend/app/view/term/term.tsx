@@ -163,7 +163,10 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         if (ts?.["term:scrollback"]) termScrollback = Math.floor(ts["term:scrollback"]);
         if (blockData()?.meta?.["term:scrollback"]) termScrollback = Math.floor(blockData().meta["term:scrollback"]);
         termScrollback = Math.max(0, Math.min(termScrollback, 50000));
-        const termAllowBPM = termBPMAtom() ?? false;
+        // Default ON: modern shells (bash 4+, zsh, fish) all support BPM and it
+        // prevents the shell from executing partial lines mid-paste. Disable per-pane
+        // via term:allowbracketedpaste=false for legacy shells that don't support it.
+        const termAllowBPM = termBPMAtom() ?? true;
         const wasFocused = model.termRef.current != null && model.nodeModel.isFocused();
         const termWrap = new TermWrap(
             blockId,

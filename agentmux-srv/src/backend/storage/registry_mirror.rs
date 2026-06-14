@@ -28,16 +28,33 @@ use super::store::{AgentInstance, Store};
 /// cross-version dropdown.
 fn agent_instance_to_record(
     inst: &AgentInstance,
-    agents_root: &Path,
+    global_agents_root: Option<&Path>,
+    channel_agents_base: &Path,
 ) -> Result<crate::registry::NamedAgentRecord, String> {
     use crate::registry::{NamedAgentRecord, NamedAgentRecordV1};
-    let rel = relative_workdir(&inst.working_directory, agents_root).ok_or_else(|| {
-        format!(
-            "working_directory {:?} is not under {:?}",
-            inst.working_directory,
-            agents_root.display()
-        )
-    })?;
+    // Agent workspaces are GLOBAL (`<home>/agents/<name>`), so anchor on that
+    // global root FIRST, falling back to this channel's agents dir only for a
+    // legacy in-channel workspace. This MUST match `registry/migrate.rs`'s
+    // `row_to_record` — the one-shot migration and this live mirror have to stamp
+    // the same `source_agents_base` for a given agent or a reader sees two
+    // different bases. Without the global branch, every real (global) workspace
+    // failed strip_prefix and the agent was dropped from the registry ("not
+    // representable") — the live-write twin of the bug #1393 fixed in the
+    // migration.
+    let (rel, base): (String, &Path) = global_agents_root
+        .and_then(|g| relative_workdir(&inst.working_directory, g).map(|r| (r, g)))
+        .or_else(|| {
+            relative_workdir(&inst.working_directory, channel_agents_base)
+                .map(|r| (r, channel_agents_base))
+        })
+        .ok_or_else(|| {
+            format!(
+                "working_directory {:?} is under neither the global agents root {:?} nor the channel base {:?}",
+                inst.working_directory,
+                global_agents_root.map(|p| p.display().to_string()),
+                channel_agents_base.display()
+            )
+        })?;
     let version = env!("CARGO_PKG_VERSION").to_string();
     let data = NamedAgentRecordV1 {
         instance_id: inst.id.clone(),
@@ -49,11 +66,11 @@ fn agent_instance_to_record(
         // record can `--resume` without joining the current channel's SQLite.
         session_id: empty_to_none(&inst.session_id),
         working_dir: rel,
-        // v3: the agents dir `working_dir` is relative to — this row lives in
-        // the CURRENT channel, so its source base is the channel agents dir we
-        // just stripped against. Lets a different channel reconstruct the
-        // absolute path instead of re-joining under its own agents dir (P0.4).
-        source_agents_base: Some(agents_root.to_string_lossy().to_string()),
+        // v3: the agents dir `working_dir` is relative to — the GLOBAL workspace
+        // root for a normal agent, or this channel's agents dir for a legacy
+        // in-channel workspace. Stored absolute so any channel reconstructs the
+        // path via `source_agents_base.join(working_dir)` (P0.4).
+        source_agents_base: Some(base.to_string_lossy().to_string()),
         created_at_ms: inst.created_at,
         last_launched_at_ms: inst.started_at,
         created_by_version: version.clone(),
@@ -148,7 +165,14 @@ impl Store {
             tracing::warn!("registry: no agents base — skipping mirror");
             return;
         };
-        let rec = match agent_instance_to_record(inst, &agents_root) {
+        // Agent workspaces are GLOBAL (`<home>/agents/<name>`). Derive `<home>`
+        // from the registry root exactly as main.rs does for the one-shot
+        // migration (registry = `<home>/shared/agents/registry` → `nth(3)` strips
+        // registry→agents→shared = `<home>`), so the live mirror and the migration
+        // anchor identically. `None` in shallow test/pre-re-root layouts → the
+        // mirror falls back to the per-channel base.
+        let global_agents_root = reg.root().ancestors().nth(3).map(|h| h.join("agents"));
+        let rec = match agent_instance_to_record(inst, global_agents_root.as_deref(), &agents_root) {
             Ok(rec) => rec,
             Err(e) => {
                 tracing::warn!(

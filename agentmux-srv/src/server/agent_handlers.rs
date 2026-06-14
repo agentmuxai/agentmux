@@ -1803,18 +1803,130 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty());
 
-                let instances = wstore
-                    // Picker "My Agents": include continuations.
-                    // Under Option E a continuation row is the most-
-                    // recent named instance of an agent the user
-                    // actively used — exactly what we want surfaced.
-                    .instance_list_named(
-                        raw_limit,
-                        None,
-                        identity_filter,
-                        /* include_continuations */ true,
-                    )
-                    .map_err(|e| format!("listrecentsessions: {e}"))?;
+                // "My Agents" sources from the cross-version REGISTRY when it's
+                // available, so agents created in ANY build / channel / version
+                // appear here — not just this instance's local SQLite sessions
+                // (the live mirror, registry_mirror.rs, keeps the registry current
+                // for global workspaces). Falls back to local SQLite when the
+                // registry couldn't be resolved (CI / odd envs). Cross-channel rows
+                // arrive as synthetic instances (no live block); the per-instance
+                // snapshot enrichment below lights up the ones that ALSO ran here.
+                let instances: Vec<AgentInstance> = match wstore.shared_agent_registry() {
+                    Some(reg) => {
+                        let agents_root = wstore.registry_agents_base();
+                        let mut records = reg
+                            .list_active()
+                            .map_err(|e| format!("listrecentsessions: registry: {e}"))?;
+                        if let Some(idf) = identity_filter {
+                            records.retain(|r| r.data.identity_id.as_deref() == Some(idf));
+                        }
+                        // Dedup by (definition_id, instance_name) keeping the newest
+                        // launch — the registry read path lacks SQLite's chain-root
+                        // collapse, so two fresh heads of one logical agent would
+                        // otherwise double up. Sort newest-first within each group,
+                        // collapse, then re-sort by recency.
+                        records.sort_by(|a, b| {
+                            a.data
+                                .definition_id
+                                .cmp(&b.data.definition_id)
+                                .then_with(|| a.data.instance_name.cmp(&b.data.instance_name))
+                                .then_with(|| {
+                                    b.data.last_launched_at_ms.cmp(&a.data.last_launched_at_ms)
+                                })
+                        });
+                        records.dedup_by(|a, b| {
+                            a.data.definition_id == b.data.definition_id
+                                && a.data.instance_name == b.data.instance_name
+                        });
+                        records.sort_by(|a, b| {
+                            b.data.last_launched_at_ms.cmp(&a.data.last_launched_at_ms)
+                        });
+                        records.truncate(raw_limit);
+                        // Local agents in PICKER mode (include_continuations=true):
+                        // collapses each chain to one row AND surfaces orphan
+                        // continuations (head hard-deleted) as their own root, so
+                        // they don't vanish from "My Agents" (reagent P2). Indexed by
+                        // (definition_id, instance_name) — the SAME key the registry
+                        // dedup uses — keeping the newest, so overlay AND the
+                        // local-only append agree on identity (reagent P1).
+                        let local = wstore
+                            .instance_list_named(raw_limit, None, identity_filter, true)
+                            .unwrap_or_default();
+                        let mut local_by_key: std::collections::HashMap<
+                            (String, String),
+                            AgentInstance,
+                        > = std::collections::HashMap::new();
+                        for li in local {
+                            let key = (li.definition_id.clone(), li.instance_name.clone());
+                            match local_by_key.get(&key) {
+                                Some(e) if e.started_at >= li.started_at => {}
+                                _ => {
+                                    local_by_key.insert(key, li);
+                                }
+                            }
+                        }
+                        let mut out: Vec<AgentInstance> = records
+                            .into_iter()
+                            .map(|rec| {
+                                let d = rec.data;
+                                let key = (d.definition_id.clone(), d.instance_name.clone());
+                                if let Some(li) = local_by_key.get(&key) {
+                                    return li.clone();
+                                }
+                                // Reconstruct the absolute workdir from the record's
+                                // source base (v3) or the current channel (legacy).
+                                let working_directory = match d.source_agents_base.as_deref() {
+                                    Some(src) => std::path::Path::new(src)
+                                        .join(&d.working_dir)
+                                        .to_string_lossy()
+                                        .to_string(),
+                                    None => match agents_root.as_ref() {
+                                        Some(root) => root
+                                            .join(&d.working_dir)
+                                            .to_string_lossy()
+                                            .to_string(),
+                                        None => d.working_dir.clone(),
+                                    },
+                                };
+                                AgentInstance {
+                                    id: d.instance_id,
+                                    definition_id: d.definition_id,
+                                    parent_instance_id: String::new(),
+                                    block_id: String::new(),
+                                    session_id: d.session_id.unwrap_or_default(),
+                                    status: "available".to_string(),
+                                    github_context: String::new(),
+                                    started_at: d.last_launched_at_ms,
+                                    ended_at: 0,
+                                    created_at: d.created_at_ms,
+                                    identity_id: d.identity_id.unwrap_or_default(),
+                                    memory_id: d.memory_id.unwrap_or_default(),
+                                    instance_name: d.instance_name,
+                                    working_directory,
+                                    display_hidden: false,
+                                }
+                            })
+                            .collect();
+                        // APPEND local-only agents — those whose (definition_id,
+                        // instance_name) no registry record represents (created
+                        // before the live mirror could register them, or orphan
+                        // continuations). Keyed identically to the dedup, so a deduped
+                        // agent's local head never re-appears as a duplicate row.
+                        let have_keys: std::collections::HashSet<(String, String)> = out
+                            .iter()
+                            .map(|i| (i.definition_id.clone(), i.instance_name.clone()))
+                            .collect();
+                        for (key, li) in local_by_key {
+                            if !have_keys.contains(&key) {
+                                out.push(li);
+                            }
+                        }
+                        out
+                    }
+                    None => wstore
+                        .instance_list_named(raw_limit, None, identity_filter, true)
+                        .map_err(|e| format!("listrecentsessions: {e}"))?,
+                };
 
                 let defs = wstore
                     .agent_def_list()
@@ -2799,6 +2911,7 @@ mod recent_sessions_tests {
             app_path: String::new(),
             wstore: wstore.clone(),
             filestore: filestore.clone(),
+            global_transcript_store: None,
             event_bus: event_bus.clone(),
             broker,
             reactive_handler,
@@ -3083,6 +3196,7 @@ mod recent_sessions_tests {
             app_path: String::new(),
             wstore: wstore.clone(),
             filestore: filestore.clone(),
+            global_transcript_store: None,
             event_bus: event_bus.clone(),
             broker,
             reactive_handler,

@@ -53,6 +53,13 @@ pub struct AppState {
     pub app_path: String,
     pub wstore: Arc<Store>,
     pub filestore: Arc<FileStore>,
+    /// GLOBAL, channel-independent transcript store backing the
+    /// `agent:<defId>:current` zone. `None` when the shared root can't be
+    /// resolved (global transcripts disabled — falls back to per-channel
+    /// `filestore`). Lets an agent's conversation load when opened from any
+    /// build/channel, finishing the cross-channel arc started by #1387–#1396.
+    /// See `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
+    pub global_transcript_store: Option<Arc<FileStore>>,
     pub event_bus: Arc<EventBus>,
     pub broker: Arc<Broker>,
     pub reactive_handler: &'static ReactiveHandler,
@@ -217,6 +224,11 @@ pub fn build_router(state: AppState) -> Router {
         // Bash command is running; we forward to the in-process WPS broker.
         // Auth-gated like the other reactive routes (PR #801 pattern).
         .route("/agentmux/wps/publish", post(handle_wps_publish))
+        // Persistent shell launch endpoint
+        // (SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.3). agentmux-mcp's
+        // Shell tool POSTs here; we publish shell_node_create + spawn a
+        // ShellNodeRunner that streams shell_chunk events to the frontend.
+        .route("/api/v1/shell/create", post(handle_shell_create))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -357,6 +369,133 @@ async fn handle_wps_publish(
     };
     state.broker.publish(event);
     (StatusCode::OK, Json(json!({"ok": true})))
+}
+
+// ---- Shell create ----
+
+#[derive(serde::Deserialize)]
+struct ShellCreateRequest {
+    /// Block UUID of the agent pane that launched the shell.
+    /// Events will be scoped to `block:<agent_block_id>` so only
+    /// that pane's subscription receives them.
+    agent_block_id: String,
+    cmd: String,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    env: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(serde::Serialize)]
+struct ShellCreateResponse {
+    shell_id: String,
+}
+
+/// `POST /api/v1/shell/create` — start a persistent background shell.
+///
+/// Called by `agentmux-mcp`'s `Shell` tool. Returns immediately with a
+/// `shell_id`; the `ShellNodeRunner` streams stdout/stderr to the frontend
+/// as `shell_chunk` WPS events without blocking the agent.
+async fn handle_shell_create(
+    State(state): State<AppState>,
+    Json(req): Json<ShellCreateRequest>,
+) -> impl IntoResponse {
+    let shell_id = uuid::Uuid::new_v4().to_string();
+    let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    // Read the agent block once for both the cwd and env fallbacks below.
+    let agent_block = state.wstore
+        .get::<crate::backend::obj::Block>(&req.agent_block_id)
+        .ok()
+        .flatten();
+
+    // If cwd wasn't supplied by the caller, fall back to the agent block's
+    // cmd:cwd — the working directory the agent pane was launched with.
+    // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
+    // (typically the portable runtime/ dir) instead of the project dir.
+    let effective_cwd = req.cwd.or_else(|| {
+        agent_block.as_ref().and_then(|block| {
+            let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+            if cwd.is_empty() { None } else { Some(cwd.to_string()) }
+        })
+    });
+
+    // Env parity with the agent CLI: start from the agent block's stored
+    // cmd:env (the per-agent env the agent process is launched with — same
+    // shape app_api.rs / websocket.rs read), then let the caller-supplied
+    // req.env override on top (explicit Shell env wins). This forwards the
+    // concrete per-agent env so `Shell(...)` runs with the same env the agent
+    // itself sees, mirroring the cmd:cwd fallback above.
+    //
+    // NOT forwarded here: the dynamic identity bindings (resolver.rs) and the
+    // bundled tools/bin PATH prefix that blockcontroller/shell.rs injects at
+    // agent-CLI spawn time — those are resolved live per spawn, not stored in
+    // cmd:env. The MCP server (agentmux-mcp) is itself launched by the agent
+    // CLI through the bundled tools/bin, so tools it spawns inherit that PATH;
+    // shells created here run from agentmux-srv's env plus cmd:env + req.env.
+    let mut effective_env: std::collections::HashMap<String, String> = agent_block
+        .as_ref()
+        .and_then(|block| match block.meta.get("cmd:env") {
+            Some(serde_json::Value::Object(obj)) => Some(
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if let Some(req_env) = req.env {
+        effective_env.extend(req_env);
+    }
+
+    tracing::info!(
+        block_id = %req.agent_block_id,
+        shell_id = %shell_id,
+        cmd = %req.cmd,
+        cwd = ?effective_cwd,
+        "shell.create"
+    );
+
+    // Publish shell_node_create so the frontend inserts the row
+    // before the first chunk arrives (avoids a flash of orphaned chunks).
+    // persist: 64 — retain up to 64 shell_node_create events per block scope
+    // so multiple shells in a pane all replay on WS reconnect / pane remount.
+    // (persist: 1 meant only the last shell's create event was kept; earlier
+    // shells lost their create event while their shell_chunk events at
+    // persist: 1024 still replayed, causing the reducer to silently drop
+    // orphaned chunks.)
+    state.broker.publish(crate::backend::wps::WaveEvent {
+        event: crate::backend::wps::EVENT_SHELL_NODE_CREATE.to_string(),
+        scopes: vec![format!("block:{}", req.agent_block_id)],
+        sender: String::new(),
+        persist: 64,
+        data: Some(json!({
+            "shell_id": shell_id,
+            "cmd": req.cmd,
+            "cwd": effective_cwd,
+            "title": title,
+            "timestamp": now_ms,
+        })),
+    });
+
+    // Spawn the runner — fire-and-forget; events flow independently.
+    let runner = crate::backend::shell_node::ShellNodeRunner {
+        shell_id: shell_id.clone(),
+        block_id: req.agent_block_id,
+        cmd: req.cmd,
+        cwd: effective_cwd,
+        extra_env: effective_env,
+        broker: Arc::clone(&state.broker),
+    };
+    tokio::spawn(runner.run());
+
+    (StatusCode::OK, Json(ShellCreateResponse { shell_id }))
 }
 
 // ---- Auth Middleware ----

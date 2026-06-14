@@ -40,6 +40,7 @@ pub(crate) fn test_state() -> AppState {
         app_path: String::new(),
         wstore,
         filestore,
+        global_transcript_store: None,
         event_bus: event_bus.clone(),
         broker,
         reactive_handler,
