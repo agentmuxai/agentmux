@@ -104,6 +104,51 @@ pub fn validate_and_current(definition_id: &str) -> Result<String, String> {
     Ok(agent_current_zone(definition_id))
 }
 
+// ---------------------------------------------------------------------------
+// Global (cross-channel) transcript store
+// ---------------------------------------------------------------------------
+
+/// Process-global handle to the GLOBAL transcript FileStore (the one rooted at
+/// `<shared>/agents/transcripts`, opened once in `main.rs`). Backs the
+/// `agent:<defId>:current` zone so a conversation loads when the agent is
+/// opened from *any* build/channel — finishing the cross-channel arc
+/// (#1387–#1396). `None` until `set_global_transcript_store` runs (or never, in
+/// unit tests / when the shared root can't be resolved), in which case the
+/// hot-path mirror is a no-op and reads fall back to the per-channel store.
+///
+/// It's a process-global rather than a threaded parameter because the store is
+/// genuinely process-wide (one per srv instance) and the alternative would be
+/// plumbing an `Option<Arc<FileStore>>` through `resync_controller` and every
+/// block-controller constructor purely to reach the stdout-reader hot path.
+static GLOBAL_TRANSCRIPT_STORE: std::sync::OnceLock<Arc<FileStore>> = std::sync::OnceLock::new();
+
+/// Install the global transcript store. Called once from `main.rs` startup.
+/// Idempotent — a second call is ignored (the first store wins).
+pub fn set_global_transcript_store(store: Arc<FileStore>) {
+    let _ = GLOBAL_TRANSCRIPT_STORE.set(store);
+}
+
+/// Borrow the global transcript store, if installed.
+pub fn global_transcript_store() -> Option<&'static Arc<FileStore>> {
+    GLOBAL_TRANSCRIPT_STORE.get()
+}
+
+/// Resolve the agent's GLOBAL `agent:<defId>:current` zone from a block's meta.
+///
+/// The block's `agentId` meta IS the agent `definition_id` (the same value the
+/// snapshot RPCs and `blockfile:read_range` fallback key on — see
+/// `app_api.rs`), so the zone the hot-path mirror *writes* and the zone the
+/// read fallback *reads* are identical by construction. Returns `None` when the
+/// block isn't agent-anchored or carries an invalid id (no mirror/fallback).
+pub fn agent_zone_for_block_meta(meta: &crate::backend::obj::MetaMapType) -> Option<String> {
+    let def_id = crate::backend::obj::meta_get_string(meta, "agentId", "");
+    if is_valid_definition_id(&def_id) {
+        Some(agent_current_zone(&def_id))
+    } else {
+        None
+    }
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -117,13 +162,26 @@ fn now_ms() -> u64 {
 
 /// Write `content` to `output.state.json` in `agent:<defId>:current`.
 /// Idempotent — creates the file if missing, overwrites otherwise.
+///
+/// The per-channel write is primary (preserving all existing same-channel
+/// behaviour); the snapshot overlay is *additionally* mirrored into the GLOBAL
+/// transcript store (when installed) so a cross-channel open — and the
+/// migrated-agent backfill — find a coherent zone (overlay + `output`
+/// together). Mirroring is best-effort: a global-store failure is logged, never
+/// propagated. See `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
 pub fn write_session_state(
     filestore: &FileStore,
     definition_id: &str,
     content: &[u8],
 ) -> Result<(), String> {
     let zone = validate_and_current(definition_id)?;
-    write_zone_file(filestore, &zone, SNAPSHOT_FILE, content)
+    write_zone_file(filestore, &zone, SNAPSHOT_FILE, content)?;
+    if let Some(gfs) = global_transcript_store() {
+        if let Err(e) = write_zone_file(gfs, &zone, SNAPSHOT_FILE, content) {
+            tracing::warn!(zone = %zone, error = %e, "global transcripts: snapshot mirror failed");
+        }
+    }
+    Ok(())
 }
 
 /// Append `line` (with a trailing newline added if not present) to
@@ -149,23 +207,42 @@ pub fn append_session_output(
 /// Read `output.state.json` from `agent:<defId>:current`. Returns
 /// `Ok((None, None))` when the zone doesn't exist — that's the
 /// "fresh agent, nothing to restore" path and is NOT an error.
+///
+/// Reads the per-channel store first (primary), then falls back to the GLOBAL
+/// transcript store so an agent opened from another build/channel still
+/// restores its overlay. Symmetric with the `blockfile:read_range` fallback in
+/// `app_api.rs`.
 pub fn read_session_state(
     filestore: &FileStore,
     definition_id: &str,
 ) -> Result<(Option<String>, Option<i64>), String> {
     let zone = validate_and_current(definition_id)?;
-    let stat = filestore
-        .stat(&zone, SNAPSHOT_FILE)
+    if let Some(found) = read_snapshot_from(filestore, &zone)? {
+        return Ok((Some(found.0), Some(found.1)));
+    }
+    // Cross-channel fallback: the agent's snapshot may live only in the global
+    // store (it ran in another build/channel, or was backfilled there).
+    if let Some(gfs) = global_transcript_store() {
+        if let Some(found) = read_snapshot_from(gfs, &zone)? {
+            return Ok((Some(found.0), Some(found.1)));
+        }
+    }
+    Ok((None, None))
+}
+
+/// Read `output.state.json` from `zone` in `store`. `Ok(None)` when absent.
+fn read_snapshot_from(store: &FileStore, zone: &str) -> Result<Option<(String, i64)>, String> {
+    let stat = store
+        .stat(zone, SNAPSHOT_FILE)
         .map_err(|e| format!("stat: {e}"))?;
     let Some(file) = stat else {
-        return Ok((None, None));
+        return Ok(None);
     };
-    let bytes = filestore
-        .read_file(&zone, SNAPSHOT_FILE)
+    let bytes = store
+        .read_file(zone, SNAPSHOT_FILE)
         .map_err(|e| format!("read_file: {e}"))?
         .unwrap_or_default();
-    let content = String::from_utf8_lossy(&bytes).into_owned();
-    Ok((Some(content), Some(file.modts)))
+    Ok(Some((String::from_utf8_lossy(&bytes).into_owned(), file.modts)))
 }
 
 /// Archive `agent:<defId>:current` to `agent:<defId>:archive:<now_ms>`.
@@ -1220,6 +1297,53 @@ mod tests {
 
     fn fresh_filestore() -> Arc<FileStore> {
         Arc::new(FileStore::open_in_memory().unwrap())
+    }
+
+    // ---- Cross-channel transcript zone resolution ----
+
+    #[test]
+    fn agent_zone_for_block_meta_resolves_from_agent_id() {
+        let mut meta = MetaMapType::new();
+        meta.insert("agentId".to_string(), serde_json::json!("def-abc123"));
+        assert_eq!(
+            agent_zone_for_block_meta(&meta).as_deref(),
+            Some("agent:def-abc123:current"),
+        );
+    }
+
+    #[test]
+    fn agent_zone_for_block_meta_none_when_missing_or_invalid() {
+        // No agentId at all.
+        assert_eq!(agent_zone_for_block_meta(&MetaMapType::new()), None);
+        // Empty agentId.
+        let mut empty = MetaMapType::new();
+        empty.insert("agentId".to_string(), serde_json::json!(""));
+        assert_eq!(agent_zone_for_block_meta(&empty), None);
+        // Path-traversal / invalid characters are rejected (zone-injection guard).
+        let mut bad = MetaMapType::new();
+        bad.insert("agentId".to_string(), serde_json::json!("../etc"));
+        assert_eq!(agent_zone_for_block_meta(&bad), None);
+    }
+
+    #[test]
+    fn read_session_state_falls_back_to_global_store() {
+        // Per-channel store has no snapshot for the agent; the global store does.
+        // read_session_state must return the global snapshot (cross-channel open).
+        let per_channel = fresh_filestore();
+        let global = fresh_filestore();
+        set_global_transcript_store(global.clone());
+
+        let def_id = "def-global-fallback-xyz";
+        let zone = agent_current_zone(def_id);
+        let body = br#"{"schemaVersion":2,"highWaterMark":3}"#;
+        global
+            .make_file(&zone, SNAPSHOT_FILE, FileMeta::default(), FileOpts::default())
+            .unwrap();
+        global.write_file(&zone, SNAPSHOT_FILE, body).unwrap();
+
+        let (content, modts) = read_session_state(&per_channel, def_id).unwrap();
+        assert_eq!(content.as_deref(), Some(std::str::from_utf8(body).unwrap()));
+        assert!(modts.is_some());
     }
 
     #[test]

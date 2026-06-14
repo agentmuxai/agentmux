@@ -951,23 +951,97 @@ fn resolve_placement(
 }
 
 // ---------------------------------------------------------------------------
+// Cross-channel transcript fallback (shared by line_count + read_range)
+// ---------------------------------------------------------------------------
+
+/// If this channel has no local `output` for `block_id` but the agent's GLOBAL
+/// transcript zone (`agent:<defId>:current`) does, return `(global_store,
+/// agent_zone)`. Returns `None` when the local output is present and non-empty,
+/// the block isn't agent-anchored, there's no global store, or the global zone
+/// is empty — callers then read the per-channel store keyed by `block_id`.
+///
+/// Only the agent `output` stream is globalized; every other file stays local.
+/// This is what makes opening a cross-channel agent show its conversation: the
+/// freshly-opened local block has no `output`, so the read is transparently
+/// served from the global zone the agent wrote elsewhere (mirrored live by the
+/// block-controller hot path, or backfilled).
+fn global_output_source(
+    per_channel: &Arc<crate::backend::storage::filestore::FileStore>,
+    global: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    wstore: &Arc<crate::backend::storage::store::Store>,
+    block_id: &str,
+    filename: &str,
+) -> Option<(Arc<crate::backend::storage::filestore::FileStore>, String)> {
+    if filename != crate::backend::agent_session::OUTPUT_FILE {
+        return None;
+    }
+    // Local output present & non-empty → normal path, no fallback.
+    if matches!(per_channel.stat(block_id, filename), Ok(Some(ref wf)) if wf.size > 0) {
+        return None;
+    }
+    let gfs = global.as_ref()?;
+    let block = wstore.get::<Block>(block_id).ok().flatten()?;
+    let zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)?;
+    match gfs.stat(&zone, filename) {
+        Ok(Some(ref wf)) if wf.size > 0 => Some((gfs.clone(), zone)),
+        _ => None,
+    }
+}
+
+/// Exact non-blank line count of the `output` file in `zone`, computed via the
+/// same streaming index builder `read_range` uses (so the two endpoints always
+/// agree). Returns `Some(0)` for an empty file, `None` on read failure.
+fn global_zone_line_count(
+    gfs: &Arc<crate::backend::storage::filestore::FileStore>,
+    zone: &str,
+) -> Option<u64> {
+    let stat = gfs
+        .stat(zone, crate::backend::agent_session::OUTPUT_FILE)
+        .ok()??;
+    if stat.size == 0 {
+        return Some(0);
+    }
+    crate::backend::blockcontroller::shell::rebuild_output_idx(gfs, zone, stat.size as u64)
+}
+
+// ---------------------------------------------------------------------------
 // blockfile:line_count
 // ---------------------------------------------------------------------------
 
 fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let wstore = state.wstore.clone();
+    let filestore = state.filestore.clone();
+    let global_store = state.global_transcript_store.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_LINE_COUNT,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
             let wstore = wstore.clone();
+            let filestore = filestore.clone();
+            let global_store = global_store.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileLineCountData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:line_count: {e}"))?;
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
+
+                // Cross-channel fallback (checked first): when this channel has
+                // no local `output` for the block, the local `session:line_count`
+                // meta is absent/stale, so a fresh cross-channel open would
+                // report 0 lines and the pane would render empty. Count from the
+                // agent's GLOBAL transcript zone instead. See
+                // `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
+                if let Some((gfs, zone)) =
+                    global_output_source(&filestore, &global_store, &wstore, &cmd.block_id, &cmd.filename)
+                {
+                    if let Some(count) = global_zone_line_count(&gfs, &zone) {
+                        return Ok(Some(
+                            serde_json::to_value(&BlockfileLineCountResult { count }).unwrap(),
+                        ));
+                    }
+                }
 
                 // Fast path: read session:line_count meta (O(1), maintained
                 // by SessionStatsAccumulator). For "output" filename this is
@@ -1029,12 +1103,16 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let filestore = state.filestore.clone();
+    let global_store = state.global_transcript_store.clone();
+    let wstore = state.wstore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_READ_RANGE,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
             let filestore = filestore.clone();
+            let global_store = global_store.clone();
+            let wstore = wstore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileReadRangeData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:read_range: {e}"))?;
@@ -1044,6 +1122,15 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let limit = cmd.limit.min(10_000) as usize;
                 let offset = cmd.offset as usize;
                 let end = offset.saturating_add(limit);
+
+                // Cross-channel fallback: when this channel has no local `output`
+                // for the block, read the agent's GLOBAL transcript zone
+                // (`agent:<defId>:current`) instead. `read_block` is the zone for
+                // every FileStore call below — the local block_id normally, the
+                // agent zone when the agent ran in another build/channel.
+                let (filestore, read_block) =
+                    global_output_source(&filestore, &global_store, &wstore, &cmd.block_id, &cmd.filename)
+                        .unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
 
                 // Fast path: output.idx — a lazily-built, self-validating byte-offset
                 // index of every non-blank line in `output`. It lets us seek directly
@@ -1062,7 +1149,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 use crate::backend::blockcontroller::shell::{rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
                 if cmd.filename == "output" {
                     let idx_result: Option<BlockfileReadRangeResult> = (|| {
-                        let out_stat = filestore.stat(&cmd.block_id, "output").ok()??;
+                        let out_stat = filestore.stat(&read_block, "output").ok()??;
                         if out_stat.opts.circular {
                             return None; // circular files: fall back to slow path
                         }
@@ -1070,11 +1157,11 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                         // Determine total_lines, rebuilding the index iff it is missing or
                         // its covered-size header doesn't match the current output size.
-                        let idx_stat = filestore.stat(&cmd.block_id, "output.idx").ok().flatten();
+                        let idx_stat = filestore.stat(&read_block, "output.idx").ok().flatten();
                         let fresh = match &idx_stat {
                             Some(s) if s.size >= OUTPUT_IDX_HEADER_LEN => {
                                 let (_, h) = filestore
-                                    .read_at(&cmd.block_id, "output.idx", 0, OUTPUT_IDX_HEADER_LEN)
+                                    .read_at(&read_block, "output.idx", 0, OUTPUT_IDX_HEADER_LEN)
                                     .ok()?;
                                 u64::from_le_bytes(h.try_into().ok()?) == output_size
                             }
@@ -1084,7 +1171,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             let s = idx_stat.unwrap();
                             ((s.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64
                         } else {
-                            rebuild_output_idx(&filestore, &cmd.block_id, output_size)?
+                            rebuild_output_idx(&filestore, &read_block, output_size)?
                         };
 
                         // Empty result cases — answered from the index, no output read.
@@ -1096,7 +1183,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let entry = |k: u64| -> Option<i64> {
                             let (_, b) = filestore
                                 .read_at(
-                                    &cmd.block_id,
+                                    &read_block,
                                     "output.idx",
                                     OUTPUT_IDX_HEADER_LEN + (k * 8) as i64,
                                     8,
@@ -1113,7 +1200,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         };
                         let read_len = (byte_end - byte_start).max(0);
                         let (_, raw) = filestore
-                            .read_at(&cmd.block_id, "output", byte_start, read_len)
+                            .read_at(&read_block, "output", byte_start, read_len)
                             .ok()?;
                         let text = String::from_utf8_lossy(&raw);
                         let lines: Vec<String> = text
@@ -1140,9 +1227,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //
                 // If FileStore has the file and it is non-empty, read from disk.
                 // Otherwise fall back to ring buffer for backward compatibility.
-                let filestore_lines = match filestore.stat(&cmd.block_id, &cmd.filename) {
+                let filestore_lines = match filestore.stat(&read_block, &cmd.filename) {
                     Ok(Some(ref wf)) if wf.size > 0 => {
-                        match filestore.read_file(&cmd.block_id, &cmd.filename) {
+                        match filestore.read_file(&read_block, &cmd.filename) {
                             Ok(Some(bytes)) => {
                                 let text = String::from_utf8_lossy(&bytes);
                                 let lines: Vec<String> = text.lines()
@@ -2289,5 +2376,111 @@ fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod cross_channel_tests {
+    use super::*;
+    use crate::backend::agent_session::OUTPUT_FILE;
+    use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
+
+    fn mem_store() -> Arc<FileStore> {
+        Arc::new(FileStore::open_in_memory().unwrap())
+    }
+
+    fn seed_output(fs: &Arc<FileStore>, zone: &str, body: &[u8]) {
+        fs.make_file(zone, OUTPUT_FILE, FileMeta::default(), FileOpts::default())
+            .unwrap();
+        fs.append_data(zone, OUTPUT_FILE, body).unwrap();
+    }
+
+    fn insert_agent_block(wstore: &Arc<Store>, def_id: &str) -> String {
+        let oid = uuid::Uuid::new_v4().to_string();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!(def_id));
+        let mut block = Block {
+            oid: oid.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta,
+            subblockids: None,
+        };
+        wstore.insert(&mut block).expect("insert block");
+        oid
+    }
+
+    #[test]
+    fn global_output_source_falls_back_when_local_empty() {
+        let per_channel = mem_store();
+        let global = mem_store();
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = insert_agent_block(&wstore, "def-cc-1");
+
+        // No local output for the block, but the global zone has content.
+        seed_output(&global, "agent:def-cc-1:current", b"{\"type\":\"user\"}\n");
+
+        let resolved = global_output_source(
+            &per_channel,
+            &Some(global.clone()),
+            &wstore,
+            &block_id,
+            "output",
+        );
+        let (_store, zone) = resolved.expect("should fall back to global");
+        assert_eq!(zone, "agent:def-cc-1:current");
+    }
+
+    #[test]
+    fn global_output_source_prefers_local_when_present() {
+        let per_channel = mem_store();
+        let global = mem_store();
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = insert_agent_block(&wstore, "def-cc-2");
+
+        // Local output present & non-empty → no fallback.
+        seed_output(&per_channel, &block_id, b"{\"type\":\"local\"}\n");
+        seed_output(&global, "agent:def-cc-2:current", b"{\"type\":\"global\"}\n");
+
+        let resolved = global_output_source(
+            &per_channel,
+            &Some(global.clone()),
+            &wstore,
+            &block_id,
+            "output",
+        );
+        assert!(resolved.is_none(), "local output present → must not fall back");
+    }
+
+    #[test]
+    fn global_output_source_only_for_output_and_with_global_store() {
+        let per_channel = mem_store();
+        let global = mem_store();
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = insert_agent_block(&wstore, "def-cc-3");
+        seed_output(&global, "agent:def-cc-3:current", b"{\"x\":1}\n");
+
+        // Non-"output" filename is never globalized.
+        assert!(global_output_source(&per_channel, &Some(global.clone()), &wstore, &block_id, "term").is_none());
+        // No global store configured → None.
+        assert!(global_output_source(&per_channel, &None, &wstore, &block_id, "output").is_none());
+        // Non-agent block id → None.
+        assert!(global_output_source(&per_channel, &Some(global), &wstore, "not-a-block", "output").is_none());
+    }
+
+    #[test]
+    fn global_zone_line_count_counts_non_blank_lines() {
+        let global = mem_store();
+        let zone = "agent:def-cc-4:current";
+        seed_output(&global, zone, b"{\"a\":1}\n{\"b\":2}\n\n{\"c\":3}\n");
+        // 3 non-blank NDJSON lines (the blank line is ignored, matching read_range).
+        assert_eq!(global_zone_line_count(&global, zone), Some(3));
+
+        // Empty / absent zone → Some(0) / None respectively.
+        let empty_zone = "agent:def-empty:current";
+        assert_eq!(global_zone_line_count(&global, empty_zone), None);
+    }
 }
 

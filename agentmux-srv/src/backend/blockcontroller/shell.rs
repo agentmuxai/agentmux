@@ -865,6 +865,7 @@ impl Controller for ShellController {
                                 "term",
                                 &buf[..n],
                                 None, // PTY output is raw terminal data; no FileStore write-through
+                                None, // not an agent output stream; no global mirror
                             );
                             if let Some(ref mut t) = translator {
                                 accumulate_and_translate(
@@ -1208,6 +1209,7 @@ pub fn handle_append_block_file(
     filename: &str,
     data: &[u8],
     filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
 ) {
     let data64 = base64::engine::general_purpose::STANDARD.encode(data);
 
@@ -1283,6 +1285,67 @@ pub fn handle_append_block_file(
         // write failure, chunk-split lines, blank-line miscounting) at the cost of one
         // rescan per output-size change.
     }
+
+    // Mirror the agent's `output` stream into the GLOBAL transcript zone
+    // (`agent:<defId>:current`) so the conversation loads when this agent is
+    // opened from another build/channel. Fire-and-forget, exactly like the
+    // per-channel write above: a global-store hiccup must never stall the live
+    // pane. Callers pass `Some(zone)` only for the agent output stream, so we
+    // never mirror PTY `term` data or non-agent blocks.
+    if let Some(zone) = global_output_zone {
+        if let Some(gfs) = crate::backend::agent_session::global_transcript_store() {
+            mirror_append_to_global(gfs, zone, data);
+        }
+    }
+}
+
+/// Append `data` to the global transcript zone's `output` file, creating it
+/// lazily on first write. Mirrors the per-channel write-through in
+/// [`handle_append_block_file`]; all errors are logged and swallowed so the
+/// hot stdout path is never blocked by the global store.
+fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[u8]) {
+    use crate::backend::agent_session::OUTPUT_FILE;
+    use crate::backend::storage::error::StoreError;
+
+    match gfs.stat(zone, OUTPUT_FILE) {
+        Ok(None) => {
+            if let Err(e) = gfs.make_file(
+                zone,
+                OUTPUT_FILE,
+                std::collections::HashMap::new(),
+                crate::backend::storage::filestore::FileOpts::default(),
+            ) {
+                if !matches!(e, StoreError::AlreadyExists) {
+                    tracing::warn!(zone = %zone, error = %e, "global transcripts: make_file failed; skipping mirror");
+                    return;
+                }
+            }
+        }
+        Ok(Some(_)) => {}
+        Err(e) => {
+            tracing::warn!(zone = %zone, error = %e, "global transcripts: stat failed; skipping mirror");
+            return;
+        }
+    }
+    if let Err(e) = gfs.append_data(zone, OUTPUT_FILE, data) {
+        tracing::warn!(zone = %zone, error = %e, "global transcripts: append_data failed");
+    }
+}
+
+/// Resolve a block's GLOBAL transcript zone (`agent:<defId>:current`) from its
+/// `agentId` meta, looking the block up in `wstore`. Returns `None` for
+/// non-agent blocks, when there's no store, or when the block can't be loaded —
+/// the caller then passes `None` and no global mirror happens. Shared by the
+/// subprocess / persistent / acp agent controllers.
+pub(crate) fn resolve_global_output_zone(
+    wstore: &Option<Arc<crate::backend::storage::store::Store>>,
+    block_id: &str,
+) -> Option<String> {
+    let store = wstore.as_ref()?;
+    let block = store
+        .must_get::<crate::backend::obj::Block>(block_id)
+        .ok()?;
+    crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)
 }
 
 /// Magic header size for `output.idx`: the first 8 bytes are the `output` byte-size
@@ -1703,7 +1766,7 @@ mod tests {
             },
         );
 
-        handle_append_block_file(&broker, "block-1", "term", b"hello world", None);
+        handle_append_block_file(&broker, "block-1", "term", b"hello world", None, None);
 
         // Check event was published
         let _history = broker.read_event_history(wps::EVENT_BLOCK_FILE, "block:block-1", 10);
@@ -1860,11 +1923,11 @@ mod tests {
 
         // First append — file does not exist yet; handle_append_block_file must create it lazily.
         let line1 = b"line one\n";
-        handle_append_block_file(&broker, block_id, filename, line1, Some(&fs));
+        handle_append_block_file(&broker, block_id, filename, line1, Some(&fs), None);
 
         // Second append
         let line2 = b"line two\n";
-        handle_append_block_file(&broker, block_id, filename, line2, Some(&fs));
+        handle_append_block_file(&broker, block_id, filename, line2, Some(&fs), None);
 
         // Read back from FileStore
         let data = fs.read_file(block_id, filename)
@@ -1889,9 +1952,67 @@ mod tests {
             },
         );
         // Re-publish one more line to confirm broker still receives events alongside filestore
-        handle_append_block_file(&broker, block_id, filename, b"line three\n", Some(&fs));
+        handle_append_block_file(&broker, block_id, filename, b"line three\n", Some(&fs), None);
         let stat_after = fs.stat(block_id, filename).unwrap().unwrap();
         assert_eq!(stat_after.size, (line1.len() + line2.len() + b"line three\n".len()) as i64);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Cross-channel global transcript mirror
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn mirror_append_to_global_creates_and_appends() {
+        use crate::backend::agent_session::OUTPUT_FILE;
+        let gfs = Arc::new(FileStore::open_in_memory().expect("global filestore"));
+        let zone = "agent:def-mirror-1:current";
+
+        // First append creates the file lazily.
+        mirror_append_to_global(&gfs, zone, b"{\"type\":\"user\"}\n");
+        // Second append extends it.
+        mirror_append_to_global(&gfs, zone, b"{\"type\":\"assistant\"}\n");
+
+        let data = gfs
+            .read_file(zone, OUTPUT_FILE)
+            .expect("read ok")
+            .expect("present");
+        let text = String::from_utf8(data).unwrap();
+        assert!(text.contains("\"user\""), "got {text:?}");
+        assert!(text.contains("\"assistant\""), "got {text:?}");
+        // Two NDJSON lines.
+        assert_eq!(text.lines().filter(|l| !l.trim().is_empty()).count(), 2);
+    }
+
+    #[test]
+    fn resolve_global_output_zone_maps_agent_block() {
+        let wstore = Arc::new(Store::open_in_memory().expect("wstore"));
+
+        // Agent-anchored block → zone resolved from agentId meta.
+        let oid = uuid::Uuid::new_v4().to_string();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("def-zone-1"));
+        let mut block = obj::Block {
+            oid: oid.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta,
+            subblockids: None,
+        };
+        wstore.insert(&mut block).expect("insert block");
+
+        let some = Some(wstore.clone());
+        assert_eq!(
+            resolve_global_output_zone(&some, &oid).as_deref(),
+            Some("agent:def-zone-1:current"),
+        );
+
+        // Unknown block id → None (no crash).
+        assert_eq!(resolve_global_output_zone(&some, "no-such-block"), None);
+        // No store → None.
+        assert_eq!(resolve_global_output_zone(&None, &oid), None);
     }
 
     // ────────────────────────────────────────────────────────────────

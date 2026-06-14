@@ -336,6 +336,9 @@ impl AcpController {
         let inner_clone = self.inner.clone();
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
+        // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
+        let global_output_zone =
+            super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             tracing::info!(block_id = %block_id_stdout, "ACP stdout_reader started");
@@ -408,6 +411,7 @@ impl AcpController {
                         ACP_OUTPUT_SUBJECT,
                         line_with_newline.as_bytes(),
                         filestore_clone.as_ref(),
+                        global_output_zone.as_deref(),
                     );
                 }
             }
