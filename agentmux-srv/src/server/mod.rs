@@ -402,20 +402,50 @@ async fn handle_shell_create(
         .unwrap_or_default()
         .as_millis() as u64;
 
+    // Read the agent block once for both the cwd and env fallbacks below.
+    let agent_block = state.wstore
+        .get::<crate::backend::obj::Block>(&req.agent_block_id)
+        .ok()
+        .flatten();
+
     // If cwd wasn't supplied by the caller, fall back to the agent block's
     // cmd:cwd — the working directory the agent pane was launched with.
     // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
     // (typically the portable runtime/ dir) instead of the project dir.
     let effective_cwd = req.cwd.or_else(|| {
-        state.wstore
-            .get::<crate::backend::obj::Block>(&req.agent_block_id)
-            .ok()
-            .flatten()
-            .and_then(|block| {
-                let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
-                if cwd.is_empty() { None } else { Some(cwd.to_string()) }
-            })
+        agent_block.as_ref().and_then(|block| {
+            let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
+            if cwd.is_empty() { None } else { Some(cwd.to_string()) }
+        })
     });
+
+    // Env parity with the agent CLI: start from the agent block's stored
+    // cmd:env (the per-agent env the agent process is launched with — same
+    // shape app_api.rs / websocket.rs read), then let the caller-supplied
+    // req.env override on top (explicit Shell env wins). This forwards the
+    // concrete per-agent env so `Shell(...)` runs with the same env the agent
+    // itself sees, mirroring the cmd:cwd fallback above.
+    //
+    // NOT forwarded here: the dynamic identity bindings (resolver.rs) and the
+    // bundled tools/bin PATH prefix that blockcontroller/shell.rs injects at
+    // agent-CLI spawn time — those are resolved live per spawn, not stored in
+    // cmd:env. The MCP server (agentmux-mcp) is itself launched by the agent
+    // CLI through the bundled tools/bin, so tools it spawns inherit that PATH;
+    // shells created here run from agentmux-srv's env plus cmd:env + req.env.
+    let mut effective_env: std::collections::HashMap<String, String> = agent_block
+        .as_ref()
+        .and_then(|block| match block.meta.get("cmd:env") {
+            Some(serde_json::Value::Object(obj)) => Some(
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if let Some(req_env) = req.env {
+        effective_env.extend(req_env);
+    }
 
     tracing::info!(
         block_id = %req.agent_block_id,
@@ -453,7 +483,7 @@ async fn handle_shell_create(
         block_id: req.agent_block_id,
         cmd: req.cmd,
         cwd: effective_cwd,
-        extra_env: req.env.unwrap_or_default(),
+        extra_env: effective_env,
         broker: Arc::clone(&state.broker),
     };
     tokio::spawn(runner.run());
