@@ -1278,9 +1278,10 @@ pub fn handle_append_block_file(
         }
         // Note: output.idx is NOT updated incrementally here. It is a lazily-built,
         // self-validating cache rebuilt by the read path whenever output grows (see
-        // ensure_output_idx in app_api.rs). This avoids every incremental-index
-        // failure mode (desync on write failure, chunk-split lines, blank-line
-        // miscounting) at the cost of one rescan per output-size change.
+        // `rebuild_output_idx` below, invoked from the blockfile:read_range handler
+        // in app_api.rs). This avoids every incremental-index failure mode (desync on
+        // write failure, chunk-split lines, blank-line miscounting) at the cost of one
+        // rescan per output-size change.
     }
 }
 
