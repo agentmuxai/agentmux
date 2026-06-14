@@ -23,13 +23,18 @@
 # Each candidate is validated by checking for libcef.so + icudtl.dat (necessary
 # minimum for a usable CEF runtime).
 #
-# Sanity check (warning, not failure)
-# -----------------------------------
-# If the chosen libcef.so is suspiciously large (>1 GB), it is almost certainly the
-# unstripped upstream debug build from cef-dll-sys, which means it lacks our
-# BeginWindowDrag patch. The runtime ABI guard in agentmux-cef will catch this and
-# log a warning at runtime, but we surface the issue at build time too so it's
-# obvious before the user clicks the binary and finds drag silently broken.
+# Diagnostics (warning vs. info, never failure)
+# ---------------------------------------------
+# The real risk is resolving to the cef-dll-sys cargo cache: that's the upstream
+# prebuilt CEF, which lacks our BeginWindowDrag patch regardless of file size, so
+# left-click window drag silently no-ops. We emit a WARNING whenever we fall through
+# to that candidate. The runtime ABI guard in agentmux-cef also catches it at
+# runtime, but surfacing it at build time makes it obvious before the user clicks.
+#
+# Size is NOT a reliable patched/unpatched signal: the patched dev build is ~1.5 GB
+# UNSTRIPPED (the AppImage packager strips it to ~260 MB at bundle time), so on the
+# cef-build/override trees a >1 GB libcef.so is expected — we emit a soft INFO there,
+# not the unpatched-provenance alarm.
 #
 # Output
 # ------
