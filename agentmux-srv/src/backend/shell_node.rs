@@ -116,29 +116,38 @@ impl ShellNodeRunner {
     }
 }
 
-// Every shell_chunk / exit event is published under TWO scopes:
-//   - `block:<block_id>`  → live delivery to the pane's per-block subscription
-//                           (installed once on mount in useAgentStream.ts).
-//   - `shell:<shell_id>`  → a per-shell persistence ring buffer. All shells in a
-//                           pane share the block ring (1024 entries), so a chatty
-//                           shell can evict an earlier shell's `exit` event from
-//                           replay, leaving that shell's row stuck `running` after
-//                           a pane remount / WS reconnect. Giving each shell its
-//                           own ring means a sibling can no longer evict it. The
-//                           frontend subscribes to `shell:<shell_id>` when it sees
-//                           the (block-scoped, persist:64) shell_node_create, so
-//                           the dedicated ring replays on remount.
-// The broker dedups on replay (reducer's isDuplicate / idempotent
-// ShellStatusUpdate), so a chunk delivered live via block AND replayed via shell
-// is harmless.
-fn shell_scopes(block_id: &str, shell_id: &str) -> Vec<String> {
-    vec![format!("block:{block_id}"), format!("shell:{shell_id}")]
+// Every shell_chunk / exit event is published under a SINGLE scope:
+//   - `shell:<shell_id>`  → a per-shell persistence ring buffer (1024 entries).
+//
+// Single-scope delivery (chosen over the fallback of strengthening the reducer's
+// dedup): an earlier design also published every chunk under `block:<block_id>`
+// for "live" delivery, so output produced before the frontend's `shell:<id>`
+// subscription established (the common case — process spawn + first lines beat
+// the WS resub round-trip) arrived LIVE via the block scope AND then again in the
+// replay burst when the broker replayed the whole `shell:<id>` ring on first
+// subscribe. The reducer's last-chunk-only `isDuplicate` let those non-adjacent
+// dups through → doubled output (full duplication on WS reconnect).
+//
+// Now chunks/exit go ONLY to `shell:<shell_id>`. The frontend subscribes to that
+// scope when it sees the (block-scoped, persist:64) `shell_node_create`. Because
+// the broker persists the ring regardless of subscribers (wps.rs persist_event
+// runs inside publish whenever persist>0), any output produced before the
+// subscription establishes is retained in the persist:1024 ring and replayed
+// exactly once on subscribe (guarded by the broker's per-route+event+scope
+// `replayed` set). No chunk is ever delivered via two paths → no duplication.
+//
+// This still preserves the reason the per-shell ring was introduced: each shell
+// has its OWN ring, so a chatty shell can't evict another shell's `exit` event
+// (the bug that left a sibling's row stuck `running` after a remount when all
+// shells shared the block ring).
+fn shell_scopes(shell_id: &str) -> Vec<String> {
+    vec![format!("shell:{shell_id}")]
 }
 
-fn publish_chunk(broker: &Broker, block_id: &str, shell_id: &str, kind: &str, content: &str, ts: u64) {
+fn publish_chunk(broker: &Broker, _block_id: &str, shell_id: &str, kind: &str, content: &str, ts: u64) {
     broker.publish(WaveEvent {
         event: EVENT_SHELL_CHUNK.to_string(),
-        scopes: shell_scopes(block_id, shell_id),
+        scopes: shell_scopes(shell_id),
         sender: String::new(),
         persist: 1024,
         data: Some(serde_json::json!({
@@ -151,10 +160,10 @@ fn publish_chunk(broker: &Broker, block_id: &str, shell_id: &str, kind: &str, co
     });
 }
 
-fn publish_exit(broker: &Broker, block_id: &str, shell_id: &str, exit_code: i32, ts: u64) {
+fn publish_exit(broker: &Broker, _block_id: &str, shell_id: &str, exit_code: i32, ts: u64) {
     broker.publish(WaveEvent {
         event: EVENT_SHELL_CHUNK.to_string(),
-        scopes: shell_scopes(block_id, shell_id),
+        scopes: shell_scopes(shell_id),
         sender: String::new(),
         persist: 1024,
         data: Some(serde_json::json!({

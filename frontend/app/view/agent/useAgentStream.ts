@@ -187,12 +187,12 @@ export function useAgentStream({
     // this the global handler would leak one per mount.
     onCleanup(() => { try { blockChunkUnsub(); } catch { /* ignore */ } });
 
-    // shell_chunk handler — shared by the per-block live subscription AND the
-    // per-shell replay subscriptions. The payload always carries `shell_id`, so
-    // one handler routes correctly regardless of which scope delivered it. The
-    // reducer dedups chunks (isDuplicate) and ShellStatusUpdate is idempotent,
-    // so a chunk delivered live via `block:<id>` and again on replay via
-    // `shell:<id>` after a remount is harmless.
+    // shell_chunk handler — used by the per-shell subscriptions. The payload
+    // always carries `shell_id`, so one handler routes correctly. Chunks are
+    // delivered via a SINGLE scope (`shell:<id>`); there is no longer a separate
+    // block-scope live path, so the same chunk can never arrive twice (the
+    // doubled-output bug this fix removes — see shell_node.rs for the full
+    // rationale).
     const handleShellChunk = (event: any) => {
         const d = event?.data;
         if (!d || typeof d !== "object") return;
@@ -218,14 +218,16 @@ export function useAgentStream({
     };
 
     // Per-shell shell_chunk subscriptions. The backend publishes each shell's
-    // chunk/exit events under BOTH `block:<id>` (live) and `shell:<shellId>` (a
-    // dedicated persistence ring — see shell_node.rs). The per-block
-    // subscription below covers live delivery, but on a pane remount / WS
-    // reconnect a chatty sibling shell may have evicted an earlier shell's exit
-    // event from the shared block ring. Subscribing to `shell:<shellId>` when we
-    // learn of the shell (via the persist:64 block-scoped shell_node_create that
-    // replays on remount) backfills that shell's own ring so its terminal status
-    // survives independently. Tracked here so all per-shell subs tear down on
+    // chunk/exit events under a SINGLE scope: `shell:<shellId>` (a dedicated
+    // persist:1024 ring — see shell_node.rs). This is the ONLY delivery path for
+    // chunks; we subscribe to it when we learn of the shell (via the persist:64
+    // block-scoped shell_node_create that replays on remount). Because the broker
+    // persists the ring regardless of subscribers, any output produced before
+    // this subscription establishes (the common spawn-beats-resub race) is
+    // retained in the ring and replayed exactly once on subscribe — so dropping
+    // the old block-scope live subscription cannot lose the first chunks. Each
+    // shell having its own ring also means a chatty sibling can't evict another
+    // shell's exit event. Tracked here so all per-shell subs tear down on
     // unmount. (SPEC_PERSISTENT_SHELL_NODE — P2 per-shell ring buffer fix.)
     const perShellUnsubs = new Map<string, () => void>();
     const subscribeShellScope = (shellId: string) => {
@@ -273,13 +275,12 @@ export function useAgentStream({
     });
     onCleanup(() => { try { shellNodeCreateUnsub(); } catch { /* ignore */ } });
 
-    // shell_chunk live delivery: per-block subscription (op="chunk" / op="exit").
-    const shellChunkUnsub = waveEventSubscribe({
-        eventType: "shell_chunk",
-        scope: `block:${blockId}`,
-        handler: handleShellChunk,
-    });
-    onCleanup(() => { try { shellChunkUnsub(); } catch { /* ignore */ } });
+    // NOTE: there is intentionally NO block-scope `shell_chunk` subscription.
+    // Chunks/exit are delivered solely via the per-shell `shell:<id>` scope
+    // (subscribed in subscribeShellScope above). Publishing to both scopes used
+    // to double-deliver early output — once live via block, once in the replay
+    // burst via shell — which the reducer's last-chunk-only isDuplicate could not
+    // collapse. See shell_node.rs shell_scopes() for the full rationale.
 
     function flushPendingNodes() {
         flushRafId = null;
