@@ -432,7 +432,8 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         }
         const name = path.split(/[/\\]/).pop() ?? path;
         if (isDir) {
-            return [
+            const isRoot = model.treeModel.rootsAtom().some((r) => r.path === path);
+            const items: ContextMenuItem[] = [
                 { type: "action", label: "New File…", onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "file" }); } },
                 { type: "action", label: "New Folder…", onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "dir" }); } },
                 { type: "separator" },
@@ -441,7 +442,9 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 { type: "action", label: "Collapse Folder", onSelect: () => model.treeModel.collapseFolder(path) },
                 { type: "separator" },
                 { type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) },
-                {
+            ];
+            if (!isRoot) {
+                items.push({
                     type: "action",
                     label: "Delete",
                     danger: true,
@@ -452,8 +455,9 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                             onConfirm: proceed,
                         });
                     }),
-                },
-            ];
+                });
+            }
+            return items;
         }
         return [
             { type: "action", label: "Open", onSelect: () => void model.openFile(path) },
