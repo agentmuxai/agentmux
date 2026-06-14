@@ -864,7 +864,9 @@ impl SubprocessController {
     ///
     /// `base_cmd` is `[cli_command] + cli_args` WITHOUT resume — this method appends
     /// `--resume <sid>` internally before starting the exec.
-    /// `container_env` is the pre-filtered env list (denylist already applied).
+    /// The exec env is derived from THIS message's `config.env_vars` (denylist
+    /// applied here, per-turn) — not carried across queue drains — so a queued
+    /// message runs with its own freshly-resolved auth/env, matching `spawn_turn`.
     ///
     /// Takes `cm` and `container_name` by value (not reference) so the returned
     /// future is `'static` — required for `tokio::spawn` in the queue-drain path.
@@ -873,7 +875,6 @@ impl SubprocessController {
         cm: crate::backend::container::ContainerManager,
         container_name: String,
         base_cmd: Vec<String>,
-        container_env: Vec<(String, String)>,
         config: SubprocessSpawnConfig,
     ) -> Result<(), String> {
         if !self.try_lock_run() {
@@ -890,11 +891,19 @@ impl SubprocessController {
         self.emit_message_accepted(&config);
         self.hydrate_session_id_from_config(config.session_id.as_deref());
 
+        // Derive the exec env from THIS message's own env_vars (apply the
+        // container denylist here, per-turn) rather than carrying a pre-filtered
+        // list across drains — so a message queued behind a running turn uses its
+        // own freshly-resolved auth/env, not the prior turn's stale values.
+        let container_env: Vec<(String, String)> = config.env_vars.iter()
+            .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
         // Snapshot container params for the queue-drain path before base_cmd is consumed.
         let cm_for_drain = cm.clone();
         let container_name_for_drain = container_name.clone();
         let base_cmd_for_drain = base_cmd.clone();
-        let container_env_for_drain = container_env.clone();
 
         // Build final command: append --resume <sid> if we have a prior session.
         let mut cmd = base_cmd;
@@ -978,7 +987,6 @@ impl SubprocessController {
                                 cm_for_drain,
                                 container_name_for_drain,
                                 base_cmd_for_drain,
-                                container_env_for_drain,
                                 cfg,
                             ) {
                                 tracing::warn!(error = %e, "failed to spawn queued container turn");
@@ -1179,7 +1187,6 @@ impl SubprocessController {
                         cm_for_drain,
                         container_name_for_drain,
                         base_cmd_for_drain,
-                        container_env_for_drain,
                         cfg,
                     ) {
                         tracing::warn!(error = %e, "failed to spawn queued container turn");

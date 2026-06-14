@@ -588,14 +588,11 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             "container agent turn: bollard exec (env via Docker socket, not argv)",
                         );
 
-                        // Filter env vars: skip host-path vars the container image provides.
-                        // Do NOT pass cwd: cmd:cwd is a host path, not a container path.
-                        // Env vars are passed via CreateExecOptions.env (Docker socket API),
+                        // Env is passed via CreateExecOptions.env (Docker socket API),
                         // NOT as -e KEY=VALUE argv args — this prevents CWE-214 exposure.
-                        let container_env: Vec<(String, String)> = env_vars.iter()
-                            .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect();
+                        // spawn_container_turn filters config.env_vars (denylist) per
+                        // turn, so cmd:cwd (host path) and host-path vars never reach
+                        // the container, and each queued turn uses its own env.
 
                         // Base cmd: [container_command, ...cli_args]. The command
                         // is the provider CLI resolved INSIDE the image (on PATH,
@@ -626,7 +623,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 Some(persisted_session_id)
                             },
                         };
-                        subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, container_env, config)?;
+                        subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
                     } else {
                         // Host agent: regular CLI subprocess (env set on child process, not in argv).
                         let config = blockcontroller::subprocess::SubprocessSpawnConfig {
