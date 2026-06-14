@@ -1107,9 +1107,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // shellexec → run a shell command in the agent's working directory and return output.
     // Invoked by the `!cmd` prefix in the agent pane composer.
+    let wstore_se = state.wstore.clone();
     engine.register_handler(
         COMMAND_SHELL_EXEC,
-        Box::new(|data, _ctx| {
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_se.clone();
             Box::pin(async move {
                 let cmd: CommandShellExecData = serde_json::from_value(data)
                     .map_err(|e| format!("shellexec: {e}"))?;
@@ -1118,6 +1120,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // ~/.agentmux/logs/ in plaintext.
                 tracing::info!(block_id = %cmd.blockid, "ShellExec");
                 tracing::debug!(command = %cmd.command, "ShellExec command");
+
+                // Reject container agents: their filesystem lives inside the
+                // Docker container, so running sh on the host gives misleading
+                // results or mutates the wrong environment.  Routing through
+                // `docker exec` is tracked as a follow-up feature.
+                let block: crate::backend::obj::Block = wstore
+                    .get(&cmd.blockid)
+                    .map_err(|e| format!("shellexec: load block: {e}"))?
+                    .ok_or_else(|| format!("shellexec: block {} not found", cmd.blockid))?;
+                let agent_mode = crate::backend::obj::meta_get_string(
+                    &block.meta, "agentMode", "host",
+                );
+                if agent_mode == "container" {
+                    return Err(
+                        "shellexec: container agents are not supported; \
+                         run the command from within the agent session instead".to_string()
+                    );
+                }
 
                 let cwd: Option<std::path::PathBuf> = if cmd.working_dir.is_empty() {
                     None
@@ -1171,12 +1191,27 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // dropped; without this flag the OS process keeps running
                 // (e.g. `! sleep 1000` would linger indefinitely).
                 proc.kill_on_drop(true);
+                // Unix: put the shell in its own process group so that compound
+                // commands (`! a | b`, `! foo &`) are in the same group and can
+                // all be killed at once on timeout.  kill_on_drop only kills the
+                // direct sh child; without process_group(0), grandchildren
+                // get reparented to init and outlive the timeout.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::process::CommandExt as _;
+                    proc.process_group(0);
+                }
                 if let Some(ref dir) = cwd {
                     proc.current_dir(dir);
                 }
 
                 let mut child = proc.spawn()
                     .map_err(|e| format!("shellexec: spawn failed: {e}"))?;
+
+                // Capture the PID before taking stdout/stderr (id() requires
+                // the Child to still have its stdio handles on some platforms).
+                #[cfg(unix)]
+                let child_pgid = child.id().map(|id| id as libc::pid_t);
 
                 let mut stdout_pipe = child.stdout.take().expect("stdout piped");
                 let mut stderr_pipe = child.stderr.take().expect("stderr piped");
@@ -1197,7 +1232,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // → complete; MAX_OUTPUT+1 → truncated), then immediately drain the
                 // remainder.  stdout and stderr pipelines run concurrently with each
                 // other, and with child.wait().
-                let status = tokio::time::timeout(
+                let timeout_result = tokio::time::timeout(
                     std::time::Duration::from_secs(TIMEOUT_SECS),
                     async {
                         let (sout, serr, wait) = tokio::join!(
@@ -1230,8 +1265,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         wait.map_err(|e| format!("shellexec: wait: {e}"))
                     }
                 )
-                .await
-                .map_err(|_| format!("shellexec: timed out after {TIMEOUT_SECS}s"))??;
+                .await;
+
+                // On timeout: kill_on_drop kills the direct sh/cmd child, but
+                // compound commands (`! a | b`, `! foo &`) fork grandchildren
+                // in the same process group.  Kill the whole group so they don't
+                // linger.  (Unix only; on Windows the job-object approach is a
+                // separate follow-up since tokio doesn't expose it yet.)
+                #[cfg(unix)]
+                if timeout_result.is_err() {
+                    if let Some(pgid) = child_pgid {
+                        // SAFETY: kill() is async-signal-safe; negative pid
+                        // addresses the process group with id=pgid.
+                        unsafe { libc::kill(-pgid, libc::SIGKILL); }
+                    }
+                }
+
+                let status = timeout_result
+                    .map_err(|_| format!("shellexec: timed out after {TIMEOUT_SECS}s"))??;
 
                 let format_output = |bytes: Vec<u8>| -> String {
                     // bytes.len() > MAX_OUTPUT means we read the MAX_OUTPUT+1
