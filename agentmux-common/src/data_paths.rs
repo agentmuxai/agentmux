@@ -1148,6 +1148,22 @@ mod tests {
             assert_eq!(inst.channel, "stable");
             assert_eq!(inst.instance_dir, root.join("channels").join("stable"));
 
+            // Portable path_only ALSO ignores the env channel. This is the
+            // behavior the launcher relies on for a NESTED portable launch
+            // (agentmux-launcher/src/data_dir.rs): a build launched from inside
+            // another AgentMux pane inherits AGENTMUX_CHANNEL from the parent and
+            // must resolve to its OWN baked channel (BUILD_CHANNEL_DEFAULT =
+            // "stable" in tests), NOT the leaked parent channel — otherwise it
+            // adopts the parent's data dir + cef-cache and CEF's user-data-dir
+            // singleton forwards it into the parent.
+            let port = DataPaths::resolve_path_only(
+                "0.33.639",
+                &RuntimeMode::Portable,
+            )
+            .unwrap();
+            assert_eq!(port.channel, "stable");
+            assert_eq!(port.instance_dir, root.join("channels").join("stable"));
+
             // Sanity: regular `resolve` DOES honor the env override in
             // both modes — confirms the divergence is solely on the
             // path_only variant.

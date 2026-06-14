@@ -83,14 +83,26 @@ LABEL="${VERSION}+g${SHA}${DIRTY}.${STAMP}.$$"
 # share a prefix from aliasing to the same data dir once the human-readable
 # slug is truncated. Budget for the 64-char channel cap enforced in
 # data_paths.rs::sanitize_channel_name:
-#   "local-" (6) + slug (≤27) + "-" + hash (6) + "-" + stamp (15)
-#   = ≤56  → comfortably under 64 even with the --fresh suffix.
+#   "local-" (6) + slug (≤27) + "-" + hash (6) + "-" + build-id (8)
+#   = ≤55  → comfortably under 64.
 BRANCH_HASH=$(printf '%s' "$BRANCH" | sha1sum | cut -c1-6)
 BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-27)
-CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}"
-if [ "$FRESH" -eq 1 ]; then
-    CHANNEL="${CHANNEL}-${STAMP}"
-fi
+# Per-BUILD isolation (one AgentMux instance per build). The channel is the
+# data-dir + cef-cache + single-instance-pipe key, so making it unique per build
+# means a freshly-built binary launches as its OWN instance instead of joining a
+# still-running sibling build of the same branch. (#1315 fixed only the pipe; the
+# cef-cache stayed per-branch — data_paths.rs:209 derives it from the channel — so
+# a second build's host hit Chromium's user-data-dir singleton and exited with
+# "Opening in existing browser session". Stamping the channel fixes all three keys
+# at once.) Safe to isolate per build now that agents + auth are GLOBAL
+# (cross-channel work #1387-#1393): a fresh per-build data dir still sees every
+# agent and stays logged in; only pane layout + memories start fresh. BUILD_ID
+# hashes the full LABEL (sha+dirty+stamp+pid) so even concurrent same-second builds
+# of one branch get distinct channels, well within the 64-char cap.
+BUILD_ID=$(printf '%s' "$LABEL" | sha1sum | cut -c1-8)
+CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"
+# --fresh is redundant now (every local build is already its own data dir); kept
+# as an accepted no-op so existing invocations / muscle memory don't break.
 
 # Release portables must bake the "stable" channel so users open their
 # real data dir, not a branch-scoped local dir. Set RELEASE_CHANNEL
@@ -111,12 +123,30 @@ echo "  label   : $LABEL"
 echo "  channel : $CHANNEL"
 if [ -n "${RELEASE_CHANNEL:-}" ]; then
     echo "  data    : RELEASE — channel override: $RELEASE_CHANNEL"
-elif [ "$FRESH" -eq 1 ]; then
-    echo "  data    : FRESH — throwaway dir for this build only"
 else
-    echo "  data    : persistent — shared across rebuilds of '$BRANCH'"
+    echo "  data    : per-build — isolated dir (agents + auth carry over globally; pane layout + memories start fresh)"
 fi
 echo "──────────────────────────────────────────────────────────"
+
+# GC: per-build channels accumulate (each build leaves a data dir + cef-cache,
+# tens–hundreds of MB). For LOCAL builds, keep the few most-recent per-build
+# channels for THIS branch and prune older ones so an iterate-rebuild loop doesn't
+# grow the disk without bound. Skips anything modified in the last 30 min (a crude
+# "might still be running" guard) so a live sibling build is never nuked. The
+# pre-per-build shared channel (`local-<slug>-<hash>` with no build-id suffix) does
+# NOT match the glob and is preserved. Best-effort: never fails the build.
+if [ -z "${RELEASE_CHANNEL:-}" ]; then
+    GC_KEEP=${AGENTMUX_LOCAL_CHANNELS_KEEP:-5}
+    CH_ROOT="${HOME}/.agentmux/channels"
+    if [ -d "$CH_ROOT" ] && [ -n "$BRANCH_HASH" ]; then
+        ls -dt "$CH_ROOT/local-${BRANCH_SLUG}-${BRANCH_HASH}-"* 2>/dev/null \
+            | tail -n +$((GC_KEEP + 1)) \
+            | while IFS= read -r old; do
+                [ -n "$(find "$old" -maxdepth 0 -mmin -30 2>/dev/null)" ] && continue
+                rm -rf "$old" 2>/dev/null && echo "  gc      : pruned old build channel $(basename "$old")"
+              done
+    fi
+fi
 
 # Exported for:
 #   - the cargo builds: AGENTMUX_BUILD_CHANNEL_DEFAULT is read via
