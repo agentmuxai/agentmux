@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["agentmux-srv", "agentmux-cef", "agentmux-launcher", "agentmux-common", "agentmux-bashwrap"]
+members = ["agentmux-srv", "agentmux-cef", "agentmux-launcher", "agentmux-common", "agentmux-bashwrap", "agentmux-mcp"]
 
 # Shared workspace metadata — members inherit `version` via
 # `version.workspace = true` so a single bump touches one Cargo.toml.

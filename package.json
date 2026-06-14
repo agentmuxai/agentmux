@@ -34,7 +34,6 @@
     "@tailwindcss/vite": "^4.1.18",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/user-event": "^14.6.1",
-    "@types/color": "^4.2.0",
     "@types/css-tree": "^2",
     "@types/debug": "^4",
     "@types/node": "^22.13.17",
@@ -92,7 +91,6 @@
     "base64-js": "^1.5.1",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
-    "color": "^4.2.3",
     "colord": "^2.9.3",
     "css-tree": "^3.1.0",
     "dayjs": "^1.11.19",
@@ -121,7 +119,11 @@
     "vite-plugin-solid": "^2.11.10",
     "ws": "^8.19.0"
   },
-  "packageManager": "npm@10.9.2",
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
+  },
   "workspaces": [
     "docs"
   ]

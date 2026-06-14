@@ -11,6 +11,7 @@
 //! This is Phase 1.5 PR 0: types + skeleton. PR 1 wires the agent
 //! pane through this module; PR 2 wires the drone Agent block.
 
+pub mod failure;
 pub mod runner;
 pub mod translator;
 pub mod types;

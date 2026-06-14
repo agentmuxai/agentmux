@@ -1120,6 +1120,96 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let offset = cmd.offset as usize;
                 let end = offset.saturating_add(limit);
 
+                // Fast path: output.idx — a lazily-built, self-validating byte-offset
+                // index of every non-blank line in `output`. It lets us seek directly
+                // to the requested line range instead of loading the whole file.
+                //
+                // The index is a pure cache of `output` with NO incremental mutation:
+                // its 8-byte header records the `output` size it was built for. If that
+                // equals `output`'s current size the index is fresh; otherwise we rebuild
+                // it from a single streaming scan (rebuild_output_idx). Because the index
+                // is always derived from the current `output` in one shot, it can never
+                // desync, mis-handle chunk-split lines, or miscount blank lines — the
+                // failure modes an incremental index would have.
+                //
+                // Gated to non-circular files: circular `output` (terminal ring buffers)
+                // drops early bytes, so absolute byte offsets wouldn't map cleanly.
+                use crate::backend::blockcontroller::shell::{rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
+                if cmd.filename == "output" {
+                    let idx_result: Option<BlockfileReadRangeResult> = (|| {
+                        let out_stat = filestore.stat(&cmd.block_id, "output").ok()??;
+                        if out_stat.opts.circular {
+                            return None; // circular files: fall back to slow path
+                        }
+                        let output_size = out_stat.size as u64;
+
+                        // Determine total_lines, rebuilding the index iff it is missing or
+                        // its covered-size header doesn't match the current output size.
+                        let idx_stat = filestore.stat(&cmd.block_id, "output.idx").ok().flatten();
+                        let fresh = match &idx_stat {
+                            Some(s) if s.size >= OUTPUT_IDX_HEADER_LEN => {
+                                let (_, h) = filestore
+                                    .read_at(&cmd.block_id, "output.idx", 0, OUTPUT_IDX_HEADER_LEN)
+                                    .ok()?;
+                                u64::from_le_bytes(h.try_into().ok()?) == output_size
+                            }
+                            _ => false,
+                        };
+                        let total_lines: u64 = if fresh {
+                            let s = idx_stat.unwrap();
+                            ((s.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64
+                        } else {
+                            rebuild_output_idx(&filestore, &cmd.block_id, output_size)?
+                        };
+
+                        // Empty result cases — answered from the index, no output read.
+                        if limit == 0 || total_lines == 0 || (offset as u64) >= total_lines {
+                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines });
+                        }
+
+                        // entry(k) = byte offset of non-blank line k (past the 8-byte header).
+                        let entry = |k: u64| -> Option<i64> {
+                            let (_, b) = filestore
+                                .read_at(
+                                    &cmd.block_id,
+                                    "output.idx",
+                                    OUTPUT_IDX_HEADER_LEN + (k * 8) as i64,
+                                    8,
+                                )
+                                .ok()?;
+                            Some(u64::from_le_bytes(b.try_into().ok()?) as i64)
+                        };
+
+                        let byte_start = entry(offset as u64)?;
+                        let byte_end: i64 = if (offset + limit) as u64 >= total_lines {
+                            output_size as i64
+                        } else {
+                            entry((offset + limit) as u64)?
+                        };
+                        let read_len = (byte_end - byte_start).max(0);
+                        let (_, raw) = filestore
+                            .read_at(&cmd.block_id, "output", byte_start, read_len)
+                            .ok()?;
+                        let text = String::from_utf8_lossy(&raw);
+                        let lines: Vec<String> = text
+                            .lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .map(|l| l.to_string())
+                            .collect();
+                        Some(BlockfileReadRangeResult { lines, total: total_lines })
+                    })();
+                    if let Some(result) = idx_result {
+                        tracing::debug!(
+                            block_id = %cmd.block_id,
+                            offset,
+                            limit,
+                            lines = result.lines.len(),
+                            "blockfile:read_range via output.idx fast path"
+                        );
+                        return Ok(Some(serde_json::to_value(&result).unwrap()));
+                    }
+                }
+
                 // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
                 // WPS broker ring buffer (MAX_PERSIST = 4096 events).
                 //

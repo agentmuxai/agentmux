@@ -32,6 +32,19 @@ export async function setupCefApi(): Promise<void> {
         window.__AGENTMUX_IPC_TOKEN__ = token;
     }
 
+    // Security: strip the IPC port/token from the visible URL immediately after
+    // capturing them into window globals. Leaving them in window.location.href
+    // exposes the bearer token for the whole page lifetime (referrer leakage to
+    // remote browser-pane origins, devtools, crash dumps). Subsequent reads use
+    // the window globals above, not the URL. Other params (e.g. windowLabel) are
+    // preserved. See reports security sweep 2026-06-12 (ipc-token-in-url).
+    if (port || token) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("ipc_token");
+        url.searchParams.delete("ipc_port");
+        window.history.replaceState(window.history.state, "", url.toString());
+    }
+
     // Pre-fetch all cached values from Rust host via IPC
     await initCefApi();
 

@@ -67,7 +67,6 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     const { blockId, model } = props;
     let viewRef!: HTMLDivElement;
     let connectElemRef!: HTMLDivElement;
-    let scrollbarHideObserverRef!: HTMLDivElement;
 
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
     const termSettingsAtom = getSettingsPrefixAtom("term");
@@ -254,21 +253,6 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         }
     });
 
-    const onScrollbarShowObserver = () => {
-        // xterm v6 reworked the viewport/scrollbar — try both old and new class names
-        const termViewport = (viewRef.getElementsByClassName("xterm-viewport")[0] ??
-            viewRef.getElementsByClassName("xterm-scroll-area")[0]) as HTMLDivElement;
-        if (termViewport) termViewport.style.zIndex = "var(--zindex-xterm-viewport-overlay)";
-        if (scrollbarHideObserverRef) scrollbarHideObserverRef.style.display = "block";
-    };
-
-    const onScrollbarHideObserver = () => {
-        const termViewport = (viewRef.getElementsByClassName("xterm-viewport")[0] ??
-            viewRef.getElementsByClassName("xterm-scroll-area")[0]) as HTMLDivElement;
-        if (termViewport) termViewport.style.zIndex = "auto";
-        if (scrollbarHideObserverRef) scrollbarHideObserverRef.style.display = "none";
-    };
-
     const stickerConfig = createMemo(() => ({
         charWidth: 8,
         charHeight: 16,
@@ -419,14 +403,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                     {model.agentRuntimeLabel()}
                 </div>
             </Show>
-            <div class="term-connectelem" ref={connectElemRef!}>
-                <div class="term-scrollbar-show-observer" onPointerOver={onScrollbarShowObserver} />
-                <div
-                    ref={scrollbarHideObserverRef!}
-                    class="term-scrollbar-hide-observer"
-                    onPointerOver={onScrollbarHideObserver}
-                />
-            </div>
+            <div class="term-connectelem" ref={connectElemRef!} />
             <Search {...searchProps} />
         </div>
     );

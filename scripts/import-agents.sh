@@ -194,7 +194,7 @@ import_into() {
 
     local tgt_win; tgt_win=$(win_path "$target_db")
     local ts; ts=$(now_ms)
-    local imported=0 skipped=0
+    local imported=0 skipped=0 copy_failures=0
 
     echo "Target: $target_db"
     echo ""
@@ -213,6 +213,24 @@ import_into() {
         fi
 
         local src_win; src_win=$(win_path "$src_db")
+
+        # Resilience: one unreadable / locked / corrupt / table-less source DB
+        # must never abort the whole import. Under `set -euo pipefail` the first
+        # sqlite error would propagate and silently drop every agent in DBs not
+        # yet scanned (observed: a stale `*.bak` channel mid-scan dropped a real
+        # agent whose data lived in a later-sorted DB). Probe the source first.
+        # Old pre-agent-schema versions (no db_agent_definitions table) are
+        # expected and numerous — skip those silently; WARN only on genuine
+        # problems (corruption, locks).
+        local _probe_err
+        if ! _probe_err=$(sqlite3 "$src_win" \
+            "SELECT 1 FROM db_agent_definitions LIMIT 1;" 2>&1 >/dev/null); then
+            case "$_probe_err" in
+                *"no such table"*) : ;;  # pre-agent-schema DB — nothing to import
+                *) echo "  WARN  skipping unreadable source DB (${_probe_err%%$'\n'*}): $src_db" >&2 ;;
+            esac
+            continue
+        fi
 
         # Detect which newer columns exist in the source schema so the SELECTs
         # below never reference a missing column. This MUST run BEFORE the agents
@@ -242,8 +260,23 @@ import_into() {
 
         # Use char(1) (ASCII unit-separator) instead of '|' so agent names that
         # contain a pipe character don't corrupt the field split.
-        agents=$(db_query "$src_db" \
-            "SELECT id||char(1)||name||char(1)||COALESCE(${_col_slug},'') FROM db_agent_definitions WHERE $where;" 2>/dev/null)
+        # sqlite3.exe emits CRLF on Windows; the trailing CR contaminates the
+        # last char(1)-delimited field (the slug), which silently breaks the
+        # on-disk session lookup below. Strip CR so every field is clean.
+        # Distinguish a genuine query FAILURE (corruption hit mid-scan, or a
+        # column the WHERE/SELECT names — e.g. is_seeded — missing despite the
+        # table existing, which the up-front probe doesn't catch) from an empty
+        # result. A bare `|| agents=""` would mask the failure as "no agents"
+        # and skip the DB with no WARN (codex P2 on #1380). Capture stdout+stderr
+        # with the exit code; on failure WARN + skip this source DB.
+        local _agents_out
+        if _agents_out=$(sqlite3 "$src_win" \
+            "SELECT id||char(1)||name||char(1)||COALESCE(${_col_slug},'') FROM db_agent_definitions WHERE $where;" 2>&1); then
+            agents=$(printf '%s' "$_agents_out" | tr -d '\r')
+        else
+            echo "  WARN  skipping source DB (agent query failed: ${_agents_out%%$'\n'*}): $src_db" >&2
+            continue
+        fi
         [ -z "$agents" ] && continue
 
         while IFS=$'\x01' read -r def_id agent_name agent_slug; do
@@ -266,7 +299,12 @@ import_into() {
             # when importing across versions with different db_agent_definitions schemas.
             # Uses detected column names so source DBs lacking updated_at/user_hidden
             # fall back to created_at/0 rather than aborting the import.
-            sqlite3 "$src_win" \
+            # A schema mismatch in this single source DB (e.g. an old or `*.bak`
+            # DB missing a column named below) must skip THIS agent, not abort
+            # the whole import. Capture stderr and continue on failure rather
+            # than letting `set -e` propagate the error and drop later agents.
+            local _def_copy_err
+            if ! _def_copy_err=$(sqlite3 "$src_win" \
                 "ATTACH '$tgt_win' AS dst;
                  INSERT OR IGNORE INTO dst.db_agent_definitions
                    (id, slug, name, icon, provider, description,
@@ -279,7 +317,41 @@ import_into() {
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label,
                     ${_col_updated_at}, ${_col_user_hidden}
-                 FROM db_agent_definitions WHERE id='$def_id';"
+                 FROM db_agent_definitions WHERE id='$def_id';" 2>&1); then
+                case "$_def_copy_err" in
+                    *"dst."*)
+                        # Error names the attached TARGET schema (dst.*): the
+                        # target table is missing/corrupt or the target DB is not
+                        # an AgentMux DB. That's a target-side failure — abort,
+                        # don't mask it as a per-agent source skip (codex P2 on
+                        # #1380: "no such table: dst.db_agent_definitions").
+                        echo "ERROR: import aborted — target DB unusable for '$agent_name': ${_def_copy_err%%$'\n'*}" >&2
+                        exit 1
+                        ;;
+                    *"no such column"*|*"no such table"*)
+                        # SOURCE schema mismatch (an old / *.bak source missing a
+                        # column the SELECT names; the up-front probe already
+                        # proved the source TABLE exists) — skip THIS agent.
+                        echo "  WARN  $agent_name — source schema mismatch; skipping (${_def_copy_err%%$'\n'*})" >&2
+                        ((skipped++)) || true
+                        continue
+                        ;;
+                    *)
+                        # Ambiguous copy failure for THIS agent — e.g. a bare
+                        # `database is locked` / I/O error, which SQLite does not
+                        # attribute to source vs target (the source could lock
+                        # racing the up-front probe, or the target — the running
+                        # instance — could hold a transient write lock). Don't
+                        # abort the whole run: that would drop every later source
+                        # DB (codex P2 #345). WARN, record the failure, and skip
+                        # this agent. The end-of-run check exits non-zero so an
+                        # incomplete import is never reported as success.
+                        echo "  WARN  $agent_name — copy failed; skipping (${_def_copy_err%%$'\n'*})" >&2
+                        ((copy_failures++)) || true
+                        continue
+                        ;;
+                esac
+            fi
 
             # Verify the definition was actually inserted.
             # db_agent_definitions has a UNIQUE index on slug — an INSERT OR IGNORE
@@ -350,7 +422,10 @@ import_into() {
                 lookup_slug=$(printf '%s' "$agent_name" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9_-]/-/g')
             fi
             local resolved sess_id="" work_dir="" src_jsonl=""
-            resolved=$(best_session_for_slug "$lookup_slug")
+            # best_session_for_slug returns non-zero when the agent has no
+            # on-disk session (a normal case); `|| resolved=""` keeps that from
+            # aborting the whole import under `set -e`.
+            resolved=$(best_session_for_slug "$lookup_slug") || resolved=""
             if [ -n "$resolved" ]; then
                 # Tab-delimited fields; filesystem paths never contain a literal
                 # tab, so the split is unambiguous.
@@ -418,9 +493,20 @@ import_into() {
     done < <(all_dbs)
 
     echo ""
-    echo "Imported: $imported  Skipped: $skipped"
-    [ "$imported" -gt 0 ] && \
+    echo "Imported: $imported  Skipped: $skipped  Failed: $copy_failures"
+    # Use an `if` (not `&&`) so a zero-import run doesn't make this function —
+    # and the whole script under `set -e` — exit non-zero.
+    if [ "$imported" -gt 0 ]; then
         echo "Reopen the agent pane in the $target_version build to see the changes."
+    fi
+    # Any per-agent copy failure (the ambiguous `*)` branch above) means the
+    # import is incomplete. Surface it as a non-zero exit so callers/CI never
+    # mistake a partial import for success — without having aborted the run and
+    # dropped the agents that DID copy.
+    if [ "$copy_failures" -gt 0 ]; then
+        echo "ERROR: $copy_failures agent(s) failed to copy (see WARN lines above); import incomplete." >&2
+        exit 1
+    fi
 }
 
 # ── arg parsing ──────────────────────────────────────────────────────────────

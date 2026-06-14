@@ -1136,15 +1136,13 @@ unsafe fn set_macos_app_display_name() {
         fn objc_msgSend();
     }
 
-    // Resolve dev vs. not the same way `commands::platform::get_is_dev` does.
-    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .map(|d| agentmux_common::RuntimeMode::current(&d))
-    });
-    let is_dev = matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. }));
-    let name = if is_dev { "AgentMux DEV" } else { "AgentMux" };
+    // Resolve dev vs. not by the exe PATH (`is_dev_self`), matching
+    // `commands::platform::get_is_dev` and the menu name in `macos_menu.rs`.
+    // NOT `AGENTMUX_RUNTIME_MODE`: a parent dev AgentMux leaks that env into
+    // descendants, which would otherwise set the Dock / app-menu process name
+    // to "AgentMux DEV" on a packaged build launched from inside a dev
+    // instance. Build identity is a property of the binary on disk.
+    let name = if agentmux_common::is_dev_self() { "AgentMux DEV" } else { "AgentMux" };
 
     // NSString *ns = [NSString stringWithUTF8String:name]
     let cls_str = objc_getClass(b"NSString\0".as_ptr() as _);

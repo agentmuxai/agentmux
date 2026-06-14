@@ -32,16 +32,12 @@ pub fn get_host_name() -> serde_json::Value {
     serde_json::json!(hostname)
 }
 
-/// Check if running in development mode — resolved from the runtime
-/// `RuntimeMode` (launcher-injected env, or the host exe path).
+/// Check if THIS build is a `task dev` build — resolved from the host exe
+/// PATH (`is_dev_self`), NOT `AGENTMUX_RUNTIME_MODE`. A running dev AgentMux
+/// leaks that env into descendant processes, which would otherwise flip a
+/// packaged build to "DEV" (the status-bar badge).
 pub fn get_is_dev() -> serde_json::Value {
-    let mode = agentmux_common::RuntimeMode::from_env().or_else(|| {
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .map(|d| agentmux_common::RuntimeMode::current(&d))
-    });
-    serde_json::json!(matches!(mode, Some(agentmux_common::RuntimeMode::Dev { .. })))
+    serde_json::json!(agentmux_common::is_dev_self())
 }
 
 /// Get the app data directory path (version-specific).
@@ -125,15 +121,40 @@ pub fn ensure_auth_dir(
 }
 
 /// Get an environment variable value.
+///
+/// Security: refuses keys whose name suggests a secret (cloud keys, API
+/// tokens, passwords, the AgentMux auth key, etc.). `get_env` is reachable by
+/// any IPC caller holding the bearer token — including agent processes and
+/// browser-pane code — so an unrestricted reader is a direct
+/// credential-exfiltration path. The legitimate frontend never depends on this
+/// command in the CEF host (the `getEnv` shim returns "" and resolves real
+/// values from window globals), so the denylist is transparent to the app.
+/// See reports security sweep 2026-06-12 (get-env-unrestricted).
 pub fn get_env(args: &serde_json::Value) -> serde_json::Value {
     let key = args
         .get("key")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
+    if is_sensitive_env_key(key) {
+        tracing::warn!(key = %key, "get_env: refused to expose a secret-looking env var");
+        return serde_json::Value::Null;
+    }
     match std::env::var(key) {
         Ok(val) => serde_json::json!(val),
         Err(_) => serde_json::Value::Null,
     }
+}
+
+/// True if an env-var name looks like it holds a secret and must not be
+/// exposed over the IPC `get_env` command. Substring match on the
+/// upper-cased key so prefixed/suffixed variants (AWS_SECRET_ACCESS_KEY,
+/// GITHUB_TOKEN, AGENTMUX_AUTH_KEY, …) are all caught.
+fn is_sensitive_env_key(key: &str) -> bool {
+    const NEEDLES: [&str; 7] = [
+        "KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH",
+    ];
+    let upper = key.to_ascii_uppercase();
+    NEEDLES.iter().any(|needle| upper.contains(needle))
 }
 
 /// The ephemeral build label of a local portable, read from the
@@ -1053,8 +1074,13 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing url".to_string())?;
 
-    // Only allow safe URL schemes
-    if !url.starts_with("http://") && !url.starts_with("https://") && !url.starts_with("devtools://") {
+    // Allow safe URL schemes. vscode:// is included so that file-path links
+    // with a :line suffix can open the file at the correct line in VS Code.
+    let allowed = url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("devtools://")
+        || url.starts_with("vscode://");
+    if !allowed {
         return Err(format!("Refusing to open URL with unsupported scheme: {}", url));
     }
 
@@ -1086,6 +1112,71 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
             .arg(url)
             .spawn()
             .map_err(|e| format!("Failed to open URL: {}", e))?;
+    }
+
+    Ok(serde_json::Value::Null)
+}
+
+/// Open the system file manager at the given path.
+/// Directories are opened directly; files are revealed (selected) in their
+/// parent directory.
+///
+/// | Platform | Directory        | File                        |
+/// |----------|------------------|-----------------------------|
+/// | Windows  | `explorer <dir>` | `explorer /select,<file>`   |
+/// | macOS    | `open <dir>`     | `open -R <file>`            |
+/// | Linux    | `xdg-open <dir>` | `xdg-open <parent dir>`     |
+pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let file_path = args
+        .get("filePath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing filePath".to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Convert forward slashes (from JS normalisation) back to backslashes.
+        let native = file_path.replace('/', "\\");
+        let is_dir = std::path::Path::new(&native).is_dir();
+        let arg = if is_dir {
+            // Open the directory itself.
+            native.clone()
+        } else {
+            // /select,<path> must be a single argument — the comma delimits the
+            // switch from the path. Reveals the file in its parent directory.
+            format!("/select,{}", native)
+        };
+        let _ = std::process::Command::new("explorer.exe")
+            .arg(arg)
+            .spawn()
+            .map_err(|e| format!("Failed to open in Explorer: {}", e))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let is_dir = std::path::Path::new(file_path).is_dir();
+        if is_dir {
+            let _ = std::process::Command::new("open")
+                .arg(file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open directory in Finder: {}", e))?;
+        } else {
+            let _ = std::process::Command::new("open")
+                .args(["-R", file_path])
+                .spawn()
+                .map_err(|e| format!("Failed to reveal file in Finder: {}", e))?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let path = std::path::Path::new(file_path);
+        let open_path = if path.is_dir() {
+            file_path
+        } else {
+            path.parent().and_then(|p| p.to_str()).unwrap_or(file_path)
+        };
+        let _ = std::process::Command::new("xdg-open")
+            .arg(open_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
     }
 
     Ok(serde_json::Value::Null)

@@ -11,11 +11,18 @@
 //!   if PTY allocation fails. The PTY path keeps glibc's stdout
 //!   line-buffered so partial chunks reach the overlay in real time;
 //!   bash's startup DSR (`\x1b[6n`) is satisfied by pre-loading the
-//!   master writer with `\x1b[1;1R` and dropping it immediately, and
-//!   the user's command is prefixed `exec </dev/null;` so stdin-
-//!   reading children see EOF rather than blocking on the PTY's
-//!   stdin (ConPTY doesn't EOF on master-writer drop). The pipe
-//!   path remains as a safety net and is the only path that
+//!   master writer with `\x1b[1;1R`; the writer is held alive until
+//!   after child.wait() (dropping it earlier sends CTRL_C_EVENT on
+//!   Windows — ConPTY CONIN lifetime invariant, same as pair.master).
+//!   The command is wrapped in a brace group redirected from /dev/null
+//!   (`{ <cmd>; } </dev/null`) so stdin-reading children see EOF instead
+//!   of blocking on the live PTY slave. We must NOT use `exec </dev/null`
+//!   for this: running it inside bash closes the child's ConPTY console
+//!   input from the child side, which ConPTY reports as a CTRL_C_EVENT,
+//!   killing every command with exit 130 before it ran. The group
+//!   redirect points only the group's fd 0 at /dev/null while bash's own
+//!   console fd stays open, so children get EOF and ConPTY never fires.
+//!   The pipe path remains as a safety net and is the only path that
 //!   preserves the stdout/stderr split — PTY collapses both onto
 //!   one stream. See `docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`.
 //! - Bash is located via `$BASH` → `$AGENTMUX_BASH` → PATH search →
@@ -467,11 +474,17 @@ async fn run_via_pty(
     // dirs to PATH manually (see below) so external commands like
     // `date`, `grep`, `awk` resolve without needing rc-script setup.
     cmd.arg("-c");
-    // Redirect stdin to /dev/null inside bash so stdin-reading
-    // children see EOF — ConPTY does not deliver EOF on master
-    // writer drop. The redirect runs after readline's startup DSR
-    // exchange, so the pre-written CSI response is still consumed.
-    cmd.arg(format!("exec </dev/null; {}", command));
+    // Give stdin-reading children (`cat`, `read`, prompted scripts) EOF
+    // instead of leaving them blocked on the live PTY slave, but do NOT use
+    // `exec </dev/null` — running that inside bash closes the child's ConPTY
+    // console-input handle from the child side, which ConPTY reports as a
+    // CTRL_C_EVENT and kills the command with exit 130 before it runs (the
+    // bug this wrapper exists to fix). A brace-group redirect points the
+    // group's fd 0 at /dev/null for the command's duration while bash's own
+    // fd 0 (the console) stays open, so children see EOF and ConPTY never
+    // fires ctrl-c. The leading newline terminates the group list cleanly
+    // regardless of how `command` ends (trailing comment, no newline, etc.).
+    cmd.arg(format!("{{\n{}\n}} </dev/null", command));
 
     // PATH fix-up: bashwrap is a Windows exe, so when MSYS2/Git Bash
     // spawned us it converted PATH to Windows form, which has
@@ -530,16 +543,20 @@ async fn run_via_pty(
 
     let reader = pair.master.try_clone_reader().context("PTY try_clone_reader")?;
 
-    // Pre-load bash's stdin with a DSR response and drop the writer.
-    // Bash's readline blocks on `\x1b[6n` until it reads a matching
-    // CSI report; queuing the response upfront unblocks that read
-    // without keeping the master writer open across the child.
-    {
+    // Write the DSR response into the master writer, then hold the
+    // writer alive until after child.wait(). On Windows, closing the
+    // CONIN pipe write-end while the pseudoconsole is still attached
+    // sends CTRL_C_EVENT to the child (exit 130 / SIGINT). This is
+    // the same ConPTY-lifetime invariant as pair.master itself — both
+    // must outlive child.wait(). After the DSR response we never write
+    // again; the handle is kept open only to hold CONIN alive.
+    let writer = {
         use std::io::Write as _;
-        let mut writer = pair.master.take_writer().context("PTY take_writer")?;
-        let _ = writer.write_all(b"\x1b[1;1R");
-        let _ = writer.flush();
-    }
+        let mut w = pair.master.take_writer().context("PTY take_writer")?;
+        let _ = w.write_all(b"\x1b[1;1R");
+        let _ = w.flush();
+        w
+    };
 
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
     let tx_reader = tx.clone();
@@ -550,14 +567,16 @@ async fn run_via_pty(
 
     let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
 
-    // Move the whole pair (master + dropped-slave-handle slot) into
-    // the wait task so its destructor runs after child reaps.
+    // Move pair AND writer into the wait task — both must outlive
+    // child.wait() to satisfy the ConPTY lifetime contract on Windows.
     let exit_code = tokio::task::spawn_blocking(move || -> Result<i32> {
         let mut child = child;
         let status = child.wait().context("PTY child wait")?;
-        // pair drops here, after wait returns — triggers reader EOF.
+        let code = status.exit_code() as i32;
+        tracing::info!(target: "bashwrap", exit_code = code, "PTY child exited");
+        drop(writer);
         drop(pair);
-        Ok(status.exit_code() as i32)
+        Ok(code)
     })
     .await
     .context("PTY wait task join")??;
@@ -630,6 +649,7 @@ fn pty_reader_loop(
                 return;
             }
             Ok(n) => {
+                let raw_n = n;
                 let mut chunk = buf[..n].to_vec();
                 strip_dsr(&mut chunk);
                 // Phase β: strip remaining ANSI control sequences so
@@ -640,6 +660,7 @@ fn pty_reader_loop(
                 // PTY; without this strip every chunk list starts
                 // with garbage.
                 strip_ansi(&mut chunk);
+                tracing::debug!(target: "bashwrap", raw_bytes = raw_n, post_strip = chunk.len(), "PTY read");
                 if chunk.is_empty() {
                     continue;
                 }

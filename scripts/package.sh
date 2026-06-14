@@ -9,13 +9,9 @@
 # Usage:
 #   bash scripts/package.sh [--fresh] [output-dir]
 #
-#   --fresh      Give this build a throwaway data dir instead of the
-#                branch's persistent one. Normally every local build of a
-#                given branch shares one data dir (so your test session —
-#                agents, panes, auth — survives an iterate-rebuild loop).
-#                --fresh suffixes the channel with the build stamp so this
-#                one build starts clean. (Triggers a recompile of the
-#                crates that bake the channel — occasional, expected.)
+#   --fresh      No-op (accepted for back-compat). Every local build is now
+#                already its own isolated data dir — see CHANNEL below — so
+#                there is nothing left for --fresh to do.
 #   output-dir   Where the portable lands (default ~/Desktop).
 #
 # What gets stamped:
@@ -27,14 +23,18 @@
 #                never collide with or reorder a release). Names the
 #                portable folder + ZIP so builds are unique on disk and
 #                you can tell them apart at a glance.
-#   - CHANNEL  : local-<branch>[-<stamp> if --fresh] — the data-dir key.
-#                Branch-scoped so rebuilds of the same branch reuse one
-#                data dir. Baked into the binary at compile time via
+#   - CHANNEL  : local-<slug>-<branch-hash>-<build-id> — the data-dir key.
+#                PER-BUILD: the build-id (hash of the full label) makes each
+#                build its own data dir + cef-cache + single-instance pipe, so a
+#                freshly-built binary launches as its own instance instead of
+#                joining a still-running sibling build. Baked at compile time via
 #                AGENTMUX_BUILD_CHANNEL_DEFAULT (see agentmux-common/build.rs).
-#   - AGENTMUX_BUILD_LABEL: the full label (including stamp) baked into
-#                the launcher for use as the single-instance pipe key, so
-#                two successive local builds never share a pipe and each
-#                local build starts its own window.
+#                Safe now that agents + auth are global (#1387-#1393); only pane
+#                layout + memories start fresh. Releases override to "stable".
+#   - AGENTMUX_BUILD_LABEL: the full label (including stamp) baked into the
+#                launcher's single-instance pipe key. With per-build channels the
+#                data dir already forces a unique pipe; the label is still the
+#                pipe key for RELEASE builds (which share the "stable" channel).
 
 set -euo pipefail
 
@@ -83,14 +83,26 @@ LABEL="${VERSION}+g${SHA}${DIRTY}.${STAMP}.$$"
 # share a prefix from aliasing to the same data dir once the human-readable
 # slug is truncated. Budget for the 64-char channel cap enforced in
 # data_paths.rs::sanitize_channel_name:
-#   "local-" (6) + slug (≤27) + "-" + hash (6) + "-" + stamp (15)
-#   = ≤56  → comfortably under 64 even with the --fresh suffix.
+#   "local-" (6) + slug (≤27) + "-" + hash (6) + "-" + build-id (8)
+#   = ≤55  → comfortably under 64.
 BRANCH_HASH=$(printf '%s' "$BRANCH" | sha1sum | cut -c1-6)
 BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-27)
-CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}"
-if [ "$FRESH" -eq 1 ]; then
-    CHANNEL="${CHANNEL}-${STAMP}"
-fi
+# Per-BUILD isolation (one AgentMux instance per build). The channel is the
+# data-dir + cef-cache + single-instance-pipe key, so making it unique per build
+# means a freshly-built binary launches as its OWN instance instead of joining a
+# still-running sibling build of the same branch. (#1315 fixed only the pipe; the
+# cef-cache stayed per-branch — data_paths.rs:209 derives it from the channel — so
+# a second build's host hit Chromium's user-data-dir singleton and exited with
+# "Opening in existing browser session". Stamping the channel fixes all three keys
+# at once.) Safe to isolate per build now that agents + auth are GLOBAL
+# (cross-channel work #1387-#1393): a fresh per-build data dir still sees every
+# agent and stays logged in; only pane layout + memories start fresh. BUILD_ID
+# hashes the full LABEL (sha+dirty+stamp+pid) so even concurrent same-second builds
+# of one branch get distinct channels, well within the 64-char cap.
+BUILD_ID=$(printf '%s' "$LABEL" | sha1sum | cut -c1-8)
+CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"
+# --fresh is redundant now (every local build is already its own data dir); kept
+# as an accepted no-op so existing invocations / muscle memory don't break.
 
 # Release portables must bake the "stable" channel so users open their
 # real data dir, not a branch-scoped local dir. Set RELEASE_CHANNEL
@@ -111,12 +123,21 @@ echo "  label   : $LABEL"
 echo "  channel : $CHANNEL"
 if [ -n "${RELEASE_CHANNEL:-}" ]; then
     echo "  data    : RELEASE — channel override: $RELEASE_CHANNEL"
-elif [ "$FRESH" -eq 1 ]; then
-    echo "  data    : FRESH — throwaway dir for this build only"
 else
-    echo "  data    : persistent — shared across rebuilds of '$BRANCH'"
+    echo "  data    : per-build — isolated dir (agents + auth carry over globally; pane layout + memories start fresh)"
 fi
 echo "──────────────────────────────────────────────────────────"
+
+# NOTE: per-build channels accumulate on disk (each build leaves a data dir +
+# cef-cache, tens–hundreds of MB). Cleanup is a deliberate FOLLOW-UP, NOT done
+# here: a safe prune needs a REAL liveness signal (is an instance still using this
+# channel?), which only the launcher has — it owns the single-instance pipe, so it
+# can prune a sibling channel iff that channel's pipe is unheld. A time-window
+# mtime heuristic in this build script can't close the race (an idle-but-running
+# instance has no recent writes) and on Unix `rm -rf` would unlink a live
+# instance's open DB → corruption. So pruning belongs in launcher startup, not
+# here. Until then, clean up manually: remove `~/.agentmux/channels/local-*` dirs
+# with no running instance.
 
 # Exported for:
 #   - the cargo builds: AGENTMUX_BUILD_CHANNEL_DEFAULT is read via

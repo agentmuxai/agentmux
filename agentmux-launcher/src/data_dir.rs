@@ -60,25 +60,39 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     // Prevents inheriting AGENTMUX_RUNTIME_MODE from a parent AgentMux
     // process when `task dev` is launched from inside an existing pane.
     let is_dev = agentmux_common::is_dev_build_exe(launcher_exe_dir);
-    let mode = if is_dev {
+
+    // A portable/installed build launched from INSIDE another AgentMux pane
+    // inherits the parent's AGENTMUX_CHANNEL + AGENTMUX_RUNTIME_MODE (the srv
+    // sets AGENTMUX=1 and the full AGENTMUX_* path env for every pane shell —
+    // `agentmux-srv/.../blockcontroller/shell.rs`). Honoring that *leaked*
+    // channel makes the new build adopt the PARENT's data dir + cef-cache, so
+    // Chromium's user-data-dir singleton forwards it into the parent and it exits
+    // ("Opening in existing browser session", CEF exit 24) — the build you
+    // launched never runs. Treat a nested launch like a dev build: ignore the
+    // ambient channel/mode and resolve from this binary's BAKED per-build channel
+    // (`AGENTMUX_BUILD_CHANNEL_DEFAULT`). An EXPLICIT, *standalone*
+    // `AGENTMUX_CHANNEL=… ./agentmux` (not nested) is still honored — that is the
+    // intentional parallel-channel override (PR #1027); only the leak is
+    // suppressed. `AGENTMUX` is the canonical "inside a pane" sentinel.
+    let nested = std::env::var_os("AGENTMUX").is_some();
+    let ignore_ambient = is_dev || nested;
+
+    let mode = if ignore_ambient {
         RuntimeMode::current_path_only(launcher_exe_dir)
     } else {
         RuntimeMode::current(launcher_exe_dir)
     };
-    // For dev builds the launcher MUST use `resolve_path_only` too —
-    // not just `resolve` — so that AGENTMUX_CHANNEL is ignored
-    // symmetrically with the host's dev-build branch in
-    // agentmux-cef/src/main.rs and sidecar.rs. Without this, the
-    // launcher would honor a leaked `AGENTMUX_CHANNEL` from a parent
-    // agentmux pane and write the lockfile + IPC files into
-    // `channels/<override>/runtime/`, while the host (running its own
-    // path-only resolution) would look for them under
-    // `dev/<branch>/runtime/`. Launcher/host disagreement on the
-    // single-instance lock breaks dev-mode isolation. Channel
-    // override is intentionally an Installed/Portable-only feature in
-    // this design (codex P2 follow-up on PR #1027); dev mode keeps
-    // its per-branch isolation as the sole identity axis.
-    let common = if is_dev {
+    // The launcher MUST use `resolve_path_only` (not `resolve`) whenever it
+    // ignores the ambient channel — so AGENTMUX_CHANNEL is dropped symmetrically
+    // with the host's dev/nested branch in agentmux-cef/src/main.rs and
+    // sidecar.rs. Without this the launcher would honor a leaked `AGENTMUX_CHANNEL`
+    // and write the lockfile + IPC files into `channels/<override>/runtime/`,
+    // while the host (path-only) looks elsewhere — launcher/host disagreement on
+    // the single-instance lock breaks isolation. The launcher's resolved env is
+    // authoritative for the host + srv it spawns (`to_env_vars()` overwrites the
+    // inherited AGENTMUX_* at every spawn site), so fixing it here fixes the whole
+    // chain.
+    let common = if ignore_ambient {
         CommonDataPaths::resolve_path_only(version, &mode)?
     } else {
         CommonDataPaths::resolve(version, &mode)?

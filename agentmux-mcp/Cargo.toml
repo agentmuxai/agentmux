@@ -1,0 +1,18 @@
+[package]
+name = "agentmux-mcp"
+version.workspace = true
+edition = "2021"
+description = "AgentMux MCP server — exposes Shell and other agent tools to Claude"
+authors = ["AgentMux Corp"]
+license = "Apache-2.0"
+
+[[bin]]
+name = "agentmux-mcp"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
