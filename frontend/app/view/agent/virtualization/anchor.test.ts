@@ -85,6 +85,32 @@ describe("isNearBottom", () => {
         expect(isNearBottom(699, 1000, 100)).toBe(false);
         expect(STICK_TO_BOTTOM_THRESHOLD_PX).toBe(200);
     });
+
+    it("short conversation: caps sticky zone at half range so top is reachable", () => {
+        // maxScroll=50 (barely overflows), threshold=200 → effectiveThreshold=25.
+        // At scrollTop=0 (top): distance=50, not < 25 → false (can disengage).
+        expect(isNearBottom(0, 850, 800)).toBe(false);
+        // At scrollTop=25: distance=25, not < 25 → false.
+        expect(isNearBottom(25, 850, 800)).toBe(false);
+        // At scrollTop=26: distance=24 < 25 → true (near bottom).
+        expect(isNearBottom(26, 850, 800)).toBe(true);
+        // At scrollTop=50 (bottom): distance=0 < 25 → true.
+        expect(isNearBottom(50, 850, 800)).toBe(true);
+    });
+
+    it("no overflow: always near bottom", () => {
+        // Content fits in viewport — nothing to scroll, always at bottom.
+        expect(isNearBottom(0, 800, 800)).toBe(true);
+        expect(isNearBottom(0, 500, 800)).toBe(true);
+    });
+
+    it("short conversation with range=1: only at absolute bottom is near bottom", () => {
+        // maxScroll=1, effectiveThreshold=max(1, floor(0.5))=1.
+        // scrollTop=0: distance=1 < 1? No → false.
+        expect(isNearBottom(0, 801, 800)).toBe(false);
+        // scrollTop=1: distance=0 < 1 → true.
+        expect(isNearBottom(1, 801, 800)).toBe(true);
+    });
 });
 
 describe("isNearTop", () => {

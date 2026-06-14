@@ -3,12 +3,75 @@
 
 import { assert, describe, test } from "vitest";
 import {
+    detectAgentFromEnv,
     detectAgentFromPath,
     detectAgentFromWorkspacesPath,
     generateAutoTitle,
     getEffectiveTitle,
+    isUsableFocusRingColor,
     shouldAutoGenerateTitle,
 } from "./autotitle";
+
+describe("detectAgentFromEnv", () => {
+    test("detects agent from AGENTMUX_AGENT_ID", () => {
+        assert.equal(detectAgentFromEnv({ AGENTMUX_AGENT_ID: "AgentY" }), "AgentY");
+        assert.equal(detectAgentFromEnv({ AGENTMUX_AGENT_ID: "  Agent2  " }), "Agent2");
+    });
+
+    test("returns null for missing/blank env", () => {
+        assert.equal(detectAgentFromEnv(undefined), null);
+        assert.equal(detectAgentFromEnv({}), null);
+        assert.equal(detectAgentFromEnv({ AGENTMUX_AGENT_ID: "  " }), null);
+    });
+
+    test('rejects "Terminal" — the default pane title is not an agent identity', () => {
+        assert.equal(detectAgentFromEnv({ AGENTMUX_AGENT_ID: "Terminal" }), null);
+        assert.equal(detectAgentFromEnv({ AGENTMUX_AGENT_ID: "terminal" }), null);
+        assert.equal(detectAgentFromEnv({ AGENTMUX_AGENT_ID: " TERMINAL " }), null);
+    });
+});
+
+describe("isUsableFocusRingColor", () => {
+    test("accepts the claw agent palette", () => {
+        assert.isTrue(isUsableFocusRingColor("#ef4444")); // AgentX red
+        assert.isTrue(isUsableFocusRingColor("#f87171")); // AgentY coral
+        assert.isTrue(isUsableFocusRingColor("#eab308")); // gold
+        assert.isTrue(isUsableFocusRingColor("#3b82f6")); // blue
+    });
+
+    test("accepts dark-but-visible colors (AgentA dark blue)", () => {
+        assert.isTrue(isUsableFocusRingColor("#1e3a5f"));
+    });
+
+    test("rejects black and near-black (the invisible-ring bug)", () => {
+        assert.isFalse(isUsableFocusRingColor("#000000"));
+        assert.isFalse(isUsableFocusRingColor("#000"));
+        assert.isFalse(isUsableFocusRingColor("#111111"));
+        assert.isFalse(isUsableFocusRingColor("rgb(0, 0, 0)"));
+        assert.isFalse(isUsableFocusRingColor("rgb(20, 20, 20)"));
+    });
+
+    test("rejects transparent and low-alpha colors", () => {
+        assert.isFalse(isUsableFocusRingColor("rgba(239, 68, 68, 0)"));
+        assert.isFalse(isUsableFocusRingColor("rgba(239, 68, 68, 0.2)"));
+        assert.isFalse(isUsableFocusRingColor("#ef444400"));
+    });
+
+    test("accepts rgb()/rgba()/short-hex syntaxes for visible colors", () => {
+        assert.isTrue(isUsableFocusRingColor("rgb(239, 68, 68)"));
+        assert.isTrue(isUsableFocusRingColor("rgba(239, 68, 68, 1)"));
+        assert.isTrue(isUsableFocusRingColor("#e44"));
+    });
+
+    test("rejects unparseable values (fall back to accent)", () => {
+        assert.isFalse(isUsableFocusRingColor(null));
+        assert.isFalse(isUsableFocusRingColor(undefined));
+        assert.isFalse(isUsableFocusRingColor(""));
+        assert.isFalse(isUsableFocusRingColor("red"));
+        assert.isFalse(isUsableFocusRingColor("not-a-color"));
+        assert.isFalse(isUsableFocusRingColor("#12"));
+    });
+});
 
 describe("detectAgentFromWorkspacesPath", () => {
     test("detects agent from Unix path", () => {
@@ -234,20 +297,6 @@ describe("generateAutoTitle", () => {
         };
         const title = generateAutoTitle(block);
         assert.equal(title, "Editor");
-    });
-
-    test("generates chat title with channel", () => {
-        const block: Block = {
-            otype: "block",
-            oid: "test-123",
-            version: 1,
-            meta: {
-                view: "chat",
-                "chat:channel": "general",
-            } as MetaType,
-        };
-        const title = generateAutoTitle(block);
-        assert.equal(title, "Chat: general");
     });
 
     test("generates default title for help view", () => {

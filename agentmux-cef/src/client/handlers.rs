@@ -100,16 +100,17 @@ wrap_focus_handler! {
 
 // ---------------------------------------------------------------------------
 // DragHandler — handles `-webkit-app-region: drag` regions reported by the
-// renderer (used on macOS/Windows where native draggable regions work).
+// renderer (used on Windows, where native draggable regions work).
 //
-// NOTE(Linux): On Linux/Wayland we do NOT use -webkit-app-region: drag for
-// window-move because Chromium suppresses ALL events on drag regions before
-// they reach the renderer (verified empirically), making drag mutually
-// exclusive with right-click contextmenu on the same element. Linux drag is
-// JS-driven instead — see frontend/app/hook/useWindowDrag.linux.ts and
-// the start_window_drag IPC → CefWindow::BeginWindowDrag() (CEF source
-// patch in agentmux/7680-... branch). Retro:
-// docs/retros/2026-05-02-drag-and-rightclick-coexistence.md.
+// NOTE(Linux/macOS): On Linux/Wayland AND macOS we do NOT use
+// -webkit-app-region: drag for window-move because Chromium suppresses ALL
+// events on drag regions before they reach the renderer (verified
+// empirically), making drag mutually exclusive with right-click contextmenu
+// on the same element. Both drive drag from JS instead — see
+// frontend/app/hook/useWindowDrag.{linux,darwin}.ts and the start_window_drag
+// IPC (Linux → CefWindow::BeginWindowDrag(), CEF source patch in
+// agentmux/7680-... branch; macOS → host-side run_macos_native_drag_loop).
+// Retro: docs/retros/2026-05-02-drag-and-rightclick-coexistence.md.
 
 wrap_drag_handler! {
     struct AgentMuxDragHandler {

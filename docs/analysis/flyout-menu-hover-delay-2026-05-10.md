@@ -206,6 +206,6 @@ Phases 1 + 3 alone should erase the user-reported "unusual delay" symptom. Phase
 
 - Source: `frontend/app/element/flyoutmenu.tsx`, `flyoutmenu.scss`
 - Caller: `frontend/app/tab/tabbar.tsx` (`tabBarMenuItems`)
-- Submenu-using callers: `frontend/app/view/chat/data.tsx` (only other site with `subItems`)
+- Submenu-using callers: `tabbar.tsx` is the sole `subItems` caller (the chat view, formerly the only other site, was removed 2026-06-13)
 - Related work: PR #791 (the Theme/Opacity hamburger menu that surfaced this) — the rendering issues exist regardless but were hidden when the menu only had top-level items
 - Floating-UI library: `@floating-ui/dom` — `autoUpdate` docs at https://floating-ui.com/docs/autoUpdate

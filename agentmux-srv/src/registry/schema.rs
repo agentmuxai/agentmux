@@ -15,7 +15,7 @@ use thiserror::Error;
 pub const MIN_SUPPORTED_SCHEMA: u32 = 1;
 /// Highest envelope schema this binary will write or read. Bumped
 /// per release that adds fields.
-pub const MAX_SUPPORTED_SCHEMA: u32 = 1;
+pub const MAX_SUPPORTED_SCHEMA: u32 = 3;
 
 /// On-disk envelope. The `data` field's shape is gated by
 /// `schema_version`; readers should match on the version before
@@ -38,14 +38,55 @@ pub struct NamedAgentRecordV1 {
     pub identity_id: Option<String>,
     /// FK to `db_memory_bundles.id`. None = unbound (= vanilla CLI).
     pub memory_id: Option<String>,
-    /// Path **relative to `<shared_home>/agents/`** — never absolute.
-    /// Keeps the record portable across machines where the home dir
-    /// differs.
+    /// Provider CLI session id for `--resume` (e.g. a Claude Code session
+    /// uuid). `None` = no session wired yet (fresh stub / legacy record).
+    /// Added in schema v2 so a global/migrated record can resume the
+    /// agent's conversation across channels without a current-channel
+    /// SQLite join. Old (v1) files deserialize this as `None`.
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// Path **relative to [`source_agents_base`]** (or, for legacy records
+    /// without one, the reader's current channel agents dir) — never
+    /// absolute. Keeps the record portable across machines where the home
+    /// dir differs.
     pub working_dir: String,
+    /// Absolute path of the agents dir that [`working_dir`] is relative to —
+    /// i.e. the channel/dev instance the agent actually lives in
+    /// (`channels/<ch>/agents` or `<dev-instance>/agents`). Added in schema
+    /// v3 (cross-channel persistence P0.4): the registry is global, so a row
+    /// surfaced in a DIFFERENT channel must reconstruct its absolute
+    /// `working_directory` against the SOURCE base, not the reader's current
+    /// channel. `None` for legacy (v1/v2) records — the reader then falls
+    /// back to its current channel agents dir, matching pre-P0.4 behavior.
+    /// Old binaries deserialize this as `None`.
+    #[serde(default)]
+    pub source_agents_base: Option<String>,
     pub created_at_ms: i64,
     pub last_launched_at_ms: i64,
     pub created_by_version: String,
     pub last_launched_by_version: String,
+}
+
+impl NamedAgentRecordV1 {
+    /// Lowest envelope schema that can faithfully represent this payload.
+    /// Climbs only when a higher-version-only field is populated, so an
+    /// older binary keeps reading records that don't use any newer feature —
+    /// only records that actually need the newer schema are hidden from it.
+    /// Writers should stamp the record with this rather than always using
+    /// `MAX_SUPPORTED_SCHEMA`.
+    ///
+    /// - v3 when `source_agents_base` is set (cross-channel reconstruction)
+    /// - v2 when `session_id` is set (cross-channel resume)
+    /// - v1 otherwise
+    pub fn min_schema_version(&self) -> u32 {
+        if self.source_agents_base.is_some() {
+            3
+        } else if self.session_id.is_some() {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -133,7 +174,9 @@ mod tests {
                 definition_id: "claude-code".to_string(),
                 identity_id: None,
                 memory_id: None,
+                session_id: None,
                 working_dir: "demo-0512a".to_string(),
+                source_agents_base: None,
                 created_at_ms: 1,
                 last_launched_at_ms: 1,
                 created_by_version: "0.33.822".to_string(),
@@ -197,5 +240,59 @@ mod tests {
             validate("abc", &r).unwrap_err(),
             ValidationError::MissingField("instance_name")
         ));
+    }
+
+    #[test]
+    fn session_id_drives_min_schema_version() {
+        let mut r = v1_record("abc");
+        assert_eq!(r.data.min_schema_version(), 1, "session-less record is v1");
+        r.data.session_id = Some("sess-xyz".to_string());
+        assert_eq!(r.data.min_schema_version(), 2, "session-wired record is v2");
+        // A v2 record validates under the bumped MAX_SUPPORTED_SCHEMA.
+        r.schema_version = 2;
+        validate("abc", &r).unwrap();
+    }
+
+    #[test]
+    fn source_agents_base_drives_min_schema_version_v3() {
+        let mut r = v1_record("abc");
+        assert_eq!(r.data.min_schema_version(), 1);
+        r.data.source_agents_base = Some("/home/u/.agentmux/channels/stable/agents".to_string());
+        assert_eq!(
+            r.data.min_schema_version(),
+            3,
+            "a source-anchored record needs v3"
+        );
+        // v3 takes precedence even with session_id also set.
+        r.data.session_id = Some("sess-1".to_string());
+        assert_eq!(r.data.min_schema_version(), 3);
+        // Validates under the bumped MAX_SUPPORTED_SCHEMA.
+        r.schema_version = 3;
+        validate("abc", &r).unwrap();
+    }
+
+    #[test]
+    fn unknown_future_field_round_trips() {
+        // A v3 record written by a newer binary with an unknown field must
+        // still deserialize (serde ignores unknowns) so this reader can load
+        // it — the additive-evolution contract.
+        let raw = serde_json::json!({
+            "schema_version": 3,
+            "data": {
+                "instance_id": "abc", "instance_name": "demo",
+                "definition_id": "claude-code", "identity_id": null,
+                "memory_id": null, "working_dir": "demo-0",
+                "source_agents_base": "/h/.agentmux/channels/x/agents",
+                "created_at_ms": 1, "last_launched_at_ms": 1,
+                "created_by_version": "0.45.0", "last_launched_by_version": "0.45.0",
+                "future_field": "ignored"
+            }
+        });
+        let parsed: NamedAgentRecord = serde_json::from_value(raw).unwrap();
+        assert_eq!(parsed.data.instance_id, "abc");
+        assert_eq!(
+            parsed.data.source_agents_base.as_deref(),
+            Some("/h/.agentmux/channels/x/agents")
+        );
     }
 }

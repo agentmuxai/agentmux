@@ -5,44 +5,55 @@
 
 use std::path::PathBuf;
 
-/// Resolve `<shared_home>/agents/registry/`.
+/// Resolve the GLOBAL `<home>/shared/agents/registry/` directory.
 ///
-/// The registry is shared across every portable/installed version on
-/// the same machine — it must NOT use the per-version data dir.
+/// P0.3 re-roots the named-**instance** registry from the old
+/// channel-scoped `channels/<ch>/agents/registry/` (which walked
+/// `AGENTMUX_DATA_DIR` up three levels and so landed inside the current
+/// channel) to the channel-independent `~/.agentmux/shared/`. An agent
+/// named in one channel is then visible in every channel, exactly like the
+/// definition store ([`resolve_shared_definitions_dir`]) — the two are now
+/// siblings under `shared/agents/`.
 ///
-/// Resolution order:
-/// 1. `AGENTMUX_HOME_OVERRIDE` — test-only escape hatch, matching
-///    `agentmux-common::data_paths` convention.
-/// 2. Walk up from `AGENTMUX_DATA_DIR` (per-version data dir set by
-///    the launcher) by three levels: `data → versions/<v> → versions
-///    → <shared_home>`. Robust against the launcher running without
-///    a real home dir (CI).
-/// 3. Fall back to `~/.agentmux/`.
+/// The base directory that instance `working_directory` values are stored
+/// *relative to* is tracked separately (the Store's `registry_agents_base`,
+/// fed from `AGENTMUX_AGENTS_DIR`) — it must stay the current channel's
+/// agents dir even though the registry files are now global.
 ///
-/// Returns `None` only if every source fails — caller treats this as
-/// "registry disabled," no write attempts.
+/// Returns `None` only if the global shared root can't be resolved — caller
+/// treats this as "registry disabled," no write attempts.
 pub fn resolve_shared_registry_dir() -> Option<PathBuf> {
-    resolve_shared_home().map(|h| h.join("agents").join("registry"))
+    resolve_global_shared_root().map(|h| h.join("agents").join("registry"))
 }
 
-fn resolve_shared_home() -> Option<PathBuf> {
+/// Resolve the GLOBAL `<home>/shared/agents/definitions/` directory.
+///
+/// Sibling of [`resolve_shared_registry_dir`]: since P0.3 both the definition
+/// store and the instance registry are **channel-independent**, resolved via
+/// the same [`resolve_global_shared_root`] so an agent created/named in one
+/// channel is visible in every channel (cross-channel agent persistence,
+/// P0.2/P0.3). Resolves via the launcher-exported `AGENTMUX_SHARED_DIR`, with
+/// a test override and a `~/.agentmux/shared` fallback.
+pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("agents").join("definitions"))
+}
+
+/// The global, channel-independent `<home>/shared` root.
+fn resolve_global_shared_root() -> Option<PathBuf> {
     if let Ok(s) = std::env::var("AGENTMUX_HOME_OVERRIDE") {
+        if !s.is_empty() {
+            // Consistent with data_paths everywhere else: the override is the
+            // ~/.agentmux root, with the shared dir at root/shared. (reagent
+            // P2 on #1385.)
+            return Some(PathBuf::from(s).join("shared"));
+        }
+    }
+    if let Ok(s) = std::env::var("AGENTMUX_SHARED_DIR") {
         if !s.is_empty() {
             return Some(PathBuf::from(s));
         }
     }
-    if let Ok(s) = std::env::var("AGENTMUX_DATA_DIR") {
-        if !s.is_empty() {
-            let p = PathBuf::from(s);
-            // .../versions/<v>/data → ancestors()[3] = .../
-            if let Some(root) = p.ancestors().nth(3) {
-                if !root.as_os_str().is_empty() {
-                    return Some(root.to_path_buf());
-                }
-            }
-        }
-    }
-    dirs::home_dir().map(|h| h.join(".agentmux"))
+    dirs::home_dir().map(|h| h.join(".agentmux").join("shared"))
 }
 
 #[cfg(test)]
@@ -56,28 +67,45 @@ mod tests {
     fn clear() {
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
         std::env::remove_var("AGENTMUX_DATA_DIR");
+        std::env::remove_var("AGENTMUX_SHARED_DIR");
     }
 
     #[test]
     fn override_wins() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear();
+        // The override is the ~/.agentmux root; the global registry lives at
+        // root/shared/agents/registry (P0.3 re-root).
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
         let r = resolve_shared_registry_dir().unwrap();
-        assert_eq!(r, PathBuf::from("/tmp/test-home/agents/registry"));
+        assert_eq!(
+            r,
+            PathBuf::from("/tmp/test-home/shared/agents/registry")
+        );
         clear();
     }
 
     #[test]
-    fn walks_up_from_data_dir() {
+    fn registry_uses_shared_dir_and_ignores_data_dir() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear();
+        // The instance registry is GLOBAL now: it resolves from the shared
+        // root, NOT by walking up the per-version AGENTMUX_DATA_DIR (which
+        // would land in the current channel). Set both and confirm the
+        // channel-scoped data dir is ignored.
+        std::env::set_var("AGENTMUX_SHARED_DIR", "/home/user/.agentmux/shared");
         std::env::set_var(
             "AGENTMUX_DATA_DIR",
-            "/home/user/.agentmux/versions/0.33.822/data",
+            "/home/user/.agentmux/channels/stable/versions/0.44.2/data",
         );
         let r = resolve_shared_registry_dir().unwrap();
-        assert_eq!(r, PathBuf::from("/home/user/.agentmux/agents/registry"));
+        assert_eq!(
+            r,
+            PathBuf::from("/home/user/.agentmux/shared/agents/registry")
+        );
+        // Sibling of the definition store — both under shared/agents/.
+        let d = resolve_shared_definitions_dir().unwrap();
+        assert_eq!(r.parent(), d.parent());
         clear();
     }
 
@@ -85,7 +113,34 @@ mod tests {
     fn falls_back_to_home() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear();
-        // No env set — uses dirs::home_dir(). Just assert non-None.
+        // No env set — uses dirs::home_dir()/.agentmux/shared. Non-None.
         assert!(resolve_shared_registry_dir().is_some());
+    }
+
+    #[test]
+    fn definitions_dir_uses_shared_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_SHARED_DIR", "/home/user/.agentmux/shared");
+        let r = resolve_shared_definitions_dir().unwrap();
+        assert_eq!(
+            r,
+            PathBuf::from("/home/user/.agentmux/shared/agents/definitions")
+        );
+        clear();
+    }
+
+    #[test]
+    fn definitions_dir_override_wins() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        let r = resolve_shared_definitions_dir().unwrap();
+        // Override is the ~/.agentmux root; shared lives at root/shared.
+        assert_eq!(
+            r,
+            PathBuf::from("/tmp/test-home/shared/agents/definitions")
+        );
+        clear();
     }
 }

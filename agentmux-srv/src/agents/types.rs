@@ -140,6 +140,12 @@ pub struct AgentRunResult {
     pub tokens: TokenCounts,
     pub cost_usd: f64,
     pub transcript: Vec<AgentTurn>,
+    /// Terminal stream-json `result` frame when it reported an error
+    /// (`is_error` / `error_*` subtype). Internal only — `#[serde(skip)]`
+    /// keeps it off the IPC wire. Lets the runner fail a run that claude
+    /// reported as an error on stdout while still exiting 0. (codex P1 #1353.)
+    #[serde(skip)]
+    pub error_frame: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -270,6 +276,7 @@ mod tests {
             tokens: TokenCounts::default(),
             cost_usd: 0.0,
             transcript: vec![],
+            error_frame: None,
         };
         let v = serde_json::to_value(&r).unwrap();
         // costUsd at the result level, tokens nested with camelCase.

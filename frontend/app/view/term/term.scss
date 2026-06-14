@@ -59,8 +59,10 @@
         min-height: 0;
         overflow: hidden;
         line-height: 1;
-        margin: 5px;
-        margin-left: var(--space-1);
+        // No inset — the terminal fills the block body edge-to-edge. The old
+        // `margin: 5px` (4px left) painted a frame of the block background
+        // around the terminal on all four sides; we want zero gaps.
+        margin: 0;
     }
 
     .term-htmlelem {
@@ -126,27 +128,21 @@
         }
     }
 
-    // The 18px width is the width of the scrollbar plus the margin
-    .term-scrollbar-show-observer {
-        z-index: calc(var(--zindex-xterm-viewport-overlay) - 1);
-        position: absolute;
-        top: 0;
-        right: 0;
-        height: 100%;
-        width: 18px;
-    }
-
-    .term-scrollbar-hide-observer {
-        z-index: calc(var(--zindex-xterm-viewport-overlay) + 1);
-        display: none;
-        position: absolute;
-        top: 0;
-        left: 0;
-        height: 100%;
-        width: calc(100% - 18px);
-    }
-
     .terminal {
+        // `.term-connectelem` is a flex row and `.xterm` is a flex item that
+        // otherwise sizes to its content width (cols × cellWidth). That left a
+        // variable strip of free flex space — `connectWidth − cols·cellWidth`,
+        // 0..<1 cell — to the RIGHT of the overlay scrollbar (which is anchored
+        // `right: 0` inside `.xterm-scrollable-element`). The strip's width
+        // changed with zoom (cellWidth changes → remainder changes), so the
+        // scrollbar visibly floated a few px off the pane's right edge. Grow
+        // `.xterm` to fill the connect width so the scrollable-element — and
+        // thus the `right: 0` scrollbar — sit flush against the pane edge. The
+        // text grid (`.xterm-screen`, still cols·cellWidth) stays left-aligned;
+        // the now-interior remainder is terminal background, and the fading
+        // overlay scrollbar covers the rightmost sliver.
+        flex-grow: 1;
+
         // WebView2 renders the native textarea caret even at opacity:0
         // when the terminal background is transparent.
         .xterm-helper-textarea {
@@ -157,31 +153,43 @@
             caret-color: transparent !important; /* stylelint-disable-line declaration-no-important */
         }
 
+        // xterm 6 replaced the native-scrollbar viewport with a custom
+        // scrollable-element + overlay scrollbar DIVs. `.xterm-viewport` is now
+        // an empty positioning anchor (scrollHeight === clientHeight always), but
+        // the vendored xterm.css still sets it `overflow-y: scroll`, which would
+        // paint a permanent dead native track down the right edge. Override to
+        // `auto` so the empty viewport shows nothing; the real scrollbar lives in
+        // the `.scrollbar` block below.
         .xterm-viewport {
-            // xterm defaults this to `overflow-y: scroll`, which permanently reserves the
-            // 14px scrollbar gutter even with no scrollback — the dead lane to the right of
-            // the text. `auto` shows the scrollbar only when content overflows; TermWrap.
-            // customFit reserves a matching 14 px (≈1 column) of width only while it is shown.
             overflow-y: auto;
+        }
 
-            &::-webkit-scrollbar {
-                width: 14px;
-                height: 14px;
-            }
+        // xterm 6's overlay scrollbar (`.scrollbar.vertical` > `.slider`) is a
+        // later sibling of `.xterm-screen` inside `.xterm-scrollable-element`,
+        // so by DOM order it should paint above the text. But `.xterm-link-layer`
+        // (the canvas the WebLinks/FilePath providers hit-test) carries
+        // `z-index: 2`, and an explicit positive z-index beats the scrollbar's
+        // `z-index: auto` regardless of DOM order — so the link layer paints over
+        // the scrollbar and, now that `.xterm-screen` no longer has
+        // `pointer-events: none`, swallows every click in the scrollbar lane.
+        // Lift the scrollbar above the link layer (z:2) and helpers (z:5) so the
+        // thumb is clickable. Verified via elementFromPoint over the scrollbar
+        // lane: link-layer (blocked) → slider (clickable). The scrollbar only
+        // occupies the right 14px, so link hover over the text area is unaffected;
+        // when there is no overflow the scrollbar is `visibility:hidden` and not
+        // hit-tested, so the full width stays available for link hover.
+        .xterm-scrollable-element > .scrollbar {
+            z-index: 10;
+            // Normal arrow over the scrollbar, never the link "hand". xterm adds
+            // `.xterm-cursor-pointer` (cursor: pointer) to the terminal while a link
+            // is under the mouse; the scrollbar sits above the link layer, so force
+            // the default cursor on the whole scrollbar so the lane shows the plain
+            // pointer instead of the hyperlink hand.
+            cursor: default;
 
-            // Transparent track: the scrollbar lane (reserved only while the scrollbar is
-            // visible — see TermWrap.customFit) shows the terminal background instead of a
-            // contrasting strip. The thumb paints on top on hover.
-            &::-webkit-scrollbar-track {
-                background-color: transparent;
-            }
-
-            &::-webkit-scrollbar-thumb {
-                cursor: pointer;
-                display: none;
+            .slider {
+                cursor: default;
                 background-color: var(--scrollbar-thumb-color);
-                border-radius: 0;
-                margin: 0 1px 0 1px;
 
                 &:hover {
                     background-color: var(--scrollbar-thumb-hover-color);
@@ -190,12 +198,6 @@
                 &:active {
                     background-color: var(--scrollbar-thumb-active-color);
                 }
-            }
-        }
-
-        &:hover {
-            .xterm-viewport::-webkit-scrollbar-thumb {
-                display: block;
             }
         }
     }

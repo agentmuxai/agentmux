@@ -43,9 +43,6 @@
         "editor.insertSpaces": true,
         "editor.autoIndent": "keep"
     },
-    "[go]": {
-        "editor.defaultFormatter": "golang.go"
-    },
     "[mdx]": {
         "editor.wordWrap": "on"
     },
@@ -54,12 +51,5 @@
     },
     "files.associations": {
         "*.css": "tailwindcss"
-    },
-    "go.lintTool": "staticcheck",
-    "gopls": {
-        "analyses": {
-            "QF1003": false
-        },
-        "directoryFilters": ["-tsunami/frontend/scaffold"]
     }
 }
