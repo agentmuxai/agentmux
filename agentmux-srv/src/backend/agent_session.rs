@@ -330,6 +330,15 @@ pub fn archive_session(
         }
     }
 
+    // Clear the GLOBAL current zone in the same lifecycle. Without this, the
+    // cross-channel read fallback (`read_session_state` / `blockfile:read_range`
+    // / `blockfile:line_count`) would treat the intentionally-cleared local
+    // `:current` as a cross-channel miss and resurrect the just-archived
+    // conversation on the next open — so a "new session" for this definition
+    // would inherit stale history. Best-effort, same as the per-channel clear.
+    // (codex P1 on PR #1399.)
+    clear_global_current_zone(definition_id);
+
     tracing::info!(
         definition_id = %definition_id,
         archive_zoneid = %archive_zone,
@@ -338,6 +347,38 @@ pub fn archive_session(
     );
 
     Ok(Some((archive_zone, ts as i64)))
+}
+
+/// Delete `output.state.json` + `output` from the agent's GLOBAL
+/// `agent:<defId>:current` zone, if a global store is installed. Best-effort:
+/// a missing file is the expected "agent never mirrored" case (silent), other
+/// errors are logged but never propagated. Keeps the global zone in lockstep
+/// with the per-channel `:current` clear in [`archive_session`].
+fn clear_global_current_zone(definition_id: &str) {
+    let Some(gfs) = global_transcript_store() else {
+        return;
+    };
+    let Ok(zone) = validate_and_current(definition_id) else {
+        return;
+    };
+    for name in [SNAPSHOT_FILE, OUTPUT_FILE] {
+        // Only delete what's present, so an absent file isn't logged as an error.
+        match gfs.stat(&zone, name) {
+            Ok(Some(_)) => {
+                if let Err(e) = gfs.delete_file(&zone, name) {
+                    tracing::warn!(
+                        zone = %zone, file = %name, error = %e,
+                        "global transcripts: failed to clear current zone on archive"
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(
+                zone = %zone, file = %name, error = %e,
+                "global transcripts: stat failed clearing current zone on archive"
+            ),
+        }
+    }
 }
 
 /// List archive zones for `definition_id`, newest first.
@@ -1325,25 +1366,49 @@ mod tests {
         assert_eq!(agent_zone_for_block_meta(&bad), None);
     }
 
+    // NOTE: the global transcript store is a process-global `OnceLock`, so only
+    // ONE test may install it deterministically (a second `set_` is a silent
+    // no-op under parallel test execution). This single test therefore owns the
+    // singleton and exercises both global-dependent behaviours: the read
+    // fallback AND the archive-clears-global lifecycle (codex P1 on #1399).
     #[test]
-    fn read_session_state_falls_back_to_global_store() {
-        // Per-channel store has no snapshot for the agent; the global store does.
-        // read_session_state must return the global snapshot (cross-channel open).
+    fn global_store_read_fallback_and_archive_clear() {
         let per_channel = fresh_filestore();
         let global = fresh_filestore();
         set_global_transcript_store(global.clone());
 
         let def_id = "def-global-fallback-xyz";
         let zone = agent_current_zone(def_id);
-        let body = br#"{"schemaVersion":2,"highWaterMark":3}"#;
+
+        // Seed the GLOBAL current zone (agent ran in another channel).
+        let snap = br#"{"schemaVersion":2,"highWaterMark":3}"#;
         global
             .make_file(&zone, SNAPSHOT_FILE, FileMeta::default(), FileOpts::default())
             .unwrap();
-        global.write_file(&zone, SNAPSHOT_FILE, body).unwrap();
+        global.write_file(&zone, SNAPSHOT_FILE, snap).unwrap();
+        global
+            .make_file(&zone, OUTPUT_FILE, FileMeta::default(), FileOpts::default())
+            .unwrap();
+        global.append_data(&zone, OUTPUT_FILE, b"{\"type\":\"user\"}\n").unwrap();
 
+        // (1) Read fallback: per-channel has nothing → returns the global snapshot.
         let (content, modts) = read_session_state(&per_channel, def_id).unwrap();
-        assert_eq!(content.as_deref(), Some(std::str::from_utf8(body).unwrap()));
+        assert_eq!(content.as_deref(), Some(std::str::from_utf8(snap).unwrap()));
         assert!(modts.is_some());
+
+        // (2) Archive lifecycle: give the per-channel `:current` content so the
+        // archive runs, then assert the GLOBAL current zone is also cleared.
+        write_zone_file(&per_channel, &zone, SNAPSHOT_FILE, b"{\"local\":true}").unwrap();
+        let archived = archive_session(&per_channel, def_id).unwrap();
+        assert!(archived.is_some(), "should have archived the local current");
+
+        // Global current zone must now be empty (no resurrection).
+        assert!(global.stat(&zone, SNAPSHOT_FILE).unwrap().is_none(), "global snapshot not cleared");
+        assert!(global.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "global output not cleared");
+
+        // (3) A subsequent read finds nothing anywhere → fresh session, no stale history.
+        let (after, _) = read_session_state(&per_channel, def_id).unwrap();
+        assert_eq!(after, None, "archived conversation must not be resurrected from global zone");
     }
 
     #[test]
