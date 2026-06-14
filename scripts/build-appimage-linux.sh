@@ -138,6 +138,16 @@ fi
 #        agentmux-cef looks for next to its binary. ---
 cp -r dist/frontend "$APPDIR/usr/bin/frontend"
 
+# Strip frontend source maps from the release artifact (debug-only, ~28 MB).
+# Mirrors the STRIP_MAPS policy for release builds
+# (docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md): the app runs identically;
+# only prod-stack-trace symbolication is lost.
+_maps=$(find "$APPDIR/usr/bin/frontend" -name '*.map' | wc -l)
+if [ "$_maps" -gt 0 ]; then
+    find "$APPDIR/usr/bin/frontend" -name '*.map' -delete
+    echo "Stripped $_maps source-map file(s) from the AppImage frontend"
+fi
+
 # --- 6. Schema (optional — only present if `task copy:schema` ran) ---
 if [ -d dist/schema ]; then
     mkdir -p "$APPDIR/usr/share/agentmux"
@@ -186,9 +196,15 @@ for size in 16 32 48 64 128 256 512; do
 done
 
 # --- 11. Build the AppImage ---
+# appimagetool's bundled mksquashfs only ships the zstd compressor (no xz), so
+# crank zstd to its max level (22 vs the default 15). The bulk of the image is
+# libcef.so (~414 MB); the higher level trades build time for a smaller artifact.
+# Decompress cost is absorbed by AppRun's extract-once-cache on first launch.
 mkdir -p "$OUTDIR"
 rm -f "$OUTPUT"
-ARCH=x86_64 "$APPIMAGETOOL" --no-appstream "$APPDIR" "$OUTPUT"
+ARCH=x86_64 "$APPIMAGETOOL" --no-appstream \
+    --comp zstd --mksquashfs-opt -Xcompression-level --mksquashfs-opt 22 \
+    "$APPDIR" "$OUTPUT"
 
 chmod +x "$OUTPUT"
 echo ""
