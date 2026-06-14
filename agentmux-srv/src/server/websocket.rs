@@ -1185,41 +1185,66 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let mut stderr_buf: Vec<u8> = Vec::new();
 
                 use tokio::io::AsyncReadExt as _;
-                tokio::time::timeout(
+                // Read one extra sentinel byte per stream. If we receive
+                // MAX_OUTPUT+1 bytes the output was genuinely truncated (we can
+                // tell definitively). If we receive ≤MAX_OUTPUT bytes the read
+                // completed without hitting the cap.
+                //
+                // Use `(&mut pipe).take(n)` rather than `pipe.take(n)` so the
+                // Take adapter borrows the pipe instead of consuming it — the
+                // original handles stay available for the drain phase below.
+                let status = tokio::time::timeout(
                     std::time::Duration::from_secs(TIMEOUT_SECS),
                     async {
-                        // Bind Take adapters to named vars — the read_to_end
-                        // futures borrow them, and temporaries in join! arms
-                        // would be dropped before the futures complete (E0716).
-                        let mut sout_take = stdout_pipe.take(MAX_OUTPUT);
-                        let mut serr_take = stderr_pipe.take(MAX_OUTPUT);
+                        // Named bindings required: join! futures borrow the
+                        // Take adapters and Sink values across poll points, so
+                        // temporaries created inside join! arms are freed too
+                        // early (E0716). Bind every short-lived value here first.
+                        let mut sout_take = (&mut stdout_pipe).take(MAX_OUTPUT + 1);
+                        let mut serr_take = (&mut stderr_pipe).take(MAX_OUTPUT + 1);
                         let (sout, serr) = tokio::join!(
                             sout_take.read_to_end(&mut stdout_buf),
                             serr_take.read_to_end(&mut stderr_buf),
                         );
                         sout.map_err(|e| format!("shellexec: stdout read: {e}"))?;
                         serr.map_err(|e| format!("shellexec: stderr read: {e}"))?;
-                        Ok::<_, String>(())
+                        // sout_take / serr_take drop here, releasing their borrows
+                        // on stdout_pipe / stderr_pipe so we can use them below.
+                        drop(sout_take);
+                        drop(serr_take);
+
+                        // Drain any remaining output concurrently with child.wait().
+                        // Without draining, a command that emits more than MAX_OUTPUT
+                        // bytes blocks on its write() syscall (the pipe buffer is full
+                        // and nobody is reading) until the RPC timeout fires.  On Unix
+                        // this often manifests as SIGPIPE flipping an otherwise-zero
+                        // exit code.  Draining lets the process flush and exit cleanly
+                        // so the reported exit code is the real one.
+                        let mut sink_out = tokio::io::sink();
+                        let mut sink_err = tokio::io::sink();
+                        let (drain_sout, drain_serr, wait) = tokio::join!(
+                            tokio::io::copy(&mut stdout_pipe, &mut sink_out),
+                            tokio::io::copy(&mut stderr_pipe, &mut sink_err),
+                            child.wait(),
+                        );
+                        drain_sout.map_err(|e| format!("shellexec: drain stdout: {e}"))?;
+                        drain_serr.map_err(|e| format!("shellexec: drain stderr: {e}"))?;
+                        wait.map_err(|e| format!("shellexec: wait: {e}"))
                     }
                 )
                 .await
                 .map_err(|_| format!("shellexec: timed out after {TIMEOUT_SECS}s"))??;
-                // Pipes are consumed/dropped by the join! — child can now exit.
-                let status = child.wait().await
-                    .map_err(|e| format!("shellexec: wait: {e}"))?;
 
-                // `take(MAX_OUTPUT)` already caps each buffer at MAX_OUTPUT bytes,
-                // so `bytes.len()` is at most MAX_OUTPUT — checking `> MAX_OUTPUT`
-                // would always be false (dead code). Instead, check for equality:
-                // if we read exactly MAX_OUTPUT bytes the take adapter hit its limit
-                // and there may be more data the user didn't see.
                 let format_output = |bytes: Vec<u8>| -> String {
-                    let len = bytes.len();
-                    let s = String::from_utf8_lossy(&bytes);
-                    if len == MAX_OUTPUT as usize {
+                    // bytes.len() > MAX_OUTPUT means we read the MAX_OUTPUT+1
+                    // sentinel — the stream was truncated.  Checking for equality
+                    // with MAX_OUTPUT (without +1) would be a false positive for
+                    // commands that emit exactly MAX_OUTPUT bytes.
+                    if bytes.len() > MAX_OUTPUT as usize {
+                        let s = String::from_utf8_lossy(&bytes[..MAX_OUTPUT as usize]);
                         format!("{s}…[output capped at {MAX_OUTPUT} bytes]")
                     } else {
-                        s.into_owned()
+                        String::from_utf8_lossy(&bytes).into_owned()
                     }
                 };
 

@@ -253,9 +253,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 await dispatchBangCommand(trimmed.slice(1).trim(), opts.blockId, buildCommandContext());
             } finally {
                 // TurnStart was dispatched by handleSendMessage before sendMessage
-                // was called. Always reset it — even if dispatchBangCommand throws —
-                // so the pane returns to Idle instead of waiting for the 30s watchdog.
-                opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                // was called. Reset it so the pane returns to Idle instead of waiting
+                // for the 30s watchdog — but only if the pane was idle when !cmd was
+                // submitted. If wasAlreadyWorking is true, a real agent turn was
+                // already streaming; resetting to Idle here would clobber its UI state
+                // until the next backend event arrives.
+                if (!wasAlreadyWorking) {
+                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                }
             }
             return;
         }
