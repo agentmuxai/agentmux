@@ -37,7 +37,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { parseHistoryLines } from "../parseHistoryLines";
 
-import type { LogFn } from "../types";
+import type { DocumentState, FilterState, LogFn } from "../types";
 export type { LogFn };
 
 export interface UseHistoryPaginationOptions {
@@ -80,6 +80,16 @@ export interface UseHistoryPaginationOptions {
      *  for an empty document). Used to gate the new-message enter animation
      *  so history rows don't animate on open/restore. See PR #1212. */
     onHistoryReady?: () => void;
+    /**
+     * Schema-v2 restore: called when a v2 snapshot is successfully read and
+     * its overlay state (DocumentState + pane flags) should be applied. The
+     * caller owns the atoms; the hook passes the deserialized overlay so the
+     * caller can apply it without coupling this hook to the atom types.
+     */
+    onSnapshotOverlay?: (overlay: {
+        documentState: Partial<DocumentState>;
+        detailsOpen?: boolean;
+    }) => void;
     log: LogFn;
 }
 
@@ -88,19 +98,44 @@ export interface UseHistoryPagination {
     historyTotal: Accessor<number>;
     loadingOlder: Accessor<boolean>;
     loadOlder: () => Promise<void>;
+    /**
+     * True when this pane mounted against a v2 snapshot whose `sourceBlockId`
+     * names a DIFFERENT block (cross-block "structural continuation" — a second
+     * pane for an agent already shown elsewhere). Such a pane is a transient
+     * viewer: it must NOT overwrite the agent-anchored snapshot, or it would
+     * repoint it at its own (near-empty) block and make the original block's
+     * conversation unrestorable. The caller gates `writeSnapshotNow` on this.
+     * Cross-block continuation restore itself is deferred (see spec §15, #1397).
+     */
+    snapshotIsForeignBlock: Accessor<boolean>;
 }
 
 const PAGE_SIZE = 200;
 
 /** Sidecar filename for reducer-state snapshots, sibling to "output". */
 export const SNAPSHOT_FILENAME = "output.state.json";
-/** Current snapshot schema version. Bump on any breaking shape change. */
-export const SNAPSHOT_SCHEMA_VERSION = 1;
+/** Schema versions. v1 = nodes[] embedded; v2 = overlay only + NDJSON replay. */
+export const SNAPSHOT_SCHEMA_VERSION_V1 = 1;
+export const SNAPSHOT_SCHEMA_VERSION_V2 = 2;
+/** Version written by writeSnapshotNow. */
+export const SNAPSHOT_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION_V2;
+
+/** Render viewport: lines loaded on restore. Not a storage cap — see §2 of spec. */
+export const RESTORE_WINDOW_LINES = 5_000;
+
+const DEFAULT_FILTER_STATE: FilterState = {
+    showThinking: false,
+    showSuccessfulTools: true,
+    showFailedTools: true,
+    showIncoming: true,
+    showOutgoing: true,
+};
 
 export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
+    const [snapshotIsForeignBlock, setSnapshotIsForeignBlock] = createSignal(false);
 
     /**
      * Load the previous page of history and prepend to the document.
@@ -198,33 +233,117 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (!mounted) return;
                 if (stateResp.content) {
                     const snapshot = JSON.parse(stateResp.content);
-                    if (snapshot && snapshot.schemaVersion === SNAPSHOT_SCHEMA_VERSION && Array.isArray(snapshot.nodes)) {
-                        batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes }));
+                    const modts = typeof stateResp.modts === "number" ? stateResp.modts : 0;
 
+                    // --- Schema v2: overlay only, reconstruct nodes from NDJSON ---
+                    // Taken only for a SAME-BLOCK reopen with a usable high-water mark:
+                    //
+                    //  - hwm>0: `writeSnapshotNow` defaults hwm=0 when the line-count RPC
+                    //    fails at write time; treating hwm=0 as "empty session" would
+                    //    render a blank pane and hide on-disk history, so hwm<=0 falls
+                    //    through to the NDJSON replay (which re-derives the count).
+                    //  - sourceBlockId === opts.blockId: the durable NDJSON history is
+                    //    per-block, but the snapshot is agent-anchored (shared across all
+                    //    of an agent's blocks). When a *new* block opens for the same
+                    //    agent (cross-block "structural continuation"), this block's own
+                    //    output is empty, so we must NOT read it as if it were the source.
+                    //    Cross-block continuation needs a unified per-agent log; until
+                    //    that lands (follow-up to PR #1361) we fall through to NDJSON
+                    //    replay on this block rather than restore a fragmented/blank view.
+                    const v2SameBlock = snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2
+                        && typeof snapshot.highWaterMark === "number"
+                        && snapshot.highWaterMark > 0
+                        && (typeof snapshot.sourceBlockId !== "string"
+                            || snapshot.sourceBlockId === ""
+                            || snapshot.sourceBlockId === opts.blockId);
+                    if (v2SameBlock) {
+                        const hwm: number = snapshot.highWaterMark;
+                        const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
+                        const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+                            block_id: opts.blockId,
+                            filename: "output",
+                            offset: windowStart,
+                            limit: hwm - windowStart,
+                        }, { timeout: 30_000 });
+                        if (!mounted) return;
+                        const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
+                        batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
+                        // Apply DocumentState + pane overlay via caller callback.
+                        const ds = snapshot.documentState;
+                        if (ds && opts.onSnapshotOverlay) {
+                            opts.onSnapshotOverlay({
+                                documentState: {
+                                    collapsedNodes: new Set<string>(ds.collapsedNodeIds ?? []),
+                                    pinnedNodes: new Set<string>(ds.pinnedNodeIds ?? []),
+                                    scrollPosition: typeof ds.scrollPosition === "number" ? ds.scrollPosition : 0,
+                                    filter: ds.filter ?? DEFAULT_FILTER_STATE,
+                                },
+                                detailsOpen: snapshot.paneState?.detailsOpen,
+                            });
+                        }
+                        // Trust the backend's reported total over the snapshot's hwm:
+                        // `rangeResp.total` is the line count the backend can actually
+                        // serve (clamped to its ring-buffer window), so load-older never
+                        // asks for offsets below the floor. See the invariant at the
+                        // NDJSON replay path below.
+                        const available = typeof rangeResp.total === "number" ? rangeResp.total : hwm;
+                        const clampedStart = Math.min(windowStart, available);
+                        setHistoryOffset(clampedStart);
+                        setHistoryTotal(available);
+                        opts.onContinuationModts?.(modts);
+                        opts.log(
+                            "history",
+                            `v2 restore: ${nodes.length} nodes from lines [${clampedStart}, ${available})` +
+                            (clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
+                            (ds?.collapsedNodeIds?.length ? `, ${ds.collapsedNodeIds.length} collapsed` : ""),
+                        );
+                        opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
+                        opts.onHistoryReady?.();
+                        return;
+                    }
+                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2) {
+                        // v2 snapshot we deliberately didn't fast-path: either hwm<=0
+                        // (write-time count failure) or a cross-block continuation
+                        // (sourceBlockId !== this block). Don't render empty — fall
+                        // through to NDJSON replay on this block.
+                        const crossBlock = typeof snapshot.sourceBlockId === "string"
+                            && snapshot.sourceBlockId !== ""
+                            && snapshot.sourceBlockId !== opts.blockId;
+                        if (crossBlock) {
+                            // Mark this pane as a transient cross-block viewer so the
+                            // caller suppresses snapshot writes — otherwise it would
+                            // clobber the agent-anchored snapshot that still references
+                            // the block holding the real conversation.
+                            setSnapshotIsForeignBlock(true);
+                        }
+                        opts.log(
+                            "history",
+                            crossBlock
+                                ? "v2 snapshot is from another block (cross-block continuation not yet supported); falling back to NDJSON replay"
+                                : "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay",
+                            "warn",
+                        );
+                    }
+
+                    // --- Schema v1: nodes[] embedded (legacy fast path) ---
+                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) {
+                        batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: snapshot.nodes }));
                         const offset = typeof snapshot.historyOffset === "number" && snapshot.historyOffset >= 0
                             ? snapshot.historyOffset
                             : 0;
                         setHistoryOffset(offset);
                         setHistoryTotal(typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : snapshot.nodes.length);
-                        // Option E: surface the snapshot's modts so the
-                        // view model can render the "· continued from
-                        // Xm ago" chip in the title bar. The chip
-                        // suppresses itself when the gap is <30s (same
-                        // pane's own fresh write).
-                        const modts = typeof stateResp.modts === "number" ? stateResp.modts : 0;
                         opts.onContinuationModts?.(modts);
                         opts.log(
                             "history",
-                            `restored ${snapshot.nodes.length} nodes from snapshot ` +
+                            `v1 restore: ${snapshot.nodes.length} nodes from snapshot ` +
                                 `(savedAt=${snapshot.savedAt ?? "unknown"}, loadOlder offset=${offset})`,
                         );
-                        opts.model.dispatchPane({
-                            type: "InitReady",
-                            at: Date.now(),
-                        });
+                        opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
                         opts.onHistoryReady?.();
                         return;
                     }
+
                     opts.log(
                         "history",
                         `snapshot schema mismatch (got v${snapshot?.schemaVersion}); falling back to NDJSON replay`,
@@ -316,5 +435,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         historyTotal,
         loadingOlder,
         loadOlder,
+        snapshotIsForeignBlock,
     };
 }
