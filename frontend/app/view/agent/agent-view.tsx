@@ -346,7 +346,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         const [detailsOpen] = agentAtoms().detailsOpenAtom;
         const capturedDocState = docState();
         const capturedDetailsOpen = detailsOpen();
-        const capturedOffset = history.historyOffset();
 
         inFlightSnapshot = inFlightSnapshot.then(async () => {
             let highWaterMark = 0;
@@ -359,11 +358,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             } catch {
                 // Soft fail — snapshot still ships without the mark.
             }
+            // Note: no historyOffset field — v2 restore derives the render window
+            // from highWaterMark (windowStart = hwm - RESTORE_WINDOW_LINES), so a
+            // persisted offset would be dead/misleading.
             const snapshot = {
                 schemaVersion: SNAPSHOT_SCHEMA_VERSION,
                 savedAt: new Date().toISOString(),
                 highWaterMark,
-                historyOffset: capturedOffset,
                 documentState: {
                     collapsedNodeIds: capturedDocState ? [...capturedDocState.collapsedNodes] : [],
                     pinnedNodeIds: capturedDocState ? [...capturedDocState.pinnedNodes] : [],

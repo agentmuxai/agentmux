@@ -225,20 +225,25 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     const modts = typeof stateResp.modts === "number" ? stateResp.modts : 0;
 
                     // --- Schema v2: overlay only, reconstruct nodes from NDJSON ---
-                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2) {
-                        const hwm: number = typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : 0;
+                    // Only taken when the snapshot carries a usable high-water mark.
+                    // `writeSnapshotNow` defaults hwm=0 when the line-count RPC fails
+                    // at write time; treating hwm=0 as "empty session" here would
+                    // render a blank pane and hide on-disk history. So when hwm<=0 we
+                    // deliberately fall through to the NDJSON ring-buffer replay below,
+                    // which derives the line count fresh from the backend.
+                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2
+                        && typeof snapshot.highWaterMark === "number"
+                        && snapshot.highWaterMark > 0) {
+                        const hwm: number = snapshot.highWaterMark;
                         const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
-                        let nodes = [];
-                        if (hwm > 0) {
-                            const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                                block_id: opts.blockId,
-                                filename: "output",
-                                offset: windowStart,
-                                limit: hwm - windowStart,
-                            }, { timeout: 30_000 });
-                            if (!mounted) return;
-                            nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
-                        }
+                        const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+                            block_id: opts.blockId,
+                            filename: "output",
+                            offset: windowStart,
+                            limit: hwm - windowStart,
+                        }, { timeout: 30_000 });
+                        if (!mounted) return;
+                        const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Apply DocumentState + pane overlay via caller callback.
                         const ds = snapshot.documentState;
@@ -253,18 +258,34 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                                 detailsOpen: snapshot.paneState?.detailsOpen,
                             });
                         }
-                        setHistoryOffset(windowStart);
-                        setHistoryTotal(hwm);
+                        // Trust the backend's reported total over the snapshot's hwm:
+                        // `rangeResp.total` is the line count the backend can actually
+                        // serve (clamped to its ring-buffer window), so load-older never
+                        // asks for offsets below the floor. See the invariant at the
+                        // NDJSON replay path below.
+                        const available = typeof rangeResp.total === "number" ? rangeResp.total : hwm;
+                        const clampedStart = Math.min(windowStart, available);
+                        setHistoryOffset(clampedStart);
+                        setHistoryTotal(available);
                         opts.onContinuationModts?.(modts);
                         opts.log(
                             "history",
-                            `v2 restore: ${nodes.length} nodes from lines [${windowStart}, ${hwm})` +
-                            (windowStart > 0 ? ` (${windowStart} older lines available via load-older)` : "") +
+                            `v2 restore: ${nodes.length} nodes from lines [${clampedStart}, ${available})` +
+                            (clampedStart > 0 ? ` (${clampedStart} older lines available via load-older)` : "") +
                             (ds?.collapsedNodeIds?.length ? `, ${ds.collapsedNodeIds.length} collapsed` : ""),
                         );
                         opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
                         opts.onHistoryReady?.();
                         return;
+                    }
+                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2) {
+                        // v2 snapshot with hwm<=0 (write-time count failure). Don't
+                        // render empty — fall through to NDJSON replay.
+                        opts.log(
+                            "history",
+                            "v2 snapshot has no usable highWaterMark; falling back to NDJSON replay",
+                            "warn",
+                        );
                     }
 
                     // --- Schema v1: nodes[] embedded (legacy fast path) ---
