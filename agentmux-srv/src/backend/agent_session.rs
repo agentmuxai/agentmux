@@ -269,6 +269,24 @@ pub fn archive_session(
 ) -> Result<Option<(String, i64)>, String> {
     let current_zone = validate_and_current(definition_id)?;
 
+    // Prefer the GLOBAL current zone as the archive source. It is the complete
+    // cross-channel accumulation — and (via the hot-path mirror) the place the
+    // `output` NDJSON is fully gathered — so the per-channel `:current` is at
+    // most a subset (often just this channel's snapshot). Archiving from the
+    // global store therefore preserves the full history in *every* case:
+    //   - cross-channel viewer (empty local), AND
+    //   - cross-channel session that also ran locally (non-empty local) —
+    // both previously risked discarding global-only history.
+    // We then clear BOTH currents so the read fallback can't resurrect the
+    // just-archived conversation. Falls through to the per-channel path below
+    // only when there's no global store or it holds nothing for this agent
+    // (pure pre-global / same-channel-only data). (codex + reagent P1/P2 #1399.)
+    if let Some(archived) = archive_global_current(filestore, definition_id)? {
+        clear_local_current_zone(filestore, &current_zone);
+        clear_global_current_zone(definition_id);
+        return Ok(Some(archived));
+    }
+
     // Determine whether there's anything worth archiving.
     let state_stat = filestore
         .stat(&current_zone, SNAPSHOT_FILE)
@@ -285,17 +303,7 @@ pub fn archive_session(
         None => false,
     };
     if !has_state && !has_output {
-        // Per-channel `:current` is empty — but a cross-channel *viewer's* live
-        // conversation lives only in the GLOBAL current (history was served via
-        // the read fallback; nothing was ever written to this channel's local
-        // zone). Archive it from the global store (so it's preserved + browsable
-        // here, honouring the archive contract) and clear the global current, so
-        // the read fallback can't resurrect it on the next open. Without this,
-        // the empty-local early return skipped the global clear entirely
-        // (reagent P1 #1399, follow-up to codex's archive P1).
-        let archived = archive_global_current(filestore, definition_id)?;
-        clear_global_current_zone(definition_id);
-        return Ok(archived);
+        return Ok(None);
     }
 
     let ts = now_ms();
@@ -408,6 +416,24 @@ fn read_snapshot_bytes(store: &FileStore, zone: &str, name: &str) -> Result<Opti
             .read_file(zone, name)
             .map_err(|e| format!("read_file: {e}")),
         None => Ok(None),
+    }
+}
+
+/// Delete `output.state.json` + `output` from a per-channel `:current` zone,
+/// only for files that are present (so absence isn't logged as an error).
+/// Best-effort — used after the global-preferred archive has persisted the
+/// content, to retire this channel's (subset) copy.
+fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
+    for name in [SNAPSHOT_FILE, OUTPUT_FILE] {
+        match filestore.stat(zone, name) {
+            Ok(Some(_)) => {
+                if let Err(e) = filestore.delete_file(zone, name) {
+                    tracing::warn!(zone = %zone, file = %name, error = %e, "agent_session: failed to clear local current after global archive");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(zone = %zone, file = %name, error = %e, "agent_session: stat failed clearing local current"),
+        }
     }
 }
 

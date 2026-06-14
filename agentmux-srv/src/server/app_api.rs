@@ -981,6 +981,21 @@ fn global_output_source(
     }
     let gfs = global.as_ref()?;
     let block = wstore.get::<Block>(block_id).ok().flatten()?;
+    // Suppress the fallback for an explicitly ARCHIVED block. The UI archive
+    // button + the periodic `SessionArchiver` sweep delete the local block
+    // `output` and stamp `session:archived_at` (`archive_session_output`). That
+    // empty local output is intentional — the block must reopen archived (banner
+    // + Restore), exactly as pre-PR — so we must NOT resurrect it from the global
+    // mirror here. (reagent P1 #1399.)
+    let archived = block
+        .meta
+        .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
+        .and_then(|v| v.as_i64())
+        .map(|v| v > 0)
+        .unwrap_or(false);
+    if archived {
+        return None;
+    }
     let zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)?;
     match gfs.stat(&zone, filename) {
         Ok(Some(ref wf)) if wf.size > 0 => Some((gfs.clone(), zone)),
@@ -2468,6 +2483,42 @@ mod cross_channel_tests {
         assert!(global_output_source(&per_channel, &None, &wstore, &block_id, "output").is_none());
         // Non-agent block id → None.
         assert!(global_output_source(&per_channel, &Some(global), &wstore, "not-a-block", "output").is_none());
+    }
+
+    #[test]
+    fn global_output_source_suppressed_for_archived_block() {
+        // A block archived via the UI/sweep (`session:archived_at` set, local
+        // output deleted) must NOT resurrect from the global mirror — it should
+        // reopen archived/empty as pre-PR. (reagent P1 #1399.)
+        let per_channel = mem_store();
+        let global = mem_store();
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+
+        let oid = uuid::Uuid::new_v4().to_string();
+        let mut meta = MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("def-cc-arch"));
+        meta.insert(
+            crate::backend::session_archive::META_SESSION_ARCHIVED_AT.to_string(),
+            serde_json::json!(1_700_000_000_000i64),
+        );
+        let mut block = Block {
+            oid: oid.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta,
+            subblockids: None,
+        };
+        wstore.insert(&mut block).expect("insert block");
+
+        // Global zone has content, but the block is archived → no fallback.
+        seed_output(&global, "agent:def-cc-arch:current", b"{\"type\":\"user\"}\n");
+        assert!(
+            global_output_source(&per_channel, &Some(global), &wstore, &oid, "output").is_none(),
+            "archived block must not fall back to the global mirror",
+        );
     }
 
     #[test]
