@@ -1842,21 +1842,36 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             b.data.last_launched_at_ms.cmp(&a.data.last_launched_at_ms)
                         });
                         records.truncate(raw_limit);
-                        // Local chain-heads: (a) OVERLAY the live block_id/session
-                        // onto agents that also ran in this channel, (b) APPEND
-                        // purely-local agents not (yet) mirrored, so nothing the
-                        // user has here disappears.
-                        let local_heads = wstore
-                            .instance_list_named(raw_limit, None, identity_filter, false)
+                        // Local agents in PICKER mode (include_continuations=true):
+                        // collapses each chain to one row AND surfaces orphan
+                        // continuations (head hard-deleted) as their own root, so
+                        // they don't vanish from "My Agents" (reagent P2). Indexed by
+                        // (definition_id, instance_name) — the SAME key the registry
+                        // dedup uses — keeping the newest, so overlay AND the
+                        // local-only append agree on identity (reagent P1).
+                        let local = wstore
+                            .instance_list_named(raw_limit, None, identity_filter, true)
                             .unwrap_or_default();
-                        let local_by_id: std::collections::HashMap<&str, &AgentInstance> =
-                            local_heads.iter().map(|i| (i.id.as_str(), i)).collect();
+                        let mut local_by_key: std::collections::HashMap<
+                            (String, String),
+                            AgentInstance,
+                        > = std::collections::HashMap::new();
+                        for li in local {
+                            let key = (li.definition_id.clone(), li.instance_name.clone());
+                            match local_by_key.get(&key) {
+                                Some(e) if e.started_at >= li.started_at => {}
+                                _ => {
+                                    local_by_key.insert(key, li);
+                                }
+                            }
+                        }
                         let mut out: Vec<AgentInstance> = records
                             .into_iter()
                             .map(|rec| {
                                 let d = rec.data;
-                                if let Some(li) = local_by_id.get(d.instance_id.as_str()) {
-                                    return (*li).clone();
+                                let key = (d.definition_id.clone(), d.instance_name.clone());
+                                if let Some(li) = local_by_key.get(&key) {
+                                    return li.clone();
                                 }
                                 // Reconstruct the absolute workdir from the record's
                                 // source base (v3) or the current channel (legacy).
@@ -1892,10 +1907,17 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 }
                             })
                             .collect();
-                        let have: std::collections::HashSet<String> =
-                            out.iter().map(|i| i.id.clone()).collect();
-                        for li in local_heads {
-                            if !have.contains(&li.id) {
+                        // APPEND local-only agents — those whose (definition_id,
+                        // instance_name) no registry record represents (created
+                        // before the live mirror could register them, or orphan
+                        // continuations). Keyed identically to the dedup, so a deduped
+                        // agent's local head never re-appears as a duplicate row.
+                        let have_keys: std::collections::HashSet<(String, String)> = out
+                            .iter()
+                            .map(|i| (i.definition_id.clone(), i.instance_name.clone()))
+                            .collect();
+                        for (key, li) in local_by_key {
+                            if !have_keys.contains(&key) {
                                 out.push(li);
                             }
                         }
