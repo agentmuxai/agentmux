@@ -110,6 +110,12 @@ tasks:
         cmds:
             - pwsh -File scripts/package-msix.ps1 {{.CLI_ARGS}}
 
+    package:installer:
+        desc: 'Build the Windows .exe installer (Inno Setup) from a portable build → ~/Desktop/AgentMux-<ver>-x64-setup.exe. Per-user install, native CEF (replaces the Tauri-era installer). Needs Inno Setup 6 (ISCC). `-- -PortableDir <dir>` to pick a specific portable. See packaging/windows/agentmux.iss.'
+        platforms: [windows]
+        cmds:
+            - pwsh -File scripts/package-installer.ps1 {{.CLI_ARGS}}
+
     package:macos:
         desc: >-
             Package the application as a signed macOS .app + .dmg (Developer ID,
