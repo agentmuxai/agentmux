@@ -1106,18 +1106,20 @@ mod tests {
 
     #[test]
     fn resolve_path_only_ignores_env_channel() {
-        // resolve_path_only is the dev-build self-detection variant —
-        // it deliberately ignores AGENTMUX_CHANNEL because a dev host
-        // launched from inside a parent agentmux instance would inherit
-        // the parent's channel env and cross-contaminate.
+        // resolve_path_only is the dev-build / nested-launch self-detection
+        // variant — it deliberately ignores AGENTMUX_CHANNEL because a host (dev
+        // OR a portable launched nested inside another AgentMux) inherits the
+        // parent's channel env and would cross-contaminate.
         //
-        // This is the codex P1 regression test on PR #1027 — without
-        // the gate, dev hosts launched via `task dev` from inside an
-        // agent pane would redirect to the parent's channel/<channel>/
-        // dir instead of dev/<branch>/, tripping the channel's
-        // single-instance lock.
+        // Codex P1 regression test on PR #1027 (dev), extended for the nested
+        // portable case the launcher relies on (agentmux-launcher/src/data_dir.rs).
         with_home_override(|root| {
-            std::env::set_var("AGENTMUX_CHANNEL", "stable");
+            // Use a NON-default channel value so "ignored" (→ baked default) is
+            // distinguishable from "honored" (→ this value). BUILD_CHANNEL_DEFAULT
+            // is "stable" in tests, so an override of "beta" that gets ignored
+            // resolves to "stable" — a name the env never set. (A "stable" override
+            // would be tautological against the default.)
+            std::env::set_var("AGENTMUX_CHANNEL", "beta");
             struct ChannelGuard;
             impl Drop for ChannelGuard {
                 fn drop(&mut self) {
@@ -1131,9 +1133,7 @@ mod tests {
                 &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
             )
             .unwrap();
-            // Dev mode default holds — channel name is dev-main, path
-            // stays under dev/main/. AGENTMUX_CHANNEL=stable does NOT
-            // redirect to channels/stable/.
+            // Dev path_only ignores "beta" → stays under dev/main/.
             assert_eq!(dev.channel, "dev-main");
             assert_eq!(dev.instance_dir, root.join("dev").join("main"));
 
@@ -1142,22 +1142,51 @@ mod tests {
                 &RuntimeMode::Installed,
             )
             .unwrap();
-            // Installed default holds — build-time channel
-            // (BUILD_CHANNEL_DEFAULT = "stable" in tests). Path lands
-            // at channels/stable/ regardless of the env override.
+            // Installed path_only ignores "beta" → baked default "stable".
             assert_eq!(inst.channel, "stable");
             assert_eq!(inst.instance_dir, root.join("channels").join("stable"));
 
-            // Sanity: regular `resolve` DOES honor the env override in
-            // both modes — confirms the divergence is solely on the
-            // path_only variant.
+            // Portable path_only ALSO ignores the env channel — the behavior the
+            // launcher relies on for a NESTED portable launch. A build launched
+            // inside another AgentMux pane inherits AGENTMUX_CHANNEL=<parent> and
+            // must resolve to its OWN baked channel, NOT the leaked one — else it
+            // adopts the parent's data dir + cef-cache and CEF's user-data-dir
+            // singleton forwards it into the parent. "beta" ignored → baked
+            // "stable".
+            let port = DataPaths::resolve_path_only(
+                "0.33.639",
+                &RuntimeMode::Portable,
+            )
+            .unwrap();
+            assert_eq!(
+                port.channel, "stable",
+                "nested portable must IGNORE the leaked AGENTMUX_CHANNEL=beta"
+            );
+            assert_eq!(port.instance_dir, root.join("channels").join("stable"));
+
+            // Sanity / B6: regular `resolve` DOES honor the override in every mode
+            // (Dev AND Portable) → "beta". This proves (a) the divergence is solely
+            // on the path_only variant, (b) the assertions above are not tautological
+            // against the default, and (c) an EXPLICIT standalone AGENTMUX_CHANNEL is
+            // still honored for portables (parallel-channel testing, PR #1027).
             let dev_env = DataPaths::resolve(
                 "0.33.639",
                 &RuntimeMode::Dev { branch: "main".into(), clone_id: None },
             )
             .unwrap();
-            assert_eq!(dev_env.channel, "stable");
-            assert_eq!(dev_env.instance_dir, root.join("channels").join("stable"));
+            assert_eq!(dev_env.channel, "beta");
+            assert_eq!(dev_env.instance_dir, root.join("channels").join("beta"));
+
+            let port_env = DataPaths::resolve(
+                "0.33.639",
+                &RuntimeMode::Portable,
+            )
+            .unwrap();
+            assert_eq!(
+                port_env.channel, "beta",
+                "standalone portable still HONORS an explicit AGENTMUX_CHANNEL"
+            );
+            assert_eq!(port_env.instance_dir, root.join("channels").join("beta"));
         });
     }
 
