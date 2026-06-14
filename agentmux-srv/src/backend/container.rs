@@ -1,0 +1,669 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Container management for container-type agent panes (Phase 1).
+//!
+//! Manages persistent Docker containers — one per container agent. Each
+//! container runs the configured image (e.g. `ghcr.io/agentmuxai/agent-claude`)
+//! with `tini` as PID 1 and is kept alive between turns. Individual turns are
+//! executed via `docker exec -i` (no `-t` — avoids CR/LF corruption of NDJSON).
+//!
+//! Platform support (cross-platform, matches SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md):
+//!   - Windows: named pipe `//./pipe/docker_engine`
+//!   - macOS:   socket resolved via `docker context inspect` (Docker Desktop or Rancher)
+//!   - Linux:   `/var/run/docker.sock` or rootless path in XDG_RUNTIME_DIR
+//!
+//! Independence boundary: this module has no dependency on a5af/claw.
+//! Docker best practices here were researched independently.
+
+use std::collections::HashMap;
+use std::pin::Pin;
+use std::sync::Arc;
+use tokio::io::AsyncWrite;
+use tokio::sync::Mutex;
+use futures_util::StreamExt as _;
+use bollard::Docker;
+use bollard::container::{
+    Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
+    StopContainerOptions,
+};
+use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
+use bollard::image::CreateImageOptions;
+use bollard::models::{HostConfig, Mount, MountTypeEnum};
+
+/// Env var names that reference host-filesystem paths and must NOT be forwarded
+/// into a container via `docker exec -e`. The container image supplies its own
+/// values for these (e.g. `CLAUDE_CONFIG_DIR=/home/agent/.claude` baked in).
+pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
+    "CLAUDE_CONFIG_DIR",
+    "GH_CONFIG_DIR",
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+];
+
+/// Shared container manager. Clone-on-Arc; cheap to pass around.
+#[derive(Clone)]
+pub struct ContainerManager {
+    inner: Arc<ContainerManagerInner>,
+}
+
+struct ContainerManagerInner {
+    docker: Docker,
+    /// Per-container serialization lock: prevents concurrent ensure_running calls
+    /// for the same container from both seeing "not found" in Docker and both
+    /// attempting create_container (which would fail with a 409 name-conflict
+    /// on the second caller).
+    ensure_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+}
+
+/// Exec session handle for a single turn.
+///
+/// `input` is the stdin pipe into the container process (write JSON message here,
+/// then drop/flush to send EOF). `output` is a bollard `LogOutput` stream; with
+/// `tty: false` Docker multiplexes stdout as `LogOutput::StdOut` frames and
+/// stderr as `LogOutput::StdErr` frames.
+///
+/// Env vars are passed via `CreateExecOptions.env` (Docker socket) — they never
+/// appear in process argv, preventing CWE-214 credential exposure via ps/proc.
+pub struct ExecSession {
+    /// Docker exec id — pass to [`ContainerManager::inspect_exec`] after the
+    /// output stream ends to retrieve the process's real exit code. The stream
+    /// ending is NOT the exit status, so callers that care about success/failure
+    /// must inspect the exec (the in-container CLI can exit non-zero while still
+    /// closing stdout cleanly).
+    pub exec_id: String,
+    /// Stdin pipe to the container process. Write the JSON message then flush/drop.
+    pub input: Pin<Box<dyn AsyncWrite + Send>>,
+    /// Multiplexed stdout/stderr stream (LogOutput::StdOut / LogOutput::StdErr).
+    pub output: Pin<Box<dyn futures_util::Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send>>,
+}
+
+/// Errors from container operations.
+#[derive(Debug, thiserror::Error)]
+pub enum ContainerError {
+    #[error("Docker API error: {0}")]
+    Docker(#[from] bollard::errors::Error),
+    #[error("Container has no id after create: {name}")]
+    NoId { name: String },
+    #[error("Docker is not available on this host: {0}")]
+    NotAvailable(String),
+}
+
+impl ContainerManager {
+    /// Connect to the local Docker daemon using environment/platform defaults.
+    ///
+    /// Honors `DOCKER_HOST` env var (e.g. for rootless or remote daemons).
+    /// On Windows connects via named pipe; on macOS/Linux via Unix socket.
+    pub fn connect() -> Result<Self, ContainerError> {
+        let docker = Docker::connect_with_local_defaults()
+            .map_err(|e| ContainerError::NotAvailable(e.to_string()))?;
+        Ok(Self {
+            inner: Arc::new(ContainerManagerInner {
+                docker,
+                ensure_locks: Mutex::new(HashMap::new()),
+            }),
+        })
+    }
+
+    /// Ping the Docker daemon. Returns `Ok(())` if available.
+    pub async fn check_available(&self) -> Result<(), ContainerError> {
+        self.inner.docker.ping().await?;
+        Ok(())
+    }
+
+    /// Ensure the container for this agent is created and running.
+    ///
+    /// - If it exists and is running: no-op.
+    /// - If it exists but stopped: starts it.
+    /// - If it doesn't exist: creates and starts it.
+    ///
+    /// Always queries Docker (no in-memory cache) so externally killed containers
+    /// are detected. Concurrent calls for the **same** `container_name` are
+    /// serialized via a per-container mutex. Concurrent calls for **different**
+    /// containers proceed in parallel.
+    pub async fn ensure_running(
+        &self,
+        container_name: &str,
+        image: &str,
+        volumes: &[String],
+        env_vars: &[(String, String)],
+    ) -> Result<(), ContainerError> {
+        // Acquire the per-container serialization lock before touching Docker.
+        // Concurrent callers for the same container_name queue here; once the
+        // first caller completes, the second finds the container already running
+        // via the Docker query below and returns immediately.
+        let container_lock = {
+            let mut locks = self.inner.ensure_locks.lock().await;
+            locks.entry(container_name.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        let guard = container_lock.lock().await;
+
+        let result = self.ensure_running_locked(container_name, image, volumes, env_vars).await;
+
+        // Release the per-container lock, then evict its map entry when no other
+        // caller is queued on it — otherwise `ensure_locks` grows unbounded (one
+        // entry per distinct container ever seen) over the process lifetime.
+        // A queued caller has already cloned the Arc (strong_count > 2), so we
+        // only drop the entry when it's truly idle (map's ref + our clone == 2),
+        // which can't reintroduce the create-race the lock guards: a new caller
+        // can't clone the old Arc while we hold the map lock, and after eviction
+        // it just creates a fresh one with no contention.
+        drop(guard);
+        {
+            let mut locks = self.inner.ensure_locks.lock().await;
+            if Arc::strong_count(&container_lock) <= 2 {
+                locks.remove(container_name);
+            }
+        }
+
+        result
+    }
+
+    /// Create/reuse logic for [`ensure_running`], run while holding the
+    /// per-container serialization lock. Split out so `ensure_running` can wrap
+    /// it with lock acquisition + map-entry eviction on every exit path.
+    async fn ensure_running_locked(
+        &self,
+        container_name: &str,
+        image: &str,
+        volumes: &[String],
+        env_vars: &[(String, String)],
+    ) -> Result<(), ContainerError> {
+        // Always query Docker — do not rely on an in-memory cache. The container
+        // can be stopped or removed externally (e.g. `docker rm -f`), and a
+        // stale cache entry would cause ensure_running to silently no-op while
+        // a subsequent exec call fails.
+        let existing = self.find_container(container_name).await?;
+
+        match existing {
+            Some(status) if status == "running" => {
+                // Already running — nothing to do.
+            }
+            Some(_) => {
+                // Exists but stopped — start it.
+                self.inner.docker
+                    .start_container(container_name, None::<StartContainerOptions<String>>)
+                    .await?;
+                tracing::info!(container = container_name, "restarted stopped container");
+            }
+            None => {
+                // Pull the image via Docker socket before create so the Engine API
+                // has the image locally. Unlike `docker run`, the Engine's
+                // create_container does NOT auto-pull — it returns 404 if the image
+                // is absent. pull_image is a no-op when the image already exists.
+                self.pull_image(image).await?;
+                // Create and start.
+                self.create_and_start(container_name, image, volumes, env_vars).await?;
+                tracing::info!(container = container_name, image = image, "created and started container");
+            }
+        }
+        Ok(())
+    }
+
+    /// Launch an exec session inside a running container.
+    ///
+    /// Uses `-i` (not `-t`) to avoid tty CR/LF corruption of NDJSON output.
+    /// The caller receives `ExecSession` whose `output` stream carries
+    /// multiplexed stdout/stderr for piping into the block.
+    pub async fn exec(
+        &self,
+        container_name: &str,
+        cmd: &[String],
+        working_dir: Option<&str>,
+        env_vars: &[(String, String)],
+    ) -> Result<ExecSession, ContainerError> {
+        let env: Vec<String> = env_vars.iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+
+        let exec = self.inner.docker
+            .create_exec(container_name, CreateExecOptions {
+                attach_stdin: Some(true),
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                tty: Some(false), // NO tty — preserves NDJSON newlines
+                cmd: Some(cmd.iter().map(String::as_str).collect()),
+                working_dir,
+                env: if env.is_empty() { None } else { Some(env.iter().map(String::as_str).collect()) },
+                ..Default::default()
+            })
+            .await?;
+
+        let results = self.inner.docker
+            .start_exec(&exec.id, Some(StartExecOptions {
+                detach: false,
+                ..Default::default()
+            }))
+            .await?;
+
+        match results {
+            StartExecResults::Attached { input, output } => {
+                Ok(ExecSession { exec_id: exec.id, input, output })
+            }
+            StartExecResults::Detached => {
+                Err(ContainerError::Docker(
+                    bollard::errors::Error::DockerResponseServerError {
+                        status_code: 0,
+                        message: "start_exec returned Detached unexpectedly (detach=false)".to_string(),
+                    }
+                ))
+            }
+        }
+    }
+
+    /// Retrieve the exit code of a finished exec via the Docker socket.
+    ///
+    /// Returns `Ok(Some(code))` once the exec has exited, `Ok(None)` while it is
+    /// still running (no code yet) or if Docker did not report one. Call this
+    /// after the exec's output stream has ended — unlike a child process's
+    /// `wait()`, the attached output stream closing does not carry the exit
+    /// status, so the turn's success/failure can only be known by inspecting.
+    pub async fn inspect_exec(&self, exec_id: &str) -> Result<Option<i64>, ContainerError> {
+        let info = self.inner.docker.inspect_exec(exec_id).await?;
+        // `running == Some(true)` means no meaningful code yet.
+        if info.running == Some(true) {
+            return Ok(None);
+        }
+        Ok(info.exit_code)
+    }
+
+    /// Best-effort interruption of the turn's process(es) inside a container.
+    ///
+    /// Docker/bollard has no "kill exec" API, so we `pkill` the matching process
+    /// via a short detached exec. The persistent-container model runs one turn at
+    /// a time (guarded by `run_lock`), so a single CLI process matches `pattern`
+    /// (the command name, e.g. `claude`). `-f` matches the full command line
+    /// because the CLI runs under `node`, whose process name isn't the CLI's.
+    ///
+    /// Requires `pkill` (procps) in the image. Fire-and-forget (detached); a
+    /// non-match (`pkill` exit 1, e.g. the turn already exited) is not an error.
+    pub async fn signal_exec_process(
+        &self,
+        container_name: &str,
+        pattern: &str,
+        force: bool,
+    ) -> Result<(), ContainerError> {
+        let signal = if force { "-KILL" } else { "-TERM" };
+        let cmd: Vec<&str> = vec!["pkill", signal, "-f", pattern];
+        let exec = self.inner.docker
+            .create_exec(container_name, CreateExecOptions {
+                cmd: Some(cmd),
+                attach_stdout: Some(false),
+                attach_stderr: Some(false),
+                ..Default::default()
+            })
+            .await?;
+        self.inner.docker
+            .start_exec(&exec.id, Some(StartExecOptions { detach: true, ..Default::default() }))
+            .await?;
+        Ok(())
+    }
+
+    /// Gracefully stop a container. Uses SIGTERM → SIGKILL after `timeout_secs`.
+    pub async fn stop(&self, container_name: &str, timeout_secs: i64) -> Result<(), ContainerError> {
+        self.inner.docker
+            .stop_container(container_name, Some(StopContainerOptions { t: timeout_secs }))
+            .await?;
+        tracing::info!(container = container_name, "stopped container");
+        Ok(())
+    }
+
+    /// Remove a container (must be stopped first or use `force = true`).
+    pub async fn remove(&self, container_name: &str, force: bool) -> Result<(), ContainerError> {
+        use bollard::container::RemoveContainerOptions;
+        self.inner.docker
+            .remove_container(container_name, Some(RemoveContainerOptions {
+                force,
+                ..Default::default()
+            }))
+            .await?;
+        tracing::info!(container = container_name, "removed container");
+        Ok(())
+    }
+
+    // ---- private helpers ----
+
+    /// Returns the container status string ("running", "exited", …) or `None` if not found.
+    async fn find_container(&self, name: &str) -> Result<Option<String>, ContainerError> {
+        let mut filters = HashMap::new();
+        filters.insert("name", vec![name]);
+        let list = self.inner.docker
+            .list_containers(Some(ListContainersOptions {
+                all: true,
+                filters,
+                ..Default::default()
+            }))
+            .await?;
+
+        // `name` filter is a prefix match — verify exact name.
+        let canonical = format!("/{name}");
+        for c in &list {
+            if let Some(names) = &c.names {
+                if names.iter().any(|n| n == &canonical) {
+                    return Ok(c.state.clone());
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Pull `image` via the Docker socket (create_image API).
+    ///
+    /// Streams the pull response to completion before returning. If the image is
+    /// already present locally, Docker returns an empty stream immediately — this
+    /// function treats that as success (no pull needed).
+    ///
+    /// Errors only on genuine pull failures (network, auth, no such image).
+    async fn pull_image(&self, image: &str) -> Result<(), ContainerError> {
+        // Skip the pull entirely when the image is already present locally.
+        // `create_image` always contacts the registry, so on an offline host the
+        // pull stream errors out even when the image is cached — aborting
+        // container creation even though `docker run` would start it from the
+        // local cache. An `inspect_image` short-circuit makes the cached-offline
+        // path work (and avoids a redundant registry round-trip when online).
+        if self.inner.docker.inspect_image(image).await.is_ok() {
+            tracing::info!(image = image, "image already present locally; skipping pull");
+            return Ok(());
+        }
+
+        tracing::info!(image = image, "pulling image (not cached locally)");
+        let mut stream = self.inner.docker.create_image(
+            Some(CreateImageOptions {
+                from_image: image,
+                ..Default::default()
+            }),
+            None,
+            None,
+        );
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(info) => {
+                    if let Some(status) = info.status {
+                        tracing::debug!(image = image, status = %status, "pull progress");
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(image = image, error = %e, "image pull error");
+                    return Err(ContainerError::Docker(e));
+                }
+            }
+        }
+        tracing::info!(image = image, "image pull complete (or already cached)");
+        Ok(())
+    }
+
+    async fn create_and_start(
+        &self,
+        container_name: &str,
+        image: &str,
+        volumes: &[String],
+        env_vars: &[(String, String)],
+    ) -> Result<(), ContainerError> {
+        let env: Vec<String> = env_vars.iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+
+        let mounts: Vec<Mount> = volumes.iter().filter_map(|spec| {
+            let (source, target, read_only) = parse_volume_spec(spec)?;
+            if target.is_empty() {
+                tracing::warn!(spec = %spec, "ignoring malformed volume spec (expected source:target)");
+                return None;
+            }
+            let mount_type = if source.starts_with('/') || source.starts_with('~')
+                || (source.len() >= 2 && source.as_bytes()[1] == b':')
+            {
+                MountTypeEnum::BIND
+            } else {
+                MountTypeEnum::VOLUME
+            };
+            Some(Mount {
+                target: Some(target.to_string()),
+                source: Some(source.to_string()),
+                typ: Some(mount_type),
+                read_only: Some(read_only),
+                ..Default::default()
+            })
+        }).collect();
+
+        // claude-config named volume: ensure ~/.claude persists across container restarts.
+        // Using a named volume (not a host bind mount) avoids credential leakage from the
+        // host's .claude directory into the container.
+        let mut all_mounts = vec![
+            Mount {
+                target: Some("/home/agent/.claude".to_string()),
+                source: Some(format!("agentmux-claude-{container_name}")),
+                typ: Some(MountTypeEnum::VOLUME),
+                read_only: Some(false),
+                ..Default::default()
+            },
+        ];
+        all_mounts.extend(mounts);
+
+        let config: Config<String> = Config {
+            image: Some(image.to_string()),
+            env: if env.is_empty() { None } else { Some(env) },
+            // Keep container alive between turns — idle PID 1 (`sleep infinity`
+            // via tini) stays running until `docker stop`. Agent turns run via
+            // `docker exec`, not as the PID-1 process.
+            tty: Some(false),
+            open_stdin: Some(true),
+            host_config: Some(HostConfig {
+                mounts: Some(all_mounts),
+                // Security: no host network, no privileged mode.
+                network_mode: Some("bridge".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let container = self.inner.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: container_name,
+                    platform: None,
+                }),
+                config,
+            )
+            .await?;
+
+        let id = container.id;
+        if id.is_empty() {
+            return Err(ContainerError::NoId { name: container_name.to_string() });
+        }
+
+        self.inner.docker
+            .start_container(&id, None::<StartContainerOptions<String>>)
+            .await?;
+
+        Ok(())
+    }
+}
+
+/// Derive the stable container name for an agent from its slug.
+/// Format: `agentmux-<slug>`. Deterministic so restarts reuse the same container.
+pub fn container_name_for_slug(slug: &str) -> String {
+    format!("agentmux-{slug}")
+}
+
+/// Parse a Docker volume spec into `(source, target, read_only)`.
+///
+/// Format: `source:target` or `source:target:options`.
+///
+/// Handles Windows drive-letter bind paths (e.g. `C:\Users\me\repo:/workspace:ro`)
+/// by treating the drive-letter colon (`X:`) as part of the source path, not as
+/// the source/target separator. A plain `splitn(3, ':')` would split `C:\path`
+/// into `C` and `\path`, losing the drive letter.
+///
+/// Returns `None` for malformed specs (no target separator found).
+fn parse_volume_spec(spec: &str) -> Option<(&str, &str, bool)> {
+    let bytes = spec.as_bytes();
+
+    // Detect Windows drive-letter prefix: single ASCII letter followed by ':\'  or ':/'
+    let (source, rest) = if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        // Windows path: skip the drive colon and split on the next ':'.
+        let tail = &spec[2..]; // starts at '\' or '/'
+        let pos = tail.find(':')?;
+        (&spec[..2 + pos], &tail[pos + 1..])
+    } else {
+        let pos = spec.find(':')?;
+        (&spec[..pos], &spec[pos + 1..])
+    };
+
+    // Split target from optional options.
+    let (target, options) = if let Some(pos) = rest.find(':') {
+        (&rest[..pos], &rest[pos + 1..])
+    } else {
+        (rest, "")
+    };
+
+    Some((source, target, options.contains("ro")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_container_name_for_slug() {
+        assert_eq!(container_name_for_slug("my-agent"), "agentmux-my-agent");
+        assert_eq!(container_name_for_slug("agent1"), "agentmux-agent1");
+    }
+
+    #[test]
+    fn test_parse_volume_spec_unix_named() {
+        let (src, tgt, ro) = parse_volume_spec("myvolume:/data").unwrap();
+        assert_eq!(src, "myvolume");
+        assert_eq!(tgt, "/data");
+        assert!(!ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_unix_bind_readonly() {
+        let (src, tgt, ro) = parse_volume_spec("/host/path:/container/path:ro").unwrap();
+        assert_eq!(src, "/host/path");
+        assert_eq!(tgt, "/container/path");
+        assert!(ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_windows_bind() {
+        // Drive-letter path must not be split at the drive colon.
+        let (src, tgt, ro) = parse_volume_spec("C:\\Users\\me\\repo:/workspace").unwrap();
+        assert_eq!(src, "C:\\Users\\me\\repo");
+        assert_eq!(tgt, "/workspace");
+        assert!(!ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_windows_bind_readonly() {
+        let (src, tgt, ro) = parse_volume_spec("C:/Users/me/repo:/workspace:ro").unwrap();
+        assert_eq!(src, "C:/Users/me/repo");
+        assert_eq!(tgt, "/workspace");
+        assert!(ro);
+    }
+
+    #[test]
+    fn test_parse_volume_spec_malformed() {
+        assert!(parse_volume_spec("nocodon").is_none());
+    }
+
+    /// Docker-gated integration test for the container lifecycle + exec path.
+    /// Requires a reachable Docker daemon (Colima/Docker Desktop), so it is
+    /// `#[ignore]` by default. Run with:
+    ///   DOCKER_HOST=unix://$HOME/.colima/default/docker.sock \
+    ///     cargo test -p agentmux-srv -- --ignored --nocapture itest_container
+    ///
+    /// Validates the foundation Phase 2 rests on against a real daemon:
+    /// `ensure_running` create→reuse, env delivered into the exec via the Docker
+    /// socket (`CreateExecOptions.env`, NOT argv — the CWE-214 guard), and the
+    /// stdin→stdout exec I/O contract `spawn_container_turn` depends on.
+    #[tokio::test]
+    #[ignore]
+    async fn itest_container_lifecycle_exec_env_and_io() {
+        use tokio::io::AsyncWriteExt as _;
+
+        async fn drain_stdout<S>(mut out: S) -> String
+        where
+            S: futures_util::Stream<
+                    Item = Result<bollard::container::LogOutput, bollard::errors::Error>,
+                > + Unpin,
+        {
+            use futures_util::StreamExt as _;
+            let mut s = String::new();
+            while let Some(item) = out.next().await {
+                if let Ok(bollard::container::LogOutput::StdOut { message }) = item {
+                    s.push_str(&String::from_utf8_lossy(&message));
+                }
+            }
+            s
+        }
+
+        let cm = ContainerManager::connect().expect("connect to docker (set DOCKER_HOST)");
+        cm.check_available().await.expect("docker daemon must be reachable");
+
+        let name = "agentmux-itest-1357";
+        // Public, pullable image with a long-lived default CMD (nginx daemon) and
+        // a shell — `create_and_start` sets no cmd, so the image default must keep
+        // PID 1 alive between exec turns (the persistent-container model).
+        let image = "nginx:alpine";
+        let _ = cm.remove(name, true).await; // clean slate; ignore if absent
+
+        // create path: pull + create + start
+        cm.ensure_running(name, image, &[], &[]).await.expect("ensure_running (create)");
+        // reuse path: already running → must no-op, not error or re-create
+        cm.ensure_running(name, image, &[], &[]).await.expect("ensure_running (reuse)");
+
+        // env reaches the in-container process via the Docker socket, not argv.
+        // Drop the (unused) stdin half first: bollard's exec output stream does
+        // not EOF while the write-half is held open — the same reason
+        // spawn_container_turn drops `input` before reading output.
+        let ExecSession { input, output, .. } = cm
+            .exec(
+                name,
+                &["sh".into(), "-c".into(), "printf %s \"$ITEST_KEY\"".into()],
+                None,
+                &[("ITEST_KEY".into(), "val-42".into())],
+            )
+            .await
+            .expect("exec (env)");
+        drop(input);
+        let out = drain_stdout(output).await;
+        assert!(out.contains("val-42"), "env must reach container; got {out:?}");
+
+        // stdin → stdout I/O contract: write a newline-terminated message and
+        // read it back. Use `read` (completes on the first '\n', then the shell
+        // exits) rather than `cat` (which blocks until stdin EOF) — `claude`
+        // likewise consumes newline-delimited JSON without waiting for EOF, and
+        // bollard's hijacked exec stream does not reliably half-close stdin on
+        // `drop(input)`, so an EOF-dependent reader would hang.
+        let ExecSession { mut input, output, .. } = cm
+            .exec(
+                name,
+                &["sh".into(), "-c".into(), "read line; printf 'got:%s' \"$line\"".into()],
+                None,
+                &[],
+            )
+            .await
+            .expect("exec (io)");
+        input.write_all(b"hello-stdin\n").await.expect("write stdin");
+        input.flush().await.expect("flush stdin");
+        drop(input);
+        let out = drain_stdout(output).await;
+        assert!(out.contains("got:hello-stdin"), "stdin must reach the container process; got {out:?}");
+
+        // cleanup
+        cm.remove(name, true).await.expect("remove");
+    }
+}
