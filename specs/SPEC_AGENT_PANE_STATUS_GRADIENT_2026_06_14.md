@@ -276,7 +276,10 @@ The gradient is made 200–300% wider than the element. Animating `background-po
 // In agent-view.tsx, first child inside .agent-view:
 <div
     class="agent-pane-progress-bar"
-    classList={{ "agent-pane-progress-bar--active": isLoading() }}
+    classList={{
+        "agent-pane-progress-bar--active": isLoading(),
+        "agent-pane-progress-bar--stopping": stoppingAtom[0](),
+    }}
     role="progressbar"
     aria-label="Agent working"
     aria-valuemin={0}
