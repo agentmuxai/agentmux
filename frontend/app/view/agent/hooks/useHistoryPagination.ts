@@ -126,6 +126,15 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
     const [historyTotal, setHistoryTotal] = createSignal(0);
     const [loadingOlder, setLoadingOlder] = createSignal(false);
 
+    // Block whose per-block NDJSON `output` holds this pane's durable history.
+    // Defaults to this pane's own block, but a schema-v2 snapshot read from the
+    // agent-anchored zone (`agent:<defId>:current`) carries the `sourceBlockId`
+    // it was written from. On cross-block "structural continuation" (Option E) a
+    // fresh pane gets a new blockId whose per-block output is empty, so history
+    // (initial window AND load-older) must be read from the snapshot's source
+    // block instead. Live new output still streams into this pane's own block.
+    const [historyBlockId, setHistoryBlockId] = createSignal(opts.blockId);
+
     /**
      * Load the previous page of history and prepend to the document.
      * Called by AgentDocumentView when the user scrolls near the top.
@@ -143,7 +152,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             const loadLimit = currentOffset - newOffset;
 
             const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                block_id: opts.blockId,
+                block_id: historyBlockId(),
                 filename: "output",
                 offset: newOffset,
                 limit: loadLimit,
@@ -236,8 +245,16 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         && snapshot.highWaterMark > 0) {
                         const hwm: number = snapshot.highWaterMark;
                         const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
+                        // History lives in the block the snapshot was written from.
+                        // For same-pane reopen this equals opts.blockId; for cross-block
+                        // continuation it points at the original block whose output holds
+                        // the conversation. Route load-older to the same block.
+                        const srcBlockId = typeof snapshot.sourceBlockId === "string" && snapshot.sourceBlockId
+                            ? snapshot.sourceBlockId
+                            : opts.blockId;
+                        setHistoryBlockId(srcBlockId);
                         const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-                            block_id: opts.blockId,
+                            block_id: srcBlockId,
                             filename: "output",
                             offset: windowStart,
                             limit: hwm - windowStart,

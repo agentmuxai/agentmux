@@ -361,10 +361,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // Note: no historyOffset field — v2 restore derives the render window
             // from highWaterMark (windowStart = hwm - RESTORE_WINDOW_LINES), so a
             // persisted offset would be dead/misleading.
+            //
+            // sourceBlockId records which block's per-block NDJSON `output` the
+            // highWaterMark counted. The snapshot itself is agent-anchored
+            // (definition_id zone) and survives across blocks, but the NDJSON it
+            // references is per-block — so restore must read history from this
+            // block, not from a fresh continuation pane's empty block.
             const snapshot = {
                 schemaVersion: SNAPSHOT_SCHEMA_VERSION,
                 savedAt: new Date().toISOString(),
                 highWaterMark,
+                sourceBlockId: model.blockId,
                 documentState: {
                     collapsedNodeIds: capturedDocState ? [...capturedDocState.collapsedNodes] : [],
                     pinnedNodeIds: capturedDocState ? [...capturedDocState.pinnedNodes] : [],
