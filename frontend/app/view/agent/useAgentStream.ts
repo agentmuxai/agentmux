@@ -187,8 +187,67 @@ export function useAgentStream({
     // this the global handler would leak one per mount.
     onCleanup(() => { try { blockChunkUnsub(); } catch { /* ignore */ } });
 
+    // shell_chunk handler — shared by the per-block live subscription AND the
+    // per-shell replay subscriptions. The payload always carries `shell_id`, so
+    // one handler routes correctly regardless of which scope delivered it. The
+    // reducer dedups chunks (isDuplicate) and ShellStatusUpdate is idempotent,
+    // so a chunk delivered live via `block:<id>` and again on replay via
+    // `shell:<id>` after a remount is harmless.
+    const handleShellChunk = (event: any) => {
+        const d = event?.data;
+        if (!d || typeof d !== "object") return;
+        const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
+        if (!shellId) return;
+        if (d.op === "exit") {
+            const exitCode = typeof d.exit_code === "number" ? d.exit_code : -1;
+            const status: ShellNode["status"] = exitCode === 0 ? "exited-ok" : "exited-err";
+            pendingShellExits.push({ shellId, status, exitCode, exitedAt: d.timestamp ?? Date.now() });
+            scheduleFlush();
+            return;
+        }
+        if (d.op !== "chunk") return;
+        pendingShellChunks.push({
+            shellId,
+            chunk: {
+                kind: d.kind ?? "stdout",
+                content: d.content ?? "",
+                timestamp: d.timestamp ?? Date.now(),
+            },
+        });
+        scheduleFlush();
+    };
+
+    // Per-shell shell_chunk subscriptions. The backend publishes each shell's
+    // chunk/exit events under BOTH `block:<id>` (live) and `shell:<shellId>` (a
+    // dedicated persistence ring — see shell_node.rs). The per-block
+    // subscription below covers live delivery, but on a pane remount / WS
+    // reconnect a chatty sibling shell may have evicted an earlier shell's exit
+    // event from the shared block ring. Subscribing to `shell:<shellId>` when we
+    // learn of the shell (via the persist:64 block-scoped shell_node_create that
+    // replays on remount) backfills that shell's own ring so its terminal status
+    // survives independently. Tracked here so all per-shell subs tear down on
+    // unmount. (SPEC_PERSISTENT_SHELL_NODE — P2 per-shell ring buffer fix.)
+    const perShellUnsubs = new Map<string, () => void>();
+    const subscribeShellScope = (shellId: string) => {
+        if (perShellUnsubs.has(shellId)) return;
+        const unsub = waveEventSubscribe({
+            eventType: "shell_chunk",
+            scope: `shell:${shellId}`,
+            handler: handleShellChunk,
+        });
+        perShellUnsubs.set(shellId, unsub);
+    };
+    onCleanup(() => {
+        for (const unsub of perShellUnsubs.values()) {
+            try { unsub(); } catch { /* ignore */ }
+        }
+        perShellUnsubs.clear();
+    });
+
     // shell_node_create: backend published immediately when Shell tool is called.
-    // We build the full ShellNode and queue it for the next RAF flush.
+    // We build the full ShellNode and queue it for the next RAF flush. We also
+    // subscribe to this shell's per-shell `shell_chunk` ring so its chunks/exit
+    // replay on remount even if a sibling shell evicted them from the block ring.
     const shellNodeCreateUnsub = waveEventSubscribe({
         eventType: "shell_node_create",
         scope: `block:${blockId}`,
@@ -208,38 +267,17 @@ export function useAgentStream({
                 log: { chunks: [], open: true },
             };
             pendingShellCreates.push({ node });
+            subscribeShellScope(shellId);
             scheduleFlush();
         },
     });
     onCleanup(() => { try { shellNodeCreateUnsub(); } catch { /* ignore */ } });
 
-    // shell_chunk: per-line output (op="chunk") or process exit (op="exit").
+    // shell_chunk live delivery: per-block subscription (op="chunk" / op="exit").
     const shellChunkUnsub = waveEventSubscribe({
         eventType: "shell_chunk",
         scope: `block:${blockId}`,
-        handler: (event: any) => {
-            const d = event?.data;
-            if (!d || typeof d !== "object") return;
-            const shellId = typeof d.shell_id === "string" ? d.shell_id : "";
-            if (!shellId) return;
-            if (d.op === "exit") {
-                const exitCode = typeof d.exit_code === "number" ? d.exit_code : -1;
-                const status: ShellNode["status"] = exitCode === 0 ? "exited-ok" : "exited-err";
-                pendingShellExits.push({ shellId, status, exitCode, exitedAt: d.timestamp ?? Date.now() });
-                scheduleFlush();
-                return;
-            }
-            if (d.op !== "chunk") return;
-            pendingShellChunks.push({
-                shellId,
-                chunk: {
-                    kind: d.kind ?? "stdout",
-                    content: d.content ?? "",
-                    timestamp: d.timestamp ?? Date.now(),
-                },
-            });
-            scheduleFlush();
-        },
+        handler: handleShellChunk,
     });
     onCleanup(() => { try { shellChunkUnsub(); } catch { /* ignore */ } });
 

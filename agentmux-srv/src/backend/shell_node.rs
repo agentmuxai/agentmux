@@ -116,10 +116,29 @@ impl ShellNodeRunner {
     }
 }
 
+// Every shell_chunk / exit event is published under TWO scopes:
+//   - `block:<block_id>`  → live delivery to the pane's per-block subscription
+//                           (installed once on mount in useAgentStream.ts).
+//   - `shell:<shell_id>`  → a per-shell persistence ring buffer. All shells in a
+//                           pane share the block ring (1024 entries), so a chatty
+//                           shell can evict an earlier shell's `exit` event from
+//                           replay, leaving that shell's row stuck `running` after
+//                           a pane remount / WS reconnect. Giving each shell its
+//                           own ring means a sibling can no longer evict it. The
+//                           frontend subscribes to `shell:<shell_id>` when it sees
+//                           the (block-scoped, persist:64) shell_node_create, so
+//                           the dedicated ring replays on remount.
+// The broker dedups on replay (reducer's isDuplicate / idempotent
+// ShellStatusUpdate), so a chunk delivered live via block AND replayed via shell
+// is harmless.
+fn shell_scopes(block_id: &str, shell_id: &str) -> Vec<String> {
+    vec![format!("block:{block_id}"), format!("shell:{shell_id}")]
+}
+
 fn publish_chunk(broker: &Broker, block_id: &str, shell_id: &str, kind: &str, content: &str, ts: u64) {
     broker.publish(WaveEvent {
         event: EVENT_SHELL_CHUNK.to_string(),
-        scopes: vec![format!("block:{block_id}")],
+        scopes: shell_scopes(block_id, shell_id),
         sender: String::new(),
         persist: 1024,
         data: Some(serde_json::json!({
@@ -135,7 +154,7 @@ fn publish_chunk(broker: &Broker, block_id: &str, shell_id: &str, kind: &str, co
 fn publish_exit(broker: &Broker, block_id: &str, shell_id: &str, exit_code: i32, ts: u64) {
     broker.publish(WaveEvent {
         event: EVENT_SHELL_CHUNK.to_string(),
-        scopes: vec![format!("block:{block_id}")],
+        scopes: shell_scopes(block_id, shell_id),
         sender: String::new(),
         persist: 1024,
         data: Some(serde_json::json!({
