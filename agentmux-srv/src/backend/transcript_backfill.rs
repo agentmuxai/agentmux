@@ -204,7 +204,17 @@ fn read_agent_blocks(
     for r in rows {
         let Ok(bytes) = r else { continue };
         let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else { continue };
-        let agent_id = v.get("meta").and_then(|m| m.get("agentId")).and_then(|x| x.as_str());
+        let meta = v.get("meta");
+        // The agent definition id is stored under either `agentId` (current
+        // shape) or the legacy `agent:id` — match both, exactly like the
+        // canonical block scan in `agent_session.rs`. Legacy blocks are a core
+        // part of the pre-existing population this backfill targets, so missing
+        // them would strand those conversations permanently (the marker is
+        // written after the scan). (reagent P1 / codex P2 #1403.)
+        let agent_id = meta
+            .and_then(|m| m.get("agentId"))
+            .and_then(|x| x.as_str())
+            .or_else(|| meta.and_then(|m| m.get("agent:id")).and_then(|x| x.as_str()));
         let oid = v.get("oid").and_then(|x| x.as_str());
         if let (Some(aid), Some(oid)) = (agent_id, oid) {
             if want.contains(aid) {
@@ -310,6 +320,17 @@ mod tests {
     // Build a channel data dir at <home>/channels/<ch>/versions/<v>/data with a
     // db_block row (agentId=def) and a filestore.db holding that block's output.
     fn seed_channel(home: &Path, ch: &str, def_id: &str, block_oid: &str, output: &[u8]) {
+        seed_channel_keyed(home, ch, "agentId", def_id, block_oid, output);
+    }
+
+    fn seed_channel_keyed(
+        home: &Path,
+        ch: &str,
+        meta_key: &str,
+        def_id: &str,
+        block_oid: &str,
+        output: &[u8],
+    ) {
         let data = home
             .join("channels")
             .join(ch)
@@ -321,7 +342,7 @@ mod tests {
         // objects.db with a minimal db_block(data) row.
         let oc = Connection::open(db.join("objects.db")).unwrap();
         oc.execute("CREATE TABLE db_block (data TEXT)", []).unwrap();
-        let block_json = serde_json::json!({"oid": block_oid, "meta": {"view":"agent","agentId":def_id}});
+        let block_json = serde_json::json!({"oid": block_oid, "meta": {"view":"agent", meta_key: def_id}});
         // Store as a BLOB to mirror the wstore (db_block.data is declared TEXT
         // but holds blob-typed JSON) — the reader reads raw bytes.
         oc.execute(
@@ -368,6 +389,24 @@ mod tests {
         let stats2 = backfill_transcripts_once(home, &tdir, &[def_id.to_string()], &global);
         assert_eq!(stats2.seeded, 0);
         assert_eq!(stats2.data_dirs_scanned, 0, "marker short-circuits the re-run");
+    }
+
+    #[test]
+    fn backfill_matches_legacy_agent_id_key() {
+        // Blocks from older builds stamp the legacy `agent:id` meta key instead
+        // of `agentId`; the backfill must still recover them. (reagent P1 #1403.)
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let tdir = home.join("shared").join("agents").join("transcripts");
+        std::fs::create_dir_all(&tdir).unwrap();
+        let def_id = "deadbeef-0000-1111-2222-333344445555";
+        seed_channel_keyed(home, "legacy-ch", "agent:id", def_id, "blk-legacy", b"{\"type\":\"system\"}\n{\"type\":\"result\"}\n");
+
+        let global = Arc::new(FileStore::open(&tdir.join("filestore.db")).unwrap());
+        let stats = backfill_transcripts_once(home, &tdir, &[def_id.to_string()], &global);
+        assert_eq!(stats.seeded, 1, "legacy agent:id block must be recovered");
+        let out = global.read_file(&agent_current_zone(def_id), OUT).unwrap().unwrap();
+        assert!(out.starts_with(b"{\"type\":\"system\"}"));
     }
 
     #[test]
