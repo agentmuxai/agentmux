@@ -523,7 +523,7 @@ export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn
  */
 export type PermissionMode = "bypass" | "auto" | "acceptEdits" | "plan" | "default";
 export type ModelChoice = "opus" | "sonnet" | "haiku";
-export type EffortLevel = "low" | "medium" | "high" | "max";
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface AgentRuntimeConfig {
     permissionMode: PermissionMode;
@@ -533,8 +533,11 @@ export interface AgentRuntimeConfig {
 
 export const DEFAULT_RUNTIME_CONFIG: AgentRuntimeConfig = {
     permissionMode: "bypass",
-    model: "sonnet",
-    effort: "medium",
+    // Default to Opus (the `claude` CLI resolves `--model opus` to the current
+    // Opus, i.e. Opus 4.8) at xhigh effort — the coding/agentic sweet spot and
+    // Claude Code's own default. effort is Claude-only and works on Opus/Sonnet.
+    model: "opus",
+    effort: "xhigh",
 };
 
 /**

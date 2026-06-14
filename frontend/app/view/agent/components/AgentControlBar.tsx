@@ -51,6 +51,7 @@ const EFFORT_LABELS: Record<string, string> = {
     low: "Low",
     medium: "Medium",
     high: "High",
+    xhigh: "X-High",
     max: "Max",
 };
 
@@ -303,6 +304,7 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                             <option value="low">Low</option>
                             <option value="medium">Medium</option>
                             <option value="high">High</option>
+                            <option value="xhigh">X-High (coding/agentic)</option>
                             <option value="max">Max (Opus only)</option>
                         </select>
                     </div>
