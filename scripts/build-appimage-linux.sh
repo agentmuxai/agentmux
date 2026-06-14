@@ -66,6 +66,7 @@ require dist/cef/agentmux-cef
 require dist/cef/agentmux-launcher
 require dist/cef/libcef.so
 require dist/bin/agentmux-srv-${VERSION}-linux.x64
+require target/release/agentmux-mcp
 # `task build:frontend` outputs to dist/frontend (per vite.config.ts outDir).
 # `dev:serve` symlinks dist/cef/frontend → ../frontend for the host's runtime
 # lookup, but that symlink isn't created by `task bundle` — and on a clean
@@ -96,6 +97,13 @@ cp dist/cef/agentmux-launcher "$APPDIR/usr/bin/agentmux-launcher"
 # --- 3. Backend sidecar (versioned filename — host's resolve_backend_binary
 #        looks for `agentmux-srv-<VERSION>-linux.x64` next to the host) ---
 cp "dist/bin/agentmux-srv-${VERSION}-linux.x64" "$APPDIR/usr/bin/"
+
+# --- 3b. Bundled tools — agentmux-srv adds <exe_dir>/tools/bin to Claude's PATH.
+#         On Linux, exe_dir = usr/bin, so tools land at usr/bin/tools/bin/.
+#         agentmux-mcp is the Shell MCP server; without it the Shell tool
+#         fails with command-not-found on packaged builds. ---
+mkdir -p "$APPDIR/usr/bin/tools/bin"
+cp target/release/agentmux-mcp "$APPDIR/usr/bin/tools/bin/agentmux-mcp"
 
 # --- 4. CEF runtime (libcef.so, GL libs, paks, snapshots, sandbox) ---
 for f in libcef.so libEGL.so libGLESv2.so chrome-sandbox chrome_crashpad_handler \

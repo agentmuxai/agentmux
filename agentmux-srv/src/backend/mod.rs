@@ -37,5 +37,6 @@ pub mod wconfig;
 pub mod wcore;
 pub mod wps;
 pub mod tool_store;
+pub mod shell_node;
 
 pub use oref::ORef;
