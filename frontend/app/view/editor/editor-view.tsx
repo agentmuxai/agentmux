@@ -421,8 +421,8 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         }
         if (isDir) {
             return [
-                { type: "action", label: "New File…", onSelect: () => setNewEntry({ parentPath: path, kind: "file" }) },
-                { type: "action", label: "New Folder…", onSelect: () => setNewEntry({ parentPath: path, kind: "dir" }) },
+                { type: "action", label: "New File…", onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "file" }); } },
+                { type: "action", label: "New Folder…", onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "dir" }); } },
                 { type: "separator" },
                 { type: "action", label: "Open in Terminal", onSelect: () => void model.openInTerminal(path) },
                 { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },

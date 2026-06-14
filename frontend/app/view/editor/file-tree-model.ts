@@ -141,6 +141,17 @@ export class FileTreeModel {
         this._expanded[1](next);
     }
 
+    /** Expand a folder and lazy-load its children if not yet fetched. */
+    async expandFolder(path: string): Promise<void> {
+        if (this.isExpanded(path)) return;
+        const next = new Set(this._expanded[0]());
+        next.add(path);
+        this._expanded[1](next);
+        if (!this._data[0]().has(path)) {
+            await this.load(path);
+        }
+    }
+
     /** Re-fetch a single path (e.g. after a file-system mutation in that dir). */
     async refreshPath(path: string): Promise<void> {
         await this.load(path);

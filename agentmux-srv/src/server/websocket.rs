@@ -1521,7 +1521,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 if !canonical.starts_with(&canonical_home) {
                     return Err("deleteeditorfile: path outside home directory".to_string());
                 }
-                if canonical.is_dir() {
+                // Use symlink_metadata (not metadata) to detect symlinks without following them.
+                // Deleting via `canonical` would delete the symlink TARGET; we always remove the
+                // entry at the original path so the symlink itself is unlinked.
+                let meta = std::fs::symlink_metadata(path)
+                    .map_err(|e| format!("deleteeditorfile: {e}"))?;
+                if meta.file_type().is_symlink() {
+                    std::fs::remove_file(path).map_err(|e| format!("deleteeditorfile: {e}"))?;
+                } else if canonical.is_dir() {
                     if cmd.recursive {
                         std::fs::remove_dir_all(&canonical).map_err(|e| format!("deleteeditorfile: {e}"))?;
                     } else {
@@ -1603,27 +1610,39 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // Validate + resolve destination.
                 let expanded_dest = expand_home_dir_safe(&cmd.destination_path);
                 let dest_path = expanded_dest.as_path();
+
+                // Coarse home-boundary check before any filesystem mutation.
+                // We use the unexpanded path here because the dest may not exist yet
+                // (canonicalize fails on non-existent paths).
+                if !dest_path.starts_with(&home) {
+                    return Err("movescratchfile: destination outside home directory".to_string());
+                }
+                // Reject existing destination to avoid silent data loss.
+                if dest_path.exists() {
+                    return Err("movescratchfile: destination already exists".to_string());
+                }
+                // Create parent directories if needed.
+                if let Some(parent) = dest_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("movescratchfile: create dirs: {e}"))?;
+                }
+                // Canonicalize parent (now guaranteed to exist) + append filename.
                 let canonical_dest = dest_path.parent()
                     .and_then(|p| p.canonicalize().ok())
                     .map(|p| p.join(dest_path.file_name().unwrap_or_default()))
                     .ok_or_else(|| "movescratchfile: invalid destination path".to_string())?;
+                // Fine-grained home-boundary check with canonical paths.
                 if !canonical_dest.starts_with(&canonical_home) {
                     return Err("movescratchfile: destination outside home directory".to_string());
                 }
-                if let Some(parent) = canonical_dest.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| format!("movescratchfile: create dirs: {e}"))?;
-                }
+                // Copy then remove scratch source (cross-device-safe move).
                 std::fs::copy(&scratch_path, &canonical_dest)
-                    .map_err(|e| format!("movescratchfile: {e}"))?;
-                // Mark sidecar as saved.
+                    .map_err(|e| format!("movescratchfile: copy: {e}"))?;
+                std::fs::remove_file(&scratch_path)
+                    .map_err(|e| format!("movescratchfile: remove scratch: {e}"))?;
+                // Clean up the .meta sidecar.
                 let meta_path = scratch_dir.join(format!("{}.md.meta", cmd.scratch_id));
-                if let Ok(bytes) = std::fs::read_to_string(&meta_path) {
-                    if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&bytes) {
-                        json["saved_to"] = serde_json::json!(canonical_dest.to_string_lossy());
-                        let _ = std::fs::write(&meta_path, json.to_string());
-                    }
-                }
+                let _ = std::fs::remove_file(&meta_path);
                 Ok(Some(serde_json::json!({ "file_path": canonical_dest.to_string_lossy() })))
             })
         }),

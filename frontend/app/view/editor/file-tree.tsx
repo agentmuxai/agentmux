@@ -307,10 +307,19 @@ function InlineInput(props: InlineInputProps): JSX.Element {
         }
     });
 
+    // Guard against Escape → onCancel unmounts the input → blur fires confirm.
+    let committed = false;
     const confirm = () => {
+        if (committed) return;
+        committed = true;
         const v = value().trim();
         if (v) props.onConfirm(v);
         else props.onCancel();
+    };
+    const cancel = () => {
+        if (committed) return;
+        committed = true;
+        props.onCancel();
     };
 
     return (
@@ -324,7 +333,7 @@ function InlineInput(props: InlineInputProps): JSX.Element {
             onKeyDown={(e) => {
                 e.stopPropagation();
                 if (e.key === "Enter") confirm();
-                if (e.key === "Escape") props.onCancel();
+                if (e.key === "Escape") cancel();
             }}
             onBlur={confirm}
             onClick={(e) => e.stopPropagation()}

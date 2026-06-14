@@ -580,27 +580,39 @@ export class EditorViewModel implements ViewModel {
 
     // ── File tree mutations ─────────────────────────────────────────────
 
-    /** Rename a file/folder. Updates open tabs and refreshes the tree. */
+    /** Rename a file/folder. Updates open tabs (including children for dirs) and refreshes the tree. */
     async renameFile(path: string, newName: string): Promise<void> {
         try {
             const result = await RpcApi.RenameEditorFileCommand(TabRpcClient, {
                 old_path: path,
                 new_name: newName,
             });
+            // Update the exact tab for this path.
             dispatch(this.blockId, {
                 type: "RenameFile",
                 oldPath: path,
                 newPath: result.new_path,
                 source: "system",
             });
+            // Also update any tabs that are children of a renamed directory.
+            // Canonicalize both paths with a trailing sep so we don't match
+            // "~/proj2" when renaming "~/proj".
+            const oldCanon = canonicalizePath(path);
+            const newCanon = canonicalizePath(result.new_path);
+            const oldPrefix = oldCanon + "/";
+            const newPrefix = newCanon + "/";
+            for (const tab of snapshot(this.blockId)?.tabs ?? []) {
+                const tabCanon = canonicalizePath(tab.filePath);
+                if (tabCanon.startsWith(oldPrefix)) {
+                    const newTabPath = newPrefix + tabCanon.slice(oldPrefix.length);
+                    dispatch(this.blockId, { type: "RenameFile", oldPath: tab.filePath, newPath: newTabPath, source: "system" });
+                }
+            }
             // Refresh the parent directory.
             const parentPath = path.replace(/[/\\][^/\\]*$/, "") || path;
             void this.treeModel.refreshPath(parentPath);
         } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            // Surface the error via the active tab's loadError if there is one,
-            // otherwise just log — rename failures are rare and recoverable.
-            console.error(`[editor] rename failed: ${msg}`);
+            console.error(`[editor] rename failed: ${e instanceof Error ? e.message : String(e)}`);
         }
     }
 
@@ -663,9 +675,8 @@ export class EditorViewModel implements ViewModel {
     /** Open the folder in a terminal pane (split right of the current pane). */
     async openInTerminal(folderPath: string): Promise<void> {
         try {
-            // pane.open with view=term and cwd=folderPath (App API Tier 1).
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (RpcApi as any).OpenPaneCommand?.(TabRpcClient, {
+            // pane.open is a raw RPC — no typed wrapper exists yet in RpcApi.
+            await TabRpcClient.rpcCall("pane.open", {
                 view: "term",
                 cwd: folderPath,
                 split_direction: "right",
