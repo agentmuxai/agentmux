@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { Index, Match, Show, Switch, createEffect, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -90,18 +90,49 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         stickToBottom = dist < 40;
     };
 
+    // Track whether the overlay panel is collapsed (content-visibility: hidden).
+    // Accessing layout-forcing properties (scrollHeight, scrollTop) on an element
+    // inside a content-visibility:hidden subtree forces a synchronous subtree
+    // render and emits "Rendering was performed in a subtree hidden by
+    // content-visibility" warnings in the console. MutationObserver is
+    // layout-free and correctly tracks the .agent-tool-panel--hidden class flip
+    // that applies content-visibility:hidden to the panel containing this log.
+    //
+    // panelHidden is a SolidJS signal so that createEffect below tracks it as a
+    // reactive dependency. If it were a plain `let`, the effect would have no
+    // dependency on it: when streaming completes while the panel is collapsed,
+    // `chunks()` stops changing and the effect never re-fires on expand, leaving
+    // `scrollTop` frozen at the pre-collapse position. Using a signal ensures
+    // the effect re-runs when the panel is expanded.
+    const [panelHidden, setPanelHidden] = createSignal(false);
+    onMount(() => {
+        const panel = scrollRef?.closest(".agent-tool-panel");
+        if (!panel) return;
+        setPanelHidden(panel.classList.contains("agent-tool-panel--hidden"));
+        const mo = new MutationObserver(() => {
+            setPanelHidden(panel.classList.contains("agent-tool-panel--hidden"));
+        });
+        mo.observe(panel, { attributes: true, attributeFilter: ["class"] });
+        onCleanup(() => mo.disconnect());
+    });
+
     createEffect(() => {
-        // Re-read chunks to register the dep, then schedule a scroll-down.
+        // Re-read chunks and panelHidden to register both as reactive deps.
+        // panelHidden must be read here (not inside the RAF callback) so the
+        // effect re-fires when the panel expands even after streaming has ended
+        // and chunks() is no longer changing.
         chunks();
+        const hidden = panelHidden();
         if (stickToBottom && scrollRef) {
             // Wait one frame for the DOM to flush before measuring.
             // Re-check scrollRef + isConnected because a Show-branch
             // flip during the same RAF window can detach the element
             // out from under us. Mutating scrollTop on a detached node
             // raised the `replaceChild` reconciliation race that
-            // crashed v0.33.799.
+            // crashed v0.33.799. Guard panelHidden to avoid forcing
+            // layout on a content-visibility:hidden subtree.
             requestAnimationFrame(() => {
-                if (scrollRef && scrollRef.isConnected) {
+                if (scrollRef && scrollRef.isConnected && !hidden) {
                     scrollRef.scrollTop = scrollRef.scrollHeight;
                 }
             });
@@ -139,14 +170,17 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     );
 };
 
+type LogChunk = { kind: string; content: string; timestamp: number };
+
 interface ChunkListProps {
-    chunks: ReadonlyArray<{ kind: string; content: string; timestamp: number }>;
+    chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
-    // Cap the inline render to ~MAX_TOOL_OUTPUT_LINES worth of trailing
-    // chunks. Inline (not memoized) per this file's reactivity discipline.
-    // The capper is stateful (per-stream running line total) so each streamed
-    // append only scans the new chunk, never the growing dropped prefix.
+    // All CR/spinner handling is in the Rust layer: pending_cr_override slots
+    // in pty_reader_loop and stream_reader collapse throttled spinner frames
+    // before they become LineEvents; spawn_publisher_loop strips any leading \r
+    // before publishing. No \r reaches the frontend. The cap is the only
+    // transform needed here.
     const cap = createChunkCapper();
     const capped = () => cap(props.chunks);
     return (
@@ -154,13 +188,13 @@ function ChunkList(props: ChunkListProps): JSX.Element {
             <Show when={capped().hiddenLines > 0}>
                 <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
             </Show>
-            <Index each={capped().chunks}>
+            <For each={capped().chunks}>
                 {(chunk) => (
-                    <pre class={`agent-tool-log-line ${KIND_CLASS[chunk().kind] ?? ""}`}>
-                        {capChars(chunk().content)}
+                    <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
+                        {capChars(chunk.content)}
                     </pre>
                 )}
-            </Index>
+            </For>
         </>
     );
 }
