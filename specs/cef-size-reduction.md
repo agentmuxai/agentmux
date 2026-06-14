@@ -19,11 +19,20 @@
 
 The main library is ~70% of every distribution. File-level trimming is marginal.
 
-**IMPORTANT:** The official CEF builds (hosted on Spotify CDN, the official CEF build infra)
-already use `is_official_build=true` with full optimization (`/OPT:REF`, `/OPT:ICF`, LTO).
-PDB files are excluded from the minimal distribution. The 251 MB libcef.dll is **already
-stripped and optimized** — `symbol_level=0` would yield single-digit percent savings at best,
-not the ~50% initially estimated. The size is inherent to Chromium's codebase.
+**IMPORTANT:** The *official* CEF builds (hosted on Spotify CDN) use
+`is_official_build=true` with full optimization (`/OPT:REF`, `/OPT:ICF`, LTO), so for
+those, `symbol_level=0` yields single-digit-percent savings at best — the size is
+inherent to Chromium.
+
+> **CORRECTION (2026-06-14): this does NOT apply to our patched fork build.** This
+> spec assumed our `libcef` was already official. It wasn't — the local fork build
+> (`docs/cef-build/build-patched-libcef.md`) omitted `is_official_build`, so it was a
+> plain `is_debug=false` Release and ran **~2× bigger** than stock-official. Adding
+> `is_official_build=true` + `use_thin_lto=true` cut **`libcef.so` 414 → 263 MB
+> stripped** (below stock-official ~280 MB) and the **Linux AppImage 197 → 135 MB**
+> (now smaller than Windows/macOS). So for *our* build the official flags ARE the
+> ~50% lever — the build doc now sets them. See
+> [cef148-official-build-size in agent memory] / the updated build doc.
 
 ---
 
@@ -170,13 +179,13 @@ Effort: trivial. Marginal gain since the main library dominates.
 
 ### Scenario B: Custom Build — Feature Disable
 
-**NOTE:** The official CEF builds already use `is_official_build=true` with full
-optimization and ship without PDB files. `symbol_level=0` does NOT halve the DLL —
-the 251 MB is already optimized. The only meaningful savings from a custom build
-come from **disabling features**.
+**NOTE:** True for the *stock-official* CEF. **But our patched fork build did NOT
+set these** (see the correction above) — so for us they are the ~50% lever, not
+"already set". The build doc (`docs/cef-build/build-patched-libcef.md`) now sets
+them. The feature-disable flags below are a *further* ~20–40 MB on top.
 
 ```gn
-# Already set by official builds (included for completeness)
+# THE size lever for our fork build (it omitted these — now set in the build doc)
 is_official_build=true
 use_thin_lto=true
 exclude_unwind_tables=true

@@ -91,6 +91,10 @@ If you see "class member cannot be redeclared" compile errors later, the patcher
 cd ~/cef-build/chromium_git/chromium/src
 gn gen out/Release_GN_x64 --args='
   is_debug=false
+  is_official_build=true
+  use_thin_lto=true
+  is_cfi=false
+  chrome_pgo_phase=0
   symbol_level=1
   is_component_build=false
   proprietary_codecs=true
@@ -100,6 +104,24 @@ gn gen out/Release_GN_x64 --args='
   cc_wrapper="ccache"
 '
 ```
+
+> **`is_official_build=true` is the size lever — do not omit it.** It enables
+> thin-LTO + identical-code-folding + full optimization. Without it (a plain
+> `is_debug=false` Release), `libcef.so` is **~2x** the official size:
+> ~414 MB stripped vs **~263 MB** with it — and the Linux AppImage ~190 vs
+> **~135 MB**. `is_cfi=false` and `chrome_pgo_phase=0` are disabled only to skip
+> their data/setup deps (they don't drive size). `symbol_level=1` keeps the
+> unstripped `.so` large (~1.5 GB of debug info) but `strip --strip-all` removes
+> all of it; ship the stripped binary. Verified 2026-06-14 on CEF 148.0.7778.180.
+>
+> Two gotchas after changing args on an existing tree:
+> 1. **Regenerate the gitignored wrappers first** or the build dies instantly on
+>    `cef/libcef_dll/ctocpp/views/window_ctocpp.cc` "missing and no known rule":
+>    `cd cef && python3 tools/translator.py --root-dir .` (the tree stays clean —
+>    identical API rewrite — so no `version_manager.py` needed).
+> 2. **Copy the new `snapshot_blob.bin` + `v8_context_snapshot.bin`** alongside
+>    `libcef.so` — `is_official_build` rebuilds V8, and stale snapshots crash the
+>    host on a checksum mismatch.
 
 ### 5. Build (use the OOM-resistant wrapper)
 
