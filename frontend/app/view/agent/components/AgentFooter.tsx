@@ -10,8 +10,9 @@ import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
-import type { SessionStats, TurnTokens } from "../types";
+import type { SessionStats, TurnTokens, AgentRuntimeConfig, PermissionMode } from "../types";
 import { SlashAutocomplete } from "./SlashAutocomplete";
+import { getRuntimeConfig } from "../buildRuntimeArgs";
 
 // ── AgentStatusLine ───────────────────────────────────────────────────────────
 // Displayed above the control bar. Shows a cycling thinking phrase while the
@@ -186,6 +187,185 @@ export const AgentStatusLine = (props: AgentStatusLineProps): JSX.Element => {
 };
 
 AgentStatusLine.displayName = "AgentStatusLine";
+
+// ── AgentWorkingRow ───────────────────────────────────────────────────────────
+// Rendered immediately below AgentDocumentView in the conversation area.
+// Shows spinner + "Working… · Ns" while loading, "✓ Worked · 42s" on completion.
+// Returns null when neither loading nor has stats — no idle placeholder.
+// Stays visible as a turn delimiter until the user sends the next message.
+
+interface AgentWorkingRowProps {
+    loading: boolean;
+    stopping?: boolean;
+    currentTool?: string | null;
+    sessionStats?: SessionStats | null;
+    turnTokens?: TurnTokens | null;
+}
+
+export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
+    const [phrase, setPhrase] = createSignal(pickThinkingPhrase());
+    const [lastPhrase, setLastPhrase] = createSignal(pickThinkingPhrase());
+    const [elapsedMs, setElapsedMs] = createSignal(0);
+
+    createEffect(() => {
+        if (!props.loading || props.currentTool) return;
+        setPhrase(pickThinkingPhrase());
+        const id = setInterval(() => {
+            setPhrase((prev) => {
+                const next = pickThinkingPhrase(prev);
+                setLastPhrase(next);
+                return next;
+            });
+        }, 30000);
+        onCleanup(() => clearInterval(id));
+    });
+
+    createEffect(() => {
+        if (!props.loading) return;
+        const start = Date.now();
+        setElapsedMs(0);
+        const id = setInterval(() => setElapsedMs(Date.now() - start), 1000);
+        onCleanup(() => clearInterval(id));
+    });
+
+    createEffect(() => {
+        if (props.loading && !props.currentTool) setLastPhrase(phrase());
+    });
+
+    const workedSummary = createMemo((): string | null => {
+        const stats = props.sessionStats;
+        if (!stats) return null;
+        const parts: string[] = ["✓ " + ingToEd(lastPhrase())];
+        if (stats.duration_ms != null) {
+            const s = Math.round(stats.duration_ms / 1000);
+            parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
+        }
+        if (stats.input_tokens != null || stats.output_tokens != null) {
+            parts.push(fmtTokens({ input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }));
+        }
+        return parts.join("  ·  ");
+    });
+
+    const workedSecondary = createMemo((): string | null => {
+        const stats = props.sessionStats;
+        if (!stats) return null;
+        const parts: string[] = [];
+        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
+        if (stats.num_turns) parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
+        return parts.length ? parts.join("  ·  ") : null;
+    });
+
+    const rightText = createMemo((): string => {
+        const right: string[] = [];
+        if (props.turnTokens) right.push(fmtTokens(props.turnTokens));
+        right.push(fmtElapsed(elapsedMs()));
+        return right.join("  ·  ");
+    });
+
+    return (
+        <Show
+            when={props.loading}
+            fallback={
+                <Show when={workedSummary()}>
+                    <span class="agent-working-row agent-working-row--worked">
+                        <span class="agent-working-row-left">{workedSummary()}</span>
+                        <span class="agent-working-row-right">
+                            <Show when={workedSecondary()}>
+                                <span class="agent-working-row-secondary">{workedSecondary()}</span>
+                            </Show>
+                        </span>
+                    </span>
+                </Show>
+            }
+        >
+            <span class="agent-working-row agent-working-row--loading">
+                <span class="agent-spinner-dot" />
+                <span class="agent-working-row-left">
+                    {props.stopping
+                        ? "Stopping…"
+                        : props.currentTool
+                            ? props.currentTool
+                            : `${phrase()}…`}
+                </span>
+                <span class="agent-working-row-right">{rightText()}</span>
+            </span>
+        </Show>
+    );
+};
+
+AgentWorkingRow.displayName = "AgentWorkingRow";
+
+// ── AgentAuxInfoBar ───────────────────────────────────────────────────────────
+// Static runtime context strip: model · effort · permission mode.
+// Replaces the spinner/status slot; working state moved to AgentWorkingRow.
+// Only renders for claude provider (same rule as AgentControlBar).
+
+const PERM_LABELS: Record<PermissionMode, string> = {
+    bypass: "Bypass",
+    auto: "Auto",
+    acceptEdits: "Accept Edits",
+    plan: "Plan",
+    default: "Default",
+};
+
+const MODEL_LABELS: Record<string, string> = {
+    "": "Default",
+    opus: "Opus",
+    sonnet: "Sonnet",
+    haiku: "Haiku",
+    xhigh: "Opus xhigh",
+};
+
+const EFFORT_LABELS: Record<string, string> = {
+    "": "Default",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    max: "Max",
+    xhigh: "xHigh",
+};
+
+interface AgentAuxInfoBarProps {
+    blockAtom: () => Block | undefined;
+    providerId: string;
+    processCount?: number;
+    onProcessBadgeClick?: () => void;
+}
+
+export const AgentAuxInfoBar = (props: AgentAuxInfoBarProps): JSX.Element => {
+    const runtime = (): AgentRuntimeConfig => getRuntimeConfig(props.blockAtom()?.meta);
+
+    const summary = (): string => {
+        const r = runtime();
+        return [
+            PERM_LABELS[r.permissionMode],
+            MODEL_LABELS[r.model] || r.model,
+            `Effort: ${EFFORT_LABELS[r.effort] || r.effort}`,
+        ].join("  ·  ");
+    };
+
+    return (
+        // <Show> guards reactively — SolidJS early-return is not reactive
+        <Show when={props.providerId === "claude"}>
+            <span class="agent-aux-info-bar">
+                <span class="agent-aux-info-summary">{summary()}</span>
+                <Show when={(props.processCount ?? 0) > 0}>
+                    <button
+                        type="button"
+                        class="agent-process-badge"
+                        title={`${props.processCount} tracked ${props.processCount === 1 ? "process" : "processes"} spawned by this agent — click to open swarm`}
+                        onClick={() => props.onProcessBadgeClick?.()}
+                    >
+                        <span class="agent-process-badge-icon">⚙</span>
+                        <span class="agent-process-badge-count">{props.processCount}</span>
+                    </button>
+                </Show>
+            </span>
+        </Show>
+    );
+};
+
+AgentAuxInfoBar.displayName = "AgentAuxInfoBar";
 
 interface AgentFooterProps {
     /**
