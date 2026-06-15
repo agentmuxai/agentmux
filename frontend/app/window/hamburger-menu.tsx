@@ -121,14 +121,14 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 onClick: () => openModal(CommandPaletteModal),
             },
             {
-                // Bundle-management PR 4 (Feature 2) — the app-wide
-                // Identity & Memory bundle manager. Opens the manager
-                // modal here when the app-wide singleton is free; when it
-                // is held in another window, focuses that window instead
-                // (the persistent "open elsewhere" banner stays the
-                // durable affordance). See SPEC_BUNDLE_MANAGEMENT §3.
-                label: "Identity & Memory",
-                icon: "id-card",
+                // Trust Center — the app-wide hub for Accounts, Identity,
+                // and Memory. Opens the manager modal here when the app-wide
+                // singleton is free; when it is held in another window,
+                // focuses that window instead (the persistent "open
+                // elsewhere" banner stays the durable affordance).
+                // See SPEC_BUNDLE_MANAGEMENT §3, SPEC_TRUST_CENTER_2026_06_15.
+                label: "Trust Center",
+                icon: "shield-halved",
                 onClick: () => openBundleManager(),
             },
             {
