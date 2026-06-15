@@ -83,9 +83,11 @@ New backend service in `agentmux-srv/src/editor/scratch.rs`:
     <uuid>.md.meta     ← JSON sidecar: { displayName, createdAt, lastModifiedAt, savedTo }
 ```
 
-**Directory:** `{data_dir}/cache/scratch/` — inside the per-instance data dir so
-multiple AgentMux instances each have isolated scratch files. On first write, the dir
-is created if absent.
+**Directory:** `~/.agentmux/cache/scratch/` — in the shared global data root, NOT
+per-instance. This is intentional: scratch content is user data (unsaved work) and
+must be recoverable across channels and build versions, the same way agents and auth
+are global (I6 applies to app state, not user content). On first write, the dir is
+created if absent. A 30-day cleanup pass on startup prunes orphaned files.
 
 **Lifecycle:**
 

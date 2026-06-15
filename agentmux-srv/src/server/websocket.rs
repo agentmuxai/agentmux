@@ -1617,6 +1617,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 if !dest_path.starts_with(&home) {
                     return Err("movescratchfile: destination outside home directory".to_string());
                 }
+                // Reject ".." components before create_dir_all — the coarse starts_with
+                // check is purely lexical and passes paths like ~/foo/../../../tmp/evil
+                // because the prefix matches, but create_dir_all would then materialize
+                // directories outside the home boundary before the canonical check fires.
+                if dest_path.components().any(|c| c == std::path::Component::ParentDir) {
+                    return Err("movescratchfile: destination path must not contain '..' components".to_string());
+                }
                 // Reject existing destination to avoid silent data loss.
                 if dest_path.exists() {
                     return Err("movescratchfile: destination already exists".to_string());

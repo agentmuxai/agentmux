@@ -555,6 +555,16 @@ export class EditorViewModel implements ViewModel {
         const tab = this.activeTabAtom();
         if (!tab?.isScratch || !tab.scratchId) return;
         try {
+            // Flush the live in-memory buffer to the scratch file on disk first.
+            // MoveScratchFileCommand copies from disk, so without this step any
+            // edits since the last auto-save would be silently discarded.
+            const liveContent = this._contentByTab.get(tab.id);
+            if (liveContent !== undefined) {
+                await RpcApi.WriteEditorFileCommand(TabRpcClient, {
+                    path: tab.filePath,
+                    content: liveContent,
+                });
+            }
             const result = await RpcApi.MoveScratchFileCommand(TabRpcClient, {
                 scratch_id: tab.scratchId,
                 destination_path: destPath,
@@ -565,7 +575,10 @@ export class EditorViewModel implements ViewModel {
                 newPath: result.file_path,
                 source: "user",
             });
-            // Re-load content from the new path to sync the hash.
+            // Clear cached buffer so openFile reloads from disk and syncs the
+            // contentHash. Without this the early-return guard at openFile:372
+            // (contentLoaded && _contentByTab.has) skips the hash update.
+            this._contentByTab.delete(tab.id);
             await this.openFile(result.file_path);
         } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e);
