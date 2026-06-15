@@ -241,6 +241,11 @@ pub fn build_router(state: AppState) -> Router {
         // Stop a persistent shell (Phase 3). agentmux-mcp's `ShellStop` tool
         // POSTs here; tree-kills the shell's process group.
         .route("/api/v1/shell/stop", post(handle_shell_stop))
+        // Open a pane (editor/term/browser/…) from an agent tool call.
+        // agentmux-mcp's OpenEditor tool POSTs `{view:"editor", file, …}` here;
+        // shares the exact pane.open logic with the WebSocket RPC handler
+        // (app_api::open_pane). See ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.
+        .route("/api/v1/pane/open", post(handle_pane_open))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -538,6 +543,31 @@ async fn handle_shell_stop(
     let stopped = state.shell_sessions.stop(&req.shell_id);
     tracing::info!(shell_id = %req.shell_id, stopped, "shell.stop");
     (StatusCode::OK, Json(json!({ "stopped": stopped })))
+}
+
+/// `POST /api/v1/pane/open` — open a pane (editor/term/browser/…).
+///
+/// Called by `agentmux-mcp`'s `OpenEditor` tool. Thin HTTP wrapper over
+/// `app_api::open_pane` (the same logic the WebSocket `pane.open` RPC uses):
+/// creates the block, enqueues the layout action, and broadcasts the updates
+/// so the frontend renders the pane. Body is `CommandPaneOpenData`.
+async fn handle_pane_open(
+    State(state): State<AppState>,
+    Json(req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
+) -> impl IntoResponse {
+    match app_api::open_pane(&state, req).await {
+        Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
+        Err(e) => {
+            // Argument/validation errors from build_pane_meta are the caller's
+            // fault (400); everything else is a server-side failure (500).
+            let status = if e.starts_with("MISSING_ARG") || e.starts_with("INVALID_VIEW") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, Json(json!({ "error": e }))).into_response()
+        }
+    }
 }
 
 // ---- Auth Middleware ----

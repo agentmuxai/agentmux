@@ -55,6 +55,20 @@ const SHELL_STOP_TOOL: &str = r#"{
   }
 }"#;
 
+const OPEN_EDITOR_TOOL: &str = r#"{
+  "name": "OpenEditor",
+  "description": "Open a file in an AgentMux editor pane next to this conversation. Use when you want the user to see a file you're discussing or editing. Pass an absolute host path. Fire-and-forget: returns once the pane is opened.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "file":  { "type": "string", "description": "Absolute path to the file to open" },
+      "title": { "type": "string", "description": "Optional tab/pane title (defaults to the file name)" },
+      "split": { "type": "string", "enum": ["right", "left", "down", "up"], "description": "Where to place the new pane relative to this agent pane (default: right)" }
+    },
+    "required": ["file"]
+  }
+}"#;
+
 #[tokio::main]
 async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
@@ -127,10 +141,11 @@ async fn main() {
             "tools/list" => {
                 let shell: Value = serde_json::from_str(SHELL_TOOL).expect("static json");
                 let shell_stop: Value = serde_json::from_str(SHELL_STOP_TOOL).expect("static json");
+                let open_editor: Value = serde_json::from_str(OPEN_EDITOR_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop] }
+                    "result": { "tools": [shell, shell_stop, open_editor] }
                 })
             }
             "tools/call" => {
@@ -284,6 +299,68 @@ async fn call_tool(
             } else {
                 format!("shell {shell_id} was not running (unknown or already exited)")
             })
+        }
+        "OpenEditor" => {
+            let file = arguments
+                .get("file")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: file"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let split = arguments
+                .get("split")
+                .and_then(|v| v.as_str())
+                .filter(|s| matches!(*s, "right" | "left" | "down" | "up"))
+                .unwrap_or("right");
+
+            let url = format!("{}/api/v1/pane/open", local_url.trim_end_matches('/'));
+            let mut body = json!({
+                "view": "editor",
+                "file": file,
+                "focus": true,
+            });
+            // Place the editor relative to the calling agent pane when we know
+            // its block id (AGENTMUX_BLOCKID); otherwise the sidecar inserts it
+            // at the tab root.
+            if !block_id.is_empty() {
+                body["split_direction"] = json!(split);
+                body["split_reference_block_id"] = json!(block_id);
+            }
+            if let Some(title) = arguments.get("title").and_then(|v| v.as_str()) {
+                body["title"] = json!(title);
+            }
+
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("pane.open failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            let block = result
+                .get("block_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+
+            Ok(format!("Opened {file} in editor pane (block {block})"))
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }
