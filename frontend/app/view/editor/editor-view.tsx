@@ -290,6 +290,10 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 {
                     key: "Mod-Shift-s",
                     run: () => {
+                        // Phase 1: Save As is only implemented for scratch tabs.
+                        // Don't swallow the key for non-scratch tabs so the OS
+                        // default (or a future handler) can still see it.
+                        if (!model.activeTabAtom()?.isScratch) return false;
                         triggerSaveAs();
                         return true;
                     },
