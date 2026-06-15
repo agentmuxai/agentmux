@@ -1130,6 +1130,18 @@ class RpcApiType {
         return client.rpcCall("shellexec", data, opts);
     }
 
+    // command "shellstop" [call]
+    // Stop a running persistent shell node (Phase 3). Invoked by the UI stop
+    // button on a running PersistentShellBlock; tree-kills the process group.
+    // Returns { stopped: false } if the id is unknown / already exited.
+    ShellStopCommand(
+        client: RpcClient,
+        data: { shell_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ stopped: boolean }> {
+        return client.rpcCall("shellstop", data, opts);
+    }
+
     // command "agentstop" [call]
     AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("agentstop", data, opts);

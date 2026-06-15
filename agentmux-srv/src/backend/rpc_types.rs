@@ -162,6 +162,8 @@ pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 pub const COMMAND_SHELL_EXEC: &str = "shellexec";
+/// Stop a running persistent shell node (Phase 3) — UI stop button.
+pub const COMMAND_SHELL_STOP: &str = "shellstop";
 pub const COMMAND_WRITE_AGENT_CONFIG: &str = "writeagentconfig";
 pub const COMMAND_RESOLVE_CLI: &str = "resolvecli";
 pub const COMMAND_CHECK_CLI_AUTH: &str = "checkcliauth";
@@ -647,6 +649,12 @@ pub struct ShellExecResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
+}
+
+/// Data for ShellStopCommand — stop a running persistent shell node by id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandShellStopData {
+    pub shell_id: String,
 }
 
 /// A file to write as part of agent config.

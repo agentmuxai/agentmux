@@ -71,6 +71,7 @@ pub(crate) fn test_state() -> AppState {
         auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
         install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
         container_manager: None,
+        shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
     }
 }
 

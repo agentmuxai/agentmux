@@ -15,6 +15,8 @@ import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode, ToolLogChunk } from "../types";
 
 interface PersistentShellBlockProps {
@@ -77,6 +79,22 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
 
     const expanded = () => props.pinned;
 
+    // Stop button (Phase 3): tree-kills the running process. Status updates
+    // arrive via the `stopped` exit event, so we don't optimistically mutate.
+    const [stopping, setStopping] = createSignal(false);
+    const handleStop = async (e: MouseEvent) => {
+        e.stopPropagation(); // don't toggle the expand panel
+        if (stopping()) return;
+        setStopping(true);
+        try {
+            await RpcApi.ShellStopCommand(TabRpcClient, { shell_id: props.node.id });
+        } catch {
+            // Best-effort — the exit event reconciles the final status.
+        } finally {
+            setStopping(false);
+        }
+    };
+
     // createChunkCapper tracks total lines incrementally and returns hiddenLines.
     // Using capChunksByLines directly only returns keptLines (no hidden count).
     const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
@@ -103,6 +121,16 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                 <span class="agent-shell-elapsed">[{elapsed()}]</span>
                 <Show when={lastLine()}>
                     <span class="agent-shell-live-tail">↳ {lastLine()}</span>
+                </Show>
+                <Show when={props.node.status === "running"}>
+                    <button
+                        class="agent-shell-stop"
+                        title="Stop process"
+                        disabled={stopping()}
+                        onClick={handleStop}
+                    >
+                        ■
+                    </button>
                 </Show>
             </div>
             <div
