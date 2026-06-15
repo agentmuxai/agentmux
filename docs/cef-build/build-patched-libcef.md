@@ -174,6 +174,20 @@ out/Release_GN_x64/cefsimple --no-sandbox --url=https://example.com
 
 A window with example.com proves the libcef is functional. (The `BeginWindowDrag` patch isn't exercised by cefsimple — verification of THAT happens via `task package:linux` + the AgentMux app.)
 
+To check the patch is present without launching anything:
+
+```bash
+bash scripts/verify-cef-patch.sh ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64
+# exit 0 = patched · exit 1 = unpatched upstream · exit 2 = stripped (run on the unstripped build)
+```
+
+`task bundle:linux` runs this **advisorily** (a warning, so `task dev` still works on the
+upstream cef-dll-sys fallback); `scripts/build-appimage-linux.sh` runs it as a **hard
+release gate** that refuses to package an AppImage whose libcef.so lacks the patch.
+The symbol it keys on (`window_begin_window_drag_<apiver>`) lives in `.symtab` — present
+in the unstripped build, gone after `strip` — so the gate must (and does) run **before**
+the packaging strip. Override the gate with `AGENTMUX_SKIP_CEF_PATCH_CHECK=1` (emergency only).
+
 ---
 
 ## Using the built libcef in AgentMux

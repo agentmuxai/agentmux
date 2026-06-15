@@ -631,6 +631,10 @@ tasks:
                 # See docs/specs/patched-libcef-bundling-2026-05-08.md.
                 CEF_DIR="$(bash scripts/resolve-cef-runtime.sh)"
                 echo "Using CEF runtime from: $CEF_DIR"
+                # Advisory BeginWindowDrag-patch check — non-fatal here so `task dev`
+                # still works on the upstream cef-dll-sys fallback (no 3-hour CEF
+                # build required). The hard release gate is in build-appimage-linux.sh.
+                bash scripts/verify-cef-patch.sh "$CEF_DIR" || true
                 mkdir -p dist/cef/locales
                 cp -f "$CEF_DIR/libcef.so" dist/cef/
                 cp -f "$CEF_DIR/libEGL.so" dist/cef/ 2>/dev/null || true
