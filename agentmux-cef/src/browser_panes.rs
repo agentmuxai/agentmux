@@ -239,6 +239,29 @@ impl BrowserPaneManager {
         match result {
             RegisterResult::AlreadyLive(label) => {
                 // Existing Live entry — re-navigate the existing browser.
+                //
+                // DIAGNOSTIC (redock black-page triage —
+                // ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md §2):
+                // if a redock's create lands here while the old pane is still
+                // Live (the close IPC hasn't flipped it to Closing yet), we
+                // only re-navigate the EXISTING browser — which is still
+                // parented to the *old* (floater) window — and never create a
+                // pane in the requested `window_label`. The target window then
+                // shows black until the old pane closes. Logging requested
+                // window + rect makes this race visible in a repro; if a redock
+                // hits this arm, it is the smoking gun.
+                tracing::info!(
+                    block_id,
+                    label = %label,
+                    requested_window = %window_label,
+                    rect = ?(rect.x, rect.y, rect.width, rect.height),
+                    "browser pane create hit AlreadyLive — re-navigating existing browser (NOT creating in requested window)"
+                );
+                crate::browser_pane::trace::pane_trace(
+                    block_id,
+                    "create-already-live",
+                    &format!("label={label} requested_win={window_label} url={url}"),
+                );
                 if let Some(browser) = state.get_browser(&label) {
                     if let Some(frame) = browser.main_frame() {
                         frame.load_url(Some(&CefString::from(url)));
@@ -261,6 +284,8 @@ impl BrowserPaneManager {
                 // docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md.
                 tracing::info!(
                     block_id,
+                    requested_window = %window_label,
+                    rect = ?(rect.x, rect.y, rect.width, rect.height),
                     "browser pane create deferred — block_id still Closing; reducer will replay on close-completion"
                 );
                 crate::browser_pane::trace::pane_trace(
@@ -274,7 +299,10 @@ impl BrowserPaneManager {
                 crate::browser_pane::trace::pane_trace(
                     block_id,
                     "create-request",
-                    &format!("url={url} label={label} win={window_label}"),
+                    &format!(
+                        "url={url} label={label} win={window_label} rect=({},{},{},{})",
+                        rect.x, rect.y, rect.width, rect.height
+                    ),
                 );
                 let mut task = CreateBrowserPaneTask::new(
                     state.clone(),
