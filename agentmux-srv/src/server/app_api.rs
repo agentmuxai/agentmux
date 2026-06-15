@@ -515,12 +515,13 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // `identitybundlebindings:changed:<bundle_id>` event
                 // when the expiry probe updates an account's status
                 // (PR D — spec §4.4).
-                crate::identity::resolver::inject_identity_env_with_broker(
+                env_vars = crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
                     Some(broker.clone()),
-                    &cmd.block_id,
-                    &mut env_vars,
-                );
+                    cmd.block_id.clone(),
+                    env_vars,
+                )
+                .await;
                 let session_id_field = obj::meta_get_string(
                     &block.meta, "agent:session_id_field", "session_id",
                 );
