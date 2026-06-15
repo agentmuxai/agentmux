@@ -15,8 +15,10 @@
  * `sessionStorage`-guarded auto-reload (so a persistent failure can't storm —
  * the 2026-06-15 incident reloaded 385×), then a recovery card with a
  * one-click Reload. `location.reload()` works here because this is a real
- * `http://localhost` document (not the host's `data:` crash page), and it
- * preserves the `__AGENTMUX_IPC_PORT__`/token query params.
+ * `http://localhost` document (not the host's `data:` crash page); the IPC
+ * port/token are re-supplied by the host's `on_load_end` re-injection on the
+ * fresh load — NOT carried in the URL (cef-init.ts strips them into window
+ * globals on first load), so reload and "Reopen window" recover identically.
  *
  * Spec: docs/specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md
  */
@@ -41,9 +43,10 @@ function setReloadCount(n: number): void {
 }
 
 /**
- * Clear the auto-reload budget. Call after a successful startup so a later,
- * unrelated failure begins with a fresh budget (and call before a *manual*
- * reload so the user's click always gets a full set of retries).
+ * Clear the auto-reload budget. Called ONLY after a successful startup, so a
+ * later, unrelated failure begins with a fresh budget. It is deliberately NOT
+ * called before a manual reload — resetting there re-entered the auto-reconnect
+ * cycle and caused the infinite loop (see tryAutoRecover).
  */
 export function clearStartupReloadCount(): void {
     setReloadCount(0);
@@ -54,8 +57,9 @@ export function clearStartupReloadCount(): void {
  *
  * If the bounded reload budget isn't exhausted, show a "Reconnecting…" overlay
  * and reload after a short backoff — returns `true`, meaning the caller should
- * stop (the page is about to reload). Otherwise reset the budget, render the
- * recovery card, and return `false`.
+ * stop (the page is about to reload). Once the budget is exhausted, render the
+ * recovery card and return `false` WITHOUT resetting the budget, so any further
+ * reload returns to the card instead of re-entering the auto-reconnect loop.
  */
 export function tryAutoRecover(message: string): boolean {
     const attempt = getReloadCount() + 1;
@@ -67,11 +71,20 @@ export function tryAutoRecover(message: string): boolean {
         setTimeout(() => location.reload(), 700 * attempt);
         return true;
     }
-    // Budget exhausted — STOP auto-reloading (this is the 385×-storm guard) and
-    // reset so the user's manual Reload gets a fresh budget.
-    setReloadCount(0);
+    // Budget exhausted — STOP auto-reloading. Do NOT reset the counter: keeping
+    // it ≥ MAX means any further reload (including the card's manual Reload) goes
+    // straight back to this card instead of re-entering the auto-reconnect cycle.
+    // That is what breaks the infinite "keeps trying to reconnect" loop (the bug
+    // where Reload reset the budget and looped). The counter is cleared only on a
+    // SUCCESSFUL startup (clearStartupReloadCount, from bootstrap's success path).
     showStartupError(message);
     return false;
+}
+
+/** True once the bounded auto-reload budget is spent — reloading has not
+ *  reconnected, so the card escalates its copy and drops the auto-loop. */
+function reloadBudgetExhausted(): boolean {
+    return getReloadCount() >= MAX_RELOADS;
 }
 
 function mountRoot(): HTMLElement {
@@ -120,6 +133,10 @@ export function showReconnecting(attempt: number, max: number): void {
  */
 export function showStartupError(message: string): void {
     const main = mountRoot();
+    // Once auto-reload has been spent without reconnecting, the failure is
+    // likely persistent (a stopped/restarted host), so escalate the copy and
+    // point at a real fix rather than implying another reload will help.
+    const exhausted = reloadBudgetExhausted();
 
     const card = document.createElement("div");
     card.style.cssText =
@@ -128,14 +145,18 @@ export function showStartupError(message: string): void {
         `font-family:${FONT};color:#e8e8e8;`;
 
     const title = document.createElement("h2");
-    title.textContent = "AgentMux lost its connection to the host";
+    title.textContent = exhausted
+        ? "Can't reconnect to AgentMux"
+        : "AgentMux lost its connection to the host";
     title.style.cssText = "margin:0 0 10px;font-size:18px;color:#ffd479;";
     card.appendChild(title);
 
     const body = document.createElement("p");
-    body.textContent =
-        "The interface loaded but couldn't reach the AgentMux host process. " +
-        "This is almost always temporary — reloading reconnects it.";
+    body.textContent = exhausted
+        ? "Reloading hasn't reconnected to the AgentMux host. The host process may have " +
+          "stopped or restarted — close this window and reopen it, or restart AgentMux."
+        : "The interface loaded but couldn't reach the AgentMux host process. " +
+          "This is almost always temporary — reloading reconnects it.";
     body.style.cssText = "margin:0 0 18px;font-size:14px;line-height:1.5;color:rgba(255,255,255,0.8);";
     card.appendChild(body);
 
@@ -160,7 +181,11 @@ export function showStartupError(message: string): void {
         "padding:9px 18px;border-radius:7px;border:none;cursor:pointer;font-size:13px;font-weight:600;" +
         "background:#4c8dff;color:#fff;";
     reload.onclick = () => {
-        clearStartupReloadCount(); // a manual reload gets a fresh budget
+        // Do NOT reset the budget here — that re-entered the auto-reconnect loop.
+        // A manual reload is a single attempt: the host re-injects fresh creds on
+        // load and invokeCommand retries the 401, so a recovered host succeeds
+        // (and bootstrap clears the budget); a still-dead host comes straight back
+        // to this card instead of looping the "Reconnecting…" spinner.
         location.reload();
     };
 
@@ -170,9 +195,11 @@ export function showStartupError(message: string): void {
         "padding:9px 18px;border-radius:7px;border:1px solid rgba(255,255,255,0.18);cursor:pointer;" +
         "font-size:13px;background:transparent;color:#e8e8e8;";
     reopen.onclick = () => {
-        clearStartupReloadCount();
-        // Re-navigate to the same URL — preserves the IPC port/token query
-        // params, a fuller reset than reload().
+        // Re-navigate to the same URL — a fuller reset than reload() (fresh
+        // document rather than a reload of the current one). Creds are re-supplied
+        // exactly as with reload(): the host's on_load_end re-injection, since the
+        // URL no longer carries ipc_port/ipc_token (cef-init.ts strips them on
+        // first load). Budget is left intact (cleared only on successful startup).
         location.assign(location.pathname + location.search);
     };
 
