@@ -167,6 +167,30 @@ impl PersistentSubprocessController {
             .map_err(|e| format!("stdin send failed: {e}"))
     }
 
+    /// Deliver an AskUserQuestion answer to the running CLI as a `tool_result`
+    /// on the live stdin, unblocking the agent's turn. Mirrors `send_message`
+    /// but emits a user turn whose content is a single `tool_result` block
+    /// keyed on the original `AskUserQuestion` tool_use id. The process must
+    /// already be running (the agent is mid-turn, blocked on this answer) — we
+    /// never spawn here. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+    pub fn send_tool_result(&self, tool_use_id: String, content: String) -> Result<(), String> {
+        let json_msg = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    { "type": "tool_result", "tool_use_id": tool_use_id, "content": content }
+                ]
+            }
+        });
+
+        let inner = self.inner.lock().unwrap();
+        let tx = inner.stdin_tx.as_ref()
+            .ok_or("persistent process not running (cannot deliver answer)")?;
+        tx.try_send(json_msg.to_string())
+            .map_err(|e| format!("stdin send failed: {e}"))
+    }
+
     /// Spawn the persistent CLI process.
     fn spawn_process(&self, config: PersistentSpawnConfig) -> Result<(), String> {
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows

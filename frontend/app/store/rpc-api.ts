@@ -93,6 +93,13 @@ class RpcApiType {
         return client.rpcCall("tooldecision", data, opts);
     }
 
+    // command "agent.answer" [call]
+    // Deliver an AskUserQuestion answer to the running agent CLI as a
+    // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+    AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("agent.answer", data, opts);
+    }
+
     // command "controllerresync" [call]
     ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("controllerresync", data, opts);
