@@ -1434,8 +1434,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let home = dirs::home_dir().ok_or("renameeditorfile: cannot determine home")?;
                 let canonical_home = home.canonicalize().map_err(|e| format!("renameeditorfile: home: {e}"))?;
                 let canonical_old = old_path.canonicalize().map_err(|e| format!("renameeditorfile: {e}"))?;
-                if !canonical_old.starts_with(&canonical_home) {
-                    return Err("renameeditorfile: path outside home directory".to_string());
+                if !canonical_old.starts_with(&canonical_home) || canonical_old == canonical_home {
+                    return Err("renameeditorfile: path outside or is the home directory".to_string());
                 }
                 if cmd.new_name.contains('/') || cmd.new_name.contains('\\') || cmd.new_name.contains('\0') || cmd.new_name == ".." || cmd.new_name == "." || cmd.new_name.is_empty() {
                     return Err("renameeditorfile: new_name must be a plain filename".to_string());
