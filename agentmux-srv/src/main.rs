@@ -270,6 +270,9 @@ async fn main() {
     // See SPEC_TOOLCHAIN_MANAGER_2026-06-15 §3.1.
     let path_source = agentmux_common::enrich_current_process_path();
     if path_source != agentmux_common::PathSource::Inherited {
+        // Record the source for the Toolchain modal (the host sets this when it
+        // spawns the srv; on a direct launch we set it here after enriching).
+        std::env::set_var("AGENTMUX_PATH_SOURCE", path_source.as_str());
         tracing::info!(
             source = path_source.as_str(),
             "Enriched srv PATH on direct launch (stripped PATH detected)"
