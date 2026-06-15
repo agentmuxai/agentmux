@@ -52,8 +52,25 @@ impl ShellNodeRunner {
             c
         };
 
+        // Only set the working directory if it actually exists. The cwd is
+        // normalized upstream (handle_shell_create → base::normalize_working_dir),
+        // but a stale or mistyped path would otherwise make the spawn fail hard
+        // with os error 267 (ERROR_DIRECTORY) on Windows. Mirror the agent-CLI
+        // spawn's graceful fallback (subprocess.rs): warn via a system chunk and
+        // run in the server's cwd rather than killing the shell before it starts.
         if let Some(ref cwd) = self.cwd {
-            child_cmd.current_dir(cwd);
+            if std::path::Path::new(cwd).is_dir() {
+                child_cmd.current_dir(cwd);
+            } else {
+                publish_chunk(
+                    &broker,
+                    &block_id,
+                    &shell_id,
+                    "system",
+                    &format!("[cwd not found: {cwd} — running in the server's working directory]"),
+                    now_ms(),
+                );
+            }
         }
         for (k, v) in &self.extra_env {
             child_cmd.env(k, v);

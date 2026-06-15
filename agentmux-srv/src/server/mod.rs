@@ -430,6 +430,13 @@ async fn handle_shell_create(
         })
     });
 
+    // Normalize the cwd before it reaches the spawner. Agents on Windows run
+    // inside a bash shell and emit MSYS paths like `/c/Users/asafe/project`;
+    // passing those straight to `Command::current_dir` fails with os error 267
+    // (ERROR_DIRECTORY). This converts them to native form and expands `~`.
+    let effective_cwd =
+        effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c));
+
     // Env parity with the agent CLI: start from the agent block's stored
     // cmd:env (the per-agent env the agent process is launched with — same
     // shape app_api.rs / websocket.rs read), then let the caller-supplied
