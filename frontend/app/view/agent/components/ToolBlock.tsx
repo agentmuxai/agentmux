@@ -51,6 +51,7 @@ interface ToolBlockProps {
 const STATUS_ICON: Record<ToolNode["status"], string> = {
     running: "⏳",
     pending_approval: "⚠",
+    awaiting_answer: "❓",
     success: "✓",
     failed: "✗",
     denied: "⊘",

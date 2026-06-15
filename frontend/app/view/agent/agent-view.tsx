@@ -507,11 +507,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // panel dismisses immediately. The agent's continuation (the next
         // assistant content / result the smoke test confirmed arrives) drives
         // the rest of the conversation; the node carries the answer as its
-        // summary for the record.
+        // summary for the record. We snapshot the original node(s) so a failed
+        // delivery can roll the transition back (see the catch below).
+        const originals: import("./types").ToolNode[] = [];
         const updated: import("./types").ToolNode[] = [];
         for (const n of getDocument()) {
             if (n.type !== "tool" || n.status !== "awaiting_answer") continue;
             if (n.question?.tool_use_id !== outcome.tool_use_id) continue;
+            originals.push(n);
             updated.push({
                 ...n,
                 status: "success",
@@ -533,7 +536,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             tool_use_id: outcome.tool_use_id,
             answer_text: outcome.answer_text,
         }).catch((err: unknown) => {
+            // Delivery failed — most commonly UNSUPPORTED_CONTROLLER on a
+            // container / one-shot agent (no live stdin; Phase 2). Roll the
+            // node back to awaiting_answer so the panel re-surfaces and the
+            // user isn't falsely told the question was answered while the
+            // agent is still blocked.
             log("error", `agent.answer failed: ${String(err)}`);
+            if (originals.length > 0) {
+                dispatchDoc(
+                    model.blockId,
+                    { type: "StreamFlush", newNodes: [], updatedNodes: originals },
+                    "user",
+                );
+            }
         });
     };
     const status = useAgentControllerStatus({
