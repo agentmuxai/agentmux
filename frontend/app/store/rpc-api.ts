@@ -701,6 +701,7 @@ class RpcApiType {
             apiKey: string;
             validate: boolean;
             accountId?: string;
+            context?: Record<string, unknown>;
         },
         opts?: RpcOpts,
     ): Promise<{

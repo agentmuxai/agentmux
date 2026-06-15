@@ -399,6 +399,27 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [keyReplacing, setKeyReplacing] = createSignal(!editingIsKeychain);
     const validationEndpoint = (): string | undefined => KEY_VALIDATION_ENDPOINT[provider()];
 
+    // Build the non-secret context from the form fields, layered over the
+    // editing account's existing context so keys we don't render (masked_tail,
+    // validation metadata from account.key.verify) survive an edit.
+    const buildContext = (): AccountContext => {
+        const context: AccountContext = { ...(editing()?.context ?? {}) };
+        if (provider() === "github") {
+            if (ghUsername()) context.github_username = ghUsername().trim();
+            if (ghScopes()) context.github_scopes = ghScopes().split(",").map((s) => s.trim()).filter(Boolean);
+        }
+        if (provider() === "aws") {
+            if (awsProfile()) context.aws_profile = awsProfile().trim();
+            if (awsRoleArn()) context.aws_role_arn = awsRoleArn().trim();
+            if (awsRegion()) context.aws_region = awsRegion().trim();
+        }
+        if (provider() === "anthropic") {
+            if (anthropicModel()) context.anthropic_model = anthropicModel().trim();
+        }
+        if (description()) context.description = description().trim();
+        return context;
+    };
+
     const buildAccount = (): Omit<Account, "id" | "status" | "created_at" | "updated_at"> | null => {
         const n = name().trim();
         if (!n) {
@@ -413,21 +434,15 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             secretRef.sm_json_path = secretSmJsonPath().trim() || undefined;
         }
         if (secretBackend() === "plaintext_dev") secretRef.value = secretValue();
+        if (secretBackend() === "keychain") {
+            // Preserve the existing keychain pointer (service/account) so a
+            // metadata-only Save on a locked account doesn't drop it. New
+            // keychain accounts go through the key flow, not this path.
+            secretRef.service = editing()?.secret_ref.service;
+            secretRef.account = editing()?.secret_ref.account;
+        }
 
-        const context: AccountContext = {};
-        if (provider() === "github") {
-            if (ghUsername()) context.github_username = ghUsername().trim();
-            if (ghScopes()) context.github_scopes = ghScopes().split(",").map((s) => s.trim()).filter(Boolean);
-        }
-        if (provider() === "aws") {
-            if (awsProfile()) context.aws_profile = awsProfile().trim();
-            if (awsRoleArn()) context.aws_role_arn = awsRoleArn().trim();
-            if (awsRegion()) context.aws_region = awsRegion().trim();
-        }
-        if (provider() === "anthropic") {
-            if (anthropicModel()) context.anthropic_model = anthropicModel().trim();
-        }
-        if (description()) context.description = description().trim();
+        const context = buildContext();
 
         const agents = assignedAgents()
             .split(",")
@@ -480,6 +495,9 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                 apiKey: keychainKey(),
                 validate,
                 accountId: isEdit() ? editing()!.id : undefined,
+                // Carry the user-entered context so the backend merges (not
+                // drops) github_username/scopes/notes on a key change.
+                context: buildContext(),
             });
             // Drop the plaintext from the form immediately.
             setKeychainKey("");
@@ -733,10 +751,12 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     <button class="identity-btn identity-btn-secondary" onClick={() => model.cancelForm()}>
                         Cancel
                     </button>
-                    {/* The keychain path has its own Validate/Save buttons; the
-                        generic upsert button is hidden there to avoid storing a
-                        keychain account through the non-secure path. */}
-                    <Show when={secretBackend() !== "keychain"}>
+                    {/* The keychain *entry* path has its own Validate/Save
+                        buttons; hide the generic upsert there. But a locked
+                        keychain account (editing, not replacing the key) uses
+                        this button to save metadata-only edits — buildAccount
+                        preserves the existing keychain pointer + context. */}
+                    <Show when={secretBackend() !== "keychain" || (isEdit() && !keyReplacing())}>
                         <button class="identity-btn identity-btn-primary" onClick={handleSubmit}>
                             {isEdit() ? "Save" : "Add Account"}
                         </button>
