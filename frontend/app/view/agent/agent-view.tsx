@@ -56,7 +56,7 @@ import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
-import { AgentFooter } from "./components/AgentFooter";
+import { AgentFooter, AgentWorkingRow, AgentAuxInfoBar } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
@@ -817,6 +817,21 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             onContextMenu={handleContextMenu}
             tabIndex={-1}
         >
+            {/* Gradient progress bar — 2px, pinned position:absolute top:0.
+                Animated shimmer while working, hidden at rest. Colors derived
+                from --accent-color via color-mix() so it adapts to all themes.
+                See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §4. */}
+            <div
+                class="agent-pane-progress-bar"
+                classList={{
+                    "agent-pane-progress-bar--active": status.isLoading() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
+                    "agent-pane-progress-bar--stopping": agentAtoms().turnPhaseAtom[0]().kind === "Interrupting",
+                }}
+                role="progressbar"
+                aria-label="Agent working"
+                aria-valuemin={0}
+                aria-valuemax={100}
+            />
             <DragOverlay message={dropAttach.dropMessage()} visible={dropAttach.isDragOver()} />
             {/* Pane title + back button now live in the block frame header,
                 driven by AgentViewModel.viewName / viewIcon / endIconButtons.
@@ -878,6 +893,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 blockId={model.blockId}
                 layoutView={layoutView}
             />
+
+            {/* Working indicator — bottom of conversation area.
+                Shows spinner + elapsed while loading, "✓ Worked · Ns" on completion.
+                Acts as a visual turn delimiter; stays until next message is sent.
+                See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2. */}
+            <Show when={
+                status.isLoading()
+                || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
+                || agentAtoms().sessionStatsAtom[0]() != null
+            }>
+                <AgentWorkingRow
+                    loading={status.isLoading() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
+                    stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
+                    currentTool={agentAtoms().currentToolAtom[0]()}
+                    sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                    turnTokens={agentAtoms().turnTokensAtom[0]()}
+                />
+            </Show>
 
             <Show when={status.canRetry()}>
                 <div class="agent-retry-bar">
