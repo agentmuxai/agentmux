@@ -15,8 +15,10 @@
  * `sessionStorage`-guarded auto-reload (so a persistent failure can't storm —
  * the 2026-06-15 incident reloaded 385×), then a recovery card with a
  * one-click Reload. `location.reload()` works here because this is a real
- * `http://localhost` document (not the host's `data:` crash page), and it
- * preserves the `__AGENTMUX_IPC_PORT__`/token query params.
+ * `http://localhost` document (not the host's `data:` crash page); the IPC
+ * port/token are re-supplied by the host's `on_load_end` re-injection on the
+ * fresh load — NOT carried in the URL (cef-init.ts strips them into window
+ * globals on first load), so reload and "Reopen window" recover identically.
  *
  * Spec: docs/specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md
  */
@@ -191,9 +193,11 @@ export function showStartupError(message: string): void {
         "padding:9px 18px;border-radius:7px;border:1px solid rgba(255,255,255,0.18);cursor:pointer;" +
         "font-size:13px;background:transparent;color:#e8e8e8;";
     reopen.onclick = () => {
-        // Re-navigate to the same URL — preserves the IPC port/token query params
-        // and triggers the host's on_load_end re-injection, a fuller reset than
-        // reload(). Budget is left intact (cleared only on successful startup).
+        // Re-navigate to the same URL — a fuller reset than reload() (fresh
+        // document rather than a reload of the current one). Creds are re-supplied
+        // exactly as with reload(): the host's on_load_end re-injection, since the
+        // URL no longer carries ipc_port/ipc_token (cef-init.ts strips them on
+        // first load). Budget is left intact (cleared only on successful startup).
         location.assign(location.pathname + location.search);
     };
 

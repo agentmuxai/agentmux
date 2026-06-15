@@ -77,10 +77,16 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
                         body: JSON.stringify({ cmd, args: args ?? {} }),
                     });
                 } catch (e) {
-                    // Host not reachable yet (port just changed / still binding).
-                    lastErr = e instanceof Error ? e : new Error(String(e));
-                    if (attempt < MAX_ATTEMPTS) await delay(RETRY_DELAY_MS);
-                    continue;
+                    // Network/transport error: the POST may have already reached the
+                    // host and been applied before the connection dropped, so a
+                    // blind retry could double-apply a mutating command (or a
+                    // fire-and-forget input dispatch). Propagate instead of retrying
+                    // — matching the pre-retry behavior. The retries that ARE safe
+                    // (no request was sent, or the host explicitly rejected it) are
+                    // the missing-creds and 401 cases above; the cred-injection race
+                    // is otherwise handled upfront by waitForIpcCreds (cef-init.ts).
+                    recordIpcRoundtrip(cmd, performance.now() - t0);
+                    throw e instanceof Error ? e : new Error(String(e));
                 }
                 if (resp.status === 401) {
                     // Stale token — the host re-injects a fresh one on load. Wait,
