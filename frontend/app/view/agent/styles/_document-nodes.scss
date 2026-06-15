@@ -229,6 +229,15 @@
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+
+                // Waiting state (no stdout yet — showing elapsed timer).
+                // Dimmer than real output so it reads as "pending" rather
+                // than actual tool content.
+                &--waiting {
+                    color: var(--secondary-text-color);
+                    background: transparent;
+                    font-family: inherit;
+                }
             }
 
         }

@@ -38,6 +38,19 @@ import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 
+// Ticks every second while a tool is running with no output yet.
+function ToolElapsedTicker(props: { startMs: number }): JSX.Element {
+    const [elapsed, setElapsed] = createSignal(
+        Math.floor((Date.now() - props.startMs) / 1000)
+    );
+    const interval = setInterval(
+        () => setElapsed(Math.floor((Date.now() - props.startMs) / 1000)),
+        1000
+    );
+    onCleanup(() => clearInterval(interval));
+    return <>{elapsed()}s…</>;
+}
+
 interface ToolBlockProps {
     node: ToolNode;
     /** User has clicked to pin this tool block open. */
@@ -230,24 +243,42 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         {resultPill()?.label}
                     </span>
                 </Show>
-                {/* Live-tail: while the tool is streaming, show the most
-                    recent stdout/stderr line right in the collapsed row
-                    so the user can watch progress without expanding
-                    the overlay. With auto-expand-while-running, the
-                    panel below already shows the full stream — this
-                    tail still helps for the user-collapsed-mid-run
-                    case (and for tools the user manually pinned-closed
-                    while running). */}
-                <Show when={
-                    props.node.log?.open === true
-                    && (props.node.log?.chunks?.length ?? 0) > 0
-                }>
-                    <span
-                        class="agent-tool-live-tail"
-                        title={`latest stream output (${props.node.log?.chunks?.length ?? 0} chunks)`}
-                    >
-                        ↳ {props.node.log!.chunks[props.node.log!.chunks.length - 1].content}
-                    </span>
+                {/* Live-tail: while streaming, show the last stdout/stderr
+                    line so the user can watch real output without opening
+                    the overlay. Skips kind:"system" chunks — those are
+                    bashwrap internals ("[bashwrap] starting: N chars", PTY
+                    ready, etc.) and are not useful here. If no stdout/stderr
+                    has arrived yet (e.g. during a `sleep` prefix), show an
+                    elapsed timer instead so the user knows it's alive. */}
+                <Show when={props.node.log?.open === true}>
+                    {(() => {
+                        const chunks = props.node.log?.chunks ?? [];
+                        // Walk backwards — find the last real output chunk
+                        let lastOutput: { kind: string; content: string } | undefined;
+                        for (let i = chunks.length - 1; i >= 0; i--) {
+                            const c = chunks[i];
+                            if (c.kind === "stdout" || c.kind === "stderr") {
+                                lastOutput = c;
+                                break;
+                            }
+                        }
+                        if (lastOutput) {
+                            return (
+                                <span
+                                    class="agent-tool-live-tail"
+                                    title={`latest stream output (${chunks.length} chunks)`}
+                                >
+                                    ↳ {lastOutput.content}
+                                </span>
+                            );
+                        }
+                        // No stdout/stderr yet — show elapsed time
+                        return (
+                            <span class="agent-tool-live-tail agent-tool-live-tail--waiting">
+                                <ToolElapsedTicker startMs={props.node.timestamp ?? Date.now()} />
+                            </span>
+                        );
+                    })()}
                 </Show>
                 <Show when={props.node.tool === "Agent"}>
                     <button
