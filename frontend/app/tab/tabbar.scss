@@ -4,25 +4,18 @@
 @use "../mixins.scss";
 
 .tab-bar {
-    // Workspace tabs adopt editor-tab-style sizing: each tab targets a
-    // preferred basis and shrinks with per-tab ellipsis when the row gets
-    // crowded, instead of staying at content-width and triggering horizontal
-    // scroll. Floor is `--ws-tab-min`; once every tab is at the floor and the
-    // row still overflows, `.tab-bar-scroll`'s `overflow-x: auto` re-engages
-    // as the safety net (no tabs are hidden — workspace tabs are
-    // unrecoverable from the bar today, unlike editor tabs which clip).
-    // Spec: specs/SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md.
-    // Basis ~ VS Code "fit" mode default (~240px) — enough room for
-    // ~25 chars of file/title before ellipsis. Floor at 56px is the
-    // thin end a crowded tab shrinks to (a few chars + ellipsis) once
-    // widget labels have collapsed, before the scroll safety-net. Cap
-    // at 320px so a near-empty bar with one or two tabs still gives
-    // each tab a generous ~30-char window. Editor tabs run narrower
-    // (140 basis) because the editor pane itself is narrower than
-    // the workspace title bar.
-    --ws-tab-basis: 240px;
-    --ws-tab-min: 56px;
-    --ws-tab-max: 320px;
+    // Content-aware tab sizing (VS Code model): each tab's preferred width
+    // is measured from its label text via canvas.measureText() and injected
+    // as `--tab-natural-width` inline style on the wrapper by DroppableTab.
+    // This matches VS Code's "shrink" mode — short labels get narrow tabs,
+    // long labels get wide tabs, and all shrink proportionally under pressure.
+    // Spec: specs/SPEC_TAB_CONTENT_AWARE_SIZING_2026-06-14.md.
+    //
+    // `--tab-natural-width` fallback (160px) covers the initial paint before
+    // JS has run a measurement. Floor at 60px keeps the close button reachable.
+    // Cap at 260px prevents very long labels from dominating the bar.
+    --ws-tab-min: 60px;
+    --ws-tab-max: 260px;
 
     display: flex;
     flex-direction: row;
@@ -59,15 +52,16 @@
         }
 
         // Override tab.scss absolute positioning — render tabs in flex flow.
-        // grow=1 so tabs fill the bar's available width when there's
-        // room (matches VS Code "fit" mode with few tabs); shrink=1
-        // lets `.name`'s `text-overflow: ellipsis` trip once the bar
-        // gets crowded. Width is bounded by `--ws-tab-max` so a near-
-        // empty bar still doesn't blow tabs up absurdly wide.
+        // Each tab uses its measured natural width as flex-basis (set by
+        // DroppableTab as `--tab-natural-width`). grow=0 so tabs don't
+        // sprawl to fill slack — the `.tab-bar-fill` filler absorbs that.
+        // shrink=1 so all tabs compress proportionally under overflow;
+        // `.name`'s `text-overflow: ellipsis` trips once the tab narrows
+        // past its text. The 160px fallback covers initial paint before JS.
         .tab {
             position: relative;
             opacity: 1;
-            flex: 1 1 var(--ws-tab-basis);
+            flex: 0 1 var(--tab-natural-width, 160px);
             min-width: var(--ws-tab-min);
             max-width: var(--ws-tab-max);
             overflow: hidden;
@@ -118,11 +112,11 @@
     // once all tabs hit the floor and there's still overflow.
     .tab-drop-wrapper {
         position: relative;
-        // grow=1 so tabs fill the bar when there's room (matches VS
-        // Code's "fit" mode behavior with few tabs). Cap at
-        // `--ws-tab-max` so a near-empty bar still doesn't blow tabs
-        // up absurdly wide.
-        flex: 1 1 var(--ws-tab-basis);
+        // Wrapper mirrors the inner .tab sizing contract so both shrink
+        // in lockstep. `--tab-natural-width` is set as an inline style
+        // by DroppableTab once Tab fires onNaturalWidth; falls back to
+        // 160px until JS measures the label.
+        flex: 0 1 var(--tab-natural-width, 160px);
         min-width: var(--ws-tab-min);
         max-width: var(--ws-tab-max);
         display: flex;

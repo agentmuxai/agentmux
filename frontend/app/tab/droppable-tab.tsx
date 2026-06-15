@@ -5,7 +5,7 @@ import { Logger } from "@/util/logger";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { isWindows } from "@/util/platformutil";
-import { createMemo, onCleanup, onMount } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import clsx from "clsx";
 import { Tab } from "./tab";
@@ -21,7 +21,6 @@ import {
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { getApi } from "@/store/global";
-import { createSignal } from "solid-js";
 import { setTabGrabOffset } from "./tab-grab-offset";
 
 export interface DroppableTabProps {
@@ -41,6 +40,7 @@ export interface DroppableTabProps {
 export function DroppableTab(props: DroppableTabProps): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
     const [isDragging, setIsDragging] = createSignal(false);
+    const [naturalWidth, setNaturalWidth] = createSignal<number | null>(null);
 
     // Gap before (left padding) — this tab is the afterTabId of the insertion point
     const gapBefore = createMemo(() => {
@@ -160,6 +160,9 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             style={{
                 "padding-left": `${gapBefore()}px`,
                 "padding-right": `${gapAfter()}px`,
+                ...(naturalWidth() != null
+                    ? { "--tab-natural-width": `${naturalWidth()}px` }
+                    : {}),
             } as JSX.CSSProperties}
         >
             <Tab
@@ -174,6 +177,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 onClose={props.onClose}
                 onDragStart={() => {}}
                 onLoaded={() => {}}
+                onNaturalWidth={setNaturalWidth}
             />
         </div>
     );

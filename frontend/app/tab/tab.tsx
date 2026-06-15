@@ -12,6 +12,7 @@ import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ObjectService } from "../store/services";
 import { makeORef, useWaveObjectValue } from "../store/wos";
+import { measureTabWidth } from "./tab-measure";
 import "./tab.scss";
 
 // 10 equally-spaced hues (0°, 36°, 72°, … 324°) — full spectrum, no near-duplicates
@@ -114,6 +115,7 @@ interface TabProps {
     onClose: (event: MouseEvent | null) => void;
     onDragStart: (event: DragEvent) => void;
     onLoaded: () => void;
+    onNaturalWidth?: (width: number) => void;
 }
 
 function Tab(props: TabProps): JSX.Element {
@@ -134,6 +136,13 @@ function Tab(props: TabProps): JSX.Element {
         const name = tabData()?.name;
         if (name) {
             setOriginalName(name);
+        }
+    });
+
+    createEffect(() => {
+        const name = tabData()?.name;
+        if (name && props.onNaturalWidth) {
+            props.onNaturalWidth(measureTabWidth(name));
         }
     });
 
