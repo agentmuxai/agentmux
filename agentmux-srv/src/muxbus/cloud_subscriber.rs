@@ -136,29 +136,51 @@ async fn run_loop(
     let mut delay_secs = RECONNECT_DELAY_SECS;
 
     loop {
-        // Load token — refresh if expired, wait for ReloadToken if none stored
+        // Load token — refresh if expired.
+        // Two distinct None cases:
+        //   a) No credentials in DB at all → wait for muxbus.login ReloadToken signal
+        //   b) Credentials exist but refresh failed transiently → back off and retry
+        let has_stored_creds = wstore.muxbus_load().ok().flatten().is_some();
         let token = match load_valid_token(&wstore, &http).await {
-            Some(t) => t,
-            None => {
-                // No usable credentials; drain ctrl messages until we get ReloadToken
+            Some(t) => {
+                delay_secs = RECONNECT_DELAY_SECS; // token loaded; reset back-off
+                t
+            }
+            None if !has_stored_creds => {
+                // No credentials at all — wait for muxbus.login to signal us
                 while let Some(msg) = ctrl_rx.recv().await {
-                    if matches!(msg, CtrlMsg::ReloadToken) {
-                        break;
-                    }
-                    // AddAgent / RemoveAgent already updated `agents` mutex — nothing else to do
+                    if matches!(msg, CtrlMsg::ReloadToken) { break; }
+                    // AddAgent / RemoveAgent already updated `agents` mutex
                 }
+                continue;
+            }
+            None => {
+                // Credentials present but refresh failed transiently — back off and retry
+                tracing::warn!(
+                    "cloud_subscriber: token refresh failed, retrying in {}s",
+                    delay_secs
+                );
+                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                delay_secs = (delay_secs * 2).min(MAX_RECONNECT_DELAY_SECS);
                 continue;
             }
         };
 
         tracing::info!("cloud_subscriber: connecting to {}", MUXBUS_WS_URL);
+        let session_start = std::time::Instant::now();
 
         match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &wstore, &http).await {
             Ok(()) => {
-                tracing::info!("cloud_subscriber: disconnected cleanly, reconnecting in {}s", delay_secs);
-                delay_secs = RECONNECT_DELAY_SECS; // reset on clean disconnect
+                // Clean disconnect — reset back-off
+                delay_secs = RECONNECT_DELAY_SECS;
+                tracing::info!("cloud_subscriber: disconnected cleanly");
             }
             Err(e) => {
+                // If the session was healthy for >30s before the error, treat it as
+                // network instability rather than a persistent failure and reset back-off.
+                if session_start.elapsed().as_secs() > 30 {
+                    delay_secs = RECONNECT_DELAY_SECS;
+                }
                 tracing::warn!("cloud_subscriber: error: {e}, reconnecting in {}s", delay_secs);
             }
         }
