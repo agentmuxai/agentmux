@@ -230,6 +230,34 @@
     font-size: 11px;
 }
 
+.file-tree-row--renaming {
+    // Don't show hover highlight while the inline input is active.
+    background: transparent !important;
+}
+
+.file-tree-row--new-entry {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+// Inline rename / new-entry input — matches the row height, no border-radius.
+.file-tree-inline-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--input-bg-color, #1e1e2e);
+    border: 1px solid var(--accent-color, #89b4fa);
+    border-radius: 2px;
+    color: var(--text-color);
+    font-size: inherit;
+    font-family: inherit;
+    padding: 0 4px;
+    height: 18px;
+    outline: none;
+
+    &:focus {
+        box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.25);
+    }
+}
+
 // ── Main column (CodeMirror or empty-state) ─────────────────────────────────
 
 .editor-main-column {

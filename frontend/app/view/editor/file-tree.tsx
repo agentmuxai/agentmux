@@ -9,24 +9,42 @@
 // to the file-tree-toolbar so they don't leak to the rest of the editor.
 //
 // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+// Context menu: specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
 
-import { createMemo, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { FileTreeModel, isHiddenName, joinPath, type Root } from "./file-tree-model";
 
 interface FileTreeProps {
     model: FileTreeModel;
     activeFilePath: string;
     showHidden: boolean;
-    /** Called on file row single-click — VS Code-style "preview" open
-     *  (replaces the current preview tab if any). */
+    /** Called on file row single-click — VS Code-style "preview" open. */
     onFileClick: (path: string) => void;
-    /** Called on file row double-click — pins the tab so subsequent
-     *  preview-opens don't replace it. */
+    /** Called on file row double-click — pins the tab. */
     onFileDblClick?: (path: string) => void;
     onToggleHidden: () => void;
+    /** Right-click on a node or empty tree background.
+     *  path=null means the background was right-clicked. */
+    onContextMenu?: (path: string | null, isDir: boolean, e: MouseEvent) => void;
+    /** When non-null, the node at this path renders an inline rename input. */
+    renamingPath?: string | null;
+    onRenameConfirm?: (path: string, newName: string) => void;
+    onRenameCancel?: () => void;
+    /** When set, renders an inline new-entry input inside the specified parent. */
+    newEntry?: { parentPath: string; kind: "file" | "dir" } | null;
+    onNewEntryConfirm?: (parentPath: string, name: string, kind: "file" | "dir") => void;
+    onNewEntryCancel?: () => void;
 }
 
 export function FileTree(props: FileTreeProps): JSX.Element {
+    const handleBackgroundContextMenu = (e: MouseEvent) => {
+        if (props.onContextMenu) {
+            e.preventDefault();
+            e.stopPropagation();
+            props.onContextMenu(null, false, e);
+        }
+    };
+
     return (
         <div class="file-tree">
             <FileTreeToolbar
@@ -34,7 +52,10 @@ export function FileTree(props: FileTreeProps): JSX.Element {
                 showHidden={props.showHidden}
                 onToggleHidden={props.onToggleHidden}
             />
-            <div class="file-tree-body">
+            <div
+                class="file-tree-body"
+                onContextMenu={handleBackgroundContextMenu}
+            >
                 <For each={props.model.rootsAtom()}>
                     {(root: Root) => (
                         <TreeNode
@@ -48,6 +69,13 @@ export function FileTree(props: FileTreeProps): JSX.Element {
                             showHidden={props.showHidden}
                             onFileClick={props.onFileClick}
                             onFileDblClick={props.onFileDblClick}
+                            onContextMenu={props.onContextMenu}
+                            renamingPath={props.renamingPath}
+                            onRenameConfirm={props.onRenameConfirm}
+                            onRenameCancel={props.onRenameCancel}
+                            newEntry={props.newEntry}
+                            onNewEntryConfirm={props.onNewEntryConfirm}
+                            onNewEntryCancel={props.onNewEntryCancel}
                         />
                     )}
                 </For>
@@ -108,12 +136,20 @@ interface TreeNodeProps {
     showHidden: boolean;
     onFileClick: (path: string) => void;
     onFileDblClick?: (path: string) => void;
+    onContextMenu?: (path: string | null, isDir: boolean, e: MouseEvent) => void;
+    renamingPath?: string | null;
+    onRenameConfirm?: (path: string, newName: string) => void;
+    onRenameCancel?: () => void;
+    newEntry?: { parentPath: string; kind: "file" | "dir" } | null;
+    onNewEntryConfirm?: (parentPath: string, name: string, kind: "file" | "dir") => void;
+    onNewEntryCancel?: () => void;
 }
 
 function TreeNode(props: TreeNodeProps): JSX.Element {
     const expanded = createMemo(() => props.model.isExpanded(props.path));
     const nodeData = createMemo(() => props.model.getNodeData(props.path));
     const isActive = createMemo(() => props.path === props.activeFilePath);
+    const isRenaming = createMemo(() => props.renamingPath === props.path);
 
     const filteredEntries = createMemo(() => {
         const data = nodeData();
@@ -127,11 +163,6 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
         if (props.isDir) {
             void props.model.toggleExpand(props.path);
         } else {
-            // Single-click → preview-open (VS Code-style). The browser will
-            // also fire `dblclick` separately when it's a double-click —
-            // that path handles pinning. We don't try to suppress this
-            // first click: if it preview-opens then dblclick pins the same
-            // tab, the user sees the file load once and the tab persist.
             props.onFileClick(props.path);
         }
     };
@@ -144,6 +175,14 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
         }
     };
 
+    const handleContextMenu = (e: MouseEvent) => {
+        if (props.onContextMenu) {
+            e.preventDefault();
+            e.stopPropagation();
+            props.onContextMenu(props.path, props.isDir, e);
+        }
+    };
+
     return (
         <div>
             <div
@@ -151,11 +190,13 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                 classList={{
                     "file-tree-row--active": isActive(),
                     "file-tree-row--dir": props.isDir,
+                    "file-tree-row--renaming": isRenaming(),
                 }}
                 style={{ "padding-left": `${4 + props.depth * 16}px` }}
-                onClick={handleClick}
+                onClick={isRenaming() ? undefined : handleClick}
                 onDblClick={handleDblClick}
-                title={props.path}
+                onContextMenu={handleContextMenu}
+                title={isRenaming() ? undefined : props.path}
             >
                 <Show
                     when={props.isDir}
@@ -165,10 +206,21 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                         class={`fa fa-chevron-${expanded() ? "down" : "right"} file-tree-chevron`}
                     />
                 </Show>
-                <i class={`fa fa-${iconForEntry(props.name, props.isDir, isActive())} file-tree-icon`} />
-                <span class="file-tree-label">{props.name}</span>
-                <Show when={props.isSymlink}>
-                    <span class="file-tree-symlink" aria-label="symlink">↗</span>
+                <Show
+                    when={!isRenaming()}
+                    fallback={
+                        <InlineInput
+                            initialValue={props.name}
+                            onConfirm={(v) => props.onRenameConfirm?.(props.path, v)}
+                            onCancel={() => props.onRenameCancel?.()}
+                        />
+                    }
+                >
+                    <i class={`fa fa-${iconForEntry(props.name, props.isDir, isActive())} file-tree-icon`} />
+                    <span class="file-tree-label">{props.name}</span>
+                    <Show when={props.isSymlink}>
+                        <span class="file-tree-symlink" aria-label="symlink">↗</span>
+                    </Show>
                 </Show>
             </div>
             <Show when={props.isDir && expanded()}>
@@ -188,6 +240,26 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                         ⚠ {nodeData()?.error}
                     </div>
                 </Show>
+                {/* New-entry placeholder — rendered inside this dir when active */}
+                <Show when={props.newEntry?.parentPath === props.path}>
+                    <div
+                        class="file-tree-row file-tree-row--new-entry"
+                        style={{ "padding-left": `${4 + (props.depth + 1) * 16}px` }}
+                    >
+                        <span class="file-tree-chevron-spacer" />
+                        <i class={`fa fa-${props.newEntry?.kind === "dir" ? "folder" : "file"} file-tree-icon`} />
+                        <InlineInput
+                            initialValue=""
+                            placeholder={props.newEntry?.kind === "dir" ? "folder name" : "file name"}
+                            onConfirm={(v) => {
+                                if (props.newEntry) {
+                                    props.onNewEntryConfirm?.(props.newEntry.parentPath, v, props.newEntry.kind);
+                                }
+                            }}
+                            onCancel={() => props.onNewEntryCancel?.()}
+                        />
+                    </div>
+                </Show>
                 <For each={filteredEntries()}>
                     {(entry) => (
                         <TreeNode
@@ -201,6 +273,13 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                             showHidden={props.showHidden}
                             onFileClick={props.onFileClick}
                             onFileDblClick={props.onFileDblClick}
+                            onContextMenu={props.onContextMenu}
+                            renamingPath={props.renamingPath}
+                            onRenameConfirm={props.onRenameConfirm}
+                            onRenameCancel={props.onRenameCancel}
+                            newEntry={props.newEntry}
+                            onNewEntryConfirm={props.onNewEntryConfirm}
+                            onNewEntryCancel={props.onNewEntryCancel}
                         />
                     )}
                 </For>
@@ -209,9 +288,61 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
     );
 }
 
+interface InlineInputProps {
+    initialValue: string;
+    placeholder?: string;
+    onConfirm: (value: string) => void;
+    onCancel: () => void;
+}
+
+function InlineInput(props: InlineInputProps): JSX.Element {
+    const [value, setValue] = createSignal(props.initialValue);
+    let inputRef: HTMLInputElement | undefined;
+
+    createEffect(() => {
+        // Auto-focus and select-all on mount.
+        if (inputRef) {
+            inputRef.focus();
+            inputRef.select();
+        }
+    });
+
+    // Guard against Escape → onCancel unmounts the input → blur fires confirm.
+    let committed = false;
+    const confirm = () => {
+        if (committed) return;
+        committed = true;
+        const v = value().trim();
+        if (v) props.onConfirm(v);
+        else props.onCancel();
+    };
+    const cancel = () => {
+        if (committed) return;
+        committed = true;
+        props.onCancel();
+    };
+
+    return (
+        <input
+            ref={(el) => { inputRef = el; }}
+            class="file-tree-inline-input"
+            type="text"
+            value={value()}
+            placeholder={props.placeholder}
+            onInput={(e) => setValue(e.currentTarget.value)}
+            onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") confirm();
+                if (e.key === "Escape") cancel();
+            }}
+            onBlur={confirm}
+            onClick={(e) => e.stopPropagation()}
+        />
+    );
+}
+
 function iconForEntry(name: string, isDir: boolean, isActive: boolean): string {
     if (isDir) return "folder";
-    // Active file gets a filled-dot indicator (`circle-dot`) per spec.
     if (isActive) return "circle-dot";
     const lower = name.toLowerCase();
     if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(lower)) return "file-code";

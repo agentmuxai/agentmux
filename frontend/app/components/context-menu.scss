@@ -1,0 +1,62 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.ctx-menu {
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    min-width: 180px;
+    max-width: 260px;
+    padding: 4px 0;
+    user-select: none;
+    font-size: 13px;
+    color: #cdd6f4;
+}
+
+.ctx-menu-sep {
+    height: 1px;
+    background: #313244;
+    margin: 4px 0;
+}
+
+.ctx-menu-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 12px;
+    cursor: default;
+    gap: 16px;
+
+    &:hover:not(.ctx-menu-item--disabled),
+    &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {
+        background: #313244;
+    }
+
+    &.ctx-menu-item--disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    &.ctx-menu-item--danger {
+        color: #f38ba8;
+
+        &:hover:not(.ctx-menu-item--disabled),
+        &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {
+            background: rgba(243, 139, 168, 0.15);
+        }
+    }
+}
+
+.ctx-menu-label {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ctx-menu-shortcut {
+    font-size: 11px;
+    color: #6c7086;
+    flex-shrink: 0;
+}
