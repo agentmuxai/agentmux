@@ -440,9 +440,9 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 { type: "action", label: "Open in Terminal", onSelect: () => void model.openInTerminal(path) },
                 { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },
                 { type: "action", label: "Collapse Folder", onSelect: () => model.treeModel.collapseFolder(path) },
-                { type: "separator" },
             ];
             if (!isRoot) {
+                items.push({ type: "separator" });
                 items.push({ type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) });
                 items.push({
                     type: "action",
