@@ -441,7 +441,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             { type: "separator" },
             { type: "action", label: "Copy Path", onSelect: () => void copyToClipboard(path) },
             { type: "action", label: "Copy Relative Path", onSelect: () => {
-                const root = model.treeModel.rootsAtom().find((r) => path.startsWith(r.path));
+                const root = model.treeModel.rootsAtom().find((r) => path === r.path || path.startsWith(r.path + "/") || path.startsWith(r.path + "\\"));
                 const rel = root ? path.slice(root.path.length).replace(/^[/\\]/, "") : path;
                 void copyToClipboard(rel);
             }},

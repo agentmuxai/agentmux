@@ -35,6 +35,15 @@ use super::service::update_object_meta;
 
 use super::AppState;
 
+// Per-process token written into scratch claim files. Stale claim files from a
+// previous process run have a different token and are ignored during reuse scans,
+// allowing crash-recovery (the scratch becomes reclaimable on restart).
+static SCRATCH_SESSION_TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn scratch_session_token() -> &'static str {
+    SCRATCH_SESSION_TOKEN.get_or_init(|| uuid::Uuid::new_v4().to_string())
+}
+
 /// Enumerate drives/mounts accessible from the current OS user.
 /// Used by the `geteditorroots` RPC so the editor file-tree exposes
 /// every reachable filesystem root, not just $HOME.
@@ -1573,10 +1582,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .unwrap_or_default()
                     .as_millis() as u64;
                 const THIRTY_DAYS_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+                let session_token = scratch_session_token();
 
-                // Scan existing .md.meta files: prune expired ones, reuse the most
-                // recent active one (no saved_to, created within 30 days).
-                let mut best: Option<(u64, String, String)> = None; // (created_at, scratch_id, display_name)
+                // Phase 1: scan .md.meta files, collect candidates and prune expired pairs.
+                // A candidate is: not saved, not expired, not in exclude_scratch_ids.
+                let mut candidates: Vec<(u64, String, String)> = Vec::new(); // (created_at, sid, display_name)
                 if let Ok(entries) = std::fs::read_dir(&scratch_dir) {
                     for entry in entries.flatten() {
                         let meta_path = entry.path();
@@ -1590,7 +1600,6 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         }
                         let Ok(content) = std::fs::read_to_string(&meta_path) else { continue };
                         let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
-                        // Skip already-promoted scratch files (saved_to present + non-null).
                         if meta_json.get("saved_to").map_or(false, |v| !v.is_null()) {
                             continue;
                         }
@@ -1599,41 +1608,76 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         if created_at == 0 || sid.is_empty() {
                             continue;
                         }
-                        // Skip scratch files already open in another pane.
                         if cmd.exclude_scratch_ids.as_deref().map_or(false, |ex| ex.iter().any(|e| e == &sid)) {
                             continue;
                         }
                         if now_ms.saturating_sub(created_at) > THIRTY_DAYS_MS {
-                            // Prune expired pair.
+                            // Prune expired pair (all three files: .md, .md.meta, .md.claim).
                             let _ = std::fs::remove_file(scratch_dir.join(format!("{}.md", sid)));
                             let _ = std::fs::remove_file(&meta_path);
+                            let _ = std::fs::remove_file(scratch_dir.join(format!("{}.md.claim", sid)));
                             continue;
                         }
-                        // Track most recent active scratch.
-                        if best.as_ref().map_or(true, |(best_ts, _, _)| created_at > *best_ts) {
-                            let dname = meta_json
-                                .get("display_name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("Untitled")
-                                .to_string();
-                            best = Some((created_at, sid, dname));
+                        let dname = meta_json
+                            .get("display_name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Untitled")
+                            .to_string();
+                        candidates.push((created_at, sid, dname));
+                    }
+                }
+
+                // Phase 2: try to atomically claim the most-recent candidate.
+                // Claim files prevent two concurrent createscratchfile calls from
+                // returning the same backing file to different panes. Each claim file
+                // stores the per-process session token; a claim from a previous process
+                // (crash/restart) has a different token and is cleared so recovery works.
+                candidates.sort_by(|a, b| b.0.cmp(&a.0)); // most recent first
+                let mut chosen: Option<(String, String)> = None;
+                for (_, sid, dname) in &candidates {
+                    let claim_path = scratch_dir.join(format!("{}.md.claim", sid));
+                    // Evict stale claims from a previous process session.
+                    if claim_path.exists() {
+                        if let Ok(tok) = std::fs::read_to_string(&claim_path) {
+                            if tok.trim() == session_token {
+                                // Valid live claim — another concurrent call already owns this.
+                                continue;
+                            }
                         }
+                        // Stale claim (different session) — remove so we can reclaim.
+                        let _ = std::fs::remove_file(&claim_path);
+                    }
+                    // Try to exclusively create the claim file. If another concurrent
+                    // call wins the race, it will have already created it → we skip.
+                    match std::fs::OpenOptions::new().write(true).create_new(true).open(&claim_path) {
+                        Ok(mut f) => {
+                            use std::io::Write as _;
+                            let _ = f.write_all(session_token.as_bytes());
+                            let file_path = scratch_dir.join(format!("{}.md", sid));
+                            if file_path.exists() {
+                                chosen = Some((sid.clone(), dname.clone()));
+                            } else {
+                                // Backing file gone (deleted externally) — release claim.
+                                let _ = std::fs::remove_file(&claim_path);
+                            }
+                        }
+                        Err(_) => continue, // Concurrent call claimed this one first.
+                    }
+                    if chosen.is_some() {
+                        break;
                     }
                 }
 
-                // Reuse most recent active scratch if the backing file still exists.
-                if let Some((_, ref scratch_id, ref display_name)) = best {
+                if let Some((scratch_id, display_name)) = chosen {
                     let file_path = scratch_dir.join(format!("{}.md", scratch_id));
-                    if file_path.exists() {
-                        return Ok(Some(serde_json::json!({
-                            "scratch_id": scratch_id,
-                            "file_path": file_path.to_string_lossy(),
-                            "display_name": display_name,
-                        })));
-                    }
+                    return Ok(Some(serde_json::json!({
+                        "scratch_id": scratch_id,
+                        "file_path": file_path.to_string_lossy(),
+                        "display_name": display_name,
+                    })));
                 }
 
-                // No reusable active scratch found — mint a fresh UUID pair.
+                // No reusable candidate — mint a fresh UUID pair.
                 let scratch_id = uuid::Uuid::new_v4().to_string();
                 let display_name = cmd.display_name.unwrap_or_else(|| "Untitled".to_string());
                 let file_path = scratch_dir.join(format!("{}.md", scratch_id));
@@ -1647,6 +1691,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let meta_path = scratch_dir.join(format!("{}.md.meta", scratch_id));
                 std::fs::write(&meta_path, meta.to_string())
                     .map_err(|e| format!("createscratchfile: meta: {e}"))?;
+                // Claim the fresh scratch so subsequent calls don't immediately reuse it.
+                let claim_path = scratch_dir.join(format!("{}.md.claim", scratch_id));
+                let _ = std::fs::write(&claim_path, session_token);
                 Ok(Some(serde_json::json!({
                     "scratch_id": scratch_id,
                     "file_path": file_path.to_string_lossy(),
@@ -1718,9 +1765,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     .map_err(|e| format!("movescratchfile: copy: {e}"))?;
                 std::fs::remove_file(&scratch_path)
                     .map_err(|e| format!("movescratchfile: remove scratch: {e}"))?;
-                // Clean up the .meta sidecar.
+                // Clean up the .meta sidecar and the claim file.
                 let meta_path = scratch_dir.join(format!("{}.md.meta", cmd.scratch_id));
                 let _ = std::fs::remove_file(&meta_path);
+                let claim_path = scratch_dir.join(format!("{}.md.claim", cmd.scratch_id));
+                let _ = std::fs::remove_file(&claim_path);
                 Ok(Some(serde_json::json!({ "file_path": canonical_dest.to_string_lossy() })))
             })
         }),

@@ -1274,7 +1274,7 @@ class RpcApiType {
     // Spec: specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
     CreateScratchFileCommand(
         client: RpcClient,
-        data: { display_name?: string } = {},
+        data: { display_name?: string; exclude_scratch_ids?: string[] } = {},
         opts?: RpcOpts,
     ): Promise<{ scratch_id: string; file_path: string; display_name: string }> {
         return client.rpcCall("createscratchfile", data, opts);
