@@ -322,13 +322,37 @@ const ActionWidgets = (): JSX.Element => {
     });
 
     // ── Drag-to-reorder (pinned only, saves to widget:pinned) ─────────────────
+    //
+    // State machine: idle → pending (left-button down) → dragging (threshold exceeded)
+    // A single DragState signal replaces the previous ref/signal duplication.
 
-    const [draggingKey, setDraggingKey] = createSignal<string | null>(null);
-    const [dropIndex, setDropIndex] = createSignal<number | null>(null);
+    type DragState =
+        | { phase: "idle" }
+        | { phase: "pending"; key: string; startX: number; startY: number; pointerId: number }
+        | { phase: "dragging"; key: string; dropIndex: number };
+
+    const DRAG_IDLE: DragState = { phase: "idle" };
+    const [dragState, setDragState] = createSignal<DragState>(DRAG_IDLE);
+
+    const draggingKey = () => { const s = dragState(); return s.phase === "dragging" ? s.key      : null; };
+    const dropIndex   = () => { const s = dragState(); return s.phase === "dragging" ? s.dropIndex : null; };
+
     let containerRef!: HTMLDivElement;
-    let draggingKeyRef: string | null = null;
-    let dropIndexRef: number | null = null;
-    let dragStartRef: { x: number; y: number; key: string } | null = null;
+
+    // Cancel drag if the OS interrupts the gesture or the window loses visibility
+    // (e.g. Alt+Tab with a button held). pointerup during a normal drop is handled
+    // by the element's handlePointerUp — no global pointerup listener needed because
+    // setPointerCapture redirects it to the element once dragging begins.
+    createEffect(() => {
+        if (dragState().phase === "idle") return;
+        const cancel = () => setDragState(DRAG_IDLE);
+        window.addEventListener("pointercancel",    cancel, { capture: true });
+        window.addEventListener("visibilitychange", cancel);
+        onCleanup(() => {
+            window.removeEventListener("pointercancel",    cancel, { capture: true });
+            window.removeEventListener("visibilitychange", cancel);
+        });
+    });
 
     onMount(() => {
         const header = containerRef?.closest(".window-header") as HTMLElement | null;
@@ -386,18 +410,18 @@ const ActionWidgets = (): JSX.Element => {
     });
 
     const handlePointerDown = (key: string, e: PointerEvent) => {
-        dragStartRef = { x: e.clientX, y: e.clientY, key };
+        if (e.button !== 0) return;
+        setDragState({ phase: "pending", key, startX: e.clientX, startY: e.clientY, pointerId: e.pointerId });
     };
 
     const handlePointerMove = (e: PointerEvent) => {
-        if (!dragStartRef) return;
-        if (!draggingKeyRef) {
-            const dx = e.clientX - dragStartRef.x;
-            const dy = e.clientY - dragStartRef.y;
+        const state = dragState();
+        if (state.phase === "idle") return;
+        if (state.phase === "pending") {
+            const dx = e.clientX - state.startX;
+            const dy = e.clientY - state.startY;
             if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-            draggingKeyRef = dragStartRef.key;
-            setDraggingKey(dragStartRef.key);
+            (e.currentTarget as HTMLElement).setPointerCapture(state.pointerId);
         }
         e.preventDefault();
         if (!containerRef) return;
@@ -410,30 +434,25 @@ const ActionWidgets = (): JSX.Element => {
                 break;
             }
         }
-        if (newIndex !== dropIndexRef) {
-            dropIndexRef = newIndex;
-            setDropIndex(newIndex);
+        if (state.phase === "pending") {
+            setDragState({ phase: "dragging", key: state.key, dropIndex: newIndex });
+        } else if (state.dropIndex !== newIndex) {
+            setDragState({ ...state, dropIndex: newIndex });
         }
     };
 
     const handlePointerUp = (_e: PointerEvent) => {
-        const wasActuallyDragging = draggingKeyRef != null;
-        const dk = draggingKeyRef;
-        const di = dropIndexRef;
-        dragStartRef = null;
-        draggingKeyRef = null;
-        dropIndexRef = null;
-        setDraggingKey(null);
-        setDropIndex(null);
-        if (!wasActuallyDragging || dk == null || di == null) return;
+        const state = dragState();
+        setDragState(DRAG_IDLE);
+        if (state.phase !== "dragging") return;
         const current = pinnedWidgets();
         const shortNames = current.map(({ key }) => key.replace("defwidget@", ""));
-        const dragShort = dk.replace("defwidget@", "");
+        const dragShort = state.key.replace("defwidget@", "");
         const fromIdx = shortNames.indexOf(dragShort);
         if (fromIdx === -1) return;
         const next = [...shortNames];
         next.splice(fromIdx, 1);
-        const adjustedDrop = fromIdx < di ? di - 1 : di;
+        const adjustedDrop = fromIdx < state.dropIndex ? state.dropIndex - 1 : state.dropIndex;
         next.splice(adjustedDrop, 0, dragShort);
         if (next.join(",") !== shortNames.join(",")) {
             fireAndForget(async () => {
@@ -442,13 +461,7 @@ const ActionWidgets = (): JSX.Element => {
         }
     };
 
-    const handlePointerCancel = () => {
-        dragStartRef = null;
-        draggingKeyRef = null;
-        dropIndexRef = null;
-        setDraggingKey(null);
-        setDropIndex(null);
-    };
+    const handlePointerCancel = () => setDragState(DRAG_IDLE);
 
     // ── Context menu active state (keeps hover highlight while menu is open) ──
     const [contextMenuActiveKey, setContextMenuActiveKey] = createSignal<string | null>(null);
@@ -495,6 +508,7 @@ const ActionWidgets = (): JSX.Element => {
     const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
+        setDragState(DRAG_IDLE);
         armContextMenuDismiss(key);
         const shortName = key.replace("defwidget@", "");
         ContextMenuModel.showContextMenu(
