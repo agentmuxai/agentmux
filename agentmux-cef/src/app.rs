@@ -74,7 +74,7 @@ wrap_window_delegate! {
             #[cfg(target_os = "windows")]
             if let Some((_, label)) = self.window_registration.as_ref() {
                 if label.starts_with("window-pool-") {
-                    let raw_hwnd = window.window_handle() as *mut std::ffi::c_void;
+                    let raw_hwnd = window.window_handle().0 as *mut std::ffi::c_void;
                     if !raw_hwnd.is_null() {
                         crate::commands::window_pool::init_pool_window_hwnd(label, raw_hwnd);
                     }
