@@ -54,6 +54,7 @@ import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
+import { AgentQuestionPanel, type AnswerOutcome } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow, AgentAuxInfoBar } from "./components/AgentFooter";
@@ -485,6 +486,69 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             feedback: decision.feedback,
         }).catch((err: unknown) => {
             log("error", `tool:decision failed: ${String(err)}`);
+        });
+    };
+
+    // Pending AskUserQuestion queue — every ToolNode in `awaiting_answer`,
+    // oldest first. The question panel renders the head; Submit transitions
+    // the node and delivers the answer to the agent CLI as a tool_result.
+    // Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+    const pendingQuestions = (): import("./types").ToolNode[] => {
+        const docs = getDocument();
+        const out: import("./types").ToolNode[] = [];
+        for (const n of docs) {
+            if (n.type === "tool" && n.status === "awaiting_answer" && n.question) out.push(n);
+        }
+        return out;
+    };
+
+    const handleAnswer = (outcome: AnswerOutcome) => {
+        // Optimistic transition: flip the node out of awaiting_answer so the
+        // panel dismisses immediately. The agent's continuation (the next
+        // assistant content / result the smoke test confirmed arrives) drives
+        // the rest of the conversation; the node carries the answer as its
+        // summary for the record. We snapshot the original node(s) so a failed
+        // delivery can roll the transition back (see the catch below).
+        const originals: import("./types").ToolNode[] = [];
+        const updated: import("./types").ToolNode[] = [];
+        for (const n of getDocument()) {
+            if (n.type !== "tool" || n.status !== "awaiting_answer") continue;
+            if (n.question?.tool_use_id !== outcome.tool_use_id) continue;
+            originals.push(n);
+            updated.push({
+                ...n,
+                status: "success",
+                question: undefined,
+                summary: `❓ Answered — ${outcome.answer_text.replace(/\n/g, "; ")}`,
+            });
+        }
+        if (updated.length > 0) {
+            dispatchDoc(
+                model.blockId,
+                { type: "StreamFlush", newNodes: [], updatedNodes: updated },
+                "user",
+            );
+        }
+        // Deliver the answer to the running agent CLI as a tool_result over the
+        // persistent controller's live stdin.
+        void RpcApi.AgentAnswerCommand(TabRpcClient, {
+            blockid: model.blockId,
+            tool_use_id: outcome.tool_use_id,
+            answer_text: outcome.answer_text,
+        }).catch((err: unknown) => {
+            // Delivery failed — most commonly UNSUPPORTED_CONTROLLER on a
+            // container / one-shot agent (no live stdin; Phase 2). Roll the
+            // node back to awaiting_answer so the panel re-surfaces and the
+            // user isn't falsely told the question was answered while the
+            // agent is still blocked.
+            log("error", `agent.answer failed: ${String(err)}`);
+            if (originals.length > 0) {
+                dispatchDoc(
+                    model.blockId,
+                    { type: "StreamFlush", newNodes: [], updatedNodes: originals },
+                    "user",
+                );
+            }
         });
     };
     const status = useAgentControllerStatus({
@@ -937,6 +1001,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     // prompt remains reachable.
                     log("agent", "Decision minimized");
                 }}
+            />
+
+            {/* AskUserQuestion panel — surfaced when a tool call is in
+                `awaiting_answer` (the agent asked the user a structured
+                question and is blocked on the answer). Submitting delivers a
+                tool_result over the persistent controller's stdin.
+                Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md. */}
+            <AgentQuestionPanel
+                pending={pendingQuestions}
+                onAnswer={handleAnswer}
+                onDefer={() => log("agent", "Question minimized")}
             />
 
             {/* Queue sits directly below the feed so the user's newly-

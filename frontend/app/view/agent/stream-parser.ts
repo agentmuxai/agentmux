@@ -301,6 +301,33 @@ export class ClaudeCodeStreamParser {
         // Store pending tool call for when result arrives
         this.pendingToolCalls.set(event.id, event);
 
+        // AskUserQuestion is a tool the agent calls to consult the human; it
+        // blocks the turn on a tool_result. When the params are fully parsed
+        // (input.questions[]), surface it as `awaiting_answer` so the question
+        // panel renders. Until the questions array lands (the streaming
+        // placeholder tool_call has empty params), keep it `running` — a later
+        // fully-parsed tool_call with the same id upgrades it in place.
+        // Spec: SPEC_ASK_USER_QUESTION_2026_06_15.md.
+        if (event.tool === "AskUserQuestion") {
+            const questions = (event.params as { questions?: unknown })?.questions;
+            if (Array.isArray(questions) && questions.length > 0) {
+                return {
+                    type: "tool",
+                    id: event.id,
+                    tool: this.normalizeToolName(event.tool),
+                    params: event.params,
+                    status: "awaiting_answer",
+                    collapsed: false,
+                    summary: "❓ Waiting for your answer",
+                    question: {
+                        type: "ask_user_question",
+                        tool_use_id: event.id,
+                        questions: questions as import("./types").AskUserQuestionItem[],
+                    },
+                };
+            }
+        }
+
         const summary = this.generateToolSummary(event.tool, event.params, "running");
 
         return {

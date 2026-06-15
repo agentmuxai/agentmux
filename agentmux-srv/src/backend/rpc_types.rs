@@ -160,6 +160,11 @@ pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
+/// Deliver an AskUserQuestion answer to the running agent CLI as a tool_result.
+/// Lowercase, no separators — matches the sibling command-name convention
+/// (`agentinput`, `agentstop`, `tooldecision`).
+/// Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+pub const COMMAND_AGENT_ANSWER: &str = "agentanswer";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 pub const COMMAND_SHELL_EXEC: &str = "shellexec";
 /// Stop a running persistent shell node (Phase 3) — UI stop button.
@@ -597,6 +602,19 @@ pub struct CommandToolDecisionData {
     /// this verbatim into the agent's next prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feedback: Option<String>,
+}
+
+/// Data for AgentAnswerCommand — an AskUserQuestion answer delivered back to
+/// the running agent CLI as a `tool_result` over the persistent controller's
+/// live stdin. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandAgentAnswerData {
+    pub blockid: String,
+    /// The `AskUserQuestion` tool_use id the answer responds to.
+    pub tool_use_id: String,
+    /// Canonical flat-text rendering of the user's selections; becomes the
+    /// tool_result content the model consumes.
+    pub answer_text: String,
 }
 
 // ---- Subprocess agent command data types ----
