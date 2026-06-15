@@ -57,13 +57,13 @@ done
 
 echo "Release type: $RELEASE_TYPE" >&2
 
-# Capture descriptions (body after the second --- marker).
+# Capture one description per changeset: the first non-empty body line (the
+# changeset title). A changeset body may carry extra prose lines for reviewer
+# context; those must NOT each become their own changelog bullet (issue #1200).
 DESCRIPTIONS=()
 for f in "${CHANGESETS[@]}"; do
-    BODY="$(awk '/^---$/{n++;next} n==2 {print}' "$f" | sed '/^$/d')"
-    while IFS= read -r line; do
-        DESCRIPTIONS+=("$line")
-    done <<<"$BODY"
+    TITLE="$(awk '/^---$/{n++;next} n==2 && NF {print; exit}' "$f")"
+    [[ -n "$TITLE" ]] && DESCRIPTIONS+=("$TITLE")
 done
 
 if (( DRY_RUN )); then
