@@ -2,21 +2,34 @@
 
 Status: Partially Implemented (MVP shipped; idempotency, `is_new`, and `mode` pending)
 Date: 2026-04-20
-Updated: 2026-06-14
+Updated: 2026-06-15
 Depends on: `app-api-extension.md`, `app-api-status.md`
 
-## Implementation Status (as of 2026-06-14)
+## Implementation Status (as of 2026-06-15)
 
 | Feature | Status |
 |---------|--------|
 | Basic `pane.open` handler in `app_api.rs` | ✅ Shipped (skeleton) |
 | `view`, `file`, `url`, `cwd`, `title`, `tab_id`, `split_direction`, `split_reference_block_id`, `focus` | ✅ Shipped in `CommandPaneOpenData` |
+| Shared `open_pane()` core + `POST /api/v1/pane/open` HTTP route | ✅ Shipped — auth-gated like `/api/v1/shell/create` |
+| `OpenEditor` MCP tool (agent-accessible, auto-discovered by Claude Code) | ✅ Shipped in `agentmux-mcp` — Phase 1, local connections, file only |
 | Idempotency (focus existing pane on same file) | ❌ Not implemented |
 | Path sandboxing / allowed-roots validation | ❌ Not implemented |
+| Path translation (container/SSH/WSL agents) | ❌ Not implemented — Phase 2, see analysis §5 |
 | `is_new` (scratch/untitled file creation) | ❌ Not implemented — see `SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md` |
 | `mode: "preview" \| "pinned"` | ❌ Not implemented |
 | `language` hint | ❌ Not implemented |
 | `amux open <path>` CLI bridge | ❌ Not implemented — see `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.md` |
+
+> **Agent transport (2026-06-15):** an agent inside an AgentMux pane can now open
+> an editor pane by calling the `OpenEditor` MCP tool (exposed by `agentmux-mcp`,
+> the same server that exposes `Shell`). The tool POSTs `{view:"editor", file, …}`
+> to the auth-gated `POST /api/v1/pane/open` route, which calls the shared
+> `app_api::open_pane()` — the identical logic the WebSocket `pane.open` RPC uses.
+> The editor opens split beside the calling agent pane (overridable via the `split`
+> arg). Phase 1 is **local connections, single file, new pane each call**
+> (no idempotency/reuse yet). The `amux` CLI in the analysis remains a separate,
+> additive surface for non-MCP/shell agents.
 
 > **Note:** The view name in the live RPC is `"editor"` (not `"codeeditor"` as written below in the original design). All future code should use `"editor"`. The spec body below is being kept historically accurate and updated with corrections inline.
 
