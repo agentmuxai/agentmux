@@ -184,6 +184,11 @@ pub(super) async fn handle_reactive_register(
                 sub.add_agent(&req.agent_id);
             }
 
+            // Notify cloud subscriber so it can subscribe for cloud-push delivery
+            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                sub.add_agent(&req.agent_id);
+            }
+
             Json(json!({"success": true})).into_response()
         }
         Err(e) => (
