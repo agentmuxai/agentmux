@@ -201,6 +201,18 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         &auth_key[..8.min(auth_key.len())]
     );
 
+    // GUI launches (Finder / Dock / mounted DMG) inherit launchd's stripped
+    // PATH, so the srv can't find nvm/Homebrew node/npm/git — `npm install`
+    // dies with "command not found" and agent CLIs can't resolve their
+    // interpreter. Reconstruct a usable PATH from the user's login shell +
+    // well-known toolchain dirs (additive; never drops a system dir; no-op on
+    // Windows). See SPEC_TOOLCHAIN_MANAGER_2026-06-15 §3.
+    let enriched = agentmux_common::resolve_login_path();
+    tracing::info!(
+        source = enriched.source.as_str(),
+        "Resolved srv PATH for toolchain spawning"
+    );
+
     let mut cmd = std::process::Command::new(&backend_path);
     cmd.args([
         "--wavedata",
@@ -215,6 +227,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // chain (launcher → host, host → srv).
     .envs(paths.to_env_vars())
     .env("AGENTMUX_APP_PATH", &app_path_str)
+    .env("PATH", &enriched.path)
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());
