@@ -157,7 +157,17 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
-        controllerType: "subprocess",
+        // Persistent (bidirectional stream-json) so a turn can BLOCK on a
+        // tool_use and consume a tool_result over live stdin — required for
+        // AskUserQuestion (SPEC_ASK_USER_QUESTION_2026_06_15.md). In `-p`
+        // subprocess mode the CLI auto-rejects AskUserQuestion with
+        // `Error: Answer questions?`, so the question panel never renders.
+        // (#406's Subprocess switch dodged a Windows pipe hang in the old
+        // Node.js CLI; the CLI is native now, so that root cause is gone.)
+        // Keep this in sync with `static CLAUDE` in agentmux-srv providers.rs.
+        // controllerType selects persistentLaunchArgs over launchArgs in
+        // useAgentCommands.ts.
+        controllerType: "persistent",
         persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         // Claude Code calls `git` at session-start (issue
         // anthropics/claude-code#29898). Without git the CLI fails

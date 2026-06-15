@@ -99,7 +99,18 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     id: "claude",
     display_name: "Claude Code",
     cli_command: "claude",
-    controller_type: ControllerType::Subprocess,
+    // Persistent (bidirectional stream-json) so the agent's turn can BLOCK on a
+    // tool_use and consume a tool_result over live stdin — required for the
+    // AskUserQuestion flow (SPEC_ASK_USER_QUESTION_2026_06_15.md). In `-p`
+    // subprocess mode the CLI auto-rejects AskUserQuestion with
+    // `Error: Answer questions?` ~7ms after emitting it (no interactive stdin to
+    // answer on), so the question panel never renders.
+    //
+    // #406 originally switched this to Subprocess to dodge a Windows
+    // anonymous-pipe "no response" hang in the then-Node.js CLI. The CLI is now a
+    // native binary (v2.1.x), so that root cause is gone; the spec's §10 smoke
+    // test confirmed persistent streams correctly against the native CLI.
+    controller_type: ControllerType::Persistent,
     launch_args: &[
         "-p",
         "--output-format",
@@ -477,10 +488,14 @@ mod tests {
     }
 
     #[test]
-    fn claude_subprocess_with_persistent_args_present() {
+    fn claude_persistent_with_persistent_args_present() {
         let p = get_provider("claude").unwrap();
+        // Claude runs on the persistent controller so AskUserQuestion can block
+        // on a tool_use and consume a tool_result over live stdin (see the
+        // controller_type comment on `static CLAUDE`).
         assert!(p.persistent_launch_args.is_some());
-        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.controller_type, ControllerType::Persistent);
+        assert_eq!(p.controller_type_str(), "persistent");
     }
 
     #[test]
