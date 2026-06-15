@@ -63,6 +63,24 @@ wrap_window_delegate! {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
 
+            // Windows: hide pool windows from the taskbar at creation time.
+            // CefWindow::GetWindowHandle() is reliable here; BrowserHost::
+            // window_handle() (used in register_pool_window / on_after_created)
+            // can return null after the page loads — see window_pool.rs
+            // POOL_HWND_CACHE comment for the diagnosed CEF behaviour.
+            // This early call also pre-populates the HWND cache so
+            // promote_pool_window works even when on_after_created's
+            // BrowserHost lookup returns null.
+            #[cfg(target_os = "windows")]
+            if let Some((_, label)) = self.window_registration.as_ref() {
+                if label.starts_with("window-pool-") {
+                    let raw_hwnd = window.window_handle() as *mut std::ffi::c_void;
+                    if !raw_hwnd.is_null() {
+                        crate::commands::window_pool::init_pool_window_hwnd(label, raw_hwnd);
+                    }
+                }
+            }
+
             // Linux/macOS only — register this Window in state.windows
             // keyed by label, so the browser-pane Views path can attach
             // pane overlays to the right window. Popup delegates pass
