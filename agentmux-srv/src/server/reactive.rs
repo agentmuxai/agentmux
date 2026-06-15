@@ -40,6 +40,7 @@ pub(super) async fn handle_reactive_inject(
         .unwrap_or(false);
 
     if is_not_found {
+        // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_wave_data_dir();
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
@@ -50,12 +51,6 @@ pub(super) async fn handle_reactive_inject(
                     url = %forward_url,
                     "cross-instance inject forward"
                 );
-                // Reactive routes now require auth (audit C1/C2 fix).
-                // Peers authenticate using the entry's `auth_key` (the
-                // owning instance's per-launch UUID, written into the
-                // registry by `registry::write`). If a pre-fix entry has
-                // no auth_key, the peer returns 401 and the cloud
-                // agentbus fallback handles it.
                 let mut fwd = state.http_client.post(&forward_url).json(&req);
                 if !entry.auth_key.is_empty() {
                     fwd = fwd.header("X-AuthKey", &entry.auth_key);
@@ -81,15 +76,58 @@ pub(super) async fn handle_reactive_inject(
                             url = %forward_url,
                             "cross-instance forward failed — removing stale registry entry"
                         );
-                        // Remove stale entry so next call doesn't retry a dead instance.
                         agent_registry::remove(&data_dir, &req.target_agent);
                     }
                 }
             }
         }
+
+        // Tier 3: LAN peer (mDNS lookup → HTTP). Runs when tier 2 had no registry
+        // entry or its forward failed. Queries each discovered LAN peer for the
+        // agent; result is cached for 60s to avoid per-inject mDNS fan-out.
+        if let Some((peer_url, peer_auth_key)) = state
+            .lan_discovery
+            .find_agent(&req.target_agent, &state.http_client)
+            .await
+        {
+            let forward_url = format!("{}/agentmux/reactive/inject", peer_url);
+            tracing::debug!(
+                target = %req.target_agent,
+                url = %forward_url,
+                "LAN peer inject forward"
+            );
+            let mut fwd = state.http_client.post(&forward_url).json(&req);
+            if !peer_auth_key.is_empty() {
+                fwd = fwd.header("X-AuthKey", &peer_auth_key);
+            }
+            match fwd.send().await {
+                Ok(r) if r.status().is_success() => {
+                    if let Ok(body) = r.json::<serde_json::Value>().await {
+                        return Json(body);
+                    }
+                }
+                Ok(r) => {
+                    tracing::warn!(
+                        target = %req.target_agent,
+                        status = %r.status(),
+                        url = %forward_url,
+                        "LAN peer forward: non-success status"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target = %req.target_agent,
+                        error = %e,
+                        url = %forward_url,
+                        "LAN peer forward failed — evicting cache entry"
+                    );
+                    state.lan_discovery.evict_agent(&req.target_agent);
+                }
+            }
+        }
     }
 
-    // 3. Return original error (agentbus-client will fall back to cloud).
+    // 4. Return original error (muxbus-client will fall back to cloud relay).
     Json(serde_json::to_value(&resp).unwrap_or_default())
 }
 
