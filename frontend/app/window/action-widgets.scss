@@ -125,7 +125,16 @@
 .action-widget-more-dropdown {
     @include menuFrame.menu-frame;
     z-index: var(--z-flyout-menu);
-    min-width: 170px;
+    // Hug the widest row instead of forcing a fixed floor. This menu lists
+    // short, left-aligned widget names with no right-aligned content (no
+    // accelerators / submenu arrows), so the old `min-width: 170px` rendered a
+    // ~176px panel over ~83px of content — leaving ~100px of dead space on the
+    // right of *every* row (the "wide gap"). `width: max-content` with no
+    // oversized floor sizes the panel to its longest label. Measured in
+    // headless Chrome: 176px → 83px, right-gap 99-120px → 0 on the widest row.
+    // NOTE: a min-width floor here re-introduces the gap (120px floor still
+    // left a 49-70px gap), so deliberately none.
+    width: max-content;
     user-select: none;
 
     .action-widget-more-item {
