@@ -1301,9 +1301,20 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                wstore
-                    .identity_upsert(&account)
-                    .map_err(|e| format!("account.key.verify: {e}"))?;
+                if let Err(e) = wstore.identity_upsert(&account) {
+                    // DB write failed after the keychain write — roll the
+                    // secret back so we don't leave an orphaned credential
+                    // with no DB row to reclaim it later. Best-effort; a
+                    // failed rollback is logged but the original error wins.
+                    if let Err(de) = crate::identity::secret_store::delete(&account_id) {
+                        tracing::warn!(
+                            target: "identity",
+                            "rollback of orphaned keychain secret for {} failed: {de}",
+                            account_id,
+                        );
+                    }
+                    return Err(format!("account.key.verify: {e}"));
+                }
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "identityaccounts:changed".to_string(),
                     scopes: vec![],
