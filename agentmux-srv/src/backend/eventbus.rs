@@ -96,6 +96,23 @@ impl EventBus {
         }
     }
 
+    /// Send an event to a single connection by conn_id. No-op if not found.
+    pub fn send_to_conn(&self, conn_id: &str, event: &WSEventType) {
+        let data = match serde_json::to_value(event) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("cannot marshal event: {}", e);
+                return;
+            }
+        };
+        let watches = self.watches.lock().unwrap();
+        if let Some(watch) = watches.get(conn_id) {
+            if watch.sender.send(data).is_err() {
+                tracing::warn!("failed to send event to conn {}", conn_id);
+            }
+        }
+    }
+
     /// Send an event to all connected WebSocket clients.
     pub fn broadcast_event(&self, event: &WSEventType) {
         let data = match serde_json::to_value(event) {
@@ -156,7 +173,7 @@ impl EventBusBridge {
 }
 
 impl WpsClient for EventBusBridge {
-    fn send_event(&self, _route_id: &str, event: WaveEvent) {
+    fn send_event(&self, route_id: &str, event: WaveEvent) {
         // Wrap as RPC eventrecv message (format expected by frontend)
         let ws_event = WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),
@@ -166,7 +183,14 @@ impl WpsClient for EventBusBridge {
                 "data": event
             })),
         };
-        self.event_bus.broadcast_event(&ws_event);
+        // Route to the specific connection that subscribed. Broadcast is used
+        // only for legacy callers that pass "ws-main" (none remain after the
+        // per-conn-id fix), so this always takes the targeted path in practice.
+        if route_id == "ws-main" {
+            self.event_bus.broadcast_event(&ws_event);
+        } else {
+            self.event_bus.send_to_conn(route_id, &ws_event);
+        }
     }
 }
 
