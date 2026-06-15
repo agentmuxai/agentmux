@@ -148,7 +148,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     let (engine, mut rpc_output_rx) = WshRpcEngine::new();
 
     // Register handlers
-    register_handlers(&engine, state.clone());
+    register_handlers(&engine, state.clone(), conn_id.clone());
     tracing::info!("[ws-perf] create_engine+register_handlers: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
     tracing::info!("[ws-perf] TOTAL ws_setup: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
 
@@ -263,6 +263,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     tracing::info!(conn_id = %conn_id, "WebSocket client disconnected");
     state.event_bus.unregister_ws(&conn_id);
+    state.broker.unsubscribe_all(&conn_id);
 
     // Unregister from messagebus if this connection was an agent
     if let Some(ref agent_id) = bus_agent_id {
@@ -470,7 +471,7 @@ async fn handle_incoming_text(
     Ok(None)
 }
 
-fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
+fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: String) {
     // getfullconfig → return full config as JSON
     let config_watcher = state.config_watcher.clone();
     engine.register_handler(
@@ -506,15 +507,17 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // eventsub → register subscription with the WPS broker
     let broker_sub = state.broker.clone();
+    let conn_id_sub = conn_id.clone();
     engine.register_handler(
         COMMAND_EVENT_SUB,
         Box::new(move |data, _ctx| {
             let broker = broker_sub.clone();
+            let conn_id = conn_id_sub.clone();
             Box::pin(async move {
                 let sub: crate::backend::wps::SubscriptionRequest =
                     serde_json::from_value(data).map_err(|e| format!("eventsub: {e}"))?;
                 tracing::debug!("eventsub: event={} scopes={:?} allscopes={}", sub.event, sub.scopes, sub.allscopes);
-                broker.subscribe("ws-main", sub);
+                broker.subscribe(&conn_id, sub);
                 Ok(None)
             })
         }),
@@ -522,14 +525,16 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // eventunsub → unsubscribe from the WPS broker
     let broker_unsub = state.broker.clone();
+    let conn_id_unsub = conn_id.clone();
     engine.register_handler(
         COMMAND_EVENT_UNSUB,
         Box::new(move |data, _ctx| {
             let broker = broker_unsub.clone();
+            let conn_id = conn_id_unsub.clone();
             Box::pin(async move {
                 let event_name = data.as_str().unwrap_or("").to_string();
                 if !event_name.is_empty() {
-                    broker.unsubscribe("ws-main", &event_name);
+                    broker.unsubscribe(&conn_id, &event_name);
                 }
                 Ok(None)
             })
@@ -538,12 +543,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // eventunsuball → unsubscribe all from the WPS broker
     let broker_unsub_all = state.broker.clone();
+    let conn_id_unsub_all = conn_id.clone();
     engine.register_handler(
         COMMAND_EVENT_UNSUB_ALL,
         Box::new(move |_data, _ctx| {
             let broker = broker_unsub_all.clone();
+            let conn_id = conn_id_unsub_all.clone();
             Box::pin(async move {
-                broker.unsubscribe_all("ws-main");
+                broker.unsubscribe_all(&conn_id);
                 Ok(None)
             })
         }),
