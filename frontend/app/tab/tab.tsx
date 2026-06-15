@@ -175,8 +175,15 @@ function Tab(props: TabProps): JSX.Element {
         newText = newText || originalName();
         editableRef.innerText = newText;
         setIsEditable(false);
+        props.onNaturalWidth?.(measureTabWidth(newText));
         fireAndForget(() => ObjectService.UpdateTabName(props.id, newText));
         setTimeout(() => refocusNode(null), 10);
+    };
+
+    const handleRenameInput = () => {
+        if (!editableRef || !props.onNaturalWidth) return;
+        const text = editableRef.innerText || originalName();
+        props.onNaturalWidth(measureTabWidth(text));
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -270,6 +277,7 @@ function Tab(props: TabProps): JSX.Element {
                         onDblClick={() => handleRenameTab()}
                         onBlur={handleBlur}
                         onKeyDown={handleKeyDown}
+                        onInput={handleRenameInput}
                     >
                         {tabData()?.name}
                     </div>
