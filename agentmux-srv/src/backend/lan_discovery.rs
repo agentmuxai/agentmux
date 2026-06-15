@@ -20,6 +20,8 @@ use serde_json::json;
 use super::eventbus::{EventBus, WSEventType};
 
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
+const LAN_AGENT_CACHE_TTL_SECS: u64 = 60;
+const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanInstance {
@@ -28,9 +30,17 @@ pub struct LanInstance {
     pub version: String,
     pub address: String,
     pub port: u16,
+    pub auth_key: String,
     pub agents: Vec<String>,
     pub first_seen: u64,
     pub last_seen: u64,
+}
+
+struct LanCacheEntry {
+    /// `None` = negative cache entry: agent is not on any LAN peer.
+    peer_url: Option<String>,
+    auth_key: String,
+    expires: std::time::Instant,
 }
 
 pub struct LanDiscovery {
@@ -39,6 +49,7 @@ pub struct LanDiscovery {
     instance_id: String,
     event_bus: Arc<EventBus>,
     service_fullname: String,
+    auth_key: String,
 }
 
 /// Normalize an OS hostname into a valid mDNS host name by appending the
@@ -61,6 +72,7 @@ impl LanDiscovery {
         hostname: String,
         version: String,
         port: u16,
+        auth_key: String,
         event_bus: Arc<EventBus>,
     ) -> Result<Arc<Self>, String> {
         let daemon = ServiceDaemon::new().map_err(|e| format!("mDNS daemon failed: {e}"))?;
@@ -74,6 +86,7 @@ impl LanDiscovery {
             ("version", version.as_str()),
             ("hostname", hostname.as_str()),
             ("instance_id", instance_id.as_str()),
+            ("auth_key", auth_key.as_str()),
         ];
         let service_info = ServiceInfo::new(
             SERVICE_TYPE,
@@ -104,6 +117,7 @@ impl LanDiscovery {
             instance_id: instance_id.clone(),
             event_bus: event_bus.clone(),
             service_fullname,
+            auth_key,
         });
 
         // Spawn event receiver on a blocking thread to avoid starving the tokio runtime
@@ -167,6 +181,10 @@ impl LanDiscovery {
                     .get_property_val_str("version")
                     .unwrap_or_default()
                     .to_string();
+                let auth_key = info
+                    .get_property_val_str("auth_key")
+                    .unwrap_or_default()
+                    .to_string();
 
                 let fullname = info.get_fullname().to_string();
                 let mut instances = self.instances.write();
@@ -176,6 +194,7 @@ impl LanDiscovery {
                     version: version.clone(),
                     address: address.clone(),
                     port: info.get_port(),
+                    auth_key: auth_key.clone(),
                     agents: Vec::new(),
                     first_seen: now,
                     last_seen: now,
@@ -185,6 +204,7 @@ impl LanDiscovery {
                 entry.version = version;
                 entry.address = address;
                 entry.port = info.get_port();
+                entry.auth_key = auth_key;
                 drop(instances);
 
                 tracing::info!(
@@ -274,7 +294,11 @@ pub struct LanDiscoveryController {
     hostname: String,
     version: String,
     port: u16,
+    auth_key: String,
     event_bus: Arc<EventBus>,
+    /// Short-lived cache mapping agent_id → (peer_url, auth_key). Entries expire
+    /// after LAN_AGENT_CACHE_TTL_SECS to handle agent migration between peers.
+    agent_cache: std::sync::RwLock<HashMap<String, LanCacheEntry>>,
 }
 
 impl LanDiscoveryController {
@@ -284,6 +308,7 @@ impl LanDiscoveryController {
         version: String,
         port: u16,
         event_bus: Arc<EventBus>,
+        auth_key: String,
     ) -> Self {
         Self {
             slot: Arc::new(RwLock::new(None)),
@@ -291,7 +316,89 @@ impl LanDiscoveryController {
             hostname,
             version,
             port,
+            auth_key,
             event_bus,
+            agent_cache: std::sync::RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Query LAN peers for which one hosts `agent_id`. Returns `(peer_url,
+    /// auth_key)` for the first peer that responds 2xx to the agent-lookup
+    /// endpoint. Results — both positive and negative — are cached for
+    /// `LAN_AGENT_CACHE_TTL_SECS` seconds to avoid a blocking peer fan-out on
+    /// every inject for cloud-only agents.
+    ///
+    /// Security: `auth_key` is broadcast in the mDNS TXT record. This is
+    /// intentional and matches the same trust assumption as tier-2 loopback
+    /// forwarding — LAN traffic is trusted (private network). Anyone on the LAN
+    /// who can already intercept mDNS multicast can intercept the HTTP traffic
+    /// too, so the key adds no exposure beyond what already exists.
+    pub async fn find_agent(
+        &self,
+        agent_id: &str,
+        http: &reqwest::Client,
+    ) -> Option<(String, String)> {
+        // Fast path: valid cache hit (positive or negative)
+        if let Ok(cache) = self.agent_cache.read() {
+            if let Some(e) = cache.get(agent_id) {
+                if e.expires > std::time::Instant::now() {
+                    return e.peer_url.as_ref().map(|url| (url.clone(), e.auth_key.clone()));
+                }
+            }
+        }
+
+        // Slow path: query each peer. Use reqwest's .query() for safe
+        // percent-encoding of the agent_id (handles spaces, &, =, #, etc.).
+        let peers = self.get_instances();
+        for peer in &peers {
+            if peer.address.is_empty() || peer.auth_key.is_empty() {
+                continue;
+            }
+            let peer_url = format!("http://{}:{}", peer.address, peer.port);
+            let result = http
+                .get(format!("{}/agentmux/reactive/agent", peer_url))
+                .query(&[("id", agent_id)])
+                .header("X-AuthKey", &peer.auth_key)
+                .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
+                .send()
+                .await;
+            if matches!(result, Ok(ref r) if r.status().is_success()) {
+                tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent found on peer");
+                if let Ok(mut cache) = self.agent_cache.write() {
+                    cache.insert(
+                        agent_id.to_string(),
+                        LanCacheEntry {
+                            peer_url: Some(peer_url.clone()),
+                            auth_key: peer.auth_key.clone(),
+                            expires: std::time::Instant::now()
+                                + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                        },
+                    );
+                }
+                return Some((peer_url, peer.auth_key.clone()));
+            }
+        }
+
+        // No peer has this agent — write a negative cache entry so future
+        // injects for cloud-only agents skip the full peer fan-out.
+        if let Ok(mut cache) = self.agent_cache.write() {
+            cache.insert(
+                agent_id.to_string(),
+                LanCacheEntry {
+                    peer_url: None,
+                    auth_key: String::new(),
+                    expires: std::time::Instant::now()
+                        + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                },
+            );
+        }
+        None
+    }
+
+    /// Evict a stale cache entry (e.g. after a forward to that peer failed).
+    pub fn evict_agent(&self, agent_id: &str) {
+        if let Ok(mut cache) = self.agent_cache.write() {
+            cache.remove(agent_id);
         }
     }
 
@@ -314,6 +421,7 @@ impl LanDiscoveryController {
                     self.hostname.clone(),
                     self.version.clone(),
                     self.port,
+                    self.auth_key.clone(),
                     self.event_bus.clone(),
                 ) {
                     Ok(d) => {

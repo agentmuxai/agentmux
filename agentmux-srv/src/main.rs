@@ -902,6 +902,7 @@ async fn main() {
         version.clone(),
         web_addr.port(),
         event_bus.clone(),
+        config.auth_key.clone(),
     ));
     // Honor the current setting at boot — starts the daemon if enabled.
     lan_discovery.apply(config_watcher.get_settings().network_lan_discovery);
