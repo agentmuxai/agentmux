@@ -313,6 +313,11 @@ pub const COMMAND_DELETE_IDENTITY_ACCOUNT: &str = "deleteidentityaccount";
 /// accounts and replacing a key on an existing one (via `accountId`).
 /// See specs/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
 pub const COMMAND_ACCOUNT_KEY_VERIFY: &str = "account.key.verify";
+/// Trust Center service OAuth (scaffold — activates once client ids are
+/// provisioned or supplied as BYO). See SPEC_TRUST_CENTER_2026_06_15.md §4.2.
+pub const COMMAND_ACCOUNT_OAUTH_START: &str = "account.oauth.start";
+pub const COMMAND_ACCOUNT_OAUTH_POLL: &str = "account.oauth.poll";
+pub const COMMAND_ACCOUNT_OAUTH_CANCEL: &str = "account.oauth.cancel";
 
 // Agent ↔ Identity junction
 pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";

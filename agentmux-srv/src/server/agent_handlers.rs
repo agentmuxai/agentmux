@@ -38,6 +38,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_IDENTITY_ACCOUNTS, COMMAND_GET_IDENTITY_ACCOUNT,
     COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
     COMMAND_ACCOUNT_KEY_VERIFY,
+    COMMAND_ACCOUNT_OAUTH_START, COMMAND_ACCOUNT_OAUTH_POLL, COMMAND_ACCOUNT_OAUTH_CANCEL,
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES,
     COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,
@@ -117,6 +118,45 @@ struct VerifyKeyReq {
     /// the user set previously.
     #[serde(default)]
     context: serde_json::Value,
+}
+
+/// Request for `account.oauth.start`. `clientId`/`clientSecret` are BYO OAuth
+/// app credentials (optional; required for secret-mandatory providers).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OAuthStartReq {
+    provider: String,
+    name: String,
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    client_secret: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OAuthSessionReq {
+    session_id: String,
+}
+
+/// Serialize an OAuthStatus to the frontend wire shape.
+fn oauth_status_wire(s: &crate::identity::oauth_client::OAuthStatus) -> serde_json::Value {
+    use crate::identity::oauth_client::OAuthStatus;
+    match s {
+        OAuthStatus::Pending => serde_json::json!({ "status": "pending" }),
+        OAuthStatus::UrlAvailable { auth_url } => {
+            serde_json::json!({ "status": "url-available", "authUrl": auth_url })
+        }
+        OAuthStatus::CodeEmitted { user_code, verification_uri } => serde_json::json!({
+            "status": "code-emitted",
+            "userCode": user_code,
+            "verificationUri": verification_uri,
+        }),
+        OAuthStatus::Success { account_id } => {
+            serde_json::json!({ "status": "success", "accountId": account_id })
+        }
+        OAuthStatus::Failed { error } => serde_json::json!({ "status": "failed", "error": error }),
+    }
 }
 
 /// Shallow-merge the keys of `overlay` (if both are JSON objects) into `base`.
@@ -1381,6 +1421,62 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "status": account.status,
                     "metadata": account.context,
                 })))
+            })
+        }),
+    );
+
+    // ── Trust Center service OAuth (scaffold) ──
+    // start: resolve config + client (gates on "not configured"), spawn the
+    // flow, return session id + initial status. poll/cancel drive the rest.
+    let oauth_wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_ACCOUNT_OAUTH_START,
+        Box::new(move |data, _ctx| {
+            let wstore = oauth_wstore.clone();
+            Box::pin(async move {
+                let req: OAuthStartReq = serde_json::from_value(data)
+                    .map_err(|e| format!("account.oauth.start: {e}"))?;
+                let byo = req.client_id.map(|cid| {
+                    crate::identity::oauth_client::ByoCredentials {
+                        client_id: cid,
+                        client_secret: req.client_secret,
+                    }
+                });
+                match crate::identity::oauth_client::start(&req.provider, req.name, byo, wstore) {
+                    Ok((session_id, status)) => Ok(Some(serde_json::json!({
+                        "sessionId": session_id,
+                        "status": oauth_status_wire(&status),
+                    }))),
+                    // "not configured" / unknown provider surface as a clean
+                    // error field, not an RPC failure, so the UI can show it.
+                    Err(e) => Ok(Some(serde_json::json!({ "error": e }))),
+                }
+            })
+        }),
+    );
+
+    engine.register_handler(
+        COMMAND_ACCOUNT_OAUTH_POLL,
+        Box::new(move |data, _ctx| {
+            Box::pin(async move {
+                let req: OAuthSessionReq = serde_json::from_value(data)
+                    .map_err(|e| format!("account.oauth.poll: {e}"))?;
+                match crate::identity::oauth_client::manager().poll(&req.session_id) {
+                    Some(s) => Ok(Some(oauth_status_wire(&s))),
+                    None => Err(format!("account.oauth.poll: unknown session {}", req.session_id)),
+                }
+            })
+        }),
+    );
+
+    engine.register_handler(
+        COMMAND_ACCOUNT_OAUTH_CANCEL,
+        Box::new(move |data, _ctx| {
+            Box::pin(async move {
+                let req: OAuthSessionReq = serde_json::from_value(data)
+                    .map_err(|e| format!("account.oauth.cancel: {e}"))?;
+                let cancelled = crate::identity::oauth_client::manager().cancel(&req.session_id);
+                Ok(Some(serde_json::json!({ "cancelled": cancelled })))
             })
         }),
     );
