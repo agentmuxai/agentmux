@@ -55,6 +55,19 @@ const SHELL_STOP_TOOL: &str = r#"{
   }
 }"#;
 
+const SEND_MESSAGE_TOOL: &str = r#"{
+  "name": "SendMessage",
+  "description": "Send a message to another agent by name. The message is injected as input into the target agent's active conversation. Use for agent-to-agent coordination — handoff, task delegation, status notifications. Delivery is best-effort and tries local → LAN → cloud in order. Returns once delivery is confirmed or all tiers have failed.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "to":      { "type": "string", "description": "Name of the target agent (its AGENTMUX_AGENT_ID value)" },
+      "message": { "type": "string", "description": "Message text to inject into the target agent's conversation" }
+    },
+    "required": ["to", "message"]
+  }
+}"#;
+
 const OPEN_EDITOR_TOOL: &str = r#"{
   "name": "OpenEditor",
   "description": "Open a file in an AgentMux editor pane next to this conversation. Use when you want the user to see a file you're discussing or editing. Pass an absolute host path. Fire-and-forget: returns once the pane is opened.",
@@ -142,10 +155,11 @@ async fn main() {
                 let shell: Value = serde_json::from_str(SHELL_TOOL).expect("static json");
                 let shell_stop: Value = serde_json::from_str(SHELL_STOP_TOOL).expect("static json");
                 let open_editor: Value = serde_json::from_str(OPEN_EDITOR_TOOL).expect("static json");
+                let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message] }
                 })
             }
             "tools/call" => {
@@ -361,6 +375,69 @@ async fn call_tool(
                 .unwrap_or("unknown");
 
             Ok(format!("Opened {file} in editor pane (block {block})"))
+        }
+        "SendMessage" => {
+            let to = arguments
+                .get("to")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: to"))?;
+            let message = arguments
+                .get("message")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: message"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let source_agent = std::env::var("AGENTMUX_AGENT_ID")
+                .ok()
+                .filter(|s| !s.is_empty());
+
+            let url = format!(
+                "{}/agentmux/reactive/inject",
+                local_url.trim_end_matches('/')
+            );
+            let mut body = json!({
+                "target_agent": to,
+                "message": message,
+            });
+            if let Some(src) = source_agent {
+                body["source_agent"] = json!(src);
+            }
+
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("inject failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
+                Ok(format!("Message sent to {to}"))
+            } else {
+                let err = result
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                anyhow::bail!("Message delivery failed: {err}")
+            }
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }
