@@ -385,10 +385,21 @@ update in 7.2 (and/or a matching `tool_result` echo if the provider emits one). 
   the true tool_result path (Phase 1).
 
 **Phase 3 — refinements.**
-- Structured (JSON) tool_result instead of the flat text block, if the model
-  benefits. Cross-provider parity (Gemini/Codex/Kimi translators emit the same
-  `tool_call` shape — most of Phase 1 is provider-agnostic once detection keys on
-  the tool name the provider uses). Persisted answer history in the transcript.
+- **Reload de-duplication — SHIPPED.** On history reload an *answered*
+  AskUserQuestion re-parsed as `awaiting_answer` and the panel re-surfaced for a
+  question already answered. Fixed in the agent-document orphan-scrub
+  (`scrubOrphanedInProgress`, runs on `SessionEnd` / `HistoryLoaded` /
+  `HistoryRestored`): an `awaiting_answer` tool node that has content *after* it
+  (the conversation continued → it was answered) is resolved to `success` with
+  `question` cleared, so the panel no longer re-opens. A **tail** awaiting_answer is
+  deliberately left untouched — a one-shot agent's turn ends (`SessionEnd`) with the
+  question as the tail and it is still answerable via a follow-up resume turn, so
+  scrubbing it would kill the panel before the user could answer.
+- **Deferred / not pursued:** structured (JSON) tool_result instead of flat text
+  (no evidence the model mis-parses the flat block — §10 validated it). Cross-provider
+  parity is moot: `AskUserQuestion` is Claude-specific; no other bundled provider
+  emits it (detection already keys on the tool name, so it's automatically a no-op
+  elsewhere).
 
 ---
 
