@@ -33,9 +33,11 @@ export function measureTabWidth(label: string): number {
     const ctx = getCtx();
     if (!ctx) return DEFAULT_TAB_WIDTH;
 
-    // Read the font from the document root so it stays in sync with theme changes.
-    const font = getComputedStyle(document.documentElement).font || "11px system-ui";
-    ctx.font = font;
+    // `.font` shorthand is not serialized by Chromium — always returns "".
+    // Read fontFamily explicitly and pair with the tab label's hardcoded
+    // font-size/weight (11px 400, from tab.scss .name).
+    const fontFamily = getComputedStyle(document.documentElement).fontFamily || "system-ui";
+    ctx.font = `400 11px ${fontFamily}`;
 
     const textWidth = ctx.measureText(label).width;
     const natural = Math.ceil(textWidth) + TAB_PADDING_BUDGET;
