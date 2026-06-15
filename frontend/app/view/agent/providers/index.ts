@@ -32,6 +32,15 @@ export interface SystemPrereq {
     };
 }
 
+/** One selectable model for a provider's `--model` flag. */
+export interface ProviderModel {
+    value: string;          // the model string passed to the CLI (e.g. "opus", "gpt-5.5")
+    label: string;          // UI label
+    default?: boolean;      // the default model for this provider
+    description?: string;   // optional one-liner shown in the /model picker
+    aliases?: string[];     // optional /model aliases (e.g. "claude-opus")
+}
+
 export interface ProviderDefinition {
     id: string;
     displayName: string;
@@ -85,6 +94,15 @@ export interface ProviderDefinition {
      * Omit for providers whose context window is unknown or variable.
      */
     contextWindow?: number;
+    /**
+     * AgentMux-side model choices for this provider's `--model` flag. Drives the
+     * `/model` slash command (and, for Claude, the control-bar dropdown). Mark one
+     * `default`. Omit for providers whose model is chosen in their own config
+     * (muxcode/openclaw/pi/copilot) — those show no AgentMux model picker.
+     * NOTE: model strings move with the upstream provider — keep current; see
+     * docs/providers/PROVIDER_MODELS_EFFORT_SETTINGS_2026-06.md.
+     */
+    models?: ProviderModel[];
 }
 
 /** Shared git prereq — claude-code calls `git` from session-start
@@ -146,6 +164,12 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // with `Error: Git is required but was not found.`.
         systemPrereqs: [GIT_PREREQ],
         contextWindow: 200_000,
+        // Aliases resolve to the current model (e.g. opus → Opus 4.8) via the CLI.
+        models: [
+            { value: "opus", label: "Opus", default: true, description: "Claude Opus — highest quality", aliases: ["claude-opus"] },
+            { value: "sonnet", label: "Sonnet", description: "Claude Sonnet — balanced", aliases: ["claude-sonnet"] },
+            { value: "haiku", label: "Haiku", description: "Claude Haiku — fastest", aliases: ["claude-haiku"] },
+        ],
     },
     codex: {
         id: "codex",
@@ -174,6 +198,13 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "thread_id",
         controllerType: "subprocess",
         contextWindow: 200_000,
+        // Verify ChatGPT-account availability when bumping the codex CLI pin.
+        models: [
+            { value: "gpt-5.5", label: "GPT-5.5", default: true, description: "Current codex frontier" },
+            { value: "gpt-5.4", label: "GPT-5.4", description: "Prior frontier" },
+            { value: "gpt-5.1-codex-max", label: "GPT-5.1-Codex-Max", description: "Codex-tuned, long-horizon" },
+            { value: "gpt-5.3-codex", label: "GPT-5.3-Codex", description: "Codex-tuned" },
+        ],
     },
     // muxcode — AgentMux's first-party agentic coding CLI.
     // Supports local GGUF inference via llama-server, Anthropic, OpenAI, and
