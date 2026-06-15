@@ -152,9 +152,9 @@ pub struct Broker {
 /// Tracks `(route_id, event_name, scope)` tuples whose persisted
 /// history has already been replayed to a given route. Skipping
 /// replay on resubscribe prevents the frontend's `eventsub`
-/// flushes (sent on every listener add/remove against the shared
-/// `ws-main` route) from re-emitting completed bash logs on every
-/// pane mount or tab switch. Codex P2 on PR #817.
+/// flushes (sent on every listener add/remove, once per conn_id)
+/// from re-emitting completed bash logs on every pane mount or
+/// tab switch. Codex P2 on PR #817; route keying updated PR #1418.
 type ReplayKey = (String, String, String);
 
 struct BrokerInner {
@@ -223,14 +223,15 @@ impl Broker {
     /// interleave.
     ///
     /// **Once-per-(route, event, scope).** The frontend
-    /// (`frontend/app/store/wps.ts`) flushes `eventsub` for the
-    /// shared `ws-main` route on every listener add/remove. Replaying
-    /// persisted history on each of those flushes would re-emit
-    /// completed bash logs every pane mount / tab switch / sibling
-    /// subscription. The `replayed` set tracks tuples that already
-    /// received their backfill and short-circuits subsequent
-    /// resubscribes. Cleared per-route in `unsubscribe_all` so a true
-    /// reconnect (route dropped + re-registered) gets a fresh replay.
+    /// (`frontend/app/store/wps.ts`) flushes `eventsub` on every
+    /// listener add/remove; each WebSocket connection has its own
+    /// `conn_id` as the route key (PR #1418). Replaying persisted
+    /// history on each of those flushes would re-emit completed bash
+    /// logs every pane mount / tab switch / sibling subscription. The
+    /// `replayed` set tracks tuples that already received their backfill
+    /// and short-circuits subsequent resubscribes. Cleared per-route in
+    /// `unsubscribe_all` so a true reconnect (route dropped +
+    /// re-registered) gets a fresh replay.
     ///
     /// Star-scope replay is intentionally not implemented (rare,
     /// requires scanning every persist key; can add later if needed).
