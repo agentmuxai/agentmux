@@ -1560,7 +1560,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
         Box::new(|data, _ctx| {
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
-                struct Cmd { display_name: Option<String> }
+                struct Cmd { display_name: Option<String>, exclude_scratch_ids: Option<Vec<String>> }
                 let cmd: Cmd = serde_json::from_value(data)
                     .map_err(|e| format!("createscratchfile: {e}"))?;
                 let home = dirs::home_dir()
@@ -1597,6 +1597,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                         let created_at = meta_json.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
                         let sid = meta_json.get("scratch_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         if created_at == 0 || sid.is_empty() {
+                            continue;
+                        }
+                        // Skip scratch files already open in another pane.
+                        if cmd.exclude_scratch_ids.as_deref().map_or(false, |ex| ex.iter().any(|e| e == &sid)) {
                             continue;
                         }
                         if now_ms.saturating_sub(created_at) > THIRTY_DAYS_MS {

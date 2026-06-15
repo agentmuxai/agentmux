@@ -28,6 +28,7 @@ import {
     setEventSink,
     snapshot,
     unregisterEditorPane,
+    getAllActiveScratchIds,
 } from "@/app/store/editor-pane-state-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -523,7 +524,12 @@ export class EditorViewModel implements ViewModel {
             return;
         }
         try {
-            const result = await RpcApi.CreateScratchFileCommand(TabRpcClient, {});
+            // Exclude scratch files already open in any editor pane so that
+            // two panes never share the same backing scratch file.
+            const excludeIds = getAllActiveScratchIds();
+            const result = await RpcApi.CreateScratchFileCommand(TabRpcClient, {
+                exclude_scratch_ids: excludeIds.length > 0 ? excludeIds : undefined,
+            });
             const events = dispatch(this.blockId, {
                 type: "OpenScratch",
                 filePath: result.file_path,
@@ -535,12 +541,18 @@ export class EditorViewModel implements ViewModel {
             const opened = events.find((e) => e.type === "TabOpened" || e.type === "TabActivated");
             if (!opened || (opened.type !== "TabOpened" && opened.type !== "TabActivated")) return;
             const tabId = opened.tabId;
-            this._contentByTab.set(tabId, "");
+            // Read the actual on-disk content — the backend may have returned a
+            // reused scratch file that already has content from a prior session.
+            // Seeding "" here would clobber that content on the next Ctrl+S.
+            const fileResult = await RpcApi.ReadEditorFileCommand(TabRpcClient, { path: result.file_path });
+            const content = fileResult?.content ?? "";
+            this._contentByTab.set(tabId, content);
             this._contentVersion[1]((v) => v + 1);
+            const hash = content === "" ? "" : await sha256Hex(content);
             dispatch(this.blockId, {
                 type: "TabContentLoaded",
                 tabId,
-                contentHash: "",
+                contentHash: hash,
                 readOnly: false,
                 source: "system",
             });

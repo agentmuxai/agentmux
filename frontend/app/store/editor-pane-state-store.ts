@@ -883,6 +883,17 @@ export function snapshot(blockId: string): EditorPaneState | null {
     return slots.get(blockId)?.state ?? null;
 }
 
+/** Return the scratchId of every scratch tab currently open across ALL editor panes. */
+export function getAllActiveScratchIds(): string[] {
+    const ids: string[] = [];
+    for (const slot of slots.values()) {
+        for (const tab of slot.state.tabs) {
+            if (tab.isScratch && tab.scratchId) ids.push(tab.scratchId);
+        }
+    }
+    return ids;
+}
+
 /** Test/dev helper — clears every slot AND resets the event sink. */
 export function resetAllSlots(): void {
     slots.clear();
