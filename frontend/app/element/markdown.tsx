@@ -373,7 +373,6 @@ const Markdown = (props: MarkdownProps) => {
         onClickExecute,
     } = props;
     const textAtomValue = useAtomValueSafe<string>(textAtom as any);
-    const tocItems: TocItem[] = [];
     const showToc = useAtomValueSafe(showTocAtom) ?? false;
     const [focusedHeading, setFocusedHeading] = createSignal<string | null>(null);
 
@@ -530,22 +529,29 @@ const Markdown = (props: MarkdownProps) => {
         try {
             const mdast = processor.parse(txt);
             const hast = processor.runSync(mdast);
-            // Update tocItems after processing
-            tocRefObj.current.forEach((item) => tocItems.push(item));
-            return toJsxRuntime(hast as any, {
+            const element = toJsxRuntime(hast as any, {
                 jsx: jsx as any,
                 jsxs: jsxs as any,
                 Fragment: Fragment as any,
                 passKeys: false,
                 components: markdownComponents as any,
             }) as JSX.Element;
+            // `tocRef` is local to this memo run, so the toc reflects only the
+            // current text — it no longer accumulates stale/duplicate headings
+            // across re-renders (issue #789).
+            return { element, toc: tocRefObj.current };
         } catch (e) {
             console.error("Markdown render error:", e);
-            return <pre>{txt}</pre>;
+            return { element: <pre>{txt}</pre>, toc: [] as TocItem[] };
         } finally {
             markEnd("markdown-render", `len=${txt.length}`);
         }
     });
+
+    // Reactive TOC, derived from the render memo. Re-derives whenever the text
+    // changes so streaming markdown keeps the TOC in sync, instead of the old
+    // non-reactive array that stayed stuck on the first heading set.
+    const tocItems = createMemo<TocItem[]>(() => renderedMarkdown().toc);
 
     onMount(() => {
         if (scrollable && contentsEl) {
@@ -571,19 +577,19 @@ const Markdown = (props: MarkdownProps) => {
                 when={scrollable}
                 fallback={
                     <div class={cn("content non-scrollable", contentClassName)}>
-                        {renderedMarkdown()}
+                        {renderedMarkdown().element}
                     </div>
                 }
             >
                 <div class={cn("content", contentClassName)} ref={contentsEl}>
-                    {renderedMarkdown()}
+                    {renderedMarkdown().element}
                 </div>
             </Show>
-            <Show when={showToc && tocItems.length > 0}>
+            <Show when={showToc && tocItems().length > 0}>
                 <div class="toc mt-1" ref={tocEl}>
                     <div class="toc-inner">
                         <h4 class="font-bold">Table of Contents</h4>
-                        {tocItems.map((item) => (
+                        {tocItems().map((item) => (
                             <a
                                 class="toc-item"
                                 style={{ "--indent-factor": item.depth } as any}
@@ -595,7 +601,7 @@ const Markdown = (props: MarkdownProps) => {
                     </div>
                 </div>
             </Show>
-            <Show when={showToc && tocItems.length === 0}>
+            <Show when={showToc && tocItems().length === 0}>
                 <div class="toc mt-1">
                     <div class="toc-inner">
                         <h4 class="font-bold">Table of Contents</h4>
