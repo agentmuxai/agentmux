@@ -27,8 +27,10 @@ use crate::backend::rpc_types::{
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_TOOL_DECISION,
+    COMMAND_AGENT_ANSWER,
     COMMAND_WRITE_AGENT_CONFIG, COMMAND_SHELL_EXEC, COMMAND_SHELL_STOP,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
+    CommandAgentAnswerData,
     CommandShellExecData, ShellExecResult, CommandShellStopData,
 };
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -769,6 +771,44 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     "[tooldecision] received (delivery mechanism deferred to PR-3b/PR-4)"
                 );
                 Ok(None)
+            })
+        }),
+    );
+
+    // agent.answer → deliver an AskUserQuestion answer to the running agent
+    // CLI as a `tool_result` over the persistent controller's live stdin,
+    // unblocking the agent's turn. Unlike tooldecision (no-op delivery), this
+    // path is real: the persistent controller (host agents, --input-format
+    // stream-json) keeps stdin open for the session. Container / one-shot
+    // subprocess agents have no live stdin — they return UNSUPPORTED_CONTROLLER
+    // (Phase 2). Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+    engine.register_handler(
+        COMMAND_AGENT_ANSWER,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandAgentAnswerData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.answer: {e}"))?;
+                if cmd.tool_use_id.is_empty() {
+                    return Err("agent.answer: MISSING_ARG: tool_use_id".to_string());
+                }
+                let ctrl = blockcontroller::get_controller(&cmd.blockid)
+                    .ok_or_else(|| format!("agent.answer: no controller for block {}", cmd.blockid))?;
+                if let Some(persistent_ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+                {
+                    persistent_ctrl.send_tool_result(cmd.tool_use_id.clone(), cmd.answer_text)?;
+                    tracing::info!(
+                        block_id = %cmd.blockid,
+                        tool_use_id = %cmd.tool_use_id,
+                        "[agent.answer] tool_result delivered to persistent stdin"
+                    );
+                    Ok(None)
+                } else {
+                    Err("agent.answer: UNSUPPORTED_CONTROLLER: answering AskUserQuestion \
+                         requires a persistent (host) agent; container/one-shot agents are \
+                         not yet supported (Phase 2)".to_string())
+                }
             })
         }),
     );

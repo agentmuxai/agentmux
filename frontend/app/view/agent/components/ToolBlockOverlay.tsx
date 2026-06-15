@@ -38,6 +38,7 @@ export interface ToolBlockOverlayProps {
 const STATUS_LABEL: Record<ToolNode["status"], string> = {
     running: "running",
     pending_approval: "awaiting approval",
+    awaiting_answer: "awaiting answer",
     success: "ok",
     failed: "failed",
     denied: "denied",

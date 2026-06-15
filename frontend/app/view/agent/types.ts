@@ -224,9 +224,13 @@ export interface ToolNode {
      *                          collapsed with the ⏹ icon, never with a
      *                          spinner. Spec:
      *                          SPEC_ORPHAN_THINKING_NODES_2026_05_27.md.
+     *  - `awaiting_answer`   — the agent called `AskUserQuestion` and is
+     *                          blocked on the user's answer (delivered as a
+     *                          tool_result). Carries `question`. Spec:
+     *                          SPEC_ASK_USER_QUESTION_2026_06_15.md.
      *  Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.2.
      */
-    status: "running" | "pending_approval" | "success" | "failed" | "denied" | "canceled";
+    status: "running" | "pending_approval" | "awaiting_answer" | "success" | "failed" | "denied" | "canceled";
     duration?: number; // Seconds
     result?: ToolResult;
     /** Live streaming buffer. Populated when the provider emits
@@ -240,6 +244,9 @@ export interface ToolNode {
     /** Set when status === "pending_approval". Carried into the
      *  decision panel + echoed back through `tool:decision` IPC. */
     pendingPermission?: PermissionRequestEvent;
+    /** Set when status === "awaiting_answer" (the tool is AskUserQuestion).
+     *  Drives the question panel; the answer goes back as a tool_result. */
+    question?: AskUserQuestionRequest;
 }
 
 /**
@@ -449,6 +456,44 @@ export type PermissionPreview =
     | { kind: "bash"; command: string }
     | { kind: "text"; content: string }
     | { kind: "none" };
+
+/**
+ * AskUserQuestion — the agent called the `AskUserQuestion` tool to ask the
+ * human a structured multiple-choice question and is BLOCKING its turn on a
+ * `tool_result`. Parsed from the tool_use `input` (validated wire shape:
+ * `input.questions[]`). The answer is delivered back over the persistent
+ * controller's live stdin as a tool_result.
+ *
+ * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+ */
+export interface AskUserQuestionOption {
+    label: string;
+    description?: string;
+}
+
+export interface AskUserQuestionItem {
+    question: string;
+    /** Short chip label (≤12 chars), e.g. "Auth method". */
+    header: string;
+    /** true → checkbox semantics (pick many); false → radio (pick one). */
+    multiSelect: boolean;
+    options: AskUserQuestionOption[];
+}
+
+export interface AskUserQuestionRequest {
+    type: "ask_user_question";
+    /** The AskUserQuestion tool_use id; echoed in the tool_result reply. */
+    tool_use_id: string;
+    questions: AskUserQuestionItem[];
+}
+
+/** One question's answer. `selected` are chosen option labels (length 1 for
+ *  single-select); `other` is free-text the user typed instead of / alongside. */
+export interface AskUserQuestionAnswer {
+    header: string;
+    selected: string[];
+    other?: string;
+}
 
 export interface AgentMessageEvent {
     type: "agent_message";

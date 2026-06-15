@@ -64,6 +64,7 @@ interface ToolBlockProps {
 const STATUS_ICON: Record<ToolNode["status"], string> = {
     running: "⏳",
     pending_approval: "⚠",
+    awaiting_answer: "❓",
     success: "✓",
     failed: "✗",
     denied: "⊘",
@@ -226,6 +227,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 failed: props.node.status === "failed",
                 canceled: props.node.status === "canceled",
                 pending_approval: props.node.status === "pending_approval",
+                awaiting_answer: props.node.status === "awaiting_answer",
                 denied: props.node.status === "denied",
             })}
             data-tool={props.node.tool.toLowerCase()}
