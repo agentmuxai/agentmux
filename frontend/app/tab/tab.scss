@@ -47,7 +47,7 @@
         white-space: nowrap;
         border-radius: 0;
         // Bound min-width so the flex-shrink contract on `.tab`
-        // (`flex: 0 1 var(--ws-tab-basis)`) actually propagates here.
+        // (`flex: 0 1 var(--tab-natural-width, 160px)`) actually propagates here.
         // Without this, `.tab-inner`'s default `min-width: auto`
         // pins it to its content's natural width, so a shrinking
         // `.tab` would clip the inner row from the right edge
