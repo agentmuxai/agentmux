@@ -70,6 +70,10 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if let Err(e) = wstore.muxbus_save(&result.credentials) {
                             tracing::warn!(error = %e, "muxbus.login: failed to save credentials");
                         }
+                        // Kick the cloud subscriber to open a WS with the new token
+                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                            sub.reload_token();
+                        }
                         let resp = MuxBusLoginResp {
                             success: true,
                             email: result.credentials.user_email,
