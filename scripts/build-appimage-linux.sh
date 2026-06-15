@@ -74,6 +74,40 @@ require target/release/agentmux-mcp
 # the build output to keep packaging reproducible from a fresh checkout.
 require dist/frontend/index.html
 
+# --- Release gate: the bundled libcef.so MUST carry the BeginWindowDrag patch,
+#     or left-click window drag silently no-ops in the shipped AppImage (the
+#     runtime ABI guard only surfaces it after the user clicks). The symbol check
+#     needs an UNSTRIPPED .so: dist/cef/libcef.so is unstripped at this point in the
+#     canonical `task package:linux` flow (bundle:linux copies the build-tree output;
+#     the strip below runs on the AppDir copy). If dist/cef was pre-stripped
+#     out-of-band, fall back to verifying the resolved build-tree source. This is
+#     release-only — `task dev`/`task bundle` never run this script. Override with
+#     AGENTMUX_SKIP_CEF_PATCH_CHECK=1 (emergency only). ---
+if [ "${AGENTMUX_SKIP_CEF_PATCH_CHECK:-0}" != "1" ]; then
+    set +e
+    bash "$REPO_ROOT/scripts/verify-cef-patch.sh" dist/cef/libcef.so
+    patch_rc=$?
+    if [ "$patch_rc" = "2" ]; then
+        echo "→ dist/cef/libcef.so couldn't be verified (stripped?); checking the resolved source…" >&2
+        cef_src="$(bash "$REPO_ROOT/scripts/resolve-cef-runtime.sh" 2>/dev/null || true)"
+        if [ -n "$cef_src" ]; then
+            bash "$REPO_ROOT/scripts/verify-cef-patch.sh" "$cef_src"
+            patch_rc=$?
+        fi
+    fi
+    set -e
+    case "$patch_rc" in
+        0) echo "✓ libcef.so carries the BeginWindowDrag patch" ;;
+        1) echo "ERROR: bundled libcef.so lacks the BeginWindowDrag patch — refusing to" >&2
+           echo "       package a release with broken left-click window drag. Build the" >&2
+           echo "       patched libcef (docs/cef-build/build-patched-libcef.md) or set" >&2
+           echo "       AGENTMUX_SKIP_CEF_PATCH_CHECK=1 to override." >&2
+           exit 1 ;;
+        *) echo "WARNING: could not verify the BeginWindowDrag patch (stripped runtime and" >&2
+           echo "         no unstripped source to check). Proceeding — verify drag manually." >&2 ;;
+    esac
+fi
+
 echo "Building AgentMux v$VERSION AppImage → $OUTPUT"
 
 # --- 1. Wipe and recreate AppDir ---
