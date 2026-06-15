@@ -30,6 +30,13 @@ use crate::backend::storage::store::Store;
 const MUXBUS_WS_URL: &str = "wss://muxbus.agentmux.ai/ws";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
+// Application-level keepalive. Without it, a silently half-open WS (NAT/firewall
+// idle drop, server stall with no FIN/RST) leaves read.next() blocked forever:
+// the subscriber looks connected but receives no pushes and never reconnects.
+// We send a WS Ping every PING_INTERVAL and force a reconnect if no frame of any
+// kind (data, ping, or pong) arrives within IDLE_TIMEOUT.
+const PING_INTERVAL_SECS: u64 = 30;
+const IDLE_TIMEOUT_SECS: u64 = 90;
 
 // ── Wire protocol ─────────────────────────────────────────────────────────────
 
@@ -224,10 +231,17 @@ async fn connect_and_run(
         .await
         .map_err(|e| format!("send subscribe: {e}"))?;
 
+    let mut keepalive = tokio::time::interval(Duration::from_secs(PING_INTERVAL_SECS));
+    // The first tick fires immediately; skip it so we don't ping before any idle.
+    keepalive.tick().await;
+    let mut last_activity = std::time::Instant::now();
+
     loop {
         tokio::select! {
             // Incoming WebSocket message from cloud
             msg = read.next() => {
+                // Any frame — data, ping, or pong — proves the link is alive.
+                last_activity = std::time::Instant::now();
                 match msg {
                     None => return Ok(()), // server closed
                     Some(Err(e)) => return Err(format!("ws recv: {e}")),
@@ -242,7 +256,19 @@ async fn connect_and_run(
                         let _ = write.send(Message::Pong(data)).await;
                     }
                     Some(Ok(Message::Close(_))) => return Ok(()),
-                    Some(Ok(_)) => {} // binary frames etc — ignore
+                    Some(Ok(_)) => {} // pong / binary frames etc — ignore (already counted as activity)
+                }
+            }
+
+            // Keepalive tick: detect a half-open connection and ping to keep NAT open.
+            _ = keepalive.tick() => {
+                if last_activity.elapsed() >= Duration::from_secs(IDLE_TIMEOUT_SECS) {
+                    return Err(format!(
+                        "keepalive timeout: no frames for {}s", IDLE_TIMEOUT_SECS
+                    ));
+                }
+                if let Err(e) = write.send(Message::Ping(Vec::<u8>::new().into())).await {
+                    return Err(format!("keepalive ping failed: {e}"));
                 }
             }
 
@@ -317,11 +343,15 @@ async fn load_valid_token(wstore: &Store, http: &reqwest::Client) -> Option<Stri
         Ok(Some(c)) if !c.access_token.is_empty() => c,
         _ => return None,
     };
-    if creds.is_valid() {
+    // Gate on nearly_expired (300s buffer), not is_valid (exact expiry): a token
+    // with only seconds of life would otherwise open a long-lived WS that the
+    // cloud drops right after the handshake, causing reconnect churn. Refresh
+    // proactively while there's still a comfortable margin.
+    if !creds.nearly_expired() {
         return Some(creds.access_token);
     }
-    // Token expired (or nearly so) — try refresh
-    tracing::info!("cloud_subscriber: access token expired, attempting refresh");
+    // Token expired or within the refresh buffer — try refresh
+    tracing::info!("cloud_subscriber: access token expired or near expiry, attempting refresh");
     match crate::muxbus::pkce::refresh_token(&creds, http).await {
         Ok(refreshed) => {
             if let Err(e) = wstore.muxbus_save(&refreshed) {
