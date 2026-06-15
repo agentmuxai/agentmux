@@ -177,6 +177,11 @@ pub(super) async fn handle_reactive_register(
                 state.subagent_watcher.watch_agent(&req.agent_id, config_dir);
             }
 
+            // Notify cloud subscriber so it can subscribe for cloud-push delivery
+            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                sub.add_agent(&req.agent_id);
+            }
+
             Json(json!({"success": true})).into_response()
         }
         Err(e) => (
@@ -203,6 +208,10 @@ pub(super) async fn handle_reactive_unregister(
     // Drop the subagent filesystem watcher (handle + channel + task) — the
     // symmetric teardown for the watch_agent() call in the register handler.
     state.subagent_watcher.unwatch_agent(&req.agent_id);
+    // Notify cloud subscriber so it stops subscribing for this agent
+    if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+        sub.remove_agent(&req.agent_id);
+    }
     Json(json!({"success": true}))
 }
 

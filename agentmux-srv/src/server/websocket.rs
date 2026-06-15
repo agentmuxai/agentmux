@@ -924,6 +924,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 // a scope and the frontend's per-block subscription
                 // doesn't receive them.
                 env_vars.insert("AGENTMUX_BLOCKID".to_string(), cmd.blockid.clone());
+                // Agent display name for MuxBus self-identification.
+                // muxbus-client reads AGENTMUX_AGENT_ID (preferred) or AGENT_NAME
+                // to know who it is when sending/receiving messages.
+                let agent_display_name = crate::backend::obj::meta_get_string(
+                    &block.meta, "agentName", "",
+                );
+                if !agent_display_name.is_empty() {
+                    env_vars.insert("AGENTMUX_AGENT_ID".to_string(), agent_display_name);
+                }
                 // PATH includes BOTH bundled tools dir (portable
                 // builds, runtime/tools/bin/) AND user tools dir
                 // (~/.agentmux/tools/bin/). bundled is None in dev
