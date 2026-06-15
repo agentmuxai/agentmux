@@ -311,6 +311,7 @@ export class ClaudeCodeStreamParser {
             status: "running",
             collapsed: false, // Show running tools
             summary,
+            timestamp: Date.now(),
         };
     }
 
