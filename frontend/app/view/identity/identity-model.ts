@@ -15,7 +15,7 @@ import { Logger } from "@/util/logger";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type AccountProvider = "github" | "aws" | "anthropic" | "custom";
+export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "custom";
 export type AccountKind = "pat" | "role" | "api_key" | "env_ref";
 export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking";
 export type IdentityTab = "accounts" | "assignments";
@@ -109,6 +109,7 @@ export function agentsAssignedToAccount(accountId: string, agents: AgentDefiniti
 
 export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     github: "GitHub",
+    openai: "OpenAI",
     aws: "AWS",
     anthropic: "Anthropic",
     custom: "Custom",
@@ -116,6 +117,7 @@ export const PROVIDER_LABELS: Record<AccountProvider, string> = {
 
 export const PROVIDER_COLORS: Record<AccountProvider, string> = {
     github: "#e1effe",
+    openai: "#d1fae5",
     aws: "#fef3c7",
     anthropic: "#ede9fe",
     custom: "#f1f5f9",
@@ -359,7 +361,7 @@ export class IdentityViewModel implements ViewModel {
 
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
-        const order: AccountProvider[] = ["github", "aws", "anthropic", "custom"];
+        const order: AccountProvider[] = ["github", "openai", "aws", "anthropic", "custom"];
         for (const p of order) {
             const group = this.accountsAtom().filter((a) => a.provider === p);
             if (group.length > 0) map.set(p, group);
