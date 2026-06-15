@@ -32,10 +32,12 @@ const PERMISSION_STRIP = new Set([
 
 // Default codex model. The Claude-named `ModelChoice` (opus/sonnet/haiku) does
 // not apply to codex, and codex 0.116.0's baked default (gpt-5.3-codex) is
-// rejected for ChatGPT-account auth. gpt-5.4 is a current ChatGPT-supported
-// codex model. Per-provider model selection is a follow-up — see
-// docs/analysis/CODEX_AGENT_LAUNCH_DOA_2026_06_02.md.
-const CODEX_DEFAULT_MODEL = "gpt-5.4";
+// rejected for ChatGPT-account auth. gpt-5.5 is the current ChatGPT-supported
+// codex frontier (more intelligent + more token-efficient than gpt-5.4).
+// Per-provider model selection is a follow-up — see
+// docs/specs/SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md
+// (re-verify ChatGPT-account availability when bumping the codex CLI pin).
+const CODEX_DEFAULT_MODEL = "gpt-5.5";
 
 /**
  * Build final CLI args from base provider args and runtime config.
@@ -101,7 +103,10 @@ export function buildRuntimeArgs(
     if (supportsModel) {
         args.push("--model", config.model);
     }
-    if (!providerId || providerId === "claude") {
+    // --effort: claude only, and NOT on Haiku — `--effort` 400s on Haiku 4.5
+    // (effort is supported on Opus/Sonnet only). Skip it so a `haiku` pane
+    // doesn't error out on every turn.
+    if ((!providerId || providerId === "claude") && config.model !== "haiku") {
         args.push("--effort", config.effort);
     }
 
