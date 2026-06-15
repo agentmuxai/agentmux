@@ -164,13 +164,14 @@ declare global {
         feedback?: string;
     };
 
-    // CommandAgentAnswerData — AskUserQuestion answer, delivered back to the
-    // running agent CLI as a tool_result over the persistent controller's
-    // stdin. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+    // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
+    // agent CLI via the Agent SDK control protocol (a control_response carrying
+    // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     type CommandAgentAnswerData = {
         blockid: string;
         tool_use_id: string;
-        answer_text: string;
+        // question text → chosen label | label[] (multiSelect) | free-text ("Other")
+        answers: {[key: string]: string | string[]};
     };
 
     // wshrpc.CommandBlockSetViewData

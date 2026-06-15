@@ -699,12 +699,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         };
         applyDoc(updated);
 
-        // Phase 1 path: persistent (host) agents have a live stdin, so the
-        // answer is delivered as a tool_result that resumes the blocked turn.
+        // Phase 1 path: persistent (host) agents speak the control protocol, so
+        // the answer is delivered as a control_response (updatedInput.answers)
+        // that resumes the turn the CLI parked on the can_use_tool request.
         void RpcApi.AgentAnswerCommand(TabRpcClient, {
             blockid: model.blockId,
             tool_use_id: outcome.tool_use_id,
-            answer_text: outcome.answer_text,
+            answers: outcome.answers_map,
         }).catch((err: unknown) => {
             const msg = String(err);
             // Phase 2 path: one-shot / container agents have no live stdin, and

@@ -99,17 +99,19 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     id: "claude",
     display_name: "Claude Code",
     cli_command: "claude",
-    // Persistent (bidirectional stream-json) so the agent's turn can BLOCK on a
-    // tool_use and consume a tool_result over live stdin — required for the
-    // AskUserQuestion flow (SPEC_ASK_USER_QUESTION_2026_06_15.md). In `-p`
-    // subprocess mode the CLI auto-rejects AskUserQuestion with
-    // `Error: Answer questions?` ~7ms after emitting it (no interactive stdin to
-    // answer on), so the question panel never renders.
+    // Persistent (bidirectional stream-json) + the Agent SDK CONTROL PROTOCOL is
+    // the only way AskUserQuestion (and interactive tool-permission) works headless.
+    // The CLI auto-rejects AskUserQuestion with `Error: Answer questions?` in any
+    // mode UNLESS the driver speaks the control protocol: launch with
+    // `--permission-prompt-tool stdio` (+ a non-bypass `--permission-mode`), then
+    // answer the CLI's `can_use_tool` control_request with a control_response
+    // carrying `updatedInput.answers`. See SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md
+    // (§2 captured the exact wire bytes against bundled CLI v2.1.178).
     //
-    // #406 originally switched this to Subprocess to dodge a Windows
-    // anonymous-pipe "no response" hang in the then-Node.js CLI. The CLI is now a
-    // native binary (v2.1.x), so that root cause is gone; the spec's §10 smoke
-    // test confirmed persistent streams correctly against the native CLI.
+    // CRITICAL: `--dangerously-skip-permissions` DISABLES that routing (it bypasses
+    // canUseTool), so it must NOT be in persistent_launch_args. The persistent
+    // controller's ControlChannel auto-allows ordinary tools to preserve today's
+    // yolo UX; only AskUserQuestion is surfaced to the user.
     controller_type: ControllerType::Persistent,
     launch_args: &[
         "-p",
@@ -126,7 +128,12 @@ static CLAUDE: ProviderConfig = ProviderConfig {
         "stream-json",
         "--verbose",
         "--include-partial-messages",
-        "--dangerously-skip-permissions",
+        // Enable the control protocol so the sidecar can answer can_use_tool /
+        // AskUserQuestion. Replaces --dangerously-skip-permissions (which bypasses it).
+        "--permission-prompt-tool",
+        "stdio",
+        "--permission-mode",
+        "default",
     ]),
     resume_flag: Some("--resume"),
     session_id_field: "session_id",
