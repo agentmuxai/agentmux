@@ -9,6 +9,7 @@ import { initLogPipe } from "./log/log-pipe";
 import { initErrorForwarder } from "./log/error-forwarder";
 import { setupCefApi } from "./cef-init";
 import { initApp } from "./app-init";
+import { tryAutoRecover, clearStartupReloadCount } from "./app/init/error-display";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
 
@@ -72,6 +73,27 @@ document.addEventListener("webglcontextlost", (event) => {
     setTimeout(() => window.location.reload(), 1000);
 }, true);
 
+// ── Keyboard reload (host-window recovery) ───────────────────────────────────
+// AgentMux's app window is CEF, not a browser, so Ctrl+R / F5 aren't wired to a
+// page reload (the host's only reload path is for browser *panes*). Register a
+// capture-phase handler BEFORE the bridge handshake so it works even when the
+// UI is wedged on a startup failure — the exact state where users reach for it.
+//
+// SCOPED TO STARTUP ONLY: this handler is removed the moment the app finishes
+// loading (see the success path in bootstrap()). Leaving it active for the
+// whole session would hijack pane-level Ctrl+R — terminal reverse-i-search
+// (bash/zsh/readline), editor shortcuts — and reload the whole app instead.
+// [reagent #1424 P1]
+const startupReloadKeyHandler = (e: KeyboardEvent) => {
+    const isReload =
+        e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
+    if (isReload) {
+        e.preventDefault();
+        window.location.reload();
+    }
+};
+window.addEventListener("keydown", startupReloadKeyHandler, true);
+
 // ── Static CSS imports ──────────────────────────────────────────────────────
 import "overlayscrollbars/overlayscrollbars.css";
 import "./app/app.scss";
@@ -130,6 +152,12 @@ async function bootstrap() {
         try {
             await initApp();
             log("INFO", "✅ Main application loaded successfully");
+            // Successful startup — reset the auto-reload budget so a later,
+            // unrelated failure begins with a full set of retries, and drop the
+            // startup reload keybinding so pane-level Ctrl+R (terminal
+            // reverse-i-search, editor) works normally. [reagent #1424 P1]
+            clearStartupReloadCount();
+            window.removeEventListener("keydown", startupReloadKeyHandler, true);
         } catch (initError) {
             log("ERROR", "Failed in initApp:", initError);
             log("ERROR", "Init error name:", (initError as Error)?.name);
@@ -142,28 +170,19 @@ async function bootstrap() {
         log("ERROR", "❌ Bootstrap failed:", error);
         log("ERROR", "Stack:", (error as Error).stack);
 
-        document.body.innerHTML = "";
-        const errorDiv = document.createElement("div");
-        errorDiv.style.cssText = "padding: 20px; font-family: monospace; color: red;";
-
-        const title = document.createElement("h1");
-        title.textContent = "AgentMux Failed to Start";
-        errorDiv.appendChild(title);
-
-        const errorPre = document.createElement("pre");
-        errorPre.textContent = String(error);
-        errorDiv.appendChild(errorPre);
-
-        const stackPre = document.createElement("pre");
-        stackPre.textContent = (error as Error).stack || "";
-        errorDiv.appendChild(stackPre);
-
-        const helpText = document.createElement("p");
-        helpText.textContent = "Check the browser console (F12) for more details.";
-        errorDiv.appendChild(helpText);
-
-        document.body.appendChild(errorDiv);
-        throw error;
+        // Self-heal: a bridge-init failure is almost always transient (a Vite
+        // full-reload mid-change in dev, a slow backend spawn, or a stale
+        // pooled window). tryAutoRecover does a bounded auto-reload; only when
+        // the budget is exhausted does it render the recovery card (with a
+        // manual Reload). Either way the user never gets the old dead screen.
+        const detail = `${String(error)}\n\n${(error as Error)?.stack ?? ""}`.trim();
+        const reloading = tryAutoRecover(detail);
+        if (!reloading) {
+            // Recovery card is shown; re-throw so the structured error
+            // forwarder still ships the failure to the host log.
+            throw error;
+        }
+        // Page is about to reload — swallow so no UI flashes before navigation.
     }
 }
 
