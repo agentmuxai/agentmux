@@ -816,6 +816,44 @@ describe("agent document reducer", () => {
             ]);
         });
 
+        // AskUserQuestion answered before reload (conversation continued past
+        // the question) — must resolve to `success` and clear `question` so the
+        // question panel does NOT re-surface. SPEC_ASK_USER_QUESTION §13/Phase 3.
+        it("resolves an answered AskUserQuestion (content after) to success", () => {
+            const q = tool("q1", {
+                status: "awaiting_answer",
+                question: { type: "ask_user_question", tool_use_id: "q1", questions: [] },
+                summary: "❓ Waiting for your answer",
+            });
+            const after = md("m1", "the agent continued after the answer");
+            const r = update(seed([q, after]), { type: "ScrubOrphanedInProgress", at: 1000 });
+            const scrubbed = r.state.nodes[0] as ToolNode;
+            expect(scrubbed.status).toBe("success");
+            expect(scrubbed.question).toBeUndefined();
+            expect(scrubbed.summary).toBe("❓ Question answered");
+            expect(r.events).toEqual([
+                { type: "orphans-scrubbed", markdownCanceled: 0, toolsCanceled: 1 },
+            ]);
+        });
+
+        // A TAIL AskUserQuestion is left alone — a one-shot agent's turn ends
+        // (SessionEnd) with the question as the tail, and it's still
+        // answerable via a follow-up resume turn. Scrubbing it would kill the
+        // panel before the user could answer.
+        it("leaves a tail-pending AskUserQuestion untouched", () => {
+            const q = tool("q1", {
+                status: "awaiting_answer",
+                question: { type: "ask_user_question", tool_use_id: "q1", questions: [] },
+                summary: "❓ Waiting for your answer",
+            });
+            const s0 = seed([md("m1"), q]);
+            const r = update(s0, { type: "ScrubOrphanedInProgress", at: 1000 });
+            // No allocation, no events — nothing to scrub.
+            expect(r.state).toBe(s0);
+            expect((r.state.nodes[1] as ToolNode).status).toBe("awaiting_answer");
+            expect(r.events).toEqual([]);
+        });
+
         // Codex + reagent P2 on #1104: scrubbing must also close
         // the streaming log. Otherwise ToolBlock's live-tail branch
         // (gated on log.open) keeps rendering a canceled tool as
