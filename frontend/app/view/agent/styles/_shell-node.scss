@@ -155,8 +155,12 @@
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--main-bg-color, #161616);
+    // Stronger separation from the pane content below: a slightly elevated
+    // surface + a 2px accent-tinted divider make the pinned region read as a
+    // distinct "dock" rather than blending into the transcript.
+    border-bottom: 2px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+    background: var(--elevated-bg-color, #1d1d20);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
     max-height: 45%;            // never let the dock eat the whole pane
     overflow-y: auto;
     z-index: 2;
@@ -201,7 +205,8 @@
 .agent-activity-title {
     flex: 0 0 auto;
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
+    color: var(--main-text-color);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -211,7 +216,8 @@
 .agent-activity-elapsed {
     flex: 0 0 auto;
     font-size: 11px;
-    color: var(--secondary-text-color);
+    color: var(--main-text-color);
+    opacity: 0.8;
     white-space: nowrap;
 }
 
@@ -219,38 +225,59 @@
     flex: 1 1 0;
     min-width: 0;
     font-size: 11px;
-    color: var(--secondary-text-color);
+    color: var(--main-text-color);
+    font-family: var(--fixed-font, monospace);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    opacity: 0.75;
+    opacity: 0.9;
 }
 
 .agent-activity-stop,
 .agent-activity-dismiss {
     flex: 0 0 auto;
     margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    // The summary row is `align-items: baseline` (so the text baselines line up);
+    // without this the taller button hangs off the text baseline. Center it in
+    // the row instead.
+    align-self: center;
+    min-width: 32px;
+    height: 32px;
     appearance: none;
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
-    color: var(--secondary-text-color);
-    font-size: 11px;
+    color: var(--main-text-color);
+    font-size: 22px;
     line-height: 1;
-    padding: 2px 6px;
-    border-radius: 3px;
+    padding: 0 9px;
+    border-radius: 6px;
     cursor: pointer;
-    opacity: 0.55;
-    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+    opacity: 0.75;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 
     &:hover {
         opacity: 1;
         color: var(--error-color, #ff6b6b);
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+        border-color: color-mix(in srgb, var(--error-color, #ff6b6b) 45%, transparent);
     }
 }
 
+// Dismiss (×) glyph is scaled up well past the stop button — a big, obvious
+// target for clearing a finished activity. `font-size` is what actually grows
+// the glyph (the earlier `height` bump only stretched the row). Stop keeps the
+// shared 22px sizing above.
+.agent-activity-dismiss {
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1;
+}
+
 .agent-activity-summary:hover .agent-activity-stop,
-.agent-activity-summary:hover .agent-activity-dismiss { opacity: 0.85; }
+.agent-activity-summary:hover .agent-activity-dismiss { opacity: 0.95; }
 
 // Expanded live log — reuses the tool-overlay log line styles.
 .agent-activity-log {
