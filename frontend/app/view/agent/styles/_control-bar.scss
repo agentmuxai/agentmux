@@ -45,6 +45,179 @@
         flex-direction: column;
     }
 
+    // === Gradient Progress Bar ===
+    // 2px bar pinned position:absolute top:0. .agent-view already has
+    // position:relative (agent-view.scss). Animated while working, hidden
+    // at rest. All colors derived from --accent-color + --main-text-color
+    // via color-mix() so they adapt to every theme without hardcoded hex.
+    // SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §4.
+    .agent-pane-progress-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        z-index: var(--z-pane-overlay, 4);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 200ms ease;
+
+        background: linear-gradient(
+            90deg,
+            color-mix(in srgb, var(--accent-color) 35%, transparent)            0%,
+            var(--accent-color)                                                  25%,
+            color-mix(in srgb, var(--accent-color) 55%, var(--main-text-color)) 50%,
+            var(--accent-color)                                                  75%,
+            color-mix(in srgb, var(--accent-color) 35%, transparent)           100%
+        );
+        background-size: 200% 100%;
+
+        &--active {
+            opacity: 1;
+            animation: agent-gradient-sweep 2s linear infinite;
+        }
+
+        &--active#{&}--stopping {
+            opacity: 0.55;
+        }
+    }
+
+    @keyframes agent-gradient-sweep {
+        from { background-position: 200% 0; }
+        to   { background-position: -200% 0; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .agent-pane-progress-bar--active {
+            animation: none;
+            background: linear-gradient(
+                90deg,
+                color-mix(in srgb, var(--accent-color) 30%, transparent) 0%,
+                var(--accent-color)                                       50%,
+                color-mix(in srgb, var(--accent-color) 30%, transparent) 100%
+            );
+            background-size: 100% 100%;
+        }
+    }
+
+    // === Working Row ===
+    // Shown immediately below AgentDocumentView in the conversation area.
+    // No idle placeholder — component returns null when neither loading nor
+    // has completed stats. Direct child selector avoids collisions with any
+    // .agent-working-row inside AgentDocumentView.
+    // SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2.
+    > .agent-working-row {
+        font-size: 10px;
+        font-family: var(--fixed-font, monospace);
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: var(--space-1) var(--space-3) var(--space-1-5);
+        flex-shrink: 0;
+
+        &--loading {
+            color: var(--accent-color);
+            background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+            position: relative;
+            overflow: hidden;
+            isolation: isolate;
+
+            // Spotlight sweep — theme-derived, replaces hardcoded magenta rgba
+            &::before {
+                content: "";
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                width: 40%;
+                pointer-events: none;
+                background: linear-gradient(
+                    90deg,
+                    transparent                                                           0%,
+                    color-mix(in srgb, var(--accent-color) 12%, transparent)            35%,
+                    color-mix(in srgb, var(--accent-color) 28%, var(--main-text-color)) 50%,
+                    color-mix(in srgb, var(--accent-color) 12%, transparent)            65%,
+                    transparent                                                          100%
+                );
+                mix-blend-mode: screen;
+                animation: agent-spotlight-sweep 2.8s ease-in-out infinite alternate;
+                z-index: 0;
+                will-change: transform;
+            }
+
+            .agent-spinner-dot,
+            .agent-working-row-left,
+            .agent-working-row-right {
+                position: relative;
+                z-index: 1;
+            }
+
+            .agent-working-row-left {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-working-row-right {
+                flex-shrink: 0;
+                opacity: 0.7;
+                margin-left: var(--space-2);
+            }
+        }
+
+        &--worked {
+            color: var(--secondary-text-color);
+            opacity: 0.55;
+            justify-content: space-between;
+
+            .agent-working-row-left {
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-working-row-right {
+                flex-shrink: 0;
+                margin-left: var(--space-2);
+                display: inline-flex;
+                align-items: center;
+                gap: var(--space-1-5);
+            }
+
+            .agent-working-row-secondary {
+                color: var(--secondary-text-color);
+                opacity: 0.7;
+            }
+        }
+    }
+
+    // === Aux Info Bar ===
+    // Static model · effort · permission strip (AgentAuxInfoBar).
+    > .agent-aux-info-bar {
+        min-height: 14px;
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        padding: var(--space-0-5) var(--space-2);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 5px;
+        font-family: var(--fixed-font, monospace);
+
+        .agent-aux-info-summary {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+
     // === Control Bar ===
     // Anchored to the bottom of the pane below AgentFooter (see
     // SPEC_AGENT_PANE_FOLLOWUPS item #7). Border on top so it reads
@@ -113,11 +286,11 @@
                 pointer-events: none;
                 background: linear-gradient(
                     90deg,
-                    transparent 0%,
-                    rgba(224, 170, 255, 0.10) 35%,
-                    rgba(224, 170, 255, 0.30) 50%,
-                    rgba(224, 170, 255, 0.10) 65%,
-                    transparent 100%
+                    transparent                                                           0%,
+                    color-mix(in srgb, var(--accent-color) 12%, transparent)            35%,
+                    color-mix(in srgb, var(--accent-color) 28%, var(--main-text-color)) 50%,
+                    color-mix(in srgb, var(--accent-color) 12%, transparent)            65%,
+                    transparent                                                          100%
                 );
                 mix-blend-mode: screen;
                 animation: agent-spotlight-sweep 2.8s ease-in-out infinite alternate;
@@ -189,7 +362,7 @@
         animation: agent-pulse 1.2s ease-in-out infinite;
         // Subtle halo that breathes with the pulse — gives the dot
         // a little more life without interfering with the spotlight.
-        box-shadow: 0 0 6px rgba(140, 200, 255, 0.55);
+        box-shadow: 0 0 6px color-mix(in srgb, var(--accent-color) 60%, transparent);
     }
 
     @keyframes agent-pulse {
