@@ -278,7 +278,11 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                     {showPath() ? "Hide" : "Show"} effective PATH
                                 </button>
                                 <Show when={showPath()}>
-                                    <pre class="toolchain-path-dump">{e().path.split(":").join("\n")}</pre>
+                                    <pre class="toolchain-path-dump">
+                                        {e()
+                                            .path.split(e().os === "windows" ? ";" : ":")
+                                            .join("\n")}
+                                    </pre>
                                 </Show>
                             </>
                         )}
