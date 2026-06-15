@@ -119,3 +119,50 @@
     flex-shrink: 0;
     justify-content: flex-end;
 }
+
+// ── Trust Center secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
+
+.identity-key-egress-note {
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--secondary-text-color);
+    background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+    border-radius: var(--radius-sm, 4px);
+    padding: var(--space-2);
+    margin: var(--space-1) 0 var(--space-2);
+
+    code {
+        font-family: var(--fixed-font, monospace);
+        color: var(--main-text-color);
+    }
+}
+
+.identity-key-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.identity-key-locked {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 4px);
+
+    .identity-key-masked {
+        font-family: var(--fixed-font, monospace);
+        font-size: 13px;
+        letter-spacing: 1px;
+        color: var(--main-text-color);
+    }
+
+    .identity-key-locked-note {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        flex: 1 1 auto;
+    }
+}

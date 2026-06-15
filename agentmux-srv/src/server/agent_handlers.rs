@@ -112,6 +112,20 @@ struct VerifyKeyReq {
     /// Set to replace the key on an existing account; empty mints a new one.
     #[serde(default)]
     account_id: String,
+    /// User-entered, non-secret context (github_username, scopes, notes, …).
+    /// Merged over any existing context so editing a key never wipes fields
+    /// the user set previously.
+    #[serde(default)]
+    context: serde_json::Value,
+}
+
+/// Shallow-merge the keys of `overlay` (if both are JSON objects) into `base`.
+fn merge_json_object(base: &mut serde_json::Value, overlay: &serde_json::Value) {
+    if let (Some(b), Some(o)) = (base.as_object_mut(), overlay.as_object()) {
+        for (k, v) in o {
+            b.insert(k.clone(), v.clone());
+        }
+    }
 }
 
 pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -1281,8 +1295,22 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("account.key.verify: {e}"))?;
                 }
 
-                // Non-secret context for display: metadata + masked tail.
-                let mut context = metadata;
+                // Fetch the existing row once (replacement path) — preserves
+                // created_at and any previously-stored context.
+                let existing = wstore.identity_get(&account_id).ok().flatten();
+
+                // Non-secret context, merged so nothing the user set is lost:
+                //   existing context  →  user-entered context  →  validation
+                //   metadata  →  masked tail.
+                let mut context = existing
+                    .as_ref()
+                    .map(|a| a.context.clone())
+                    .unwrap_or_else(|| serde_json::json!({}));
+                if !context.is_object() {
+                    context = serde_json::json!({});
+                }
+                merge_json_object(&mut context, &req.context);
+                merge_json_object(&mut context, &metadata);
                 if let serde_json::Value::Object(ref mut m) = context {
                     m.insert("masked_tail".to_string(), serde_json::json!(masked_tail));
                 }
@@ -1291,10 +1319,8 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
-                let created_at = wstore
-                    .identity_get(&account_id)
-                    .ok()
-                    .flatten()
+                let created_at = existing
+                    .as_ref()
                     .map(|a| a.created_at)
                     .filter(|&c| c != 0)
                     .unwrap_or(now);
