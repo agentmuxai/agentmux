@@ -273,14 +273,32 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                     }, 250);
                 }
             }),
-            // Ctrl+S → save
-            keymap.of([{
-                key: "Mod-s",
-                run: () => {
-                    void model.saveFile();
-                    return true;
+            // Ctrl+S → save; on scratch tabs triggers Save As instead.
+            // Ctrl+Shift+S → Save As for scratch tabs only (Phase 1; non-scratch Save As is Phase 2).
+            keymap.of([
+                {
+                    key: "Mod-s",
+                    run: () => {
+                        if (model.activeTabAtom()?.isScratch) {
+                            triggerSaveAs();
+                        } else {
+                            void model.saveFile();
+                        }
+                        return true;
+                    },
                 },
-            }]),
+                {
+                    key: "Mod-Shift-s",
+                    run: () => {
+                        // Phase 1: Save As is only implemented for scratch tabs.
+                        // Don't swallow the key for non-scratch tabs so the OS
+                        // default (or a future handler) can still see it.
+                        if (!model.activeTabAtom()?.isScratch) return false;
+                        triggerSaveAs();
+                        return true;
+                    },
+                },
+            ]),
         ];
 
         if (readOnly) {
@@ -401,6 +419,19 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             void model.openFile(path);
             setFileInput("");
         }
+    };
+
+    // ── Save As flow (scratch tabs) ───────────────────────────────────
+    const [saveAsTabId, setSaveAsTabId] = createSignal<string | null>(null);
+
+    const triggerSaveAs = () => {
+        const tab = model.activeTabAtom();
+        if (tab?.isScratch) setSaveAsTabId(tab.id);
+    };
+
+    const handleSaveAsConfirm = async (path: string) => {
+        setSaveAsTabId(null);
+        if (path) await model.saveFileAs(path);
     };
 
     // ── File-tree context menu ────────────────────────────────────────
@@ -579,7 +610,12 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
             <div class="editor-main-column">
                 <Show when={model.tabsAtom().length > 0}>
-                    <EditorTabStrip model={model} />
+                    <EditorTabStrip
+                        model={model}
+                        saveAsTabId={saveAsTabId()}
+                        onSaveAsConfirm={(path) => void handleSaveAsConfirm(path)}
+                        onSaveAsCancel={() => setSaveAsTabId(null)}
+                    />
                 </Show>
 
                 <Show when={model.loadingAtom()}>
