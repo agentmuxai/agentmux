@@ -385,6 +385,7 @@ async fn call_tool(
             let message = arguments
                 .get("message")
                 .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: message"))?;
 
             if local_url.is_empty() || auth_key.is_empty() {
