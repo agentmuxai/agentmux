@@ -399,11 +399,24 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [keyReplacing, setKeyReplacing] = createSignal(!editingIsKeychain);
     const validationEndpoint = (): string | undefined => KEY_VALIDATION_ENDPOINT[provider()];
 
-    // Build the non-secret context from the form fields, layered over the
-    // editing account's existing context so keys we don't render (masked_tail,
-    // validation metadata from account.key.verify) survive an edit.
+    // Non-rendered context keys: not editable in the form, so they must be
+    // carried across an edit rather than dropped. Everything else is rebuilt
+    // fresh from the form so cleared fields are removed and a provider switch
+    // doesn't leak stale provider-specific keys. (github_username/scopes are
+    // form fields, so they intentionally follow the form, not this list.)
+    const PRESERVED_CONTEXT_KEYS: (keyof AccountContext)[] = [
+        "masked_tail",
+        "openai_model_count",
+        "anthropic_model_count",
+        "slack_team",
+        "slack_user",
+    ];
+
+    // Build the non-secret context fresh from the form fields, then re-apply
+    // only the non-rendered keys (masked_tail + validation metadata) so a
+    // metadata-only edit doesn't wipe them.
     const buildContext = (): AccountContext => {
-        const context: AccountContext = { ...(editing()?.context ?? {}) };
+        const context: AccountContext = {};
         if (provider() === "github") {
             if (ghUsername()) context.github_username = ghUsername().trim();
             if (ghScopes()) context.github_scopes = ghScopes().split(",").map((s) => s.trim()).filter(Boolean);
@@ -417,6 +430,12 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             if (anthropicModel()) context.anthropic_model = anthropicModel().trim();
         }
         if (description()) context.description = description().trim();
+        const prior = editing()?.context;
+        if (prior) {
+            for (const k of PRESERVED_CONTEXT_KEYS) {
+                if (prior[k] !== undefined) (context[k] as unknown) = prior[k];
+            }
+        }
         return context;
     };
 
