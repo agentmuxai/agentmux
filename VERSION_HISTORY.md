@@ -1,5 +1,43 @@
 # AgentMux Version History
 
+## 0.46.0 — 2026-06-15
+
+- feat(agent): backfill pre-existing agent conversations into the global transcript store
+- docs(macos): document release-artifact verification (maps/symbols/channel stripped) + build-from-tag and non-Desktop output-dir gotchas
+- fix(build): slim the Linux AppImage — strip frontend source maps (~28MB) and use max-level zstd compression
+- feat(agent-pane): add `!cmd` shell execution prefix to run commands in the agent working directory
+- fix(build): commit canonical CEF GN args + configure script so libcef rebuilds are slim by default; stop resolve-cef-runtime crying 'unpatched upstream' on the correct unstripped official build
+- feat(editor): Save As inline path entry for scratch buffers (Ctrl+S / Ctrl+Shift+S)
+- feat(editor): context menu polish — confirm dialog, Collapse Folder, F2 rename shortcut
+- feat(agent): default Claude runtime to Opus + xhigh effort, add xhigh effort level — `xhigh` (between high and max) is the coding/agentic sweet spot and Claude Code's own default; the default model now resolves to the current Opus (4.8)
+- feat(windows): native-CEF Inno Setup .exe installer (`task package:installer`) — per-user install with the AgentMux icon, replacing the removed Tauri-era installer.
+- fix(agent-pane): normalize MSYS /c/ cwd for persistent Shell so task dev / vite servers spawn on Windows (os error 267)
+- feat(editor): scratch buffers, file-tree context menu, widget default UX
+- fix(agent): bump codex default model to gpt-5.5 and stop sending `--effort` to Claude Haiku (it 400s on Haiku 4.5) — first slice of the per-provider models/effort generalization (SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION)
+- fix(srv): unsubscribe WPS broker on WebSocket disconnect — stops ~1000/min handle leak (closes #1125)
+- feat(tabs): content-aware tab sizing — measure label text, size each tab to fit (VS Code shrink model)
+- feat(build): add release-time BeginWindowDrag-patch gate for Linux libcef.so (verify-cef-patch.sh) — advisory in bundle:linux, hard gate in build-appimage-linux.sh
+- feat(agent): per-provider model lists + provider-aware `/model` — the `/model` picker now shows the active provider's models (Claude opus/sonnet/haiku, Codex gpt-5.5/gpt-5.4/gpt-5.1-codex-max/gpt-5.3-codex) and Codex honors the picked model; runtime `model` is now provider-scoped (P2 + model-side of P3 from SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION)
+- feat(agent-pane): persistent shell node Phase 3 — ShellStop tool + UI stop button (tree-kill, no more taskkill roulette)
+- fix(widgets): repair phantom drop indicator after right-click unpin — replaces brittle ref/signal dual-state with a single DragState machine, adds primary-button guard and global OS-interrupt cleanup (closes #1432)
+- fix(startup): self-heal + recovery UI for host-bridge init failure (auto-reload guard, Reload button, Ctrl+R/F5 keybinding)
+- fix(agent-pane): scope subagent ⚡ panels to the owning pane so terminal-spawned subagents stop leaking into unrelated agent panes
+- feat(editor): bind CodeMirror colors to the global theme and tighten the line-number gutter
+- feat(agent-pane): pinned activity dock (Phase 1) — long-running shells pinned atop the pane, click to expand live log
+- feat(trust-center): rename the app-wide "Identity & Memory" hub to "Trust Center" and add an Accounts tab for managing service credentials alongside Identity and Memory bundles
+- feat(trust-center): secure API-key storage backend — validate keys against the live service, store them in the OS keychain (never plaintext in the DB), and expose them via the new account.key.verify RPC
+- feat(trust-center): secure API-key entry UI — paste a key, Validate (one user-initiated probe with an inline egress notice) or save without validating; keys are stored in the OS keychain and shown masked + non-recoverable with a Replace action
+- feat(trust-center): add OpenAI as a key-based account provider (validated against api.openai.com/v1/models), with icon and per-agent assignment support
+- feat(agent): OpenEditor MCP tool + /api/v1/pane/open route so agents can open editor panes
+- feat(trust-center): service OAuth 2.0 client scaffold — Authorization Code + PKCE (loopback) and Device Flow per RFC 8252/7636/8628/9700, with account.oauth.* RPCs; gated on per-provider client ids (inert until provisioned or supplied as BYO)
+- fix(tabs): increase tab padding to match VS Code feel; resize live while typing during rename
+- feat(muxbus): delivery hierarchy P1+P2 — agent ID injection, URL fix, cloud push subscriber
+- fix(agent): tool live-tail skips system chunks — shows last stdout/stderr or elapsed timer while waiting
+- fix(release): use only the changeset title line in VERSION_HISTORY, not every body line
+- feat(agent): render AskUserQuestion as an interactive panel and deliver the answer to the agent
+- fix(markdown): make the table-of-contents reactive to streaming text
+
+
 ## 0.45.0 — 2026-06-14
 
 - fix(container): thread global_output_zone through the container-exec output path (publish_line) so main compiles — semantic merge conflict between #1399 and #1357 (#1401)
