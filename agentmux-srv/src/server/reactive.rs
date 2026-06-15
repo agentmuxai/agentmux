@@ -173,8 +173,10 @@ pub(super) async fn handle_reactive_register(
             agent_registry::write(&data_dir, &req.agent_id, &state.local_web_url, &req.block_id);
 
             // Auto-watch this agent's Claude Code config dir for subagent JSONL files.
+            // Pass block_id so subagent events are stamped with the owning pane,
+            // letting the frontend route ⚡ panels to that pane only.
             if let Some(config_dir) = subagent_watcher::derive_claude_config_dir(&req.agent_id) {
-                state.subagent_watcher.watch_agent(&req.agent_id, config_dir);
+                state.subagent_watcher.watch_agent(&req.agent_id, &req.block_id, config_dir);
             }
 
             Json(json!({"success": true})).into_response()

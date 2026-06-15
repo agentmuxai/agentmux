@@ -22,6 +22,14 @@ import type { DocumentNode, SubagentLinkNode } from "../types";
 import type { LogFn } from "./useAgentControllerStatus";
 
 export interface UseSubagentEventsOptions {
+    /**
+     * The block id of THIS agent pane. subagent:* events are a global
+     * broadcast stamped with `parentBlockId` (the pane that owns the parent
+     * Claude). We only render subagents whose parentBlockId matches, so a
+     * subagent spawned by an unrelated pane — or by a Claude running in a
+     * terminal pane — does not leak a ⚡ panel into this pane.
+     */
+    blockId: string;
     documentAtom: SignalPair<DocumentNode[]>;
     log: LogFn;
 }
@@ -35,6 +43,10 @@ export function useSubagentEvents(opts: UseSubagentEventsOptions): void {
             handler: (event: WaveEvent) => {
                 const data = event?.data as any;
                 if (!data?.agentId) return;
+                // Drop subagents owned by a different pane (or no pane). This is
+                // the fix for ⚡ panels leaking into unrelated agent panes — the
+                // event is broadcast to every client, so each pane must filter.
+                if (data.parentBlockId !== opts.blockId) return;
                 const linkNode: SubagentLinkNode = {
                     type: "subagent_link",
                     id: `subagent_${data.agentId}`,
@@ -56,6 +68,7 @@ export function useSubagentEvents(opts: UseSubagentEventsOptions): void {
             handler: (event: WaveEvent) => {
                 const data = event?.data as any;
                 if (!data?.agentId) return;
+                if (data.parentBlockId !== opts.blockId) return;
                 const nodeId = `subagent_${data.agentId}`;
                 setDoc((prev) =>
                     prev.map((n) =>

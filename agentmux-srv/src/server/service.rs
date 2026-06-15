@@ -2290,7 +2290,14 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            state.subagent_watcher.watch_agent(&agent_id, std::path::PathBuf::from(config_dir));
+            // Optional block_id (arg 2) — stamps emitted subagent events with the
+            // owning pane so the frontend can filter. Defaults to "" for callers
+            // that don't supply it (events then match no pane, which is correct
+            // for this manual/legacy entry point).
+            let block_id: String = service::get_optional_arg(args, 2)
+                .unwrap_or(None)
+                .unwrap_or_default();
+            state.subagent_watcher.watch_agent(&agent_id, &block_id, std::path::PathBuf::from(config_dir));
             WebReturnType::success_empty()
         }
 
