@@ -37,6 +37,7 @@ use crate::backend::rpc_types::{
     // v6 identity / instance / fork
     COMMAND_LIST_IDENTITY_ACCOUNTS, COMMAND_GET_IDENTITY_ACCOUNT,
     COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
+    COMMAND_ACCOUNT_KEY_VERIFY,
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES,
     COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,
@@ -81,10 +82,37 @@ use crate::backend::rpc_types::{
 };
 use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
 use crate::backend::storage::store::{
-    AgentInstance, Identity, IdentityAccount, InstanceStatus, Memory,
+    AgentInstance, Identity, IdentityAccount, InstanceStatus, Memory, SecretRef,
 };
 
 use super::AppState;
+
+/// Request for `account.key.verify` (Trust Center key flow). The `api_key`
+/// field is a secret — never log this struct.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyKeyReq {
+    /// Service id: "github" | "openai" | "anthropic" | "slack" | … .
+    provider: String,
+    /// Account display name (user-chosen label).
+    name: String,
+    #[serde(default)]
+    display_name: String,
+    /// Account kind; defaults to "api_key" when empty.
+    #[serde(default)]
+    kind: String,
+    /// The pasted secret. Used once to (optionally) validate + store in the
+    /// OS keychain, then dropped. Never persisted in the DB, never logged.
+    api_key: String,
+    /// When true, run a live validation probe before storing (user clicked
+    /// "Validate"). When false, store with status "unknown" (the "Save
+    /// without validating" air-gapped path).
+    #[serde(default)]
+    validate: bool,
+    /// Set to replace the key on an existing account; empty mints a new one.
+    #[serde(default)]
+    account_id: String,
+}
 
 pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // listagents → return all agent definitions, optionally filtered by
@@ -1191,6 +1219,109 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+    // Trust Center: validate (optional) + securely store an API key.
+    // The plaintext goes to the OS keychain; the DB row keeps only the
+    // SecretRef::Keychain pointer + masked tail + non-secret metadata.
+    // See specs/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_ACCOUNT_KEY_VERIFY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                // NB: `req.api_key` is a secret — never log `req`.
+                let req: VerifyKeyReq = serde_json::from_value(data)
+                    .map_err(|e| format!("account.key.verify: {e}"))?;
+
+                let account_id = if req.account_id.is_empty() {
+                    uuid::Uuid::new_v4().to_string()
+                } else {
+                    req.account_id.clone()
+                };
+
+                // Optional live validation — the single outbound probe, fired
+                // only when the user clicked "Validate" (validate=true).
+                let (status, metadata, masked_tail, valid) = if req.validate {
+                    let outcome =
+                        crate::identity::key_validator::validate(&req.provider, &req.api_key).await;
+                    if !outcome.valid {
+                        // Nothing stored — surface a structured error so the UI
+                        // stays in the entry state.
+                        return Ok(Some(serde_json::json!({
+                            "valid": false,
+                            "error": outcome.error.unwrap_or_else(|| "validation failed".to_string()),
+                        })));
+                    }
+                    ("valid".to_string(), outcome.metadata, outcome.masked_tail, true)
+                } else {
+                    (
+                        "unknown".to_string(),
+                        serde_json::json!({}),
+                        crate::identity::key_validator::masked_tail(&req.api_key),
+                        false,
+                    )
+                };
+
+                // Store the plaintext in the OS keychain; the DB never sees it.
+                crate::identity::secret_store::put(&account_id, &req.api_key)
+                    .map_err(|e| format!("account.key.verify: {e}"))?;
+
+                // Non-secret context for display: metadata + masked tail.
+                let mut context = metadata;
+                if let serde_json::Value::Object(ref mut m) = context {
+                    m.insert("masked_tail".to_string(), serde_json::json!(masked_tail));
+                }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                let created_at = wstore
+                    .identity_get(&account_id)
+                    .ok()
+                    .flatten()
+                    .map(|a| a.created_at)
+                    .filter(|&c| c != 0)
+                    .unwrap_or(now);
+
+                let account = IdentityAccount {
+                    id: account_id.clone(),
+                    name: req.name.clone(),
+                    provider: req.provider.clone(),
+                    kind: if req.kind.is_empty() { "api_key".to_string() } else { req.kind.clone() },
+                    display_name: req.display_name.clone(),
+                    secret_ref: SecretRef::Keychain {
+                        service: crate::identity::secret_store::SERVICE.to_string(),
+                        account: crate::identity::secret_store::account_key(&account_id),
+                    },
+                    context,
+                    status,
+                    created_at,
+                    updated_at: now,
+                };
+                wstore
+                    .identity_upsert(&account)
+                    .map_err(|e| format!("account.key.verify: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "identityaccounts:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(serde_json::json!({
+                    "valid": valid,
+                    "accountId": account_id,
+                    "maskedTail": account.context.get("masked_tail").cloned().unwrap_or_default(),
+                    "status": account.status,
+                    "metadata": account.context,
+                })))
+            })
+        }),
+    );
+
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
@@ -1201,6 +1332,15 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let cmd: CommandDeleteIdentityAccountData = serde_json::from_value(data)
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;
+                // If this account stored its secret in the OS keychain, drop
+                // it too so no orphaned credential survives the DB row.
+                if let Ok(Some(acct)) = wstore.identity_get(&cmd.id) {
+                    if matches!(acct.secret_ref, SecretRef::Keychain { .. }) {
+                        if let Err(e) = crate::identity::secret_store::delete(&cmd.id) {
+                            tracing::warn!(target: "identity", "keychain delete for {} failed: {e}", cmd.id);
+                        }
+                    }
+                }
                 let deleted = wstore
                     .identity_delete(&cmd.id)
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;

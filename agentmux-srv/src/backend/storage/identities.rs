@@ -63,6 +63,19 @@ pub enum SecretRef {
         /// (PR E).
         dir: String,
     },
+    /// **API key / token stored in the OS-native secret store** (macOS
+    /// Keychain / Windows Credential Manager / Linux Secret Service),
+    /// addressed by `(service, account)`. The plaintext is NEVER held in
+    /// the DB — only this pointer. Written by the Trust Center key flow
+    /// after a successful live validation; resolved to the real value at
+    /// agent spawn time via `crate::identity::secret_store`. See
+    /// specs/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+    Keychain {
+        /// Keychain service string — always `"agentmux"`.
+        service: String,
+        /// Keychain account string — `"acct:<account_id>"`.
+        account: String,
+    },
 }
 
 /// An identity account (reusable credential, linked to agents via the

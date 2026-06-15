@@ -300,6 +300,12 @@ pub const COMMAND_LIST_IDENTITY_ACCOUNTS: &str = "listidentityaccounts";
 pub const COMMAND_GET_IDENTITY_ACCOUNT: &str = "getidentityaccount";
 pub const COMMAND_UPSERT_IDENTITY_ACCOUNT: &str = "upsertidentityaccount";
 pub const COMMAND_DELETE_IDENTITY_ACCOUNT: &str = "deleteidentityaccount";
+/// Trust Center: validate (optional, user-initiated) + securely store an API
+/// key. The plaintext goes to the OS keychain; the DB keeps only a
+/// `SecretRef::Keychain` pointer + masked tail + metadata. Used for both new
+/// accounts and replacing a key on an existing one (via `accountId`).
+/// See specs/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+pub const COMMAND_ACCOUNT_KEY_VERIFY: &str = "account.key.verify";
 
 // Agent ↔ Identity junction
 pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";
