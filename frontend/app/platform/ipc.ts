@@ -14,6 +14,8 @@ import { recordIpcRoundtrip } from "@/perf";
  */
 export type HostType = "cef" | "browser";
 
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 export function detectHost(): HostType {
     if (typeof window.__AGENTMUX_IPC_PORT__ !== "undefined") {
         return "cef";
@@ -43,29 +45,69 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
 
     switch (host) {
         case "cef": {
-            const port = window.__AGENTMUX_IPC_PORT__;
-            const token = window.__AGENTMUX_IPC_TOKEN__;
-            if (!port) {
-                throw new Error("IPC port not injected by CEF host");
-            }
-            const resp = await fetch(`http://127.0.0.1:${port}/ipc`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({ cmd, args: args ?? {} }),
-            });
-            if (!resp.ok) {
+            // The host re-injects fresh, self-consistent ipc_port + ipc_token into
+            // the window globals on EVERY page load (on_load_end, agentmux-cef
+            // client/mod.rs). On a reload there's a brief window where the first
+            // IPC call can race ahead of that injection — stale/missing creds yield
+            // a 401 (or no port) — which previously failed bridge init outright and
+            // wedged the window in the recovery loop. Re-read the globals each
+            // attempt and retry a few times so the freshly-injected creds self-heal
+            // the race. Real errors (non-401 HTTP, IPC-level failures) still throw
+            // immediately. See SPEC_BRIDGE_INIT_RECOVERY / token-retry follow-up.
+            const MAX_ATTEMPTS = 6;
+            const RETRY_DELAY_MS = 250;
+            let lastErr: Error | null = null;
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+                // Re-read every attempt — on_load_end keeps these fresh.
+                const port = window.__AGENTMUX_IPC_PORT__;
+                const token = window.__AGENTMUX_IPC_TOKEN__;
+                if (!port || !token) {
+                    lastErr = new Error("IPC credentials not yet injected by CEF host");
+                    if (attempt < MAX_ATTEMPTS) await delay(RETRY_DELAY_MS);
+                    continue;
+                }
+                let resp: Response;
+                try {
+                    resp = await fetch(`http://127.0.0.1:${port}/ipc`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({ cmd, args: args ?? {} }),
+                    });
+                } catch (e) {
+                    // Network/transport error: the POST may have already reached the
+                    // host and been applied before the connection dropped, so a
+                    // blind retry could double-apply a mutating command (or a
+                    // fire-and-forget input dispatch). Propagate instead of retrying
+                    // — matching the pre-retry behavior. The retries that ARE safe
+                    // (no request was sent, or the host explicitly rejected it) are
+                    // the missing-creds and 401 cases above; the cred-injection race
+                    // is otherwise handled upfront by waitForIpcCreds (cef-init.ts).
+                    recordIpcRoundtrip(cmd, performance.now() - t0);
+                    throw e instanceof Error ? e : new Error(String(e));
+                }
+                if (resp.status === 401) {
+                    // Stale token — the host re-injects a fresh one on load. Wait,
+                    // re-read the globals, and retry rather than failing the bridge.
+                    lastErr = new Error("IPC unauthorized (stale token)");
+                    if (attempt < MAX_ATTEMPTS) await delay(RETRY_DELAY_MS);
+                    continue;
+                }
+                if (!resp.ok) {
+                    recordIpcRoundtrip(cmd, performance.now() - t0);
+                    throw new Error(`IPC HTTP error: ${resp.status} ${resp.statusText}`);
+                }
+                const parsed = await resp.json();
                 recordIpcRoundtrip(cmd, performance.now() - t0);
-                throw new Error(`IPC HTTP error: ${resp.status} ${resp.statusText}`);
+                if (parsed.success) {
+                    return parsed.data as T;
+                }
+                throw new Error(parsed.error ?? "IPC error");
             }
-            const parsed = await resp.json();
             recordIpcRoundtrip(cmd, performance.now() - t0);
-            if (parsed.success) {
-                return parsed.data as T;
-            }
-            throw new Error(parsed.error ?? "IPC error");
+            throw lastErr ?? new Error(`IPC '${cmd}' failed after ${MAX_ATTEMPTS} attempts`);
         }
 
         case "browser":

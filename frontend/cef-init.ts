@@ -10,6 +10,31 @@
 import { buildCefApi, initCefApi, isCef } from "@/util/cef-api";
 
 /**
+ * Poll the window globals until the host has injected the IPC port + token, or
+ * the bound elapses.
+ *
+ * On first load the creds arrive via URL query params and are already set when
+ * this runs, so it returns immediately. On a *reload* the URL no longer carries
+ * them (we strip them on first load, and a reload starts a fresh JS context
+ * with empty globals); the host re-injects them into the globals via its
+ * `on_load_end` hook (agentmux-cef client/mod.rs), which can land a beat after
+ * setupCefApi() begins. Waiting here — once, upfront — keeps initCefApi()'s
+ * first IPC call (`get_backend_endpoints`) from racing ahead of the creds,
+ * failing, and falling into the 30s backend-ready wait that never resolves
+ * (which left window.api unset → initApp's 5s guard fired → recovery card
+ * reloaded → loop). Bounded well under that 5s guard.
+ */
+async function waitForIpcCreds(timeoutMs: number): Promise<void> {
+    const start = performance.now();
+    while (
+        (window.__AGENTMUX_IPC_PORT__ == null || window.__AGENTMUX_IPC_TOKEN__ == null) &&
+        performance.now() - start < timeoutMs
+    ) {
+        await new Promise((r) => setTimeout(r, 50));
+    }
+}
+
+/**
  * Initialize the CEF API shim if running inside a CEF host.
  * Sets window.api to a CEF-backed implementation of AppApi.
  *
@@ -44,6 +69,12 @@ export async function setupCefApi(): Promise<void> {
         url.searchParams.delete("ipc_port");
         window.history.replaceState(window.history.state, "", url.toString());
     }
+
+    // On a reload the creds come from the host's on_load_end re-injection, not
+    // the (now-stripped) URL, and can land just after this point. Wait for them
+    // here so initCefApi()'s first IPC call doesn't race ahead and wedge startup
+    // (see waitForIpcCreds). No-op on first load (creds already set from URL).
+    await waitForIpcCreds(2500);
 
     // Pre-fetch all cached values from Rust host via IPC
     await initCefApi();
