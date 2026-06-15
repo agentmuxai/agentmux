@@ -113,6 +113,13 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
 
             DestroyWindow(h);
 
+            // Drop any focus-tracking entry that pointed at this now-dead HWND
+            // so the WM_ACTIVATE restore hook never tries to SetFocus it. The
+            // actual focus handoff to the surviving window's render widget is
+            // posted by the close()/drain caller (the keyboard-focus orphaning
+            // fix). See ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK §1.
+            crate::browser_pane::hwnd::forget_focus_for_child(h);
+
             // Ask the parent (main's top-level) to repaint the area where the
             // pane used to sit. Without InvalidateRect + UpdateWindow, DWM
             // may keep showing the cached pane surface until unrelated UI
@@ -370,6 +377,16 @@ impl BrowserPaneManager {
         {
             let ops = AppStateCloseOps(state);
             Self::close_with(&label, &ops);
+            // Keyboard-focus orphaning fix: destroying the pane's native HWND
+            // doesn't hand Win32 focus back, so if the pane held focus (common
+            // on redock — the dragged pane is focused) keystrokes are orphaned
+            // app-wide until something reclaims focus. Post a focus reclaim for
+            // the surviving foreground window so its render widget (which hosts
+            // the whole DOM UI — agent/terminal panes included) regains focus
+            // and native panes are defocused. Mirrors the manual recovery the
+            // user otherwise triggers by switching windows. See
+            // ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md §1.
+            Self::reclaim_focus_after_pane_destroy(state);
         }
         // Linux/macOS — Views path. Marshal the BrowserView detach onto the
         // CEF UI thread (remove_child_view is UI-thread-only); the underlying
@@ -426,6 +443,20 @@ impl BrowserPaneManager {
         }
     }
 
+    /// Post a focus reclaim for the foreground window after a pane HWND was
+    /// destroyed, so Win32 keyboard focus returns to that window's main render
+    /// widget (which hosts the entire DOM UI — agent/terminal panes included)
+    /// and native panes are defocused. Windows-only: the orphaning is a Win32
+    /// native-child-window issue. The empty label tells `MainFocusReclaimTask`
+    /// to resolve the foreground agentmux window itself, which is correct for
+    /// both redock (the floater is gone → the target window is foreground) and
+    /// an in-window close (that window stays foreground).
+    #[cfg(target_os = "windows")]
+    fn reclaim_focus_after_pane_destroy(state: &Arc<AppState>) {
+        let mut task = crate::ui_tasks::MainFocusReclaimTask::new(state.clone(), String::new());
+        cef::post_task(cef::ThreadId::UI, Some(&mut task));
+    }
+
     /// Called from CEF's `on_before_close` if/when it fires for a pane
     /// browser. The explicit `close()` path usually clears the entry first,
     /// so this is a no-op in that case — but `on_before_close` may still
@@ -439,6 +470,10 @@ impl BrowserPaneManager {
         );
         if let Some(block_id) = out.drained_browser_pane_block_id {
             tracing::info!(label, block_id = %block_id, "browser pane drained via on_before_close");
+            // Same keyboard-focus orphaning fix as close() — the async
+            // on_before_close drain also destroys the pane HWND.
+            #[cfg(target_os = "windows")]
+            Self::reclaim_focus_after_pane_destroy(state);
             // PR #6 H.7 kick — see `close()` for rationale. The
             // on_before_close path is the async drain; pool refill that
             // was deferred while the pane was Closing should now resume.

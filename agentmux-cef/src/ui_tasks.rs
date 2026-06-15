@@ -1213,18 +1213,43 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            // An empty label means "reclaim the foreground agentmux window" —
+            // used by the pane-destroy focus handoff, which can't know the
+            // surviving window's label up front (redock vs. in-window close).
+            let label: String = if !self.label.is_empty() {
+                self.label.clone()
+            } else {
+                #[cfg(target_os = "windows")]
+                {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+                    let fg = unsafe { GetForegroundWindow() } as isize;
+                    let resolved: Option<String> = if fg != 0 {
+                        let map = self.state.window_hwnds.lock();
+                        map.iter()
+                            .find_map(|(k, &h)| if h == fg { Some(k.clone()) } else { None })
+                    } else {
+                        None
+                    };
+                    resolved.unwrap_or_else(|| "main".to_string())
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    "main".to_string()
+                }
+            };
+
             // Phase H.2.b — reducer-aware lookup with fallback.
-            let mut browser = match self.state.get_browser(&self.label) {
+            let mut browser = match self.state.get_browser(&label) {
                 Some(b) => b,
                 None => {
-                    tracing::warn!("[main-focus-reclaim] no browser for label={}", self.label);
+                    tracing::warn!("[main-focus-reclaim] no browser for label={}", label);
                     return;
                 }
             };
 
             if let Some(host) = browser.host() {
                 host.set_focus(1);
-                tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", self.label);
+                tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", label);
             }
 
             #[cfg(target_os = "windows")]
@@ -1269,7 +1294,7 @@ wrap_task! {
                     None => {
                         tracing::warn!(
                             "[main-focus-reclaim] could not resolve Views top-level HWND for label={}",
-                            self.label,
+                            label,
                         );
                     }
                 }
