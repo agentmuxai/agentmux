@@ -52,6 +52,7 @@ import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
+import { ActivityDock } from "./components/ActivityDock";
 import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
@@ -877,6 +878,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onTabChange={(tab) => { model._lastOverlayTab = tab; }}
                 />
             </Show>
+
+            {/* Pinned activity dock — long-running shells (and later crons /
+                subagents) stay glanceable at the top while the conversation
+                scrolls under it. SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15. */}
+            <ActivityDock
+                documentAtom={agentAtoms().documentAtom}
+                documentStateAtom={agentAtoms().documentStateAtom}
+            />
 
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}

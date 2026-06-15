@@ -145,3 +145,134 @@
         display: none;
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pinned activity dock — long-running activities (shell/cron/subagent) pinned
+// to the top of the agent pane. SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.
+// ─────────────────────────────────────────────────────────────────────────────
+
+.agent-activity-dock {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--main-bg-color, #161616);
+    max-height: 45%;            // never let the dock eat the whole pane
+    overflow-y: auto;
+    z-index: 2;
+}
+
+.agent-activity-row {
+    border-left: 3px solid var(--border-color);
+    transition: border-left-color 0.2s ease;
+
+    &.running  { border-left-color: var(--term-bright-green); }
+    &.done     { border-left-color: var(--accent-color); opacity: 0.75; }
+    &.error    { border-left-color: var(--error-color, #ff6b6b); }
+    &.stopped  { border-left-color: var(--secondary-text-color); opacity: 0.6; }
+
+    & + & { border-top: 1px solid var(--border-color); }
+}
+
+.agent-activity-summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    user-select: none;
+    min-height: 24px;
+
+    &:hover { background: var(--hover-bg-color, rgba(255, 255, 255, 0.04)); }
+}
+
+.agent-activity-sigil {
+    flex: 0 0 auto;
+    font-size: 12px;
+    width: 14px;
+    text-align: center;
+
+    .running &  { color: var(--term-bright-green); }
+    .done &     { color: var(--accent-color); }
+    .error &    { color: var(--error-color, #ff6b6b); }
+    .stopped &  { color: var(--secondary-text-color); }
+}
+
+.agent-activity-title {
+    flex: 0 0 auto;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+}
+
+.agent-activity-elapsed {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+.agent-activity-tail {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.75;
+}
+
+.agent-activity-stop,
+.agent-activity-dismiss {
+    flex: 0 0 auto;
+    margin-left: auto;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+        opacity: 1;
+        color: var(--error-color, #ff6b6b);
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+    }
+}
+
+.agent-activity-summary:hover .agent-activity-stop,
+.agent-activity-summary:hover .agent-activity-dismiss { opacity: 0.85; }
+
+// Expanded live log — reuses the tool-overlay log line styles.
+.agent-activity-log {
+    padding: var(--space-1) var(--space-2) var(--space-2);
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--block-bg-color, rgba(0, 0, 0, 0.18));
+}
+
+.agent-activity-overflow {
+    appearance: none;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    padding: var(--space-1) var(--space-2);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+
+    &:hover { background: var(--hover-bg-color, rgba(255, 255, 255, 0.04)); color: var(--main-text-color); }
+}
+
+@container agent-pane (max-width: 399px) {
+    .agent-activity-tail { display: none; }
+}
