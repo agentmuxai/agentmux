@@ -1032,6 +1032,7 @@ async fn main() {
                 }
             }
         },
+        shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
     };
 
     // Saga durability PR 2 — resume-on-startup. Walk any sagas the

@@ -200,7 +200,12 @@ export function useAgentStream({
         if (!shellId) return;
         if (d.op === "exit") {
             const exitCode = typeof d.exit_code === "number" ? d.exit_code : -1;
-            const status: ShellNode["status"] = exitCode === 0 ? "exited-ok" : "exited-err";
+            // `stopped` = the exit was caused by ShellStop (tree-killed), so show
+            // the grey "stopped" status rather than a red exited-err for the
+            // non-zero code the kill produces.
+            const status: ShellNode["status"] = d.stopped === true
+                ? "stopped"
+                : exitCode === 0 ? "exited-ok" : "exited-err";
             pendingShellExits.push({ shellId, status, exitCode, exitedAt: d.timestamp ?? Date.now() });
             scheduleFlush();
             return;

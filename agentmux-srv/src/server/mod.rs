@@ -130,6 +130,10 @@ pub struct AppState {
     /// `None` when Docker is not available on this host — container agents
     /// will refuse to start rather than crashing the server.
     pub container_manager: Option<std::sync::Arc<crate::backend::container::ContainerManager>>,
+    /// Phase 3 — per-shell stop handles so `ShellStop` (MCP tool) and the UI
+    /// stop button can tree-kill a running persistent shell node. See
+    /// `docs/specs/SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md`.
+    pub shell_sessions: std::sync::Arc<crate::backend::shell_node::ShellSessionRegistry>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
@@ -233,6 +237,9 @@ pub fn build_router(state: AppState) -> Router {
         // Shell tool POSTs here; we publish shell_node_create + spawn a
         // ShellNodeRunner that streams shell_chunk events to the frontend.
         .route("/api/v1/shell/create", post(handle_shell_create))
+        // Stop a persistent shell (Phase 3). agentmux-mcp's `ShellStop` tool
+        // POSTs here; tree-kills the shell's process group.
+        .route("/api/v1/shell/stop", post(handle_shell_stop))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -503,10 +510,33 @@ async fn handle_shell_create(
         cwd: effective_cwd,
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
+        registry: Arc::clone(&state.shell_sessions),
     };
     tokio::spawn(runner.run());
 
     (StatusCode::OK, Json(ShellCreateResponse { shell_id }))
+}
+
+// ---- Shell stop ----
+
+#[derive(serde::Deserialize)]
+struct ShellStopRequest {
+    shell_id: String,
+}
+
+/// `POST /api/v1/shell/stop` — stop a running persistent shell.
+///
+/// Called by `agentmux-mcp`'s `ShellStop` tool. Tree-kills the shell's
+/// process group (so `task dev` → `task.exe`/`node` grandchildren die too),
+/// which makes the runner publish a `stopped` exit event. Returns `{ stopped }`
+/// — false if the id is unknown (never started or already exited).
+async fn handle_shell_stop(
+    State(state): State<AppState>,
+    Json(req): Json<ShellStopRequest>,
+) -> impl IntoResponse {
+    let stopped = state.shell_sessions.stop(&req.shell_id);
+    tracing::info!(shell_id = %req.shell_id, stopped, "shell.stop");
+    (StatusCode::OK, Json(json!({ "stopped": stopped })))
 }
 
 // ---- Auth Middleware ----

@@ -27,9 +27,9 @@ use crate::backend::rpc_types::{
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP, COMMAND_TOOL_DECISION,
-    COMMAND_WRITE_AGENT_CONFIG, COMMAND_SHELL_EXEC,
+    COMMAND_WRITE_AGENT_CONFIG, COMMAND_SHELL_EXEC, COMMAND_SHELL_STOP,
     CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData, CommandWriteAgentConfigData,
-    CommandShellExecData, ShellExecResult,
+    CommandShellExecData, ShellExecResult, CommandShellStopData,
 };
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::update_object_meta;
@@ -1101,6 +1101,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     }
                     None => Ok(None),
                 }
+            })
+        }),
+    );
+
+    // shellstop → tree-kill a running persistent shell node (Phase 3). Invoked
+    // by the UI stop button on a running PersistentShellBlock. The runner then
+    // publishes a `stopped` exit event.
+    let shell_sessions_stop = state.shell_sessions.clone();
+    engine.register_handler(
+        COMMAND_SHELL_STOP,
+        Box::new(move |data, _ctx| {
+            let registry = shell_sessions_stop.clone();
+            Box::pin(async move {
+                let req: CommandShellStopData = serde_json::from_value(data)
+                    .map_err(|e| format!("shellstop: {e}"))?;
+                let stopped = registry.stop(&req.shell_id);
+                tracing::info!(shell_id = %req.shell_id, stopped, "shellstop");
+                Ok(Some(serde_json::json!({ "stopped": stopped })))
             })
         }),
     );

@@ -30,7 +30,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 const SHELL_TOOL: &str = r#"{
   "name": "Shell",
-  "description": "Start a long-running shell process. Returns immediately with a shell_id. Output streams live in the conversation document. Use for build systems, watchers, dev servers — anything that should run in the background without blocking the conversation.",
+  "description": "Start a long-running shell process. Returns immediately with a shell_id. Output streams live in the conversation document. Use for build systems, watchers, dev servers — anything that should run in the background without blocking the conversation. Stop it later with ShellStop(shell_id) — never use kill/taskkill on a shell you started.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -40,6 +40,18 @@ const SHELL_TOOL: &str = r#"{
       "env":   { "type": "object",  "description": "Extra environment variables", "additionalProperties": { "type": "string" } }
     },
     "required": ["cmd"]
+  }
+}"#;
+
+const SHELL_STOP_TOOL: &str = r#"{
+  "name": "ShellStop",
+  "description": "Stop a running shell started by Shell(). Pass the shell_id returned by Shell. Tree-kills the whole process group (e.g. `task dev` and its child task.exe/node processes), so prefer this over kill/taskkill — those can hit other agents' or the host's processes by name.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id": { "type": "string", "description": "The shell_id returned by a prior Shell() call" }
+    },
+    "required": ["shell_id"]
   }
 }"#;
 
@@ -113,11 +125,12 @@ async fn main() {
                 })
             }
             "tools/list" => {
-                let tool: Value = serde_json::from_str(SHELL_TOOL).expect("static json");
+                let shell: Value = serde_json::from_str(SHELL_TOOL).expect("static json");
+                let shell_stop: Value = serde_json::from_str(SHELL_STOP_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [tool] }
+                    "result": { "tools": [shell, shell_stop] }
                 })
             }
             "tools/call" => {
@@ -232,6 +245,45 @@ async fn call_tool(
                 .unwrap_or("unknown");
 
             Ok(shell_id.to_string())
+        }
+        "ShellStop" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/shell/stop", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&json!({ "shell_id": shell_id }))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("shell/stop failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            let stopped = result.get("stopped").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(if stopped {
+                format!("stopped shell {shell_id}")
+            } else {
+                format!("shell {shell_id} was not running (unknown or already exited)")
+            })
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }
