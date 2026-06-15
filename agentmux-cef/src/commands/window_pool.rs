@@ -256,6 +256,29 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // alive.
 }
 
+/// Called from `AgentMuxWindowDelegate::on_window_created` for pool windows
+/// (Windows only). Applies `WS_EX_TOOLWINDOW` and caches the HWND at the
+/// earliest reliable point — the CEF `CefWindow::GetWindowHandle()` is
+/// non-null here, whereas `BrowserHost::window_handle()` may return null
+/// by the time `on_after_created` fires (post-page-load CEF behaviour,
+/// diagnosed 2026-05-06; see `POOL_HWND_CACHE` doc above).
+///
+/// `register_pool_window` still runs later as belt-and-suspenders, but the
+/// taskbar hide and HWND cache are already correct by then.
+#[cfg(target_os = "windows")]
+pub fn init_pool_window_hwnd(label: &str, raw_hwnd: *mut std::ffi::c_void) {
+    pool_hwnd_cache()
+        .lock()
+        .unwrap()
+        .insert(label.to_string(), raw_hwnd as usize);
+    set_taskbar_hidden(raw_hwnd, true);
+    tracing::debug!(
+        target: "dnd:tearoff:pool",
+        label = %label,
+        "[pool] HWND cached + taskbar hidden at on_window_created (early path)"
+    );
+}
+
 /// Called from on_after_created when a pool window's browser is
 /// registered. Logs + applies WS_EX_TOOLWINDOW so the off-screen
 /// pool window doesn't show up in the taskbar / Alt+Tab. The
