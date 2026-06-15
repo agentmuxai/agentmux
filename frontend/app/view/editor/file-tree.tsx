@@ -34,6 +34,8 @@ interface FileTreeProps {
     newEntry?: { parentPath: string; kind: "file" | "dir" } | null;
     onNewEntryConfirm?: (parentPath: string, name: string, kind: "file" | "dir") => void;
     onNewEntryCancel?: () => void;
+    /** Called when F2 is pressed in the tree — trigger rename for the given path. */
+    onStartRename?: (path: string) => void;
 }
 
 export function FileTree(props: FileTreeProps): JSX.Element {
@@ -45,8 +47,15 @@ export function FileTree(props: FileTreeProps): JSX.Element {
         }
     };
 
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "F2" && props.onStartRename && props.activeFilePath) {
+            e.preventDefault();
+            props.onStartRename(props.activeFilePath);
+        }
+    };
+
     return (
-        <div class="file-tree">
+        <div class="file-tree" tabIndex={0} onKeyDown={handleKeyDown}>
             <FileTreeToolbar
                 model={props.model}
                 showHidden={props.showHidden}

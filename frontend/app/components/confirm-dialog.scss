@@ -1,0 +1,78 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// ConfirmDialog — modal overlay used by the file-tree delete flow.
+
+.confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+.confirm-dialog {
+    background: var(--modal-bg-color, #1e1e2e);
+    border: 1px solid var(--border-color, #45475a);
+    border-radius: 6px;
+    padding: 20px 24px;
+    min-width: 300px;
+    max-width: 460px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    color: var(--main-text-color);
+}
+
+.confirm-dialog-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.confirm-dialog-message {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    line-height: 1.5;
+    margin-bottom: 20px;
+}
+
+.confirm-dialog-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.confirm-btn {
+    padding: 5px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 80ms ease, opacity 80ms ease;
+
+    &--cancel {
+        background: transparent;
+        border: 1px solid var(--border-color, #45475a);
+        color: var(--main-text-color);
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+    }
+
+    &--danger {
+        background: var(--error-color, #f38ba8);
+        border: 1px solid transparent;
+        color: #1e1e2e;
+        font-weight: 500;
+
+        &:hover {
+            opacity: 0.88;
+        }
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color, #89b4fa);
+        outline-offset: 2px;
+    }
+}
