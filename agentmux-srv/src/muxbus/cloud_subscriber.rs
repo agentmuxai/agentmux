@@ -132,14 +132,15 @@ async fn run_loop(
     agents: Arc<Mutex<HashSet<String>>>,
     mut ctrl_rx: mpsc::UnboundedReceiver<CtrlMsg>,
 ) {
+    let http = reqwest::Client::new();
     let mut delay_secs = RECONNECT_DELAY_SECS;
 
     loop {
-        // Load token — if none, wait for a ReloadToken ctrl signal
-        let token = match load_valid_token(&wstore) {
+        // Load token — refresh if expired, wait for ReloadToken if none stored
+        let token = match load_valid_token(&wstore, &http).await {
             Some(t) => t,
             None => {
-                // No token; drain ctrl messages until we get ReloadToken
+                // No usable credentials; drain ctrl messages until we get ReloadToken
                 while let Some(msg) = ctrl_rx.recv().await {
                     if matches!(msg, CtrlMsg::ReloadToken) {
                         break;
@@ -152,7 +153,7 @@ async fn run_loop(
 
         tracing::info!("cloud_subscriber: connecting to {}", MUXBUS_WS_URL);
 
-        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &wstore).await {
+        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &wstore, &http).await {
             Ok(()) => {
                 tracing::info!("cloud_subscriber: disconnected cleanly, reconnecting in {}s", delay_secs);
                 delay_secs = RECONNECT_DELAY_SECS; // reset on clean disconnect
@@ -172,17 +173,15 @@ async fn connect_and_run(
     agents: Arc<Mutex<HashSet<String>>>,
     ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
     wstore: &Arc<Store>,
+    _http: &reqwest::Client,
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::http::Request;
 
+    // Only set Authorization — tungstenite adds Connection/Upgrade/Sec-WebSocket-*
+    // automatically. Setting them manually causes duplicate headers in the handshake.
     let request = Request::builder()
         .uri(MUXBUS_WS_URL)
         .header("Authorization", format!("Bearer {}", token))
-        .header("Host", "muxbus.agentmux.ai")
-        .header("Connection", "Upgrade")
-        .header("Upgrade", "websocket")
-        .header("Sec-WebSocket-Version", "13")
-        .header("Sec-WebSocket-Key", generate_ws_key())
         .body(())
         .map_err(|e| format!("build request: {e}"))?;
 
@@ -286,25 +285,30 @@ async fn handle_server_msg(
     Ok(())
 }
 
-fn load_valid_token(wstore: &Store) -> Option<String> {
-    match wstore.muxbus_load() {
-        Ok(Some(creds)) if !creds.access_token.is_empty() => Some(creds.access_token),
-        _ => None,
+/// Load a valid (non-expired) access token, refreshing via refresh_token if needed.
+/// Saves refreshed credentials back to the store. Returns None if no credentials
+/// are stored, the token is expired and refresh fails, or the refresh_token is absent.
+async fn load_valid_token(wstore: &Store, http: &reqwest::Client) -> Option<String> {
+    let creds = match wstore.muxbus_load() {
+        Ok(Some(c)) if !c.access_token.is_empty() => c,
+        _ => return None,
+    };
+    if creds.is_valid() {
+        return Some(creds.access_token);
+    }
+    // Token expired (or nearly so) — try refresh
+    tracing::info!("cloud_subscriber: access token expired, attempting refresh");
+    match crate::muxbus::pkce::refresh_token(&creds, http).await {
+        Ok(refreshed) => {
+            if let Err(e) = wstore.muxbus_save(&refreshed) {
+                tracing::warn!(error = %e, "cloud_subscriber: failed to save refreshed credentials");
+            }
+            Some(refreshed.access_token)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "cloud_subscriber: token refresh failed; user must re-login via muxbus.login");
+            None
+        }
     }
 }
 
-fn generate_ws_key() -> String {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    let bytes: [u8; 16] = std::array::from_fn(|_| rand_byte());
-    STANDARD.encode(bytes)
-}
-
-fn rand_byte() -> u8 {
-    // Simple non-crypto random — used only for WS handshake key
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    (t & 0xFF) as u8
-}
