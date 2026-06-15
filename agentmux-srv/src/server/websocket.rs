@@ -910,12 +910,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // hand-in lets the OAuth expiry probe (PR D, spec §4.4)
                 // publish `identitybundlebindings:changed:<bundle_id>`
                 // when it flips a token's status valid→expired etc.
-                crate::identity::resolver::inject_identity_env_with_broker(
+                env_vars = crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
                     Some(broker.clone()),
-                    &cmd.blockid,
-                    &mut env_vars,
-                );
+                    cmd.blockid.clone(),
+                    env_vars,
+                )
+                .await;
                 // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN
                 // if the user has authenticated via muxbus.login. No-op if no
                 // credentials are stored. Auto-refreshes if token is nearly expired.

@@ -382,6 +382,36 @@ pub fn inject_identity_env(
 /// (`app_api.rs` AgentSendCommand + `websocket.rs` AgentInputCommand)
 /// pass `Some(broker.clone())` so the IdentityManager's bindings table
 /// flips its status badge without a reload. Per spec §4.4.
+/// Async wrapper around [`inject_identity_env_with_broker`] for use from
+/// async spawn handlers. The underlying path does blocking I/O — synchronous
+/// SQLite reads and, for `SecretRef::Keychain` accounts, a blocking
+/// `keyring` (D-Bus Secret Service on Linux) read — so it runs on a blocking
+/// thread via `spawn_blocking` rather than stalling an async runtime worker.
+/// Takes ownership of `env_vars` and returns it with identity vars merged in.
+/// On the rare task-join failure the original map is returned unchanged so
+/// the static `cmd:env` vars are never lost. See spec §12.2.
+pub async fn inject_identity_env_async(
+    wstore: Arc<Store>,
+    broker: Option<Arc<Broker>>,
+    block_id: String,
+    env_vars: HashMap<String, String>,
+) -> HashMap<String, String> {
+    let fallback = env_vars.clone();
+    match tokio::task::spawn_blocking(move || {
+        let mut env = env_vars;
+        inject_identity_env_with_broker(wstore, broker, &block_id, &mut env);
+        env
+    })
+    .await
+    {
+        Ok(merged) => merged,
+        Err(e) => {
+            tracing::warn!(target: "identity", "identity injection task join failed: {e}");
+            fallback
+        }
+    }
+}
+
 pub fn inject_identity_env_with_broker(
     wstore: Arc<Store>,
     broker: Option<Arc<Broker>>,
