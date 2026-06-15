@@ -37,7 +37,8 @@ pub struct LanInstance {
 }
 
 struct LanCacheEntry {
-    peer_url: String,
+    /// `None` = negative cache entry: agent is not on any LAN peer.
+    peer_url: Option<String>,
     auth_key: String,
     expires: std::time::Instant,
 }
@@ -323,31 +324,40 @@ impl LanDiscoveryController {
 
     /// Query LAN peers for which one hosts `agent_id`. Returns `(peer_url,
     /// auth_key)` for the first peer that responds 2xx to the agent-lookup
-    /// endpoint. Result is cached for `LAN_AGENT_CACHE_TTL_SECS` seconds.
+    /// endpoint. Results — both positive and negative — are cached for
+    /// `LAN_AGENT_CACHE_TTL_SECS` seconds to avoid a blocking peer fan-out on
+    /// every inject for cloud-only agents.
+    ///
+    /// Security: `auth_key` is broadcast in the mDNS TXT record. This is
+    /// intentional and matches the same trust assumption as tier-2 loopback
+    /// forwarding — LAN traffic is trusted (private network). Anyone on the LAN
+    /// who can already intercept mDNS multicast can intercept the HTTP traffic
+    /// too, so the key adds no exposure beyond what already exists.
     pub async fn find_agent(
         &self,
         agent_id: &str,
         http: &reqwest::Client,
     ) -> Option<(String, String)> {
-        // Fast path: valid cache hit
+        // Fast path: valid cache hit (positive or negative)
         if let Ok(cache) = self.agent_cache.read() {
             if let Some(e) = cache.get(agent_id) {
                 if e.expires > std::time::Instant::now() {
-                    return Some((e.peer_url.clone(), e.auth_key.clone()));
+                    return e.peer_url.as_ref().map(|url| (url.clone(), e.auth_key.clone()));
                 }
             }
         }
 
-        // Slow path: query each peer
+        // Slow path: query each peer. Use reqwest's .query() for safe
+        // percent-encoding of the agent_id (handles spaces, &, =, #, etc.).
         let peers = self.get_instances();
         for peer in &peers {
             if peer.address.is_empty() || peer.auth_key.is_empty() {
                 continue;
             }
             let peer_url = format!("http://{}:{}", peer.address, peer.port);
-            let query_url = format!("{}/agentmux/reactive/agent?id={}", peer_url, agent_id);
             let result = http
-                .get(&query_url)
+                .get(format!("{}/agentmux/reactive/agent", peer_url))
+                .query(&[("id", agent_id)])
                 .header("X-AuthKey", &peer.auth_key)
                 .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
                 .send()
@@ -358,7 +368,7 @@ impl LanDiscoveryController {
                     cache.insert(
                         agent_id.to_string(),
                         LanCacheEntry {
-                            peer_url: peer_url.clone(),
+                            peer_url: Some(peer_url.clone()),
                             auth_key: peer.auth_key.clone(),
                             expires: std::time::Instant::now()
                                 + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
@@ -367,6 +377,20 @@ impl LanDiscoveryController {
                 }
                 return Some((peer_url, peer.auth_key.clone()));
             }
+        }
+
+        // No peer has this agent — write a negative cache entry so future
+        // injects for cloud-only agents skip the full peer fan-out.
+        if let Ok(mut cache) = self.agent_cache.write() {
+            cache.insert(
+                agent_id.to_string(),
+                LanCacheEntry {
+                    peer_url: None,
+                    auth_key: String::new(),
+                    expires: std::time::Instant::now()
+                        + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                },
+            );
         }
         None
     }

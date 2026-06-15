@@ -103,7 +103,18 @@ pub(super) async fn handle_reactive_inject(
             match fwd.send().await {
                 Ok(r) if r.status().is_success() => {
                     if let Ok(body) = r.json::<serde_json::Value>().await {
-                        return Json(body);
+                        // /reactive/inject always returns HTTP 200; check body.success
+                        // to detect "agent not found on that peer" (e.g. after migration).
+                        if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
+                            tracing::warn!(
+                                target = %req.target_agent,
+                                url = %forward_url,
+                                "LAN peer inject: success=false — evicting stale cache entry"
+                            );
+                            state.lan_discovery.evict_agent(&req.target_agent);
+                        } else {
+                            return Json(body);
+                        }
                     }
                 }
                 Ok(r) => {
@@ -111,7 +122,7 @@ pub(super) async fn handle_reactive_inject(
                         target = %req.target_agent,
                         status = %r.status(),
                         url = %forward_url,
-                        "LAN peer forward: non-success status"
+                        "LAN peer forward: non-success HTTP status"
                     );
                 }
                 Err(e) => {
