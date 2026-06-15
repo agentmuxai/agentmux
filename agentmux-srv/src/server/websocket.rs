@@ -1527,6 +1527,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let meta = std::fs::symlink_metadata(path)
                     .map_err(|e| format!("deleteeditorfile: {e}"))?;
                 if meta.file_type().is_symlink() {
+                    // On Windows, directory junctions/symlinks must use remove_dir;
+                    // remove_file fails for directory symlinks on that platform.
+                    #[cfg(windows)]
+                    if path.is_dir() {
+                        std::fs::remove_dir(path).map_err(|e| format!("deleteeditorfile: {e}"))?;
+                    } else {
+                        std::fs::remove_file(path).map_err(|e| format!("deleteeditorfile: {e}"))?;
+                    }
+                    #[cfg(not(windows))]
                     std::fs::remove_file(path).map_err(|e| format!("deleteeditorfile: {e}"))?;
                 } else if canonical.is_dir() {
                     if cmd.recursive {
@@ -1559,19 +1568,77 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 let scratch_dir = home.join(".agentmux").join("cache").join("scratch");
                 std::fs::create_dir_all(&scratch_dir)
                     .map_err(|e| format!("createscratchfile: create dir: {e}"))?;
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                const THIRTY_DAYS_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
+                // Scan existing .md.meta files: prune expired ones, reuse the most
+                // recent active one (no saved_to, created within 30 days).
+                let mut best: Option<(u64, String, String)> = None; // (created_at, scratch_id, display_name)
+                if let Ok(entries) = std::fs::read_dir(&scratch_dir) {
+                    for entry in entries.flatten() {
+                        let meta_path = entry.path();
+                        let fname = meta_path
+                            .file_name()
+                            .and_then(|f| f.to_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if !fname.ends_with(".md.meta") {
+                            continue;
+                        }
+                        let Ok(content) = std::fs::read_to_string(&meta_path) else { continue };
+                        let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&content) else { continue };
+                        // Skip already-promoted scratch files (saved_to present + non-null).
+                        if meta_json.get("saved_to").map_or(false, |v| !v.is_null()) {
+                            continue;
+                        }
+                        let created_at = meta_json.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let sid = meta_json.get("scratch_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        if created_at == 0 || sid.is_empty() {
+                            continue;
+                        }
+                        if now_ms.saturating_sub(created_at) > THIRTY_DAYS_MS {
+                            // Prune expired pair.
+                            let _ = std::fs::remove_file(scratch_dir.join(format!("{}.md", sid)));
+                            let _ = std::fs::remove_file(&meta_path);
+                            continue;
+                        }
+                        // Track most recent active scratch.
+                        if best.as_ref().map_or(true, |(best_ts, _, _)| created_at > *best_ts) {
+                            let dname = meta_json
+                                .get("display_name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Untitled")
+                                .to_string();
+                            best = Some((created_at, sid, dname));
+                        }
+                    }
+                }
+
+                // Reuse most recent active scratch if the backing file still exists.
+                if let Some((_, ref scratch_id, ref display_name)) = best {
+                    let file_path = scratch_dir.join(format!("{}.md", scratch_id));
+                    if file_path.exists() {
+                        return Ok(Some(serde_json::json!({
+                            "scratch_id": scratch_id,
+                            "file_path": file_path.to_string_lossy(),
+                            "display_name": display_name,
+                        })));
+                    }
+                }
+
+                // No reusable active scratch found — mint a fresh UUID pair.
                 let scratch_id = uuid::Uuid::new_v4().to_string();
                 let display_name = cmd.display_name.unwrap_or_else(|| "Untitled".to_string());
                 let file_path = scratch_dir.join(format!("{}.md", scratch_id));
                 std::fs::write(&file_path, "")
                     .map_err(|e| format!("createscratchfile: {e}"))?;
-                let created_at = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64;
                 let meta = serde_json::json!({
                     "display_name": display_name,
                     "scratch_id": scratch_id,
-                    "created_at": created_at,
+                    "created_at": now_ms,
                 });
                 let meta_path = scratch_dir.join(format!("{}.md.meta", scratch_id));
                 std::fs::write(&meta_path, meta.to_string())
