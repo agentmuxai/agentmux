@@ -290,7 +290,7 @@ const ActionWidgets = (): JSX.Element => {
     // Minimum tab strip reserved before widget labels are dropped (tier 1→2).
     const MIN_TAB_WIDTH = 120;
     // Per-tab comfortable width — labels collapse when each tab would fall
-    // below this. Deliberately above --ws-tab-min (56 px) so labels drop
+    // below this. Deliberately above --ws-tab-min (60 px) so labels drop
     // first, then tabs continue shrinking.
     const TAB_COLLAPSE_RESERVE_PX = 100;
     // Tighter reserves used for the tier 2→3 threshold (icon-only bar is
