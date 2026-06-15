@@ -89,6 +89,40 @@
     white-space: nowrap;
 }
 
+// Stop button (Phase 3) — tree-kills the running process. Pinned to the
+// right edge; `margin-left: auto` covers the case where the live-tail (which
+// otherwise grows to fill) is hidden.
+.agent-shell-stop {
+    flex: 0 0 auto;
+    margin-left: auto;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+        opacity: 1;
+        color: var(--error-color, #ff6b6b);
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+    }
+
+    &:disabled {
+        opacity: 0.3;
+        cursor: default;
+    }
+}
+
+.agent-shell-summary:hover .agent-shell-stop {
+    opacity: 0.85;
+}
+
 // Pulsing cursor shown while the shell is still streaming
 .agent-shell-streaming-indicator {
     display: inline-block;

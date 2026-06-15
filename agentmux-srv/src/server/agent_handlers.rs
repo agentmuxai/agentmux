@@ -2938,6 +2938,7 @@ mod recent_sessions_tests {
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
             container_manager: None,
+            shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
         };
 
         // Seed: 1 SEEDED definition (template), 1 identity bundle, 1
@@ -3224,6 +3225,7 @@ mod recent_sessions_tests {
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
             container_manager: None,
+            shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
         };
 
         // One seeded template + one already-user-owned definition.

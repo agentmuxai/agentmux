@@ -1033,6 +1033,7 @@ async fn main() {
                 }
             }
         },
+        shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
     };
 
     // Saga durability PR 2 — resume-on-startup. Walk any sagas the
@@ -1123,6 +1124,9 @@ async fn main() {
     );
 
     // 7. Build router and serve on both listeners
+    // Keep a handle to the shell registry for shutdown cleanup — `state` is
+    // moved into the router below. [reagent #1422 P2]
+    let shell_sessions_shutdown = state.shell_sessions.clone();
     let router = build_router(state);
 
     let web_server = axum::serve(web_listener, router.clone());
@@ -1192,6 +1196,18 @@ async fn main() {
         _ = stdin_token.cancelled() => {
             tracing::info!("shutdown signal received, exiting");
         }
+    }
+
+    // Shutdown cleanup — tree-kill any persistent shells so long-running
+    // children (`task dev` → task.exe/node) don't orphan on srv exit. stop_all()
+    // fires each shell's cancel handle; the kill_tasks run taskkill/killpg
+    // asynchronously, so give them a brief grace to complete before we exit.
+    // (`kill_on_drop` only reaps the wrapper shell and doesn't fire on a clean
+    // process exit, so this is the real orphan guard.) [reagent #1422 P2]
+    let live = shell_sessions_shutdown.stop_all();
+    if live > 0 {
+        tracing::info!(count = live, "shutdown: stopping persistent shells");
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     }
 }
 
