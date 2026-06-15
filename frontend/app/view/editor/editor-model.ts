@@ -587,7 +587,11 @@ export class EditorViewModel implements ViewModel {
                 newPath: result.file_path,
                 source: "user",
             });
-            // Re-load content from the new path to sync the hash.
+            // Clear the cached buffer so openFile reloads from disk and
+            // computes a fresh contentHash. Without this, the early-return at
+            // openFile:372 (contentLoaded && _contentByTab.has) would skip the
+            // hash update, leaving the slice with a stale hash after PromoteScratch.
+            this._contentByTab.delete(tab.id);
             await this.openFile(result.file_path);
         } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e);

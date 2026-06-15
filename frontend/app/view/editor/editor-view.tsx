@@ -274,7 +274,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 }
             }),
             // Ctrl+S → save; on scratch tabs triggers Save As instead.
-            // Ctrl+Shift+S → always Save As (for naming an already-saved file).
+            // Ctrl+Shift+S → Save As for scratch tabs only (Phase 1; non-scratch Save As is Phase 2).
             keymap.of([
                 {
                     key: "Mod-s",
