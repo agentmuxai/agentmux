@@ -15,6 +15,7 @@ pub mod history;
 pub mod identities;
 pub mod memory_bundles;
 pub mod migrations;
+pub mod muxbus;
 pub mod registry_mirror;
 pub mod skills;
 pub mod snapshot;

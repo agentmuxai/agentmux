@@ -1361,6 +1361,36 @@ class RpcApiType {
         return client.rpcCall("session:export", data, opts);
     }
 
+    // ── MuxBus cloud connectivity ─────────────────────────────────────────────
+
+    // command "muxbus.login" — PKCE browser flow; blocks until login completes (up to 5 min)
+    MuxBusLoginCommand(
+        client: RpcClient,
+        data: { cognitoDomain: string; clientId: string },
+        opts?: RpcOpts,
+    ): Promise<{ success: boolean; email: string; error?: string }> {
+        return client.rpcCall("muxbus.login", data, { timeout: 360000, ...opts });
+    }
+
+    // command "muxbus.status" — current credential state
+    MuxBusStatusCommand(
+        client: RpcClient,
+        opts?: RpcOpts,
+    ): Promise<{
+        connected: boolean;
+        email: string;
+        cognitoDomain: string;
+        expiresAt: number;
+        valid: boolean;
+    }> {
+        return client.rpcCall("muxbus.status", {}, opts);
+    }
+
+    // command "muxbus.disconnect" — clear stored credentials
+    MuxBusDisconnectCommand(client: RpcClient, opts?: RpcOpts): Promise<Record<string, never>> {
+        return client.rpcCall("muxbus.disconnect", {}, opts);
+    }
+
 }
 
 export const RpcApi = new RpcApiType();

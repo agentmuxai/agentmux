@@ -14,7 +14,7 @@
  * through the existing AccountForm via identityModel.openAddForm().
  */
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { AccountForm } from "@/app/view/identity/identity-view";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import {
@@ -25,6 +25,8 @@ import {
     PROVIDER_LABELS,
     serializeAgentAccounts,
 } from "@/app/view/identity/identity-model";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 
 const ALL_PROVIDERS: AccountProvider[] = ["github", "aws", "anthropic", "custom"];
 
@@ -171,6 +173,9 @@ export const AgentIdentityPanel = (props: AgentIdentityPanelProps): JSX.Element 
             <Show when={props.model.formOpenAtom()}>
                 <AccountForm model={props.model} />
             </Show>
+
+            {/* MuxBus cloud connectivity — global, not per-agent */}
+            <MuxBusConnectSection />
         </div>
     );
 };
@@ -179,3 +184,128 @@ AgentIdentityPanel.displayName = "AgentIdentityPanel";
 
 /** Serialize AgentAccounts to the JSON string stored on AgentDefinition. */
 export { serializeAgentAccounts };
+
+// ── MuxBus Cloud Section ──────────────────────────────────────────────────────
+
+// Production Cognito config — set after deployment.
+// Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
+const MUXBUS_COGNITO_DOMAIN =
+    (import.meta.env.VITE_MUXBUS_COGNITO_DOMAIN as string | undefined) ??
+    "https://muxbus-auth-prod.auth.us-east-1.amazoncognito.com";
+const MUXBUS_CLIENT_ID =
+    (import.meta.env.VITE_MUXBUS_CLIENT_ID as string | undefined) ?? "";
+
+interface MuxBusStatus {
+    connected: boolean;
+    email: string;
+    expiresAt: number;
+    valid: boolean;
+}
+
+export const MuxBusConnectSection = (): JSX.Element => {
+    const [status, setStatus] = createSignal<MuxBusStatus | null>(null);
+    const [loading, setLoading] = createSignal(false);
+    const [error, setError] = createSignal<string | null>(null);
+
+    const refreshStatus = async () => {
+        try {
+            const s = await RpcApi.MuxBusStatusCommand(TabRpcClient);
+            setStatus(s);
+        } catch {
+            // no credentials or server not reachable — treat as disconnected
+            setStatus({ connected: false, email: "", expiresAt: 0, valid: false });
+        }
+    };
+
+    onMount(() => {
+        void refreshStatus();
+    });
+
+    const handleConnect = async () => {
+        if (!MUXBUS_CLIENT_ID) {
+            setError("MuxBus client ID not configured (contact AgentMux team).");
+            return;
+        }
+        setError(null);
+        setLoading(true);
+        try {
+            const result = await RpcApi.MuxBusLoginCommand(TabRpcClient, {
+                cognitoDomain: MUXBUS_COGNITO_DOMAIN,
+                clientId: MUXBUS_CLIENT_ID,
+            });
+            if (result.success) {
+                await refreshStatus();
+            } else {
+                setError(result.error ?? "Login failed.");
+            }
+        } catch (e) {
+            setError(String(e));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDisconnect = async () => {
+        setError(null);
+        setLoading(true);
+        try {
+            await RpcApi.MuxBusDisconnectCommand(TabRpcClient);
+            await refreshStatus();
+        } catch (e) {
+            setError(String(e));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const expiryLabel = () => {
+        const s = status();
+        if (!s?.connected) return null;
+        const exp = new Date(s.expiresAt * 1000);
+        return exp.toLocaleString();
+    };
+
+    return (
+        <div class="agent-identity-muxbus">
+            <div class="agent-identity-section-title">AgentMux Cloud</div>
+            <Show
+                when={status()?.connected}
+                fallback={
+                    <div class="agent-identity-muxbus-row">
+                        <span class="agent-identity-none">Not connected</span>
+                        <button
+                            class="agent-identity-new-btn"
+                            disabled={loading()}
+                            onClick={() => void handleConnect()}
+                        >
+                            {loading() ? "Connecting…" : "Connect"}
+                        </button>
+                    </div>
+                }
+            >
+                <div class="agent-identity-muxbus-row">
+                    <div class="agent-identity-muxbus-info">
+                        <span class="agent-identity-account-name">{status()!.email}</span>
+                        <Show when={!status()!.valid}>
+                            <span class="agent-identity-muxbus-expired"> (token expired)</span>
+                        </Show>
+                        <Show when={expiryLabel()}>
+                            <span class="agent-identity-muxbus-expiry"> · expires {expiryLabel()}</span>
+                        </Show>
+                    </div>
+                    <button
+                        class="agent-identity-unassign-btn"
+                        disabled={loading()}
+                        title="Disconnect from AgentMux Cloud"
+                        onClick={() => void handleDisconnect()}
+                    >
+                        Disconnect
+                    </button>
+                </div>
+            </Show>
+            <Show when={error()}>
+                <div class="agent-identity-error">{error()}</div>
+            </Show>
+        </div>
+    );
+};

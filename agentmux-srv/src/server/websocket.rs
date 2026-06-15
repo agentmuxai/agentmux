@@ -900,6 +900,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                     &cmd.blockid,
                     &mut env_vars,
                 );
+                // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN
+                // if the user has authenticated via muxbus.login. No-op if no
+                // credentials are stored. Auto-refreshes if token is nearly expired.
+                crate::server::muxbus_handlers::inject_muxbus_env(&wstore, &mut env_vars);
                 // Streaming-bash wrapper auth + discovery
                 // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
                 //
@@ -1751,6 +1755,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
 
     // App API handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
     super::app_api::register_app_api_handlers(engine, &state);
+
+    // MuxBus cloud connectivity (muxbus.login / muxbus.status / muxbus.disconnect)
+    super::muxbus_handlers::register_muxbus_handlers(engine, &state);
 }
 
 
