@@ -142,10 +142,12 @@ async fn run_loop(
         //   b) Credentials exist but refresh failed transiently → back off and retry
         let has_stored_creds = wstore.muxbus_load().ok().flatten().is_some();
         let token = match load_valid_token(&wstore, &http).await {
-            Some(t) => {
-                delay_secs = RECONNECT_DELAY_SECS; // token loaded; reset back-off
-                t
-            }
+            // Do NOT reset back-off here: a valid token loads on every iteration,
+            // so resetting on load would pin the delay at the base value and
+            // defeat exponential back-off for the common "valid token, WS endpoint
+            // unreachable" failure. Back-off is reset only after a *healthy*
+            // connection — see the clean-disconnect and >30s-session branches below.
+            Some(t) => t,
             None if !has_stored_creds => {
                 // No credentials at all — wait for muxbus.login to signal us
                 while let Some(msg) = ctrl_rx.recv().await {
