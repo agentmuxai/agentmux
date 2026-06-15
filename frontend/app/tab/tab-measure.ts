@@ -17,8 +17,9 @@ function getCtx(): CanvasRenderingContext2D | null {
 }
 
 // Non-text width budget:
-//   6px left-pad + 6px right-pad + 4px gap + 16px close-btn + 4px slack = 36px
-const TAB_PADDING_BUDGET = 36;
+//   10px left-pad + 10px right-pad + 4px gap + 16px close-btn + 12px slack = 52px
+// Matches .tab-inner { padding: 0 10px } in tab.scss.
+const TAB_PADDING_BUDGET = 52;
 export const TAB_MIN_WIDTH = 60;
 export const TAB_MAX_WIDTH = 260;
 
