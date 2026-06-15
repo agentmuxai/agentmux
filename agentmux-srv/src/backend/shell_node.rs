@@ -66,11 +66,15 @@ impl ShellSessionRegistry {
 
     /// Stop every running shell. For srv-shutdown cleanup so long-running
     /// children (`task dev` → `task.exe`/`node`) don't orphan and hold ports.
-    pub fn stop_all(&self) {
+    /// Returns the number of shells signalled (so the caller can skip the
+    /// grace-period sleep when there was nothing to stop).
+    pub fn stop_all(&self) -> usize {
         let drained: Vec<_> = self.shells.lock().drain().map(|(_, tx)| tx).collect();
+        let n = drained.len();
         for tx in drained {
             let _ = tx.send(());
         }
+        n
     }
 }
 
