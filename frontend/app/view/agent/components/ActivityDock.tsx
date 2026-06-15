@@ -58,12 +58,23 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         return m;
     });
 
-    // Tick once a second only while a terminal row is lingering toward expiry.
-    const hasExpiring = createMemo(() =>
-        allActivities().some(
-            (a) => a.status !== "running" && RETENTION_MS[a.status] !== Infinity && a.endedAt != null,
-        ),
-    );
+    // Tick once a second only while a terminal row is STILL within its retention
+    // window. The `now() - endedAt < retention` check is what lets this go false:
+    // ShellNodes linger in the document forever, so without it the guard stayed
+    // true permanently and the 1Hz setInterval never cleared — a perpetual
+    // re-render loop per pane after the first shell exited (reagent #1428 P2).
+    // Depending on now() means each tick re-evaluates; once every lingering row
+    // has aged past its retention the effect re-runs and clears the interval.
+    const hasExpiring = createMemo(() => {
+        const t = now();
+        return allActivities().some(
+            (a) =>
+                a.status !== "running" &&
+                RETENTION_MS[a.status] !== Infinity &&
+                a.endedAt != null &&
+                t - a.endedAt < RETENTION_MS[a.status],
+        );
+    });
     createEffect(() => {
         if (!hasExpiring()) return;
         const id = setInterval(() => setNow(Date.now()), 1000);
