@@ -158,6 +158,14 @@ impl ShellNodeRunner {
 
         child_cmd.stdout(std::process::Stdio::piped());
         child_cmd.stderr(std::process::Stdio::piped());
+        // Null stdin (CRITICAL). The shell runs non-interactively and the srv's
+        // own stdin is not a usable TTY. Without this the child inherits the srv
+        // stdin, and tools that probe/read stdin at startup HANG before doing any
+        // work — e.g. `npm run dev` spawned npm-cli.js but it never launched the
+        // vite script (no output, never bound its port). Confirmed: the same
+        // command with `< NUL` starts vite instantly (agentx/fix-shell-dev-server).
+        // (When ShellInput lands — Phase 3b — this becomes a piped stdin.)
+        child_cmd.stdin(std::process::Stdio::null());
         // Backstop: reap the wrapper shell if this runner task is ever dropped.
         child_cmd.kill_on_drop(true);
         // Unix: own process group so kill_tree can signal the whole group
@@ -181,6 +189,7 @@ impl ShellNodeRunner {
         // tree-kills this child. On natural exit we drop the sender (via
         // registry.remove) so `kill_task` resolves Err → "not stopped".
         let pid = child.id();
+        tracing::info!(shell_id = %shell_id, pid = ?pid, "shell.spawn");
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
         self.registry.insert(shell_id.clone(), cancel_tx);
         let kill_task = tokio::spawn(async move {
@@ -225,7 +234,9 @@ impl ShellNodeRunner {
         // Drop original sender so channel closes once both reader tasks finish.
         drop(tx);
 
+        let mut line_count: u64 = 0;
         while let Some((kind, content, ts)) = rx.recv().await {
+            line_count += 1;
             publish_chunk(&broker, &block_id, &shell_id, kind, &content, ts);
         }
 
@@ -241,6 +252,7 @@ impl ShellNodeRunner {
         };
 
         let was_stopped = kill_task.await.unwrap_or(false);
+        tracing::info!(shell_id = %shell_id, exit_code, was_stopped, line_count, "shell.exit");
         publish_exit(&broker, &block_id, &shell_id, exit_code, was_stopped, now_ms());
     }
 }
