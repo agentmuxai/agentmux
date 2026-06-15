@@ -521,6 +521,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Subagent event subscriptions. See hooks/useSubagentEvents.ts.
     useSubagentEvents({
+        blockId: model.blockId,
         documentAtom: agentAtoms().documentAtom,
         log,
     });

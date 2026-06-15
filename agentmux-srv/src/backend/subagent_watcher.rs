@@ -109,7 +109,18 @@ impl SubagentWatcher {
 
     /// Start watching a Claude Code agent's session directory for subagent files.
     /// Spawns a background tokio task for debounced file event processing.
-    pub fn watch_agent(self: &Arc<Self>, agent_id: &str, config_dir: PathBuf) {
+    ///
+    /// `parent_block_id` is the pane/block that owns this Claude instance (from
+    /// the reactive register request). It is stamped onto every emitted subagent
+    /// event so the frontend can route the ⚡ panel to the originating pane only,
+    /// instead of every agent pane rendering every subagent globally.
+    ///
+    /// Note: the watcher dedupes by `agent_id`, so if the same agent_id is
+    /// registered from two blocks, events carry the first registrant's block id.
+    /// That edge case (same instance name in two panes) is rare; the common
+    /// leak — a terminal Claude's subagents showing up in unrelated agent panes —
+    /// is fully fixed because the terminal block id never matches an agent pane.
+    pub fn watch_agent(self: &Arc<Self>, agent_id: &str, parent_block_id: &str, config_dir: PathBuf) {
         // Derive the projects directory where Claude stores session data
         let projects_dir = config_dir.join("projects");
         if !projects_dir.exists() {
@@ -200,11 +211,12 @@ impl SubagentWatcher {
         }
 
         // Scan for any existing subagent files
-        self.scan_existing_subagents(agent_id, &projects_dir);
+        self.scan_existing_subagents(agent_id, parent_block_id, &projects_dir);
 
         // Spawn async task to process file change notifications
         let self_clone = Arc::clone(self);
         let parent_agent = agent_id.to_string();
+        let parent_block_id = parent_block_id.to_string();
         tokio::spawn(async move {
             loop {
                 let path = match rx.recv().await {
@@ -228,7 +240,7 @@ impl SubagentWatcher {
                 }
 
                 for changed_path in paths {
-                    self_clone.process_jsonl_change(&parent_agent, &changed_path);
+                    self_clone.process_jsonl_change(&parent_agent, &parent_block_id, &changed_path);
                 }
             }
         });
@@ -281,7 +293,7 @@ impl SubagentWatcher {
     // ── Internal methods ──────────────────────────────────────────────────
 
     /// Scan for existing subagent JSONL files in a projects directory.
-    fn scan_existing_subagents(&self, parent_agent: &str, projects_dir: &Path) {
+    fn scan_existing_subagents(&self, parent_agent: &str, parent_block_id: &str, projects_dir: &Path) {
         if !projects_dir.exists() {
             return;
         }
@@ -299,7 +311,7 @@ impl SubagentWatcher {
                         let path = file.path();
                         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                             if name.starts_with("agent-") && name.ends_with(".jsonl") {
-                                self.process_jsonl_change(parent_agent, &path);
+                                self.process_jsonl_change(parent_agent, parent_block_id, &path);
                             }
                         }
                     }
@@ -310,7 +322,7 @@ impl SubagentWatcher {
 
     /// Process a changed/new JSONL subagent file. Reads new lines, updates state,
     /// and broadcasts events via EventBus.
-    fn process_jsonl_change(&self, parent_agent: &str, jsonl_path: &Path) {
+    fn process_jsonl_change(&self, parent_agent: &str, parent_block_id: &str, jsonl_path: &Path) {
         // Extract agent ID from filename: agent-<id>.jsonl
         let agent_id = match jsonl_path
             .file_stem()
@@ -430,6 +442,7 @@ impl SubagentWatcher {
                             "agentId": info_snapshot.agent_id,
                             "slug": info_snapshot.slug,
                             "parentAgent": parent_agent,
+                            "parentBlockId": parent_block_id,
                             "sessionId": session_id,
                             "model": info_snapshot.model,
                         }
@@ -456,6 +469,7 @@ impl SubagentWatcher {
                         "data": {
                             "agentId": agent_id,
                             "parentAgent": parent_agent,
+                            "parentBlockId": parent_block_id,
                             "newEvents": new_events.len(),
                             "totalEvents": info_snapshot.event_count,
                             "events": new_events,
@@ -477,6 +491,7 @@ impl SubagentWatcher {
                         "data": {
                             "agentId": agent_id,
                             "parentAgent": parent_agent,
+                            "parentBlockId": parent_block_id,
                             "totalEvents": info_snapshot.event_count,
                         }
                     }
