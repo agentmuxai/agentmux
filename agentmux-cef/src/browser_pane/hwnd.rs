@@ -121,6 +121,23 @@ pub unsafe fn record_intentional_focus(child: *mut std::ffi::c_void) {
     }
 }
 
+/// Forget any `LAST_FOCUSED_BY_ROOT` entry whose recorded child is `child`.
+/// Called when a pane HWND is destroyed so the `WM_ACTIVATE` focus-restore
+/// hook never tries to `SetFocus` a dead child, and the destroyed pane isn't
+/// "remembered" as the focus target for its (possibly surviving) root.
+/// Returns true if an entry was removed (the dying pane was the recorded focus
+/// holder for some root). See
+/// docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15.md §1.
+pub fn forget_focus_for_child(child: *mut std::ffi::c_void) -> bool {
+    let target = child as usize;
+    if let Ok(mut map) = LAST_FOCUSED_BY_ROOT.lock() {
+        let before = map.len();
+        map.retain(|_, &mut v| v != target);
+        return map.len() != before;
+    }
+    false
+}
+
 /// Last-redirect timestamp per root HWND, used by
 /// `should_redirect_pane_focus_to_root` to rate-limit programmatic focus
 /// storms (setInterval-driven `window.focus()`, OAuth redirector pages,
