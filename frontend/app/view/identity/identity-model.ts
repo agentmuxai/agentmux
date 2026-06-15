@@ -21,11 +21,16 @@ export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "check
 export type IdentityTab = "accounts" | "assignments";
 
 export interface SecretRef {
-    backend: "env" | "secrets_manager" | "plaintext_dev";
+    backend: "env" | "secrets_manager" | "plaintext_dev" | "keychain";
     env_var?: string;
     sm_path?: string;
     sm_json_path?: string;
     value?: string; // plaintext_dev only
+    // keychain only — pointer into the OS secret store. The plaintext is
+    // never carried here; resolved backend-side at spawn. See
+    // specs/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+    service?: string;
+    account?: string;
 }
 
 export interface AccountContext {
@@ -37,6 +42,13 @@ export interface AccountContext {
     anthropic_model?: string;
     endpoint?: string;
     description?: string;
+    // Trust Center key flow — non-secret display hint (e.g. "••••••••3f9a")
+    // and per-service validation metadata. Populated by account.key.verify.
+    masked_tail?: string;
+    openai_model_count?: number;
+    anthropic_model_count?: number;
+    slack_team?: string;
+    slack_user?: string;
 }
 
 export interface Account {
@@ -182,6 +194,8 @@ function secretRefFromBackend(s: IdentityAccount["secret_ref"]): SecretRef {
             };
         case "plaintext_dev":
             return { backend: "plaintext_dev", value: s.plaintext_dev };
+        case "keychain":
+            return { backend: "keychain", service: s.service, account: s.account };
     }
 }
 
@@ -201,6 +215,8 @@ function secretRefToBackend(s: SecretRef): IdentityAccount["secret_ref"] {
             };
         case "plaintext_dev":
             return { backend: "plaintext_dev", plaintext_dev: s.value ?? "" };
+        case "keychain":
+            return { backend: "keychain", service: s.service ?? "", account: s.account ?? "" };
     }
 }
 

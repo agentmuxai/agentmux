@@ -686,6 +686,34 @@ class RpcApiType {
         return client.rpcCall("deleteidentityaccount", data, opts);
     }
 
+    // command "account.key.verify" [call]
+    // Trust Center: optionally validate (validate=true → single user-initiated
+    // outbound probe) then store an API key in the OS keychain. The plaintext
+    // is never returned; on success the response carries only the masked tail +
+    // non-secret metadata. See SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+    AccountKeyVerifyCommand(
+        client: RpcClient,
+        data: {
+            provider: string;
+            name: string;
+            displayName?: string;
+            kind?: string;
+            apiKey: string;
+            validate: boolean;
+            accountId?: string;
+        },
+        opts?: RpcOpts,
+    ): Promise<{
+        valid: boolean;
+        error?: string;
+        accountId?: string;
+        maskedTail?: string;
+        status?: string;
+        metadata?: Record<string, unknown>;
+    }> {
+        return client.rpcCall("account.key.verify", data, opts);
+    }
+
     // command "linkagentidentity" [call]
     LinkAgentIdentityCommand(
         client: RpcClient,
