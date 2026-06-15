@@ -105,9 +105,23 @@ a.plain-link {
 .os-scrollbar-handle {
     // Arrow, not the link hand — the OverlayScrollbars drag handle is a scroll
     // affordance. (Agent panes scroll through OverlayScrollbars, so this is
-    // what made the conversation scrollbar show the hand.)
-    cursor: default;
+    // what made the conversation scrollbar show the hand.) Token-driven via the
+    // cursor design tokens; the `-webkit-scrollbar` guard in `.stylelintrc.json`
+    // can't cover this OS-library class, so it is set explicitly here.
+    cursor: var(--cursor-default);
 }
+
+// ─── Cursor utilities — interaction affordances ─────────────────────────────
+// Resolve to the `--cursor-*` design tokens (theme.scss). Use these on markup
+// that can't easily reach a component stylesheet; SCSS authors can also write
+// `cursor: var(--cursor-interactive)` directly. See
+// `docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md`.
+.u-cursor-interactive { cursor: var(--cursor-interactive); }
+.u-cursor-default     { cursor: var(--cursor-default); }
+.u-cursor-text        { cursor: var(--cursor-text); }
+.u-cursor-disabled    { cursor: var(--cursor-disabled); }
+.u-cursor-grab        { cursor: var(--cursor-grab); }
+.u-cursor-grabbing    { cursor: var(--cursor-grabbing); }
 
 .scrollbar-hide-until-hover {
     *::-webkit-scrollbar-thumb,

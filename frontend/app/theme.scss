@@ -295,6 +295,22 @@
     --motion-slow:   280ms cubic-bezier(0.2, 1, 0.3, 1);
     --motion-spring: 400ms cubic-bezier(0.2, 0.9, 0.2, 1.2);
 
+    // Cursor — interaction affordances. Name the INTENT, not the raw keyword,
+    // so components read semantically and the mapping can move in one place.
+    // A scroll affordance (scrollbar thumb / handle) is NOT interactive in the
+    // click sense — it stays the arrow (`--cursor-default`), never the link
+    // hand. The `.u-cursor-*` utilities + the scrollbar guard in
+    // `.stylelintrc.json` keep this honest. See
+    // `docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md`.
+    --cursor-interactive: pointer;     // buttons, links, clickable rows
+    --cursor-default:     default;     // arrow — surfaces, scroll thumbs, chrome
+    --cursor-text:        text;        // editable text
+    --cursor-disabled:    not-allowed; // disabled controls
+    --cursor-grab:        grab;        // draggable, idle
+    --cursor-grabbing:    grabbing;    // draggable, active
+    --cursor-resize-x:    ew-resize;   // horizontal dividers
+    --cursor-resize-y:    ns-resize;   // vertical dividers
+
     // Z-index hierarchy (canonical source — SPEC_DESIGN_SYSTEM §5.3).
     // Naming is aspirational; existing `--zindex-*` tokens higher in
     // this file stay valid and will be re-pointed or retired in a
