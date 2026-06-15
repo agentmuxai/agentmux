@@ -78,18 +78,21 @@ document.addEventListener("webglcontextlost", (event) => {
 // page reload (the host's only reload path is for browser *panes*). Register a
 // capture-phase handler BEFORE the bridge handshake so it works even when the
 // UI is wedged on a startup failure — the exact state where users reach for it.
-window.addEventListener(
-    "keydown",
-    (e) => {
-        const isReload =
-            e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
-        if (isReload) {
-            e.preventDefault();
-            window.location.reload();
-        }
-    },
-    true,
-);
+//
+// SCOPED TO STARTUP ONLY: this handler is removed the moment the app finishes
+// loading (see the success path in bootstrap()). Leaving it active for the
+// whole session would hijack pane-level Ctrl+R — terminal reverse-i-search
+// (bash/zsh/readline), editor shortcuts — and reload the whole app instead.
+// [reagent #1424 P1]
+const startupReloadKeyHandler = (e: KeyboardEvent) => {
+    const isReload =
+        e.key === "F5" || ((e.ctrlKey || e.metaKey) && (e.key === "r" || e.key === "R"));
+    if (isReload) {
+        e.preventDefault();
+        window.location.reload();
+    }
+};
+window.addEventListener("keydown", startupReloadKeyHandler, true);
 
 // ── Static CSS imports ──────────────────────────────────────────────────────
 import "overlayscrollbars/overlayscrollbars.css";
@@ -150,8 +153,11 @@ async function bootstrap() {
             await initApp();
             log("INFO", "✅ Main application loaded successfully");
             // Successful startup — reset the auto-reload budget so a later,
-            // unrelated failure begins with a full set of retries.
+            // unrelated failure begins with a full set of retries, and drop the
+            // startup reload keybinding so pane-level Ctrl+R (terminal
+            // reverse-i-search, editor) works normally. [reagent #1424 P1]
             clearStartupReloadCount();
+            window.removeEventListener("keydown", startupReloadKeyHandler, true);
         } catch (initError) {
             log("ERROR", "Failed in initApp:", initError);
             log("ERROR", "Init error name:", (initError as Error)?.name);
