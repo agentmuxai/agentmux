@@ -12,6 +12,14 @@
                 "auto", "unset", "inherit", "initial"
             ]
         },
+        "rule-selector-property-disallowed-list": [
+            {
+                "/-webkit-scrollbar/": ["cursor"]
+            },
+            {
+                "message": "Scrollbars are scroll affordances, not links — never set `cursor` on a `::-webkit-scrollbar*` selector. Remove it so the thumb keeps the default arrow (it inherits it). See docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md."
+            }
+        ],
         "declaration-no-important": [true, {
             "message": "`!important` is forbidden — fix the underlying specificity or selector. If unavoidable, document the reason in a comment AND grandfather the file via `.stylelintignore`."
         }],
