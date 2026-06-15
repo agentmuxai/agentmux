@@ -43,9 +43,10 @@ function setReloadCount(n: number): void {
 }
 
 /**
- * Clear the auto-reload budget. Call after a successful startup so a later,
- * unrelated failure begins with a fresh budget (and call before a *manual*
- * reload so the user's click always gets a full set of retries).
+ * Clear the auto-reload budget. Called ONLY after a successful startup, so a
+ * later, unrelated failure begins with a fresh budget. It is deliberately NOT
+ * called before a manual reload — resetting there re-entered the auto-reconnect
+ * cycle and caused the infinite loop (see tryAutoRecover).
  */
 export function clearStartupReloadCount(): void {
     setReloadCount(0);
@@ -56,8 +57,9 @@ export function clearStartupReloadCount(): void {
  *
  * If the bounded reload budget isn't exhausted, show a "Reconnecting…" overlay
  * and reload after a short backoff — returns `true`, meaning the caller should
- * stop (the page is about to reload). Otherwise reset the budget, render the
- * recovery card, and return `false`.
+ * stop (the page is about to reload). Once the budget is exhausted, render the
+ * recovery card and return `false` WITHOUT resetting the budget, so any further
+ * reload returns to the card instead of re-entering the auto-reconnect loop.
  */
 export function tryAutoRecover(message: string): boolean {
     const attempt = getReloadCount() + 1;
