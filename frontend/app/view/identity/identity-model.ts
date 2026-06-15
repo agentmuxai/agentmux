@@ -311,14 +311,21 @@ export class IdentityViewModel implements ViewModel {
     formErrorAtom: Accessor<string | null> = this._formError[0];
     private setFormError: Setter<string | null> = this._formError[1];
 
+    /** Unsubscribe from the account cache; assigned in the constructor,
+     *  invoked in dispose() so direct callers don't leak a listener. */
+    private _unsubAccounts: (() => void) | null = null;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
         // Initial paint from cache (may be empty on first launch).
         this.setAccounts(loadAccounts());
         // Stay in sync with module-level cache updates from any source
-        // (other panes, RPC events, etc.).
-        const unsub = subscribeAccountChanges((accounts) => {
+        // (other panes, RPC events, etc.). The unsubscribe is stashed and
+        // invoked in dispose() so callers that mount this model directly
+        // (e.g. the Trust Center Accounts tab) don't leak a listener per
+        // open/close.
+        this._unsubAccounts = subscribeAccountChanges((accounts) => {
             this.setAccounts(accounts);
             // Keep the selected account fresh if it was edited externally.
             const sel = this.selectedAccountAtom();
@@ -330,11 +337,6 @@ export class IdentityViewModel implements ViewModel {
         });
         // Force a refresh in case the cache hasn't been primed yet.
         void refreshAccountCache();
-        // No explicit dispose — subscription leaks per ViewModel are
-        // bounded by the number of identity panes ever opened in a
-        // session (small). If this becomes a memory concern, wire
-        // `unsub` to ViewModel teardown (no such hook exists today).
-        void unsub;
     }
 
     // ── Derived helpers ──────────────────────────────────────────────────────
@@ -441,6 +443,9 @@ export class IdentityViewModel implements ViewModel {
     }
 
     dispose(): void {
-        // nothing to clean up — no backend subscriptions
+        // Drop the account-cache subscription so direct callers (Trust
+        // Center Accounts tab) don't leak a listener per open/close.
+        this._unsubAccounts?.();
+        this._unsubAccounts = null;
     }
 }
