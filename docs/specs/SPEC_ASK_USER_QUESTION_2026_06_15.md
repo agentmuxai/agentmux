@@ -1,7 +1,9 @@
 # SPEC: AskUserQuestion — interactive agent questions in the agent pane
 
 **Date:** 2026-06-15
-**Status:** Validated — implementing Phase 1 (smoke test passed 2026-06-15; see §10)
+**Status:** Phase 1 shipped (persistent agents, tool_result). Phase 2 shipped
+(one-shot/container agents — follow-up delivery; the resume+tool_result mechanism
+was empirically disproven, see §10.1).
 **Owner:** Agent pane (frontend stream/reducer/render) + sidecar (controller stdin delivery)
 **Related:** `SPEC_DECISION_PROMPT_2026_04_24.md` (sibling feature — tool *permission* gating, distinct from this), `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.md` (agent→app callback precedent)
 
@@ -363,12 +365,24 @@ update in 7.2 (and/or a matching `tool_result` echo if the provider emits one). 
   `send_tool_result`. Single & multi-select & "Other". Local host agents only.
 - Gated on the §2 validation result.
 
-**Phase 2 — one-shot / container agents.**
-- The subprocess controller has no live stdin. Options: resume the session via the
-  provider's `--resume <session_id>` with the tool_result as the new input
-  (a fresh subprocess per answer), or buffer the answer for the next turn. Decide
-  per-provider. Until then, those agents surface "answering not supported on this
-  connection" (the `UNSUPPORTED_CONTROLLER` path from 7.4).
+**Phase 2 — one-shot / container agents — SHIPPED (follow-up delivery).**
+- The subprocess / container controllers are strictly one-shot (stdin closes after
+  each turn). The originally-planned mechanism — resume with `--resume <session_id>`
+  and feed the `tool_result` — was **empirically disproven** (§10.1): when a one-shot
+  turn ends, the CLI *abandons* the pending `AskUserQuestion` tool_use, so a later
+  `tool_result` referencing it is dropped (the model reports "the user sent an empty
+  message"). There is no dangling tool_use to complete.
+- **Therefore Phase 2 delivers the answer as a normal follow-up turn**, not a
+  tool_result. The agent resumes the session (the existing `agentinput`/`--resume`
+  path) and receives the answer text as a regular user message; with the question
+  fresh in context, it continues correctly. This is a frontend fallback: the panel
+  first tries `agent.answer` (Phase 1 tool_result path); on `UNSUPPORTED_CONTROLLER`
+  it routes `answer_text` through the standard `handleSendMessage` path. The
+  optimistic success is kept; the panel never dead-ends on a one-shot agent.
+- Semantic caveat: for one-shot/container agents the answer is a *message*, not a
+  protocol tool_result — so the `AskUserQuestion` tool_use stays unanswered in the
+  transcript (harmless; the turn already ended cleanly). Persistent agents remain on
+  the true tool_result path (Phase 1).
 
 **Phase 3 — refinements.**
 - Structured (JSON) tool_result instead of the flat text block, if the model
@@ -429,6 +443,31 @@ Before writing UI, confirm the contract empirically against the bundled Claude C
 If (3) shows the tool is suppressed in this mode, escalate to a CLI-flag/upstream
 question and scope Phase 1 to whichever provider does emit it. If (5) fails, the
 content shape is wrong — adjust the `tool_result` block accordingly.
+
+### 10.1 One-shot / resume smoke test — Phase 2 finding (2026-06-15)
+
+To decide the Phase 2 mechanism, the same harness was run in **one-shot** mode
+(`claude -p --output-format stream-json …`, no `--input-format`) followed by a
+**resume** turn:
+
+```
+one_shot_emits_askq   = True     # one-shot -p DOES emit the AskUserQuestion tool_use
+one_shot_turn_ends    = True     # the turn then ends with a `result` (process exits)
+resume_accepts_result = "no-op"  # --resume + a tool_result for that id did NOT answer it
+resume_error          = False    # no hard error — but the model logged
+                                 #   "the user sent an empty message" and just greeted
+```
+
+**Conclusion:** when a one-shot turn ends, the CLI **abandons** the pending
+`AskUserQuestion` tool_use. On resume there is no open tool_use to complete, so a
+`tool_result` referencing it is silently dropped. The "resume + tool_result"
+mechanism is therefore **not viable** for one-shot/container agents.
+
+The viable path — and what Phase 2 ships — is to deliver the answer as a **normal
+follow-up user turn** over the existing `--resume` `agentinput` path. The agent
+continues the session with the answer as context. (A plain follow-up message is the
+ordinary, working resume path; only the *tool_result block* is what the abandoned
+tool_use can't consume.)
 
 ---
 
