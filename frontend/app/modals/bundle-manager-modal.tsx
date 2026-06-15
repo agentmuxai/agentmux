@@ -48,6 +48,7 @@ import {
 } from "@/app/store/singleton-modal";
 import { IdentityManager } from "@/app/view/identity/identity-manager";
 import { MemoryManager } from "@/app/view/memory/memory-manager";
+import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import "./bundle-manager-modal.scss";
 
 /**
@@ -57,7 +58,7 @@ import "./bundle-manager-modal.scss";
 export const SINGLETON_KIND_BUNDLE_MANAGER: SingletonKind = "bundle-manager";
 
 /** Which section the left rail currently shows. */
-type BundleSection = "identities" | "memories";
+type BundleSection = "accounts" | "identities" | "memories";
 
 /**
  * Resolve a window *label* to its human display name ("Window N", the
@@ -80,7 +81,7 @@ function windowNameForLabel(label: string): string {
  * windows can take it.
  */
 export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
-    const [section, setSection] = createSignal<BundleSection>("identities");
+    const [section, setSection] = createSignal<BundleSection>("accounts");
 
     // Release the singleton on unmount — guaranteed regardless of HOW the
     // modal closes. The Close button and ESC route through `onClose`, but
@@ -93,6 +94,7 @@ export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
     const handleClose = () => props.close();
 
     const rail: { id: BundleSection; label: string; icon: string }[] = [
+        { id: "accounts", label: "Accounts", icon: "key" },
         { id: "identities", label: "Identities", icon: "id-card" },
         { id: "memories", label: "Memories", icon: "brain" },
     ];
@@ -100,7 +102,7 @@ export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
     return (
         <Modal open={true} onClose={handleClose} scope="window" size="xl">
             <div class="modal-panel-header">
-                <div class="modal-panel-title">Identity &amp; Memory</div>
+                <div class="modal-panel-title">Trust Center</div>
             </div>
             <div class="modal-panel-body bundle-manager-body">
                 <nav class="bundle-manager-rail" aria-label="Bundle section">
@@ -131,6 +133,12 @@ export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
                      * choice; both stay consistent via the `*:changed`
                      * WPS events regardless.
                      */}
+                    <div
+                        class="bundle-manager-pane"
+                        classList={{ "is-hidden": section() !== "accounts" }}
+                    >
+                        <AccountsManager />
+                    </div>
                     <div
                         class="bundle-manager-pane"
                         classList={{ "is-hidden": section() !== "identities" }}
@@ -203,7 +211,7 @@ const BundleManagerElsewhereBannerInner = (props: {
                 onClick={focusHolder}
                 title="Bring the holding window to the front"
             >
-                Identity &amp; Memory is open in {holderName()} — click to focus
+                Trust Center is open in {holderName()} — click to focus
             </button>
         </Show>
     );

@@ -80,7 +80,7 @@ export function IdentityPanel(props: { model: IdentityViewModel }): JSX.Element 
 
 // ── Accounts tab ─────────────────────────────────────────────────────────────
 
-function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Element {
+export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const groups = () => model.accountsByProvider();
 
     return (
