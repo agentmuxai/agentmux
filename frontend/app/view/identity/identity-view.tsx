@@ -10,9 +10,21 @@ import type {
     IdentityViewModel,
     SecretRef,
 } from "./identity-model";
-import { KIND_LABELS, PROVIDER_LABELS } from "./identity-model";
+import { KIND_LABELS, PROVIDER_LABELS, refreshAccountCache } from "./identity-model";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import "./identity-view.scss";
+
+// Per-provider validation endpoint, surfaced in the egress help note next to
+// the Validate button so the user sees exactly where their key is sent before
+// they click. Mirrors the backend probes in key_validator.rs. Providers absent
+// here have no validator yet → the key can only be saved without validating.
+// See SPEC_TRUST_CENTER_2026_06_15.md §5.1/§6.
+const KEY_VALIDATION_ENDPOINT: Partial<Record<AccountProvider, string>> = {
+    github: "api.github.com/user",
+    anthropic: "api.anthropic.com/v1/models",
+};
 
 const STATUS_DOT: Record<string, string> = {
     valid: "status-dot status-valid",
@@ -186,6 +198,10 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                 <Show when={account.secret_ref.backend === "plaintext_dev"}>
                     <DetailField label="Value" value="••••••••••••" />
                 </Show>
+                <Show when={account.secret_ref.backend === "keychain"}>
+                    <DetailField label="Stored in" value="OS keychain" />
+                    <DetailField label="Key" value={account.context.masked_tail ?? "••••••••"} />
+                </Show>
 
                 {/* Context fields */}
                 <Show when={account.context.github_username}>
@@ -353,7 +369,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [provider, setProvider] = createSignal<AccountProvider>(editing()?.provider ?? "github");
     const [kind, setKind] = createSignal<AccountKind>(editing()?.kind ?? "pat");
     const [displayName, setDisplayName] = createSignal(editing()?.display_name ?? "");
-    const [secretBackend, setSecretBackend] = createSignal<SecretRef["backend"]>(editing()?.secret_ref.backend ?? "env");
+    const [secretBackend, setSecretBackend] = createSignal<SecretRef["backend"]>(editing()?.secret_ref.backend ?? "keychain");
     const [secretEnvVar, setSecretEnvVar] = createSignal(editing()?.secret_ref.env_var ?? "");
     const [secretSmPath, setSecretSmPath] = createSignal(editing()?.secret_ref.sm_path ?? "");
     const [secretSmJsonPath, setSecretSmJsonPath] = createSignal(editing()?.secret_ref.sm_json_path ?? "");
@@ -367,6 +383,61 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [anthropicModel, setAnthropicModel] = createSignal(editing()?.context.anthropic_model ?? "");
     const [description, setDescription] = createSignal(editing()?.context.description ?? "");
     const [assignedAgents, setAssignedAgents] = createSignal(editing()?.assigned_agents.join(", ") ?? "");
+
+    // ── Trust Center secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
+    // Active when secretBackend === "keychain": the user pastes a key and
+    // clicks Validate (single user-initiated egress) or "Save without
+    // validating". The plaintext is sent once to the backend, which stores it
+    // in the OS keychain and returns only a masked tail + metadata — it is
+    // never read back into the UI. Existing keychain accounts render locked
+    // (masked) and require Replace to re-enter.
+    const editingIsKeychain = editing()?.secret_ref.backend === "keychain";
+    const [keychainKey, setKeychainKey] = createSignal("");
+    const [keyBusy, setKeyBusy] = createSignal(false);
+    const [keyError, setKeyError] = createSignal<string | null>(null);
+    // For an existing keychain account, start locked (masked) until Replace.
+    const [keyReplacing, setKeyReplacing] = createSignal(!editingIsKeychain);
+    const validationEndpoint = (): string | undefined => KEY_VALIDATION_ENDPOINT[provider()];
+
+    // Non-rendered context keys: not editable in the form, so they must be
+    // carried across an edit rather than dropped. Everything else is rebuilt
+    // fresh from the form so cleared fields are removed and a provider switch
+    // doesn't leak stale provider-specific keys. (github_username/scopes are
+    // form fields, so they intentionally follow the form, not this list.)
+    const PRESERVED_CONTEXT_KEYS: (keyof AccountContext)[] = [
+        "masked_tail",
+        "openai_model_count",
+        "anthropic_model_count",
+        "slack_team",
+        "slack_user",
+    ];
+
+    // Build the non-secret context fresh from the form fields, then re-apply
+    // only the non-rendered keys (masked_tail + validation metadata) so a
+    // metadata-only edit doesn't wipe them.
+    const buildContext = (): AccountContext => {
+        const context: AccountContext = {};
+        if (provider() === "github") {
+            if (ghUsername()) context.github_username = ghUsername().trim();
+            if (ghScopes()) context.github_scopes = ghScopes().split(",").map((s) => s.trim()).filter(Boolean);
+        }
+        if (provider() === "aws") {
+            if (awsProfile()) context.aws_profile = awsProfile().trim();
+            if (awsRoleArn()) context.aws_role_arn = awsRoleArn().trim();
+            if (awsRegion()) context.aws_region = awsRegion().trim();
+        }
+        if (provider() === "anthropic") {
+            if (anthropicModel()) context.anthropic_model = anthropicModel().trim();
+        }
+        if (description()) context.description = description().trim();
+        const prior = editing()?.context;
+        if (prior) {
+            for (const k of PRESERVED_CONTEXT_KEYS) {
+                if (prior[k] !== undefined) (context[k] as unknown) = prior[k];
+            }
+        }
+        return context;
+    };
 
     const buildAccount = (): Omit<Account, "id" | "status" | "created_at" | "updated_at"> | null => {
         const n = name().trim();
@@ -382,21 +453,15 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             secretRef.sm_json_path = secretSmJsonPath().trim() || undefined;
         }
         if (secretBackend() === "plaintext_dev") secretRef.value = secretValue();
+        if (secretBackend() === "keychain") {
+            // Preserve the existing keychain pointer (service/account) so a
+            // metadata-only Save on a locked account doesn't drop it. New
+            // keychain accounts go through the key flow, not this path.
+            secretRef.service = editing()?.secret_ref.service;
+            secretRef.account = editing()?.secret_ref.account;
+        }
 
-        const context: AccountContext = {};
-        if (provider() === "github") {
-            if (ghUsername()) context.github_username = ghUsername().trim();
-            if (ghScopes()) context.github_scopes = ghScopes().split(",").map((s) => s.trim()).filter(Boolean);
-        }
-        if (provider() === "aws") {
-            if (awsProfile()) context.aws_profile = awsProfile().trim();
-            if (awsRoleArn()) context.aws_role_arn = awsRoleArn().trim();
-            if (awsRegion()) context.aws_region = awsRegion().trim();
-        }
-        if (provider() === "anthropic") {
-            if (anthropicModel()) context.anthropic_model = anthropicModel().trim();
-        }
-        if (description()) context.description = description().trim();
+        const context = buildContext();
 
         const agents = assignedAgents()
             .split(",")
@@ -421,6 +486,50 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             model.updateAccount(editing()!.id, data);
         } else {
             model.createAccount(data);
+        }
+    };
+
+    // Secure-key submit. `validate` true → the backend runs one live probe
+    // against the service (user-initiated egress) before storing; false →
+    // store with status "unknown" (the air-gapped escape hatch). On success
+    // the key lives only in the OS keychain; we refresh the cache and close.
+    const submitKey = async (validate: boolean) => {
+        const n = name().trim();
+        if (!n) {
+            setKeyError("Name is required");
+            return;
+        }
+        if (!keychainKey().trim()) {
+            setKeyError("Enter a key first");
+            return;
+        }
+        setKeyBusy(true);
+        setKeyError(null);
+        try {
+            const res = await RpcApi.AccountKeyVerifyCommand(TabRpcClient, {
+                provider: provider(),
+                name: n,
+                displayName: displayName().trim() || undefined,
+                kind: kind(),
+                apiKey: keychainKey(),
+                validate,
+                accountId: isEdit() ? editing()!.id : undefined,
+                // Carry the user-entered context so the backend merges (not
+                // drops) github_username/scopes/notes on a key change.
+                context: buildContext(),
+            });
+            // Drop the plaintext from the form immediately.
+            setKeychainKey("");
+            if (!res.valid && validate) {
+                setKeyError(res.error ?? "Validation failed");
+                return;
+            }
+            await refreshAccountCache();
+            model.cancelForm();
+        } catch (err) {
+            setKeyError((err as Error)?.message ?? String(err));
+        } finally {
+            setKeyBusy(false);
         }
     };
 
@@ -490,11 +599,89 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     {/* Secret storage */}
                     <FormField label="Secret backend">
                         <select class="identity-select" value={secretBackend()} onChange={(e) => setSecretBackend(e.currentTarget.value as SecretRef["backend"])}>
+                            <option value="keychain">OS Keychain (validated) — recommended</option>
                             <option value="env">Environment variable</option>
                             <option value="secrets_manager">AWS Secrets Manager</option>
                             <option value="plaintext_dev">Plaintext (dev only ⚠)</option>
                         </select>
                     </FormField>
+
+                    {/* ── Secure key lifecycle (keychain backend) ── */}
+                    <Show when={secretBackend() === "keychain"}>
+                        <Show
+                            when={keyReplacing()}
+                            fallback={
+                                <div class="identity-key-locked">
+                                    <span class="identity-key-masked">
+                                        {editing()?.context.masked_tail ?? "••••••••"}
+                                    </span>
+                                    <span class="identity-key-locked-note">
+                                        Stored in the OS keychain · not recoverable
+                                    </span>
+                                    <button
+                                        class="identity-btn identity-btn-secondary"
+                                        onClick={() => setKeyReplacing(true)}
+                                    >
+                                        Replace key
+                                    </button>
+                                </div>
+                            }
+                        >
+                            <FormField label="Key / token">
+                                <input
+                                    class="identity-input"
+                                    type="password"
+                                    autocomplete="off"
+                                    spellcheck={false}
+                                    value={keychainKey()}
+                                    onInput={(e) => setKeychainKey(e.currentTarget.value)}
+                                    placeholder="paste key — never stored in plaintext"
+                                />
+                            </FormField>
+                            {/* §5.1 egress transparency — placed at the point of action */}
+                            <Show
+                                when={validationEndpoint()}
+                                fallback={
+                                    <div class="identity-key-egress-note">
+                                        ⓘ No validator for {PROVIDER_LABELS[provider()]} yet — use
+                                        “Save without validating”. The key goes straight to your OS
+                                        keychain; nothing is sent anywhere.
+                                    </div>
+                                }
+                            >
+                                <div class="identity-key-egress-note">
+                                    ⓘ Clicking <strong>Validate &amp; Save</strong> sends this key once,
+                                    over HTTPS, from the AgentMux backend on your machine directly to{" "}
+                                    <code>{validationEndpoint()}</code> to confirm it works and read its
+                                    details. The key is never stored in plaintext, never logged, and not
+                                    sent anywhere else. After saving it lives in your OS keychain and
+                                    can’t be viewed again.
+                                </div>
+                            </Show>
+                            <Show when={keyError()}>
+                                <div class="identity-form-error">{keyError()}</div>
+                            </Show>
+                            <div class="identity-key-actions">
+                                <Show when={validationEndpoint()}>
+                                    <button
+                                        class="identity-btn identity-btn-primary"
+                                        disabled={keyBusy()}
+                                        onClick={() => void submitKey(true)}
+                                    >
+                                        {keyBusy() ? "Validating…" : "Validate & Save"}
+                                    </button>
+                                </Show>
+                                <button
+                                    class="identity-btn identity-btn-secondary"
+                                    disabled={keyBusy()}
+                                    onClick={() => void submitKey(false)}
+                                    title="Store the key without contacting the service"
+                                >
+                                    Save without validating
+                                </button>
+                            </div>
+                        </Show>
+                    </Show>
 
                     <Show when={secretBackend() === "env"}>
                         <FormField label="Env var name">
@@ -583,9 +770,16 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     <button class="identity-btn identity-btn-secondary" onClick={() => model.cancelForm()}>
                         Cancel
                     </button>
-                    <button class="identity-btn identity-btn-primary" onClick={handleSubmit}>
-                        {isEdit() ? "Save" : "Add Account"}
-                    </button>
+                    {/* The keychain *entry* path has its own Validate/Save
+                        buttons; hide the generic upsert there. But a locked
+                        keychain account (editing, not replacing the key) uses
+                        this button to save metadata-only edits — buildAccount
+                        preserves the existing keychain pointer + context. */}
+                    <Show when={secretBackend() !== "keychain" || (isEdit() && !keyReplacing())}>
+                        <button class="identity-btn identity-btn-primary" onClick={handleSubmit}>
+                            {isEdit() ? "Save" : "Add Account"}
+                        </button>
+                    </Show>
                 </div>
             </div>
         </div>
