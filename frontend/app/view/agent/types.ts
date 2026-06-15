@@ -527,7 +527,9 @@ export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface AgentRuntimeConfig {
     permissionMode: PermissionMode;
-    model: ModelChoice;
+    // Provider-scoped model string (a value from the active provider's
+    // `models` list). `ModelChoice` stays as the Claude-local alias type.
+    model: string;
     effort: EffortLevel;
 }
 
