@@ -32,6 +32,7 @@ pub mod auth_patterns;
 pub mod auth_session;
 pub mod key_validator;
 pub mod migration;
+pub mod oauth_client;
 pub mod resolver;
 pub mod secret_store;
 
