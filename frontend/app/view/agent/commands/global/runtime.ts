@@ -20,7 +20,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
-import type { AgentRuntimeConfig, EffortLevel, ModelChoice, PermissionMode } from "../../types";
+import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 type RuntimeUpdateResult =
@@ -58,17 +58,18 @@ function runtimeError(error: string): SlashResult {
 
 function modelChoices(ctx: SlashCommandContext): SlashChoice[] {
     const current = getRuntimeConfig(ctx.block()?.meta).model;
-    const make = (value: string, label: string, description: string, model: ModelChoice): SlashChoice => ({
-        value,
-        label,
-        description,
-        current: current === model,
-    });
-    return [
-        { ...make("opus", "Opus", "Claude Opus — highest quality", "opus"), aliases: ["claude-opus"] },
-        { ...make("sonnet", "Sonnet", "Claude Sonnet — balanced", "sonnet"), aliases: ["claude-sonnet"] },
-        { ...make("haiku", "Haiku", "Claude Haiku — fastest", "haiku"), aliases: ["claude-haiku"] },
-    ];
+    // Per-provider model list — Claude shows opus/sonnet/haiku, codex shows the
+    // gpt-5.x line, etc. Providers without a `models` list (kimi/openclaw/pi/
+    // copilot/gemini/qwen/muxcode pick their model in their own config) show no
+    // choices here.
+    const models = ctx.provider()?.models ?? [];
+    return models.map((m) => ({
+        value: m.value,
+        label: m.label,
+        description: m.description ?? m.value,
+        current: current === m.value,
+        aliases: m.aliases,
+    }));
 }
 
 export const modelCommand: SlashCommand = {
@@ -78,7 +79,7 @@ export const modelCommand: SlashCommand = {
     arg: { kind: "enum", required: true, choices: modelChoices },
     availability: "any-agent",
     handler: async (ctx, arg): Promise<SlashResult> => {
-        const result = await updateRuntime(ctx, { model: arg as ModelChoice });
+        const result = await updateRuntime(ctx, { model: arg });
         if (result.ok === false) return runtimeError(result.error);
         return { kind: "ok", message: `model set to ${result.updated.model} (applies to next turn)` };
     },

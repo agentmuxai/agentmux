@@ -30,7 +30,7 @@ describe("buildRuntimeArgs", () => {
             "--json",
             "--dangerously-bypass-approvals-and-sandbox",
             "--model",
-            "gpt-5.4",
+            "gpt-5.5",
             "-",
         ];
 
@@ -40,17 +40,24 @@ describe("buildRuntimeArgs", () => {
             // The exact things that killed the codex process before the fix:
             expect(out).not.toContain("--dangerously-skip-permissions");
             expect(out).not.toContain("sonnet");
-            // model is a ChatGPT-account-supported gpt-5.x, not the Claude ModelChoice
-            expect(out[out.indexOf("--model") + 1]).toBe("gpt-5.4");
+            // model is a ChatGPT-account-supported gpt-5.x default, not a Claude alias
+            expect(out[out.indexOf("--model") + 1]).toBe("gpt-5.5");
             // codex `exec` reads the prompt from the trailing positional `-`; the
             // model flag must sit before it, and nothing may follow it.
             expect(out[out.length - 1]).toBe("-");
         });
 
-        it("ignores the Claude-shaped runtime overrides (permission mode + ModelChoice)", () => {
+        it("falls back to the codex default when a carried-over Claude model is stored", () => {
+            // A pane created before per-provider models may have `model:"opus"`.
             const out = buildRuntimeArgs(CODEX_BASE, cfg({ permissionMode: "plan", model: "opus" }), "codex");
             expect(out).toEqual(CODEX_FIXED);
             expect(out).not.toContain("opus");
+        });
+
+        it("honors a user-picked codex model", () => {
+            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-5.4" }), "codex");
+            expect(out[out.indexOf("--model") + 1]).toBe("gpt-5.4");
+            expect(out[out.length - 1]).toBe("-"); // still before the positional
         });
     });
 
@@ -66,6 +73,12 @@ describe("buildRuntimeArgs", () => {
             const out = buildRuntimeArgs(CLAUDE_BASE, cfg({ permissionMode: "plan" }), "claude");
             expect(out).not.toContain("--dangerously-skip-permissions");
             expect(out[out.indexOf("--permission-mode") + 1]).toBe("plan");
+        });
+
+        it("omits --effort on Haiku (effort 400s on Haiku 4.5) but keeps --model", () => {
+            const out = buildRuntimeArgs(CLAUDE_BASE, cfg({ model: "haiku" }), "claude");
+            expect(out[out.indexOf("--model") + 1]).toBe("haiku");
+            expect(out).not.toContain("--effort");
         });
     });
 

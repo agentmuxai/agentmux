@@ -10,6 +10,7 @@
 
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
+import { getProvider } from "./providers";
 
 /**
  * Permission mode → CLI flags mapping.
@@ -110,11 +111,17 @@ export function buildRuntimeArgs(
         args.push("--effort", config.effort);
     }
 
-    // Codex uses a gpt-5.x model (not ModelChoice), and the flag must precede its
-    // trailing `-` prompt positional.
+    // Codex uses a gpt-5.x model, and the flag must precede its trailing `-`
+    // prompt positional. Use the user-picked model when it's a valid codex
+    // model; otherwise the provider default. (A pane carried over from before
+    // per-provider models may still have a Claude model like "opus" stored —
+    // never pass that to codex.)
     if (providerId === "codex") {
+        const codexModels = getProvider("codex")?.models ?? [];
+        const picked = codexModels.find((m) => m.value === config.model)?.value;
+        const fallback = codexModels.find((m) => m.default)?.value ?? CODEX_DEFAULT_MODEL;
         const promptPositional = args[args.length - 1] === "-" ? args.pop()! : null;
-        args.push("--model", CODEX_DEFAULT_MODEL);
+        args.push("--model", picked ?? fallback);
         if (promptPositional !== null) args.push(promptPositional);
     }
 
