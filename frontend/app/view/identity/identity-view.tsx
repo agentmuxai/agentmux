@@ -23,6 +23,7 @@ import "./identity-view.scss";
 // See SPEC_TRUST_CENTER_2026_06_15.md §5.1/§6.
 const KEY_VALIDATION_ENDPOINT: Partial<Record<AccountProvider, string>> = {
     github: "api.github.com/user",
+    openai: "api.openai.com/v1/models",
     anthropic: "api.anthropic.com/v1/models",
 };
 
@@ -279,7 +280,7 @@ function DetailField({ label, value }: { label: string; value: string }): JSX.El
 
 function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const accounts = () => model.accountsAtom();
-    const providers = (): AccountProvider[] => ["github", "aws", "anthropic", "custom"];
+    const providers = (): AccountProvider[] => ["github", "openai", "aws", "anthropic", "custom"];
 
     // Collect all unique agent IDs across all accounts
     const agentIds = () => {
@@ -559,6 +560,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     <FormField label="Provider">
                         <select class="identity-select" value={provider()} onChange={(e) => setProvider(e.currentTarget.value as AccountProvider)}>
                             <option value="github">GitHub</option>
+                            <option value="openai">OpenAI</option>
                             <option value="aws">AWS</option>
                             <option value="anthropic">Anthropic</option>
                             <option value="custom">Custom</option>
@@ -574,6 +576,9 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             <Show when={provider() === "aws"}>
                                 <option value="role">IAM Role</option>
                                 <option value="env_ref">Env Reference</option>
+                            </Show>
+                            <Show when={provider() === "openai"}>
+                                <option value="api_key">API Key</option>
                             </Show>
                             <Show when={provider() === "anthropic"}>
                                 <option value="api_key">API Key</option>
