@@ -37,7 +37,9 @@ use super::error::StoreError;
 ///        db_agent_definitions and db_agents (Phase 0 of
 ///        SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md; host agents default
 ///        to '' / '[]' / '')
-pub const OBJECT_SCHEMA_VERSION: i64 = 6;
+///   v7 — db_muxbus_credentials: global singleton for MuxBus cloud
+///        Cognito PKCE tokens (access, refresh, id) + expiry + user email
+pub const OBJECT_SCHEMA_VERSION: i64 = 7;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -378,7 +380,20 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_drone_runs_drone_started
             ON db_drone_runs(drone_id, started_at DESC);
         CREATE INDEX IF NOT EXISTS idx_drone_runs_status
-            ON db_drone_runs(status);",
+            ON db_drone_runs(status);
+
+        -- v7: MuxBus cloud connectivity — global singleton PKCE token store.
+        CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
+            id             TEXT PRIMARY KEY DEFAULT 'global',
+            cognito_domain TEXT NOT NULL DEFAULT '',
+            client_id      TEXT NOT NULL DEFAULT '',
+            access_token   TEXT NOT NULL DEFAULT '',
+            refresh_token  TEXT NOT NULL DEFAULT '',
+            id_token       TEXT NOT NULL DEFAULT '',
+            expires_at     INTEGER NOT NULL DEFAULT 0,
+            user_email     TEXT NOT NULL DEFAULT '',
+            user_sub       TEXT NOT NULL DEFAULT ''
+        );",
     )?;
 
     // ---- Additive column migrations (schema v2+) ----
@@ -401,6 +416,22 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     //     container_image / container_volumes / container_name on both tables.
     //     Host-agent rows default to '', '[]', '' respectively — ContainerManager
     //     populates them on first container spawn.
+    // v7: create db_muxbus_credentials if it doesn't exist yet (existing DBs
+    //     won't have it since it's a new table, not an added column).
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
+            id             TEXT PRIMARY KEY DEFAULT 'global',
+            cognito_domain TEXT NOT NULL DEFAULT '',
+            client_id      TEXT NOT NULL DEFAULT '',
+            access_token   TEXT NOT NULL DEFAULT '',
+            refresh_token  TEXT NOT NULL DEFAULT '',
+            id_token       TEXT NOT NULL DEFAULT '',
+            expires_at     INTEGER NOT NULL DEFAULT 0,
+            user_email     TEXT NOT NULL DEFAULT '',
+            user_sub       TEXT NOT NULL DEFAULT ''
+        )",
+    )?;
+
     for stmt in &[
         "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",

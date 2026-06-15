@@ -15,6 +15,7 @@ mod server;
 mod srv_ipc;
 mod state;
 mod drone;
+mod muxbus;
 #[cfg(windows)]
 mod crash_monitor;
 

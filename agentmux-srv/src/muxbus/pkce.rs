@@ -1,0 +1,329 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! PKCE Authorization Code flow for Cognito desktop login.
+//!
+//! Flow:
+//!   1. Generate code_verifier + code_challenge (S256).
+//!   2. Bind a random local TCP port for the redirect_uri.
+//!   3. Open browser to Cognito hosted UI.
+//!   4. Await HTTP callback (code + state).
+//!   5. Exchange code for tokens via /oauth2/token.
+//!   6. Decode email from id_token claims (no re-verification needed —
+//!      we fetched the token directly from Cognito).
+
+use base64::Engine as _;
+use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+use crate::backend::storage::muxbus::MuxBusCredentials;
+
+pub const LOGIN_TIMEOUT_SECS: u64 = 300;
+
+#[derive(Debug)]
+pub struct PkceResult {
+    pub credentials: MuxBusCredentials,
+}
+
+pub async fn run_pkce_login(
+    cognito_domain: &str,
+    client_id: &str,
+    http_client: &reqwest::Client,
+) -> Result<PkceResult, String> {
+    // 1. Generate code_verifier (43–128 chars of URL-safe chars)
+    let v1 = uuid::Uuid::new_v4();
+    let v2 = uuid::Uuid::new_v4();
+    let mut raw = [0u8; 32];
+    raw[..16].copy_from_slice(v1.as_bytes());
+    raw[16..].copy_from_slice(v2.as_bytes());
+    let code_verifier = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw);
+
+    // 2. code_challenge = BASE64URL(SHA-256(code_verifier))
+    let mut hasher = Sha256::new();
+    hasher.update(code_verifier.as_bytes());
+    let digest = hasher.finalize();
+    let code_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
+
+    // 3. State (CSRF)
+    let state = uuid::Uuid::new_v4().to_string();
+
+    // 4. Bind a random port
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("failed to bind callback listener: {e}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("listener addr: {e}"))?
+        .port();
+
+    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+
+    // 5. Build auth URL
+    let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
+    let auth_url = format!(
+        "{cognito_domain}/oauth2/authorize\
+         ?response_type=code\
+         &client_id={client_id}\
+         &redirect_uri={redirect_uri_enc}\
+         &scope={scopes}\
+         &code_challenge={code_challenge}\
+         &code_challenge_method=S256\
+         &state={state}",
+        redirect_uri_enc = percent_encode(&redirect_uri),
+    );
+
+    // 6. Open browser
+    open_browser(&auth_url);
+
+    tracing::info!(
+        cognito_domain = cognito_domain,
+        port = port,
+        "muxbus: PKCE login started, awaiting browser callback"
+    );
+
+    // 7. Accept one connection (with timeout)
+    let (mut stream, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(LOGIN_TIMEOUT_SECS),
+        listener.accept(),
+    )
+    .await
+    .map_err(|_| "login timed out (5 min) — please try again")?
+    .map_err(|e| format!("callback accept failed: {e}"))?;
+
+    // 8. Read HTTP request and extract code + state
+    let mut buf = [0u8; 4096];
+    let n = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        stream.read(&mut buf),
+    )
+    .await
+    .map_err(|_| "callback read timed out")?
+    .map_err(|e| format!("callback read failed: {e}"))?;
+    let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+
+    // Respond to the browser immediately
+    let html = if request.contains("code=") {
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+          <html><body><h2>Connected to AgentMux Cloud.</h2>\
+          <p>You can close this tab.</p></body></html>" as &[u8]
+    } else {
+        b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
+          <html><body><h2>Login failed.</h2><p>Please retry from AgentMux.</p></body></html>"
+    };
+    let _ = stream.write_all(html).await;
+
+    // Parse query from first line: GET /callback?code=xxx&state=yyy HTTP/1.1
+    let query = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|path| path.split_once('?').map(|(_, q)| q))
+        .unwrap_or("");
+
+    let code = query_param(query, "code")
+        .ok_or_else(|| "callback missing 'code' parameter")?;
+    let returned_state = query_param(query, "state").unwrap_or_default();
+
+    if returned_state != state {
+        return Err("CSRF mismatch — state parameter did not match".to_string());
+    }
+
+    // 9. Exchange code for tokens
+    let token_url = format!("{cognito_domain}/oauth2/token");
+    let params = [
+        ("grant_type", "authorization_code"),
+        ("client_id", client_id),
+        ("code", &code),
+        ("redirect_uri", &redirect_uri),
+        ("code_verifier", &code_verifier),
+    ];
+
+    let resp = http_client
+        .post(&token_url)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("token exchange request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("token exchange failed: {body}"));
+    }
+
+    let token_json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("token response parse failed: {e}"))?;
+
+    let access_token = token_json["access_token"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let refresh_token = token_json["refresh_token"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let id_token = token_json["id_token"].as_str().unwrap_or("").to_string();
+    let expires_in = token_json["expires_in"].as_i64().unwrap_or(3600);
+    let expires_at = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64)
+        + expires_in;
+
+    // 10. Extract email + sub from id_token payload (no re-verification needed)
+    let (user_email, user_sub) = extract_jwt_claims(&id_token);
+
+    tracing::info!(
+        email = user_email,
+        "muxbus: PKCE login succeeded"
+    );
+
+    Ok(PkceResult {
+        credentials: MuxBusCredentials {
+            cognito_domain: cognito_domain.to_string(),
+            client_id: client_id.to_string(),
+            access_token,
+            refresh_token,
+            id_token,
+            expires_at,
+            user_email,
+            user_sub,
+        },
+    })
+}
+
+pub async fn refresh_token(
+    creds: &MuxBusCredentials,
+    http_client: &reqwest::Client,
+) -> Result<MuxBusCredentials, String> {
+    if creds.refresh_token.is_empty() {
+        return Err("no refresh token stored".to_string());
+    }
+    let token_url = format!("{}/oauth2/token", creds.cognito_domain);
+    let params = [
+        ("grant_type", "refresh_token"),
+        ("client_id", creds.client_id.as_str()),
+        ("refresh_token", creds.refresh_token.as_str()),
+    ];
+    let resp = http_client
+        .post(&token_url)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("refresh request failed: {e}"))?;
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("token refresh failed: {body}"));
+    }
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("refresh response parse failed: {e}"))?;
+
+    let access_token = json["access_token"].as_str().unwrap_or("").to_string();
+    let expires_in = json["expires_in"].as_i64().unwrap_or(3600);
+    let expires_at = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64)
+        + expires_in;
+    // Cognito doesn't rotate refresh_token on refresh — keep existing
+    let new_id_token = json["id_token"]
+        .as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| creds.id_token.clone());
+
+    Ok(MuxBusCredentials {
+        cognito_domain: creds.cognito_domain.clone(),
+        client_id: creds.client_id.clone(),
+        access_token,
+        refresh_token: creds.refresh_token.clone(),
+        id_token: new_id_token,
+        expires_at,
+        user_email: creds.user_email.clone(),
+        user_sub: creds.user_sub.clone(),
+    })
+}
+
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        if k == key {
+            Some(percent_decode(v))
+        } else {
+            None
+        }
+    })
+}
+
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{b:02X}"));
+            }
+        }
+    }
+    out
+}
+
+fn percent_decode(s: &str) -> String {
+    let mut out = Vec::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = u8::from_str_radix(
+                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
+                16,
+            ) {
+                out.push(hex);
+                i += 3;
+                continue;
+            }
+        } else if bytes[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn extract_jwt_claims(token: &str) -> (String, String) {
+    let payload = token.splitn(3, '.').nth(1).unwrap_or("");
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(payload))
+        .unwrap_or_default();
+    let json: serde_json::Value =
+        serde_json::from_slice(&decoded).unwrap_or_default();
+    let email = json["email"].as_str().unwrap_or("").to_string();
+    let sub = json["sub"].as_str().unwrap_or("").to_string();
+    (email, sub)
+}
+
+fn open_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}

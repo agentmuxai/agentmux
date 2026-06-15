@@ -14,6 +14,7 @@ mod tool_handlers;
 pub(crate) mod wave_obj_bridge;
 mod websocket;
 mod drone_handlers;
+mod muxbus_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;
