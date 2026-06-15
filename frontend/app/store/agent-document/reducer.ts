@@ -35,6 +35,14 @@ import {
  *     `thinking` off and set `canceled: true` (+ `canceledAt`).
  *   - Tool nodes with `status === "running"` → set
  *     `status: "canceled"`.
+ *   - Tool nodes with `status === "awaiting_answer"` (AskUserQuestion)
+ *     that have content AFTER them → the conversation continued past the
+ *     question, so it was answered → set `status: "success"` and clear
+ *     `question`, so the question panel does NOT re-surface on reload (the
+ *     bug this fixes — SPEC_ASK_USER_QUESTION_2026_06_15 §13/Phase 3). A
+ *     TAIL awaiting_answer is left alone (same last-node heuristic as
+ *     thinking): a one-shot agent that just asked has the question as the
+ *     tail when SessionEnd fires, and it's still answerable.
  *
  * `pending_approval` tools are left alone: they represent a user
  * decision still in flight, not an interrupted stream. The user
@@ -106,6 +114,24 @@ function scrubOrphanedInProgress(
             // spinner" goal. Codex + reagent P2 on PR #1104.
             const closedLog = n.log != null ? { ...n.log, open: false } : n.log;
             next[i] = { ...n, status: "canceled", log: closedLog };
+            toolsCanceled++;
+            continue;
+        }
+        // AskUserQuestion that has content AFTER it was answered (the
+        // conversation continued past the question) → resolve to success and
+        // clear `question` so the panel doesn't re-surface on reload. A TAIL
+        // awaiting_answer (i === lastIdx) is deliberately left alone: it may
+        // still be answerable — a one-shot agent that just asked (SessionEnd
+        // fires while the question is the tail) or a resumable reopened
+        // session. Using the same last-node heuristic as the thinking scrub.
+        if (n.type === "tool" && n.status === "awaiting_answer" && i !== lastIdx) {
+            if (!next) next = nodes.slice();
+            next[i] = {
+                ...n,
+                status: "success",
+                question: undefined,
+                summary: "❓ Question answered",
+            };
             toolsCanceled++;
             continue;
         }
