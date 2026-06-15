@@ -49,7 +49,6 @@ enum ClientMsg {
     #[serde(rename = "subscribe:remove")]
     SubscribeRemove { agents: Vec<String> },
     Ack { id: String },
-    Ping,
 }
 
 #[derive(Deserialize)]
@@ -134,6 +133,26 @@ impl CloudSubscriber {
 
 // ── Background loop ───────────────────────────────────────────────────────────
 
+/// Sleep for `secs`, waking early if a `CtrlMsg::ReloadToken` arrives (e.g. after
+/// a fresh muxbus.login). AddAgent/RemoveAgent messages are drained without ending
+/// the sleep — they already updated the shared `agents` set. Returns true if the
+/// wait was cut short by a ReloadToken (caller should reconnect immediately), or
+/// false if the full duration elapsed (or the control channel closed).
+async fn backoff_sleep(secs: u64, ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>) -> bool {
+    let deadline = tokio::time::sleep(Duration::from_secs(secs));
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return false,
+            msg = ctrl_rx.recv() => match msg {
+                Some(CtrlMsg::ReloadToken) => return true,
+                Some(_) => {} // AddAgent / RemoveAgent already applied to `agents`
+                None => return false, // channel closed — outer loop will exit/park
+            },
+        }
+    }
+}
+
 async fn run_loop(
     wstore: Arc<Store>,
     agents: Arc<Mutex<HashSet<String>>>,
@@ -147,7 +166,16 @@ async fn run_loop(
         // Two distinct None cases:
         //   a) No credentials in DB at all → wait for muxbus.login ReloadToken signal
         //   b) Credentials exist but refresh failed transiently → back off and retry
-        let has_stored_creds = wstore.muxbus_load().ok().flatten().is_some();
+        // "Has usable creds" must match load_valid_token's own gate (non-empty
+        // access_token), otherwise a row with an empty token would make this true
+        // while load_valid_token returns None — sending the loop into a perpetual
+        // ~60s no-op back-off instead of parking for a ReloadToken.
+        let has_stored_creds = wstore
+            .muxbus_load()
+            .ok()
+            .flatten()
+            .map(|c| !c.access_token.is_empty())
+            .unwrap_or(false);
         let token = match load_valid_token(&wstore, &http).await {
             // Do NOT reset back-off here: a valid token loads on every iteration,
             // so resetting on load would pin the delay at the base value and
@@ -164,12 +192,16 @@ async fn run_loop(
                 continue;
             }
             None => {
-                // Credentials present but refresh failed transiently — back off and retry
+                // Credentials present but refresh failed transiently — back off and
+                // retry. The sleep is interruptible so a fresh muxbus.login wakes it.
                 tracing::warn!(
                     "cloud_subscriber: token refresh failed, retrying in {}s",
                     delay_secs
                 );
-                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                if backoff_sleep(delay_secs, &mut ctrl_rx).await {
+                    delay_secs = RECONNECT_DELAY_SECS; // ReloadToken — retry now
+                    continue;
+                }
                 delay_secs = (delay_secs * 2).min(MAX_RECONNECT_DELAY_SECS);
                 continue;
             }
@@ -194,7 +226,12 @@ async fn run_loop(
             }
         }
 
-        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+        // Interruptible back-off: a muxbus.login → reload_token() during the wait
+        // wakes us immediately instead of stalling reconnect for up to 60s.
+        if backoff_sleep(delay_secs, &mut ctrl_rx).await {
+            delay_secs = RECONNECT_DELAY_SECS;
+            continue;
+        }
         delay_secs = (delay_secs * 2).min(MAX_RECONNECT_DELAY_SECS);
     }
 }

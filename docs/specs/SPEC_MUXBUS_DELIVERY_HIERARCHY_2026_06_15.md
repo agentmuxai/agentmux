@@ -289,7 +289,7 @@ TTL on seen IDs: 5 minutes. Ring buffer evicts by age, not count.
 
 Already works mechanically. Just needs wiring:
 
-1. **Inject `AGENT_NAME` into every spawn env** — muxbus-client reads this to know its own identity. Currently not injected. Add to `websocket.rs` spawn path (next to `AGENTMUX_AUTH_KEY`).
+1. **Inject `AGENTMUX_AGENT_ID` into every spawn env** — muxbus-client reads this (preferred over the `AGENT_NAME` fallback) to know its own identity. Injected by the `websocket.rs` spawn path (next to `AGENTMUX_AUTH_KEY`), sourced from the block's `agentName` meta.
 2. **Bundle muxbus-client** with agentmux-mcp package — currently agents must separately install it. Include in the tools bundle so every agent pane gets it.
 3. **Fix muxbus-client local URL path** — client hits `/wave/reactive/inject` but sidecar exposes `/agentmux/reactive/inject`. Align these.
 
@@ -337,7 +337,7 @@ Already works at the API level. Needs:
 |----------|--------|---------|------|
 | `AGENTMUX_LOCAL_URL` | sidecar (main.rs) | muxbus-client, bashwrap, mcp | Tier 1/2 |
 | `AGENTMUX_AUTH_KEY` | sidecar (websocket.rs spawn) | muxbus-client, bashwrap | Tier 2 (forwarding) |
-| `AGENT_NAME` | sidecar (websocket.rs spawn) **[TO ADD]** | muxbus-client (self-identification) | all |
+| `AGENTMUX_AGENT_ID` | sidecar (websocket.rs spawn, from `agentName` meta) | muxbus-client (self-identification; falls back to `AGENT_NAME`) | all |
 | `MUXBUS_TOKEN` | sidecar (websocket.rs spawn, from db_muxbus_credentials) | muxbus-client (cloud auth), CloudSubscriber | Tier 4 |
 | `MUXBUS_COGNITO_DOMAIN` | sidecar (websocket.rs spawn) | muxbus-client (token refresh) | Tier 4 |
 | `MUXBUS_URL` | agent config / default | muxbus-client | Tier 4 |
