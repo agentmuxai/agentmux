@@ -680,6 +680,7 @@ export class EditorViewModel implements ViewModel {
                 view: "term",
                 cwd: folderPath,
                 split_direction: "right",
+                split_reference_block_id: this.blockId,
             });
         } catch {
             // pane.open might not be registered yet — fail silently.

@@ -1461,7 +1461,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 if !canonical_parent.starts_with(&canonical_home) {
                     return Err("createeditorfile: path outside home directory".to_string());
                 }
-                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.is_empty() {
+                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
                     return Err("createeditorfile: name must be a plain filename".to_string());
                 }
                 let file_path = canonical_parent.join(&cmd.name);
@@ -1491,7 +1491,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState) {
                 if !canonical_parent.starts_with(&canonical_home) {
                     return Err("createeditordir: path outside home directory".to_string());
                 }
-                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.is_empty() {
+                if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
                     return Err("createeditordir: name must be a plain name".to_string());
                 }
                 let dir_path = canonical_parent.join(&cmd.name);

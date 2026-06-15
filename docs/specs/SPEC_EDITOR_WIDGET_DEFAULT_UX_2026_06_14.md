@@ -60,7 +60,7 @@ Two specific gaps:
       "meta": {
         "view": "editor",
         "editor:scratch": true,
-        "editor:filetree-visible": false
+        "editor:tree_expanded": false
       }
     }
   }
@@ -69,7 +69,7 @@ Two specific gaps:
 
 - `editor:scratch: true` — signals the editor view to create/reopen a scratch buffer
   instead of showing an empty state.
-- `editor:filetree-visible: false` — tree starts collapsed. User can expand via the
+- `editor:tree_expanded: false` — tree starts collapsed. User can expand via the
   tree-toggle button (already exists in the toolbar). The expanded/collapsed state
   is then persisted per-pane in block meta.
 
@@ -169,11 +169,11 @@ overwrite prompt on frontend).
 
 ### 8. File tree collapsed state
 
-`editor:filetree-visible` is a block meta key (persisted in sidecar per pane):
+`editor:tree_expanded` is a block meta key (persisted in sidecar per pane):
 
 - Default from widget blockdef: `false` (collapsed).
 - Toggling the tree-toggle button in the editor toolbar sets
-  `editor:filetree-visible: true/false` in the pane's block meta.
+  `editor:tree_expanded: true/false` in the pane's block meta.
 - Survives tab close/reopen and pane resize.
 
 No new infrastructure needed — block meta persistence already exists.
@@ -184,7 +184,7 @@ No new infrastructure needed — block meta persistence already exists.
 
 | Component | Change | New? |
 |-----------|--------|------|
-| `widgets.json` | Add `editor:scratch: true`, `editor:filetree-visible: false` | No (edit) |
+| `widgets.json` | Add `editor:scratch: true`, `editor:tree_expanded: false` | No (edit) |
 | `EditorTab` interface | `filePath: string \| null`, add `scratchId`, `displayName`, `isScratch` | No (edit) |
 | `editor-pane-state-store.ts` | Handle `filePath: null` in all read/write paths | No (edit) |
 | `agentmux-srv/src/editor/scratch.rs` | `ScratchFileService` — create, recover, clean up | **Yes (new)** |
