@@ -134,6 +134,69 @@ export class FileTreeModel {
         this._expanded[1](new Set<string>());
     }
 
+    /** Collapse a single folder without affecting siblings. */
+    collapseFolder(path: string): void {
+        const next = new Set(this._expanded[0]());
+        next.delete(path);
+        this._expanded[1](next);
+    }
+
+    /** Expand a folder and lazy-load its children if not yet fetched. */
+    async expandFolder(path: string): Promise<void> {
+        if (this.isExpanded(path)) return;
+        const next = new Set(this._expanded[0]());
+        next.add(path);
+        this._expanded[1](next);
+        if (!this._data[0]().has(path)) {
+            await this.load(path);
+        }
+    }
+
+    /** Re-fetch a single path (e.g. after a file-system mutation in that dir). */
+    async refreshPath(path: string): Promise<void> {
+        await this.load(path);
+    }
+
+    /** Optimistically remove an entry from a loaded parent. Used after delete
+     *  so the tree updates immediately without a full re-fetch. */
+    removeEntryOptimistic(parentPath: string, name: string): void {
+        const setData = (updater: (map: Map<string, NodeData>) => void) => {
+            const next = new Map(this._data[0]());
+            updater(next);
+            this._data[1](next);
+        };
+        setData((map) => {
+            const existing = map.get(parentPath);
+            if (existing?.entries) {
+                map.set(parentPath, {
+                    ...existing,
+                    entries: existing.entries.filter((e) => e.name !== name),
+                });
+            }
+        });
+    }
+
+    /** Optimistically add an entry to a loaded parent. Used after create. */
+    addEntryOptimistic(parentPath: string, entry: DirEntry): void {
+        const setData = (updater: (map: Map<string, NodeData>) => void) => {
+            const next = new Map(this._data[0]());
+            updater(next);
+            this._data[1](next);
+        };
+        setData((map) => {
+            const existing = map.get(parentPath);
+            if (existing?.entries) {
+                const entries = [...existing.entries, entry];
+                // Re-sort: dirs first, then alpha.
+                entries.sort((a, b) => {
+                    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+                    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+                });
+                map.set(parentPath, { ...existing, entries });
+            }
+        });
+    }
+
     private async load(path: string): Promise<void> {
         const setData = (updater: (map: Map<string, NodeData>) => void) => {
             const next = new Map(this._data[0]());

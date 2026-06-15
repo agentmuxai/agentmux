@@ -52,7 +52,8 @@
         "blockdef": {
             "meta": {
                 "view": "editor",
-                "file": ""
+                "editor:tree_expanded": false,
+                "editor:scratch": true
             }
         }
     },

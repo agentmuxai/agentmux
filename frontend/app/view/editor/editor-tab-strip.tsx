@@ -34,6 +34,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
 
 function Tab(props: { tab: EditorTab; active: boolean; model: EditorViewModel }): JSX.Element {
     const basename = () => {
+        if (props.tab.displayName) return props.tab.displayName;
         const fp = props.tab.filePath;
         const i = Math.max(fp.lastIndexOf("/"), fp.lastIndexOf("\\"));
         return i >= 0 ? fp.slice(i + 1) : fp;
