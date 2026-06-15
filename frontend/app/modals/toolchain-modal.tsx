@@ -120,24 +120,19 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
             setRows(idx, { loading: false, found: false });
             return;
         }
-        const data =
-            row.kind === "core"
-                ? {
-                      provider_id: row.id,
-                      cli_command: (def as any).cliCommand,
-                      npm_package: "",
-                      pinned_version: "",
-                      windows_install_command: "",
-                      unix_install_command: "",
-                  }
-                : {
-                      provider_id: (def as any).id,
-                      cli_command: (def as any).cliCommand,
-                      npm_package: (def as any).npmPackage,
-                      pinned_version: (def as any).pinnedVersion,
-                      windows_install_command: (def as any).windowsInstallCommand ?? "",
-                      unix_install_command: (def as any).unixInstallCommand ?? "",
-                  };
+        // Detection MUST be pure — `resolvecli` is resolve-OR-install: with a
+        // non-empty `npm_package` it `npm install`s any provider not found in
+        // the versioned dir. We pass an EMPTY npm_package so it only probes the
+        // versioned install dir then the system PATH (never installs). Install
+        // is an explicit, user-initiated action (P2). See SPEC_TOOLCHAIN_MANAGER.
+        const data = {
+            provider_id: row.id,
+            cli_command: (def as any).cliCommand,
+            npm_package: "",
+            pinned_version: "",
+            windows_install_command: "",
+            unix_install_command: "",
+        };
         try {
             const r = await RpcApi.ResolveCliCommand(TabRpcClient, data, { timeout: 12000 });
             setRows(idx, {
