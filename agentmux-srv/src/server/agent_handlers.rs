@@ -1235,7 +1235,10 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let req: VerifyKeyReq = serde_json::from_value(data)
                     .map_err(|e| format!("account.key.verify: {e}"))?;
 
-                let account_id = if req.account_id.is_empty() {
+                // New account (mint id) vs. key replacement on an existing
+                // account. Rollback semantics differ: see the upsert below.
+                let is_new = req.account_id.is_empty();
+                let account_id = if is_new {
                     uuid::Uuid::new_v4().to_string()
                 } else {
                     req.account_id.clone()
@@ -1265,8 +1268,18 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 };
 
                 // Store the plaintext in the OS keychain; the DB never sees it.
-                crate::identity::secret_store::put(&account_id, &req.api_key)
+                // `keyring` is blocking (sync D-Bus on Linux), so run it off the
+                // async runtime worker via spawn_blocking.
+                {
+                    let aid = account_id.clone();
+                    let key = req.api_key.clone();
+                    tokio::task::spawn_blocking(move || {
+                        crate::identity::secret_store::put(&aid, &key)
+                    })
+                    .await
+                    .map_err(|e| format!("account.key.verify: keychain task: {e}"))?
                     .map_err(|e| format!("account.key.verify: {e}"))?;
+                }
 
                 // Non-secret context for display: metadata + masked tail.
                 let mut context = metadata;
@@ -1302,16 +1315,29 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     updated_at: now,
                 };
                 if let Err(e) = wstore.identity_upsert(&account) {
-                    // DB write failed after the keychain write — roll the
-                    // secret back so we don't leave an orphaned credential
-                    // with no DB row to reclaim it later. Best-effort; a
-                    // failed rollback is logged but the original error wins.
-                    if let Err(de) = crate::identity::secret_store::delete(&account_id) {
-                        tracing::warn!(
-                            target: "identity",
-                            "rollback of orphaned keychain secret for {} failed: {de}",
-                            account_id,
-                        );
+                    // DB write failed after the keychain write.
+                    //  - New account: nothing references the secret yet, so
+                    //    roll it back to avoid an orphan with no DB row.
+                    //  - Replacement: the existing DB row still points at this
+                    //    keychain entry. Deleting it would destroy the
+                    //    previously-working credential; leave the (now
+                    //    overwritten) secret in place — resolution still works
+                    //    with the new key, and the user can retry to fix
+                    //    metadata. So only roll back for new accounts.
+                    if is_new {
+                        let aid = account_id.clone();
+                        if let Err(de) = tokio::task::spawn_blocking(move || {
+                            crate::identity::secret_store::delete(&aid)
+                        })
+                        .await
+                        .unwrap_or_else(|je| Err(format!("join: {je}")))
+                        {
+                            tracing::warn!(
+                                target: "identity",
+                                "rollback of orphaned keychain secret for {} failed: {de}",
+                                account_id,
+                            );
+                        }
                     }
                     return Err(format!("account.key.verify: {e}"));
                 }
@@ -1345,9 +1371,16 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;
                 // If this account stored its secret in the OS keychain, drop
                 // it too so no orphaned credential survives the DB row.
+                // `keyring` is blocking, so run it via spawn_blocking.
                 if let Ok(Some(acct)) = wstore.identity_get(&cmd.id) {
                     if matches!(acct.secret_ref, SecretRef::Keychain { .. }) {
-                        if let Err(e) = crate::identity::secret_store::delete(&cmd.id) {
+                        let aid = cmd.id.clone();
+                        let res = tokio::task::spawn_blocking(move || {
+                            crate::identity::secret_store::delete(&aid)
+                        })
+                        .await
+                        .unwrap_or_else(|je| Err(format!("join: {je}")));
+                        if let Err(e) = res {
                             tracing::warn!(target: "identity", "keychain delete for {} failed: {e}", cmd.id);
                         }
                     }
