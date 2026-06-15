@@ -228,6 +228,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     .envs(paths.to_env_vars())
     .env("AGENTMUX_APP_PATH", &app_path_str)
     .env("PATH", &enriched.path)
+    // Record how PATH was derived so the Toolchain modal can show it.
+    .env("AGENTMUX_PATH_SOURCE", enriched.source.as_str())
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped());

@@ -154,8 +154,8 @@ Introduce a small **core-tools catalog** (node, npm, git, docker; each with id, 
 
 ## 6. Rollout
 
-- **P0 (ship first, standalone):** §3 PATH enrichment in `agentmux-common` + host sidecar spawn. Independently valuable; unblocks installs immediately. Its own AgentO PR + reagent + changeset (`fix`).
-- **P1:** `toolchain.status` RPC + core-tools catalog + read-only Toolchain modal (Environment + Core + Agent CLI sections, versions/paths/PATH-source, links only).
+- **P0 (shipped, #1454):** §3 PATH enrichment in `agentmux-common` + host sidecar spawn. Independently valuable; unblocks installs immediately.
+- **P1 (shipped):** core-tools catalog + read-only Toolchain modal (Environment + Core + Agent CLI sections, versions/paths/PATH-source, links only). **Decomposition note:** rather than one batch `toolchain.status` RPC, P1 reuses the existing `resolvecli` RPC per row (it already does versioned-dir→PATH→`--version` for any tool, incl. non-npm like docker) and adds only a tiny **`toolchain.env`** RPC for the Environment block (`{ path, pathSource, os, arch }`, sourced from the host-set `AGENTMUX_PATH_SOURCE`). Lower-risk, less new backend. The batch `toolchain.status` remains a possible later optimization if per-row latency matters.
 - **P2:** Install/Repair in place for npm providers (wire `install.start` into rows).
 - **P3:** One-click `brew install` for core tools where `brew` is detected; fold in kimi Python prereq + Node min-version flagging.
 

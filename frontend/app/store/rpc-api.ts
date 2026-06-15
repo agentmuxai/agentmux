@@ -1386,6 +1386,16 @@ class RpcApiType {
         return client.rpcCall("resolvecli", data, opts);
     }
 
+    // command "toolchain.env" [call] — report the effective PATH the srv
+    // resolves tools in, how it was derived, and OS/arch. Powers the
+    // Toolchain modal's Environment section. See SPEC_TOOLCHAIN_MANAGER.
+    ToolchainEnvCommand(
+        client: RpcClient,
+        opts?: RpcOpts,
+    ): Promise<{ path: string; pathSource: string; os: string; arch: string }> {
+        return client.rpcCall("toolchain.env", {}, opts);
+    }
+
     // command "checkcliauth" [call]
     CheckCliAuthCommand(client: RpcClient, data: CommandCheckCliAuthData, opts?: RpcOpts): Promise<CheckCliAuthResult> {
         return client.rpcCall("checkcliauth", data, opts);
