@@ -859,116 +859,125 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // ---------------------------------------------------------------------------
 
 fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
-    let event_bus = state.event_bus.clone();
-
+    let state = state.clone();
     engine.register_handler(
         COMMAND_PANE_OPEN,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
-            let event_bus = event_bus.clone();
+            let state = state.clone();
             Box::pin(async move {
                 let cmd: CommandPaneOpenData = serde_json::from_value(data)
                     .map_err(|e| format!("pane.open: {e}"))?;
-
-                tracing::info!(view = %cmd.view, "pane.open");
-
-                // Build meta for the requested view, validating required args
-                let meta = build_pane_meta(&cmd)?;
-
-                // Resolve tab
-                let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;
-
-                // Create block
-                let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
-                    .map_err(|e| format!("pane.open: create_block: {e}"))?;
-                let block_id = block.oid.clone();
-
-                // Enqueue layout action — split if requested, else append
-                let (actiontype, targetblockid, position) = resolve_placement(
-                    cmd.split_direction.as_deref(),
-                    cmd.split_reference_block_id.as_deref(),
-                );
-                let focused = cmd.focus.unwrap_or(true);
-
-                {
-                    let tab: Tab = wstore.must_get(&tab_id)
-                        .map_err(|e| format!("pane.open: reload tab: {e}"))?;
-                    if let Ok(mut layout) = wstore.must_get::<obj::LayoutState>(&tab.layoutstate) {
-                        let mut actions = layout.pendingbackendactions.take().unwrap_or_default();
-                        actions.push(obj::LayoutActionData {
-                            actiontype,
-                            actionid: uuid::Uuid::new_v4().to_string(),
-                            blockid: block_id.clone(),
-                            nodesize: None,
-                            indexarr: None,
-                            focused,
-                            magnified: false,
-                            ephemeral: false,
-                            targetblockid,
-                            position,
-                        });
-                        layout.pendingbackendactions = Some(actions);
-                        let _ = wstore.update(&mut layout);
-                    }
-                }
-
-                tracing::info!(
-                    block_id = %block_id,
-                    view = %cmd.view,
-                    "pane.open: block created + layout updated"
-                );
-
-                // Broadcast block + tab + layout updates
-                {
-                    let mut updates = Vec::new();
-                    if let Ok(updated_block) = wstore.must_get::<Block>(&block_id) {
-                        updates.push(obj::WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: "block".into(),
-                            oid: block_id.clone(),
-                            obj: Some(obj::wave_obj_to_value(&updated_block)),
-                        });
-                    }
-                    if let Ok(updated_tab) = wstore.must_get::<Tab>(&tab_id) {
-                        updates.push(obj::WaveObjUpdate {
-                            updatetype: "update".into(),
-                            otype: "tab".into(),
-                            oid: tab_id.clone(),
-                            obj: Some(obj::wave_obj_to_value(&updated_tab)),
-                        });
-                        if let Ok(updated_layout) = wstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
-                            updates.push(obj::WaveObjUpdate {
-                                updatetype: "update".into(),
-                                otype: "layout".into(),
-                                oid: updated_tab.layoutstate.clone(),
-                                obj: Some(obj::wave_obj_to_value(&updated_layout)),
-                            });
-                        }
-                    }
-                    for update in &updates {
-                        let oref = format!("{}:{}", update.otype, update.oid);
-                        if let Ok(data) = serde_json::to_value(update) {
-                            event_bus.broadcast_event(
-                                &crate::backend::eventbus::WSEventType {
-                                    eventtype: "waveobj:update".to_string(),
-                                    oref,
-                                    data: Some(data),
-                                },
-                            );
-                        }
-                    }
-                }
-
-                Ok(Some(serde_json::to_value(&PaneOpenResult {
-                    block_id,
-                    tab_id,
-                    view: cmd.view,
-                    created: true,
-                }).unwrap()))
+                let result = open_pane(&state, cmd).await?;
+                Ok(Some(serde_json::to_value(&result).unwrap()))
             })
         }),
     );
+}
+
+/// Core `pane.open` logic, shared by the WebSocket RPC handler
+/// (`register_pane_open`) and the HTTP route `POST /api/v1/pane/open`
+/// (`agentmux-mcp`'s `OpenEditor` tool). Creates a block for the requested
+/// view, enqueues a layout action (split or insert), and broadcasts the
+/// block/tab/layout updates so the frontend renders the new pane.
+pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
+    let wstore = state.wstore.clone();
+    let event_bus = state.event_bus.clone();
+
+    tracing::info!(view = %cmd.view, "pane.open");
+
+    // Build meta for the requested view, validating required args
+    let meta = build_pane_meta(&cmd)?;
+
+    // Resolve tab
+    let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;
+
+    // Create block
+    let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
+        .map_err(|e| format!("pane.open: create_block: {e}"))?;
+    let block_id = block.oid.clone();
+
+    // Enqueue layout action — split if requested, else append
+    let (actiontype, targetblockid, position) = resolve_placement(
+        cmd.split_direction.as_deref(),
+        cmd.split_reference_block_id.as_deref(),
+    );
+    let focused = cmd.focus.unwrap_or(true);
+
+    {
+        let tab: Tab = wstore.must_get(&tab_id)
+            .map_err(|e| format!("pane.open: reload tab: {e}"))?;
+        if let Ok(mut layout) = wstore.must_get::<obj::LayoutState>(&tab.layoutstate) {
+            let mut actions = layout.pendingbackendactions.take().unwrap_or_default();
+            actions.push(obj::LayoutActionData {
+                actiontype,
+                actionid: uuid::Uuid::new_v4().to_string(),
+                blockid: block_id.clone(),
+                nodesize: None,
+                indexarr: None,
+                focused,
+                magnified: false,
+                ephemeral: false,
+                targetblockid,
+                position,
+            });
+            layout.pendingbackendactions = Some(actions);
+            let _ = wstore.update(&mut layout);
+        }
+    }
+
+    tracing::info!(
+        block_id = %block_id,
+        view = %cmd.view,
+        "pane.open: block created + layout updated"
+    );
+
+    // Broadcast block + tab + layout updates
+    {
+        let mut updates = Vec::new();
+        if let Ok(updated_block) = wstore.must_get::<Block>(&block_id) {
+            updates.push(obj::WaveObjUpdate {
+                updatetype: "update".into(),
+                otype: "block".into(),
+                oid: block_id.clone(),
+                obj: Some(obj::wave_obj_to_value(&updated_block)),
+            });
+        }
+        if let Ok(updated_tab) = wstore.must_get::<Tab>(&tab_id) {
+            updates.push(obj::WaveObjUpdate {
+                updatetype: "update".into(),
+                otype: "tab".into(),
+                oid: tab_id.clone(),
+                obj: Some(obj::wave_obj_to_value(&updated_tab)),
+            });
+            if let Ok(updated_layout) = wstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
+                updates.push(obj::WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "layout".into(),
+                    oid: updated_tab.layoutstate.clone(),
+                    obj: Some(obj::wave_obj_to_value(&updated_layout)),
+                });
+            }
+        }
+        for update in &updates {
+            let oref = format!("{}:{}", update.otype, update.oid);
+            if let Ok(data) = serde_json::to_value(update) {
+                event_bus.broadcast_event(
+                    &crate::backend::eventbus::WSEventType {
+                        eventtype: "waveobj:update".to_string(),
+                        oref,
+                        data: Some(data),
+                    },
+                );
+            }
+        }
+    }
+
+    Ok(PaneOpenResult {
+        block_id,
+        tab_id,
+        view: cmd.view,
+        created: true,
+    })
 }
 
 /// Build the metadata map for a pane.open request, validating required args.
