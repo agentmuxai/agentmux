@@ -28,7 +28,7 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
-const ALL_PROVIDERS: AccountProvider[] = ["github", "aws", "anthropic", "custom"];
+const ALL_PROVIDERS: AccountProvider[] = ["github", "openai", "aws", "anthropic", "custom"];
 
 interface AgentIdentityPanelProps {
     agent: AgentDefinition;
