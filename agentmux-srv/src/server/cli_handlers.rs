@@ -470,6 +470,27 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // toolchain.env — report the environment the srv resolves tools in: the
+    // effective PATH, how it was derived (set by the host/srv PATH enricher,
+    // see SPEC_TOOLCHAIN_MANAGER §3), and OS/arch. Powers the Toolchain
+    // modal's Environment section so PATH problems are diagnosable.
+    engine.register_handler(
+        "toolchain.env",
+        Box::new(|_data, _ctx| {
+            Box::pin(async move {
+                let path = std::env::var("PATH").unwrap_or_default();
+                let path_source =
+                    std::env::var("AGENTMUX_PATH_SOURCE").unwrap_or_else(|_| "inherited".to_string());
+                Ok(Some(serde_json::json!({
+                    "path": path,
+                    "pathSource": path_source,
+                    "os": std::env::consts::OS,
+                    "arch": std::env::consts::ARCH,
+                })))
+            })
+        }),
+    );
 }
 
 /// Re-export from shared crate for internal use.

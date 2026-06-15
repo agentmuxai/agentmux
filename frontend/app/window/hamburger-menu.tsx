@@ -22,6 +22,7 @@ import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { openBundleManager } from "@/app/modals/bundle-manager-modal";
+import { openToolchainModal } from "@/app/modals/toolchain-modal";
 import { isMacOS } from "@/util/platformutil";
 import { createMemo, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
@@ -130,6 +131,14 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 label: "Trust Center",
                 icon: "shield-halved",
                 onClick: () => openBundleManager(),
+            },
+            {
+                // Toolchain — visibility + control over the dev tools AgentMux
+                // runs CLIs in (node/npm/git/docker + provider CLIs), incl. the
+                // effective PATH. See SPEC_TOOLCHAIN_MANAGER_2026-06-15.
+                label: "Toolchain",
+                icon: "wrench",
+                onClick: () => openToolchainModal(),
             },
             {
                 label: "DevTools",
