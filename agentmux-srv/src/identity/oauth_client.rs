@@ -152,6 +152,10 @@ const SESSION_TIMEOUT: Duration = Duration::from_secs(300);
 /// Terminal/transient status surfaced to the frontend poll.
 #[derive(Debug, Clone)]
 pub enum OAuthStatus {
+    /// Seeded the instant a session is created, before the spawned task has
+    /// emitted its first real status. Non-terminal so an early poll doesn't
+    /// see a terminal value and abort the flow.
+    Pending,
     /// Code flow: browser opened to `auth_url`; awaiting the loopback callback.
     UrlAvailable { auth_url: String },
     /// Device flow: show `user_code` + `verification_uri`; polling in progress.
@@ -177,13 +181,18 @@ pub struct OAuthSessionManager {
     sessions: Mutex<HashMap<String, OAuthSession>>,
 }
 
+/// How long a session entry is retained before it's pruned. Generous margin
+/// over the 5-min flow timeout so a slow frontend poll still finds its result.
+const SESSION_RETENTION: Duration = Duration::from_secs(900);
+
 impl OAuthSessionManager {
     fn new_session(&self, status: OAuthStatus) -> String {
         let id = format!("oauth-{}", uuid::Uuid::new_v4());
-        self.sessions.lock().unwrap().insert(
-            id.clone(),
-            OAuthSession { status, started_at: Instant::now() },
-        );
+        let mut guard = self.sessions.lock().unwrap();
+        // Prune stale entries so the global map can't grow unbounded over the
+        // process lifetime (terminal + timed-out sessions are GC'd here).
+        guard.retain(|_, s| s.started_at.elapsed() < SESSION_RETENTION);
+        guard.insert(id.clone(), OAuthSession { status, started_at: Instant::now() });
         id
     }
 
@@ -377,7 +386,7 @@ fn start_code_flow(
     let state = random_state();
     let scopes = cfg.scopes.join(" ");
 
-    let session_id = manager().new_session(OAuthStatus::Failed { error: "starting".into() });
+    let session_id = manager().new_session(OAuthStatus::Pending);
     let sid = session_id.clone();
 
     tokio::spawn(async move {
@@ -471,7 +480,7 @@ fn start_device_flow(
 ) -> Result<(String, OAuthStatus), String> {
     let device_url = cfg.device_url.ok_or("provider has no device endpoint")?.to_string();
     let scopes = cfg.scopes.join(" ");
-    let session_id = manager().new_session(OAuthStatus::Failed { error: "starting".into() });
+    let session_id = manager().new_session(OAuthStatus::Pending);
     let sid = session_id.clone();
 
     tokio::spawn(async move {

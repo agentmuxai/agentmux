@@ -143,6 +143,7 @@ struct OAuthSessionReq {
 fn oauth_status_wire(s: &crate::identity::oauth_client::OAuthStatus) -> serde_json::Value {
     use crate::identity::oauth_client::OAuthStatus;
     match s {
+        OAuthStatus::Pending => serde_json::json!({ "status": "pending" }),
         OAuthStatus::UrlAvailable { auth_url } => {
             serde_json::json!({ "status": "url-available", "authUrl": auth_url })
         }
