@@ -263,6 +263,19 @@ async fn main() {
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = init_logging();
 
+    // 1b. Direct-launch PATH fallback. The host enriches the srv's PATH when it
+    // spawns it (sidecar.rs), so in normal operation this is a cheap no-op.
+    // It only does work when the srv is launched directly with a stripped
+    // launchd PATH (some dev paths), so installs/CLIs still resolve node/npm.
+    // See SPEC_TOOLCHAIN_MANAGER_2026-06-15 §3.1.
+    let path_source = agentmux_common::enrich_current_process_path();
+    if path_source != agentmux_common::PathSource::Inherited {
+        tracing::info!(
+            source = path_source.as_str(),
+            "Enriched srv PATH on direct launch (stripped PATH detected)"
+        );
+    }
+
     // 2. Parse CLI args and build config
     let args = CliArgs::parse();
     let config = config::Config::from_env_and_args(&args).unwrap_or_else(|e| {
