@@ -503,55 +503,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         return out;
     };
 
-    const handleAnswer = (outcome: AnswerOutcome) => {
-        // Optimistic transition: flip the node out of awaiting_answer so the
-        // panel dismisses immediately. The agent's continuation (the next
-        // assistant content / result the smoke test confirmed arrives) drives
-        // the rest of the conversation; the node carries the answer as its
-        // summary for the record. We snapshot the original node(s) so a failed
-        // delivery can roll the transition back (see the catch below).
-        const originals: import("./types").ToolNode[] = [];
-        const updated: import("./types").ToolNode[] = [];
-        for (const n of getDocument()) {
-            if (n.type !== "tool" || n.status !== "awaiting_answer") continue;
-            if (n.question?.tool_use_id !== outcome.tool_use_id) continue;
-            originals.push(n);
-            updated.push({
-                ...n,
-                status: "success",
-                question: undefined,
-                summary: `❓ Answered — ${outcome.answer_text.replace(/\n/g, "; ")}`,
-            });
-        }
-        if (updated.length > 0) {
-            dispatchDoc(
-                model.blockId,
-                { type: "StreamFlush", newNodes: [], updatedNodes: updated },
-                "user",
-            );
-        }
-        // Deliver the answer to the running agent CLI as a tool_result over the
-        // persistent controller's live stdin.
-        void RpcApi.AgentAnswerCommand(TabRpcClient, {
-            blockid: model.blockId,
-            tool_use_id: outcome.tool_use_id,
-            answer_text: outcome.answer_text,
-        }).catch((err: unknown) => {
-            // Delivery failed — most commonly UNSUPPORTED_CONTROLLER on a
-            // container / one-shot agent (no live stdin; Phase 2). Roll the
-            // node back to awaiting_answer so the panel re-surfaces and the
-            // user isn't falsely told the question was answered while the
-            // agent is still blocked.
-            log("error", `agent.answer failed: ${String(err)}`);
-            if (originals.length > 0) {
-                dispatchDoc(
-                    model.blockId,
-                    { type: "StreamFlush", newNodes: [], updatedNodes: originals },
-                    "user",
-                );
-            }
-        });
-    };
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
@@ -720,6 +671,61 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         const wasAlreadyWorking = workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" });
         dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         return commands.sendMessage(message, wasAlreadyWorking);
+    };
+
+    // AskUserQuestion answer handler. Defined after handleSendMessage because
+    // the non-persistent fallback below delegates to it.
+    const handleAnswer = (outcome: AnswerOutcome) => {
+        // Optimistic transition: flip the node out of awaiting_answer so the
+        // panel dismisses immediately. We snapshot the original node(s) so a
+        // failed delivery can roll the transition back.
+        const originals: import("./types").ToolNode[] = [];
+        const updated: import("./types").ToolNode[] = [];
+        for (const n of getDocument()) {
+            if (n.type !== "tool" || n.status !== "awaiting_answer") continue;
+            if (n.question?.tool_use_id !== outcome.tool_use_id) continue;
+            originals.push(n);
+            updated.push({
+                ...n,
+                status: "success",
+                question: undefined,
+                summary: `❓ Answered — ${outcome.answer_text.replace(/\n/g, "; ")}`,
+            });
+        }
+        const applyDoc = (nodes: import("./types").ToolNode[]) => {
+            if (nodes.length > 0) {
+                dispatchDoc(model.blockId, { type: "StreamFlush", newNodes: [], updatedNodes: nodes }, "user");
+            }
+        };
+        applyDoc(updated);
+
+        // Phase 1 path: persistent (host) agents have a live stdin, so the
+        // answer is delivered as a tool_result that resumes the blocked turn.
+        void RpcApi.AgentAnswerCommand(TabRpcClient, {
+            blockid: model.blockId,
+            tool_use_id: outcome.tool_use_id,
+            answer_text: outcome.answer_text,
+        }).catch((err: unknown) => {
+            const msg = String(err);
+            // Phase 2 path: one-shot / container agents have no live stdin, and
+            // the CLI abandons the AskUserQuestion tool_use when the turn ends —
+            // a tool_result can no longer reach it (validated empirically:
+            // SPEC §10.1). Deliver the answer as a normal follow-up turn
+            // instead; the agent resumes the session and continues from the
+            // question with the answer as context. Keep the optimistic success.
+            if (msg.includes("UNSUPPORTED_CONTROLLER")) {
+                log("agent", "Delivering AskUserQuestion answer as a follow-up message (non-persistent agent)");
+                void handleSendMessage(outcome.answer_text).catch((e: unknown) => {
+                    log("error", `answer follow-up failed: ${String(e)}`);
+                    applyDoc(originals);
+                });
+                return;
+            }
+            // Any other failure: roll the node back so the panel re-surfaces
+            // rather than falsely showing "answered" while the agent is blocked.
+            log("error", `agent.answer failed: ${msg}`);
+            applyDoc(originals);
+        });
     };
 
     // ── Startup sequence ────────────────────────────────────────────────────────
