@@ -11,9 +11,9 @@ import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
-import { oneDark } from "@codemirror/theme-one-dark";
 import { search } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
+import { editorTheme } from "./editor-theme";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
@@ -255,8 +255,12 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
         const extensions: Extension[] = [
             basicSetup,
-            oneDark,
+            editorTheme,
             search(),
+            // lintGutter installs the lint state field that backs the inline
+            // diagnostic underlines (LSP pushes via setDiagnostics). We keep
+            // it for that field but hide its gutter column in CSS — there's
+            // no debugger/breakpoint margin, so the numbers sit tight to code.
             lintGutter(),
             lintCompartment.of([]),
             EditorView.lineWrapping,

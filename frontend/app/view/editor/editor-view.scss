@@ -541,6 +541,21 @@
         // resize together.
         font-size: calc(13px * var(--editor-zoom, 1));
     }
+
+    // Tight gutter — no debugger/breakpoint margin to reserve, so the line
+    // numbers sit flush against the code with just 1px of breathing room.
+    // The fold gutter (unused; no folding UI) and the lint gutter column are
+    // hidden. lintGutter() stays in the extension set because it backs the
+    // inline diagnostic underlines — only its empty marker column is removed
+    // here — so the only visible gutter is the line numbers.
+    .cm-foldGutter,
+    .cm-gutter-lint {
+        display: none;
+    }
+
+    .cm-lineNumbers .cm-gutterElement {
+        padding: 0 1px 0 6px;
+    }
 }
 
 // ── LSP install banner (Phase 1 of SPEC_EDITOR_LSP_AND_THEMES) ────────
