@@ -66,7 +66,9 @@ a.plain-link {
 }
 
 *::-webkit-scrollbar-thumb {
-    cursor: pointer;
+    // No cursor override: a scrollbar is a scroll affordance, not a link, so it
+    // keeps the default arrow. (Was `cursor: pointer`, which showed the link
+    // hand on every scrollbar — including agent panes.)
     background-color: var(--scrollbar-thumb-color);
     border-radius: 0;
     margin: 0 1px 0 1px;
@@ -101,7 +103,10 @@ a.plain-link {
 }
 
 .os-scrollbar-handle {
-    cursor: pointer;
+    // Arrow, not the link hand — the OverlayScrollbars drag handle is a scroll
+    // affordance. (Agent panes scroll through OverlayScrollbars, so this is
+    // what made the conversation scrollbar show the hand.)
+    cursor: default;
 }
 
 .scrollbar-hide-until-hover {
