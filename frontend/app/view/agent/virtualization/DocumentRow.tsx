@@ -17,7 +17,6 @@
 import { onMount, Show, type Accessor, type JSX } from "solid-js";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { MarkdownBlock } from "../components/MarkdownBlock";
-import { NodeHoverStrip } from "../components/NodeHoverStrip";
 import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
@@ -74,13 +73,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
 
     const canExpand = (): boolean => TOGGLEABLE_KINDS.has(props.node().type);
 
-    const isExpanded = (): boolean => {
-        const n = props.node();
-        const state = props.documentState();
-        if (n.type === "tool" || n.type === "shell") return state.pinnedNodes.has(n.id);
-        return !state.collapsedNodes.has(n.id);
-    };
-
     const onExpand = (): void => {
         const n = props.node();
         if (n.type === "tool" || n.type === "shell") props.onTogglePin(n.id);
@@ -116,7 +108,7 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
     return (
         <div
             ref={props.ref}
-            class="hover-strip-host agent-document-row"
+            class="agent-document-row"
             classList={{
                 "agent-node-search-match": isSearchMatch(),
             }}
@@ -132,13 +124,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
                 onSubagentClick={props.onSubagentClick}
-            />
-            <NodeHoverStrip
-                timestamp={(props.node() as { timestamp?: number }).timestamp}
-                nodeId={props.node().id}
-                canExpand={canExpand()}
-                isExpanded={isExpanded()}
-                onExpand={onExpand}
             />
         </div>
     );
@@ -224,7 +209,13 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 />
             </Show>
             <Show when={props.node() && props.node().type === "section"}>
-                <div class={`agent-section level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}>
+                {/* Section header toggles its own collapse on click (the
+                    expand affordance the removed hover strip used to provide);
+                    keyboard "e" on the focused row still toggles too. */}
+                <div
+                    class={`agent-section agent-section--toggle level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}
+                    onClick={() => props.onToggleCollapse(props.node().id)}
+                >
                     <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 1}>
                         <h1>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h1>
                     </Show>
