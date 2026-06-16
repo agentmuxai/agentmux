@@ -1085,12 +1085,26 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     if agent_mode == "container" {
                         return Err("container agents require a subprocess controller; this provider uses a persistent controller".to_string());
                     }
+                    // Resume support: a /model (or effort/permission) change
+                    // respawns the persistent CLI with new flags; pass the
+                    // resume flag + captured session id so the respawn continues
+                    // the same conversation. Same meta keys the subprocess path
+                    // reads below. Without this, switching model on a persistent
+                    // agent would either no-op (old behavior) or lose context.
+                    let resume_flag = crate::backend::obj::meta_get_string(
+                        &block.meta, "agent:resume_flag", "--resume",
+                    );
+                    let persisted_session_id = crate::backend::obj::meta_get_string(
+                        &block.meta, "agent:sessionid", "",
+                    );
                     let config = blockcontroller::persistent::PersistentSpawnConfig {
                         cli_command,
                         cli_args,
                         working_dir,
                         env_vars,
                         session_id_field,
+                        resume_flag,
+                        session_id: persisted_session_id,
                         message_id: cmd.message_id.clone(),
                     };
                     persistent_ctrl.send_message(cmd.message, config)?;
