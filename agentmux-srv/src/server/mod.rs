@@ -348,30 +348,36 @@ async fn handle_lan_instances(State(state): State<AppState>) -> Json<serde_json:
 /// the other reactive routes; agents reach it via AGENTMUX_LOCAL_URL + X-AuthKey.
 /// See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
 async fn handle_discovery(State(state): State<AppState>) -> Json<serde_json::Value> {
-    use std::collections::HashSet;
-
-    // Tier-1/2 reachable set — the authoritative "addressable" answer.
+    // Tier-1/2 reachable set — the authoritative "addressable" answer. Keep the
+    // live block_id per name (lowercased) so an addressable row can surface its
+    // real delivery block; the SQLite directory below does not carry one.
     let reachable = state.reactive_handler.list_agents();
-    let addressable: HashSet<String> =
-        reachable.iter().map(|a| a.agent_id.to_lowercase()).collect();
+    let reachable_block: std::collections::HashMap<String, String> = reachable
+        .iter()
+        .map(|a| (a.agent_id.to_lowercase(), a.block_id.clone()))
+        .collect();
 
-    // Host directory (live SQLite instances), each flagged against the
-    // reachable set. Hidden ("forgotten") rows are excluded.
+    // Host directory (live SQLite instances). `instance_list` already excludes
+    // hidden (user_hidden = 0) and template rows in SQL, and the consolidated
+    // path leaves block_id/status empty (agents.rs) — so addressability AND the
+    // live block_id come from the reachable set above. `block_id` is null for a
+    // known-but-unreachable agent; the always-empty `status` is omitted.
     let instances = state.wstore.instance_list(None, None).unwrap_or_default();
     let agents: Vec<serde_json::Value> = instances
         .into_iter()
-        .filter(|i| !i.display_hidden)
         .map(|i| {
-            let is_addressable = !i.instance_name.is_empty()
-                && addressable.contains(&i.instance_name.to_lowercase());
+            let live_block = if i.instance_name.is_empty() {
+                None
+            } else {
+                reachable_block.get(&i.instance_name.to_lowercase()).cloned()
+            };
             json!({
                 "name": i.instance_name,
                 "id": i.id,
                 "definition_id": i.definition_id,
-                "block_id": i.block_id,
-                "status": i.status,
                 "working_directory": i.working_directory,
-                "addressable": is_addressable,
+                "addressable": live_block.is_some(),
+                "block_id": live_block,
             })
         })
         .collect();
