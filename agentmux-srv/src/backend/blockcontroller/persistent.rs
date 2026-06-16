@@ -174,6 +174,31 @@ impl PersistentSubprocessController {
             .map_err(|e| format!("stdin send failed: {e}"))
     }
 
+    /// Deliver a user message to the **already-running** persistent process,
+    /// without a spawn config. Unlike `send_message`, this never spawns — it errors
+    /// if the process is not running. Used for controller-aware muxbus/reactive
+    /// delivery (`deliver_agent_message`), where the agent is live (busy or idle)
+    /// and we have no `PersistentSpawnConfig` to hand. Writing on the live stdin lets
+    /// the message land mid-turn (steering) instead of waiting for idle.
+    /// Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
+    pub fn send_user_message(&self, message: String) -> Result<(), String> {
+        let json_msg = serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": message
+            }
+        });
+
+        let inner = self.inner.lock().unwrap();
+        let tx = inner
+            .stdin_tx
+            .as_ref()
+            .ok_or("persistent process not running")?;
+        tx.try_send(json_msg.to_string())
+            .map_err(|e| format!("stdin send failed: {e}"))
+    }
+
     /// Answer a parked AskUserQuestion via the Agent SDK **control protocol**.
     ///
     /// The CLI asked us with a `can_use_tool` control_request (parked in

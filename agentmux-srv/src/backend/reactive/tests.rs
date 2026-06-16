@@ -323,6 +323,124 @@ async fn test_handler_inject_success() {
     assert_eq!(calls[1], ("block1".to_string(), b"hello\r".to_vec()));
 }
 
+// Controller-aware delivery (SPEC_AGENT_CONTROL_PROTOCOL §6 / Phase 3).
+
+// A structured (persistent/ACP) controller delivers via the message_sender and
+// must NOT also emit PTY keystrokes through the input_sender.
+#[test]
+fn test_handler_inject_structured_delivery_skips_pty() {
+    let pty_calls = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let msg_calls = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let pty_clone = pty_calls.clone();
+    let msg_clone = msg_calls.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        pty_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    // Structured controller: report delivered (Ok(true)).
+    handler.set_message_sender(Arc::new(move |block_id: &str, message: &str| {
+        msg_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), message.to_string()));
+        Ok(true)
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.block_id.as_deref(), Some("block1"));
+    // Structured channel got the message; PTY got nothing.
+    assert_eq!(
+        *msg_calls.lock().unwrap(),
+        vec![("block1".to_string(), "hello".to_string())]
+    );
+    assert!(pty_calls.lock().unwrap().is_empty());
+}
+
+// A PTY-based controller (message_sender returns Ok(false)) falls through to the
+// keystroke path.
+#[tokio::test]
+async fn test_handler_inject_pty_fallback() {
+    let pty_calls = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let pty_clone = pty_calls.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        pty_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| Ok(false)));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+    });
+
+    assert!(resp.success);
+    // Keystroke path ran: clear `\r` then `hello\r` (delayed `\r`s are spawned later).
+    let calls = pty_calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0], ("block1".to_string(), b"\r".to_vec()));
+    assert_eq!(calls[1], ("block1".to_string(), b"hello\r".to_vec()));
+}
+
+// A structured controller that fails to accept the message must surface the error
+// and must NOT fall back to PTY keystrokes (persistent controllers reject them).
+#[test]
+fn test_handler_inject_structured_failure_no_pty_fallback() {
+    let pty_calls = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let pty_clone = pty_calls.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        pty_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.set_message_sender(Arc::new(|_block_id: &str, _message: &str| {
+        Err("persistent process not running".to_string())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+    });
+
+    assert!(!resp.success);
+    assert!(resp.error.unwrap().contains("persistent process not running"));
+    // No PTY fallback for a structured controller.
+    assert!(pty_calls.lock().unwrap().is_empty());
+}
+
 #[test]
 fn test_handler_audit_log() {
     let mut handler = Handler::new();
