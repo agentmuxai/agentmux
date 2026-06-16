@@ -99,7 +99,20 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     id: "claude",
     display_name: "Claude Code",
     cli_command: "claude",
-    controller_type: ControllerType::Subprocess,
+    // Persistent (bidirectional stream-json) + the Agent SDK CONTROL PROTOCOL is
+    // the only way AskUserQuestion (and interactive tool-permission) works headless.
+    // The CLI auto-rejects AskUserQuestion with `Error: Answer questions?` in any
+    // mode UNLESS the driver speaks the control protocol: launch with
+    // `--permission-prompt-tool stdio` (+ a non-bypass `--permission-mode`), then
+    // answer the CLI's `can_use_tool` control_request with a control_response
+    // carrying `updatedInput.answers`. See SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md
+    // (§2 captured the exact wire bytes against bundled CLI v2.1.178).
+    //
+    // CRITICAL: `--dangerously-skip-permissions` DISABLES that routing (it bypasses
+    // canUseTool), so it must NOT be in persistent_launch_args. The persistent
+    // controller's ControlChannel auto-allows ordinary tools to preserve today's
+    // yolo UX; only AskUserQuestion is surfaced to the user.
+    controller_type: ControllerType::Persistent,
     launch_args: &[
         "-p",
         "--output-format",
@@ -115,7 +128,12 @@ static CLAUDE: ProviderConfig = ProviderConfig {
         "stream-json",
         "--verbose",
         "--include-partial-messages",
-        "--dangerously-skip-permissions",
+        // Enable the control protocol so the sidecar can answer can_use_tool /
+        // AskUserQuestion. Replaces --dangerously-skip-permissions (which bypasses it).
+        "--permission-prompt-tool",
+        "stdio",
+        "--permission-mode",
+        "default",
     ]),
     resume_flag: Some("--resume"),
     session_id_field: "session_id",
@@ -477,10 +495,14 @@ mod tests {
     }
 
     #[test]
-    fn claude_subprocess_with_persistent_args_present() {
+    fn claude_persistent_with_persistent_args_present() {
         let p = get_provider("claude").unwrap();
+        // Claude runs on the persistent controller so AskUserQuestion can block
+        // on a tool_use and consume a tool_result over live stdin (see the
+        // controller_type comment on `static CLAUDE`).
         assert!(p.persistent_launch_args.is_some());
-        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.controller_type, ControllerType::Persistent);
+        assert_eq!(p.controller_type_str(), "persistent");
     }
 
     #[test]

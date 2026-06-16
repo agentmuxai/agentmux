@@ -610,16 +610,20 @@ pub struct CommandToolDecisionData {
 }
 
 /// Data for AgentAnswerCommand — an AskUserQuestion answer delivered back to
-/// the running agent CLI as a `tool_result` over the persistent controller's
-/// live stdin. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+/// the running agent CLI via the Agent SDK control protocol (a `control_response`
+/// carrying `updatedInput.answers`). Spec:
+/// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CommandAgentAnswerData {
     pub blockid: String,
-    /// The `AskUserQuestion` tool_use id the answer responds to.
+    /// The `AskUserQuestion` tool_use id the answer responds to (correlates with
+    /// the parked `can_use_tool` control_request).
     pub tool_use_id: String,
-    /// Canonical flat-text rendering of the user's selections; becomes the
-    /// tool_result content the model consumes.
-    pub answer_text: String,
+    /// The user's selections as a JSON object mapping each question's text to the
+    /// chosen option label (a `[labels]` array for multiSelect, or free-text for
+    /// "Other"). Becomes `updatedInput.answers` in the control_response.
+    #[serde(default)]
+    pub answers: serde_json::Value,
 }
 
 // ---- Subprocess agent command data types ----

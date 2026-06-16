@@ -63,6 +63,12 @@ struct PersistentInner {
     stdin_tx: Option<mpsc::Sender<String>>,
     /// Handle to kill the process.
     kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
+    /// AskUserQuestion `can_use_tool` control_requests awaiting a user answer:
+    /// `tool_use_id -> (request_id, questions JSON)`. Filled by the stdout
+    /// reader when the CLI sends a `can_use_tool` control_request for
+    /// AskUserQuestion; consumed by `answer_question` to build the matching
+    /// `control_response`. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+    pending_questions: HashMap<String, (String, serde_json::Value)>,
 }
 
 /// PersistentSubprocessController keeps a long-running CLI process alive,
@@ -104,6 +110,7 @@ impl PersistentSubprocessController {
                 current_pid: None,
                 stdin_tx: None,
                 kill_tx: None,
+                pending_questions: HashMap::new(),
             })),
             broker,
             event_bus,
@@ -167,28 +174,124 @@ impl PersistentSubprocessController {
             .map_err(|e| format!("stdin send failed: {e}"))
     }
 
-    /// Deliver an AskUserQuestion answer to the running CLI as a `tool_result`
-    /// on the live stdin, unblocking the agent's turn. Mirrors `send_message`
-    /// but emits a user turn whose content is a single `tool_result` block
-    /// keyed on the original `AskUserQuestion` tool_use id. The process must
-    /// already be running (the agent is mid-turn, blocked on this answer) — we
-    /// never spawn here. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
-    pub fn send_tool_result(&self, tool_use_id: String, content: String) -> Result<(), String> {
-        let json_msg = serde_json::json!({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": [
-                    { "type": "tool_result", "tool_use_id": tool_use_id, "content": content }
-                ]
+    /// Answer a parked AskUserQuestion via the Agent SDK **control protocol**.
+    ///
+    /// The CLI asked us with a `can_use_tool` control_request (parked in
+    /// `pending_questions` by the stdout reader); we reply with a
+    /// `control_response` carrying `updatedInput.answers`. This is the ONLY
+    /// mechanism the CLI accepts — delivering a `tool_result` on stdin does NOT
+    /// work (the CLI auto-rejects AskUserQuestion within the turn). `answers` is
+    /// the JSON object mapping each question's text to the selected label(s) or
+    /// free-text. Process must already be running (agent is mid-turn, blocked on
+    /// this answer). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §2.3.
+    pub fn answer_question(&self, tool_use_id: String, answers: serde_json::Value) -> Result<(), String> {
+        let (request_id, questions, tx) = {
+            let mut inner = self.inner.lock().unwrap();
+            let (rid, qs) = inner
+                .pending_questions
+                .remove(&tool_use_id)
+                .ok_or_else(|| format!("no pending AskUserQuestion for tool_use_id {tool_use_id}"))?;
+            let tx = inner
+                .stdin_tx
+                .as_ref()
+                .ok_or("persistent process not running (cannot deliver answer)")?
+                .clone();
+            (rid, qs, tx)
+        };
+
+        let control_response = serde_json::json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": request_id,
+                "response": {
+                    "behavior": "allow",
+                    "updatedInput": { "questions": questions, "answers": answers },
+                    "toolUseID": tool_use_id,
+                }
             }
         });
+        tx.try_send(control_response.to_string())
+            .map_err(|e| format!("control_response send failed: {e}"))
+    }
 
-        let inner = self.inner.lock().unwrap();
-        let tx = inner.stdin_tx.as_ref()
-            .ok_or("persistent process not running (cannot deliver answer)")?;
-        tx.try_send(json_msg.to_string())
-            .map_err(|e| format!("stdin send failed: {e}"))
+    /// Push a raw NDJSON line to the live stdin (used to emit control_responses
+    /// from the stdout-reader task, which only holds an `Arc<Mutex<Inner>>`).
+    fn push_stdin(inner: &Arc<Mutex<PersistentInner>>, line: String) {
+        let guard = inner.lock().unwrap();
+        if let Some(tx) = guard.stdin_tx.as_ref() {
+            let _ = tx.try_send(line);
+        }
+    }
+
+    /// Handle a control-protocol frame from the CLI's stdout. `control_request`
+    /// of subtype `can_use_tool`: AskUserQuestion is **parked** (the frontend
+    /// panel — rendered from the assistant stream — answers it via
+    /// `answer_question`); every other tool is **auto-allowed** to preserve the
+    /// current bypass/yolo UX (Phase 1; Phase 2 routes these to the decision
+    /// prompt, #551). `control_response` frames (replies to requests we initiate,
+    /// none today) are logged and dropped. These frames are NOT conversation
+    /// output and never reach the blockfile.
+    /// Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §4.2.
+    fn handle_control_frame(
+        kind: &str,
+        parsed: &serde_json::Value,
+        block_id: &str,
+        inner: &Arc<Mutex<PersistentInner>>,
+    ) {
+        if kind == "control_response" {
+            return;
+        }
+        // control_request
+        let req = match parsed.get("request") {
+            Some(r) => r,
+            None => return,
+        };
+        let subtype = req.get("subtype").and_then(|v| v.as_str()).unwrap_or("");
+        let request_id = parsed
+            .get("request_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if subtype != "can_use_tool" {
+            tracing::info!(block_id = %block_id, subtype = %subtype, "persistent control_request: unhandled subtype, ignoring");
+            return;
+        }
+
+        let tool_name = req.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+        let tool_use_id = req
+            .get("tool_use_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let input = req.get("input").cloned().unwrap_or_else(|| serde_json::json!({}));
+
+        if tool_name == "AskUserQuestion" {
+            // Park; the frontend question panel will answer via answer_question().
+            let questions = input
+                .get("questions")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            {
+                let mut guard = inner.lock().unwrap();
+                guard
+                    .pending_questions
+                    .insert(tool_use_id.clone(), (request_id, questions));
+            }
+            tracing::info!(block_id = %block_id, tool_use_id = %tool_use_id, "AskUserQuestion parked; awaiting user answer");
+        } else {
+            // Auto-allow every other tool (preserve today's bypass UX).
+            let resp = serde_json::json!({
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": request_id,
+                    "response": { "behavior": "allow", "updatedInput": input }
+                }
+            });
+            Self::push_stdin(inner, resp.to_string());
+        }
     }
 
     /// Spawn the persistent CLI process.
@@ -388,6 +491,16 @@ impl PersistentSubprocessController {
 
                 // Parse JSON for health monitoring and session ID capture
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
+                    // Control-protocol frames (can_use_tool / AskUserQuestion) are
+                    // NOT conversation output — handle them and skip the blockfile
+                    // so the frontend stream never sees them.
+                    // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+                    if let Some(kind) = parsed.get("type").and_then(|v| v.as_str()) {
+                        if kind == "control_request" || kind == "control_response" {
+                            Self::handle_control_frame(kind, &parsed, &block_id_read, &inner_read);
+                            continue;
+                        }
+                    }
                     let (meaningful, _error) = classify_output_line(&parsed);
                     health_read.record_output(meaningful);
                     if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
