@@ -822,10 +822,31 @@ tasks:
                   echo "[dev] Port $AGENTMUX_VITE_PORT busy — reaping a stale Vite if present…"
                   if [ "{{OS}}" = "windows" ]; then
                     pid="$(netstat -ano 2>/dev/null | grep -i LISTENING | grep ":$AGENTMUX_VITE_PORT " | awk '{print $NF}' | head -1)"
-                    if [ -n "$pid" ]; then taskkill /PID "$pid" /T /F > /dev/null 2>&1 || true; fi
+                    if [ -n "$pid" ]; then
+                      # Only reap node.exe — an orphaned Vite is always a node process.
+                      # A non-node holder (another app, a different clone's non-Vite server)
+                      # is treated as a foreign process and we fail fast rather than kill it.
+                      proc="$(tasklist /FI "PID eq $pid" /FO CSV /NH 2>/dev/null | head -1 | cut -d',' -f1 | tr -d '"')"
+                      if echo "$proc" | grep -qi "node"; then
+                        taskkill /PID "$pid" /T /F > /dev/null 2>&1 || true
+                      else
+                        echo "❌ Port $AGENTMUX_VITE_PORT is held by a non-node process ($proc, pid=$pid) — will not reap."
+                        echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
+                        exit 1
+                      fi
+                    fi
                   else
                     pid="$(lsof -ti ":$AGENTMUX_VITE_PORT" 2>/dev/null | head -1)"
-                    if [ -n "$pid" ]; then kill -9 "$pid" 2>/dev/null || true; fi
+                    if [ -n "$pid" ]; then
+                      proc="$(ps -p "$pid" -o comm= 2>/dev/null)"
+                      if echo "$proc" | grep -qi "node"; then
+                        kill -9 "$pid" 2>/dev/null || true
+                      else
+                        echo "❌ Port $AGENTMUX_VITE_PORT is held by a non-node process ($proc, pid=$pid) — will not reap."
+                        echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
+                        exit 1
+                      fi
+                    fi
                   fi
                   sleep 1
                   if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
