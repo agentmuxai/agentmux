@@ -129,11 +129,15 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             break;
     }
 
-    if (f.stderrTail) {
+    // Offer the expander whenever there's expandable content. The body always
+    // carries `detail` (the explanation), so classes with no stderr tail (auth,
+    // usage_limit, context_exceeded) still need a way to reveal it — gating only
+    // on `stderrTail` left their explanation unreachable.
+    if (f.detail || f.stderrTail) {
         actions.push({
             glyph: view.expanded ? "▾" : "▸",
             label: view.expanded ? "Hide details" : "Details",
-            title: "Show the captured provider output",
+            title: "Show the explanation and any captured provider output",
             onClick: on.toggleDetails,
         });
     }

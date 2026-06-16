@@ -113,17 +113,30 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 if (isTransient(f.code)) armAutoRetry();
             },
         });
-        // Clear the row when a NEW turn starts (manual send or a retry) — the
-        // failure is from the *previous* turn, so a fresh "running" resolves it.
         const unsubStatus = waveEventSubscribe({
             eventType: "controllerstatus",
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
-                // A new turn going "running" while a failure row is showing is
-                // a fresh episode — clear the row and restore the auto-retry
-                // budget. (During the auto-retry cascade `failure()` is already
-                // null here, so this never resets mid-cascade.)
-                if ((event as any)?.data?.shellprocstatus === "running" && failure()) endEpisode();
+                const data = (event as any)?.data;
+                const procStatus = data?.shellprocstatus;
+                if (procStatus === "running" && failure()) {
+                    // User started a fresh turn by composing a new message while
+                    // a failure row was visible (the Retry button goes through
+                    // doRetry, which already cleared the row, so failure() is
+                    // null there). Fresh episode → clear the row + reset budget.
+                    endEpisode();
+                } else if (procStatus === "done" && (data?.shellprocexitcode == null || data.shellprocexitcode === 0)) {
+                    // A turn COMPLETED SUCCESSFULLY — the failure episode is
+                    // over (an auto-retry recovered it, or the user moved on),
+                    // so restore the full auto-retry budget; a later unrelated
+                    // transient failure must get its own 2 auto-retries. A
+                    // *failing* turn ends `done` with a non-zero exit code (and
+                    // fires `agentfailure`), so the cascade keeps its count and
+                    // still caps at 2. This is the reset the `running` path
+                    // can't do, because doRetry nulls failure() before the
+                    // relaunch's `running` arrives. Spec §6.
+                    autoRetries = 0;
+                }
             },
         });
         onCleanup(() => {

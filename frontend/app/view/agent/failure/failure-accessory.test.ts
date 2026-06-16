@@ -117,17 +117,25 @@ describe("failureToRow", () => {
         expect(action(row, "Retry now")?.disabled).toBe(true);
     });
 
-    it("only surfaces a Details toggle when there is a stderr tail", () => {
+    it("surfaces a Details toggle for any expandable content (detail or stderr)", () => {
         const on = mkActions();
-        const without = failureToRow(mkFailure(), mkView(), on);
-        expect(action(without, "Details")).toBeUndefined();
 
-        const withTail = failureToRow(mkFailure({ stderrTail: "panic: boom" }), mkView(), on);
-        const details = action(withTail, "Details");
+        // The common case: a detail explanation but no stderr tail (auth,
+        // usage_limit, context_exceeded) must still be expandable.
+        const withDetail = failureToRow(mkFailure({ code: "auth", stderrTail: undefined }), mkView(), on);
+        const details = action(withDetail, "Details");
         expect(details).toBeTruthy();
         details?.onClick();
         expect(on._calls.toggleDetails).toBe(1);
+
+        // A stderr tail with no detail is also expandable.
+        const withTail = failureToRow(mkFailure({ detail: "", stderrTail: "panic: boom" }), mkView(), on);
+        expect(action(withTail, "Details")).toBeTruthy();
         expect(withTail.stderrTail).toBe("panic: boom");
+
+        // Neither detail nor stderr → nothing to expand, no toggle.
+        const bare = failureToRow(mkFailure({ detail: "", stderrTail: undefined }), mkView(), on);
+        expect(action(bare, "Details")).toBeUndefined();
     });
 
     it("Details toggle flips its label/glyph when expanded", () => {
