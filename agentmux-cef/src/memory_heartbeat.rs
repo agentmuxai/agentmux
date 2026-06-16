@@ -48,9 +48,23 @@ pub fn start() {
         .name("mem-heartbeat".into())
         .spawn(move || {
             let mut last_date = String::new();
+            let mut pressure = crate::memory_pressure::PressureTracker::new();
             loop {
                 std::thread::sleep(Duration::from_secs(20));
                 log_memory_stats();
+                // Feed the debounced memory-pressure tracker from the just-
+                // sampled commit-free; log only on a level transition (the
+                // observability foundation the proactive-shedding responses
+                // will read — SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.A).
+                let free = commit_free_mb();
+                if let Some(level) = pressure.observe(free) {
+                    tracing::warn!(
+                        target: "mem_pressure",
+                        level = level.as_str(),
+                        commit_free_mb = free,
+                        "system memory pressure changed"
+                    );
+                }
                 refresh_log_pointer(&mut last_date);
             }
         })
