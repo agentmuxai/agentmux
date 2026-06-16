@@ -30,6 +30,7 @@ mod event_log;
 mod hash;
 mod host_pipe;
 mod ipc;
+mod mem_supervisor;
 mod reducer;
 mod saga;
 #[cfg(target_os = "windows")]
@@ -945,6 +946,9 @@ async fn run_unix(
     // 5. Supervised wait loop — host crash budget mirrors run_windows.
     log("entering supervised host + srv wait (unix)");
     let mut host_restarts: Vec<std::time::Instant> = Vec::new();
+    // Separate budget for system-OOM host exits (memory-aware relaunch); see
+    // mem_supervisor + SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.
+    let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
     let exit_code = loop {
@@ -980,35 +984,87 @@ async fn run_unix(
                     log("CEF host exited cleanly (code 0) — shutting down");
                     break 0;
                 }
-                let now = std::time::Instant::now();
-                host_restarts.retain(|t| now.duration_since(*t) < HOST_RESTART_WINDOW);
-                if host_restarts.len() >= HOST_RESTART_BUDGET {
-                    log(&format!(
-                        "CEF host exited abnormally (code {}); restart budget exhausted \
-                         ({} in {}s) — giving up",
-                        code,
-                        host_restarts.len(),
-                        HOST_RESTART_WINDOW.as_secs()
-                    ));
-                    break code;
-                }
-                host_restarts.push(now);
-                if last_abnormal_code == Some(code) {
-                    host_degraded = true;
-                }
-                last_abnormal_code = Some(code);
-                log(&format!(
-                    "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
-                    code,
-                    host_restarts.len(),
-                    HOST_RESTART_BUDGET,
-                    if host_degraded { ", degraded: --disable-gpu" } else { "" }
-                ));
-                match spawn_host_unix(real_exe, args, &srv_result, &host_env, host_degraded) {
-                    Some(c) => host_child = c,
-                    None => {
-                        log("host relaunch failed to spawn — giving up");
-                        break code;
+                // Classify system-OOM (wait it out) vs a genuine host fault
+                // (existing fast budget), mirroring run_windows. SPEC_MEMORY_
+                // PRESSURE_SUPERVISION_2026_06_16 §5.B. On Linux a kernel-OOM-kill
+                // arrives as a SIGKILL (code 1 here) and is caught by the low-
+                // commit reading (SPEC §9.4).
+                let commit_free = mem_supervisor::commit_free_mb();
+                match mem_supervisor::classify_host_exit(code, commit_free) {
+                    mem_supervisor::HostExitClass::SystemOom => {
+                        let now = std::time::Instant::now();
+                        if mem_supervisor::budget_exhausted(
+                            &mut oom_restarts,
+                            now,
+                            mem_supervisor::OOM_RESTART_WINDOW,
+                            mem_supervisor::OOM_RESTART_BUDGET,
+                        ) {
+                            log(&format!(
+                                "CEF host hit system OOM (code {}, {} MB commit-free); OOM restart \
+                                 budget exhausted ({} in {}s) — giving up",
+                                code,
+                                commit_free,
+                                mem_supervisor::OOM_RESTART_BUDGET,
+                                mem_supervisor::OOM_RESTART_WINDOW.as_secs()
+                            ));
+                            show_fatal_dialog(
+                                mem_supervisor::OOM_GIVEUP_TITLE,
+                                mem_supervisor::OOM_GIVEUP_BODY,
+                            );
+                            break code;
+                        }
+                        log(&format!(
+                            "CEF host hit system OOM (code {}, {} MB commit-free) — waiting for \
+                             memory to recover before relaunch",
+                            code, commit_free
+                        ));
+                        if !mem_supervisor::await_commit_recovery(log).await {
+                            show_fatal_dialog(
+                                mem_supervisor::OOM_GIVEUP_TITLE,
+                                mem_supervisor::OOM_GIVEUP_BODY,
+                            );
+                            break code;
+                        }
+                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, true) {
+                            Some(c) => host_child = c,
+                            None => {
+                                log("host relaunch failed to spawn — giving up");
+                                break code;
+                            }
+                        }
+                    }
+                    mem_supervisor::HostExitClass::Abnormal => {
+                        let now = std::time::Instant::now();
+                        host_restarts.retain(|t| now.duration_since(*t) < HOST_RESTART_WINDOW);
+                        if host_restarts.len() >= HOST_RESTART_BUDGET {
+                            log(&format!(
+                                "CEF host exited abnormally (code {}); restart budget exhausted \
+                                 ({} in {}s) — giving up",
+                                code,
+                                host_restarts.len(),
+                                HOST_RESTART_WINDOW.as_secs()
+                            ));
+                            break code;
+                        }
+                        host_restarts.push(now);
+                        if last_abnormal_code == Some(code) {
+                            host_degraded = true;
+                        }
+                        last_abnormal_code = Some(code);
+                        log(&format!(
+                            "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
+                            code,
+                            host_restarts.len(),
+                            HOST_RESTART_BUDGET,
+                            if host_degraded { ", degraded: --disable-gpu" } else { "" }
+                        ));
+                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, host_degraded) {
+                            Some(c) => host_child = c,
+                            None => {
+                                log("host relaunch failed to spawn — giving up");
+                                break code;
+                            }
+                        }
                     }
                 }
             }
@@ -1487,6 +1543,9 @@ async fn run_windows(
     // degraded mode (job == None) only.
     log("entering supervised host + srv wait");
     let mut host_restarts: Vec<std::time::Instant> = Vec::new();
+    // Separate budget for system-OOM host exits (memory-aware relaunch); see
+    // mem_supervisor + SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.
+    let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
     let exit_code = loop {
@@ -1503,51 +1562,120 @@ async fn run_windows(
                     log("CEF host exited cleanly (code 0) — shutting down");
                     break 0;
                 }
-                // Abnormal exit — relaunch within the crash budget.
-                let now = std::time::Instant::now();
-                host_restarts.retain(|t| now.duration_since(*t) < HOST_RESTART_WINDOW);
-                if host_restarts.len() >= HOST_RESTART_BUDGET {
-                    log(&format!(
-                        "CEF host exited abnormally (code {}); restart budget exhausted \
-                         ({} in {}s) — giving up",
-                        code,
-                        host_restarts.len(),
-                        HOST_RESTART_WINDOW.as_secs()
-                    ));
-                    break code;
-                }
-                host_restarts.push(now);
-                // Crash classification + retry ladder (spec §7): a crash that
-                // reproduces the previous abnormal exit code is deterministic —
-                // step down to a degraded (--disable-gpu) relaunch so the retry
-                // isn't "the same thing again". Degraded is sticky; the ladder
-                // only steps down.
-                if last_abnormal_code == Some(code) {
-                    host_degraded = true;
-                }
-                last_abnormal_code = Some(code);
-                log(&format!(
-                    "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
-                    code,
-                    host_restarts.len(),
-                    HOST_RESTART_BUDGET,
-                    if host_degraded { ", degraded: --disable-gpu" } else { "" }
-                ));
-                match spawn_host_supervised(
-                    real_exe,
-                    args,
-                    &srv_result,
-                    &host_env,
-                    &pipe_path,
-                    job.is_some(),
-                    job_handle,
-                    splash_event_name.as_deref(),
-                    host_degraded,
-                ) {
-                    Some(c) => host_child = c,
-                    None => {
-                        log("host relaunch failed to spawn — giving up");
-                        break code;
+                // Classify: a *system-OOM* exit (the OS ran out of commit) is
+                // transient and must be WAITED OUT, not hammered into the same
+                // wall on the fast wedged-host budget — that just re-OOMs and
+                // burns the budget into a silent give-up
+                // (docs/retro/retro-oom-crash-2026-06-16.md,
+                // SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.B). A genuine
+                // host fault still takes the existing path below, unchanged.
+                let commit_free = mem_supervisor::commit_free_mb();
+                match mem_supervisor::classify_host_exit(code, commit_free) {
+                    mem_supervisor::HostExitClass::SystemOom => {
+                        let now = std::time::Instant::now();
+                        if mem_supervisor::budget_exhausted(
+                            &mut oom_restarts,
+                            now,
+                            mem_supervisor::OOM_RESTART_WINDOW,
+                            mem_supervisor::OOM_RESTART_BUDGET,
+                        ) {
+                            log(&format!(
+                                "CEF host hit system OOM (code {}, {} MB commit-free); OOM restart \
+                                 budget exhausted ({} in {}s) — giving up",
+                                code,
+                                commit_free,
+                                mem_supervisor::OOM_RESTART_BUDGET,
+                                mem_supervisor::OOM_RESTART_WINDOW.as_secs()
+                            ));
+                            show_fatal_dialog(
+                                mem_supervisor::OOM_GIVEUP_TITLE,
+                                mem_supervisor::OOM_GIVEUP_BODY,
+                            );
+                            break code;
+                        }
+                        log(&format!(
+                            "CEF host hit system OOM (code {}, {} MB commit-free) — waiting for \
+                             memory to recover before relaunch",
+                            code, commit_free
+                        ));
+                        // Commit-gated, backed-off wait. Relaunching into a
+                        // starved system just re-OOMs; waiting is the only lever.
+                        if !mem_supervisor::await_commit_recovery(log).await {
+                            show_fatal_dialog(
+                                mem_supervisor::OOM_GIVEUP_TITLE,
+                                mem_supervisor::OOM_GIVEUP_BODY,
+                            );
+                            break code;
+                        }
+                        // Relaunch degraded: the GPU process is a large commit
+                        // consumer, so skip straight to software rendering for an
+                        // OOM relaunch (SPEC §5.B.4).
+                        match spawn_host_supervised(
+                            real_exe,
+                            args,
+                            &srv_result,
+                            &host_env,
+                            &pipe_path,
+                            job.is_some(),
+                            job_handle,
+                            splash_event_name.as_deref(),
+                            true, // disable_gpu
+                        ) {
+                            Some(c) => host_child = c,
+                            None => {
+                                log("host relaunch failed to spawn — giving up");
+                                break code;
+                            }
+                        }
+                    }
+                    mem_supervisor::HostExitClass::Abnormal => {
+                        // Abnormal exit — relaunch within the crash budget.
+                        let now = std::time::Instant::now();
+                        host_restarts.retain(|t| now.duration_since(*t) < HOST_RESTART_WINDOW);
+                        if host_restarts.len() >= HOST_RESTART_BUDGET {
+                            log(&format!(
+                                "CEF host exited abnormally (code {}); restart budget exhausted \
+                                 ({} in {}s) — giving up",
+                                code,
+                                host_restarts.len(),
+                                HOST_RESTART_WINDOW.as_secs()
+                            ));
+                            break code;
+                        }
+                        host_restarts.push(now);
+                        // Crash classification + retry ladder (spec §7): a crash that
+                        // reproduces the previous abnormal exit code is deterministic —
+                        // step down to a degraded (--disable-gpu) relaunch so the retry
+                        // isn't "the same thing again". Degraded is sticky; the ladder
+                        // only steps down.
+                        if last_abnormal_code == Some(code) {
+                            host_degraded = true;
+                        }
+                        last_abnormal_code = Some(code);
+                        log(&format!(
+                            "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
+                            code,
+                            host_restarts.len(),
+                            HOST_RESTART_BUDGET,
+                            if host_degraded { ", degraded: --disable-gpu" } else { "" }
+                        ));
+                        match spawn_host_supervised(
+                            real_exe,
+                            args,
+                            &srv_result,
+                            &host_env,
+                            &pipe_path,
+                            job.is_some(),
+                            job_handle,
+                            splash_event_name.as_deref(),
+                            host_degraded,
+                        ) {
+                            Some(c) => host_child = c,
+                            None => {
+                                log("host relaunch failed to spawn — giving up");
+                                break code;
+                            }
+                        }
                     }
                 }
             }

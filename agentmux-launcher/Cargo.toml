@@ -72,6 +72,10 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_LibraryLoader",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # GlobalMemoryStatusEx / MEMORYSTATUSEX — the launcher's commit-free probe
+    # for memory-aware host relaunch (mem_supervisor.rs;
+    # SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16).
+    "Win32_System_SystemInformation",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_ErrorReporting",
     "Win32_System_Diagnostics_ToolHelp",
