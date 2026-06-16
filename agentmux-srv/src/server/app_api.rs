@@ -545,6 +545,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         working_dir,
                         env_vars,
                         session_id_field,
+                        message_id: None,
                     };
                     persistent_ctrl.send_message(cmd.message, config)?;
                     session_id = persistent_ctrl.session_id();
@@ -1064,7 +1065,7 @@ fn resolve_placement(
 /// served from the global zone the agent wrote elsewhere (mirrored live by the
 /// block-controller hot path, or backfilled).
 fn global_output_source(
-    per_channel: &Arc<crate::backend::storage::filestore::FileStore>,
+    _per_channel: &Arc<crate::backend::storage::filestore::FileStore>,
     global: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
     wstore: &Arc<crate::backend::storage::store::Store>,
     block_id: &str,
@@ -1073,10 +1074,13 @@ fn global_output_source(
     if filename != crate::backend::agent_session::OUTPUT_FILE {
         return None;
     }
-    // Local output present & non-empty → normal path, no fallback.
-    if matches!(per_channel.stat(block_id, filename), Ok(Some(ref wf)) if wf.size > 0) {
-        return None;
-    }
+    // Always prefer the global zone when available — it holds the complete
+    // cross-channel history. Cross-channel opens (per-build portable channels,
+    // agent reopens in a new session) start with an empty local `output`, so
+    // the local file only ever holds the current session's lines. Bailing when
+    // local is non-empty was silently truncating history: after the first
+    // AgentInput the local had a few lines, and subsequent history loads showed
+    // only those lines instead of the full global record.
     let gfs = global.as_ref()?;
     let block = wstore.get::<Block>(block_id).ok().flatten()?;
     // Suppress the fallback for an explicitly ARCHIVED block. The UI archive
@@ -2547,13 +2551,16 @@ mod cross_channel_tests {
     }
 
     #[test]
-    fn global_output_source_prefers_local_when_present() {
+    fn global_output_source_prefers_global_even_when_local_present() {
+        // After the Bug-1 fix: even when the local output is non-empty (current
+        // session started writing), the global zone is still returned so that
+        // cross-channel history load sees the FULL record, not just the current
+        // session's lines.
         let per_channel = mem_store();
         let global = mem_store();
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let block_id = insert_agent_block(&wstore, "def-cc-2");
 
-        // Local output present & non-empty → no fallback.
         seed_output(&per_channel, &block_id, b"{\"type\":\"local\"}\n");
         seed_output(&global, "agent:def-cc-2:current", b"{\"type\":\"global\"}\n");
 
@@ -2564,7 +2571,8 @@ mod cross_channel_tests {
             &block_id,
             "output",
         );
-        assert!(resolved.is_none(), "local output present → must not fall back");
+        let (_, zone) = resolved.expect("global always preferred when available");
+        assert_eq!(zone, "agent:def-cc-2:current");
     }
 
     #[test]
