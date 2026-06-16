@@ -207,6 +207,8 @@ git push -u origin agenta/release-vX.Y.Z
 
 The release script picks the highest bump type across pending changesets (major > minor > patch), runs `scripts/bump-wrapper.sh`, appends to `VERSION_HISTORY.md`, and deletes the consumed changesets.
 
+**Forcing a bump type:** pass `--as <patch|minor|major>` to override the computed type — e.g. `task release -- --as patch` ships a patch even while `minor` changesets are queued. The override still consumes and changelogs every pending changeset (the higher-typed changes just ship under the forced version), and the script prints a loud `WARNING` when you force a bump *lower* than the changesets request. Use it when you want a deliberate patch release and accept that queued `minor` work rides along under that patch.
+
 ### Background
 
 `@a5af/bump-cli` is still installed and used internally by the release script. The `.bump.json` config now targets only the workspace root (`Cargo.toml` + `package.json` + lockfiles) thanks to Phase 1's workspace-version-inheritance — see `docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md`.

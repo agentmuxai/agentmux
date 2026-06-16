@@ -9,15 +9,41 @@
 # commits the staged changes and opens a release PR.
 #
 # Usage:
-#   scripts/release.sh [--dry-run]
+#   scripts/release.sh [--dry-run] [--as <patch|minor|major>]
+#
+# By default the bump type is the HIGHEST among the pending changesets
+# (major > minor > patch). `--as <type>` forces a specific bump regardless —
+# e.g. `--as patch` ships a patch release even while `minor` changesets are
+# queued. This intentionally under-claims: the higher-typed changesets are
+# still consumed and listed in VERSION_HISTORY, just under the forced version.
+# The script warns loudly when the override is lower than the computed type.
 #
 # RFC #857 Phase 2 / spec docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md.
 
 set -euo pipefail
 
 DRY_RUN=0
-if [[ "${1:-}" == "--dry-run" ]]; then
-    DRY_RUN=1
+FORCE_TYPE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)        DRY_RUN=1 ;;
+        --as|--bump)      shift; FORCE_TYPE="${1:-}" ;;
+        --as=*|--bump=*)  FORCE_TYPE="${1#*=}" ;;
+        *)
+            echo "ERROR: unknown argument '$1' (expected --dry-run and/or --as <patch|minor|major>)." >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+if [[ -n "$FORCE_TYPE" ]]; then
+    case "$FORCE_TYPE" in
+        patch|minor|major) ;;
+        *)
+            echo "ERROR: --as must be one of patch|minor|major (got '$FORCE_TYPE')." >&2
+            exit 1
+            ;;
+    esac
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -54,6 +80,22 @@ for f in "${CHANGESETS[@]}"; do
             ;;
     esac
 done
+
+# Apply an explicit override (`--as <type>`), if given. The computed type is
+# kept so we can warn when the override under-claims (e.g. forcing patch while
+# minor changesets are pending). The higher-typed changesets are still consumed
+# and changelogged — only the version number is forced lower.
+if [[ -n "$FORCE_TYPE" ]]; then
+    rank() { case "$1" in patch) echo 0 ;; minor) echo 1 ;; major) echo 2 ;; *) echo 0 ;; esac; }
+    if [[ "$FORCE_TYPE" != "$RELEASE_TYPE" ]]; then
+        echo "NOTE: --as overrides the computed bump '$RELEASE_TYPE' with '$FORCE_TYPE'." >&2
+        if (( $(rank "$FORCE_TYPE") < $(rank "$RELEASE_TYPE") )); then
+            echo "WARNING: forcing a LOWER bump than the changesets request — some" >&2
+            echo "         ${RELEASE_TYPE}-level change(s) will ship under a $FORCE_TYPE version." >&2
+        fi
+    fi
+    RELEASE_TYPE="$FORCE_TYPE"
+fi
 
 echo "Release type: $RELEASE_TYPE" >&2
 
