@@ -615,6 +615,16 @@ async fn main() {
                 }
             }
         }
+        // Heal global snapshots poisoned before the normalize-on-mirror fix: a
+        // channel-local `sourceBlockId` mirrored into the global zone makes a
+        // cross-channel open render empty (the read fallback can't anchor a block
+        // that doesn't exist in the opening channel). Idempotent + cheap. See
+        // docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md.
+        let healed =
+            backend::agent_session::heal_global_snapshot_source_block_ids(fs, &backfill_def_ids);
+        if healed > 0 {
+            tracing::info!(healed, "global transcripts: healed poisoned snapshot sourceBlockIds");
+        }
     }
     // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
     // Backed by its own SQLite file (`sagas.db`) so saga writes

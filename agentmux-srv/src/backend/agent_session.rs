@@ -177,11 +177,82 @@ pub fn write_session_state(
     let zone = validate_and_current(definition_id)?;
     write_zone_file(filestore, &zone, SNAPSHOT_FILE, content)?;
     if let Some(gfs) = global_transcript_store() {
-        if let Err(e) = write_zone_file(gfs, &zone, SNAPSHOT_FILE, content) {
+        // The GLOBAL mirror must be AGENT-anchored, not channel-anchored.
+        // `sourceBlockId` names the LOCAL block whose `output` a restore reads,
+        // and that id only exists in the writing channel. A different channel
+        // opening the agent would read from a block it doesn't have, and the read
+        // fallback (`global_output_source`) — which resolves the agent zone via
+        // that block's LOCAL meta — can't anchor it, so history renders empty.
+        // Strip it to "" in the global copy so a cross-channel open anchors on its
+        // own fresh local block (which maps to the agent). The per-channel copy
+        // above keeps the real id for same-channel restore. See
+        // docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md.
+        let global_content = normalize_snapshot_for_global(content);
+        if let Err(e) = write_zone_file(gfs, &zone, SNAPSHOT_FILE, &global_content) {
             tracing::warn!(zone = %zone, error = %e, "global transcripts: snapshot mirror failed");
         }
     }
     Ok(())
+}
+
+/// Strip `sourceBlockId` to "" for the GLOBAL (cross-channel) snapshot mirror.
+///
+/// In a local snapshot `sourceBlockId` names the block whose per-block `output` a
+/// restore reads. That id is channel-scoped, so a global copy carrying it is only
+/// usable by the writing channel — every other channel's reader can't anchor it.
+/// "" is the agent-anchored sentinel that makes the reader fall back to the opening
+/// channel's own block. Best-effort: returns the input unchanged if it isn't a
+/// JSON object.
+pub fn normalize_snapshot_for_global(content: &[u8]) -> Vec<u8> {
+    let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(content) else {
+        return content.to_vec();
+    };
+    if let Some(obj) = v.as_object_mut() {
+        if obj.contains_key("sourceBlockId") {
+            obj.insert(
+                "sourceBlockId".to_string(),
+                serde_json::Value::String(String::new()),
+            );
+        }
+    }
+    serde_json::to_vec(&v).unwrap_or_else(|_| content.to_vec())
+}
+
+/// One-shot heal for global snapshots poisoned before the normalize-on-mirror fix
+/// (a channel-local `sourceBlockId` was mirrored into `agent:<defId>:current`,
+/// breaking cross-channel opens). For each `def_id`, rewrite its global snapshot's
+/// `sourceBlockId` to "" iff it isn't already. Idempotent and cheap (one small
+/// JSON per agent); returns the number healed. Best-effort per agent.
+pub fn heal_global_snapshot_source_block_ids(gfs: &FileStore, def_ids: &[String]) -> usize {
+    let mut healed = 0;
+    for def_id in def_ids {
+        if !is_valid_definition_id(def_id) {
+            continue;
+        }
+        let zone = agent_current_zone(def_id);
+        let bytes = match gfs.read_file(&zone, SNAPSHOT_FILE) {
+            Ok(Some(b)) => b,
+            _ => continue, // no global snapshot for this agent
+        };
+        // Only rewrite when currently poisoned (non-empty sourceBlockId).
+        let poisoned = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .and_then(|v| {
+                v.get("sourceBlockId")
+                    .and_then(|s| s.as_str())
+                    .map(|s| !s.is_empty())
+            })
+            .unwrap_or(false);
+        if !poisoned {
+            continue;
+        }
+        let fixed = normalize_snapshot_for_global(&bytes);
+        if write_zone_file(gfs, &zone, SNAPSHOT_FILE, &fixed).is_ok() {
+            healed += 1;
+            tracing::info!(zone = %zone, "global transcripts: healed poisoned snapshot sourceBlockId");
+        }
+    }
+    healed
 }
 
 /// Append `line` (with a trailing newline added if not present) to
@@ -2708,5 +2779,25 @@ mod tests {
         assert_eq!(stats.skipped_no_snapshot, 1);
         assert_eq!(stats.archives_written, 0);
         assert_eq!(stats.current_zones_seeded, 0);
+    }
+
+    #[test]
+    fn normalize_snapshot_strips_source_block_id_for_global_mirror() {
+        // A live snapshot carries the writing channel's local block id; the global
+        // mirror must drop it so a cross-channel open anchors on its own block.
+        let local = br#"{"schemaVersion":2,"highWaterMark":1015,"sourceBlockId":"1cfdef4b-6784-4dc9-aea8-4977097736b6","documentState":{}}"#;
+        let global = normalize_snapshot_for_global(local);
+        let v: serde_json::Value = serde_json::from_slice(&global).unwrap();
+        assert_eq!(v["sourceBlockId"], "", "global copy must be agent-anchored");
+        assert_eq!(v["highWaterMark"], 1015, "other fields preserved");
+        assert_eq!(v["schemaVersion"], 2);
+
+        // Idempotent — re-normalizing an already-empty snapshot is a no-op.
+        let again = normalize_snapshot_for_global(&global);
+        let v2: serde_json::Value = serde_json::from_slice(&again).unwrap();
+        assert_eq!(v2["sourceBlockId"], "");
+
+        // Non-JSON content passes through unchanged (best-effort).
+        assert_eq!(normalize_snapshot_for_global(b"not json"), b"not json".to_vec());
     }
 }
