@@ -68,6 +68,15 @@ const SEND_MESSAGE_TOOL: &str = r#"{
   }
 }"#;
 
+const DISCOVER_AGENTS_TOOL: &str = r#"{
+  "name": "DiscoverAgents",
+  "description": "List the agents and instances reachable from here across the muxbus delivery tiers (host, LAN, cloud), so you can pick a valid target before SendMessage. Returns JSON: host.addressable (agents reachable right now via local delivery), host.agents (this host's agent directory, each with an `addressable` flag), lan (LAN peers and the agents on them), and wan.subscribed_agents (cloud-subscribed agents). Addressing is by agent name, case-insensitive. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
 const OPEN_EDITOR_TOOL: &str = r#"{
   "name": "OpenEditor",
   "description": "Open a file in an AgentMux editor pane next to this conversation. Use when you want the user to see a file you're discussing or editing. Pass an absolute host path. Fire-and-forget: returns once the pane is opened.",
@@ -156,10 +165,12 @@ async fn main() {
                 let shell_stop: Value = serde_json::from_str(SHELL_STOP_TOOL).expect("static json");
                 let open_editor: Value = serde_json::from_str(OPEN_EDITOR_TOOL).expect("static json");
                 let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
+                let discover_agents: Value =
+                    serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents] }
                 })
             }
             "tools/call" => {
@@ -439,6 +450,35 @@ async fn call_tool(
                     .unwrap_or("unknown error");
                 anyhow::bail!("Message delivery failed: {err}")
             }
+        }
+        "DiscoverAgents" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("discovery failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }

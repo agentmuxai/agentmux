@@ -226,6 +226,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/docsite/*path", get(files::handle_docsite))
         .route("/schema/*path", get(files::handle_schema))
         .route("/api/lan-instances", get(handle_lan_instances))
+        .route("/agentmux/discovery", get(handle_discovery))
         .route("/agentmux/diag/sagas", get(handle_diag_sagas))
         // Streaming-bash wrapper publish endpoint
         // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §4.3). agentmux-bashwrap
@@ -332,6 +333,67 @@ async fn handle_diag_sagas(State(state): State<AppState>) -> Json<serde_json::Va
 
 async fn handle_lan_instances(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(json!(state.lan_discovery.get_instances()))
+}
+
+/// `GET /agentmux/discovery` — a unified, agent-facing view of what exists and
+/// what is reachable across the muxbus delivery tiers, so an agent can resolve a
+/// target before sending. Aggregates:
+///   - `host.addressable`: the authoritative Tier-1/2 reachable set
+///     (`reactive_handler.list_agents()` — every entry has a live block_id).
+///   - `host.agents`: this host's agent directory (SQLite `instance_list`),
+///     each flagged `addressable` iff its name is in the reachable set.
+///   - `lan`: Tier-3 mDNS peers (each `LanInstance` carries its own `agents`).
+///   - `wan.subscribed_agents`: Tier-4 cloud subscriptions (empty when no token).
+/// Addressing is case-insensitive (registration lowercases the key). Authed like
+/// the other reactive routes; agents reach it via AGENTMUX_LOCAL_URL + X-AuthKey.
+/// See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
+async fn handle_discovery(State(state): State<AppState>) -> Json<serde_json::Value> {
+    use std::collections::HashSet;
+
+    // Tier-1/2 reachable set — the authoritative "addressable" answer.
+    let reachable = state.reactive_handler.list_agents();
+    let addressable: HashSet<String> =
+        reachable.iter().map(|a| a.agent_id.to_lowercase()).collect();
+
+    // Host directory (live SQLite instances), each flagged against the
+    // reachable set. Hidden ("forgotten") rows are excluded.
+    let instances = state.wstore.instance_list(None, None).unwrap_or_default();
+    let agents: Vec<serde_json::Value> = instances
+        .into_iter()
+        .filter(|i| !i.display_hidden)
+        .map(|i| {
+            let is_addressable = !i.instance_name.is_empty()
+                && addressable.contains(&i.instance_name.to_lowercase());
+            json!({
+                "name": i.instance_name,
+                "id": i.id,
+                "definition_id": i.definition_id,
+                "block_id": i.block_id,
+                "status": i.status,
+                "working_directory": i.working_directory,
+                "addressable": is_addressable,
+            })
+        })
+        .collect();
+
+    let wan_agents = crate::muxbus::cloud_subscriber::get_global_subscriber()
+        .map(|s| s.subscribed_agents())
+        .unwrap_or_default();
+
+    let lan = state.lan_discovery.get_instances();
+    let version = state.version.clone();
+    let local_url = state.local_web_url.clone();
+
+    Json(json!({
+        "host": {
+            "version": version,
+            "local_url": local_url,
+            "addressable": reachable,
+            "agents": agents,
+        },
+        "lan": lan,
+        "wan": { "subscribed_agents": wan_agents },
+    }))
 }
 
 async fn stub_501() -> impl IntoResponse {
