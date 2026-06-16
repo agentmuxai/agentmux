@@ -2,4 +2,4 @@
 type: patch
 ---
 
-feat(agent-session): schemaVersion 3 with inline sessionId — snapshots are now self-contained for cross-channel resume
+fix(agent-session): G1 invariant — enforce sourceBlockId="" in global snapshot via debug_assert; schemaVersion 3 migration deferred to a follow-up PR
