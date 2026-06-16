@@ -81,6 +81,39 @@ pub fn post_close_window(state: &Arc<AppState>, label: &str) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Memory-pressure → frontend banner event ────────────────────────────────
+
+wrap_task! {
+    pub struct EmitMemoryPressureTask {
+        state: Arc<AppState>,
+        level: String,
+        commit_free_mb: u64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let payload = serde_json::json!({
+                "level": self.level,
+                "commit_free_mb": self.commit_free_mb,
+            });
+            crate::events::emit_event_to_top_level_windows(
+                &self.state,
+                "memory-pressure",
+                &payload,
+            );
+        }
+    }
+}
+
+/// Push a memory-pressure level transition to the frontend banner. Callable
+/// from ANY thread (the memory heartbeat runs on a background std::thread); the
+/// emit itself (CEF JS execution) must run on the UI thread, so it's wrapped in
+/// a posted task. SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F.
+pub fn post_memory_pressure(state: &Arc<AppState>, level: &str, commit_free_mb: u64) {
+    let mut task = EmitMemoryPressureTask::new(state.clone(), level.to_string(), commit_free_mb);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Minimize ─────────────────────────────────────────────────────────────
 
 wrap_task! {

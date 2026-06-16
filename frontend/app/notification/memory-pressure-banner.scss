@@ -1,0 +1,48 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Low-memory warning banner (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F).
+// App-wide, non-modal, dismissible. Token-driven; no raw hex except the warning
+// fallback (no --warning-color token guaranteed across themes).
+
+.memory-pressure-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-3);
+    flex: 0 0 auto;
+    font-size: var(--text-sm);
+    color: var(--main-text-color);
+    border-bottom: 1px solid var(--border-color);
+    // Warn: amber-tinted; Critical: error-tinted (overridden below).
+    background: color-mix(in srgb, var(--warning-color, #d89614) 18%, var(--main-bg-color));
+
+    &--critical {
+        background: color-mix(in srgb, var(--error-color) 22%, var(--main-bg-color));
+    }
+
+    &-icon {
+        flex: 0 0 auto;
+        font-size: var(--text-md);
+    }
+
+    &-text {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    &-dismiss {
+        flex: 0 0 auto;
+        background: transparent;
+        border: none;
+        color: var(--secondary-text-color);
+        cursor: var(--cursor-interactive);
+        font-size: var(--text-md);
+        line-height: 1;
+        padding: 0 var(--space-1);
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
+}
