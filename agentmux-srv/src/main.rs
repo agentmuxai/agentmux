@@ -626,6 +626,32 @@ async fn main() {
             tracing::info!(healed, "global transcripts: healed poisoned snapshot sourceBlockIds");
         }
     }
+
+    // Backfill the registry `session_id` from each agent's largest provider
+    // session, so a cross-channel / fresh-build open `--resume`s the ORIGINAL
+    // conversation instead of starting a new session that shadows it. The id is
+    // read on launch (picker → `--resume <sid>`) but was never written, so it was
+    // always null. Idempotent; once set, `--resume` keeps it stable across turns.
+    // See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md.
+    if let (Some(reg_root), Some(tdir)) = (
+        registry::resolve_shared_registry_dir(),
+        registry::resolve_shared_transcripts_dir(),
+    ) {
+        if let Some(shared) = tdir.ancestors().nth(2) {
+            if let Ok(reg) = registry::Registry::open(reg_root) {
+                // Pass the shared dir; the backfill resolves both the default
+                // `providers/claude/projects` and per-identity bundle roots.
+                let n = backend::session_backfill::backfill_session_ids(&reg, shared);
+                if n > 0 {
+                    tracing::info!(
+                        backfilled = n,
+                        "registry: session_id backfill for cross-channel resume"
+                    );
+                }
+            }
+        }
+    }
+
     // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
     // Backed by its own SQLite file (`sagas.db`) so saga writes
     // commit independently of the wstore connection. Failure here
