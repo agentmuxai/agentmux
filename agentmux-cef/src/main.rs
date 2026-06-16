@@ -815,8 +815,10 @@ fn main() {
     macos_menu::install_menu_bar(app_state.clone());
 
     // Start memory heartbeat — logs system/process memory stats every 20s.
-    // Provides forensic data if the process later crashes from OOM / VA exhaustion.
-    memory_heartbeat::start();
+    // Provides forensic data if the process later crashes from OOM / VA
+    // exhaustion, and drives the debounced mem_pressure level + low-memory
+    // banner (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.A/§5.F).
+    memory_heartbeat::start(app_state.clone());
 
     // Phase B.6 (post-fix): publish port:token AFTER CEF init so a
     // second launcher only forwards `open_new_window` when we're

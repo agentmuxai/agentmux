@@ -30,6 +30,7 @@ import { PerfHud } from "@/perf/hud";
 import { DiagPanel } from "./devtools/diag-panel";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
+import { MemoryPressureBanner } from "./notification/memory-pressure-banner";
 import { BundleManagerElsewhereBanner } from "./modals/bundle-manager-modal";
 
 import "./app.scss";
@@ -423,6 +424,10 @@ const AppInner = () => {
                     bundles. */}
                 <Show when={!IS_FLOATING_PANE}>
                     <BundleManagerElsewhereBanner />
+                    {/* Low-memory warning banner — app-wide, non-modal,
+                        dismissible. Driven by the host's mem_pressure level
+                        (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F). */}
+                    <MemoryPressureBanner />
                 </Show>
                 <Show
                     when={IS_FLOATING_PANE}
