@@ -789,7 +789,7 @@ tasks:
                 # `cksum` is in POSIX coreutils and ships with git-bash on
                 # Windows + every Linux/macOS we target — no toolchain risk.
                 # Range is 5173-5372 (200 ports — far more than enough).
-                CLONE_ROOT="$(pwd)"
+                CLONE_ROOT="$(pwd -P 2>/dev/null || pwd)"
                 if [ -z "$AGENTMUX_VITE_PORT" ]; then
                   PORT_OFFSET=$(( $(echo -n "$CLONE_ROOT" | cksum | cut -d' ' -f1) % 200 ))
                   AGENTMUX_VITE_PORT=$((5173 + PORT_OFFSET))
@@ -829,16 +829,20 @@ tasks:
                         # root. A different clone's live Vite is also node.exe on the same
                         # port (hash collision); killing it would break that still-running
                         # session. CommandLine is a real Win32_Process property (WorkingDirectory
-                        # is not). Falls back to kill-without-check when no PowerShell available.
+                        # is not). Uses trailing-slash anchor to prevent superstring matches
+                        # (repo vs repo-v2). Fails safe: if ownership can't be verified, errors.
                         _ps="$(command -v pwsh 2>/dev/null)"; [ -z "$_ps" ] && _ps="$(command -v powershell.exe 2>/dev/null)"
-                        if [ -n "$_ps" ]; then
-                          proc_cmd="$("$_ps" -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine" 2>/dev/null | tr -d '\r\n' | tr '[:upper:]' '[:lower:]' | tr '\\' '/')"
-                          our_root="$(echo "$CLONE_ROOT" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||')"
-                          if [ -n "$proc_cmd" ] && ! echo "$proc_cmd" | grep -qF "$our_root"; then
-                            echo "❌ Port $AGENTMUX_VITE_PORT is held by a node process whose command line does not reference this clone ($our_root) — likely another dev instance."
-                            echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
-                            exit 1
-                          fi
+                        if [ -z "$_ps" ]; then
+                          echo "❌ Cannot verify Vite ownership (no pwsh/powershell.exe found) — will not reap."
+                          echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
+                          exit 1
+                        fi
+                        proc_cmd="$("$_ps" -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine" 2>/dev/null | tr -d '\r\n' | tr '[:upper:]' '[:lower:]' | tr '\\' '/')"
+                        our_root="$(echo "$CLONE_ROOT" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||')"
+                        if [ -z "$proc_cmd" ] || ! echo "$proc_cmd" | grep -qF "${our_root}/"; then
+                          echo "❌ Port $AGENTMUX_VITE_PORT is held by a node process whose command line does not reference this clone (${our_root}) — likely another dev instance."
+                          echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
+                          exit 1
                         fi
                         taskkill /PID "$pid" /T /F > /dev/null 2>&1 || true
                       else
