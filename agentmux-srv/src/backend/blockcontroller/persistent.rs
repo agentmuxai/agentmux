@@ -50,6 +50,10 @@ pub struct PersistentSpawnConfig {
     pub working_dir: String,
     pub env_vars: HashMap<String, String>,
     pub session_id_field: String,
+    /// Echoed back as `agent-message-accepted` so the frontend can promote the
+    /// pending entry. Matches `CommandAgentInputData.message_id` on the AgentInput
+    /// command; absent for legacy callers.
+    pub message_id: Option<String>,
 }
 
 /// Inner state protected by mutex.
@@ -152,10 +156,34 @@ impl PersistentSubprocessController {
 
     /// Send a user message to the running CLI process.
     /// If the process isn't spawned yet, spawns it first.
+    /// Emit `agent-message-accepted` for a given message_id, if set.
+    /// Mirrors the subprocess controller's `emit_message_accepted` — signals the
+    /// frontend to promote the pending entry from queued to in-document.
+    fn emit_message_accepted(&self, message_id: Option<&str>) {
+        let Some(id) = message_id else { return };
+        let Some(ref broker) = self.broker else { return };
+        let event = crate::backend::wps::WaveEvent {
+            event: crate::backend::wps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
+            scopes: vec![format!("block:{}", self.block_id)],
+            sender: String::new(),
+            persist: 0,
+            data: Some(serde_json::json!({
+                "block_id": self.block_id,
+                "message_id": id,
+            })),
+        };
+        broker.publish(event);
+        tracing::info!(
+            block_id = %self.block_id,
+            message_id = %id,
+            "emitted agent-message-accepted"
+        );
+    }
+
     pub fn send_message(&self, message: String, config: PersistentSpawnConfig) -> Result<(), String> {
         // Spawn process if not running
         if !self.is_running() {
-            self.spawn_process(config)?;
+            self.spawn_process(config.clone())?;
         }
 
         // Format as stream-json user message
@@ -166,12 +194,30 @@ impl PersistentSubprocessController {
                 "content": message
             }
         });
+        let json_str = json_msg.to_string();
+
+        // Silently persist the user message to the blockfile + global zone so
+        // `parseHistoryLines` can reconstruct `user_message` nodes on the next
+        // open. No WPS event is published here — the live-display is handled by
+        // the `agent-message-accepted` path (UUID node), avoiding a duplicate.
+        let global_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        let line_with_newline = format!("{json_str}\n");
+        super::shell::persist_to_blockfile_silent(
+            &self.block_id,
+            crate::backend::agent_session::OUTPUT_FILE,
+            line_with_newline.as_bytes(),
+            self.filestore.as_ref(),
+            global_zone.as_deref(),
+        );
 
         let inner = self.inner.lock().unwrap();
         let tx = inner.stdin_tx.as_ref()
             .ok_or("persistent process not running after spawn")?;
-        tx.try_send(json_msg.to_string())
-            .map_err(|e| format!("stdin send failed: {e}"))
+        tx.try_send(json_str)
+            .map_err(|e| format!("stdin send failed: {e}"))?;
+        drop(inner);
+        self.emit_message_accepted(config.message_id.as_deref());
+        Ok(())
     }
 
     /// Deliver a user message to the **already-running** persistent process,

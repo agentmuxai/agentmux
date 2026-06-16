@@ -1045,6 +1045,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         working_dir,
                         env_vars,
                         session_id_field,
+                        message_id: cmd.message_id.clone(),
                     };
                     persistent_ctrl.send_message(cmd.message, config)?;
                 } else if let Some(subprocess_ctrl) = ctrl

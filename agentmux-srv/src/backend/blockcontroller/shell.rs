@@ -1212,6 +1212,63 @@ fn accumulate_and_translate(
 }
 
 /// and write-through to FileStore (if provided).
+/// Persist `data` to the block's output file and the global transcript zone
+/// **without** publishing a WPS event. Used by the persistent controller to
+/// record user-message lines for future history loads (so that
+/// `parseHistoryLines` can reconstruct `user_message` nodes on reopen) without
+/// triggering a live-stream append that would produce a duplicate node alongside
+/// the `agent-message-accepted` UUID node. Same lazy-create semantics as
+/// `handle_append_block_file`.
+pub fn persist_to_blockfile_silent(
+    block_id: &str,
+    filename: &str,
+    data: &[u8],
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+) {
+    if let Some(fs) = filestore {
+        let needs_create = match fs.stat(block_id, filename) {
+            Ok(None) => true,
+            Ok(Some(_)) => false,
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id, filename = %filename, error = %e,
+                    "persist_silent: stat failed; skipping"
+                );
+                return;
+            }
+        };
+        if needs_create {
+            if let Err(e) = fs.make_file(
+                block_id,
+                filename,
+                std::collections::HashMap::new(),
+                crate::backend::storage::filestore::FileOpts::default(),
+            ) {
+                use crate::backend::storage::error::StoreError;
+                if !matches!(e, StoreError::AlreadyExists) {
+                    tracing::warn!(
+                        block_id = %block_id, filename = %filename, error = %e,
+                        "persist_silent: make_file failed; skipping"
+                    );
+                    return;
+                }
+            }
+        }
+        if let Err(e) = fs.append_data(block_id, filename, data) {
+            tracing::warn!(
+                block_id = %block_id, filename = %filename, error = %e,
+                "persist_silent: append_data failed"
+            );
+        }
+    }
+    if let Some(zone) = global_output_zone {
+        if let Some(gfs) = crate::backend::agent_session::global_transcript_store() {
+            mirror_append_to_global(gfs, zone, data);
+        }
+    }
+}
+
 ///
 /// Port of Go's `HandleAppendBlockFile`.
 ///
