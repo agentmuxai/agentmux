@@ -811,10 +811,30 @@ tasks:
                 # as goroutine IDs ("g1"), not real OS PIDs — so $! is never
                 # a kill-able pid in this context.
                 if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
-                  echo "❌ Port $AGENTMUX_VITE_PORT is already in use by another process."
-                  echo "   The per-clone derivation collided (rare). Override with:"
-                  echo "   AGENTMUX_VITE_PORT=<free-port> task dev"
-                  exit 1
+                  # The per-clone port is held. The overwhelmingly common cause is
+                  # OUR OWN Vite, orphaned by a prior dev session: the host window
+                  # closed but the backgrounded Vite (unkillable here — $! is a
+                  # goroutine id under go-task's shell, see note above) kept squatting
+                  # the deterministic port, and --strictPort then strands every
+                  # relaunch. Reap it best-effort; if the port is STILL held we treat
+                  # it as a genuinely foreign process and fail as before. See
+                  # docs/retro/retro-dev-instance-vite-orphan-port-2026-06-16.md.
+                  echo "[dev] Port $AGENTMUX_VITE_PORT busy — reaping a stale Vite if present…"
+                  if [ "{{OS}}" = "windows" ]; then
+                    pid="$(netstat -ano 2>/dev/null | grep -i LISTENING | grep ":$AGENTMUX_VITE_PORT " | awk '{print $NF}' | head -1)"
+                    if [ -n "$pid" ]; then taskkill /PID "$pid" /T /F > /dev/null 2>&1 || true; fi
+                  else
+                    pid="$(lsof -ti ":$AGENTMUX_VITE_PORT" 2>/dev/null | head -1)"
+                    if [ -n "$pid" ]; then kill -9 "$pid" 2>/dev/null || true; fi
+                  fi
+                  sleep 1
+                  if curl -s --max-time 1 "$VITE_URL" > /dev/null 2>&1; then
+                    echo "❌ Port $AGENTMUX_VITE_PORT is still in use after reaping (foreign process)."
+                    echo "   The per-clone derivation collided, or a non-dev process holds it. Override with:"
+                    echo "   AGENTMUX_VITE_PORT=<free-port> task dev"
+                    exit 1
+                  fi
+                  echo "[dev] Reaped stale Vite — port $AGENTMUX_VITE_PORT is free."
                 fi
 
                 # Don't `rm -rf $DEV_DIR` on exit — install-linux-desktop.sh
