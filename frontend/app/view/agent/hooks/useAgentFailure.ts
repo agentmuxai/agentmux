@@ -50,6 +50,13 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
     let countdown: ReturnType<typeof setInterval> | undefined;
     let autoRetries = 0;
+    // True after a turn emits `done` but before its success/failure verdict is
+    // known. The verdict is decided by whether an `agentfailure` follows the
+    // `done`: if the NEXT event is another turn's `running` with this still set,
+    // the prior turn completed with no failure → it succeeded. Used to reset the
+    // auto-retry budget on genuine success without trusting the exit code (a
+    // throttled transient turn exits 0 too — see the controllerstatus handler).
+    let awaitingVerdict = false;
 
     const cancelCountdown = () => {
         if (countdown) clearInterval(countdown);
@@ -106,6 +113,9 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             handler: (event) => {
                 const f = (event as any)?.data as AgentFailure | undefined;
                 if (!f) return;
+                // This turn's verdict is decided: it FAILED. (Clear the pending
+                // flag so the next `running` doesn't misread it as a success.)
+                awaitingVerdict = false;
                 cancelCountdown();
                 setExpanded(false);
                 setRetrying(false);
@@ -119,23 +129,33 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             handler: (event) => {
                 const data = (event as any)?.data;
                 const procStatus = data?.shellprocstatus;
-                if (procStatus === "running" && failure()) {
-                    // User started a fresh turn by composing a new message while
-                    // a failure row was visible (the Retry button goes through
-                    // doRetry, which already cleared the row, so failure() is
-                    // null there). Fresh episode → clear the row + reset budget.
-                    endEpisode();
-                } else if (procStatus === "done" && (data?.shellprocexitcode == null || data.shellprocexitcode === 0)) {
-                    // A turn COMPLETED SUCCESSFULLY — the failure episode is
-                    // over (an auto-retry recovered it, or the user moved on),
-                    // so restore the full auto-retry budget; a later unrelated
-                    // transient failure must get its own 2 auto-retries. A
-                    // *failing* turn ends `done` with a non-zero exit code (and
-                    // fires `agentfailure`), so the cascade keeps its count and
-                    // still caps at 2. This is the reset the `running` path
-                    // can't do, because doRetry nulls failure() before the
-                    // relaunch's `running` arrives. Spec §6.
-                    autoRetries = 0;
+                if (procStatus === "done") {
+                    // A turn finished. Whether it SUCCEEDED or FAILED is decided
+                    // by whether an `agentfailure` follows (it always does for a
+                    // failure, and arrives right after `done`). We can't use the
+                    // exit code: a throttled transient turn is classified from an
+                    // error `result` frame and exits 0, emitting `done(exit 0)`
+                    // BEFORE its `agentfailure` (subprocess.rs) — so exit 0 does
+                    // NOT mean success. Defer the verdict to the next event.
+                    awaitingVerdict = true;
+                } else if (procStatus === "running") {
+                    if (failure()) {
+                        // A new turn starting while a failure row is still
+                        // visible = the user composed a fresh message (the Retry
+                        // button goes through doRetry, which already cleared the
+                        // row). Fresh task → clear the row + reset the budget.
+                        endEpisode();
+                    } else if (awaitingVerdict) {
+                        // The previous turn emitted `done` and NO `agentfailure`
+                        // followed → it SUCCEEDED. The episode (if any) is over,
+                        // so restore the full auto-retry budget; a later
+                        // unrelated transient failure must get its own 2
+                        // auto-retries. A *failing* turn clears `awaitingVerdict`
+                        // in the agentfailure handler above, so the cascade keeps
+                        // its count and still caps at 2. Spec §6.
+                        autoRetries = 0;
+                    }
+                    awaitingVerdict = false;
                 }
             },
         });
