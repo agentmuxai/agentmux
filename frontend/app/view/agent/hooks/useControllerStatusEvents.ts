@@ -21,7 +21,7 @@ export interface UseControllerStatusEventsOptions {
 
 export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions): void {
     onMount(() => {
-        const unsub = waveEventSubscribe({
+        const unsubStatus = waveEventSubscribe({
             eventType: "controllerstatus",
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
@@ -38,6 +38,32 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
                 }
             },
         });
-        onCleanup(() => unsub());
+
+        // Rich failure cause emitted alongside a non-zero exit
+        // (SPEC_AGENT_FAILURE_DIAGNOSTICS Phase 2): surfaces the real reason —
+        // auth, rate-limit, OOM, context, etc. — plus the stderr tail, instead of
+        // just "exited with code N".
+        const unsubFailure = waveEventSubscribe({
+            eventType: "agentfailure",
+            scope: WOS.makeORef("block", opts.blockId),
+            handler: (event) => {
+                const f = (event as any)?.data as AgentFailure | undefined;
+                if (!f) return;
+                let msg = f.title || "Agent run failed";
+                if (f.detail) msg += ` — ${f.detail}`;
+                if (f.exitCode != null) msg += ` [exit ${f.exitCode}]`;
+                else if (f.signal != null) msg += ` [signal ${f.signal}]`;
+                if (f.retryable) msg += " (retryable)";
+                opts.log("subprocess", msg, "error");
+                if (f.stderrTail) {
+                    opts.log("subprocess", `claude stderr (tail):\n${f.stderrTail}`, "error");
+                }
+            },
+        });
+
+        onCleanup(() => {
+            unsubStatus();
+            unsubFailure();
+        });
     });
 }
