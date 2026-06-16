@@ -50,8 +50,17 @@ function _agentmux_si_agent_env
     end
 end
 
-# ─── muxlog helper ────────────────────────────────────────────────────────────
+# ─── muxlog ───────────────────────────────────────────────────────────────────
+# Discover, render & follow AgentMux logs across every running instance.
+# Delegates to the shared Node core (muxlog.mjs). `muxlog help` for usage,
+# `muxlog ls` to list every instance's logs.
+set -g _agentmux_muxlog_js (dirname (status -f))/../muxlog.mjs
 function muxlog
+    if command -q node; and test -f "$_agentmux_muxlog_js"
+        node "$_agentmux_muxlog_js" $argv
+        return
+    end
+    # Fallback (no node / core missing): legacy pointer-based tail.
     set -l target (test (count $argv) -ge 1; and echo $argv[1]; or echo "host")
     set -l action (test (count $argv) -ge 2; and echo $argv[2]; or echo "tail")
     if not set -q AGENTMUX_LOG_DIR
@@ -60,14 +69,10 @@ function muxlog
     end
     set -l ptr "$AGENTMUX_LOG_DIR/current-$target-v$AGENTMUX_VERSION.path"
     if not test -f "$ptr"
-        echo "Unknown log target '$target'. Check $AGENTMUX_LOG_DIR for current-*.path files." >&2
+        echo "muxlog: Node core unavailable and no pointer for '$target'" >&2
         return 1
     end
     set -l ptr_content (cat "$ptr")
-    # Pointer content may be a basename (legacy: resolve under
-    # AGENTMUX_LOG_DIR) or an absolute path (post-2026-05 host fix:
-    # global pointer writes the absolute path so discovery works
-    # from outside the instance dir).
     set -l logfile
     if string match -q '/*' "$ptr_content"; or string match -q '?:[/\\]*' "$ptr_content"
         set logfile "$ptr_content"

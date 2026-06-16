@@ -84,37 +84,30 @@ _agentmux_si_prompt_command() {
     _agentmux_si_agent_env
 }
 
-# ─── muxlog helper ────────────────────────────────────────────────────────────
-# Usage: muxlog [host|srv] [tail|cat|<pattern>]
+# ─── muxlog ───────────────────────────────────────────────────────────────────
+# Discover, render & follow AgentMux logs across every running instance.
+# Delegates to the shared Node core (muxlog.mjs, deployed next to this rcfile).
+#   muxlog                 tail the most-recently-active host log (follow)
+#   muxlog ls              list every instance's logs (newest first)
+#   muxlog srv grep <re>   search the active sidecar log (transcript excluded)
+#   muxlog bridge          startup-handshake trace (debug reconnect loops)
+#   muxlog help            full usage
+# Resolve muxlog.mjs once, at source time (BASH_SOURCE = this rcfile).
+_AGENTMUX_MUXLOG_JS="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/muxlog.mjs"
 muxlog() {
-    local target="${1:-host}"
-    local action="${2:-tail}"
-    if [ -z "$AGENTMUX_LOG_DIR" ]; then
-        echo "AGENTMUX_LOG_DIR not set — run inside an AgentMux terminal" >&2
-        return 1
+    if command -v node >/dev/null 2>&1 && [ -f "$_AGENTMUX_MUXLOG_JS" ]; then
+        node "$_AGENTMUX_MUXLOG_JS" "$@"
+        return
     fi
+    # Fallback (no node / core missing): legacy pointer-based tail, so logs are
+    # never wholly inaccessible.
+    local target="${1:-host}" action="${2:-tail}"
+    [ -z "$AGENTMUX_LOG_DIR" ] && { echo "AGENTMUX_LOG_DIR not set — run inside an AgentMux terminal" >&2; return 1; }
     local ptr="$AGENTMUX_LOG_DIR/current-${target}-v${AGENTMUX_VERSION}.path"
-    if [ ! -f "$ptr" ]; then
-        echo "Unknown log target '$target'. Available:" >&2
-        ls "$AGENTMUX_LOG_DIR"/current-*.path 2>/dev/null \
-            | sed 's|.*/current-||;s|\.path||' >&2
-        return 1
-    fi
-    local ptr_content="$(cat "$ptr")"
-    # Pointer content may be a basename (legacy: resolve under
-    # AGENTMUX_LOG_DIR) or an absolute path (post-2026-05 host fix:
-    # the global pointer at <root>/logs/ writes the absolute path so
-    # discovery works from outside the instance dir).
-    local logfile
-    case "$ptr_content" in
-        /* | ?:[/\\]*) logfile="$ptr_content" ;;
-        *)            logfile="$AGENTMUX_LOG_DIR/$ptr_content" ;;
-    esac
-    case "$action" in
-        tail) tail -f "$logfile" ;;
-        cat)  cat "$logfile" ;;
-        *)    grep "$action" "$logfile" ;;
-    esac
+    [ -f "$ptr" ] || { echo "muxlog: Node core unavailable and no pointer for '$target'" >&2; return 1; }
+    local pc logfile; pc="$(cat "$ptr")"
+    case "$pc" in /* | ?:[/\\]*) logfile="$pc" ;; *) logfile="$AGENTMUX_LOG_DIR/$pc" ;; esac
+    case "$action" in tail) tail -f "$logfile" ;; cat) cat "$logfile" ;; *) grep "$action" "$logfile" ;; esac
 }
 
 # Append to PROMPT_COMMAND (array-safe)
