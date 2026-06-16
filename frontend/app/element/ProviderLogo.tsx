@@ -47,6 +47,25 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
 
         if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 
+        // Handcrafted multi-color Slack mark (the package ships only a mono
+        // variant; the brand is recognized by its four colors).
+        if (p === "slack") {
+            return {
+                jsx: (
+                    <svg width={size()} height={size()} viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5.04 15.16a2.52 2.52 0 1 1-2.52-2.52h2.52v2.52z" fill="#E01E5A" />
+                        <path d="M6.31 15.16a2.52 2.52 0 0 1 5.04 0v6.32a2.52 2.52 0 0 1-5.04 0v-6.32z" fill="#E01E5A" />
+                        <path d="M8.83 5.04a2.52 2.52 0 1 1 2.52-2.52v2.52H8.83z" fill="#36C5F0" />
+                        <path d="M8.83 6.31a2.52 2.52 0 0 1 0 5.04H2.52a2.52 2.52 0 0 1 0-5.04h6.31z" fill="#36C5F0" />
+                        <path d="M18.96 8.83a2.52 2.52 0 1 1 2.52 2.52h-2.52V8.83z" fill="#2EB67D" />
+                        <path d="M17.69 8.83a2.52 2.52 0 0 1-5.04 0V2.52a2.52 2.52 0 0 1 5.04 0v6.31z" fill="#2EB67D" />
+                        <path d="M15.17 18.96a2.52 2.52 0 1 1-2.52 2.52v-2.52h2.52z" fill="#ECB22E" />
+                        <path d="M15.17 17.69a2.52 2.52 0 0 1 0-5.04h6.31a2.52 2.52 0 0 1 0 5.04h-6.31z" fill="#ECB22E" />
+                    </svg>
+                ),
+            };
+        }
+
         // Handcrafted multi-color Google G (more recognizable than
         // simple-icons' monochrome G).
         if (p === "google") {
