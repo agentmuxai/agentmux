@@ -832,6 +832,18 @@ async fn main() {
             None,
         )
     }));
+    // Controller-aware delivery (SPEC_AGENT_CONTROL_PROTOCOL §6 / Phase 3): persistent
+    // stream-json and ACP agents have no PTY, so muxbus Tier-1 keystroke injection
+    // silently misses them. Route those through their structured channel (live stdin /
+    // session/prompt) — which also steers the agent mid-turn — and fall back to PTY
+    // keystrokes only for terminal-based agents.
+    reactive_handler.set_message_sender(Arc::new(|block_id: &str, message: &str| {
+        match backend::blockcontroller::deliver_agent_message(block_id, message) {
+            Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(true),
+            Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
             agentmux_url: None,

@@ -54,6 +54,10 @@ pub struct Handler {
     block_to_agent: HashMap<String, String>,
     agent_info: HashMap<String, AgentRegistration>,
     input_sender: Option<InputSender>,
+    /// Controller-aware delivery for non-PTY agents (persistent stream-json / ACP).
+    /// When set, it is tried before the PTY keystroke path so messages reach (and
+    /// steer) agents that have no terminal. See `set_message_sender`.
+    message_sender: Option<MessageSender>,
     audit_log: Vec<AuditLogEntry>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
@@ -68,6 +72,7 @@ impl Handler {
             block_to_agent: HashMap::new(),
             agent_info: HashMap::new(),
             input_sender: None,
+            message_sender: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
@@ -77,6 +82,14 @@ impl Handler {
     /// Set the input sender function for message injection.
     pub fn set_input_sender(&mut self, sender: InputSender) {
         self.input_sender = Some(sender);
+    }
+
+    /// Set the controller-aware message sender. When present, `inject_message`
+    /// tries it first: persistent stream-json and ACP agents receive a structured
+    /// message on their live channel (mid-turn steering); PTY-based agents report
+    /// back so injection falls through to the keystroke path.
+    pub fn set_message_sender(&mut self, sender: MessageSender) {
+        self.message_sender = Some(sender);
     }
 
     /// Set whether to include source agent prefix in injected messages.
@@ -241,6 +254,69 @@ impl Handler {
             self.include_source_in_message,
         );
 
+        // Controller-aware delivery (SPEC_AGENT_CONTROL_PROTOCOL §6 / Phase 3).
+        // Persistent (stream-json) and ACP agents have no PTY — their inbox is a
+        // structured channel (live stdin NDJSON / `session/prompt`). Delivering there
+        // also lands the message mid-turn (steering) instead of waiting for idle.
+        // PTY-based shell/term agents report back so we fall through to keystrokes.
+        if let Some(ref deliver) = self.message_sender {
+            match deliver(&block_id, &final_msg) {
+                Ok(true) => {
+                    tracing::info!(
+                        target_agent = %req.target_agent,
+                        block_id = %block_id,
+                        "inject: structured delivery to non-PTY controller (mid-turn steer)"
+                    );
+                    self.log_audit(
+                        req.source_agent.as_deref(),
+                        &req.target_agent,
+                        &block_id,
+                        &sanitized,
+                        true,
+                        None,
+                        &request_id,
+                    );
+                    return InjectionResponse {
+                        success: true,
+                        request_id,
+                        block_id: Some(block_id),
+                        error: None,
+                        timestamp: now,
+                    };
+                }
+                Ok(false) => {
+                    // PTY-based controller — fall through to keystroke injection.
+                }
+                Err(e) => {
+                    // Structured controller but delivery failed (e.g. persistent
+                    // process not running). Do NOT fall back to PTY keystrokes — the
+                    // persistent controller rejects raw input. Surface the error.
+                    tracing::warn!(
+                        target_agent = %req.target_agent,
+                        block_id = %block_id,
+                        error = %e,
+                        "inject: structured delivery failed"
+                    );
+                    self.log_audit(
+                        req.source_agent.as_deref(),
+                        &req.target_agent,
+                        &block_id,
+                        &sanitized,
+                        false,
+                        Some(&e),
+                        &request_id,
+                    );
+                    return InjectionResponse {
+                        success: false,
+                        request_id,
+                        block_id: Some(block_id),
+                        error: Some(e),
+                        timestamp: now,
+                    };
+                }
+            }
+        }
+
         // Send message via input sender
         let sender = match &self.input_sender {
             Some(s) => s.clone(),
@@ -399,6 +475,10 @@ impl ReactiveHandler {
 
     pub fn set_input_sender(&self, sender: InputSender) {
         self.inner.lock().unwrap().set_input_sender(sender);
+    }
+
+    pub fn set_message_sender(&self, sender: MessageSender) {
+        self.inner.lock().unwrap().set_message_sender(sender);
     }
 
     #[allow(dead_code)]
