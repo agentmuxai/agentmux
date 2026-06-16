@@ -132,3 +132,15 @@ pub struct PollerStatus {
 
 /// Function type for sending input bytes to a block's PTY.
 pub type InputSender = Arc<dyn Fn(&str, &[u8]) -> Result<(), String> + Send + Sync>;
+
+/// Function type for controller-aware delivery of a message to a (non-PTY) agent.
+///
+/// Given `(block_id, message)`, returns:
+/// - `Ok(true)` — delivered on the controller's structured channel (persistent
+///   stream-json stdin / ACP `session/prompt`); no PTY keystrokes needed.
+/// - `Ok(false)` — the controller is PTY-based; the caller should fall back to
+///   keystroke injection.
+/// - `Err(_)` — a structured controller failed to accept the message (e.g. the
+///   persistent process is not running); the caller must NOT fall back to PTY,
+///   since such controllers reject raw keystrokes.
+pub type MessageSender = Arc<dyn Fn(&str, &str) -> Result<bool, String> + Send + Sync>;

@@ -275,6 +275,53 @@ pub fn send_input(block_id: &str, input: BlockInputUnion, seq: Option<u64>) -> R
     }
 }
 
+/// How a controller-aware agent message was delivered.
+pub enum AgentDelivery {
+    /// Delivered on the controller's structured input channel — a persistent
+    /// stream-json stdin line or an ACP `session/prompt`. No PTY keystrokes are
+    /// needed, and the message lands on the live channel so the agent picks it up
+    /// mid-turn (steering) instead of only when idle.
+    Structured,
+    /// The controller is PTY/terminal-based (shell/term) or otherwise has no
+    /// structured input channel. The caller should fall back to keystroke
+    /// injection.
+    Pty,
+}
+
+/// Deliver an inter-agent / muxbus message to a running agent the way its controller
+/// expects.
+///
+/// - **Persistent** (stream-json) agents have no PTY: the message is written as a
+///   `{type:"user",…}` line on the live stdin, which steers the agent mid-turn.
+/// - **ACP** agents receive the message as a `session/prompt` (the ACP controller's
+///   `send_input` already wraps raw input that way).
+/// - Everything else (shell/term PTY agents, one-shot subprocess agents) is reported
+///   as [`AgentDelivery::Pty`] so the caller uses keystroke injection — preserving
+///   today's behavior.
+///
+/// This is the controller-aware delivery primitive muxbus Tier-1 needs: PTY
+/// keystrokes silently fail to reach a persistent stream-json agent (it rejects raw
+/// input). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
+pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDelivery, String> {
+    let ctrl = get_controller(block_id)
+        .ok_or_else(|| format!("no controller for block {block_id}"))?;
+
+    if let Some(persistent_ctrl) = ctrl
+        .as_any()
+        .downcast_ref::<persistent::PersistentSubprocessController>()
+    {
+        persistent_ctrl.send_user_message(message.to_string())?;
+        return Ok(AgentDelivery::Structured);
+    }
+
+    if ctrl.controller_type() == BLOCK_CONTROLLER_ACP {
+        ctrl.send_input(BlockInputUnion::data(message.as_bytes().to_vec()), None)?;
+        return Ok(AgentDelivery::Structured);
+    }
+
+    Ok(AgentDelivery::Pty)
+}
+
 /// Resync a block's controller — the main entry point for starting/restarting blocks.
 /// Port of Go's `ResyncController`.
 ///

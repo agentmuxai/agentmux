@@ -57,6 +57,7 @@ pub(crate) fn test_state() -> AppState {
             "0.28.20".to_string(),
             0,
             event_bus.clone(),
+            String::new(),
         )),
         lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
         process_tracker,

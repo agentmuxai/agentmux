@@ -1,0 +1,9 @@
+[  0.013s] MSG1 send          long 4x-sleep multi-tool task
+[  5.915s] TOOL_USE start     #1 name=Bash
+[  5.915s] INJECT msg2        >>> mid-turn interrupt written to stdin
+[  6.244s] assistant tool     name=Bash input={"command": "sleep 4 && echo done-1", "description": "Sleep 
+[ 10.948s] tool_result        done-1
+[ 12.313s] assistant text     STEERED-MIDTURN
+[ 12.386s] RESULT             subtype=success is_error=False
+[ 12.386s] RESULT.result      STEERED-MIDTURN
+[ 91.071s] VERDICT-DATA       tools=1 STEERED-MIDTURN in text=True FINISHED-ORIGINAL in text=False
