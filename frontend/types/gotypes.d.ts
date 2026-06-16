@@ -75,6 +75,29 @@ declare global {
         is_agent_pane?: boolean;
     };
 
+    // agents.failure.AgentFailure — payload of the `agentfailure` wave event
+    // (classified cause of a non-zero agent exit). snake_case `code`, camelCase rest.
+    type AgentFailure = {
+        code:
+            | "rate_limited"
+            | "overloaded"
+            | "usage_limit"
+            | "auth"
+            | "context_exceeded"
+            | "max_turns"
+            | "network"
+            | "killed"
+            | "no_output"
+            | "spawn_failure"
+            | "unknown_non_zero";
+        title: string;
+        detail: string;
+        exitCode?: number;
+        signal?: number;
+        stderrTail?: string;
+        retryable: boolean;
+    };
+
     // waveobj.BlockDef
     type BlockDef = {
         files?: {[key: string]: FileDef};
