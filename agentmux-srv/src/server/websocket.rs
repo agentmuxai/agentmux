@@ -124,7 +124,15 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     tracing::info!(conn_id = %conn_id, "WebSocket client connected");
 
-    let mut event_rx = state.event_bus.register_ws(&conn_id, &tab_id);
+    // Two egress lanes per connection: interactive (terminal echo, RPC-routed
+    // wave events, obj updates) and background (droppable perf telemetry —
+    // sysinfo/blockstats). The select! below drains priority before background
+    // so typing never waits behind a perf tick. See
+    // docs/specs/SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md.
+    let crate::backend::eventbus::WsReceivers {
+        priority: mut priority_rx,
+        background: mut background_rx,
+    } = state.event_bus.register_ws(&conn_id, &tab_id);
     tracing::info!("[ws-perf] register_ws: {:.2}ms", ws_start.elapsed().as_secs_f64() * 1000.0);
 
     // Optional messagebus receiver — activated when pane sends bus:register
@@ -170,37 +178,35 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
     loop {
         tokio::select! {
-            // Forward event bus events → WebSocket.
-            // Two sources feed the event bus:
-            //   1. WPS Broker (via EventBusBridge) — already wrapped as
-            //      { eventtype: "rpc", data: { command: "eventrecv", data: WaveEvent } }
-            //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
-            //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
-            // Type 1: forward as-is (already RPC-wrapped).
-            // Type 2: wrap as RPC "eventrecv" so the frontend WshRouter routes
-            //         it to handleWaveEvent → updateWaveObject → Jotai re-render.
-            Some(event) = event_rx.recv() => {
-                let msg = if event["eventtype"] == "rpc" {
-                    // Already an RPC message (from WPS broker via EventBusBridge)
-                    serde_json::to_string(&event).unwrap_or_default()
-                } else {
-                    // Raw event bus event — wrap as RPC eventrecv
-                    let wave_event = json!({
-                        "event": event["eventtype"],
-                        "scopes": [event["oref"]],
-                        "data": event["data"],
-                    });
-                    let wrapped = json!({
-                        "eventtype": "rpc",
-                        "data": {
-                            "command": "eventrecv",
-                            "data": wave_event,
-                        },
-                    });
-                    serde_json::to_string(&wrapped).unwrap_or_default()
-                };
-                if socket.send(Message::Text(msg.into())).await.is_err() {
-                    break;
+            // Biased: poll branches top-to-bottom so interactive terminal I/O
+            // always wins over droppable perf telemetry. Order = incoming
+            // keystrokes → RPC replies → agent bus → priority events (terminal
+            // echo) → background events (sysinfo/blockstats) → keepalive ping.
+            // See docs/specs/SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md.
+            biased;
+
+            // Incoming WebSocket messages → parse & dispatch (keystrokes first)
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Ping(data))) => {
+                        let _ = socket.send(Message::Pong(data)).await;
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        match handle_incoming_text(&text, &engine, &state, &mut socket).await {
+                            Err(true) => break,
+                            Ok(Some((new_rx, agent_id))) => {
+                                // bus:register returned a new receiver
+                                bus_rx = Some(new_rx);
+                                bus_agent_id = Some(agent_id);
+                            }
+                            _ => {}
+                        }
+                    }
+                    Some(Ok(_)) => {
+                        // Binary or other message types — ignore
+                    }
+                    Some(Err(_)) => break,
                 }
             }
 
@@ -233,28 +239,24 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
                 }
             }
 
-            // Incoming WebSocket messages → parse & dispatch
-            msg = socket.recv() => {
-                match msg {
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(Message::Ping(data))) => {
-                        let _ = socket.send(Message::Pong(data)).await;
-                    }
-                    Some(Ok(Message::Text(text))) => {
-                        match handle_incoming_text(&text, &engine, &state, &mut socket).await {
-                            Err(true) => break,
-                            Ok(Some((new_rx, agent_id))) => {
-                                // bus:register returned a new receiver
-                                bus_rx = Some(new_rx);
-                                bus_agent_id = Some(agent_id);
-                            }
-                            _ => {}
-                        }
-                    }
-                    Some(Ok(_)) => {
-                        // Binary or other message types — ignore
-                    }
-                    Some(Err(_)) => break,
+            // Priority event lane → WebSocket. Two sources feed it:
+            //   1. WPS Broker (via EventBusBridge) — already wrapped as
+            //      { eventtype: "rpc", data: { command: "eventrecv", data: WaveEvent } }
+            //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
+            //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
+            // This carries terminal echo output and all interactive events.
+            Some(event) = priority_rx.recv() => {
+                if forward_event(&mut socket, event).await {
+                    break;
+                }
+            }
+
+            // Background event lane → WebSocket. Droppable perf telemetry
+            // (sysinfo/blockstats) only; serviced when the priority lanes above
+            // are momentarily idle, so it can never delay a keystroke echo.
+            Some(event) = background_rx.recv() => {
+                if forward_event(&mut socket, event).await {
+                    break;
                 }
             }
 
@@ -281,6 +283,37 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     if let Some(ref agent_id) = bus_agent_id {
         state.messagebus.unregister(agent_id);
     }
+}
+
+/// Forward a queued event-bus value to the WebSocket. Returns `true` if the
+/// send failed (the caller should break the loop).
+///
+/// Two shapes arrive: already-RPC-wrapped values (from the WPS broker via
+/// EventBusBridge) are forwarded as-is; raw event-bus values (e.g. SetMeta's
+/// `waveobj:update`) are wrapped as an RPC `eventrecv` so the frontend
+/// WshRouter routes them to handleWaveEvent → updateWaveObject. Shared by both
+/// the priority and background egress lanes.
+async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool {
+    let msg = if event["eventtype"] == "rpc" {
+        // Already an RPC message (from WPS broker via EventBusBridge)
+        serde_json::to_string(&event).unwrap_or_default()
+    } else {
+        // Raw event bus event — wrap as RPC eventrecv
+        let wave_event = json!({
+            "event": event["eventtype"],
+            "scopes": [event["oref"]],
+            "data": event["data"],
+        });
+        let wrapped = json!({
+            "eventtype": "rpc",
+            "data": {
+                "command": "eventrecv",
+                "data": wave_event,
+            },
+        });
+        serde_json::to_string(&wrapped).unwrap_or_default()
+    };
+    socket.send(Message::Text(msg.into())).await.is_err()
 }
 
 /// Handle an incoming text message.
