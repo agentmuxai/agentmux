@@ -24,19 +24,33 @@ set -euo pipefail
 
 DRY_RUN=0
 FORCE_TYPE=""
+FORCE_SET=0   # whether --as/--bump was passed (so an empty value still errors)
+# Each branch consumes its own args — no loop-bottom `shift`, which under
+# `set -euo pipefail` would abort cryptically when `--as` is the final token
+# (the in-branch shift empties $@, then a second shift fails).
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run)        DRY_RUN=1 ;;
-        --as|--bump)      shift; FORCE_TYPE="${1:-}" ;;
-        --as=*|--bump=*)  FORCE_TYPE="${1#*=}" ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
+        --as|--bump)
+            FORCE_SET=1
+            FORCE_TYPE="${2:-}"          # empty if no value follows → caught below
+            shift 2 2>/dev/null || shift  # consume flag (+value); tolerate missing value
+            ;;
+        --as=*|--bump=*)
+            FORCE_SET=1
+            FORCE_TYPE="${1#*=}"          # empty for `--as=` → caught below
+            shift
+            ;;
         *)
             echo "ERROR: unknown argument '$1' (expected --dry-run and/or --as <patch|minor|major>)." >&2
             exit 1
             ;;
     esac
-    shift
 done
-if [[ -n "$FORCE_TYPE" ]]; then
+if (( FORCE_SET )); then
     case "$FORCE_TYPE" in
         patch|minor|major) ;;
         *)
