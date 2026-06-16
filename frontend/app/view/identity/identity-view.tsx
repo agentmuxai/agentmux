@@ -14,7 +14,10 @@ import { KIND_LABELS, PROVIDER_LABELS, refreshAccountCache } from "./identity-mo
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
+import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import "./identity-view.scss";
+import "@/app/view/accounts/oauth-connect.scss";
 
 // Per-provider validation endpoint, surfaced in the egress help note next to
 // the Validate button so the user sees exactly where their key is sent before
@@ -558,7 +561,17 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     </FormField>
 
                     <FormField label="Provider">
-                        <select class="identity-select" value={provider()} onChange={(e) => setProvider(e.currentTarget.value as AccountProvider)}>
+                        <select
+                            class="identity-select"
+                            value={provider()}
+                            onChange={(e) => {
+                                const p = e.currentTarget.value as AccountProvider;
+                                setProvider(p);
+                                // Don't leave "oauth" selected for a provider that
+                                // doesn't support it after a switch.
+                                if (kind() === "oauth" && !supportsOAuth(p)) setKind("api_key");
+                            }}
+                        >
                             <option value="github">GitHub</option>
                             <option value="openai">OpenAI</option>
                             <option value="aws">AWS</option>
@@ -569,6 +582,10 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
 
                     <FormField label="Kind">
                         <select class="identity-select" value={kind()} onChange={(e) => setKind(e.currentTarget.value as AccountKind)}>
+                            {/* Browser-login path for OAuth-capable providers. */}
+                            <Show when={supportsOAuth(provider())}>
+                                <option value="oauth">Connect with OAuth (browser login)</option>
+                            </Show>
                             <Show when={provider() === "github"}>
                                 <option value="pat">Personal Access Token</option>
                                 <option value="api_key">API Key</option>
@@ -601,6 +618,18 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                         />
                     </FormField>
 
+                    {/* OAuth (browser login) replaces the secret/key sections —
+                        on success the backend creates the keychain-backed account
+                        itself, so this form's secret-ref + Save path is skipped. */}
+                    <Show when={kind() === "oauth"}>
+                        <OAuthConnectPanel
+                            provider={provider()}
+                            name={name}
+                            onConnected={() => model.cancelForm()}
+                        />
+                    </Show>
+
+                    <Show when={kind() !== "oauth"}>
                     {/* Secret storage */}
                     <FormField label="Secret backend">
                         <select class="identity-select" value={secretBackend()} onChange={(e) => setSecretBackend(e.currentTarget.value as SecretRef["backend"])}>
@@ -769,18 +798,19 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                     <FormField label="Notes">
                         <input class="identity-input" type="text" value={description()} onInput={(e) => setDescription(e.currentTarget.value)} placeholder="Optional description" />
                     </FormField>
+                    </Show>
                 </div>
 
                 <div class="identity-form-footer">
                     <button class="identity-btn identity-btn-secondary" onClick={() => model.cancelForm()}>
                         Cancel
                     </button>
-                    {/* The keychain *entry* path has its own Validate/Save
-                        buttons; hide the generic upsert there. But a locked
-                        keychain account (editing, not replacing the key) uses
-                        this button to save metadata-only edits — buildAccount
-                        preserves the existing keychain pointer + context. */}
-                    <Show when={secretBackend() !== "keychain" || (isEdit() && !keyReplacing())}>
+                    {/* OAuth connects via its own panel; the keychain *entry* path
+                        has its own Validate/Save buttons — hide the generic upsert
+                        in both. A locked keychain account (editing, not replacing
+                        the key) still uses this button for metadata-only saves;
+                        buildAccount preserves the keychain pointer + context. */}
+                    <Show when={kind() !== "oauth" && (secretBackend() !== "keychain" || (isEdit() && !keyReplacing()))}>
                         <button class="identity-btn identity-btn-primary" onClick={handleSubmit}>
                             {isEdit() ? "Save" : "Add Account"}
                         </button>

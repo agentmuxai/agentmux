@@ -16,7 +16,7 @@ import { Logger } from "@/util/logger";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "custom";
-export type AccountKind = "pat" | "role" | "api_key" | "env_ref";
+export type AccountKind = "pat" | "role" | "api_key" | "env_ref" | "oauth";
 export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking";
 export type IdentityTab = "accounts" | "assignments";
 
@@ -128,6 +128,7 @@ export const KIND_LABELS: Record<AccountKind, string> = {
     role: "IAM Role",
     api_key: "API Key",
     env_ref: "Environment Variable",
+    oauth: "OAuth (browser login)",
 };
 
 // ── Storage (DB-backed via RPC, in-memory cache) ─────────────────────────────

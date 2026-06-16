@@ -1,0 +1,76 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Trust Center service-OAuth connect panel (Accounts form).
+// Reuses identity-view form primitives (.identity-input, .identity-btn,
+// .identity-form-field/-label, .identity-key-actions); only the OAuth-specific
+// bits live here. Spec: specs/SPEC_TRUST_CENTER_2026_06_15.md §4.2.
+
+.oauth-connect {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+    margin-top: var(--space-1, 4px);
+
+    .oauth-byo-note {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        line-height: 1.5;
+        padding: var(--space-2, 8px);
+        background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.1));
+        border-radius: 4px;
+    }
+
+    .oauth-link {
+        color: var(--accent-color);
+        cursor: pointer;
+        text-decoration: none;
+
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+
+    .oauth-flow-status {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2, 8px);
+        padding: var(--space-2, 8px);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+    }
+
+    .oauth-device {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2, 8px);
+    }
+
+    .oauth-device-label {
+        font-size: 12px;
+        color: var(--main-text-color);
+    }
+
+    .oauth-device-code-row {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2, 8px);
+    }
+
+    .oauth-device-code {
+        font-family: var(--fixed-font, monospace);
+        font-size: 18px;
+        letter-spacing: 2px;
+        font-weight: 600;
+        padding: 4px 10px;
+        background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.15));
+        border-radius: 4px;
+        user-select: all;
+    }
+
+    .oauth-waiting {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        font-style: italic;
+    }
+}
