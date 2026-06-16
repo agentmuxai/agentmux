@@ -147,7 +147,7 @@ Reuse exactly what `TokenBreakdownPopover` uses:
 - Button: `aria-label="CPU usage, click for per-core breakdown"`, `data-tip="Per-core CPU usage"`, keyboard `Enter`/`Space` toggle.
 - Popover root: `role="dialog"`, `aria-label="Per-core CPU usage"`.
 - **Rows/cells (tiers 1–2):** each labeled; the bar is decorative (`aria-hidden`), the `%` text carries the value.
-- **Heatmap squares (tier 3):** color alone is never the only signal — every square has `aria-label="Core N, X%"` (and a `title` for pointer hover), so the value is available to screen readers and the colorblind. The squares form a focusable group (roving `tabindex` or a `role="list"` of `role="listitem"`s); arrow-key navigation moves focus and drives the optional live readout line. The header keeps the exact aggregate number, so the panel is still usable with color perception off.
+- **Heatmap squares (tier 3):** color alone is never the only signal — every square has `aria-label="Core N, X%"` (and a `title` for pointer hover), so the value is available to screen readers and the colorblind. The grid is a `role="group"` of focusable, `aria-label`led squares with a **roving tabindex**: exactly one square is in the tab order (`tabindex=0`), the rest are `-1`, so a 128-core machine adds a single tab stop, not 128. Arrow keys (±1 / ±cols), Home/End move focus across the grid and drive the live readout line. (Plain `role="group"` rather than `role="grid"` avoids the ARIA "grid must contain rows" requirement, since the layout is a single auto-placed CSS grid with no row wrappers.) The header keeps the exact aggregate number, so the panel is still usable with color perception off.
 
 ---
 

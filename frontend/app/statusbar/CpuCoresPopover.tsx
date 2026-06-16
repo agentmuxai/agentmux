@@ -16,7 +16,7 @@
  * status-bar popover): usePaneOverlay, computeMenuPosition top-end, autoUpdate.
  */
 
-import { createMemo, createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
@@ -63,6 +63,19 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
     // an object ref would go stale; the index lets the readout re-derive the
     // live value from `cores()` and update while the user keeps hovering.
     const [activeIdx, setActiveIdx] = createSignal<number | null>(null);
+    // Roving tabindex for the heatmap: exactly one square is in the tab order
+    // (tabindex 0); the rest are -1, and arrow keys move focus. This is the
+    // standard grid a11y pattern — without it, 128+ squares would each be a
+    // tab stop. `rovingIdx` is a core index (== grid position, since cores are
+    // a contiguous 0..N-1 run sorted by index).
+    const [rovingIdx, setRovingIdx] = createSignal(0);
+    let heatGridRef: HTMLDivElement | undefined;
+
+    // Keep the roving index within range as the core count changes.
+    createEffect(() => {
+        const n = cores().length;
+        if (n > 0 && rovingIdx() > n - 1) setRovingIdx(n - 1);
+    });
 
     onMount(() => {
         const unsub = waveEventSubscribe({
@@ -155,6 +168,31 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
         return `${cores().length} cores`;
     };
 
+    // Arrow-key navigation across the heatmap grid (roving tabindex). Moves the
+    // tab stop and DOM focus by ±1 (left/right) or ±cols (up/down), Home/End to
+    // the ends; also drives the readout via setActiveIdx.
+    const onHeatKeyDown = (e: KeyboardEvent) => {
+        const n = cores().length;
+        if (n === 0) return;
+        const cols = heat().cols;
+        const cur = Math.min(rovingIdx(), n - 1);
+        let next = cur;
+        switch (e.key) {
+            case "ArrowRight": next = Math.min(n - 1, cur + 1); break;
+            case "ArrowLeft": next = Math.max(0, cur - 1); break;
+            case "ArrowDown": next = Math.min(n - 1, cur + cols); break;
+            case "ArrowUp": next = Math.max(0, cur - cols); break;
+            case "Home": next = 0; break;
+            case "End": next = n - 1; break;
+            default: return;
+        }
+        e.preventDefault();
+        setRovingIdx(next);
+        setActiveIdx(next);
+        const el = heatGridRef?.querySelector<HTMLElement>(`[data-core-idx="${next}"]`);
+        el?.focus();
+    };
+
     return (
         <div
             ref={registerFloating}
@@ -218,8 +256,11 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
 
                 <Show when={tier() === "heat"}>
                     <div
+                        ref={heatGridRef}
                         class="cpu-cores-heatmap"
-                        role="list"
+                        role="group"
+                        aria-label="Per-core CPU heatmap, arrow keys to navigate"
+                        onKeyDown={onHeatKeyDown}
                         style={{
                             "--cols": String(heat().cols),
                             "--sq": `${heat().sq}px`,
@@ -229,14 +270,14 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                             {(c) => (
                                 <span
                                     class="cpu-core-square"
-                                    role="listitem"
-                                    tabindex="0"
+                                    data-core-idx={c().idx}
+                                    tabindex={c().idx === rovingIdx() ? 0 : -1}
                                     title={`Core ${c().idx} — ${Math.round(c().pct)}%`}
                                     aria-label={`Core ${c().idx}, ${Math.round(c().pct)}%`}
                                     style={{ "background-color": loadColor(c().pct) }}
                                     onMouseEnter={() => setActiveIdx(c().idx)}
                                     onMouseLeave={() => setActiveIdx(null)}
-                                    onFocus={() => setActiveIdx(c().idx)}
+                                    onFocus={() => { setRovingIdx(c().idx); setActiveIdx(c().idx); }}
                                     onBlur={() => setActiveIdx(null)}
                                 />
                             )}
