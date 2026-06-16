@@ -21,14 +21,17 @@
  * `pending_approval` tool maps to `{ open: true, via: "auto" }`, matching what
  * actually renders.
  *
- * NOT captured here (component-local transients, not derivable from a node /
- * `documentState`, that Phase 2 moves into the slice via commands):
- *   - a tool's 3 s post-completion hold (`ToolBlock.postCompletionHold`)
+ * The tool's post-completion hold IS captured here now, via `expandedTools`: a
+ * completed tool stays open while held (added on live completion, removed when
+ * its row scrolls off the top), so heights track the visual. This replaced the
+ * old 3 s `ToolBlock` timer — see
+ * docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
+ *
+ * Still NOT captured here (a genuinely component-local transient):
  *   - a user's expand CLICK on a canceled-thinking block (`MarkdownBlock.expanded`).
  *     NOTE the canceled block's collapsed *default* IS captured below (it's
- *     `metadata.canceled`); only the click that overrides it is component-local.
- * Until then these are handled by the store-layer hold timer / a click-time
- * `UserExpanded` dispatch in the wiring layer, not by this pure mapper.
+ *     `metadata.canceled`); only the click that overrides it is component-local,
+ *     handled by a click-time dispatch in the wiring layer, not this pure mapper.
  */
 
 import type { Expansion } from "@/app/store/agent-pane-layout/types";

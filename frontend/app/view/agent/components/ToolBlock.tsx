@@ -10,9 +10,11 @@
  *     duration + (while streaming) the live-tail line. Applies to ALL
  *     terminated statuses.
  *   - Auto-expand: `running` and `pending_approval` keep the panel open
- *     in flow. After a terminal transition the panel stays open for
- *     POST_COMPLETION_HOLD_MS so the user can finish reading, then
- *     collapses.
+ *     in flow. After a terminal transition the panel stays open while the
+ *     tool is held (`props.heldOpen`, backed by `documentState.expandedTools`)
+ *     — i.e. while it's still on screen — and collapses once its row scrolls
+ *     off the top. This replaced the old fixed post-completion timer; see
+ *     docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
  *   - Click summary: pins the expanded state. Clicking again unpins.
  *   - Hover: nothing happens. No browser-native tooltip, no panel
  *     expand, no time popup. The hover-to-peek model from the prior
