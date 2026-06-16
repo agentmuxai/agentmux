@@ -823,12 +823,22 @@ tasks:
                   if [ "{{OS}}" = "windows" ]; then
                     pid="$(netstat -ano 2>/dev/null | grep -i LISTENING | grep ":$AGENTMUX_VITE_PORT " | awk '{print $NF}' | head -1)"
                     if [ -n "$pid" ]; then
-                      # Only reap node.exe — an orphaned Vite is always a node process.
-                      # A non-node holder (another app, a different clone's non-Vite server)
-                      # is treated as a foreign process and we fail fast rather than kill it.
                       proc="$(tasklist /FI "PID eq $pid" /FO CSV /NH 2>/dev/null | head -1 | cut -d',' -f1 | tr -d '"')"
                       if echo "$proc" | grep -qi "node"; then
-                        taskkill /PID "$pid" /T /F > /dev/null 2>&1 || true
+                        # Guard: only reap if the process's working directory is THIS clone's
+                        # root. A different clone's live Vite is also node.exe on the same
+                        # port (hash collision); killing it would break that still-running
+                        # session. Normalize both paths: lowercase, backslash→slash, strip
+                        # leading drive letter so the comparison is drive-letter-agnostic.
+                        proc_wd="$(wmic process where "ProcessId=$pid" get WorkingDirectory /format:value 2>/dev/null | grep -i WorkingDirectory= | cut -d= -f2- | tr -d '\r\n' | tr '\\' '/' | tr '[:upper:]' '[:lower:]' | sed 's|^[a-z]/||' | sed 's|^[a-z]:/||')"
+                        our_root="$(echo "$CLONE_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||' | tr '\\' '/')"
+                        if [ -n "$proc_wd" ] && [ "$proc_wd" = "$our_root" ]; then
+                          taskkill /PID "$pid" /T /F > /dev/null 2>&1 || true
+                        else
+                          echo "❌ Port $AGENTMUX_VITE_PORT is held by a node process whose working dir ($proc_wd) does not match this clone ($our_root) — likely another dev instance."
+                          echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
+                          exit 1
+                        fi
                       else
                         echo "❌ Port $AGENTMUX_VITE_PORT is held by a non-node process ($proc, pid=$pid) — will not reap."
                         echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
@@ -840,7 +850,21 @@ tasks:
                     if [ -n "$pid" ]; then
                       proc="$(ps -p "$pid" -o comm= 2>/dev/null)"
                       if echo "$proc" | grep -qi "node"; then
-                        kill -9 "$pid" 2>/dev/null || true
+                        # Guard: only reap if it's OUR orphaned Vite (same CWD).
+                        # Another clone's live Vite on the same port (hash collision)
+                        # must not be killed.
+                        if command -v pwdx >/dev/null 2>&1; then
+                          proc_wd="$(pwdx "$pid" 2>/dev/null | cut -d: -f2- | tr -d ' \n')"
+                        else
+                          proc_wd="$(lsof -p "$pid" -a -d cwd -F n 2>/dev/null | grep '^n' | cut -c2-)"
+                        fi
+                        if [ -n "$proc_wd" ] && [ "$proc_wd" = "$CLONE_ROOT" ]; then
+                          kill -9 "$pid" 2>/dev/null || true
+                        else
+                          echo "❌ Port $AGENTMUX_VITE_PORT is held by a node process whose working dir ($proc_wd) does not match this clone ($CLONE_ROOT) — likely another dev instance."
+                          echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
+                          exit 1
+                        fi
                       else
                         echo "❌ Port $AGENTMUX_VITE_PORT is held by a non-node process ($proc, pid=$pid) — will not reap."
                         echo "   Override with: AGENTMUX_VITE_PORT=<free-port> task dev"
