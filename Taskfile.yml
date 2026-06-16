@@ -830,8 +830,8 @@ tasks:
                         # port (hash collision); killing it would break that still-running
                         # session. Normalize both paths: lowercase, backslash→slash, strip
                         # leading drive letter so the comparison is drive-letter-agnostic.
-                        proc_wd="$(wmic process where "ProcessId=$pid" get WorkingDirectory /format:value 2>/dev/null | grep -i WorkingDirectory= | cut -d= -f2- | tr -d '\r\n' | tr '\\' '/' | tr '[:upper:]' '[:lower:]' | sed 's|^[a-z]/||' | sed 's|^[a-z]:/||')"
-                        our_root="$(echo "$CLONE_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||' | tr '\\' '/')"
+                        proc_wd="$(pwsh -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').WorkingDirectory" 2>/dev/null | tr -d '\r\n' | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||')"
+                        our_root="$(echo "$CLONE_ROOT" | tr '[:upper:]' '[:lower:]' | tr '\\' '/' | sed 's|^/[a-z]/||' | sed 's|^[a-z]:/||')"
                         if [ -n "$proc_wd" ] && [ "$proc_wd" = "$our_root" ]; then
                           taskkill /PID "$pid" /T /F > /dev/null 2>&1 || true
                         else
