@@ -42,7 +42,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::backend::obj::Block;
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
 use crate::backend::storage::store::Store;
-use crate::registry::Registry;
 
 // ---------------------------------------------------------------------------
 // File names within an agent session zone (mirrors per-block zone shape)
@@ -264,75 +263,6 @@ pub fn heal_global_snapshot_source_block_ids(gfs: &FileStore, def_ids: &[String]
         }
     }
     healed
-}
-
-/// Upgrade v2 global snapshots to schemaVersion 3 by injecting the `sessionId`
-/// field from the registry. This makes the snapshot self-contained for
-/// cross-channel `--resume`: a v3 snapshot carries everything needed to open the
-/// agent in any channel without an external registry lookup.
-///
-/// Idempotent: skips snapshots that already have `schemaVersion >= 3` OR already
-/// carry a non-empty `sessionId`. Best-effort per agent — a failure is logged but
-/// never fatal. Returns the number of snapshots upgraded.
-///
-/// Requires the global transcript store to be installed (`set_global_transcript_store`).
-pub fn migrate_snapshots_v2_to_v3(reg: &Registry) -> usize {
-    let Some(gfs) = global_transcript_store() else {
-        return 0;
-    };
-    let records = match reg.list_active() {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = %e, "migrate_v2_to_v3: failed to list agents — skipping");
-            return 0;
-        }
-    };
-    let mut upgraded = 0;
-    for rec in records {
-        let def_id = &rec.data.definition_id;
-        if !is_valid_definition_id(def_id) {
-            continue;
-        }
-        let Some(sid) = rec.data.session_id.as_deref() else {
-            continue; // no session_id to inject
-        };
-        if sid.is_empty() {
-            continue;
-        }
-        let zone = agent_current_zone(def_id);
-        let bytes = match gfs.read_file(&zone, SNAPSHOT_FILE) {
-            Ok(Some(b)) => b,
-            _ => continue, // no global snapshot for this agent
-        };
-        let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            continue;
-        };
-        let Some(obj) = v.as_object_mut() else {
-            continue;
-        };
-        // Already v3 or already has sessionId → nothing to do.
-        let version = obj.get("schemaVersion").and_then(|v| v.as_i64()).unwrap_or(0);
-        if version >= 3 {
-            continue;
-        }
-        if obj.get("sessionId").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
-            continue;
-        }
-        obj.insert("sessionId".to_string(), serde_json::Value::String(sid.to_string()));
-        obj.insert("schemaVersion".to_string(), serde_json::Value::Number(3.into()));
-        let Ok(new_bytes) = serde_json::to_vec(&v) else {
-            continue;
-        };
-        if write_zone_file(gfs, &zone, SNAPSHOT_FILE, &new_bytes).is_ok() {
-            upgraded += 1;
-            tracing::info!(
-                definition_id = %def_id,
-                session_id = %sid,
-                "migrate_v2_to_v3: upgraded snapshot to schemaVersion 3"
-            );
-        }
-    }
-    upgraded
 }
 
 /// Append `line` (with a trailing newline added if not present) to
