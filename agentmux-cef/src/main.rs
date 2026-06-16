@@ -36,6 +36,7 @@ mod parent_process;
 mod srv_event_bridge;
 mod srv_ipc;
 mod memory_heartbeat;
+mod memory_pressure;
 mod browser_pane;
 #[cfg(target_os = "windows")]
 mod floating_pane;
