@@ -77,6 +77,7 @@ muxlog srv --since 2026-06-15T23:30 cat        # a time window
 | Recipe | What it shows |
 |--------|---------------|
 | `muxlog ls` | every instance's logs: target, version, source (`shared` / `dev:<branch>` / `channel:…`), age, size, path |
+| `muxlog mem` (alias `doctor`) | system **commit-free** + derived pressure level (the OOM-relevant ceiling, not physical RAM) + the count and footprint of live AgentMux processes — makes multi-instance commit pressure visible before the cliff (`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16` §5.G) |
 | `muxlog errors` | ERROR + WARN across the active host and sidecar |
 | `muxlog bridge` | the startup handshake — `Loading URL`, `Injected IPC …`, `backend-ready`, `window.api`, `Bootstrap failed` — correlated in time, so a reconnect loop is obvious at a glance |
 
