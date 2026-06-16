@@ -111,6 +111,12 @@
         cursor: default;
         transition: background 0.1s;
 
+        // Click-to-expand toggle (replaces the removed hover-strip expand
+        // button). SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15.
+        &--toggle {
+            cursor: var(--cursor-interactive, pointer);
+        }
+
         .agent-status-line-text {
             display: block;
             white-space: nowrap;

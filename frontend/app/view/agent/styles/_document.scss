@@ -31,79 +31,15 @@
         overflow-anchor: auto;
     }
 
-    // Shared hover-strip anchor. Any element that renders a `.node-strip`
-    // child (document nodes in the conversation, startup status-log
-    // lines) adds this class. Owns the positioning + fade-in rules so
-    // the two call sites stay consistent.
-    .hover-strip-host {
-        position: relative;
+    // The per-row hover strip (timestamp + expand toggle) was removed
+    // (SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15). Expand/collapse now lives on
+    // each surface's own header (tool/shell/message) + the row's keyboard
+    // handler; sections get a clickable header below.
 
-        .node-strip {
-            position: absolute;
-            top: 3px;
-            right: 6px;
-            display: flex;
-            align-items: center;
-            gap: var(--space-1-5);
-            padding: var(--space-0-5) var(--space-1);
-            font-size: 11px;
-            font-family: var(--fixed-font, monospace);
-            // `--panel-bg-color` has 50% alpha (rgba(31,33,31,0.5)); the strip
-            // must be fully opaque so content underneath doesn't bleed through.
-            background: var(--main-bg-color);
-            border: 1px solid var(--border-color);
-            border-radius: 0;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 80ms ease;
-            white-space: nowrap;
-            z-index: 6;
-            line-height: 1.6;
-            max-width: calc(100% - 12px);
-            overflow: hidden;
-        }
-
-        &:hover .node-strip,
-        &:focus-within .node-strip {
-            opacity: 1;
-        }
-
-        .node-strip-time {
-            color: var(--secondary-text-color);
-            font-variant-numeric: tabular-nums;
-        }
-
-        .node-strip-btn {
-            pointer-events: auto;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1px var(--space-1);
-            background: transparent;
-            border: none;
-            border-radius: 0;
-            color: var(--secondary-text-color);
-            cursor: pointer;
-            font-size: 11px;
-            line-height: 1.2;
-
-            &:hover:not(:disabled) {
-                background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
-                color: var(--main-text-color);
-            }
-
-            &--active {
-                color: var(--warning-color);
-            }
-
-            &:disabled,
-            &--disabled {
-                opacity: 0.35;
-                cursor: not-allowed;
-                pointer-events: none;
-            }
-        }
+    // Section headers are collapsible — clicking the header toggles the
+    // section (the affordance the hover strip used to carry).
+    .agent-section--toggle {
+        cursor: var(--cursor-interactive, pointer);
     }
 
     // === Virtualization (Phase 2 redesign) ===
