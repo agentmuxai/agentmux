@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { waveEventSubscribe } from "@/app/store/wps";
-import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
+import { CpuCoresPopover } from "./CpuCoresPopover";
+import { cpuColor } from "./cpu-color";
 
 type SysStats = {
     cpu: number;
@@ -29,12 +32,6 @@ function formatRate(mbps: number): string {
     return "0K";
 }
 
-function cpuColor(pct: number): string {
-    if (pct > 95) return "var(--error-color)";
-    if (pct > 80) return "var(--warning-color)";
-    return "var(--secondary-text-color)";
-}
-
 function memColor(used: number, total: number): string {
     if (total <= 0) return "var(--secondary-text-color)";
     if (used / total > 0.9) return "var(--warning-color)";
@@ -43,6 +40,44 @@ function memColor(used: number, total: number): string {
 
 const SystemStats = (): JSX.Element => {
     const [stats, setStats] = createSignal<SysStats | null>(null);
+
+    // Per-core CPU panel — opened by clicking the CPU readout. Mirrors the
+    // TokenUsageIndicator → TokenBreakdownPopover interaction.
+    const [cpuPanelOpen, setCpuPanelOpen] = createSignal(false);
+    const [cpuAnchorRect, setCpuAnchorRect] = createSignal<DOMRect | null>(null);
+    let cpuButtonRef: HTMLButtonElement | undefined;
+    let cpuPopoverRef: HTMLDivElement | undefined;
+
+    const toggleCpuPanel = () => {
+        if (cpuPanelOpen()) {
+            setCpuPanelOpen(false);
+            return;
+        }
+        if (cpuButtonRef) setCpuAnchorRect(cpuButtonRef.getBoundingClientRect());
+        setCpuPanelOpen(true);
+    };
+
+    // Close on outside click (ignoring the button + popover) and on Esc.
+    createEffect(() => {
+        if (!cpuPanelOpen()) return;
+        const onDown = (e: MouseEvent) => {
+            const t = e.target as Node;
+            if (cpuButtonRef?.contains(t) || cpuPopoverRef?.contains(t)) return;
+            setCpuPanelOpen(false);
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                e.stopPropagation();
+                setCpuPanelOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", onDown, true);
+        window.addEventListener("keydown", onKey, true);
+        onCleanup(() => {
+            document.removeEventListener("mousedown", onDown, true);
+            window.removeEventListener("keydown", onKey, true);
+        });
+    });
 
     onMount(() => {
         const unsub = waveEventSubscribe({
@@ -70,14 +105,28 @@ const SystemStats = (): JSX.Element => {
         <Show when={stats()}>
             {(s) => (
                 <div class="status-bar-item system-stats">
-                    <span
-                        class="stat-mono stat-cpu"
+                    <button
+                        type="button"
+                        ref={cpuButtonRef}
+                        class="stat-mono stat-cpu stat-cpu-button"
                         style={{ color: cpuColor(s().cpu) }}
-                        data-tip="CPU usage"
-                        aria-label="CPU usage"
+                        onClick={toggleCpuPanel}
+                        data-tip="Per-core CPU usage"
+                        aria-label="CPU usage, click for per-core breakdown"
+                        aria-haspopup="dialog"
+                        aria-expanded={cpuPanelOpen()}
                     >
                         CPU {Math.round(s().cpu)}%
-                    </span>
+                    </button>
+                    <Show when={cpuPanelOpen()}>
+                        <Portal>
+                            <CpuCoresPopover
+                                anchorRect={cpuAnchorRect()}
+                                onClose={() => setCpuPanelOpen(false)}
+                                ref={(el) => { cpuPopoverRef = el; }}
+                            />
+                        </Portal>
+                    </Show>
                     <Show when={s().gpu != null}>
                         <span class="stat-separator">|</span>
                         <span

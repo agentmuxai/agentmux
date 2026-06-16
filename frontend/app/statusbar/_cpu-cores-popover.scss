@@ -1,0 +1,206 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Status-bar CPU readout button + per-core panel.
+// Spec: SPEC_STATUSBAR_CPU_CORES_PANEL_2026_06_15.md.
+
+// Clickable CPU readout in the status bar (the <button> wrapping "CPU n%").
+.stat-cpu-button {
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    padding: 0 2px;
+    margin: 0;
+    cursor: pointer;
+    border-radius: 0;
+    transition: background 80ms ease;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+
+    &:focus-visible {
+        outline: 1px solid var(--accent-color);
+        outline-offset: -1px;
+    }
+}
+
+.cpu-cores-popover {
+    // Cool/muted idle end of the per-core heat ramp (loadColor in cpu-color.ts).
+    --cpu-idle-color: color-mix(in srgb, var(--accent-color) 22%, var(--secondary-text-color));
+
+    background: var(--modal-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    color: var(--main-text-color);
+    font-size: 12px;
+    zoom: var(--zoomfactor);
+    z-index: var(--zindex-modal-wrapper);
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-2) 0;
+    user-select: none;
+
+    .cpu-cores-header {
+        padding: 0 var(--space-3) var(--space-1-5);
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .cpu-cores-title {
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .cpu-cores-aggregate {
+        font-family: var(--fixed-font, monospace);
+        font-size: 12px;
+    }
+
+    .cpu-cores-subtitle {
+        padding: var(--space-1) var(--space-3) 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        color: var(--secondary-text-color);
+        font-size: 11px;
+        min-height: 14px; // stable height as the readout text changes
+    }
+
+    .cpu-cores-legend {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        opacity: 0.8;
+    }
+
+    .cpu-cores-legend-ramp {
+        display: inline-block;
+        width: 44px;
+        height: 7px;
+        border-radius: 2px;
+        // idle → warning → error, matching loadColor().
+        background: linear-gradient(
+            to right,
+            var(--cpu-idle-color),
+            var(--warning-color),
+            var(--error-color)
+        );
+    }
+
+    .cpu-cores-empty {
+        padding: var(--space-3);
+        text-align: center;
+        color: var(--secondary-text-color);
+        font-size: 11px;
+    }
+
+    // Scroll backstop shared by every tier's content area.
+    .cpu-cores-list,
+    .cpu-cores-heatmap {
+        margin-top: var(--space-1-5);
+        padding: 0 var(--space-3);
+        max-height: min(60vh, 420px);
+        overflow-y: auto;
+    }
+
+    // ── Tier 1: rows ────────────────────────────────────────────────────────
+    .cpu-cores-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+    }
+
+    .cpu-core {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+
+        .cpu-core-label {
+            flex: 0 0 auto;
+            color: var(--secondary-text-color);
+            font-family: var(--fixed-font, monospace);
+            font-size: 11px;
+        }
+
+        .cpu-core-bar {
+            flex: 1 1 auto;
+            height: 6px;
+            background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.18));
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .cpu-core-bar-fill {
+            display: block;
+            height: 100%;
+            border-radius: 2px;
+            transition: width 240ms ease, background-color 240ms ease;
+        }
+
+        .cpu-core-pct {
+            flex: 0 0 auto;
+            min-width: 34px;
+            text-align: right;
+            font-family: var(--fixed-font, monospace);
+            font-size: 11px;
+        }
+    }
+
+    // ── Tier 2: compact cells ───────────────────────────────────────────────
+    // Auto-fill grid of tiles; each tile is "index | %" on top, bar below.
+    .cpu-cores-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+        gap: 4px;
+
+        .cpu-core {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            grid-template-areas:
+                "label pct"
+                "bar   bar";
+            align-items: center;
+            gap: 2px 4px;
+            padding: 3px 5px;
+            background: var(--button-secondary-bg-color, rgba(127, 127, 127, 0.1));
+            border-radius: 3px;
+
+            .cpu-core-label { grid-area: label; }
+            .cpu-core-pct { grid-area: pct; min-width: 0; }
+            .cpu-core-bar { grid-area: bar; }
+        }
+    }
+
+    // ── Tier 3: heatmap squares ─────────────────────────────────────────────
+    .cpu-cores-heatmap {
+        display: grid;
+        grid-template-columns: repeat(var(--cols), var(--sq));
+        gap: 2px;
+        justify-content: center;
+    }
+
+    .cpu-core-square {
+        width: var(--sq);
+        height: var(--sq);
+        border-radius: 2px;
+        cursor: default;
+        transition: background-color 240ms ease, outline-color 80ms ease;
+        outline: 1px solid transparent;
+
+        &:hover,
+        &:focus-visible {
+            outline-color: var(--accent-color);
+            outline-offset: 1px;
+        }
+    }
+}
