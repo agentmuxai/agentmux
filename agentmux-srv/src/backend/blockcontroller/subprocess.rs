@@ -552,6 +552,12 @@ impl SubprocessController {
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
             super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        // Retain the terminal `result` frame so a failure reported on STDOUT
+        // (auth / rate-limit / usage — the common case; claude may even exit 0)
+        // can be classified, not just stderr-reported ones. Shared with the
+        // process_waiter below.
+        let last_result_frame: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let last_result_frame_read = Arc::clone(&last_result_frame);
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
@@ -580,12 +586,16 @@ impl SubprocessController {
                         // so token_estimate stays consistent across controller types.
                         stats.record_line(line.len(), &wstore_read);
 
-                        // Classify output for health monitoring
+                        // Classify output for health monitoring + retain the
+                        // terminal `result` frame for failure classification.
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
                             let (meaningful, error) = classify_output_line(&parsed);
                             health_read.record_output(meaningful);
                             if let Some((class, msg)) = error {
                                 health_read.record_error(class, msg);
+                            }
+                            if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
+                                *last_result_frame_read.lock().unwrap() = Some(parsed);
                             }
                         }
 
@@ -739,9 +749,10 @@ impl SubprocessController {
         let health_wait = Arc::clone(&self.health_monitor);
         let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         let stderr_tail_wait = Arc::clone(&stderr_tail);
+        let last_result_frame_wait = Arc::clone(&last_result_frame);
         tokio::spawn(async move {
-            // Classified failure cause for a genuine non-zero exit (None on clean
-            // exit or user-initiated stop). Surfaced to the pane after the loop.
+            // Classified failure cause for a genuine non-zero exit / stdout error
+            // frame (None on clean exit or user-initiated stop). Surfaced after the loop.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
             // Wait for either process exit or kill signal
             tokio::select! {
@@ -780,17 +791,24 @@ impl SubprocessController {
                         inner.kill_tx = None;
                     }
 
-                    // Classify a genuine non-zero exit into a real cause so the
-                    // pane can show the reason instead of a bare "exit N". A
-                    // user-initiated stop goes through the kill arm and is not a
-                    // failure, so it is intentionally left unclassified.
-                    if exit_code != 0 {
+                    // Classify a genuine non-zero exit OR a failure reported on
+                    // stdout as an error `result` frame (auth / rate-limit / usage —
+                    // claude may even exit 0) into a real cause, so the pane shows
+                    // the reason instead of a bare "exit N". A user-initiated stop
+                    // goes through the kill arm and is left unclassified.
+                    let result_frame = last_result_frame_wait.lock().unwrap().clone();
+                    let frame_is_error = result_frame
+                        .as_ref()
+                        .and_then(|f| f.get("is_error"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if exit_code != 0 || frame_is_error {
                         let tail = stderr_tail_wait.lock().unwrap().join("\n");
                         run_failure = Some(crate::agents::failure::classify(
                             Some(exit_code),
                             exit_signal,
                             &tail,
-                            None,
+                            result_frame.as_ref(),
                         ));
                     }
                 }
