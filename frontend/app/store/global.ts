@@ -304,6 +304,44 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 setLanDiscoveryErrorAtom(String(errMsg));
             },
         },
+        {
+            // Server-initiated floating pane (e.g. OpenEditor(floating:true)).
+            // srv creates the block + tears it into a fresh floating workspace,
+            // then broadcasts this directive scoped to the source window — srv
+            // can't open OS windows, so the window's frontend calls the host
+            // `open_floating_pane_window` command (same as a drag tear-off).
+            // See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
+            eventType: "openfloatingpane",
+            scope: initOpts.windowId,
+            handler: (event) => {
+                const data = event.data as { block_id?: string; workspace_id?: string };
+                if (!data?.block_id || !data?.workspace_id) return;
+                void (async () => {
+                    try {
+                        const { invokeCommand } = await import("@/app/platform/ipc");
+                        // width/height are DIP on all platforms; x/y are physical
+                        // px on Windows, DIP on macOS/Linux (see floating_pane.rs).
+                        // Center a default-sized floater over the current window.
+                        const dpr = window.devicePixelRatio || 1;
+                        const isWindows = /Windows/i.test(navigator.userAgent);
+                        const width = Math.max(600, Math.min(1200, Math.round(window.innerWidth * 0.5)));
+                        const height = Math.max(400, Math.min(900, Math.round(window.innerHeight * 0.6)));
+                        const cssX = window.screenX + Math.max(0, (window.outerWidth - width) / 2);
+                        const cssY = window.screenY + Math.max(0, (window.outerHeight - height) / 2);
+                        await invokeCommand("open_floating_pane_window", {
+                            pane_id: data.block_id,
+                            workspace_id: data.workspace_id,
+                            x: isWindows ? Math.round(cssX * dpr) : Math.round(cssX),
+                            y: isWindows ? Math.round(cssY * dpr) : Math.round(cssY),
+                            width,
+                            height,
+                        });
+                    } catch (e) {
+                        console.error("[openfloatingpane] failed to open floating window", e);
+                    }
+                })();
+            },
+        },
     );
 }
 

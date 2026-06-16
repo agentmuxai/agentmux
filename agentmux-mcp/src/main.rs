@@ -76,7 +76,9 @@ const OPEN_EDITOR_TOOL: &str = r#"{
     "properties": {
       "file":  { "type": "string", "description": "Absolute path to the file to open" },
       "title": { "type": "string", "description": "Optional tab/pane title (defaults to the file name)" },
-      "split": { "type": "string", "enum": ["right", "left", "down", "up"], "description": "Where to place the new pane relative to this agent pane (default: right)" }
+      "split": { "type": "string", "enum": ["right", "left", "down", "up"], "description": "Where to place the new pane relative to this agent pane (default: right). Ignored when floating is true." },
+      "collapse_tree": { "type": "boolean", "description": "Open the editor with its file-tree sidebar collapsed (just the file, no explorer). Default: false (tree expanded)." },
+      "floating": { "type": "boolean", "description": "Open the file in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
     },
     "required": ["file"]
   }
@@ -349,6 +351,15 @@ async fn call_tool(
             }
             if let Some(title) = arguments.get("title").and_then(|v| v.as_str()) {
                 body["title"] = json!(title);
+            }
+            // `collapse_tree: true` → open with the file-tree sidebar collapsed.
+            // Maps to the editor's `tree_expanded` meta (collapsed == not expanded).
+            if arguments.get("collapse_tree").and_then(|v| v.as_bool()) == Some(true) {
+                body["tree_expanded"] = json!(false);
+            }
+            // `floating: true` → open in a floating window instead of a docked split.
+            if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
+                body["floating"] = json!(true);
             }
 
             let resp = client
