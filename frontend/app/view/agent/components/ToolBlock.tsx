@@ -55,8 +55,17 @@ interface ToolBlockProps {
     node: ToolNode;
     /** User has clicked to pin this tool block open. */
     pinned: boolean;
+    /**
+     * Held expanded after completing live on screen (`documentState.expandedTools`).
+     * Set by `onHoldOpen` on completion; cleared by the pane's scroll-off scan
+     * once the row leaves the top — the scroll-driven replacement for the old
+     * 3 s post-completion timer.
+     */
+    heldOpen?: boolean;
     /** Toggle the pinned state (called on click of the collapsed row). */
     onTogglePin: () => void;
+    /** Mark this tool held-open — called once on its active→inactive transition. */
+    onHoldOpen?: () => void;
     /** Opens the tool's overlay content in a dedicated pane. */
     onOpenInPane?: () => void;
 }
@@ -72,36 +81,17 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
 };
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
-    // Stays true for POST_COMPLETION_HOLD_MS after a running tool
-    // completes so the user can read the final output line before the
-    // panel collapses.
-    // - Originally 1s (#988).
-    // - Bumped to 5s in #1006 — too tight to finish reading.
-    // - Dropped to 3s 2026-05-26 — 5s felt too long during live
-    //   conversation; user wants it punchier.
-    const POST_COMPLETION_HOLD_MS = 3000;
-    const [postCompletionHold, setPostCompletionHold] = createSignal(false);
-    // Gate the post-completion hold on a real active → inactive
-    // TRANSITION (not on a status-value snapshot). The earlier draft
-    // simply checked `s !== "running" && ...` which fired on mount
-    // for already-completed tools — loaded transcripts would briefly
-    // auto-expand every completed tool row on initial render
-    // (codex P1 round 2 on #988).
+    // A tool stays expanded after completing live until its row scrolls off the
+    // top — the "post-completion hold" now lives in `documentState.expandedTools`
+    // (read via props.heldOpen) instead of a 3 s timer. Here we just detect the
+    // active → inactive TRANSITION and mark the tool held-open via onHoldOpen.
     //
-    // Background on the older self-loop bug (round 1): reading
-    // `postCompletionHold()` inside the same effect that wrote to it
-    // made the effect a subscriber of its own write; the synchronous
-    // re-run disposed the previous owner and ran the just-registered
-    // `onCleanup(() => clearTimeout(t))` BEFORE the timer could fire,
-    // leaving the panel auto-expanded forever after the first
-    // completion. Both bugs are fixed here: track only
-    // `props.node.status`, and gate on a transition by comparing
-    // against `prevStatus` captured outside the reactive scope.
-    //
-    // prevNodeId guards against <Index> slot-position state leakage:
-    // when a streaming-buffer cap-advance replaces the node at this
-    // slot position with a different node, the old prevStatus must not
-    // be treated as a transition baseline for the incoming node.
+    // Gate on a real TRANSITION (not a status-value snapshot): firing on mount
+    // for an already-completed tool would auto-expand every row of a loaded
+    // transcript (codex P1 round 2 on #988). prevNodeId guards <Index>
+    // slot-position state leakage — when a streaming-buffer cap-advance swaps the
+    // node at this slot, the old prevStatus must not seed the incoming node's
+    // transition baseline.
     let prevStatus: string = props.node.status;
     let prevNodeId: string = props.node.id;
     const isActive = (s: string): boolean =>
@@ -112,33 +102,27 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         if (id !== prevNodeId) {
             prevNodeId = id;
             prevStatus = s;
-            setPostCompletionHold(false);
             return;
         }
         if (isActive(prevStatus) && !isActive(s)) {
-            setPostCompletionHold(true);
-            const t = setTimeout(() => setPostCompletionHold(false), POST_COMPLETION_HOLD_MS);
-            onCleanup(() => clearTimeout(t));
+            props.onHoldOpen?.();
         }
         prevStatus = s;
     });
 
-    // Auto-expand while the tool is actively running (or awaiting
-    // approval). Terminal states (success OR failure) get the 5s
-    // post-completion hold then collapse. Pin still wins as an
-    // explicit override (so the user can keep a completed tool
-    // expanded). Hover keeps working as a peek affordance for
-    // collapsed (completed) tools — successes and failures alike.
+    // Auto-expand while the tool is actively running (or awaiting approval), and
+    // keep a completed tool expanded while it's held open (props.heldOpen — set
+    // on completion, cleared when the row scrolls off the top). Pin still wins as
+    // an explicit override. Success and failure behave identically (the ✗ icon +
+    // red border-left at the collapsed row flag the failure).
     //
-    // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 — Phase B.
-    // The 2026-05-24 user feedback removed `failed` from the
-    // always-expanded set; failed-collapses-after-5s mirrors the
-    // success path, and the ✗ icon + red border-left at the
-    // collapsed row continue to flag the failure.
+    // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 and
+    // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md — the 3 s
+    // post-completion timer was replaced by scroll-position-driven collapse.
     const autoExpanded = (): boolean => {
         const s = props.node.status;
         return s === "running" || s === "pending_approval"
-            || postCompletionHold();
+            || !!props.heldOpen;
     };
     // Hover-to-peek was removed in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28
     // — expansion is now driven exclusively by pin + active-state auto-

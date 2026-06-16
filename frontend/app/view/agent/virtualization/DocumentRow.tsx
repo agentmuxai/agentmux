@@ -37,6 +37,9 @@ export interface DocumentRowProps {
     highlightNodeId?: Accessor<string | null>;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
+    /** Hold a tool expanded after it completes live on screen (ToolBlock calls
+     *  this on the active→inactive transition). */
+    onHoldToolOpen?: (id: string) => void;
     /** Style applied to the wrapper element. Virtualized parent
      *  passes absolute positioning + translateY; streaming parent
      *  passes nothing (normal flow). */
@@ -131,6 +134,7 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 onOpenInPane={onOpenInPane}
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
+                onHoldToolOpen={props.onHoldToolOpen}
                 onSubagentClick={props.onSubagentClick}
             />
             <NodeHoverStrip
@@ -151,6 +155,7 @@ interface DocumentNodeBodyProps {
     onOpenInPane?: () => void;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
+    onHoldToolOpen?: (id: string) => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
 }
 
@@ -192,7 +197,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 <ToolBlock
                     node={props.node() as Extract<DocumentNode, { type: "tool" }>}
                     pinned={props.documentState().pinnedNodes.has(props.node().id)}
+                    heldOpen={props.documentState().expandedTools.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
+                    onHoldOpen={() => props.onHoldToolOpen?.(props.node().id)}
                     onOpenInPane={props.onOpenInPane}
                 />
             </Show>

@@ -34,10 +34,14 @@
 import type { Expansion } from "@/app/store/agent-pane-layout/types";
 import type { DocumentNode, DocumentState } from "../types";
 
-/** The only `documentState` the mapping depends on — the two collapse/pin
- *  sets. Narrowed from the full `DocumentState` so the dependency is explicit
- *  (a full `DocumentState` still satisfies it at the call site). */
-export type ExpansionInputs = Pick<DocumentState, "collapsedNodes" | "pinnedNodes">;
+/** The only `documentState` the mapping depends on — the collapse/pin sets plus
+ *  the scroll-driven `expandedTools` hold. Narrowed from the full
+ *  `DocumentState` so the dependency is explicit (a full `DocumentState` still
+ *  satisfies it at the call site). */
+export type ExpansionInputs = Pick<
+    DocumentState,
+    "collapsedNodes" | "pinnedNodes" | "expandedTools"
+>;
 
 const OPEN_DEFAULT: Expansion = { open: true, via: "default" };
 const CLOSED: Expansion = { open: false };
@@ -48,11 +52,15 @@ export function currentExpansion(
 ): Expansion {
     switch (node.type) {
         case "tool":
-            // pin wins; otherwise a live tool is auto-expanded.
+            // pin wins; otherwise a live tool is auto-expanded. A completed tool
+            // stays open while held in `expandedTools` (added on live completion,
+            // removed once it scrolls off the top — the scroll-driven replacement
+            // for the old 3 s post-completion timer).
             if (state.pinnedNodes.has(node.id)) return { open: true, via: "pin" };
             if (node.status === "running" || node.status === "pending_approval") {
                 return { open: true, via: "auto" };
             }
+            if (state.expandedTools.has(node.id)) return { open: true, via: "auto" };
             return CLOSED;
 
         case "agent_message":
