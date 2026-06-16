@@ -45,7 +45,8 @@ export function AccountsManager(): JSX.Element {
             <div class="identity-body">
                 {/* Brand-tile landing: pick a service → OAuth / Key. */}
                 <AccountsGallery model={model} />
-                {/* Connected accounts (manage existing); shows its own empty state. */}
+                {/* Connected accounts (manage existing). Gated on having any —
+                    the gallery above is the empty/landing state. */}
                 <Show when={model.accountsAtom().length > 0}>
                     <div class="accounts-connected-heading">Connected accounts</div>
                     <AccountsTab model={model} />
