@@ -1018,7 +1018,44 @@ async fn run_unix(
                              memory to recover before relaunch",
                             code, commit_free
                         ));
-                        if !mem_supervisor::await_commit_recovery(log).await {
+                        // Race the commit-recovery wait against shutdown + srv
+                        // death so the supervisor stays responsive during the
+                        // (up to OOM_RELAUNCH_DEADLINE) wait — without this the
+                        // SIGINT/SIGTERM + srv arms are starved for the whole
+                        // wait (reagent P2). Mirrors the outer select! arms.
+                        let recovered = tokio::select! {
+                            r = mem_supervisor::await_commit_recovery(log) => r,
+                            srv_status = srv_child.wait() => {
+                                use std::os::unix::process::ExitStatusExt;
+                                match srv_status {
+                                    Ok(s) => {
+                                        let group_shutdown = matches!(
+                                            s.signal(),
+                                            Some(sig) if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP
+                                        );
+                                        if s.success() || group_shutdown {
+                                            log("srv exited as part of shutdown (during OOM wait) — shutting down");
+                                            break 0;
+                                        }
+                                        log(&format!(
+                                            "srv exited UNEXPECTEDLY during OOM wait with code {} — terminating launcher",
+                                            s.code().unwrap_or(1)
+                                        ));
+                                    }
+                                    Err(e) => log(&format!("FATAL: srv wait failed during OOM wait: {}", e)),
+                                }
+                                break 1;
+                            }
+                            _ = next_signal(&mut sigint) => {
+                                log("received SIGINT during OOM wait — shutting down");
+                                break 0;
+                            }
+                            _ = next_signal(&mut sigterm) => {
+                                log("received SIGTERM during OOM wait — shutting down");
+                                break 0;
+                            }
+                        };
+                        if !recovered {
                             show_fatal_dialog(
                                 mem_supervisor::OOM_GIVEUP_TITLE,
                                 mem_supervisor::OOM_GIVEUP_BODY,
@@ -1600,7 +1637,24 @@ async fn run_windows(
                         ));
                         // Commit-gated, backed-off wait. Relaunching into a
                         // starved system just re-OOMs; waiting is the only lever.
-                        if !mem_supervisor::await_commit_recovery(log).await {
+                        // Race it against srv death so the supervisor isn't blind
+                        // to a concurrent srv exit during the wait (reagent P2).
+                        // run_windows has no signal arms (shutdown flows via the
+                        // host/srv), so srv is the only concurrent event here.
+                        let recovered = tokio::select! {
+                            r = mem_supervisor::await_commit_recovery(log) => r,
+                            srv_status = srv_child.wait() => {
+                                match srv_status {
+                                    Ok(s) => log(&format!(
+                                        "srv exited UNEXPECTEDLY during OOM wait with code {} — terminating launcher",
+                                        s.code().unwrap_or(1)
+                                    )),
+                                    Err(e) => log(&format!("FATAL: srv wait failed during OOM wait: {}", e)),
+                                }
+                                break 1;
+                            }
+                        };
+                        if !recovered {
                             show_fatal_dialog(
                                 mem_supervisor::OOM_GIVEUP_TITLE,
                                 mem_supervisor::OOM_GIVEUP_BODY,

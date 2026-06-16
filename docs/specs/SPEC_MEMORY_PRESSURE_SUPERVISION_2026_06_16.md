@@ -153,6 +153,11 @@ Today (`agentmux-launcher/src/main.rs`, Windows `run_windows` ~1492-1565, Unix
    re-probing, until commit recovers *or* a wall-clock ceiling
    (`OOM_RELAUNCH_DEADLINE`, e.g. 5 min) elapses. Relaunching into a starved
    system just re-OOMs and burns the budget; waiting is the only thing that works.
+   The wait must stay **interruptible** — it races against the supervisor's
+   shutdown signals (SIGINT/SIGTERM) and srv-death, so a Ctrl+C / quit / backend
+   crash during the wait is serviced promptly rather than blocked for up to
+   `OOM_RELAUNCH_DEADLINE` (a `select!`-arm-blocking regression reagent caught on
+   the P0 PR).
 3. **Separate OOM restart budget.** OOM-class relaunches draw from
    `OOM_RESTART_BUDGET` (a larger/longer window — e.g. 5 within 10 min), **not**
    the wedged-host `HOST_RESTART_BUDGET`. A deterministic *host bug* still trips
