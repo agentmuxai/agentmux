@@ -133,8 +133,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // collapsed into a single in-flow panel.
     //
     // Exception: if the user's mouse is inside an already-expanded block,
-    // we hold it open until they leave so the post-completion timer can't
-    // collapse it mid-read.
+    // we hold it open until they leave so a scroll-off collapse can't fold it
+    // mid-read.
     const [userHolding, setUserHolding] = createSignal(false);
     const expanded = () => props.pinned || autoExpanded() || userHolding();
 
