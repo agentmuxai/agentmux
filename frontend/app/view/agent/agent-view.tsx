@@ -736,7 +736,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         prevTool = tool;
         const turnIdle = phaseKind === "Idle" || phaseKind === "Done";
         if ((newToolCall || turnIdle) && commands.hasHeldMessages()) {
-            commands.flushHeldMessages();
+            void commands.flushHeldMessages();
         }
     });
 

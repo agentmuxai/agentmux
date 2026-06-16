@@ -98,7 +98,7 @@ export interface UseAgentCommands {
      * turn end) so a queued message lands just before the agent's next tool
      * call — it finishes its current train of thought, then picks it up.
      */
-    flushHeldMessages: () => void;
+    flushHeldMessages: () => Promise<void>;
     /**
      * Pop the most-recently queued (held, not-yet-delivered) message off the
      * "send now" queue and return its text so the composer can restore it —
@@ -389,14 +389,17 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
         }
 
-        // Kick off the send AND (for idle sends) start the expiry clock together,
-        // so the 30s timer measures backend acceptance time only — not the
-        // pre-send cmd:args metadata round-trip. Codex P2 on PR #752.
-        RpcApi.AgentInputCommand(TabRpcClient, {
-            blockid: opts.blockId,
-            message,
-            message_id: messageId,
-        }).catch((err) => {
+        // Await the send so callers can sequence multiple deliveries (the flush
+        // loop relies on this to preserve submission order — ReAgent P2 on
+        // PR #1484). The cmd:args round-trip above already completed, so the 30s
+        // expiry below still measures backend acceptance time. Codex P2 on PR #752.
+        try {
+            await RpcApi.AgentInputCommand(TabRpcClient, {
+                blockid: opts.blockId,
+                message,
+                message_id: messageId,
+            });
+        } catch (err: any) {
             opts.log("error", err?.message ?? String(err), "error");
             // RPC outright failed — remove the pending entry so the user
             // doesn't see a ghost row for a message the backend never received.
@@ -404,7 +407,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 type: "PendingMessageRejected",
                 id: messageId,
             });
-        });
+            return;
+        }
 
         if (!armExpiry) return;
         // Pending acceptance timeout (issue #728 gap 2) — only for idle sends,
@@ -427,11 +431,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
      * and a failed RPC removes the pending entry via the catch in
      * `deliverToBackend`.
      */
-    const flushHeldMessages = (): void => {
+    const flushHeldMessages = async (): Promise<void> => {
         if (heldQueue.length === 0) return;
         const items = heldQueue.splice(0, heldQueue.length);
+        // Deliver sequentially (await each) so messages reach the CLI's stdin in
+        // submission order — concurrent delivery let the per-item cmd:args
+        // round-trips race and reorder the sends. ReAgent P2 on PR #1484.
         for (const item of items) {
-            void deliverToBackend(item.text, item.id, /* armExpiry */ false);
+            await deliverToBackend(item.text, item.id, /* armExpiry */ false);
         }
     };
 
