@@ -257,7 +257,32 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             || snapshot.sourceBlockId === ""
                             || snapshot.sourceBlockId === opts.blockId);
                     if (v2SameBlock) {
-                        const hwm: number = snapshot.highWaterMark;
+                        // When the snapshot is agent-anchored (sourceBlockId=""), the stored
+                        // highWaterMark was written by a *prior* block's local line count and
+                        // can be far smaller than the global zone (e.g. hwm=15 from a short
+                        // accidental session while the real conversation has 5000+ lines). Re-
+                        // derive the live count via line_count, which transparently returns the
+                        // global-zone total for a fresh empty block. Only take the larger value
+                        // so a genuinely new/short agent (hwm=5, live=5) isn't widened.
+                        let hwm: number = snapshot.highWaterMark;
+                        const isAgentAnchored = typeof snapshot.sourceBlockId !== "string"
+                            || snapshot.sourceBlockId === "";
+                        if (isAgentAnchored && snapshot.sourceBlockId !== opts.blockId) {
+                            try {
+                                const liveCount = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
+                                    block_id: opts.blockId,
+                                    filename: "output",
+                                }, { timeout: 5000 });
+                                if (!mounted) return;
+                                const liveHwm = liveCount?.count ?? 0;
+                                if (liveHwm > hwm) {
+                                    opts.log("history", `v2 cross-channel: hwm ${hwm} → ${liveHwm} (global zone)`);
+                                    hwm = liveHwm;
+                                }
+                            } catch {
+                                // soft fail — proceed with stored hwm
+                            }
+                        }
                         const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
                         const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
                             block_id: opts.blockId,
