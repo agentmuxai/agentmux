@@ -775,13 +775,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         }),
     );
 
-    // agent.answer → deliver an AskUserQuestion answer to the running agent
-    // CLI as a `tool_result` over the persistent controller's live stdin,
-    // unblocking the agent's turn. Unlike tooldecision (no-op delivery), this
-    // path is real: the persistent controller (host agents, --input-format
-    // stream-json) keeps stdin open for the session. Container / one-shot
-    // subprocess agents have no live stdin — they return UNSUPPORTED_CONTROLLER
-    // (Phase 2). Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
+    // agent.answer → deliver an AskUserQuestion answer to the running agent CLI
+    // via the Agent SDK **control protocol**: the persistent controller replies
+    // to the CLI's parked `can_use_tool` control_request with a control_response
+    // carrying `updatedInput.answers`. (Delivering a `tool_result` on stdin does
+    // NOT work — the CLI auto-rejects AskUserQuestion within the turn; see spec
+    // §2/§3.) Only the persistent controller speaks the control protocol;
+    // container/one-shot subprocess agents return UNSUPPORTED_CONTROLLER (Phase 2).
+    // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     engine.register_handler(
         COMMAND_AGENT_ANSWER,
         Box::new(|data, _ctx| {
@@ -797,11 +798,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .as_any()
                     .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
                 {
-                    persistent_ctrl.send_tool_result(cmd.tool_use_id.clone(), cmd.answer_text)?;
+                    persistent_ctrl.answer_question(cmd.tool_use_id.clone(), cmd.answers)?;
                     tracing::info!(
                         block_id = %cmd.blockid,
                         tool_use_id = %cmd.tool_use_id,
-                        "[agent.answer] tool_result delivered to persistent stdin"
+                        "[agent.answer] control_response delivered to persistent stdin"
                     );
                     Ok(None)
                 } else {

@@ -19,8 +19,13 @@ import "./AgentQuestionPanel.scss";
 export interface AnswerOutcome {
     tool_use_id: string;
     answers: AskUserQuestionAnswer[];
-    /** Canonical flat-text rendering handed to the agent as the tool_result
-     *  content. Format (per question): "<header>: <labels>[, Other: <text>]". */
+    /** Control-protocol `updatedInput.answers`: each question's TEXT → the
+     *  chosen label (string), a label array (multiSelect), or free-text ("Other").
+     *  This is what the agent CLI consumes via the control_response. Spec:
+     *  SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §2.3. */
+    answers_map: Record<string, string | string[]>;
+    /** Flat-text rendering kept for the optimistic node summary + the one-shot/
+     *  container follow-up fallback (which has no control channel). */
     answer_text: string;
 }
 
@@ -118,7 +123,17 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                 return `${a.header}: ${parts.join(", ")}`;
             })
             .join("\n");
-        return { tool_use_id: r.tool_use_id, answers, answer_text };
+        // Control-protocol answers map, keyed by each question's TEXT (not header).
+        // Free-text "Other" wins; multiSelect → label array; else single label.
+        const answers_map: Record<string, string | string[]> = {};
+        r.questions.forEach((q, i) => {
+            const s = state()[i] ?? { selected: [], other: "" };
+            const other = s.other.trim();
+            if (other) answers_map[q.question] = other;
+            else if (q.multiSelect) answers_map[q.question] = s.selected;
+            else answers_map[q.question] = s.selected[0] ?? "";
+        });
+        return { tool_use_id: r.tool_use_id, answers, answers_map, answer_text };
     };
 
     const submit = () => {

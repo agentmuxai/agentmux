@@ -157,8 +157,18 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
-        controllerType: "subprocess",
-        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
+        // Persistent (bidirectional stream-json) + the Agent SDK CONTROL PROTOCOL
+        // is the only way AskUserQuestion works headless: the CLI auto-rejects it
+        // ("Error: Answer questions?") unless launched with `--permission-prompt-tool
+        // stdio` and answered via a control_response. `--dangerously-skip-permissions`
+        // DISABLES that routing, so it must NOT be here. The persistent controller's
+        // ControlChannel auto-allows ordinary tools to preserve today's yolo UX and
+        // surfaces only AskUserQuestion to the user. Keep in sync with `static CLAUDE`
+        // in agentmux-srv/providers.rs. controllerType selects persistentLaunchArgs
+        // over launchArgs in useAgentCommands.ts.
+        // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+        controllerType: "persistent",
+        persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", "default"],
         // Claude Code calls `git` at session-start (issue
         // anthropics/claude-code#29898). Without git the CLI fails
         // with `Error: Git is required but was not found.`.
