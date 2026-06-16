@@ -1,0 +1,44 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Account service catalog — the brands shown as tiles in the Trust Center
+ * Accounts gallery, and which auth paths each offers. Clicking a tile opens a
+ * chooser of the brand's `authModes`; picking one opens the Add-account form
+ * preset to that provider + the matching account kind.
+ *
+ * `keyKind` is the account kind to preset for the "key" path (the form's
+ * Kind dropdown still lets the user refine it). The "oauth" path always presets
+ * kind = "oauth". See SPEC_TRUST_CENTER_2026_06_15.md §3/§4/§12.3.
+ */
+
+import type { AccountKind, AccountProvider } from "@/app/view/identity/identity-model";
+
+export type AuthMode = "oauth" | "key";
+
+export interface ServiceTile {
+    id: AccountProvider;
+    displayName: string;
+    /** Auth paths offered, in chooser display order. */
+    authModes: AuthMode[];
+    /** Account kind to preset when the user picks the "key" path. */
+    keyKind: AccountKind;
+    /** One-line descriptor under the tile name. */
+    blurb?: string;
+}
+
+export const SERVICE_CATALOG: ServiceTile[] = [
+    { id: "github", displayName: "GitHub", authModes: ["oauth", "key"], keyKind: "pat", blurb: "Repos, Actions, PRs" },
+    { id: "google", displayName: "Google", authModes: ["oauth"], keyKind: "api_key", blurb: "Workspace, Cloud" },
+    { id: "aws", displayName: "AWS", authModes: ["oauth", "key"], keyKind: "role", blurb: "IAM, deploy" },
+    { id: "openai", displayName: "OpenAI", authModes: ["key"], keyKind: "api_key", blurb: "API key" },
+    { id: "anthropic", displayName: "Anthropic", authModes: ["key"], keyKind: "api_key", blurb: "API key" },
+    { id: "slack", displayName: "Slack", authModes: ["oauth"], keyKind: "api_key", blurb: "Messaging" },
+    { id: "custom", displayName: "Custom", authModes: ["key"], keyKind: "api_key", blurb: "Any bearer token" },
+];
+
+export function modeLabel(mode: AuthMode): { title: string; sub: string } {
+    return mode === "oauth"
+        ? { title: "Connect with OAuth", sub: "Browser login — no key to manage" }
+        : { title: "Add API key / token", sub: "Validated & stored in your OS keychain" };
+}
