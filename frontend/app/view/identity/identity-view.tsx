@@ -283,7 +283,7 @@ function DetailField({ label, value }: { label: string; value: string }): JSX.El
 
 function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const accounts = () => model.accountsAtom();
-    const providers = (): AccountProvider[] => ["github", "openai", "aws", "anthropic", "custom"];
+    const providers = (): AccountProvider[] => ["github", "google", "aws", "openai", "anthropic", "slack", "custom"];
 
     // Collect all unique agent IDs across all accounts
     const agentIds = () => {
@@ -364,14 +364,29 @@ function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
 
 // ── Add/Edit form ─────────────────────────────────────────────────────────────
 
+// Default account kind for a provider — used to reset the Kind select on a
+// provider switch so it never holds a value invalid for the new provider.
+// Google/Slack are OAuth-only; GitHub/AWS default to their primary key kind.
+function defaultKindFor(provider: AccountProvider): AccountKind {
+    if (provider === "google" || provider === "slack") return "oauth";
+    if (provider === "github") return "pat";
+    if (provider === "aws") return "role";
+    return "api_key"; // openai, anthropic, custom
+}
+
 export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Element {
     const editing = () => model.editingAccountAtom();
     const isEdit = () => editing() !== null;
 
+    // Preset from a brand tile (Accounts gallery → openAddFormFor). Only used
+    // for a fresh Add (editing wins). Read once at setup; the form remounts on
+    // each open so this is always current.
+    const preset = model.addPresetAtom();
+
     // Form field signals
     const [name, setName] = createSignal(editing()?.name ?? "");
-    const [provider, setProvider] = createSignal<AccountProvider>(editing()?.provider ?? "github");
-    const [kind, setKind] = createSignal<AccountKind>(editing()?.kind ?? "pat");
+    const [provider, setProvider] = createSignal<AccountProvider>(editing()?.provider ?? preset?.provider ?? "github");
+    const [kind, setKind] = createSignal<AccountKind>(editing()?.kind ?? preset?.kind ?? "pat");
     const [displayName, setDisplayName] = createSignal(editing()?.display_name ?? "");
     const [secretBackend, setSecretBackend] = createSignal<SecretRef["backend"]>(editing()?.secret_ref.backend ?? "keychain");
     const [secretEnvVar, setSecretEnvVar] = createSignal(editing()?.secret_ref.env_var ?? "");
@@ -567,15 +582,18 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             onChange={(e) => {
                                 const p = e.currentTarget.value as AccountProvider;
                                 setProvider(p);
-                                // Don't leave "oauth" selected for a provider that
-                                // doesn't support it after a switch.
-                                if (kind() === "oauth" && !supportsOAuth(p)) setKind("api_key");
+                                // Kinds are provider-specific; reset to a valid
+                                // default for the new provider so the Kind select
+                                // never shows a stale/invalid value.
+                                setKind(defaultKindFor(p));
                             }}
                         >
                             <option value="github">GitHub</option>
-                            <option value="openai">OpenAI</option>
+                            <option value="google">Google</option>
                             <option value="aws">AWS</option>
+                            <option value="openai">OpenAI</option>
                             <option value="anthropic">Anthropic</option>
+                            <option value="slack">Slack</option>
                             <option value="custom">Custom</option>
                         </select>
                     </FormField>
