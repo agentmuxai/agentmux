@@ -16,7 +16,7 @@
  * status-bar popover): usePaneOverlay, computeMenuPosition top-end, autoUpdate.
  */
 
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
@@ -58,8 +58,11 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
     const [cores, setCores] = createSignal<Core[]>([]);
     const [aggregate, setAggregate] = createSignal(0);
     // Hovered/focused core drives the readout line (cheaper + a11y-friendlier
-    // than 128 simultaneous tooltips in heatmap mode).
-    const [active, setActive] = createSignal<Core | null>(null);
+    // than 128 simultaneous tooltips in heatmap mode). Stored by core *index*,
+    // not the Core object — the sysinfo handler mints new objects each tick, so
+    // an object ref would go stale; the index lets the readout re-derive the
+    // live value from `cores()` and update while the user keeps hovering.
+    const [activeIdx, setActiveIdx] = createSignal<number | null>(null);
 
     onMount(() => {
         const unsub = waveEventSubscribe({
@@ -144,8 +147,11 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
     onCleanup(() => cleanupAutoUpdate?.());
 
     const readout = (): string => {
-        const a = active();
-        if (a) return `Core ${a.idx} — ${Math.round(a.pct)}%`;
+        const i = activeIdx();
+        if (i != null) {
+            const c = cores().find((x) => x.idx === i);
+            if (c) return `Core ${c.idx} — ${Math.round(c.pct)}%`;
+        }
         return `${cores().length} cores`;
     };
 
@@ -182,31 +188,31 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                     own computed-size square grid. */}
                 <Show when={tier() !== "heat"}>
                     <div class="cpu-cores-list" classList={{ "cpu-cores-grid": tier() === "cells" }}>
-                        <For each={cores()}>
+                        <Index each={cores()}>
                             {(c) => (
                                 <div
                                     class="cpu-core"
-                                    onMouseEnter={() => setActive(c)}
-                                    onMouseLeave={() => setActive(null)}
+                                    onMouseEnter={() => setActiveIdx(c().idx)}
+                                    onMouseLeave={() => setActiveIdx(null)}
                                 >
                                     <span class="cpu-core-label">
-                                        {tier() === "rows" ? `Core ${c.idx}` : `C${c.idx}`}
+                                        {tier() === "rows" ? `Core ${c().idx}` : `C${c().idx}`}
                                     </span>
                                     <span class="cpu-core-bar" aria-hidden="true">
                                         <span
                                             class="cpu-core-bar-fill"
                                             style={{
-                                                width: `${Math.min(100, c.pct)}%`,
-                                                "background-color": loadColor(c.pct),
+                                                width: `${Math.min(100, c().pct)}%`,
+                                                "background-color": loadColor(c().pct),
                                             }}
                                         />
                                     </span>
-                                    <span class="cpu-core-pct" style={{ color: loadColor(c.pct) }}>
-                                        {Math.round(c.pct)}%
+                                    <span class="cpu-core-pct" style={{ color: loadColor(c().pct) }}>
+                                        {Math.round(c().pct)}%
                                     </span>
                                 </div>
                             )}
-                        </For>
+                        </Index>
                     </div>
                 </Show>
 
@@ -219,22 +225,22 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                             "--sq": `${heat().sq}px`,
                         }}
                     >
-                        <For each={cores()}>
+                        <Index each={cores()}>
                             {(c) => (
                                 <span
                                     class="cpu-core-square"
                                     role="listitem"
                                     tabindex="0"
-                                    title={`Core ${c.idx} — ${Math.round(c.pct)}%`}
-                                    aria-label={`Core ${c.idx}, ${Math.round(c.pct)}%`}
-                                    style={{ "background-color": loadColor(c.pct) }}
-                                    onMouseEnter={() => setActive(c)}
-                                    onMouseLeave={() => setActive(null)}
-                                    onFocus={() => setActive(c)}
-                                    onBlur={() => setActive(null)}
+                                    title={`Core ${c().idx} — ${Math.round(c().pct)}%`}
+                                    aria-label={`Core ${c().idx}, ${Math.round(c().pct)}%`}
+                                    style={{ "background-color": loadColor(c().pct) }}
+                                    onMouseEnter={() => setActiveIdx(c().idx)}
+                                    onMouseLeave={() => setActiveIdx(null)}
+                                    onFocus={() => setActiveIdx(c().idx)}
+                                    onBlur={() => setActiveIdx(null)}
                                 />
                             )}
-                        </For>
+                        </Index>
                     </div>
                 </Show>
             </Show>

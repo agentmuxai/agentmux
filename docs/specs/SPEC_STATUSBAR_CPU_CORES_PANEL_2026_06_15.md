@@ -134,7 +134,7 @@ CPU Usage                              avg 38%
 - **Sort:** numerically by core index.
 - **Width (reactive by tier):** rows ~260px; cells ~360px; heatmap ~340–380px (enough for ≥8 squares/row).
 - **Height cap:** content area `max-height: min(60vh, 420px); overflow-y: auto;`, header/subtitle/legend pinned above it. Tiers are sized to avoid scroll up to ~128 cores; beyond that it scrolls gracefully.
-- **Render cost:** `<For>` keyed by core index (stable); per tick only each unit's fill/color/% updates. At 128 squares this is 128 cheap style updates/sec — fine. Virtualization only considered at 512+ (out of scope).
+- **Render cost:** use `<Index>` (keyed by position), **not** `<For>` — the sysinfo handler mints new `Core` objects each tick, so `<For>` (keyed by object reference) would tear down and recreate every node every second (dropping keyboard focus on the active square and resetting the readout). `<Index>` persists the DOM nodes so only each unit's fill/color/% updates. At 128 squares that's 128 cheap style updates/sec — fine. The hovered/focused core is tracked by **index** (not the object) so the readout re-derives the live value while hovering. Virtualization only considered at 512+ (out of scope).
 
 ### 4.4 Positioning & airspace
 Reuse exactly what `TokenBreakdownPopover` uses:
