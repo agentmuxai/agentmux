@@ -359,10 +359,11 @@ pub fn append_session_output(
 /// `Ok((None, None))` when the zone doesn't exist — that's the
 /// "fresh agent, nothing to restore" path and is NOT an error.
 ///
-/// Reads the per-channel store first (primary), then falls back to the GLOBAL
-/// transcript store so an agent opened from another build/channel still
-/// restores its overlay. Symmetric with the `blockfile:read_range` fallback in
-/// `app_api.rs`.
+/// Reads the GLOBAL store first (preferred). The global copy always holds an
+/// agent-anchored snapshot (`sourceBlockId = ""`), which works in any channel.
+/// Per-channel is the fallback for old builds that pre-date the global store.
+/// Symmetric with the `blockfile:read_range` fallback in `app_api.rs`.
+/// See `docs/specs/SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md` invariant G2.
 pub fn read_session_state(
     filestore: &FileStore,
     definition_id: &str,
