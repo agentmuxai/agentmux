@@ -648,6 +648,17 @@ async fn main() {
                         "registry: session_id backfill for cross-channel resume"
                     );
                 }
+                // Upgrade v2 global snapshots to schemaVersion 3 (inject sessionId
+                // so the snapshot is self-contained for cross-channel --resume).
+                // Must run AFTER backfill_session_ids so registry.session_id is fresh.
+                let upgraded =
+                    backend::agent_session::migrate_snapshots_v2_to_v3(&reg);
+                if upgraded > 0 {
+                    tracing::info!(
+                        upgraded,
+                        "global transcripts: upgraded snapshots to schemaVersion 3 (sessionId injected)"
+                    );
+                }
             }
         }
     }
