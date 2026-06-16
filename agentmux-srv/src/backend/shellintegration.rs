@@ -17,6 +17,10 @@ const BASH_SCRIPT: &str = include_str!("shellintegration/bash.sh");
 const ZSH_SCRIPT: &str = include_str!("shellintegration/zsh.sh");
 const PWSH_SCRIPT: &str = include_str!("shellintegration/pwsh.ps1");
 const FISH_SCRIPT: &str = include_str!("shellintegration/fish.fish");
+/// Shared muxlog core (Node). Deployed once at `<shell>/muxlog.mjs`; every
+/// shell's `muxlog` function delegates to it. One tested implementation does log
+/// discovery + NDJSON rendering + filtering for all shells.
+const MUXLOG_JS: &str = include_str!("shellintegration/muxlog.mjs");
 const VERSION_MARKER: &str = env!("CARGO_PKG_VERSION");
 
 // ─── Shell type ──────────────────────────────────────────────────────────────
@@ -85,6 +89,14 @@ pub fn deploy_scripts(wave_data_dir: &Path) {
             tracing::warn!("shell integration: failed to write {}: {}", path.display(), e);
             all_ok = false;
         }
+    }
+
+    // Deploy the shared muxlog core next to the per-shell dirs. Each rcfile
+    // resolves it relative to its own location and delegates to `node muxlog.mjs`.
+    let muxlog_path = shell_base.join("muxlog.mjs");
+    if let Err(e) = std::fs::write(&muxlog_path, MUXLOG_JS) {
+        tracing::warn!("shell integration: failed to write {}: {}", muxlog_path.display(), e);
+        all_ok = false;
     }
 
     // Write version marker only if all scripts deployed successfully

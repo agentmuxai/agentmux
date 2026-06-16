@@ -100,16 +100,22 @@ task package:linux      # Linux AppImage (writes to ~/Desktop)
 
 ### Logs
 
-Inside AgentMux terminals, `$AGENTMUX_LOG_DIR` is set to the shared `~/.agentmux/logs/` directory. That directory holds the sidecar log directly, plus pointer files (`current-host-v<v>.path`, `current-srv-v<v>.path`) for both processes — the host log itself lives in the per-instance data dir, but its pointer here lets `muxlog host` find it from any context. The shipped `muxlog` shell helper handles the indirection:
+The `muxlog` helper (shipped in every AgentMux terminal) **discovers and renders logs across every running instance** — the shared dir, each `task dev` instance (`~/.agentmux/dev/<branch>/`), and per-build channels — so you never hunt for a file or guess a version. It defaults to the **most-recently-active** instance and renders the NDJSON logs as compact `time  level  target  message`.
 
 | What | Command |
 |------|---------|
-| Tail host log | `muxlog host` |
-| Tail sidecar log | `muxlog srv` |
-| Frontend lines only | `muxlog host '\[fe\]'` |
-| Full host log | `muxlog host cat` |
+| List every instance's logs (newest first) | `muxlog ls` |
+| Tail the active host log (follow) | `muxlog host` |
+| Tail the active sidecar log | `muxlog srv` |
+| Frontend `[fe]` lines only | `muxlog fe` |
+| Launcher log | `muxlog launcher` |
+| Search the sidecar (agent transcript excluded) | `muxlog srv grep <regex>` |
+| Errors + warnings across host & sidecar | `muxlog errors` |
+| Startup-handshake trace (debug reconnect loops) | `muxlog bridge` |
+| Target a specific instance | `muxlog host -i <branch\|version>` |
+| Full usage | `muxlog help` |
 
-Works identically across `task dev`, portable, and installed builds. Logs auto-rotate daily and are retained for 7 days. Full per-process layout and pointer-file mechanics: [docs.agentmux.ai/internals/data-layout](https://docs.agentmux.ai/internals/data-layout/) and [/internals/debugging](https://docs.agentmux.ai/internals/debugging/).
+Works identically across `task dev`, portable, and installed builds. Full reference (targets, filters, recipes, how discovery works): **[docs/MUXLOG.md](docs/MUXLOG.md)**. Per-process log layout and the underlying data dirs: [docs.agentmux.ai/internals/data-layout](https://docs.agentmux.ai/internals/data-layout/) and [/internals/debugging](https://docs.agentmux.ai/internals/debugging/).
 
 ## Widgets
 
