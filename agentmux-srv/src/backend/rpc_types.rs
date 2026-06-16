@@ -931,6 +931,19 @@ pub struct CommandPaneOpenData {
     pub split_direction: Option<String>,
     pub split_reference_block_id: Option<String>,
     pub focus: Option<bool>,
+    /// `editor` only: initial file-tree sidebar state. `Some(false)` opens the
+    /// editor with its tree collapsed (just the file, no explorer). Written to
+    /// `block.meta["editor:tree_expanded"]`, which the frontend `EditorViewModel`
+    /// restores on init. Absent / `Some(true)` → the frontend default (expanded).
+    pub tree_expanded: Option<bool>,
+    /// `Some(true)` opens the pane as a floating window instead of a docked
+    /// split. The block is created then moved into a fresh floating workspace
+    /// via the `tear_off_block` saga; the launcher broadcasts an
+    /// `openfloatingpane` directive scoped to the source window, whose frontend
+    /// calls the host `open_floating_pane_window` command to materialize the OS
+    /// window. `split_direction` / `split_reference_block_id` are ignored when
+    /// floating. See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
+    pub floating: Option<bool>,
 }
 
 /// Response from pane.open.
