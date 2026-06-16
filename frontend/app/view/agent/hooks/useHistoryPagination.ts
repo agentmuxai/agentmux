@@ -300,6 +300,9 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                                 documentState: {
                                     collapsedNodes: new Set<string>(ds.collapsedNodeIds ?? []),
                                     pinnedNodes: new Set<string>(ds.pinnedNodeIds ?? []),
+                                    // Not persisted — scroll-driven hold starts empty so
+                                    // restored history renders collapsed.
+                                    expandedTools: new Set<string>(),
                                     scrollPosition: typeof ds.scrollPosition === "number" ? ds.scrollPosition : 0,
                                     filter: ds.filter ?? DEFAULT_FILTER_STATE,
                                 },

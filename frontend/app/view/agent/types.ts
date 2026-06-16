@@ -527,6 +527,15 @@ export interface DocumentState {
      * docs/specs/tool-collapse.md.
      */
     pinnedNodes: Set<string>;
+    /**
+     * Tool nodes currently held EXPANDED after completing live on screen. A
+     * completed tool is added here on its active→inactive transition and removed
+     * once its row scrolls off the top of the viewport (latched collapse) —
+     * replacing the old 3 s post-completion timer. Loaded-history tools never
+     * transition this session, so they're never added and render collapsed.
+     * See docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
+     */
+    expandedTools: Set<string>;
     scrollPosition: number;
     selectedNode: string | null; // For keyboard navigation
     filter: FilterState;

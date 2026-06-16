@@ -71,6 +71,12 @@ export interface AgentDocumentVirtualListProps {
     scrollToBottomRef?: (fn: () => void) => void;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
+    /** Hold a tool expanded after it completes live on screen (ToolBlock calls
+     *  this on the active→inactive transition). */
+    onHoldToolOpen?: (id: string) => void;
+    /** Release a held tool once its row has scrolled off the top (latched
+     *  collapse). Invoked by the scroll-off scan in `handleScroll`. */
+    onReleaseToolOpen?: (id: string) => void;
     /**
      * Live per-pane zoom factor (the same value applied as CSS `zoom` on
      * `.agent-view` in agent-view.tsx). Normalizes the SINGLE zoomed read —
@@ -366,6 +372,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 // when this microtask was queued and when it fires.
                 if (!props.viewState.stickToBottom()) return;
                 scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
+                // New content may have pushed a held-open tool above the top
+                // without a user scroll event — collapse it now (pinned to
+                // bottom, so no visible jump).
+                collapseScrolledOffTools();
             });
         }
     });
@@ -452,6 +462,30 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (cmd) untrack(() => scrollToNode(cmd.nodeId));
     });
 
+    // Release (latched-collapse) any held-open tool whose row has scrolled fully
+    // above the viewport top. DOM-based so it works uniformly for virtualized
+    // and streaming-buffer rows and is zoom-safe (both rects share the zoomed
+    // space). `expandedTools` is tiny (a few recently-completed tools), so this
+    // is a handful of lookups per scroll. Pinned tools are skipped — pin wins.
+    const collapseScrolledOffTools = (): void => {
+        const release = props.onReleaseToolOpen;
+        if (!release || !scrollRef) return;
+        const ds = props.documentState();
+        if (ds.expandedTools.size === 0) return;
+        const containerTop = scrollRef.getBoundingClientRect().top;
+        for (const id of ds.expandedTools) {
+            if (ds.pinnedNodes.has(id)) continue;
+            const el = scrollRef.querySelector(
+                `[data-node-id="${id}"]`,
+            ) as HTMLElement | null;
+            // No element → not rendered → already off-screen (unmounted): release
+            // as a safety net. Otherwise release once it's fully above the top.
+            if (!el || el.getBoundingClientRect().bottom <= containerTop) {
+                release(id);
+            }
+        }
+    };
+
     const handleScroll = (): void => {
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
@@ -467,6 +501,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 viewportPx: clientHeight,
             });
             dispatchScrollMargin();
+        }
+
+        // Collapse held-open tools that have scrolled off the top (latched).
+        // Gated on stick-to-bottom: collapsing a row above the fold shrinks
+        // layout height above scrollTop, which is invisible while pinned to the
+        // bottom (no jump) — the primary live-streaming case. The scrolled-up /
+        // anchor-compensated case is a documented Phase 2 follow-up.
+        if (props.viewState.stickToBottom()) {
+            collapseScrolledOffTools();
         }
 
         // Engage stick when user scrolls back near bottom; disengage
@@ -684,6 +727,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         highlightNodeId={props.highlightNodeId}
                                         onToggleCollapse={props.onToggleCollapse}
                                         onTogglePin={props.onTogglePin}
+                                        onHoldToolOpen={props.onHoldToolOpen}
                                         ref={(el) => { rowEl = el; observeRow(el, row().nodeId); }}
                                         style={{
                                             position: "absolute",
@@ -744,6 +788,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     highlightNodeId={props.highlightNodeId}
                                     onToggleCollapse={props.onToggleCollapse}
                                     onTogglePin={props.onTogglePin}
+                                    onHoldToolOpen={props.onHoldToolOpen}
                                 />
                             )}
                         </Key>
