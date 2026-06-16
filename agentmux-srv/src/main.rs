@@ -637,14 +637,11 @@ async fn main() {
         registry::resolve_shared_registry_dir(),
         registry::resolve_shared_transcripts_dir(),
     ) {
-        if let Some(projects) = tdir
-            .ancestors()
-            .nth(2)
-            .map(|shared| shared.join("providers").join("claude").join("projects"))
-            .filter(|p| p.is_dir())
-        {
+        if let Some(shared) = tdir.ancestors().nth(2) {
             if let Ok(reg) = registry::Registry::open(reg_root) {
-                let n = backend::session_backfill::backfill_session_ids(&reg, &projects);
+                // Pass the shared dir; the backfill resolves both the default
+                // `providers/claude/projects` and per-identity bundle roots.
+                let n = backend::session_backfill::backfill_session_ids(&reg, shared);
                 if n > 0 {
                     tracing::info!(
                         backfilled = n,
