@@ -250,7 +250,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     //    Cross-block continuation needs a unified per-agent log; until
                     //    that lands (follow-up to PR #1361) we fall through to NDJSON
                     //    replay on this block rather than restore a fragmented/blank view.
-                    const v2SameBlock = snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2
+                    const v2SameBlock = (snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2
                         && typeof snapshot.highWaterMark === "number"
                         && snapshot.highWaterMark > 0
                         && (typeof snapshot.sourceBlockId !== "string"
@@ -326,8 +326,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         opts.onHistoryReady?.();
                         return;
                     }
-                    if (snapshot?.schemaVersion === SNAPSHOT_SCHEMA_VERSION_V2) {
-                        // v2 snapshot we deliberately didn't fast-path: either hwm<=0
+                    if ((snapshot?.schemaVersion ?? 0) >= SNAPSHOT_SCHEMA_VERSION_V2) {
+                        // v2+ snapshot we deliberately didn't fast-path: either hwm<=0
                         // (write-time count failure) or a cross-block continuation
                         // (sourceBlockId !== this block). Don't render empty — fall
                         // through to NDJSON replay on this block.

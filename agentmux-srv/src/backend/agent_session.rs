@@ -215,7 +215,17 @@ pub fn normalize_snapshot_for_global(content: &[u8]) -> Vec<u8> {
             );
         }
     }
-    serde_json::to_vec(&v).unwrap_or_else(|_| content.to_vec())
+    let result = serde_json::to_vec(&v).unwrap_or_else(|_| content.to_vec());
+    // Invariant G1: global snapshot must NEVER carry a non-empty sourceBlockId.
+    // A non-empty id is channel-local and breaks cross-channel opens.
+    debug_assert!(
+        serde_json::from_slice::<serde_json::Value>(&result)
+            .ok()
+            .and_then(|v| v.get("sourceBlockId").and_then(|s| s.as_str()).map(|s| s.is_empty()))
+            .unwrap_or(true),
+        "normalize_snapshot_for_global: G1 violated — sourceBlockId was not stripped"
+    );
+    result
 }
 
 /// One-shot heal for global snapshots poisoned before the normalize-on-mirror fix
@@ -279,24 +289,30 @@ pub fn append_session_output(
 /// `Ok((None, None))` when the zone doesn't exist — that's the
 /// "fresh agent, nothing to restore" path and is NOT an error.
 ///
-/// Reads the per-channel store first (primary), then falls back to the GLOBAL
-/// transcript store so an agent opened from another build/channel still
-/// restores its overlay. Symmetric with the `blockfile:read_range` fallback in
-/// `app_api.rs`.
+/// Reads the GLOBAL store first (preferred). The global copy always holds an
+/// agent-anchored snapshot (`sourceBlockId = ""`), which works in any channel.
+/// Per-channel is the fallback for old builds that pre-date the global store.
+/// Symmetric with the `blockfile:read_range` fallback in `app_api.rs`.
+/// See `docs/specs/SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md` invariant G2.
 pub fn read_session_state(
     filestore: &FileStore,
     definition_id: &str,
 ) -> Result<(Option<String>, Option<i64>), String> {
     let zone = validate_and_current(definition_id)?;
-    if let Some(found) = read_snapshot_from(filestore, &zone)? {
-        return Ok((Some(found.0), Some(found.1)));
-    }
-    // Cross-channel fallback: the agent's snapshot may live only in the global
-    // store (it ran in another build/channel, or was backfilled there).
+    // Read the global store first: it always holds the agent-anchored
+    // (sourceBlockId="") snapshot. The per-channel copy carries the
+    // writing channel's local block id, which is stale the moment any
+    // OTHER block opens the agent (same channel, different tab/build).
+    // Preferring global ensures cross-channel opens never get a foreign
+    // sourceBlockId — the root cause of the blank-pane regression.
+    // Per-channel is the fallback for pre-global-store builds only.
     if let Some(gfs) = global_transcript_store() {
         if let Some(found) = read_snapshot_from(gfs, &zone)? {
             return Ok((Some(found.0), Some(found.1)));
         }
+    }
+    if let Some(found) = read_snapshot_from(filestore, &zone)? {
+        return Ok((Some(found.0), Some(found.1)));
     }
     Ok((None, None))
 }
