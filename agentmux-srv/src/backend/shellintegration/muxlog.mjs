@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const HOME = os.homedir();
 const AGENTMUX = path.join(HOME, ".agentmux");
@@ -205,6 +206,111 @@ function age(ms) {
 }
 function human(b) { return b < 1024 ? b + "B" : b < 1048576 ? (b / 1024).toFixed(0) + "K" : (b / 1048576).toFixed(1) + "M"; }
 
+// ─── mem / doctor ───────────────────────────────────────────────────────────
+// The 2026-06-16 OOM crash was driven by SYSTEM COMMIT exhaustion across several
+// concurrent AgentMux instances (+ dev tooling), not physical RAM. This surfaces
+// commit-free, the derived pressure level, and the live AgentMux footprint so
+// the multi-instance cause is visible BEFORE the cliff.
+// See SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.G + Discussion #943.
+
+// Keep in lockstep with the host thresholds (agentmux-cef/src/memory_pressure.rs).
+const WARN_FLOOR_MB = 1024;
+const CRITICAL_FLOOR_MB = 512;
+
+function pressureLevel(freeMb) {
+    if (freeMb < CRITICAL_FLOOR_MB) return "critical";
+    if (freeMb < WARN_FLOOR_MB) return "warn";
+    return "normal";
+}
+
+// Best-effort, never throws — a missing tool / odd platform degrades gracefully.
+function run(file, args) {
+    try {
+        return execFileSync(file, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 8000 });
+    } catch { return ""; }
+}
+
+// System COMMIT (page file + RAM) in MB — the OOM-relevant ceiling, NOT physical
+// RAM. Returns { freeMb, totalMb } or null when the platform has no cheap figure.
+function systemCommit() {
+    const plat = os.platform();
+    if (plat === "win32") {
+        // Win32_OperatingSystem reports Free/Total VirtualMemory in KB = commit.
+        const out = run("powershell", [
+            "-NoProfile", "-Command",
+            "$o=Get-CimInstance Win32_OperatingSystem; $o.FreeVirtualMemory; $o.TotalVirtualMemorySize",
+        ]);
+        const n = out.trim().split(/\s+/).map(Number).filter((x) => Number.isFinite(x));
+        if (n.length >= 2) return { freeMb: Math.round(n[0] / 1024), totalMb: Math.round(n[1] / 1024) };
+        return null;
+    }
+    if (plat === "linux") {
+        try {
+            const info = fs.readFileSync("/proc/meminfo", "utf8");
+            const kb = (k) => { const m = info.match(new RegExp("^" + k + ":\\s+(\\d+)", "m")); return m ? +m[1] : null; };
+            const limit = kb("CommitLimit"), committed = kb("Committed_AS");
+            if (limit != null && committed != null) {
+                return { freeMb: Math.round((limit - committed) / 1024), totalMb: Math.round(limit / 1024) };
+            }
+        } catch { /* fall through */ }
+        return null;
+    }
+    return null; // macOS / other: no cheap commit figure
+}
+
+// Live AgentMux processes: [{ name, pid, mb }] sorted by memory desc.
+function agentmuxProcesses() {
+    const procs = [];
+    if (os.platform() === "win32") {
+        // CSV cols: "Image","PID","Session","Session#","Mem Usage"
+        for (const line of run("tasklist", ["/FO", "CSV", "/NH"]).split(/\r?\n/)) {
+            const c = line.split('","').map((s) => s.replace(/^"|"$/g, ""));
+            if (c.length < 5 || !/agentmux/i.test(c[0])) continue;
+            const kb = parseInt(c[4].replace(/[^\d]/g, ""), 10) || 0; // "12,345 K"
+            procs.push({ name: c[0], pid: c[1], mb: Math.round(kb / 1024) });
+        }
+    } else {
+        for (const line of run("ps", ["-eo", "comm,pid,rss"]).split(/\r?\n/).slice(1)) {
+            const m = line.trim().match(/^(\S+)\s+(\d+)\s+(\d+)$/);
+            if (!m || !/agentmux/i.test(m[1])) continue;
+            procs.push({ name: m[1], pid: m[2], mb: Math.round(+m[3] / 1024) });
+        }
+    }
+    return procs.sort((a, b) => b.mb - a.mb);
+}
+
+function memDoctor() {
+    console.log("AgentMux memory doctor\n");
+
+    const commit = systemCommit();
+    if (commit) {
+        const usedPct = (((commit.totalMb - commit.freeMb) / commit.totalMb) * 100).toFixed(1);
+        const lvl = pressureLevel(commit.freeMb);
+        const badge = lvl === "critical" ? "CRITICAL" : lvl === "warn" ? "WARN" : "ok";
+        console.log(`  system commit : ${commit.freeMb} MB free / ${commit.totalMb} MB   (${usedPct}% used)   → ${badge}`);
+        if (lvl === "critical") console.log("                  an OOM is imminent — close some windows or other apps NOW.");
+        else if (lvl === "warn") console.log("                  getting tight — closing a window or another app will help.");
+    } else {
+        console.log("  system commit : (unavailable on this platform — commit-limit exhaustion is a Windows/Linux concern)");
+    }
+
+    const procs = agentmuxProcesses();
+    // `agentmux-srv` is the backend sidecar — ~one per instance (a crash-monitor
+    // child may add one more), so it's a far more robust instance proxy than the
+    // launcher exe, which gets renamed per portable build.
+    const backends = procs.filter((p) => /srv/i.test(p.name)).length;
+    const totalMb = procs.reduce((s, p) => s + p.mb, 0);
+    console.log(`\n  agentmux procs: ${procs.length} (≈${backends} backend${backends === 1 ? "" : "s"}), ${totalMb} MB total working set`);
+    for (const p of procs.slice(0, 24)) {
+        console.log(`    ${String(p.pid).padStart(6)}  ${String(p.mb).padStart(6)} MB  ${p.name}`);
+    }
+    if (procs.length > 24) console.log(`    … and ${procs.length - 24} more`);
+
+    if (commit && pressureLevel(commit.freeMb) !== "normal") {
+        console.log(`\n  AgentMux is using ${totalMb} MB of commit — closing a window or another running AgentMux is the most direct way to free it.`);
+    }
+}
+
 // ─── CLI ──────────────────────────────────────────────────────────────────────
 function parse(argv) {
     const opt = { n: 200, all: false, raw: false, verbose: false };
@@ -240,6 +346,7 @@ const HELP = `muxlog — AgentMux log viewer
 
   muxlog [host|srv|launcher|fe|all] [tail|cat|grep <re>]   default: host tail (follow)
   muxlog ls                          list every instance's logs (newest first)
+  muxlog mem                         system commit-free + pressure + live AgentMux procs
   muxlog errors                      ERROR/WARN across host+srv (active instance)
   muxlog bridge                      startup-handshake trace (debug reconnect loops)
 
@@ -259,6 +366,7 @@ function main() {
 
     if (cmd === "help" || cmd === "-h" || cmd === "--help") { console.log(HELP); return; }
     if (cmd === "ls") { listInstances(); return; }
+    if (cmd === "mem" || cmd === "doctor") { memDoctor(); return; }
 
     if (cmd === "errors") {
         opt.level = ["error", "warn"];
