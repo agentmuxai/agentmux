@@ -32,11 +32,19 @@ export type PaneRowAccent =
 export interface PaneRowAction {
     /** Single-glyph button label (e.g. "■" stop, "×" dismiss, "⌫" close). */
     glyph: string;
+    /** Optional text rendered after the glyph (e.g. "Retry now", "Login Again").
+     *  Turns the icon button into a labelled button for action-heavy rows like
+     *  the failure-recovery row. */
+    label?: string;
     /** Accessible name / tooltip. */
     title: string;
     onClick: () => void;
     /** Tints the glyph on hover with the error colour (destructive actions). */
     danger?: boolean;
+    /** Emphasise as the primary action (filled accent). */
+    primary?: boolean;
+    /** Disable the button (e.g. a Retry mid-flight). */
+    disabled?: boolean;
 }
 
 export interface PaneRowProps {
@@ -82,13 +90,19 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                             type="button"
                             class={clsx("pane-row-action", {
                                 "pane-row-action--danger": action.danger,
+                                "pane-row-action--labeled": action.label,
+                                "pane-row-action--primary": action.primary,
                             })}
                             title={action.title}
                             aria-label={action.title}
+                            disabled={action.disabled}
                             // stopPropagation so an action never also fires onActivate.
                             onClick={(e) => { e.stopPropagation(); action.onClick(); }}
                         >
-                            {action.glyph}
+                            <span aria-hidden="true">{action.glyph}</span>
+                            <Show when={action.label}>
+                                <span class="pane-row-action-text">{action.label}</span>
+                            </Show>
                         </button>
                     )}
                 </For>

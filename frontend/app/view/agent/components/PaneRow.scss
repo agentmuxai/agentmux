@@ -93,3 +93,56 @@
 .pane-row-body {
     cursor: var(--cursor-default);
 }
+
+// Labelled / primary / disabled action buttons — the failure-recovery row uses
+// text buttons (Retry now, Login Again, Trust Center) rather than bare glyphs.
+.pane-row-action {
+    gap: var(--space-0-5);
+
+    &-text {
+        font-size: var(--text-xs, 11px);
+        white-space: nowrap;
+    }
+
+    &--labeled {
+        height: auto;
+        padding: 2px var(--space-1-5);
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        border-radius: var(--radius-sm, 3px);
+    }
+
+    &--primary {
+        color: var(--main-text-color);
+        border-color: color-mix(in srgb, var(--error-color) 60%, transparent);
+        background: color-mix(in srgb, var(--error-color) 14%, transparent);
+
+        &:hover { background: color-mix(in srgb, var(--error-color) 24%, transparent); }
+    }
+
+    &:disabled {
+        opacity: 0.45;
+        cursor: default;
+    }
+}
+
+// Expanded body for the failure-recovery row: explanation + stderr/result tail.
+.pane-row-body .agent-failure-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    font-size: var(--text-xs, 11px);
+    color: var(--secondary-text-color);
+
+    .agent-failure-stderr {
+        margin: 0;
+        max-height: 160px;
+        overflow: auto;
+        padding: var(--space-1);
+        background: var(--code-bg-color, rgba(0, 0, 0, 0.25));
+        border-radius: var(--radius-sm, 3px);
+        font-family: var(--font-mono, monospace);
+        font-size: 11px;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+}

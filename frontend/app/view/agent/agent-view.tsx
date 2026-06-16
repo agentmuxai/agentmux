@@ -49,6 +49,9 @@ import { usePtyWidth } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
+import { useAgentFailure } from "./hooks/useAgentFailure";
+import { PaneRow } from "./components/PaneRow";
+import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
@@ -673,6 +676,44 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         return commands.sendMessage(message, wasAlreadyWorking);
     };
 
+    // Failure-recovery accessory row (per-error-class actions + 5s auto-retry
+    // for transient throttling). SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.
+    const retryLastTurn = () => {
+        const last = [...getDocument()].reverse().find((n) => n.type === "user_message");
+        const msg = last && "message" in last ? (last as { message?: string }).message : undefined;
+        if (msg) {
+            void handleSendMessage(msg);
+        } else {
+            // No prior user message (e.g. the agent failed on its first
+            // launch/spawn) — fall back to respawning the agent rather than
+            // silently dismissing the row. Spec §5.1.
+            log("agent", "Retry — no prior message to re-send; relaunching the agent");
+            void status.startLaunchFlow();
+        }
+    };
+    const failureUI = useAgentFailure({
+        blockId: model.blockId,
+        onRetry: retryLastTurn,
+        onTrustCenter: () => openBundleManager(),
+        // context_exceeded recovery — drop the over-full session and return to
+        // the picker for a clean relaunch (resuming would only re-fail).
+        onNewSession: () => {
+            log("agent", "New session — clearing the over-full context and returning to the picker");
+            void model.backToPicker();
+        },
+        // P2 — real re-auth. An auth failure is a *CLI-provider* login lapse
+        // (e.g. claude's subscription OAuth expired), not a Trust Center
+        // service account. `startLaunchFlow` is the canonical path that
+        // re-runs that login (surfacing the OAuth URL via the auth panel) and
+        // relaunches the agent; the relaunched process then reports
+        // `controllerstatus: running`, which clears this failure row. This is
+        // the same flow the legacy AgentRetryBar's button drives.
+        onLoginAgain: () => {
+            log("auth", "Login Again — re-running the provider login flow");
+            void status.startLaunchFlow();
+        },
+    });
+
     // AskUserQuestion answer handler. Defined after handleSendMessage because
     // the non-persistent fallback below delegates to it.
     const handleAnswer = (outcome: AnswerOutcome) => {
@@ -1060,6 +1101,28 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 `StreamSubscribe` arm clears the phase to Idle. Spec
                 docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md
                 §6.4. */}
+            {/* Failure-recovery row — per-error-class actions + auto-retry,
+                rendered through the shared PaneRow accessory primitive.
+                SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16. */}
+            <Show when={failureUI.row()}>
+                {(row) => (
+                    <PaneRow
+                        sigil={row().sigil}
+                        title={row().title}
+                        meta={row().meta}
+                        accent={row().accent}
+                        actions={row().actions}
+                        expanded={row().expanded}
+                    >
+                        <div class="agent-failure-detail">
+                            <div>{row().detail}</div>
+                            <Show when={row().stderrTail}>
+                                <pre class="agent-failure-stderr">{row().stderrTail}</pre>
+                            </Show>
+                        </div>
+                    </PaneRow>
+                )}
+            </Show>
             <AgentDisconnectedBanner
                 phase={agentAtoms().turnPhaseAtom[0]}
                 onReconnect={() => {

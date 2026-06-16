@@ -1,0 +1,156 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * failure-accessory — pure projection of an `AgentFailure` (the classified
+ * cause of a non-zero agent exit, carried by the `agentfailure` wave event)
+ * into the shared **PaneRow** accessory model. The per-error-class **recovery
+ * actions** live here as one map; the row chrome is `<PaneRow>` — the same
+ * primitive the session digest / ActivityDock / fork bar render through.
+ *
+ * "Derive from a source of truth" (no parallel store): the caller passes the
+ * live failure + transient view flags + action handlers; this returns a
+ * fully-resolved descriptor.
+ *
+ * Spec: docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §3–§4.
+ */
+
+import type { PaneRowAction } from "../components/PaneRow";
+
+/** Handlers the pane wires to the recovery actions. */
+export interface FailureActions {
+    /** Re-run the failed turn (re-send the last user message → resumes via `--resume`). */
+    retry: () => void;
+    /** Re-authenticate this agent's provider account (auth failures). */
+    loginAgain: () => void;
+    /** Open Trust Center → Accounts. */
+    trustCenter: () => void;
+    /** Start a fresh agent session — recovery for a context-window overflow,
+     *  where resuming the same (full) session would only re-fail. */
+    newSession: () => void;
+    /** Toggle the expanded stderr-tail body. */
+    toggleDetails: () => void;
+    /** Clear the failure (dismiss the row). */
+    dismiss: () => void;
+}
+
+/** Transient view state for the failure row (no backing store). */
+export interface FailureViewState {
+    /** stderr tail revealed. */
+    expanded: boolean;
+    /** Seconds left on the auto-retry countdown, or null when not armed. */
+    autoRetryIn: number | null;
+    /** True while a retry is in flight (disables the button). */
+    retrying: boolean;
+}
+
+/** Per-class sigil. */
+const ICON: Record<AgentFailure["code"], string> = {
+    auth: "🔐",
+    rate_limited: "⏱",
+    overloaded: "🌀",
+    network: "🌐",
+    usage_limit: "🚫",
+    context_exceeded: "📏",
+    max_turns: "🔁",
+    killed: "⛔",
+    spawn_failure: "🧩",
+    no_output: "❔",
+    unknown_non_zero: "⚠",
+};
+
+/** Classes whose retry is safe to fire **automatically** (transient throttling). */
+export function isTransient(code: AgentFailure["code"]): boolean {
+    return code === "rate_limited" || code === "overloaded" || code === "network";
+}
+
+/** The resolved PaneRow descriptor for a failure (props for `<PaneRow>`). */
+export interface FailureRow {
+    sigil: string;
+    title: string;
+    meta: string;
+    accent: "error";
+    actions: PaneRowAction[];
+    expanded: boolean;
+    /** Human-readable explanation (rendered in the expanded body). */
+    detail: string;
+    /** Raw provider stderr/result tail (rendered in the expanded body). */
+    stderrTail?: string;
+}
+
+/** Project a failure + view state + handlers into a PaneRow descriptor. */
+export function failureToRow(f: AgentFailure, view: FailureViewState, on: FailureActions): FailureRow {
+    const meta: string[] = [f.code];
+    if (f.signal != null) meta.push(`signal ${f.signal}`);
+    else if (f.exitCode != null) meta.push(`exit ${f.exitCode}`);
+    if (f.retryable) meta.push("retryable");
+
+    const retryLabel = view.autoRetryIn != null ? `Retry now (${view.autoRetryIn}s)` : "Retry now";
+    const retry: PaneRowAction = {
+        glyph: "↻", label: retryLabel, title: "Re-run the last turn", primary: true,
+        disabled: view.retrying, onClick: on.retry,
+    };
+    const trustCenter: PaneRowAction = {
+        glyph: "⚙", label: "Trust Center → Accounts", title: "Open Trust Center → Accounts", onClick: on.trustCenter,
+    };
+
+    const actions: PaneRowAction[] = [];
+    switch (f.code) {
+        case "auth":
+            actions.push(
+                { glyph: "🔑", label: "Login Again", title: "Re-authenticate this agent", primary: true, onClick: on.loginAgain },
+                trustCenter,
+            );
+            break;
+        case "usage_limit":
+            actions.push({ ...trustCenter, label: "Trust Center (switch / upgrade)", primary: true });
+            break;
+        case "spawn_failure":
+            actions.push({ ...trustCenter, glyph: "🧩", label: "Provider setup", title: "Fix the provider install", primary: true });
+            break;
+        case "rate_limited":
+        case "overloaded":
+        case "network":
+            actions.push(retry);
+            break;
+        case "max_turns":
+            actions.push({ ...retry, glyph: "▶", label: "Continue" });
+            break;
+        case "context_exceeded":
+            // Resuming a context-exceeded session just re-fails (the window is
+            // still full), so the only real recovery is a fresh session.
+            actions.push({
+                glyph: "🆕", label: "New session", title: "Start a fresh session — the current one's context window is full",
+                primary: true, onClick: on.newSession,
+            });
+            break;
+        default: // killed, no_output, unknown_non_zero
+            actions.push({ ...retry, label: "Retry" });
+            break;
+    }
+
+    // Offer the expander whenever there's expandable content. The body always
+    // carries `detail` (the explanation), so classes with no stderr tail (auth,
+    // usage_limit, context_exceeded) still need a way to reveal it — gating only
+    // on `stderrTail` left their explanation unreachable.
+    if (f.detail || f.stderrTail) {
+        actions.push({
+            glyph: view.expanded ? "▾" : "▸",
+            label: view.expanded ? "Hide details" : "Details",
+            title: "Show the explanation and any captured provider output",
+            onClick: on.toggleDetails,
+        });
+    }
+    actions.push({ glyph: "×", title: "Dismiss", danger: true, onClick: on.dismiss });
+
+    return {
+        sigil: ICON[f.code] ?? "⚠",
+        title: f.title || "Agent run failed",
+        meta: meta.join(" · "),
+        accent: "error",
+        actions,
+        expanded: view.expanded,
+        detail: f.detail,
+        stderrTail: f.stderrTail,
+    };
+}
