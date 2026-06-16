@@ -94,10 +94,10 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
     // Heatmap sizing: pick the LARGEST square (≤ SQ_MAX) at which all cores fit
     // within the target height, packing as many columns as the fixed width
     // allows at that size. Squares stay big while they fit (more legible), then
-    // genuinely shrink toward SQ_MIN as the count grows; only once SQ_MIN still
-    // overflows does the height cap take over and the grid scrolls. So e.g.
-    // ~64–128 cores stay near SQ_MAX, ~256 lands near SQ_MIN, and beyond that it
-    // scrolls.
+    // shrink as the count grows; only once even SQ_MIN overflows does the height
+    // cap take over and the grid scrolls. With W=340/H=300: ~64–128 cores stay
+    // at SQ_MAX (22px), ~256 settle around the mid-teens (~17px), and the
+    // SQ_MIN (10px) floor isn't reached until ~600+ cores, beyond which it scrolls.
     const heat = createMemo(() => {
         const n = Math.max(1, cores().length);
         for (let s = SQ_MAX; s > SQ_MIN; s--) {

@@ -108,7 +108,7 @@ CPU Usage                              avg 38%
 
 - **Square sizing is computed, not fixed** — the "intelligent" bit. Given the content width `W`, gap `g`, a target height `H`, and core count `N`, pick the **largest** square edge `s` in `[s_min=10px, s_max=22px]` at which all `N` cores fit within `H`, packing `cols = floor((W+g)/(s+g))` columns at that size:
   - Search `s` from `s_max` down; for each, `rows = ceil(N/cols)`; accept the first `s` where `rows*(s+g) − g ≤ H`.
-  - Squares stay large while they fit (more legible) and **shrink only once `N` grows past what fits at the current size**; when even `s_min` overflows `H`, the grid keeps `s_min` and the area scrolls (height cap below). Net: ~64–128 cores stay near `s_max`, ~256 lands near `s_min`, beyond that scrolls.
+  - Squares stay large while they fit (more legible) and **shrink only once `N` grows past what fits at the current size**; when even `s_min` overflows `H`, the grid keeps `s_min` and the area scrolls (height cap below). Net (with `W=340`/`H=300`): ~64–128 cores stay at `s_max` (22px), ~256 settle around the mid-teens (~17px), and the `s_min` (10px) floor isn't reached until ~600+ cores, beyond which it scrolls.
 - **Color ramp (continuous):** map `pct` → color across idle→busy, e.g. interpolate muted/blue (`var(--secondary-text-color)` / a cool stop) → `var(--warning-color)` → `var(--error-color)`. A continuous ramp (not the 3-step `cpuColor` threshold) is what makes a heatmap read; expose a small `loadColor(pct)` helper. Squares use the ramp as `background-color`; the existing 3-step `cpuColor` stays for the header/row-mode text.
 - **Legend:** a tiny idle→busy gradient swatch in the header so the colors are interpretable.
 - **Hover/focus:** each square is a focusable element with `title`/tooltip and `aria-label="Core N, X%"`; no persistent text inside the square. Optional enhancement: a single live "readout line" under the grid that shows the hovered/focused core's `Core N — X%` (cheaper than 128 tooltips, keyboard-friendly).
@@ -186,7 +186,7 @@ Reuse exactly what `TokenBreakdownPopover` uses:
 ## 8. Acceptance criteria
 1. Clicking `CPU n%` in the status bar opens a panel anchored above it; clicking again, clicking outside, or pressing Esc closes it.
 2. The panel shows one unit per logical core, sorted by index, each conveying live load via fill/color.
-3. **Adaptive density:** ≤16 cores → labeled rows; 17–64 → compact cells with visible %; 65+ → computed-size heatmap squares with hover/focus detail. Verified at **8, 32, 64, and 128 cores** (synthesize payloads if needed) — each fits the panel without a long scroll, and 256 degrades gracefully (smaller squares + scroll).
+3. **Adaptive density:** ≤16 cores → labeled rows; 17–64 → compact cells with visible %; 65+ → computed-size heatmap squares with hover/focus detail. Verified at **8, 32, 64, and 128 cores** (synthesize payloads if needed) — each fits the panel without a long scroll; ~256 cores still fit (squares ~mid-teens px), and only very high counts (~600+) hit the 10px floor and scroll.
 4. Heatmap squares are color-coded by a continuous load ramp with a legend; value is reachable by hover/focus and by screen reader (`aria-label`), never color-only.
 5. The header shows the aggregate (matching the status-bar number) and a core count.
 6. Values update live (~1s) while the panel stays open; closing tears down the subscription.
