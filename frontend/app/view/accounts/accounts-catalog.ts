@@ -30,7 +30,9 @@ export interface ServiceTile {
 export const SERVICE_CATALOG: ServiceTile[] = [
     { id: "github", displayName: "GitHub", authModes: ["oauth", "key"], keyKind: "pat", blurb: "Repos, Actions, PRs" },
     { id: "google", displayName: "Google", authModes: ["oauth"], keyKind: "api_key", blurb: "Workspace, Cloud" },
-    { id: "aws", displayName: "AWS", authModes: ["oauth", "key"], keyKind: "role", blurb: "IAM, deploy" },
+    // AWS OAuth (IAM Identity Center / OIDC device) isn't wired in the backend
+    // yet — key-only for v1 so the chooser never offers a dead-end OAuth path.
+    { id: "aws", displayName: "AWS", authModes: ["key"], keyKind: "role", blurb: "IAM, deploy" },
     { id: "openai", displayName: "OpenAI", authModes: ["key"], keyKind: "api_key", blurb: "API key" },
     { id: "anthropic", displayName: "Anthropic", authModes: ["key"], keyKind: "api_key", blurb: "API key" },
     { id: "slack", displayName: "Slack", authModes: ["oauth"], keyKind: "api_key", blurb: "Messaging" },
