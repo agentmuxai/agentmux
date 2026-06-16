@@ -43,7 +43,7 @@ pub fn commit_free_mb() -> u64 {
 /// Spawn a background thread that logs memory stats at a fixed interval.
 /// Also refreshes the log pointer file on UTC date rollover.
 /// Runs for the lifetime of the process — no shutdown signal needed.
-pub fn start() {
+pub fn start(state: std::sync::Arc<crate::state::AppState>) {
     std::thread::Builder::new()
         .name("mem-heartbeat".into())
         .spawn(move || {
@@ -53,9 +53,12 @@ pub fn start() {
                 std::thread::sleep(Duration::from_secs(20));
                 log_memory_stats();
                 // Feed the debounced memory-pressure tracker from the just-
-                // sampled commit-free; log only on a level transition (the
-                // observability foundation the proactive-shedding responses
-                // will read — SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.A).
+                // sampled commit-free; on a level transition, log it AND push
+                // the new level to the frontend low-memory banner
+                // (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.A/§5.F). The
+                // emit is posted to the CEF UI thread (this is a background
+                // thread); the banner shows on Warn/Critical and clears on the
+                // return to Normal.
                 let free = commit_free_mb();
                 if let Some(level) = pressure.observe(free) {
                     tracing::warn!(
@@ -64,6 +67,7 @@ pub fn start() {
                         commit_free_mb = free,
                         "system memory pressure changed"
                     );
+                    crate::ui_tasks::post_memory_pressure(&state, level.as_str(), free);
                 }
                 refresh_log_pointer(&mut last_date);
             }
