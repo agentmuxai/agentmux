@@ -558,7 +558,7 @@ impl SubprocessController {
         // process_waiter below.
         let last_result_frame: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let last_result_frame_read = Arc::clone(&last_result_frame);
-        tokio::spawn(async move {
+        let stdout_reader_handle = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
@@ -698,7 +698,7 @@ impl SubprocessController {
         let stderr_tail_reader = Arc::clone(&stderr_tail);
         // Spawn stderr reader (logs warnings + retains a tail for classification)
         let block_id_err = self.block_id.clone();
-        tokio::spawn(async move {
+        let stderr_reader_handle = tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             loop {
@@ -751,9 +751,12 @@ impl SubprocessController {
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
         tokio::spawn(async move {
-            // Classified failure cause for a genuine non-zero exit / stdout error
-            // frame (None on clean exit or user-initiated stop). Surfaced after the loop.
+            // Classified failure cause, surfaced to the pane after the readers drain.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
+            // Set on a clean (non-killed) exit so classification runs AFTER the
+            // stdout/stderr readers are joined — otherwise the final error line can
+            // race the buffer read and be lost (reagent P1).
+            let mut clean_exit: Option<(i32, Option<i32>)> = None;
             // Wait for either process exit or kill signal
             tokio::select! {
                 exit_result = child.wait() => {
@@ -791,26 +794,9 @@ impl SubprocessController {
                         inner.kill_tx = None;
                     }
 
-                    // Classify a genuine non-zero exit OR a failure reported on
-                    // stdout as an error `result` frame (auth / rate-limit / usage —
-                    // claude may even exit 0) into a real cause, so the pane shows
-                    // the reason instead of a bare "exit N". A user-initiated stop
-                    // goes through the kill arm and is left unclassified.
-                    let result_frame = last_result_frame_wait.lock().unwrap().clone();
-                    let frame_is_error = result_frame
-                        .as_ref()
-                        .and_then(|f| f.get("is_error"))
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    if exit_code != 0 || frame_is_error {
-                        let tail = stderr_tail_wait.lock().unwrap().join("\n");
-                        run_failure = Some(crate::agents::failure::classify(
-                            Some(exit_code),
-                            exit_signal,
-                            &tail,
-                            result_frame.as_ref(),
-                        ));
-                    }
+                    // Defer classification until after the readers are joined
+                    // (below); a user-initiated stop (kill arm) stays unclassified.
+                    clean_exit = Some((exit_code, exit_signal));
                 }
                 force = kill_rx => {
                     let force = force.unwrap_or(false);
@@ -853,6 +839,32 @@ impl SubprocessController {
                 }
             }
 
+            // Classify a genuine non-zero exit OR a failure reported on stdout as
+            // an error `result` frame (auth / rate-limit / usage — claude may even
+            // exit 0). Join the stdout + stderr readers first (bounded) so their
+            // final lines — the ones carrying the error text — are in the buffers
+            // before we read them (reagent P1).
+            if let Some((exit_code, exit_signal)) = clean_exit {
+                let drain = std::time::Duration::from_secs(2);
+                let _ = tokio::time::timeout(drain, stdout_reader_handle).await;
+                let _ = tokio::time::timeout(drain, stderr_reader_handle).await;
+                let result_frame = last_result_frame_wait.lock().unwrap().clone();
+                let frame_is_error = result_frame
+                    .as_ref()
+                    .and_then(|f| f.get("is_error"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if exit_code != 0 || frame_is_error {
+                    let tail = stderr_tail_wait.lock().unwrap().join("\n");
+                    run_failure = Some(crate::agents::failure::classify(
+                        Some(exit_code),
+                        exit_signal,
+                        &tail,
+                        result_frame.as_ref(),
+                    ));
+                }
+            }
+
             // Update health monitor with exit status
             {
                 let inner = inner_wait.lock().unwrap();
@@ -882,7 +894,7 @@ impl SubprocessController {
             // the stderr tail, instead of just an opaque exit code.
             if let (Some(failure), Some(broker)) = (run_failure.as_ref(), broker_wait.as_ref()) {
                 broker.publish(wps::WaveEvent {
-                    event: "agentfailure".to_string(),
+                    event: wps::EVENT_AGENT_FAILURE.to_string(),
                     scopes: vec![format!("block:{}", block_id_wait)],
                     sender: String::new(),
                     persist: 0,
