@@ -93,7 +93,16 @@ function renderLine(raw, opt) {
     const t = raw.trim();
     if (!t) return null;
     let j;
-    try { j = JSON.parse(t); } catch { return opt.raw ? t : t; } // non-JSON: pass through
+    try {
+        j = JSON.parse(t);
+    } catch {
+        // Non-JSON line (a panic backtrace, a raw println). It has no structured
+        // fields, so any structured filter excludes it; a --grep must still match
+        // its text. Otherwise pass it through verbatim so nothing is lost.
+        if (opt.level || opt.target || opt.excludeTarget || opt.since) return null;
+        if (opt.grep && !opt.grep.test(t)) return null;
+        return t;
+    }
     const fields = j.fields || {};
     const msg = fields.message ?? j.message ?? "";
     const target = j.target || "";
@@ -171,7 +180,6 @@ function follow(file, opt) {
 
 // ─── ls ───────────────────────────────────────────────────────────────────────
 function listInstances() {
-    const all = discover("all").concat(discover("host"), discover("srv"), discover("launcher"));
     const seen = new Set();
     const rows = [];
     for (const e of discover("host").concat(discover("srv"), discover("launcher"))) {
@@ -208,7 +216,7 @@ function parse(argv) {
         else if (a === "-v" || a === "--verbose") opt.verbose = true;
         else if (a === "-n") opt.n = parseInt(argv[++i], 10) || 200;
         else if (a === "-i" || a === "--instance") opt.instance = argv[++i];
-        else if (a === "--level") opt.level = argv[++i].toLowerCase().split(",");
+        else if (a === "--level") { const v = argv[++i]; if (v) opt.level = v.toLowerCase().split(","); }
         else if (a === "--target") opt.target = argv[++i];
         else if (a === "--exclude-target") opt.excludeTarget = argv[++i];
         else if (a === "--since") opt.since = argv[++i];
@@ -255,7 +263,7 @@ function main() {
     if (cmd === "errors") {
         opt.level = ["error", "warn"];
         for (const tgt of ["host", "srv"]) {
-            const f = discover(tgt).filter((e) => !opt.instance || e.file.includes(opt.instance))[0];
+            const f = discover(tgt).filter((e) => !opt.instance || e.file.toLowerCase().includes(opt.instance.toLowerCase()))[0];
             if (f) { console.log(`\n=== ${tgt}: ${f.file} ===`); printLastLines(f.file, opt.n, opt, true); }
         }
         return;
