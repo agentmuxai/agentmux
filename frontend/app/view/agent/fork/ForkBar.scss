@@ -1,0 +1,33 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// ForkBar — bottom-of-pane fork switcher. A vertical stack of <PaneRow>s (one
+// per fork) plus the "+ fork" affordance. Row chrome comes from PaneRow.scss;
+// this only owns the container band + the add button. Token-driven.
+// Spec: docs/specs/SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md §7.
+
+.fork-bar {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border-color);
+    background: var(--tab-strip-bg, rgba(255, 255, 255, 0.03));
+}
+
+.fork-bar-add {
+    align-self: flex-start;
+    margin: var(--space-0-5) var(--space-1);
+    padding: 2px var(--space-2);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 0);
+    color: var(--secondary-text-color);
+    cursor: var(--cursor-interactive);
+    font-size: var(--text-xs);
+    transition: color 80ms ease, border-color 80ms ease, background 80ms ease;
+
+    &:hover {
+        color: var(--main-text-color);
+        border-color: var(--accent-color);
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+    }
+}
