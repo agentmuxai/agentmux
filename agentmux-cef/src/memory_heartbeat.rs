@@ -60,14 +60,26 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                 // thread); the banner shows on Warn/Critical and clears on the
                 // return to Normal.
                 let free = commit_free_mb();
-                if let Some(level) = pressure.observe(free) {
+                let transition = pressure.observe(free);
+                let level_now = pressure.level();
+                if let Some(level) = transition {
                     tracing::warn!(
                         target: "mem_pressure",
                         level = level.as_str(),
                         commit_free_mb = free,
                         "system memory pressure changed"
                     );
-                    crate::ui_tasks::post_memory_pressure(&state, level.as_str(), free);
+                }
+                // Push to the banner on a transition (to show or clear it), AND
+                // re-assert a steady non-Normal level each tick so a window
+                // opened or reloaded mid-episode catches up within one heartbeat
+                // rather than staying silent until the next transition (reagent
+                // #1501 P2 — the CustomEvent channel has no replay-on-subscribe).
+                // Idempotent on existing windows (the frontend dedups an
+                // unchanged level and a re-assert never un-dismisses); a steady
+                // Normal stays silent, so there's no traffic in the common case.
+                if transition.is_some() || level_now != crate::memory_pressure::PressureLevel::Normal {
+                    crate::ui_tasks::post_memory_pressure(&state, level_now.as_str(), free);
                 }
                 refresh_log_pointer(&mut last_date);
             }
