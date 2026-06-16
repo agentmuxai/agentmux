@@ -254,6 +254,19 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             // Background event lane → WebSocket. Droppable perf telemetry
             // (sysinfo/blockstats) only; serviced when the priority lanes above
             // are momentarily idle, so it can never delay a keystroke echo.
+            //
+            // Tradeoff of `biased;`: a SUSTAINED priority-lane flood (e.g.
+            // `! yes` pumping terminal output continuously) keeps the priority
+            // branches ready, so this lane is starved and its unbounded receiver
+            // accumulates sysinfo/blockstats until the flood pauses, then
+            // flushes as a stale burst. Acceptable for now because telemetry
+            // ingress is low-rate (sysinfo ~1/s) and a flood also saturates the
+            // socket writes — during which the priority lanes do drain, so this
+            // lane gets serviced — making true never-empty starvation the rare
+            // worst case. Phase 2 bounds it properly by coalescing this lane to
+            // the latest reading per (event, scope), so it cannot grow and the
+            // post-flood flush is one current frame, not a backlog. See
+            // SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md §4.2.
             Some(event) = background_rx.recv() => {
                 if forward_event(&mut socket, event).await {
                     break;
