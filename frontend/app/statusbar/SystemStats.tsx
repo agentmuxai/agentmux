@@ -122,7 +122,6 @@ const SystemStats = (): JSX.Element => {
                         <Portal>
                             <CpuCoresPopover
                                 anchorRect={cpuAnchorRect()}
-                                onClose={() => setCpuPanelOpen(false)}
                                 ref={(el) => { cpuPopoverRef = el; }}
                             />
                         </Portal>

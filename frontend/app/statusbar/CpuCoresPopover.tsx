@@ -44,7 +44,6 @@ const CPU_KEY = /^cpu:(\d+)$/;
 
 interface CpuCoresPopoverProps {
     anchorRect: DOMRect | null;
-    onClose: () => void;
     ref?: (el: HTMLDivElement) => void;
 }
 
@@ -88,10 +87,11 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
         return "heat";
     };
 
-    // Heatmap: pick a near-square column count, then derive square size from the
-    // fixed content width — squares shrink toward SQ_MIN as the count grows so a
-    // 128-core box fits without a long scroll. Width-driven so the grid stays a
-    // compact block; the height cap handles 256+ via scroll.
+    // Heatmap: pick a near-square column count (capped at 16), then derive the
+    // square size from the fixed content width. With the column cap, the square
+    // stays ~19px at any realistic core count — high counts wrap into more rows
+    // and the height cap scrolls, rather than shrinking the squares. (SQ_MIN is
+    // the floor for the rare narrow-width case, not a high-core-count target.)
     const heat = createMemo(() => {
         const n = cores().length;
         const cols = Math.min(16, Math.max(8, Math.ceil(Math.sqrt(n))));
