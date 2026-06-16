@@ -283,7 +283,7 @@ function DetailField({ label, value }: { label: string; value: string }): JSX.El
 
 function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const accounts = () => model.accountsAtom();
-    const providers = (): AccountProvider[] => ["github", "openai", "aws", "anthropic", "custom"];
+    const providers = (): AccountProvider[] => ["github", "google", "aws", "openai", "anthropic", "slack", "custom"];
 
     // Collect all unique agent IDs across all accounts
     const agentIds = () => {
