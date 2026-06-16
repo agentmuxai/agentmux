@@ -535,10 +535,35 @@ wrap_app! {
     impl App {
         fn on_before_command_line_processing(
             &self,
-            _process_type: Option<&CefString>,
+            process_type: Option<&CefString>,
             command_line: Option<&mut CommandLine>,
         ) {
             if let Some(cmd) = command_line {
+                // Proactive memory-pressure guard (SPEC_MEMORY_PRESSURE_
+                // SUPERVISION_2026_06_16 §5.H): if the system is already
+                // critically low on commit at launch, start in software
+                // rendering. The GPU process is a large commit consumer, and on
+                // a starved system spawning it can push commit over the edge and
+                // OOM the host before first paint — the 2026-06-16 failure mode
+                // under several concurrent instances. Browser process only (only
+                // it decides whether to spawn the GPU process); reuses the same
+                // `disable-gpu` switch as the launcher's degraded-relaunch rung.
+                // On non-Windows `commit_free_mb()` is u64::MAX, so this never
+                // fires there (commit-limit exhaustion is a Windows concern).
+                const STARTUP_DISABLE_GPU_FLOOR_MB: u64 = 512;
+                if process_type.is_none() {
+                    let free = crate::memory_heartbeat::commit_free_mb();
+                    if free < STARTUP_DISABLE_GPU_FLOOR_MB {
+                        tracing::warn!(
+                            target: "mem_pressure",
+                            commit_free_mb = free,
+                            floor_mb = STARTUP_DISABLE_GPU_FLOOR_MB,
+                            "commit critically low at startup — launching with --disable-gpu (software rendering)"
+                        );
+                        cmd.append_switch(Some(&CefString::from("disable-gpu")));
+                    }
+                }
+
                 // Prevent empty browser on visibility change (CEF #3638).
                 //
                 // Also disable MediaRouter: Chromium's Cast/DIAL device
