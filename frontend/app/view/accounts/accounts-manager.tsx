@@ -17,6 +17,7 @@ import { onCleanup, Show, type JSX } from "solid-js";
 import type { BlockNodeModel } from "@/app/block/blocktypes";
 import { IdentityViewModel } from "@/app/view/identity/identity-model";
 import { AccountsTab, AccountForm } from "@/app/view/identity/identity-view";
+import { AccountsGallery } from "./AccountsGallery";
 import "@/app/view/identity/identity-view.scss";
 
 export function AccountsManager(): JSX.Element {
@@ -42,7 +43,13 @@ export function AccountsManager(): JSX.Element {
             </div>
 
             <div class="identity-body">
-                <AccountsTab model={model} />
+                {/* Brand-tile landing: pick a service → OAuth / Key. */}
+                <AccountsGallery model={model} />
+                {/* Connected accounts (manage existing); shows its own empty state. */}
+                <Show when={model.accountsAtom().length > 0}>
+                    <div class="accounts-connected-heading">Connected accounts</div>
+                    <AccountsTab model={model} />
+                </Show>
             </div>
 
             <Show when={model.formOpenAtom()}>

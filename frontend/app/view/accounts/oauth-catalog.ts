@@ -46,6 +46,26 @@ export const OAUTH_SERVICES: Partial<Record<AccountProvider, OAuthServiceInfo>> 
             "Create a GitHub OAuth App (Settings → Developer settings → OAuth Apps), " +
             "enable “Device Flow”, and paste its Client ID below. No client secret is needed.",
     },
+    google: {
+        provider: "google",
+        flow: "pkce",
+        builtIn: false,
+        requiresSecret: false, // PKCE loopback — no confidential secret
+        consoleUrl: "https://console.cloud.google.com/apis/credentials",
+        byoHint:
+            "Create an OAuth client of type “Desktop app” in Google Cloud Console " +
+            "and paste its Client ID below.",
+    },
+    slack: {
+        provider: "slack",
+        flow: "pkce",
+        builtIn: false,
+        requiresSecret: true, // Slack mandates a confidential client secret
+        consoleUrl: "https://api.slack.com/apps",
+        byoHint:
+            "Create a Slack app, then paste its Client ID and Client Secret below " +
+            "(Slack requires a client secret).",
+    },
 };
 
 export function oauthInfo(provider: AccountProvider): OAuthServiceInfo | undefined {

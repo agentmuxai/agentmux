@@ -15,7 +15,7 @@ import { Logger } from "@/util/logger";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "custom";
+export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom";
 export type AccountKind = "pat" | "role" | "api_key" | "env_ref" | "oauth";
 export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking";
 export type IdentityTab = "accounts" | "assignments";
@@ -112,6 +112,8 @@ export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     openai: "OpenAI",
     aws: "AWS",
     anthropic: "Anthropic",
+    google: "Google",
+    slack: "Slack",
     custom: "Custom",
 };
 
@@ -120,6 +122,8 @@ export const PROVIDER_COLORS: Record<AccountProvider, string> = {
     openai: "#d1fae5",
     aws: "#fef3c7",
     anthropic: "#ede9fe",
+    google: "#e8f0fe",
+    slack: "#f3e8fd",
     custom: "#f1f5f9",
 };
 
@@ -326,6 +330,13 @@ export class IdentityViewModel implements ViewModel {
     editingAccountAtom: Accessor<Account | null> = this._editingAccount[0];
     private setEditingAccount: Setter<Account | null> = this._editingAccount[1];
 
+    // Preset provider/kind for a fresh Add form, set when the user clicks a
+    // brand tile in the Accounts gallery (→ openAddFormFor). The AccountForm
+    // reads this for its initial Provider/Kind when not editing.
+    private _addPreset = createSignal<{ provider: AccountProvider; kind: AccountKind } | null>(null);
+    addPresetAtom: Accessor<{ provider: AccountProvider; kind: AccountKind } | null> = this._addPreset[0];
+    private setAddPreset: Setter<{ provider: AccountProvider; kind: AccountKind } | null> = this._addPreset[1];
+
     private _formError = createSignal<string | null>(null);
     formErrorAtom: Accessor<string | null> = this._formError[0];
     private setFormError: Setter<string | null> = this._formError[1];
@@ -362,7 +373,7 @@ export class IdentityViewModel implements ViewModel {
 
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
-        const order: AccountProvider[] = ["github", "openai", "aws", "anthropic", "custom"];
+        const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom"];
         for (const p of order) {
             const group = this.accountsAtom().filter((a) => a.provider === p);
             if (group.length > 0) map.set(p, group);
@@ -439,18 +450,29 @@ export class IdentityViewModel implements ViewModel {
 
     openAddForm = (): void => {
         this.setEditingAccount(null);
+        this.setAddPreset(null);
+        this.setFormError(null);
+        this.setFormOpen(true);
+    };
+
+    /** Open a fresh Add form pre-set to a provider + auth kind (brand tile). */
+    openAddFormFor = (provider: AccountProvider, kind: AccountKind): void => {
+        this.setEditingAccount(null);
+        this.setAddPreset({ provider, kind });
         this.setFormError(null);
         this.setFormOpen(true);
     };
 
     openEditForm = (account: Account): void => {
         this.setEditingAccount(account);
+        this.setAddPreset(null);
         this.setFormError(null);
         this.setFormOpen(true);
     };
 
     cancelForm = (): void => {
         this.setEditingAccount(null);
+        this.setAddPreset(null);
         this.setFormError(null);
         this.setFormOpen(false);
     };

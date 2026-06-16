@@ -1,0 +1,106 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * AccountsGallery — the brand-tile landing for the Trust Center Accounts tab.
+ * Renders a grid of service logos, each with a badge showing how many accounts
+ * are connected for that brand. Clicking a tile opens a small chooser of the
+ * brand's auth modes (OAuth / Key); picking one opens the Add-account form
+ * preset to that provider + kind. SPEC_TRUST_CENTER_2026_06_15.md §3.
+ */
+
+import { createSignal, For, Show, type JSX } from "solid-js";
+import { ProviderLogo } from "@/element/ProviderLogo";
+import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
+import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
+import "./accounts-gallery.scss";
+
+export function AccountsGallery({ model }: { model: IdentityViewModel }): JSX.Element {
+    const [chooser, setChooser] = createSignal<ServiceTile | null>(null);
+
+    const countFor = (id: AccountProvider): number => model.accountsByProvider().get(id)?.length ?? 0;
+
+    const pick = (tile: ServiceTile, mode: AuthMode) => {
+        const kind: AccountKind = mode === "oauth" ? "oauth" : tile.keyKind;
+        setChooser(null);
+        model.openAddFormFor(tile.id, kind);
+    };
+
+    return (
+        <div class="accounts-gallery">
+            <div class="accounts-gallery-grid">
+                <For each={SERVICE_CATALOG}>
+                    {(tile) => {
+                        const n = () => countFor(tile.id);
+                        return (
+                            <button
+                                type="button"
+                                class="account-tile"
+                                classList={{ "account-tile--connected": n() > 0 }}
+                                onClick={() => setChooser(tile)}
+                                aria-label={`${tile.displayName} — ${n()} connected, add account`}
+                            >
+                                <Show when={n() > 0}>
+                                    <span class="account-tile-count" title={`${n()} connected`}>{n()}</span>
+                                </Show>
+                                <span class="account-tile-logo">
+                                    <ProviderLogo provider={tile.id} size={32} />
+                                </span>
+                                <span class="account-tile-name">{tile.displayName}</span>
+                                <span class="account-tile-status">
+                                    {n() > 0 ? `${n()} connected` : (tile.blurb ?? "Connect")}
+                                </span>
+                            </button>
+                        );
+                    }}
+                </For>
+            </div>
+
+            {/* Tile-click chooser: OAuth and/or Key, per the brand's authModes. */}
+            <Show when={chooser()}>
+                {(tile) => (
+                    <div
+                        class="accounts-chooser-overlay"
+                        onClick={(e) => e.target === e.currentTarget && setChooser(null)}
+                    >
+                        <div class="accounts-chooser" role="dialog" aria-label={`Connect ${tile().displayName}`}>
+                            <div class="accounts-chooser-header">
+                                <span class="account-tile-logo">
+                                    <ProviderLogo provider={tile().id} size={20} />
+                                </span>
+                                <span class="accounts-chooser-title">Connect {tile().displayName}</span>
+                                <button
+                                    type="button"
+                                    class="accounts-chooser-close"
+                                    onClick={() => setChooser(null)}
+                                    aria-label="Close"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                            <div class="accounts-chooser-modes">
+                                <For each={tile().authModes}>
+                                    {(mode) => {
+                                        const m = modeLabel(mode);
+                                        return (
+                                            <button
+                                                type="button"
+                                                class="accounts-chooser-mode"
+                                                onClick={() => pick(tile(), mode)}
+                                            >
+                                                <span class="accounts-chooser-mode-title">{m.title}</span>
+                                                <span class="accounts-chooser-mode-sub">{m.sub}</span>
+                                            </button>
+                                        );
+                                    }}
+                                </For>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </Show>
+        </div>
+    );
+}
+
+AccountsGallery.displayName = "AccountsGallery";
