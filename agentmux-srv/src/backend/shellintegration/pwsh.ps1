@@ -59,19 +59,24 @@ function Global:_agentmux_si_prompt {
     _agentmux_si_agent_env
 }
 
-# ─── muxlog helper ────────────────────────────────────────────────────────────
+# ─── muxlog ───────────────────────────────────────────────────────────────────
+# Discover, render & follow AgentMux logs across every running instance.
+# Delegates to the shared Node core (muxlog.mjs). `muxlog help` for usage,
+# `muxlog ls` to list every instance's logs.
+$global:AgentmuxMuxlogJs = Join-Path $PSScriptRoot "..\muxlog.mjs"
 function Global:muxlog {
-    param([string]$Target = "host", [string]$Action = "tail")
-    if (-not $env:AGENTMUX_LOG_DIR) {
-        Write-Error "AGENTMUX_LOG_DIR not set - run inside an AgentMux terminal"
+    if ((Get-Command node -ErrorAction SilentlyContinue) -and (Test-Path $global:AgentmuxMuxlogJs)) {
+        node $global:AgentmuxMuxlogJs @args
         return
     }
+    # Fallback (no node / core missing): legacy pointer-based tail.
+    $Target = if ($args.Count -ge 1) { $args[0] } else { "host" }
+    $Action = if ($args.Count -ge 2) { $args[1] } else { "tail" }
+    if (-not $env:AGENTMUX_LOG_DIR) { Write-Error "AGENTMUX_LOG_DIR not set - run inside an AgentMux terminal"; return }
     $ptr = Join-Path $env:AGENTMUX_LOG_DIR "current-$Target-v$($env:AGENTMUX_VERSION).path"
-    if (-not (Test-Path $ptr)) {
-        Write-Error "Unknown log target '$Target'. Check $env:AGENTMUX_LOG_DIR for current-*.path files."
-        return
-    }
-    $logfile = Join-Path $env:AGENTMUX_LOG_DIR (Get-Content $ptr)
+    if (-not (Test-Path $ptr)) { Write-Error "muxlog: Node core unavailable and no pointer for '$Target'"; return }
+    $pc = Get-Content $ptr
+    $logfile = if ($pc -match '^([A-Za-z]:[\\/]|[\\/])') { $pc } else { Join-Path $env:AGENTMUX_LOG_DIR $pc }
     switch ($Action) {
         "tail" { Get-Content $logfile -Wait -Tail 50 }
         "cat"  { Get-Content $logfile }

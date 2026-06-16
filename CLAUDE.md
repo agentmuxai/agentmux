@@ -152,18 +152,29 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 
 ## Log Access
 
-`$AGENTMUX_LOG_DIR` in AgentMux terminals is the shared `~/.agentmux/logs/` directory. The sidecar log lives there directly; the host log lives in the per-instance data dir and registers a pointer (`current-host-v<v>.path`) in the shared dir so `muxlog host` can resolve it.
+`muxlog` discovers and renders AgentMux logs across **every** running instance
+(shared dir, each `task dev` branch under `~/.agentmux/dev/<branch>/`, and per-build
+channels). It defaults to the **most-recently-active** instance — don't trust a
+single pointer; run `muxlog ls` first when several instances are up.
 
 | What | Command |
 |------|---------|
-| Tail host log | `muxlog host` |
+| List every instance's logs (newest first) | `muxlog ls` |
+| Tail host log (follow) | `muxlog host` |
 | Tail sidecar log | `muxlog srv` |
-| Frontend logs | `muxlog host '\[fe\]'` |
-| Memory heartbeat | `muxlog host mem_heartbeat` |
-| Full host log | `muxlog host cat` |
-| Launcher log | `cat "$AGENTMUX_LOG_DIR/agentmux-launcher.log"` |
+| Frontend `[fe]` lines | `muxlog fe` |
+| Search sidecar (agent transcript excluded) | `muxlog srv grep <regex>` |
+| Memory heartbeat | `muxlog host grep mem_heartbeat` |
+| Errors + warnings (host & sidecar) | `muxlog errors` |
+| Startup-handshake / reconnect-loop trace | `muxlog bridge` |
+| Target a specific instance | `muxlog host -i <branch\|version>` |
+| Launcher log | `muxlog launcher` |
+| Full usage | `muxlog help` |
 
-Works identically across `task dev`, portable, and install builds. Logs auto-rotate daily and are retained for 7 days.
+Renders NDJSON as `time level target message`; `--raw` for original JSON. Works
+identically across `task dev`, portable, and install builds. Not loaded in a
+tool-spawned subshell? Call the core directly: `node ~/.agentmux/shell/muxlog.mjs ls`.
+Full reference: `docs/MUXLOG.md`.
 
 ---
 
