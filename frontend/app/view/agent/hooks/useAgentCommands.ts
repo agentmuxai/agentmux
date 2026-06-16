@@ -92,6 +92,22 @@ export interface UseAgentCommands {
      *  `wasAlreadyWorking` should be true when a turn was in-flight before
      *  the caller dispatched TurnStart — drives PendingMessage.enqueuedWhileBusy. */
     sendMessage: (message: string, wasAlreadyWorking?: boolean) => Promise<void>;
+    /**
+     * Deliver any messages held while the agent was busy (the "send now"
+     * queue). Called by the agent view at the next tool-call boundary (or
+     * turn end) so a queued message lands just before the agent's next tool
+     * call — it finishes its current train of thought, then picks it up.
+     */
+    flushHeldMessages: () => void;
+    /**
+     * Pop the most-recently queued (held, not-yet-delivered) message off the
+     * "send now" queue and return its text so the composer can restore it —
+     * the Claude-Code-CLI ArrowUp "un-queue" gesture. Returns null if the
+     * queue is empty. The message was never sent, so this is a true un-send.
+     */
+    recallLatestHeld: () => { text: string } | null;
+    /** True when there are queued-while-busy messages awaiting delivery. */
+    hasHeldMessages: () => boolean;
     /** Return to the agent picker by clearing the agent-identity meta keys. */
     back: () => Promise<void>;
     /**
@@ -157,6 +173,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     onCleanup(() => {
         for (const id of pendingExpiryTimers) clearTimeout(id);
         pendingExpiryTimers.clear();
+    });
+
+    // Messages typed while the agent was busy are HELD here (not sent yet),
+    // shown in the "send now" panel. They are delivered by `flushHeldMessages`
+    // at the next tool-call boundary, or recalled un-sent via `recallLatestHeld`
+    // (ArrowUp). Holding — rather than sending immediately — is what makes the
+    // recall a true un-send and lets the message land at a clean boundary.
+    const heldQueue: Array<{ id: string; text: string }> = [];
+    onCleanup(() => {
+        heldQueue.length = 0;
     });
 
     // ── Inline picker state ───────────────────────────────────────────
@@ -318,6 +344,33 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             requestAnimationFrame(() => opts.onSent?.());
         }
 
+        if (wasAlreadyWorking) {
+            // Agent is busy: HOLD the message in the "send now" queue instead of
+            // sending it now. `flushHeldMessages` delivers it at the next
+            // tool-call boundary (so the agent finishes its current step first),
+            // and ArrowUp can recall it un-sent before then. No expiry timer —
+            // the message must persist until it is actually delivered, not drop
+            // off after 30s (the bug this fixes).
+            heldQueue.push({ id: messageId, text: message });
+            return;
+        }
+
+        // Idle send: deliver immediately and arm the lost-delivery safety timer.
+        await deliverToBackend(message, messageId, /* armExpiry */ true);
+    };
+
+    /**
+     * Deliver a single message to the backend: apply runtime args (permission
+     * mode / model / effort) for this turn, fire `AgentInputCommand`, and —
+     * for immediate (idle) sends — arm the lost-delivery expiry. The backend
+     * echoes `agent-message-accepted` (keyed on `messageId`), which promotes
+     * the pending entry into the conversation.
+     */
+    const deliverToBackend = async (
+        message: string,
+        messageId: string,
+        armExpiry: boolean,
+    ): Promise<void> => {
         // Apply runtime args (permission mode, model, effort) before this turn.
         const prov = opts.provider();
         if (prov) {
@@ -336,13 +389,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
         }
 
-        // Kick off the send AND start the expiry clock together, so the
-        // 30s timer measures backend acceptance time only — not the
-        // pre-send cmd:args metadata round-trip. Codex P2 on PR #752
-        // caught the prior order: a slow runtime-args update could
-        // burn most of the 30s before AgentInputCommand even fired,
-        // so the expiry would remove the pending entry minutes before
-        // the agent had a chance to accept it.
+        // Kick off the send AND (for idle sends) start the expiry clock together,
+        // so the 30s timer measures backend acceptance time only — not the
+        // pre-send cmd:args metadata round-trip. Codex P2 on PR #752.
         RpcApi.AgentInputCommand(TabRpcClient, {
             blockid: opts.blockId,
             message,
@@ -350,20 +399,18 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }).catch((err) => {
             opts.log("error", err?.message ?? String(err), "error");
             // RPC outright failed — remove the pending entry so the user
-            // doesn't see a ghost row for a message the backend never
-            // received. Log already surfaces the error elsewhere.
+            // doesn't see a ghost row for a message the backend never received.
             opts.model.dispatchPane({
                 type: "PendingMessageRejected",
                 id: messageId,
             });
         });
 
-        // Pending acceptance timeout (issue #728 gap 2). The reducer
-        // removes the ghost entry if the backend doesn't echo
-        // `agent-message-accepted` within PENDING_TIMEOUT_MS of the
-        // send. Idempotent when the message lands first.
-        // Tracked + cleared on pane unmount to avoid dispatching against
-        // an unregistered slot (which throws).
+        if (!armExpiry) return;
+        // Pending acceptance timeout (issue #728 gap 2) — only for idle sends,
+        // where a missing `agent-message-accepted` within PENDING_TIMEOUT_MS
+        // means the delivery was lost. Held (queued-while-busy) messages get NO
+        // expiry; they wait until flushed. Cleared on pane unmount.
         const expiryId = setTimeout(() => {
             pendingExpiryTimers.delete(expiryId);
             opts.model.dispatchPane({
@@ -373,6 +420,34 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }, PENDING_TIMEOUT_MS);
         pendingExpiryTimers.add(expiryId);
     };
+
+    /**
+     * Deliver every held ("send now") message, oldest first. Called at the next
+     * tool-call boundary / turn end. No expiry — these are being delivered now,
+     * and a failed RPC removes the pending entry via the catch in
+     * `deliverToBackend`.
+     */
+    const flushHeldMessages = (): void => {
+        if (heldQueue.length === 0) return;
+        const items = heldQueue.splice(0, heldQueue.length);
+        for (const item of items) {
+            void deliverToBackend(item.text, item.id, /* armExpiry */ false);
+        }
+    };
+
+    /**
+     * Pop the most-recently held message off the queue, remove its pending
+     * entry, and return its text so the composer can restore it (ArrowUp
+     * un-queue). Null if nothing is held. The message was never sent.
+     */
+    const recallLatestHeld = (): { text: string } | null => {
+        const item = heldQueue.pop();
+        if (!item) return null;
+        opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
+        return { text: item.text };
+    };
+
+    const hasHeldMessages = (): boolean => heldQueue.length > 0;
 
     // Delegate to the model so the pane-frame header button and any other
     // call sites go through a single implementation.
@@ -405,6 +480,9 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
 
     return {
         sendMessage,
+        flushHeldMessages,
+        recallLatestHeld,
+        hasHeldMessages,
         back,
         stopAgent,
         pickerSpec,
