@@ -106,9 +106,9 @@ CPU Usage                              avg 38%
 …
 ```
 
-- **Square sizing is computed, not fixed** — the "intelligent" bit. Given the content width `W`, gap `g`, and core count `N`, choose a square edge `s` and column count `c` so the grid fits the panel's target footprint without scrolling where possible, clamped to a legible/▶tappable minimum:
-  - `c = clamp(floor((W + g) / (s_target + g)), c_min, c_max)`; pick `s` from `s = floor((W - (c-1)*g) / c)`, clamped to `[s_min=10px, s_max=22px]`.
-  - As `N` grows, `s` shrinks toward `s_min`; once `s_min` is hit, the grid wraps to more rows and the area scrolls (height cap below). So 64→~16px squares, 128→~12px, 256→~10px + light scroll.
+- **Square sizing is computed, not fixed** — the "intelligent" bit. Given the content width `W`, gap `g`, a target height `H`, and core count `N`, pick the **largest** square edge `s` in `[s_min=10px, s_max=22px]` at which all `N` cores fit within `H`, packing `cols = floor((W+g)/(s+g))` columns at that size:
+  - Search `s` from `s_max` down; for each, `rows = ceil(N/cols)`; accept the first `s` where `rows*(s+g) − g ≤ H`.
+  - Squares stay large while they fit (more legible) and **shrink only once `N` grows past what fits at the current size**; when even `s_min` overflows `H`, the grid keeps `s_min` and the area scrolls (height cap below). Net: ~64–128 cores stay near `s_max`, ~256 lands near `s_min`, beyond that scrolls.
 - **Color ramp (continuous):** map `pct` → color across idle→busy, e.g. interpolate muted/blue (`var(--secondary-text-color)` / a cool stop) → `var(--warning-color)` → `var(--error-color)`. A continuous ramp (not the 3-step `cpuColor` threshold) is what makes a heatmap read; expose a small `loadColor(pct)` helper. Squares use the ramp as `background-color`; the existing 3-step `cpuColor` stays for the header/row-mode text.
 - **Legend:** a tiny idle→busy gradient swatch in the header so the colors are interpretable.
 - **Hover/focus:** each square is a focusable element with `title`/tooltip and `aria-label="Core N, X%"`; no persistent text inside the square. Optional enhancement: a single live "readout line" under the grid that shows the hovered/focused core's `Core N — X%` (cheaper than 128 tooltips, keyboard-friendly).

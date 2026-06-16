@@ -36,6 +36,7 @@ const CELL_MAX = 64;
 
 // Heatmap geometry.
 const HEAT_CONTENT_WIDTH = 340; // px available to the square grid
+const HEAT_TARGET_HEIGHT = 300; // grow rows up to here before squares shrink / scroll
 const HEAT_GAP = 2;
 const SQ_MIN = 10;
 const SQ_MAX = 22;
@@ -87,17 +88,25 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
         return "heat";
     };
 
-    // Heatmap: pick a near-square column count (capped at 16), then derive the
-    // square size from the fixed content width. With the column cap, the square
-    // stays ~19px at any realistic core count — high counts wrap into more rows
-    // and the height cap scrolls, rather than shrinking the squares. (SQ_MIN is
-    // the floor for the rare narrow-width case, not a high-core-count target.)
+    // Heatmap sizing: pick the LARGEST square (≤ SQ_MAX) at which all cores fit
+    // within the target height, packing as many columns as the fixed width
+    // allows at that size. Squares stay big while they fit (more legible), then
+    // genuinely shrink toward SQ_MIN as the count grows; only once SQ_MIN still
+    // overflows does the height cap take over and the grid scrolls. So e.g.
+    // ~64–128 cores stay near SQ_MAX, ~256 lands near SQ_MIN, and beyond that it
+    // scrolls.
     const heat = createMemo(() => {
-        const n = cores().length;
-        const cols = Math.min(16, Math.max(8, Math.ceil(Math.sqrt(n))));
-        const raw = Math.floor((HEAT_CONTENT_WIDTH - (cols - 1) * HEAT_GAP) / cols);
-        const sq = Math.max(SQ_MIN, Math.min(SQ_MAX, raw));
-        return { cols, sq };
+        const n = Math.max(1, cores().length);
+        for (let s = SQ_MAX; s > SQ_MIN; s--) {
+            const cols = Math.max(1, Math.floor((HEAT_CONTENT_WIDTH + HEAT_GAP) / (s + HEAT_GAP)));
+            const rows = Math.ceil(n / cols);
+            if (rows * (s + HEAT_GAP) - HEAT_GAP <= HEAT_TARGET_HEIGHT) {
+                return { cols, sq: s };
+            }
+        }
+        // Nothing fits at >SQ_MIN — use SQ_MIN with max columns; scroll handles it.
+        const cols = Math.max(1, Math.floor((HEAT_CONTENT_WIDTH + HEAT_GAP) / (SQ_MIN + HEAT_GAP)));
+        return { cols, sq: SQ_MIN };
     });
 
     const panelWidth = (): number => (tier() === "rows" ? 260 : 360);
