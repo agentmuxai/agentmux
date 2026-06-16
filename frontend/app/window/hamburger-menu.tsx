@@ -136,7 +136,7 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 // Toolchain — visibility + control over the dev tools AgentMux
                 // runs CLIs in (node/npm/git/docker + provider CLIs), incl. the
                 // effective PATH. See SPEC_TOOLCHAIN_MANAGER_2026-06-15.
-                label: "Toolchain",
+                label: "Toolchain Manager",
                 icon: "wrench",
                 onClick: () => openToolchainModal(),
             },
