@@ -15,7 +15,6 @@
 
 import { For, Show, createMemo, createSignal, type Accessor, type JSX } from "solid-js";
 import type { LogLine } from "../types";
-import { NodeHoverStrip } from "./NodeHoverStrip";
 
 interface ActivityLogPanelProps {
     entries: Accessor<LogLine[]>;
@@ -77,23 +76,20 @@ export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
                                 const isExpanded = () => expandedIds().has(line.id);
                                 return (
                                     <div
-                                        class="hover-strip-host agent-status-line"
+                                        class="agent-status-line agent-status-line--toggle"
                                         classList={{
                                             "agent-status-line--error": line.level === "error",
                                             "agent-status-line--warn": line.level === "warn",
                                             "agent-status-line--expanded": isExpanded(),
                                         }}
+                                        // Click toggles full/truncated text — the
+                                        // expand affordance the removed hover strip
+                                        // used to provide.
+                                        onClick={() => toggleExpanded(line.id)}
                                     >
                                         <span class="agent-status-line-text">
                                             <span class="agent-status-tag">[{line.tag}]</span> {line.text}
                                         </span>
-                                        <NodeHoverStrip
-                                            nodeId={line.id}
-                                            timestamp={line.timestamp}
-                                            canExpand
-                                            isExpanded={isExpanded()}
-                                            onExpand={() => toggleExpanded(line.id)}
-                                        />
                                     </div>
                                 );
                             }}
