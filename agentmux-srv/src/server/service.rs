@@ -2500,7 +2500,7 @@ async fn compensate_via_reducer(
 /// wcore-direct and not reducer-routed. Best-effort: a failure here
 /// leaves the new tab with the moved block but a malformed layout;
 /// the user-visible symptom is an empty render in the new window.
-fn setup_torn_off_block_layout(
+pub(crate) fn setup_torn_off_block_layout(
     store: &Store,
     new_tab_id: &str,
     block_id: &str,

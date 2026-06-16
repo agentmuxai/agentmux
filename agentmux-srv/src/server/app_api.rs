@@ -893,7 +893,15 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     // Resolve tab
     let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;
 
-    // Create block
+    // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
+    // create the block in a fresh floating workspace (via reducer CreateBlock +
+    // the existing tear_off_block saga) and signal the source window's frontend
+    // to materialize the chromeless OS window — srv can't open windows itself.
+    if cmd.floating == Some(true) {
+        return open_pane_floating(state, &wstore, &event_bus, cmd.view, tab_id, meta).await;
+    }
+
+    // Create block (docked path)
     let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
         .map_err(|e| format!("pane.open: create_block: {e}"))?;
     let block_id = block.oid.clone();
@@ -982,6 +990,190 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     })
 }
 
+/// Floating-pane branch of `open_pane`. The block already exists in
+/// `source_tab_id`'s blockids (created by the caller, with no layout node).
+/// This moves it into a fresh floating workspace via the `tear_off_block`
+/// saga, sets up the new tab's layout, broadcasts the new WaveObjs, and asks
+/// the source window's frontend to materialize the chromeless floating OS
+/// window via the host `open_floating_pane_window` command (srv cannot open
+/// windows itself). See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
+async fn open_pane_floating(
+    state: &AppState,
+    wstore: &Store,
+    event_bus: &crate::backend::eventbus::EventBus,
+    view: String,
+    source_tab_id: String,
+    meta: MetaMapType,
+) -> Result<PaneOpenResult, String> {
+    use agentmux_common::ipc::{Command, Event};
+
+    // Source workspace from the reducer's canonical tab→workspace map.
+    let source_ws_id = {
+        let s = state.srv_state.lock().await;
+        s.tabs
+            .get(&source_tab_id)
+            .map(|t| t.workspace_id.clone())
+            .ok_or_else(|| format!("pane.open: floating: tab {source_tab_id} not in reducer state"))?
+    };
+
+    // Create the block through the reducer (NOT wcore-direct) so it lands in
+    // `state.blocks` — the `tear_off_block` saga's pre-condition checks the
+    // reducer-canonical block map. The `BlockCreated` event also carries the
+    // meta, which `persist_subscriber::apply_block_created` writes into the
+    // wstore Block so the editor renders with its file + tree state. We skip
+    // layout placement, so the block never renders docked before the saga
+    // moves it into the floating workspace (no flash).
+    let meta_val = serde_json::to_value(&meta)
+        .map_err(|e| format!("pane.open: floating: meta serialize: {e}"))?;
+    let create_events = crate::server::service::dispatch_to_reducer(
+        state,
+        Command::CreateBlock {
+            tab_id: source_tab_id.clone(),
+            meta: meta_val,
+        },
+    )
+    .await;
+    if let Some(msg) = create_events.iter().find_map(|e| match e {
+        Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.open: floating: CreateBlock: {msg}"));
+    }
+    let block_id = create_events
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "pane.open: floating: CreateBlock emitted no BlockCreated".to_string())?;
+    for ev in &create_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, wstore) {
+            tracing::warn!("pane.open: floating: CreateBlock wstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &create_events);
+
+    // Tear the block off into a fresh floating workspace + tab (reuses the
+    // exact saga the drag tear-off uses: CreateWorkspace → CreateTab → MoveBlock).
+    let saga_val = crate::sagas::tear_off_block::run(
+        state,
+        block_id.clone(),
+        source_tab_id.clone(),
+        source_ws_id.clone(),
+    )
+    .await?;
+    let new_ws_id = saga_val
+        .get("new_workspace_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let new_tab_id = saga_val
+        .get("new_tab_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if new_ws_id.is_empty() || new_tab_id.is_empty() {
+        return Err("pane.open: floating: tear_off_block returned empty ids".to_string());
+    }
+
+    // Make the moved block the new tab's single root node so it renders.
+    if let Err(e) =
+        crate::server::service::setup_torn_off_block_layout(wstore, &new_tab_id, &block_id)
+    {
+        tracing::warn!(
+            new_tab = %new_tab_id,
+            "pane.open: floating: layout setup failed: {e} (block moved but layout malformed)"
+        );
+    }
+
+    // Broadcast the new workspace + layout + tab + block so any frontend syncs
+    // its WaveObj cache (mirrors the docked path + the tear-off DnD handler).
+    {
+        let mut updates: Vec<obj::WaveObjUpdate> = Vec::new();
+        if let Ok(ws) = wstore.must_get::<Workspace>(&new_ws_id) {
+            updates.push(obj::WaveObjUpdate {
+                updatetype: "update".into(),
+                otype: "workspace".into(),
+                oid: new_ws_id.clone(),
+                obj: Some(obj::wave_obj_to_value(&ws)),
+            });
+        }
+        if let Ok(t) = wstore.must_get::<Tab>(&new_tab_id) {
+            if let Ok(layout) = wstore.must_get::<obj::LayoutState>(&t.layoutstate) {
+                updates.push(obj::WaveObjUpdate {
+                    updatetype: "update".into(),
+                    otype: "layout".into(),
+                    oid: t.layoutstate.clone(),
+                    obj: Some(obj::wave_obj_to_value(&layout)),
+                });
+            }
+            updates.push(obj::WaveObjUpdate {
+                updatetype: "update".into(),
+                otype: "tab".into(),
+                oid: new_tab_id.clone(),
+                obj: Some(obj::wave_obj_to_value(&t)),
+            });
+        }
+        if let Ok(b) = wstore.must_get::<Block>(&block_id) {
+            updates.push(obj::WaveObjUpdate {
+                updatetype: "update".into(),
+                otype: "block".into(),
+                oid: block_id.clone(),
+                obj: Some(obj::wave_obj_to_value(&b)),
+            });
+        }
+        for update in &updates {
+            let oref = format!("{}:{}", update.otype, update.oid);
+            if let Ok(data) = serde_json::to_value(update) {
+                event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                    eventtype: "waveobj:update".to_string(),
+                    oref,
+                    data: Some(data),
+                });
+            }
+        }
+    }
+
+    // Ask the source window's frontend to open the floating OS window — scoped
+    // to that window (mirrors the window-scoped `userinput` event) so exactly
+    // one window acts. The frontend handler calls the host
+    // `open_floating_pane_window` command.
+    let window_id = {
+        let s = state.srv_state.lock().await;
+        s.windows
+            .iter()
+            .find(|(_, w)| w.workspace_id == source_ws_id)
+            .map(|(id, _)| id.clone())
+    };
+    match window_id {
+        Some(win) => {
+            state.broker.publish(crate::backend::wps::WaveEvent {
+                event: "openfloatingpane".to_string(),
+                scopes: vec![win],
+                sender: String::new(),
+                persist: 0,
+                data: Some(json!({
+                    "block_id": block_id,
+                    "workspace_id": new_ws_id,
+                })),
+            });
+        }
+        None => {
+            tracing::warn!(
+                source_ws = %source_ws_id,
+                "pane.open: floating: no window mapped to source workspace — floater not opened"
+            );
+        }
+    }
+
+    Ok(PaneOpenResult {
+        block_id,
+        tab_id: new_tab_id,
+        view,
+        created: true,
+    })
+}
+
 /// Build the metadata map for a pane.open request, validating required args.
 fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
     let mut meta = MetaMapType::new();
@@ -992,6 +1184,13 @@ fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
                 .ok_or_else(|| "MISSING_ARG: view=editor requires 'file'".to_string())?;
             meta.insert("view".to_string(), json!("editor"));
             meta.insert("file".to_string(), json!(file));
+            // Optional initial file-tree state. Only write when explicitly
+            // requested; absent leaves the frontend default (expanded). The
+            // frontend collapses iff this is literally `false`
+            // (EditorViewModel restore: `meta["editor:tree_expanded"] === false`).
+            if let Some(expanded) = cmd.tree_expanded {
+                meta.insert("editor:tree_expanded".to_string(), json!(expanded));
+            }
         }
         "term" => {
             meta.insert("view".to_string(), json!("term"));
