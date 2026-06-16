@@ -789,8 +789,8 @@ tasks:
                 # `cksum` is in POSIX coreutils and ships with git-bash on
                 # Windows + every Linux/macOS we target — no toolchain risk.
                 # Range is 5173-5372 (200 ports — far more than enough).
+                CLONE_ROOT="$(pwd)"
                 if [ -z "$AGENTMUX_VITE_PORT" ]; then
-                  CLONE_ROOT="$(pwd)"
                   PORT_OFFSET=$(( $(echo -n "$CLONE_ROOT" | cksum | cut -d' ' -f1) % 200 ))
                   AGENTMUX_VITE_PORT=$((5173 + PORT_OFFSET))
                   echo "Auto-selected Vite port $AGENTMUX_VITE_PORT for clone $CLONE_ROOT"
