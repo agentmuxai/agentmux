@@ -136,6 +136,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         documentStateAtom: createSignal<DocumentState>({
             collapsedNodes: new Set<string>(),
             pinnedNodes: new Set<string>(),
+            expandedTools: new Set<string>(),
             scrollPosition: 0,
             selectedNode: null,
             filter: {

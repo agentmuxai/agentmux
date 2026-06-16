@@ -28,6 +28,7 @@ import {
 const baseDocState = (): DocumentState => ({
     collapsedNodes: new Set<string>(),
     pinnedNodes: new Set<string>(),
+    expandedTools: new Set<string>(),
     scrollPosition: 0,
     selectedNode: null,
     filter: {

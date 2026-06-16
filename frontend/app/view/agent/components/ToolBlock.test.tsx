@@ -14,6 +14,7 @@
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSignal } from "solid-js";
 
 import { ToolBlock } from "./ToolBlock";
 import type { ToolNode } from "../types";
@@ -71,6 +72,37 @@ describe("ToolBlock — panel mode", () => {
         const panel = container.querySelector(".agent-tool-panel");
         expect(panel).not.toBeNull();
         expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(true);
+    });
+
+    it("heldOpen (completed, held after live completion) → panel is in-flow", () => {
+        // The scroll-driven post-completion hold: a completed tool held open
+        // renders expanded until its row scrolls off the top.
+        const { container } = render(() => (
+            <ToolBlock node={baseTool} pinned={false} heldOpen={true} onTogglePin={() => {}} />
+        ));
+        const panel = container.querySelector(".agent-tool-panel");
+        expect(panel).not.toBeNull();
+        expect(panel!.classList.contains("agent-tool-panel--flow")).toBe(true);
+        expect(panel!.classList.contains("agent-tool-panel--hidden")).toBe(false);
+    });
+
+    it("calls onHoldOpen once when a running tool completes (active→inactive)", () => {
+        const onHoldOpen = vi.fn();
+        const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
+        render(() => (
+            <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />
+        ));
+        expect(onHoldOpen).not.toHaveBeenCalled(); // still running
+        setNode({ ...baseTool, status: "success" }); // completes live
+        expect(onHoldOpen).toHaveBeenCalledTimes(1);
+    });
+
+    it("does NOT call onHoldOpen for an already-completed tool on mount (loaded history)", () => {
+        const onHoldOpen = vi.fn();
+        render(() => (
+            <ToolBlock node={baseTool} pinned={false} onTogglePin={() => {}} onHoldOpen={onHoldOpen} />
+        ));
+        expect(onHoldOpen).not.toHaveBeenCalled();
     });
 
     // ── Hover is not a trigger ────────────────────────────────────────

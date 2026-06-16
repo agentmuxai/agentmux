@@ -12,9 +12,14 @@ import type {
     UserMessageNode,
 } from "../types";
 
-const inputs = (collapsed: string[] = [], pinned: string[] = []): ExpansionInputs => ({
+const inputs = (
+    collapsed: string[] = [],
+    pinned: string[] = [],
+    expandedTools: string[] = [],
+): ExpansionInputs => ({
     collapsedNodes: new Set(collapsed),
     pinnedNodes: new Set(pinned),
+    expandedTools: new Set(expandedTools),
 });
 
 const tool = (id: string, status: ToolNode["status"]): ToolNode => ({
@@ -52,6 +57,13 @@ describe("currentExpansion — parity with the per-kind expansion rules", () => 
         it("pin wins over both terminal-collapsed and running-auto", () => {
             expect(currentExpansion(tool("t", "success"), inputs([], ["t"]))).toEqual({ open: true, via: "pin" });
             expect(currentExpansion(tool("t", "running"), inputs([], ["t"]))).toEqual({ open: true, via: "pin" });
+        });
+        it("a completed tool held in expandedTools stays open (scroll-driven hold)", () => {
+            // Held open after live completion → expanded until it scrolls off.
+            expect(currentExpansion(tool("t", "success"), inputs([], [], ["t"]))).toEqual({ open: true, via: "auto" });
+            expect(currentExpansion(tool("t", "failed"), inputs([], [], ["t"]))).toEqual({ open: true, via: "auto" });
+            // A different held id does not open this tool.
+            expect(currentExpansion(tool("t", "success"), inputs([], [], ["other"]))).toEqual({ open: false });
         });
     });
 
