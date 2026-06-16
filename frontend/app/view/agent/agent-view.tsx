@@ -920,15 +920,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 matchCount={search.matchCount}
             />
 
-            <Show when={!digest.dismissed()}>
-                <SessionDigestBanner
-                    summary={digest.summary}
-                    generatedAt={digest.generatedAt}
-                    loading={digest.loading}
-                    onDismiss={digest.dismiss}
-                    onRegenerate={() => digest.fetch(true)}
-                />
-            </Show>
+            <SessionDigestBanner
+                accessory={digest.accessory}
+                onDismiss={digest.dismiss}
+                onRegenerate={() => digest.fetch(true)}
+            />
 
             {/* Title-bar action overlay: ⚙ Agent / 👤 Identity.
                 Gated only on the tab being open — NOT on currentAgent()

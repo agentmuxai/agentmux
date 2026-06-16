@@ -23,9 +23,10 @@
  *   - dismiss()     — hide the banner for this session
  */
 
-import { createSignal, onMount, type Accessor } from "solid-js";
+import { createMemo, createSignal, onMount, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { computeDigestAccessory, type DigestAccessory } from "../digest/digest-accessory";
 
 import type { LogFn } from "../types";
 export type { LogFn };
@@ -44,6 +45,14 @@ export interface UseSessionDigest {
     generatedAt: Accessor<number | null>;
     loading: Accessor<boolean>;
     dismissed: Accessor<boolean>;
+    /**
+     * The digest projected into the Pane Accessories row model, or null when
+     * no row should render (dismissed, or empty + not generating). Reactively
+     * derived from block meta + the transient signals — the single source of
+     * truth for the digest surface. See
+     * docs/specs/SPEC_SESSION_DIGEST_AS_PANE_ACCESSORY_2026_06_15.md §3.
+     */
+    accessory: Accessor<DigestAccessory | null>;
     fetch: (force?: boolean) => Promise<void>;
     dismiss: () => void;
 }
@@ -53,10 +62,12 @@ export function useSessionDigest(opts: UseSessionDigestOptions): UseSessionDiges
     const [generatedAt, setGeneratedAt] = createSignal<number | null>(null);
     const [loading, setLoading] = createSignal(false);
     const [dismissed, setDismissed] = createSignal(false);
+    const [failed, setFailed] = createSignal(false);
 
     const fetch = async (force = false): Promise<void> => {
         if (loading()) return;
         setLoading(true);
+        setFailed(false);
         try {
             const result = await RpcApi.SessionDigestCommand(TabRpcClient, {
                 block_id: opts.blockId,
@@ -71,13 +82,40 @@ export function useSessionDigest(opts: UseSessionDigestOptions): UseSessionDiges
             }
         } catch (err: any) {
             opts.log("digest", `failed to generate session digest: ${err?.message ?? String(err)}`, "warn");
-            setSummary(null);
+            setFailed(true);
         } finally {
             setLoading(false);
         }
     };
 
     const dismiss = () => setDismissed(true);
+
+    // Reactive projection into the Pane Accessories row model. Reads block meta
+    // (line counts, cached digest) + the transient signals; the accessory
+    // module decides row vs. null and the status (generating/fresh/stale/failed).
+    const accessory = createMemo<DigestAccessory | null>(() => {
+        const meta = opts.block()?.meta ?? {};
+        const num = (k: string): number | undefined =>
+            typeof meta[k] === "number" ? (meta[k] as number) : undefined;
+        const str = (k: string): string | undefined =>
+            typeof meta[k] === "string" ? (meta[k] as string) : undefined;
+        return computeDigestAccessory(
+            opts.blockId,
+            {
+                summary: str("session:digest_summary"),
+                generatedAt: num("session:digest_generated_at"),
+                digestLastLineCount: num("session:digest_last_line_count"),
+                lineCount: num("session:line_count"),
+            },
+            {
+                loading: loading(),
+                dismissed: dismissed(),
+                failed: failed(),
+                summary: summary(),
+                generatedAt: generatedAt(),
+            },
+        );
+    });
 
     onMount(() => {
         const meta = opts.block()?.meta ?? {};
@@ -112,5 +150,5 @@ export function useSessionDigest(opts: UseSessionDigestOptions): UseSessionDiges
         }
     });
 
-    return { summary, generatedAt, loading, dismissed, fetch, dismiss };
+    return { summary, generatedAt, loading, dismissed, accessory, fetch, dismiss };
 }

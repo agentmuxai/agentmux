@@ -2,21 +2,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * SessionDigestBanner — collapsible AI-generated summary of recent session activity.
+ * SessionDigestBanner — the AI-generated session summary rendered as a Pane
+ * Accessory row (`<PaneRow>`), in the `top-fixed` region.
  *
- * Shown when the user returns to an agent pane that was idle for >1 hour and has
- * accumulated >20 lines of new activity since the last visit.
+ * The digest is derived from a single source of truth in `useSessionDigest`
+ * (block meta + transient signals → `computeDigestAccessory`); this component
+ * is presentational only — it maps the resolved `DigestAccessory` onto the
+ * shared row chrome. A ≤10-word summary is the row title (no markdown body);
+ * the status accent surfaces fresh / stale / generating / failed, so a drifted
+ * summary visibly invites a refresh (↻).
+ *
+ * Spec: docs/specs/SPEC_SESSION_DIGEST_AS_PANE_ACCESSORY_2026_06_15.md.
  */
 
-import { createSignal, Show, type Accessor, type JSX } from "solid-js";
-import { Markdown } from "@/app/element/markdown";
+import { Show, type Accessor, type JSX } from "solid-js";
+import { PaneRow, type PaneRowAccent } from "./PaneRow";
+import type { DigestAccessory, DigestStatus } from "../digest/digest-accessory";
 
 interface SessionDigestBannerProps {
-    summary: Accessor<string | null>;
-    generatedAt: Accessor<number | null>;
-    loading: Accessor<boolean>;
+    accessory: Accessor<DigestAccessory | null>;
     onDismiss: () => void;
     onRegenerate: () => void;
+}
+
+/** Map digest lifecycle → the shared PaneRow status accent. */
+function accentFor(status: DigestStatus): PaneRowAccent {
+    switch (status) {
+        case "generating": return "running";
+        case "stale": return "idle"; // amber — drifted from the conversation
+        case "failed": return "error";
+        case "fresh": return "neutral";
+    }
 }
 
 function formatAge(ms: number): string {
@@ -27,62 +43,31 @@ function formatAge(ms: number): string {
     return `${Math.floor(hours / 24)}d ago`;
 }
 
-export const SessionDigestBanner = (props: SessionDigestBannerProps): JSX.Element => {
-    const [expanded, setExpanded] = createSignal(true);
+/** Right-of-title meta: age, plus a "+N new" hint when the digest is stale. */
+function metaFor(row: DigestAccessory): string | undefined {
+    const parts: string[] = [];
+    if (row.generatedAt) parts.push(formatAge(row.generatedAt));
+    if (row.stale && row.linesSinceDigest > 0) parts.push(`+${row.linesSinceDigest} new`);
+    return parts.length ? parts.join(" · ") : undefined;
+}
 
+export const SessionDigestBanner = (props: SessionDigestBannerProps): JSX.Element => {
     return (
-        <Show when={props.summary() != null || props.loading()}>
-            <div class="agent-session-digest">
-                <div class="agent-session-digest-header">
-                    <button
-                        class="agent-session-digest-toggle"
-                        onClick={() => setExpanded((v) => !v)}
-                        title={expanded() ? "Collapse" : "Expand"}
-                    >
-                        {expanded() ? "\u25BC" : "\u25B6"}
-                    </button>
-                    <span class="agent-session-digest-title">
-                        Session digest
-                        <Show when={props.generatedAt()}>
-                            {(ts) => (
-                                <span class="agent-session-digest-age">
-                                    {" \u00B7 "}{formatAge(ts())}
-                                </span>
-                            )}
-                        </Show>
-                    </span>
-                    <button
-                        class="agent-session-digest-action"
-                        onClick={props.onRegenerate}
-                        title="Regenerate digest"
-                        disabled={props.loading()}
-                    >
-                        {"\u21BB"}
-                    </button>
-                    <button
-                        class="agent-session-digest-action agent-session-digest-dismiss"
-                        onClick={props.onDismiss}
-                        title="Dismiss"
-                    >
-                        {"\u00D7"}
-                    </button>
+        <Show when={props.accessory()}>
+            {(row) => (
+                <div class="agent-session-digest">
+                    <PaneRow
+                        sigil={row().status === "generating" ? "↻" : "✦"}
+                        title={row().title}
+                        meta={metaFor(row())}
+                        accent={accentFor(row().status)}
+                        actions={[
+                            { glyph: "↻", title: "Regenerate digest", onClick: () => props.onRegenerate() },
+                            { glyph: "×", title: "Dismiss", onClick: () => props.onDismiss() },
+                        ]}
+                    />
                 </div>
-                <Show when={expanded() && props.loading()}>
-                    <div class="agent-session-digest-loading">Generating digest\u2026</div>
-                </Show>
-                <Show when={expanded() && !props.loading()}>
-                    <div class="agent-session-digest-body">
-                        <Show
-                            when={props.summary()}
-                            fallback={<span class="agent-session-digest-empty">No summary available.</span>}
-                        >
-                            {/* scrollable={false}: avoid OverlayScrollbars on reactive
-                                agent markdown (replaceChild crash, #1326). */}
-                            {(s) => <Markdown text={s()} scrollable={false} />}
-                        </Show>
-                    </div>
-                </Show>
-            </div>
+            )}
         </Show>
     );
 };
