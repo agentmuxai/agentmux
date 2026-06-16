@@ -181,8 +181,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // (ArrowUp). Holding — rather than sending immediately — is what makes the
     // recall a true un-send and lets the message land at a clean boundary.
     const heldQueue: Array<{ id: string; text: string }> = [];
+    // Re-entrancy guard: only ONE flush drains the queue at a time. The flush
+    // effect fires fire-and-forget on every tool/phase change, so without this
+    // a second boundary could start a concurrent flush whose AgentInputCommand
+    // interleaves with the first's — reordering sends. ReAgent P2 on PR #1484.
+    let flushing = false;
     onCleanup(() => {
         heldQueue.length = 0;
+        flushing = false;
     });
 
     // ── Inline picker state ───────────────────────────────────────────
@@ -432,13 +438,22 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
      * `deliverToBackend`.
      */
     const flushHeldMessages = async (): Promise<void> => {
-        if (heldQueue.length === 0) return;
-        const items = heldQueue.splice(0, heldQueue.length);
-        // Deliver sequentially (await each) so messages reach the CLI's stdin in
-        // submission order — concurrent delivery let the per-item cmd:args
-        // round-trips race and reorder the sends. ReAgent P2 on PR #1484.
-        for (const item of items) {
-            await deliverToBackend(item.text, item.id, /* armExpiry */ false);
+        // Single-flight: if a flush is already draining, let it finish — its
+        // loop re-checks the queue each iteration, so any message queued while
+        // it runs is picked up in order. A concurrent flush would let two
+        // AgentInputCommand chains interleave and reorder sends. P2 on PR #1484.
+        if (flushing) return;
+        flushing = true;
+        try {
+            // Drain one at a time, awaiting each delivery (incl. its cmd:args
+            // round-trip) so messages reach the CLI's stdin in submission order.
+            // shift() (not a snapshot) so items queued mid-flush are included.
+            while (heldQueue.length > 0) {
+                const item = heldQueue.shift()!;
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false);
+            }
+        } finally {
+            flushing = false;
         }
     };
 
