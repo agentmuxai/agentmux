@@ -7,6 +7,22 @@
 
 import { RpcClient } from "./rpc-client";
 
+/**
+ * Wire shape of a Trust Center service-OAuth flow status (account.oauth.*).
+ * Mirrors `oauth_status_wire()` in agentmux-srv/src/server/agent_handlers.rs.
+ *   pending       — flow starting up
+ *   url-available — PKCE: open `authUrl` in the browser
+ *   code-emitted  — device flow: show `userCode` + `verificationUri`
+ *   success       — backend created the account (keychain-backed); `accountId`
+ *   failed        — `error` describes why
+ */
+export type OAuthFlowStatus =
+    | { status: "pending" }
+    | { status: "url-available"; authUrl: string }
+    | { status: "code-emitted"; userCode: string; verificationUri: string }
+    | { status: "success"; accountId: string }
+    | { status: "failed"; error: string };
+
 // WshServerCommandToDeclMap
 class RpcApiType {
     // command "activity" [call]
@@ -720,6 +736,38 @@ class RpcApiType {
         metadata?: Record<string, unknown>;
     }> {
         return client.rpcCall("account.key.verify", data, opts);
+    }
+
+    // command "account.oauth.start" [call]
+    // Trust Center service OAuth (SPEC_TRUST_CENTER §4.2/§12.1). Resolves the
+    // provider's OAuth config (built-in public client id, or BYO clientId/secret),
+    // spawns the flow (PKCE loopback or device), and returns a session id + the
+    // initial status. A "not configured" / unknown-provider case comes back as a
+    // clean `error` field (not an RPC failure) so the UI can surface it.
+    AccountOAuthStartCommand(
+        client: RpcClient,
+        data: { provider: string; name: string; clientId?: string; clientSecret?: string },
+        opts?: RpcOpts,
+    ): Promise<{ sessionId?: string; status?: OAuthFlowStatus; error?: string }> {
+        return client.rpcCall("account.oauth.start", data, opts);
+    }
+
+    // command "account.oauth.poll" [call] — drive the flow to completion.
+    AccountOAuthPollCommand(
+        client: RpcClient,
+        data: { sessionId: string },
+        opts?: RpcOpts,
+    ): Promise<OAuthFlowStatus> {
+        return client.rpcCall("account.oauth.poll", data, opts);
+    }
+
+    // command "account.oauth.cancel" [call]
+    AccountOAuthCancelCommand(
+        client: RpcClient,
+        data: { sessionId: string },
+        opts?: RpcOpts,
+    ): Promise<{ cancelled: boolean }> {
+        return client.rpcCall("account.oauth.cancel", data, opts);
     }
 
     // command "linkagentidentity" [call]
