@@ -1,0 +1,95 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// PaneRow — shared auxiliary-pin row chrome. Status accent on a 3px left
+// border (the same palette the ActivityDock established in _shell-node.scss,
+// promoted here as the reusable base). Token-driven; no raw hex.
+// Spec: docs/specs/SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md §5.2.
+
+.pane-row {
+    border-left: 3px solid var(--border-color);
+    transition: border-left-color 0.2s ease;
+
+    &--running { border-left-color: var(--term-bright-green); }
+    &--active  { border-left-color: var(--accent-color); }
+    &--idle    { border-left-color: var(--secondary-text-color); }
+    &--done    { border-left-color: var(--accent-color); opacity: 0.75; }
+    &--error   { border-left-color: var(--error-color); }
+    &--stopped { border-left-color: var(--secondary-text-color); opacity: 0.6; }
+}
+
+.pane-row-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: 2px var(--space-2);
+    min-height: 24px;
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: var(--cursor-interactive);
+    user-select: none;
+}
+
+.pane-row-sigil {
+    flex: 0 0 auto;
+    color: var(--secondary-text-color);
+}
+
+.pane-row-title {
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: var(--text-sm);
+}
+
+.pane-row-meta {
+    flex: 0 0 auto;
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.pane-row-tail {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--secondary-text-color);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    opacity: 0.85;
+}
+
+.pane-row-action {
+    // Right-align the action cluster even when there is no tail to grow.
+    &:first-of-type { margin-left: auto; }
+
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 var(--space-1);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm, 0);
+    color: var(--secondary-text-color);
+    cursor: var(--cursor-interactive);
+    font-size: var(--text-sm);
+    line-height: 1;
+    transition: color 80ms ease, background 80ms ease;
+
+    &:hover {
+        color: var(--main-text-color);
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+    }
+
+    &--danger:hover {
+        color: var(--error-color);
+    }
+}
+
+.pane-row-body {
+    cursor: var(--cursor-default);
+}
