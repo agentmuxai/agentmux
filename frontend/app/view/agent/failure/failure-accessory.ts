@@ -25,6 +25,9 @@ export interface FailureActions {
     loginAgain: () => void;
     /** Open Trust Center → Accounts. */
     trustCenter: () => void;
+    /** Start a fresh agent session — recovery for a context-window overflow,
+     *  where resuming the same (full) session would only re-fail. */
+    newSession: () => void;
     /** Toggle the expanded stderr-tail body. */
     toggleDetails: () => void;
     /** Clear the failure (dismiss the row). */
@@ -114,7 +117,12 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             actions.push({ ...retry, glyph: "▶", label: "Continue" });
             break;
         case "context_exceeded":
-            actions.push({ ...retry, label: "New session & retry" });
+            // Resuming a context-exceeded session just re-fails (the window is
+            // still full), so the only real recovery is a fresh session.
+            actions.push({
+                glyph: "🆕", label: "New session", title: "Start a fresh session — the current one's context window is full",
+                primary: true, onClick: on.newSession,
+            });
             break;
         default: // killed, no_output, unknown_non_zero
             actions.push({ ...retry, label: "Retry" });

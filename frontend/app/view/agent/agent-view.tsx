@@ -681,12 +681,26 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const retryLastTurn = () => {
         const last = [...getDocument()].reverse().find((n) => n.type === "user_message");
         const msg = last && "message" in last ? (last as { message?: string }).message : undefined;
-        if (msg) void handleSendMessage(msg);
+        if (msg) {
+            void handleSendMessage(msg);
+        } else {
+            // No prior user message (e.g. the agent failed on its first
+            // launch/spawn) — fall back to respawning the agent rather than
+            // silently dismissing the row. Spec §5.1.
+            log("agent", "Retry — no prior message to re-send; relaunching the agent");
+            void status.startLaunchFlow();
+        }
     };
     const failureUI = useAgentFailure({
         blockId: model.blockId,
         onRetry: retryLastTurn,
         onTrustCenter: () => openBundleManager(),
+        // context_exceeded recovery — drop the over-full session and return to
+        // the picker for a clean relaunch (resuming would only re-fail).
+        onNewSession: () => {
+            log("agent", "New session — clearing the over-full context and returning to the picker");
+            void model.backToPicker();
+        },
         // P2 — real re-auth. An auth failure is a *CLI-provider* login lapse
         // (e.g. claude's subscription OAuth expired), not a Trust Center
         // service account. `startLaunchFlow` is the canonical path that

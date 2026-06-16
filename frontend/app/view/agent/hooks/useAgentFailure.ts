@@ -33,6 +33,8 @@ export interface UseAgentFailureOptions {
     onLoginAgain: () => void;
     /** Open Trust Center → Accounts. */
     onTrustCenter: () => void;
+    /** Start a fresh agent session (context-window overflow recovery). */
+    onNewSession: () => void;
 }
 
 export interface UseAgentFailureResult {
@@ -62,12 +64,23 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         setRetrying(false);
     };
 
+    // End the failure *episode*: clear the row AND restore the auto-retry
+    // budget. Used when the user explicitly dismisses or a genuinely new turn
+    // resolves the failure — NOT by `doRetry` (an auto-retry is still part of
+    // the same episode and must keep counting toward the cap, else a
+    // persistently-throttled turn would auto-retry forever). Spec §6.
+    const endEpisode = () => {
+        autoRetries = 0;
+        clear();
+    };
+
     const doRetry = () => {
         cancelCountdown();
         setRetrying(true);
         opts.onRetry();
         // The next turn's lifecycle clears the row (a new turn = no failure);
-        // also clear locally so the banner goes away immediately.
+        // also clear locally so the banner goes away immediately. Keep
+        // `autoRetries` — an auto-fired retry stays within the episode's cap.
         clear();
     };
 
@@ -106,7 +119,11 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             eventType: "controllerstatus",
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
-                if ((event as any)?.data?.shellprocstatus === "running" && failure()) clear();
+                // A new turn going "running" while a failure row is showing is
+                // a fresh episode — clear the row and restore the auto-retry
+                // budget. (During the auto-retry cascade `failure()` is already
+                // null here, so this never resets mid-cascade.)
+                if ((event as any)?.data?.shellprocstatus === "running" && failure()) endEpisode();
             },
         });
         onCleanup(() => {
@@ -126,8 +143,9 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 retry: doRetry,
                 loginAgain: opts.onLoginAgain,
                 trustCenter: opts.onTrustCenter,
+                newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
-                dismiss: clear,
+                dismiss: endEpisode,
             },
         );
     };

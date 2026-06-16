@@ -21,12 +21,13 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, trustCenter: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, trustCenter: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
         loginAgain: vi.fn(() => void _calls.loginAgain++),
         trustCenter: vi.fn(() => void _calls.trustCenter++),
+        newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
         dismiss: vi.fn(() => void _calls.dismiss++),
     };
@@ -82,6 +83,19 @@ describe("failureToRow", () => {
         const row = failureToRow(mkFailure({ code: "usage_limit" }), mkView(), mkActions());
         const trust = action(row, "Trust Center (switch / upgrade)");
         expect(trust?.primary).toBe(true);
+    });
+
+    it("context_exceeded → New session (not a resume-retry that would re-fail)", () => {
+        const on = mkActions();
+        const row = failureToRow(mkFailure({ code: "context_exceeded" }), mkView(), on);
+        const fresh = action(row, "New session");
+        expect(fresh?.primary).toBe(true);
+        fresh?.onClick();
+        expect(on._calls.newSession).toBe(1);
+        // Must NOT offer a plain retry (resuming a full context just re-fails).
+        expect(action(row, "Retry")).toBeUndefined();
+        expect(action(row, "Retry now")).toBeUndefined();
+        expect(on._calls.retry).toBe(0);
     });
 
     it("transient classes get a retry action wired to retry()", () => {
