@@ -25,6 +25,7 @@ pub mod rpc_types;
 pub mod schema;
 pub mod service;
 pub mod session_archive;
+pub mod session_backfill;
 pub mod shellexec;
 pub mod transcript_backfill;
 pub mod shellintegration;
