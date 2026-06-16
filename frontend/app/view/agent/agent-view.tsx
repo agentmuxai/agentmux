@@ -687,11 +687,16 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         blockId: model.blockId,
         onRetry: retryLastTurn,
         onTrustCenter: () => openBundleManager(),
+        // P2 — real re-auth. An auth failure is a *CLI-provider* login lapse
+        // (e.g. claude's subscription OAuth expired), not a Trust Center
+        // service account. `startLaunchFlow` is the canonical path that
+        // re-runs that login (surfacing the OAuth URL via the auth panel) and
+        // relaunches the agent; the relaunched process then reports
+        // `controllerstatus: running`, which clears this failure row. This is
+        // the same flow the legacy AgentRetryBar's button drives.
         onLoginAgain: () => {
-            // P2: in-pane re-auth (ListAgentIdentities → AccountOAuthStart/poll).
-            // For now route to Trust Center → Accounts so the user can re-auth there.
-            log("agent", "Login Again — opening Trust Center → Accounts (full in-pane re-auth lands in P2)");
-            openBundleManager();
+            log("auth", "Login Again — re-running the provider login flow");
+            void status.startLaunchFlow();
         },
     });
 

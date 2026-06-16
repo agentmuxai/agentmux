@@ -87,7 +87,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     };
 
     onMount(() => {
-        const unsub = waveEventSubscribe({
+        const unsubFailure = waveEventSubscribe({
             eventType: "agentfailure",
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
@@ -100,8 +100,18 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 if (isTransient(f.code)) armAutoRetry();
             },
         });
+        // Clear the row when a NEW turn starts (manual send or a retry) — the
+        // failure is from the *previous* turn, so a fresh "running" resolves it.
+        const unsubStatus = waveEventSubscribe({
+            eventType: "controllerstatus",
+            scope: WOS.makeORef("block", opts.blockId),
+            handler: (event) => {
+                if ((event as any)?.data?.shellprocstatus === "running" && failure()) clear();
+            },
+        });
         onCleanup(() => {
-            unsub();
+            unsubFailure();
+            unsubStatus();
             cancelCountdown();
         });
     });
