@@ -288,15 +288,20 @@ pub fn read_session_state(
     definition_id: &str,
 ) -> Result<(Option<String>, Option<i64>), String> {
     let zone = validate_and_current(definition_id)?;
-    if let Some(found) = read_snapshot_from(filestore, &zone)? {
-        return Ok((Some(found.0), Some(found.1)));
-    }
-    // Cross-channel fallback: the agent's snapshot may live only in the global
-    // store (it ran in another build/channel, or was backfilled there).
+    // Read the global store first: it always holds the agent-anchored
+    // (sourceBlockId="") snapshot. The per-channel copy carries the
+    // writing channel's local block id, which is stale the moment any
+    // OTHER block opens the agent (same channel, different tab/build).
+    // Preferring global ensures cross-channel opens never get a foreign
+    // sourceBlockId — the root cause of the blank-pane regression.
+    // Per-channel is the fallback for pre-global-store builds only.
     if let Some(gfs) = global_transcript_store() {
         if let Some(found) = read_snapshot_from(gfs, &zone)? {
             return Ok((Some(found.0), Some(found.1)));
         }
+    }
+    if let Some(found) = read_snapshot_from(filestore, &zone)? {
+        return Ok((Some(found.0), Some(found.1)));
     }
     Ok((None, None))
 }
