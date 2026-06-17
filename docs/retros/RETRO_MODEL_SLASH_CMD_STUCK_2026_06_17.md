@@ -66,19 +66,17 @@ Right now there are three exit paths from `sendMessage` that bypass the real age
 
 ---
 
-## Cascading confusion from `forcerestart`
+## Why `forcerestart` is required (and not the bug)
 
-A secondary issue that made model-setting feel flaky even before today's lock bug:
+`applyRuntimeChange` calls `ControllerResyncCommand` with `forcerestart: true` for persistent (Claude) controllers. This is necessary — **not** the bug.
 
-`applyRuntimeChange` calls `ControllerResyncCommand` with `forcerestart: true` for persistent (Claude) controllers. This kills the live process and waits for the next message to respawn. The intent was "apply the change immediately," but:
+The persistent controller keeps **one Claude process alive across all turns**. It does not respawn between turns; `send_message` only spawns on `!self.is_running()`. Writing `cmd:args` to meta has no effect on the already-running process. The only way to apply a model/effort change immediately is to kill the current process so that the next `send_message` spawns fresh with the new flags.
 
-1. The persistent controller re-reads `cmd:args` on **every spawn** anyway — the new model is already baked in at next spawn without a forcerestart.
-2. `forcerestart` kills the process synchronously (well, sends an async kill signal) but only publishes `STATUS_DONE` from the synchronous `stop()` call on the old controller. The background task's kill arm (the one that does the actual `child.kill().await`) does NOT publish a broker status update — so there's a window where the frontend has seen DONE but the backend hasn't confirmed it.
-3. If the agent was mid-response when `/model` was called, the forcerestart kills a streaming turn, leaving the blockfile with a partial response and no `turn_end` event. The next message then resumes from an inconsistent state.
+Two known rough edges with forcerestart that are acceptable:
+- The background kill arm in `persistent.rs` does not publish a broker `STATUS_DONE` event (only the synchronous `stop()` call does). This is benign — the frontend sees DONE from the synchronous path and the async arm's omission is redundant.
+- If called mid-streaming turn, the partial response stays in the blockfile with no `turn_end`. The pane recovers via `TurnReset` (slash path) or has no outstanding `TurnStart` at all (UI dropdown path).
 
-The safer fix for `applyRuntimeChange` is to **drop the forcerestart entirely**. Just write the meta. The next natural respawn (user's next message) will pick up the new `cmd:args`. The model change "applies to next turn" — exactly as the success message already says.
-
-The only reason to `forcerestart` would be to apply a change to an actively-streaming turn, but that's not a supported operation (you'd need to cancel the turn first). "Applies to next turn" is the correct semantic and doesn't need a forcerestart to deliver it.
+The stuck-pane bug was caused entirely by the missing `TurnReset`, not by `forcerestart`.
 
 ---
 
@@ -135,7 +133,6 @@ This structural fix is tracked as a follow-up; Fix 1 above is the minimum for th
 ## Checklist
 
 - [x] Root cause confirmed in code (agent-view.tsx:688-691, useAgentCommands.ts:300-303)
-- [ ] Fix 1: TurnReset on slash path
-- [ ] Fix 2: Drop forcerestart from applyRuntimeChange
-- [ ] Changeset added
+- [x] Fix: TurnReset on slash path (useAgentCommands.ts)
+- [x] Changeset added
 - [ ] Structural inversion tracked (follow-up issue)
