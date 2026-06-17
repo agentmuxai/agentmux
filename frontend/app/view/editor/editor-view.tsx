@@ -87,6 +87,12 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     // LSP-backed, so this is cheap) — the preview is an overlay, which keeps
     // cursor/scroll/undo intact across toggles and sidesteps CM build-timing.
     const [mdSourceTabs, setMdSourceTabs] = createSignal<Set<string>>(new Set());
+    // Live CodeMirror doc text for the active tab — the markdown preview binds
+    // to this, NOT model.contentAtom(): that memo only recomputes on file
+    // load / tab change (onContentChange deliberately doesn't bump it on
+    // keystrokes), so it would render stale pre-edit text. We seed liveDoc
+    // whenever CM is (re)built or restored, and update it on every doc change.
+    const [liveDoc, setLiveDoc] = createSignal("");
     const isMarkdown = (): boolean => model.languageAtom() === "markdown";
     const showRendered = (): boolean =>
         isMarkdown() && !mdSourceTabs().has(model.activeIdAtom() ?? "");
@@ -306,6 +312,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 if (update.docChanged) {
                     const content = update.state.doc.toString();
                     model.onContentChange(content);
+                    setLiveDoc(content); // keep the markdown preview in sync
                     // Debounced LSP didChange — Phase 1 ships full-sync,
                     // which is the simplest and works on every server.
                     if (lspChangeDebounce) clearTimeout(lspChangeDebounce);
@@ -359,6 +366,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             }),
             parent: containerRef,
         });
+        setLiveDoc(content); // seed preview from the freshly-built doc
     };
 
     onMount(() => {
@@ -374,6 +382,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         const lang = model.languageAtom();
         const readOnly = model.readOnlyAtom();
         if (content || model.filePathAtom()) {
+            setLiveDoc(content); // seed before async setupEditor to avoid a blank preview
             void setupEditor(content, lang, readOnly);
         }
     });
@@ -429,10 +438,12 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             const saved = cmStates.get(activeId);
             if (saved && cmView) {
                 cmView.setState(saved);
+                setLiveDoc(saved.doc.toString()); // seed preview from restored doc
                 // Re-wire LSP for the now-active file's content.
                 void startLspIfSupported(path, lang, content);
                 return;
             }
+            setLiveDoc(content); // seed before async setupEditor to avoid a blank preview
             void setupEditor(content, lang, readOnly).then(() => {
                 void startLspIfSupported(path, lang, content);
             });
@@ -825,7 +836,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                             toggling back keeps cursor/scroll/undo. */}
                         <Show when={showRendered()}>
                             <div class="editor-md-preview">
-                                <Markdown textAtom={() => model.contentAtom()} />
+                                <Markdown textAtom={() => liveDoc()} />
                             </div>
                         </Show>
                         {/* Rendered/Source toggle — markdown tabs only. */}
