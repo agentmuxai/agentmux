@@ -1,5 +1,70 @@
 # AgentMux Version History
 
+## 0.46.1 — 2026-06-16
+
+- fix(cef): low-memory pause page Resume button was inert (double-quoted JS string inside a double-quoted onclick attribute) — wire it via a <script> + addEventListener so OOM-paused windows can actually resume
+- fix(agent-pane): replace remaining <Index> with <Key> in virt list and <For> with <Index> in DiffViewer to close replaceChild crash class (#1326)
+- fix(host): eliminate ghost taskbar icon from pre-warmed pool window — apply WS_EX_TOOLWINDOW at on_window_created (reliable HWND) instead of on_after_created where BrowserHost::window_handle() can return null after page load
+- fix(browser-pane): hand keyboard focus back when a pane HWND is destroyed — redocking/closing a browser pane no longer locks typing app-wide (no more "open another window to get typing back")
+- feat(muxbus): delivery hierarchy P1+P2 — agent ID injection, URL fix, cloud push subscriber
+- fix(startup): wait for re-injected IPC creds before bridge init; retry on stale token; stop the recovery-reload loop
+- diag(browser-pane): log the create register-result (Fresh/Closing/AlreadyLive), requested window, and rect on the redock path — surfaces the previously-silent AlreadyLive race so the black-page-on-redock cause is conclusive in a repro
+- feat(agent-pane): session-digest accessory data model — pure projection of the digest into the Pane Accessories row model (status incl. a new "stale" state), mirroring the fork-set derivation
+- feat(agent): deliver AskUserQuestion answers for one-shot/container agents as a follow-up turn
+- feat(agent-pane): render the session digest as a PaneRow accessory — single status-accented row (fresh/stale/generating/failed) with age + "+N new" stale hint, replacing the bespoke banner
+- fix(agent): answered AskUserQuestion no longer re-surfaces its panel on history reload
+- refactor(agent-pane): remove the per-row hover strip (timestamp + expand button). Expand/collapse now lives on each surface's own header + the row keyboard handler; section headers and activity-log lines became click-to-toggle. Per-line hover timestamps are dropped.
+- fix(agent-pane): persistent shell hung on inherited stdin — npm/vite dev servers now start (null stdin)
+- feat(agent): answer AskUserQuestion via the Agent SDK control protocol
+- feat(muxbus): LAN tier — mDNS auth_key, agent cache, tier-3 inject forwarding
+- fix(ui): scrollbars use the default arrow cursor, not the link hand
+- fix(toolchain): GUI-launched AgentMux can find nvm/Homebrew node, npm & git — enrich the srv's PATH from the user's login shell (+ well-known toolchain dirs) so `npm install`/agent CLIs resolve when launched from Finder/Dock/DMG (was failing with "npm: command not found"). Additive, login-shell-sourced, no-op on Windows. P0 of SPEC_TOOLCHAIN_MANAGER.
+- chore(ui): add cursor design tokens + utilities and a stylelint guard against cursor on scrollbars
+- fix(activity-dock): higher-contrast pinned rows + larger stop/dismiss buttons
+- feat(toolchain): Toolchain manager in the hamburger menu — a new "Toolchain" item opens a modal showing the effective PATH (and how it was derived), OS/arch, and the detected version + path + status of node, npm, git, docker and every provider CLI, with install links for anything missing. P1 of SPEC_TOOLCHAIN_MANAGER (read-only; install-in-place is P2).
+- fix(widgets): hug content width in the More dropdown so short widget labels no longer leave a wide empty gap on the right (was min-width:170px, now width:max-content)
+- fix(cef): add `.0` before the `HWND -> *mut c_void` cast in app.rs (unbreak the Windows build; windows 0.57 `HWND` is a non-primitive struct).
+- feat(mcp): add SendMessage tool for agent-to-agent messaging
+- feat(agent): shared PaneRow auxiliary-pin primitive (forks Phase 1)
+- feat(muxlog): cross-instance log discovery, NDJSON rendering, filters and recipes
+- feat(agent-pane): surface the classified failure cause when an agent exits non-zero (SPEC_AGENT_FAILURE_DIAGNOSTICS Phase 2 — pane path). The `SubprocessController` now captures a stderr tail, runs it through `failure::classify`, and emits an `agentfailure` event; the pane shows the real reason (auth, rate-limit, OOM, context, …) + stderr tail instead of a bare "exited with code N".
+- feat(agent): fork-set derivation — the data model for the fork bar (forks Phase 2)
+- feat(statusbar): click CPU to open an adaptive per-core usage panel
+- fix(agent-pane): cross-channel history empty — global snapshot stored a channel-local sourceBlockId
+- fix(widgets): give the More dropdown a small min-width floor (120px) so it isn't razor-tight while still hugging content
+- feat(menu): rename the hamburger 'Toolchain' entry to 'Toolchain Manager'
+- feat(agent): PaneRegions declarative region container (forks Phase 1, aux-pins)
+- feat(reactive): controller-aware delivery — steer persistent & ACP agents mid-turn instead of dropping PTY keystrokes (Agent Control Protocol Phase 3)
+- feat(agent): ForkBar UI — the bottom-of-pane fork switcher (forks Phase 2)
+- feat(trust-center): wire the service-OAuth connect flow in the Accounts UI (Phase 3 frontend)
+- fix(agent-pane): backfill registry session_id so a cross-channel open resumes the original conversation
+- feat(agent): useForkSet — reactive fork-set hook feeding the fork bar (forks Phase 2)
+- feat(trust-center): brand-tile Accounts gallery with connected counts and OAuth/Key chooser
+- fix(dev): reap a stale Vite squatting the dev port instead of erroring on relaunch
+- feat(agent): send-now queue — instant panel, hold-until-next-tool-call delivery, ArrowUp recall, no 30s drop
+- feat(agent-pane): per-error-class failure recovery row with real re-auth + 5s auto-retry
+- fix(agent-pane): cross-channel restore uses stale highWaterMark — re-derive from global zone
+- fix(agent-session): read global snapshot first so cross-channel opens never get a stale per-channel sourceBlockId
+- fix(agent-session): G1 invariant — enforce sourceBlockId="" in global snapshot via debug_assert; schemaVersion 3 migration deferred to a follow-up PR
+- fix(dev): reap guard checks CWD so another clone's live Vite is never killed on port collision
+- fix(agent-pane): accept schemaVersion >= 2 so v3 snapshots are not treated as schema-mismatch
+- fix(term): give terminal I/O priority over perf telemetry on the WebSocket egress
+- chore(release): add --as <type> override to force a specific version bump (e.g. patch even when minor changesets are queued)
+- feat(agent): tool blocks stay expanded until scrolled off the top (replaces 3s collapse timer)
+- fix(persistent-agent): emit agent-message-accepted, persist user msgs to NDJSON, prefer global zone for history
+- feat(launcher): memory-aware host relaunch — wait out system OOM instead of crash-looping
+- feat(host): debounced memory-pressure detection + observability (mem_pressure)
+- fix(agent-pane): clip persistent-shell panel so collapsed build log doesn't paint behind the conversation
+- feat(host): proactive --disable-gpu at startup when commit is critically low
+- feat(pane.open): OpenEditor collapse_tree + floating-pane support
+- fix(muxbus): register persistent agents for Tier-1 delivery so inter-agent messages reach no-PTY panes (#1470)
+- feat(muxbus): unified agent-discovery endpoint + DiscoverAgents tool (host/LAN/WAN, addressable flag)
+- feat(host+ui): low-memory warning banner driven by mem_pressure
+- feat(muxlog): mem/doctor command — commit-free + pressure + live AgentMux footprint
+- fix(agent): apply model/effort/permission changes to running persistent (Claude) agents via resume-preserving restart
+- feat(trust-center): add AgentMux Cloud as a virtual first-class account in the Accounts gallery (brain-alternate logo, reuses the existing muxbus PKCE sign-in)
+
+
 ## 0.46.0 — 2026-06-15
 
 - feat(agent): backfill pre-existing agent conversations into the global transcript store
