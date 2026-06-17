@@ -270,7 +270,7 @@ pseudo-elements**, because inheritance from the scroll host is otherwise unavoid
 | 1 | Pin `cursor: var(--cursor-default)` on `*::-webkit-scrollbar`, `-track`, `-thumb`, `-corner` (§5.1) | ✅ done — `app.scss` |
 | 2 | Replace the inverted stylelint ban with a value-scoped grep gate that forbids `pointer`/`text` and allows the arrow (§5.2) | ✅ done — removed `.stylelintrc.json` entry; added `scripts/check-scrollbar-cursor.sh`, wired into `task build:frontend` |
 | 3 | Correct the `app.scss` comment, the `theme.scss` token comment, and the analysis doc — strike "inherits the arrow" | ✅ done |
-| 4 | Manually verify all three surfaces × both themes before merge (§5.4) | ⏳ pending — needs `task dev` run |
+| 4 | Manually verify all three surfaces × both themes before merge (§5.4) | ✅ done — verified in `task dev` (2026-06-17): main conversation scrollbar = arrow (was I-beam), live-tool log scrollbar = arrow (was hand), other surfaces = arrow |
 | 5 | Note on the cursor token block: "scroll pseudo-elements must pin the cursor; they inherit otherwise" | ✅ done — `theme.scss` |
 
 > **Guard self-test (2026-06-17).** `scripts/check-scrollbar-cursor.sh` was
