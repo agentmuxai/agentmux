@@ -15,7 +15,7 @@ import { Logger } from "@/util/logger";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom";
+export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom" | "agentmux";
 export type AccountKind = "pat" | "role" | "api_key" | "env_ref" | "oauth";
 export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking";
 export type IdentityTab = "accounts" | "assignments";
@@ -115,6 +115,7 @@ export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     google: "Google",
     slack: "Slack",
     custom: "Custom",
+    agentmux: "AgentMux",
 };
 
 export const PROVIDER_COLORS: Record<AccountProvider, string> = {
@@ -125,6 +126,7 @@ export const PROVIDER_COLORS: Record<AccountProvider, string> = {
     google: "#e8f0fe",
     slack: "#f3e8fd",
     custom: "#f1f5f9",
+    agentmux: "#ede9fe",
 };
 
 export const KIND_LABELS: Record<AccountKind, string> = {
