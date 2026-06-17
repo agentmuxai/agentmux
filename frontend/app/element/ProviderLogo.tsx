@@ -47,6 +47,11 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
 
         if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 
+        // AgentMux's own brand mark — the brain-alternate logo. `brainSvg`
+        // (@/app/asset/logo-brain.svg) is byte-identical to the source
+        // frontend/logos/agentmux-logo-brain-alternate.svg.
+        if (p === "agentmux") return { html: brainSvg };
+
         // Handcrafted multi-color Slack mark (the package ships only a mono
         // variant; the brand is recognized by its four colors).
         if (p === "slack") {

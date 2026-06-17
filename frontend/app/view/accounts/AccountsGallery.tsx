@@ -15,15 +15,37 @@ import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view
 import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
 import "./accounts-gallery.scss";
 
-export function AccountsGallery({ model }: { model: IdentityViewModel }): JSX.Element {
+export function AccountsGallery(props: {
+    model: IdentityViewModel;
+    /** True when an AgentMux Cloud session is connected — drives the agentmux
+     *  tile's "1 connected" badge (projected, not a stored IdentityAccount). */
+    agentMuxConnected?: () => boolean;
+    /** Open the dedicated AgentMux connect panel instead of the OAuth/Key
+     *  chooser. Required for the agentmux tile to do anything. */
+    onAgentMux?: () => void;
+}): JSX.Element {
+    const model = props.model;
     const [chooser, setChooser] = createSignal<ServiceTile | null>(null);
 
-    const countFor = (id: AccountProvider): number => model.accountsByProvider().get(id)?.length ?? 0;
+    const countFor = (id: AccountProvider): number => {
+        if (id === "agentmux") return props.agentMuxConnected?.() ? 1 : 0;
+        return model.accountsByProvider().get(id)?.length ?? 0;
+    };
 
     const pick = (tile: ServiceTile, mode: AuthMode) => {
         const kind: AccountKind = mode === "oauth" ? "oauth" : tile.keyKind;
         setChooser(null);
         model.openAddFormFor(tile.id, kind);
+    };
+
+    const openTile = (tile: ServiceTile) => {
+        // AgentMux Cloud is a singleton session, not a per-credential account —
+        // open its dedicated connect panel rather than the OAuth/Key chooser.
+        if (tile.id === "agentmux") {
+            props.onAgentMux?.();
+            return;
+        }
+        setChooser(tile);
     };
 
     return (
@@ -37,7 +59,7 @@ export function AccountsGallery({ model }: { model: IdentityViewModel }): JSX.El
                                 type="button"
                                 class="account-tile"
                                 classList={{ "account-tile--connected": n() > 0 }}
-                                onClick={() => setChooser(tile)}
+                                onClick={() => openTile(tile)}
                                 aria-label={`${tile.displayName} — ${n()} connected, add account`}
                             >
                                 <Show when={n() > 0}>
