@@ -16,6 +16,8 @@ import * as WOS from "@/app/store/wos";
 import type { AgentRuntimeConfig, PermissionMode, ModelChoice, EffortLevel } from "../types";
 import { DEFAULT_RUNTIME_CONFIG } from "../types";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
+import { applyRuntimeChange } from "../runtime-apply";
+import { getProvider } from "../providers";
 
 interface AgentControlBarProps {
     blockId: string;
@@ -73,14 +75,14 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
     };
 
     const updateRuntime = async (patch: Partial<AgentRuntimeConfig>) => {
-        const current = runtime();
-        const updated = { ...current, ...patch };
-        const oref = WOS.makeORef("block", blockId);
+        const updated = { ...runtime(), ...patch };
         try {
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref,
-                meta: { "agent:runtime": updated },
-            });
+            // Persist + (for persistent Claude) rebuild args & force-restart so
+            // the change applies to the running agent. Previously this wrote
+            // only `agent:runtime` meta, which silently no-op'd for persistent
+            // Claude — picking Opus/Sonnet here didn't take effect. Now shared
+            // with the /model slash path via applyRuntimeChange.
+            await applyRuntimeChange(blockId, getProvider(providerId), updated);
         } catch {
             // Silently ignore — settings will retry on next change
         }

@@ -16,11 +16,8 @@
  * (current)`, and Enter is a no-op confirmation.
  */
 
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import * as WOS from "@/app/store/wos";
-import { staticTabId } from "@/app/store/global";
-import { buildRuntimeArgs, getRuntimeConfig } from "../../buildRuntimeArgs";
+import { getRuntimeConfig } from "../../buildRuntimeArgs";
+import { applyRuntimeChange } from "../../runtime-apply";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -41,37 +38,11 @@ async function updateRuntime(
     const current = getRuntimeConfig(ctx.block()?.meta);
     const updated: AgentRuntimeConfig = { ...current, ...patch };
     try {
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", ctx.blockId),
-            meta: { "agent:runtime": updated },
-        });
-
-        // PERSISTENT controllers (Claude stream-json) keep ONE CLI process alive
-        // across turns, so runtime flags (model/effort/permission) baked in at
-        // spawn never change from a meta-only update — the picker would silently
-        // no-op. (Subprocess controllers re-spawn per turn, so it just works
-        // there.) Rebuild cmd:args and force a controller restart; the persistent
-        // controller now resumes via --resume so the conversation is preserved.
-        //
-        // Regression: PR #1451 (a05060b0, 2026-06-15) flipped Claude from
-        // subprocess→persistent for the Agent SDK control protocol without
-        // teaching the runtime-change path to restart persistent controllers, so
-        // /model (and the inline picker) silently stopped taking effect.
-        const prov = ctx.provider();
-        if (prov?.controllerType === "persistent") {
-            const baseArgs = prov.persistentLaunchArgs ?? prov.launchArgs;
-            const updatedArgs = buildRuntimeArgs(baseArgs, updated, prov.id);
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", ctx.blockId),
-                meta: { "cmd:args": updatedArgs },
-            });
-            await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: staticTabId(),
-                blockid: ctx.blockId,
-                forcerestart: true,
-            });
-        }
-
+        // Persist + (for persistent Claude) rebuild cmd:args & force-restart so
+        // the change applies to the running agent. Shared with the GUI control
+        // bar via applyRuntimeChange — the persistent rebuild/restart used to
+        // live only here (#1503), so the dropdown silently no-op'd.
+        await applyRuntimeChange(ctx.blockId, ctx.provider(), updated);
         return { ok: true, updated };
     } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
