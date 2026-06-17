@@ -47,7 +47,7 @@ export function RecordTable(props: { node: ToolNode }): JSX.Element {
                     </tbody>
                 </table>
                 <Show when={data!.truncatedRows > 0}>
-                    <OutputHiddenMarker hidden={data!.truncatedRows} noun="line" from="head" />
+                    <OutputHiddenMarker hidden={data!.truncatedRows} noun="row" from="head" />
                 </Show>
             </div>
         </Show>

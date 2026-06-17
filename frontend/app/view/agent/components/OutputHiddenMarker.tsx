@@ -14,8 +14,8 @@ interface OutputHiddenMarkerProps {
     /** How many units were dropped. */
     hidden: number;
     /** Unit noun — "line" for text bodies, "block" for the chunk log,
-     *  "result" for result-card lists (search results, …). */
-    noun: "line" | "block" | "result";
+     *  "result" for result-card lists (search results, …), "row" for tables. */
+    noun: "line" | "block" | "result" | "row";
     /** "tail" hides older content (marker sits above the body); "head"
      *  hides later content (marker sits below). Default "tail". */
     from?: "head" | "tail";

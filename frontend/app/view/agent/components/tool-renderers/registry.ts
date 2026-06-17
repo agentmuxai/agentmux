@@ -10,8 +10,11 @@
  *
  * A renderer is the highest-priority entry whose matcher accepts the node;
  * ties break by registration order. Convention: built-in (coarse-kind) renderers
- * register at priority 0, name-matched rich renderers above (10), shape-matched
- * between (5), and a catch-all below (-Infinity).
+ * register at priority 0; name-matched rich renderers above the built-ins (e.g.
+ * 10, WebSearch); shape-matched renderers sit where they should win — above the
+ * built-ins to override them, or *below* (e.g. -1, RecordTable) to only improve
+ * the otherwise-JSON unknown-tool path; a catch-all sits at the bottom
+ * (-Infinity).
  *
  * See docs/specs/SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md.
  */
