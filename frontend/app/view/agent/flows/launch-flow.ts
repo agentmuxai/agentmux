@@ -52,6 +52,13 @@ export interface LaunchFlowOptions {
     authEnv?: Record<string, string>;
     /** Called once when login is confirmed — append a success message to the chat. */
     onLoginSuccess?: (email: string | null) => void;
+    /**
+     * Returns the pane's current `{rows, cols}` (or undefined if not laid out
+     * yet). Used to seed the PTY size on the Phase-3 resync so the agent CLI is
+     * born at the right width, avoiding the post-spawn resize race. See
+     * docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+     */
+    getInitialTermSize?: () => { rows: number; cols: number } | undefined;
 }
 
 export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
@@ -277,10 +284,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // Phase 3: Controller Registration
     log("controller", "registering subprocess controller...");
     try {
+        // Seed the PTY at the pane's current width so the agent CLI wraps
+        // correctly from its first byte — the backend opens the PTY at this
+        // size (shell.rs `pty_size_from_rt_opts`), avoiding the post-spawn
+        // resize race. Omitted when the pane isn't laid out yet; the live
+        // ResizeObserver in usePtyWidth corrects any later change.
+        const initialTermSize = opts.getInitialTermSize?.();
         await RpcApi.ControllerResyncCommand(TabRpcClient, {
             tabid: staticTabId(),
             blockid: blockId,
             forcerestart: false,
+            ...(initialTermSize ? { rtopts: { termsize: initialTermSize } } : {}),
         });
         const rts = await BlockService.GetControllerStatus(blockId);
         const status = rts?.shellprocstatus ?? "init";
