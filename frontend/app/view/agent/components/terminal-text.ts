@@ -31,7 +31,8 @@ function extract(result: unknown): string | null {
         return [stdout ?? "", stderr ?? ""].filter((s) => s.length > 0).join("\n");
     }
 
-    // Generic string carriers, same precedence as summarize().
+    // Generic string carriers: prefer `output`, then `content` (note: this is the
+    // opposite of summarize()'s content-before-output order — see the file doc).
     if (typeof r.output === "string") return r.output;
     if (typeof r.content === "string") return r.content;
     return null;
