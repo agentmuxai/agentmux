@@ -11,25 +11,31 @@
  * their output at whatever cols the PTY was opened with (80) and
  * the captured live-log shows hard wraps that don't match the pane.
  *
- * The backend (`shell.rs`) already accepts `termsize: { rows, cols }`
- * on incoming `controllerinput` messages and forwards it to
- * `master.resize(...)`. This hook supplies the value:
+ * The backend (`shell.rs`) accepts `termsize: { rows, cols }` on incoming
+ * `controllerinput` messages and forwards it to `master.resize(...)`, and
+ * also seeds the PTY at that size on spawn (`rtopts.termsize` on the resync;
+ * see launch-flow.ts). This hook supplies the value for *changes*:
  *
  *   1. Attaches a `ResizeObserver` to the supplied container ref.
  *   2. Converts width-in-pixels to cols using the computed monospace
  *      cell width (`font-size × ~0.6`).
  *   3. Debounces by `DEBOUNCE_MS` so a drag-resize emits at most one
  *      RPC per gesture.
- *   4. Sends `RpcApi.ControllerInputCommand` with `termsize`.
+ *   4. Defers the send until the controller is ready to accept input
+ *      ("running"), then sends `RpcApi.ControllerInputCommand` with
+ *      `termsize` — so a resize never races the per-turn PTY spawn.
  *
- * Caveat (documented in
- * `docs/analysis/AGENT_PANE_PTY_WRAP_2026_05_23.md`): lines already
- * in the live-log buffer stay wrapped at whatever cols was active
- * when they were captured. Only NEW output reflows.
+ * Caveats: (a) lines already in the live-log buffer stay wrapped at the cols
+ * active when they were captured — only NEW output reflows
+ * (`docs/analysis/AGENT_PANE_PTY_WRAP_2026_05_23.md`); (b) the initial-resize
+ * race and its fix are in `docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md`.
  */
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { BlockService } from "@/app/store/services";
+import { waveEventSubscribe } from "@/app/store/wps";
+import * as WOS from "@/app/store/wos";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 
 export interface UsePtyWidthOpts {
@@ -66,6 +72,36 @@ function readFontSizePx(el: HTMLElement): number {
     return 15; // matches the SCSS fallback for --termfontsize.
 }
 
+/**
+ * Compute a `{rows, cols}` TermSize from an element's current width using the
+ * same monospace math as the live resize path. Returns undefined when the
+ * element is absent or not yet laid out (`clientWidth <= 0`) so callers omit
+ * the value rather than send a bogus size.
+ *
+ * Used to seed the PTY at spawn via the resync `rtopts.termsize`
+ * (`launch-flow.ts` Phase 3 → `shell.rs::pty_size_from_rt_opts`), so the agent
+ * CLI is born at the right width instead of relying on a post-spawn resize that
+ * races controller startup. See
+ * docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+ */
+export function computeTermSizeFromEl(
+    el: HTMLElement | undefined,
+): { rows: number; cols: number } | undefined {
+    if (!el) return undefined;
+    const width = el.clientWidth;
+    if (width <= 0) return undefined;
+    return { rows: DEFAULT_ROWS, cols: computeCols(width, readFontSizePx(el)) };
+}
+
+/**
+ * Only resize failures caused by the controller not yet (or no longer) being
+ * able to accept input are worth retrying. Anything else (malformed RPC, etc.)
+ * is permanent — retrying just spams the activity log.
+ */
+function isRetryableResizeError(msg: string): boolean {
+    return msg.includes("controller is not running") || msg.includes("no controller for block");
+}
+
 export function usePtyWidth(opts: UsePtyWidthOpts): void {
     onMount(() => {
         const el = opts.elementRef();
@@ -76,20 +112,30 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
         let lastCols = -1;
         let timer: ReturnType<typeof setTimeout> | undefined;
 
-        // codex P1 on #986: the controller can be unregistered at first
-        // mount (launcher async-spawns it AFTER `startLaunchFlow` runs),
-        // so the initial `controllerinput` send fails with "controller is
-        // not running" and `lastCols` was being set BEFORE the RPC
-        // resolved — meaning we'd never retry the same width and the PTY
-        // stayed at the fallback 200 for the whole session unless the
-        // user manually resized the pane.
+        // Readiness gate. The backend's `send_input` rejects a resize with
+        // "controller is not running" until the controller's input channel
+        // exists, and for an agent pane the process is per-turn — so the PTY
+        // can only accept a resize while a turn is live ("running"). Sending
+        // before that (e.g. the at-mount ResizeObserver delivery during the
+        // launch-flow spawn) is what produced the spurious "failed after 3
+        // attempts" warning. So we DEFER sends until the controller is ready,
+        // coalesce the latest pending width, and flush on "running". `lastCols`
+        // is still set only AFTER the RPC resolves, so a failed send is retried.
         //
-        // Fix: only mark `lastCols` AFTER the RPC succeeds. Retry up to 2
-        // times on failure with a short backoff so the controller has a
-        // chance to come up. A user-driven resize remains independent —
-        // each new width attempts a fresh send.
+        // The initial width is normally already correct: the launch flow seeds
+        // the PTY at spawn via `rtopts.termsize` (launch-flow.ts), so this send
+        // is a correction, not the thing that fixes wrap.
+        // See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+        let controllerReady = false;
+        let pendingCols: number | null = null;
+
         const send = (cols: number, retriesLeft: number = 2) => {
             if (cols === lastCols) return;
+            // Not live yet — stash the latest width; flushed on "running".
+            if (!controllerReady) {
+                pendingCols = cols;
+                return;
+            }
             RpcApi.ControllerInputCommand(TabRpcClient, {
                 blockid: opts.blockId,
                 termsize: { rows: DEFAULT_ROWS, cols },
@@ -99,8 +145,11 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
                 })
                 .catch((err: unknown) => {
                     const msg = err instanceof Error ? err.message : String(err);
-                    if (retriesLeft > 0) {
-                        const delay = (3 - retriesLeft) * 500;
+                    // Only controller-not-ready races are transient; jitter the
+                    // backoff so many panes mounting together don't retry in
+                    // lockstep. Layer A makes this path non-load-bearing.
+                    if (retriesLeft > 0 && isRetryableResizeError(msg)) {
+                        const delay = (3 - retriesLeft) * 400 + Math.floor(Math.random() * 200);
                         opts.log?.(
                             "pty",
                             `resize to ${cols} cols failed: ${msg} (retrying in ${delay}ms)`,
@@ -108,9 +157,12 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
                         );
                         setTimeout(() => send(cols, retriesLeft - 1), delay);
                     } else {
+                        // Either the retry budget is spent or the error is
+                        // permanent — say which, so the log isn't misleading.
+                        const reason = isRetryableResizeError(msg) ? "after 3 attempts" : "(not retryable)";
                         opts.log?.(
                             "pty",
-                            `resize to ${cols} cols failed after 3 attempts: ${msg}`,
+                            `resize to ${cols} cols failed ${reason}: ${msg}`,
                             "warn",
                         );
                     }
@@ -126,25 +178,62 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
             send(computeCols(width, fontSize));
         };
 
+        const markReady = () => {
+            controllerReady = true;
+            if (pendingCols != null && pendingCols !== lastCols) {
+                const cols = pendingCols;
+                pendingCols = null;
+                send(cols);
+            }
+        };
+
         const observer = new ResizeObserver(() => {
             if (timer) clearTimeout(timer);
             timer = setTimeout(compute, DEBOUNCE_MS);
         });
+        // observe() delivers an initial notification with the current size, so
+        // the at-mount width is captured here (deferred via the gate above) —
+        // no separate initial timer needed.
         observer.observe(el);
 
-        // Fire once after mount so the agent gets the right cols before
-        // its first tool invocation, not just after the user resizes.
-        // Use the same debounced path so this initial value can be
-        // coalesced with any layout-driven ResizeObserver burst at mount.
-        if (timer) clearTimeout(timer);
-        timer = setTimeout(compute, DEBOUNCE_MS);
+        // Flush on each turn's spawn: "running" now fires only after the input
+        // channel is ready (shell.rs). Clear readiness on "done" so a resize
+        // made while the agent is idle is coalesced and re-applied when the
+        // next turn starts, rather than failing against a dead PTY.
+        const unsubStatus = waveEventSubscribe({
+            eventType: "controllerstatus",
+            scope: WOS.makeORef("block", opts.blockId),
+            handler: (event) => {
+                const status = (event as any)?.data?.shellprocstatus;
+                if (status === "running") markReady();
+                else if (status === "done") controllerReady = false;
+            },
+        });
+
+        // Re-mount path: the controller may already be running, in which case
+        // the event above won't re-fire — probe once so a pending resize flushes.
+        BlockService.GetControllerStatus(opts.blockId)
+            .then((rts) => {
+                if (rts?.shellprocstatus === "running") markReady();
+            })
+            .catch(() => {
+                // status unknown — the subscription covers the fresh-launch path.
+            });
 
         onCleanup(() => {
             if (timer) clearTimeout(timer);
             observer.disconnect();
+            unsubStatus();
         });
     });
 }
 
 // Export internals for unit tests / sanity checks.
-export const __test__ = { computeCols, CELL_WIDTH_RATIO, MIN_COLS, DEBOUNCE_MS };
+export const __test__ = {
+    computeCols,
+    computeTermSizeFromEl,
+    isRetryableResizeError,
+    CELL_WIDTH_RATIO,
+    MIN_COLS,
+    DEBOUNCE_MS,
+};

@@ -45,7 +45,7 @@ import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useProcessCount } from "./hooks/useProcessCount";
-import { usePtyWidth } from "./hooks/usePtyWidth";
+import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -506,6 +506,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         return out;
     };
 
+    // Root element ref — declared before useAgentControllerStatus so its
+    // getInitialTermSize closure can read the laid-out pane width when the
+    // launch flow's Phase-3 resync runs (the ref is assigned during render,
+    // before onMount fires). Also consumed by dropAttach + usePtyWidth below.
+    let rootRef: HTMLDivElement | undefined;
+
     const status = useAgentControllerStatus({
         blockId: model.blockId,
         provider,
@@ -524,6 +530,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             });
         },
         onReady: () => onReadyFn?.(),
+        getInitialTermSize: () => computeTermSizeFromEl(rootRef),
     });
 
     onMount(() => {
@@ -877,8 +884,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Persistence is owned by the universal zoom framework — see the
     // note below where the inline handlers were removed.
-
-    let rootRef: HTMLDivElement | undefined;
 
     // File-drop attach. Drop a file onto the agent pane → copy it into the
     // agent's CWD AND splice `@filename` into the composer at the caret, so

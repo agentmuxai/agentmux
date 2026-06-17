@@ -37,7 +37,7 @@ use crate::backend::eventbus::EventBus;
 use crate::backend::shellexec::{ConnInterface, ShellProc};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::obj::{self, MetaMapType};
+use crate::backend::obj::{self, MetaMapType, RuntimeOpts};
 use crate::backend::wps;
 
 /// Cap on the out-of-order input reorder buffer (`input_seq_buf`).
@@ -314,13 +314,58 @@ impl ShellController {
             super::publish_controller_status(broker, &status);
         }
     }
+
+    /// Resolve the initial PTY geometry from the resync `rt_opts` payload.
+    ///
+    /// The agent pane is a custom UI (not xterm.js), so the PTY never receives
+    /// a `fitAddon` resize and must be born at the right width — otherwise the
+    /// first batch of agent/tool output wraps at the fallback width until a
+    /// post-spawn resize RPC lands, and that RPC races controller startup (it
+    /// can fail outright). The frontend computes cols from the pane and passes
+    /// them as `rtopts.termsize` on the `controllerresync` command (see
+    /// `usePtyWidth.ts` / `launch-flow.ts`).
+    ///
+    /// Falls back to the historical 25x200 default when `rt_opts` is absent,
+    /// unparseable, or carries the serde-default termsize (`rows==0 && cols==0`,
+    /// per `obj::is_default_term_size`). Per-field guards let a cols-only
+    /// payload keep the default row count. Each axis is clamped to `[1, 1000]`
+    /// so the `i64 → u16` cast is lossless and a bogus value cannot open a
+    /// zero-size or wrapped-size PTY.
+    /// See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+    fn pty_size_from_rt_opts(rt_opts: &Option<serde_json::Value>) -> PtySize {
+        // Historical fallback geometry. Cols 200 keeps the agent-pane live-log
+        // from hard-wrapping at ~80 before the dynamic resize lands.
+        const DEFAULT_PTY_ROWS: u16 = 25;
+        const DEFAULT_PTY_COLS: u16 = 200;
+        let (mut rows, mut cols) = (DEFAULT_PTY_ROWS, DEFAULT_PTY_COLS);
+        if let Some(v) = rt_opts {
+            if let Ok(rt) = serde_json::from_value::<RuntimeOpts>(v.clone()) {
+                let ts = &rt.termsize;
+                // rows==0 && cols==0 is the serde default → treat as absent.
+                if !(ts.rows == 0 && ts.cols == 0) {
+                    if ts.cols > 0 {
+                        cols = ts.cols.clamp(1, 1000) as u16;
+                    }
+                    if ts.rows > 0 {
+                        rows = ts.rows.clamp(1, 1000) as u16;
+                    }
+                }
+            }
+        }
+        PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        }
+    }
 }
 
 impl Controller for ShellController {
     fn start(
         &self,
         block_meta: MetaMapType,
-        _rt_opts: Option<serde_json::Value>,
+        rt_opts: Option<serde_json::Value>,
         force: bool,
     ) -> Result<(), String> {
         let cmd_str_preview = Self::get_cmd_str(&block_meta);
@@ -348,13 +393,12 @@ impl Controller for ShellController {
         // Get connection info
         let conn_name = Self::get_conn_name(&block_meta);
 
-        // Update status to running and publish
+        // Update status to running.
         {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_RUNNING);
             inner.conn_name = conn_name.clone();
         }
-        self.publish_status();
 
         // Create input channel. Unbounded: input must never be silently
         // dropped on burst (the paste-truncation bug). See SHELL_INPUT_CH_SIZE.
@@ -365,6 +409,15 @@ impl Controller for ShellController {
             inner.input_seq_next = 0;
             inner.input_seq_buf.clear();
         }
+
+        // Publish "running" only AFTER `input_tx` exists, so the event is a
+        // truthful readiness signal: a frontend that resizes the PTY the instant
+        // it sees "running" will not hit `send_input`'s "controller is not
+        // running" guard (which fires while `input_tx` is None). The channel is
+        // unbounded, so a resize enqueued before the input task spawns is
+        // buffered, not lost.
+        // See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+        self.publish_status();
 
         // Check if we have a conn_factory (test/mock path)
         let has_factory = self.conn_factory.lock().unwrap().is_some();
@@ -414,19 +467,17 @@ impl Controller for ShellController {
 
         // Real PTY path.
         //
-        // Initial cols bumped to 200 (was 80) so the agent-pane live-log
-        // doesn't render hard-wrapped at ~80 chars before the frontend's
-        // dynamic resize lands (see hooks/usePtyWidth.ts and
-        // docs/analysis/AGENT_PANE_PTY_WRAP_2026_05_23.md). The dynamic
-        // resize coalesces over a ~150 ms debounce after mount, so the
-        // PTY uses this default for the very first batch of output.
+        // Open the PTY at the size the frontend computed from the pane (passed
+        // as `rtopts.termsize` on the resync), so the agent CLI and its tools
+        // wrap correctly from the very first byte. The earlier code always
+        // opened at a fixed 200 cols and relied on a post-spawn resize RPC to
+        // correct it — but that RPC races controller startup and could fail
+        // outright, leaving output wrapped at 200 all session. Seeding the size
+        // here removes that race; `pty_size_from_rt_opts` falls back to the
+        // historical 25x200 when no size was supplied (e.g. programmatic
+        // spawns). See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
         let pty_system = native_pty_system();
-        let pty_size = PtySize {
-            rows: 25,
-            cols: 200,
-            pixel_width: 0,
-            pixel_height: 0,
-        };
+        let pty_size = Self::pty_size_from_rt_opts(&rt_opts);
 
         let pair = pty_system.openpty(pty_size).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "failed to open PTY");
@@ -437,7 +488,7 @@ impl Controller for ShellController {
             self.unlock_run();
             format!("failed to open PTY: {e}")
         })?;
-        tracing::info!(block_id = %self.block_id, rows = 25, cols = 200, "PTY opened");
+        tracing::info!(block_id = %self.block_id, rows = pty_size.rows, cols = pty_size.cols, "PTY opened");
 
         // Determine shell command
         let cmd_str = Self::get_cmd_str(&block_meta);
@@ -1559,6 +1610,62 @@ mod tests {
             serde_json::Value::String(cmd.to_string()),
         );
         meta
+    }
+
+    // ── pty_size_from_rt_opts ────────────────────────────────────────────
+    // Seeds the initial PTY geometry from the resync `rtopts` payload so the
+    // agent pane is born at the right width (no post-spawn resize race).
+    // See docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+
+    #[test]
+    fn pty_size_defaults_when_rt_opts_absent() {
+        let sz = ShellController::pty_size_from_rt_opts(&None);
+        assert_eq!((sz.rows, sz.cols), (25, 200));
+    }
+
+    #[test]
+    fn pty_size_defaults_when_termsize_is_serde_default() {
+        // rows==0 && cols==0 is the serde default → treat as absent.
+        let v = serde_json::json!({ "termsize": { "rows": 0, "cols": 0 } });
+        let sz = ShellController::pty_size_from_rt_opts(&Some(v));
+        assert_eq!((sz.rows, sz.cols), (25, 200));
+    }
+
+    #[test]
+    fn pty_size_honors_supplied_termsize() {
+        let v = serde_json::json!({ "termsize": { "rows": 50, "cols": 130 } });
+        let sz = ShellController::pty_size_from_rt_opts(&Some(v));
+        assert_eq!((sz.rows, sz.cols), (50, 130));
+    }
+
+    #[test]
+    fn pty_size_keeps_default_rows_for_cols_only_payload() {
+        let v = serde_json::json!({ "termsize": { "rows": 0, "cols": 130 } });
+        let sz = ShellController::pty_size_from_rt_opts(&Some(v));
+        assert_eq!((sz.rows, sz.cols), (25, 130));
+    }
+
+    #[test]
+    fn pty_size_clamps_oversized_values() {
+        let v = serde_json::json!({ "termsize": { "rows": 99999, "cols": 99999 } });
+        let sz = ShellController::pty_size_from_rt_opts(&Some(v));
+        assert_eq!((sz.rows, sz.cols), (1000, 1000));
+    }
+
+    #[test]
+    fn pty_size_defaults_on_unparseable_rt_opts() {
+        // Unknown keys deserialize to RuntimeOpts default (termsize 0/0) → fallback.
+        let v = serde_json::json!({ "totally": "unrelated" });
+        let sz = ShellController::pty_size_from_rt_opts(&Some(v));
+        assert_eq!((sz.rows, sz.cols), (25, 200));
+    }
+
+    #[test]
+    fn pty_size_ignores_non_positive_axes() {
+        // Negative axes fail the `> 0` guard and keep their default.
+        let v = serde_json::json!({ "termsize": { "rows": -5, "cols": -1 } });
+        let sz = ShellController::pty_size_from_rt_opts(&Some(v));
+        assert_eq!((sz.rows, sz.cols), (25, 200));
     }
 
     #[test]
