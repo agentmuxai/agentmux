@@ -77,6 +77,40 @@ const DISCOVER_AGENTS_TOOL: &str = r#"{
   }
 }"#;
 
+const SET_ACTIVE_TAB_TOOL: &str = r#"{
+  "name": "SetActiveTab",
+  "description": "Switch the active (foreground) tab to the given tab_id within its workspace. Get tab ids from ListTabs or GetLayout.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "tab_id": { "type": "string", "description": "The tab to make active" }
+    },
+    "required": ["tab_id"]
+  }
+}"#;
+
+const NEW_TAB_TOOL: &str = r#"{
+  "name": "NewTab",
+  "description": "Open a new tab in your own workspace and switch to it. Optionally name it; otherwise AgentMux auto-names it.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "description": "Optional name for the new tab" }
+    }
+  }
+}"#;
+
+const FOCUS_WINDOW_TOOL: &str = r#"{
+  "name": "FocusWindow",
+  "description": "Bring an AgentMux window to the foreground. Defaults to your own window. Pass window_id (from ListWindows/GetLayout) to focus a specific one.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "window_id": { "type": "string", "description": "Optional window to focus; defaults to your own" }
+    }
+  }
+}"#;
+
 const GET_LAYOUT_TOOL: &str = r#"{
   "name": "GetLayout",
   "description": "Get the AgentMux UI tree: every window with its workspace, tabs, and panes (block_id, view, title), and which tab is active. Use it to see what's around you before naming or focusing things. Takes no arguments.",
@@ -276,10 +310,15 @@ async fn main() {
                 let list_workspaces: Value =
                     serde_json::from_str(LIST_WORKSPACES_TOOL).expect("static json");
                 let list_tabs: Value = serde_json::from_str(LIST_TABS_TOOL).expect("static json");
+                let set_active_tab: Value =
+                    serde_json::from_str(SET_ACTIVE_TAB_TOOL).expect("static json");
+                let new_tab: Value = serde_json::from_str(NEW_TAB_TOOL).expect("static json");
+                let focus_window: Value =
+                    serde_json::from_str(FOCUS_WINDOW_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name, set_tab_name, set_pane_title, set_workspace_name, get_layout, list_windows, list_workspaces, list_tabs] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name, set_tab_name, set_pane_title, set_workspace_name, get_layout, list_windows, list_workspaces, list_tabs, set_active_tab, new_tab, focus_window] }
                 })
             }
             "tools/call" => {
@@ -785,6 +824,69 @@ async fn call_tool(
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "SetActiveTab" => {
+            let tab_id = arguments
+                .get("tab_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: tab_id"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/api/v1/tab/activate", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&json!({ "tab_id": tab_id }))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("set active tab failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Switched to tab {tab_id}"))
+        }
+        "NewTab" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let name = arguments.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let url = format!("{}/api/v1/tab/new", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&json!({ "block_id": block_id, "name": name }))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("new tab failed: HTTP {status} — {text}");
+            }
+            Ok(if name.is_empty() {
+                "Opened a new tab".to_string()
+            } else {
+                format!("Opened new tab \"{name}\"")
+            })
+        }
+        "FocusWindow" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let window_id = arguments.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
+            let url = format!("{}/api/v1/window/focus", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&json!({ "block_id": block_id, "window_id": window_id }))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("focus window failed: HTTP {status} — {text}");
+            }
+            Ok("Focused window".to_string())
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }
