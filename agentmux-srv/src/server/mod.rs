@@ -253,6 +253,12 @@ pub fn build_router(state: AppState) -> Router {
         // agentmux-mcp's `WhoAmI` / `SetWindowName` tools call these.
         .route("/api/v1/self", get(handle_self))
         .route("/api/v1/window/name", post(handle_window_name))
+        // Naming verbs (SPEC §4.3): rename the caller's own tab / pane / workspace
+        // (or an explicit target). agentmux-mcp's SetTabName / SetPaneTitle /
+        // SetWorkspaceName tools POST here.
+        .route("/api/v1/tab/name", post(handle_tab_name))
+        .route("/api/v1/pane/title", post(handle_pane_title))
+        .route("/api/v1/workspace/name", post(handle_workspace_name))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -735,6 +741,165 @@ async fn handle_window_name(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))).into_response();
     }
     Json(json!({ "success": true, "window_id": window_id, "name": name })).into_response()
+}
+
+/// Trim a user-supplied name and clamp to `max` chars; `None` if empty.
+fn clean_name(raw: &str, max: usize) -> Option<String> {
+    let n: String = raw.trim().chars().take(max).collect();
+    if n.is_empty() {
+        None
+    } else {
+        Some(n)
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct TabNameRequest {
+    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the caller's
+    /// own tab when `tab_id` is omitted.
+    #[serde(default)]
+    block_id: Option<String>,
+    /// Explicit target tab; defaults to the caller's own tab.
+    #[serde(default)]
+    tab_id: Option<String>,
+    name: String,
+}
+
+/// `POST /api/v1/tab/name` — rename a tab. Defaults to the caller's own tab
+/// (resolved from `block_id`). Routes through `object.UpdateTabName`.
+async fn handle_tab_name(
+    State(state): State<AppState>,
+    Json(req): Json<TabNameRequest>,
+) -> impl IntoResponse {
+    let name = match clean_name(&req.name, 128) {
+        Some(n) => n,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "name must not be empty" }))).into_response(),
+    };
+    let tab_id = match req.tab_id.filter(|t| !t.is_empty()) {
+        Some(t) => t,
+        None => match resolve_own(&state, req.block_id, |c| Some(c.tab_id.clone())) {
+            Ok(t) => t,
+            Err(resp) => return resp,
+        },
+    };
+    let call = crate::backend::service::WebCallType {
+        service: "object".to_string(),
+        method: "UpdateTabName".to_string(),
+        uicontext: None,
+        args: vec![json!(tab_id), json!(name)],
+    };
+    finish_name_call(&state, call, json!({ "success": true, "tab_id": tab_id, "name": name })).await
+}
+
+#[derive(serde::Deserialize)]
+struct PaneTitleRequest {
+    /// Calling agent's block id (`AGENTMUX_BLOCKID`) — the pane to title by
+    /// default. Set `block_id` to title a different pane you own.
+    #[serde(default)]
+    block_id: Option<String>,
+    title: String,
+}
+
+/// `POST /api/v1/pane/title` — set a pane's display title (`frame:title`).
+/// Targets the caller's own pane (its `block_id`). Routes through
+/// `object.UpdateObjectMeta`.
+async fn handle_pane_title(
+    State(state): State<AppState>,
+    Json(req): Json<PaneTitleRequest>,
+) -> impl IntoResponse {
+    let title = match clean_name(&req.title, 128) {
+        Some(t) => t,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "title must not be empty" }))).into_response(),
+    };
+    let block_id = match req.block_id.filter(|b| !b.is_empty()) {
+        Some(b) => b,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing block_id" }))).into_response(),
+    };
+    let call = crate::backend::service::WebCallType {
+        service: "object".to_string(),
+        method: "UpdateObjectMeta".to_string(),
+        uicontext: None,
+        args: vec![
+            json!(format!("block:{block_id}")),
+            json!({ "frame:title": title }),
+        ],
+    };
+    finish_name_call(&state, call, json!({ "success": true, "block_id": block_id, "title": title })).await
+}
+
+#[derive(serde::Deserialize)]
+struct WorkspaceNameRequest {
+    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the caller's
+    /// own workspace when `workspace_id` is omitted.
+    #[serde(default)]
+    block_id: Option<String>,
+    /// Explicit target workspace; defaults to the caller's own.
+    #[serde(default)]
+    workspace_id: Option<String>,
+    name: String,
+}
+
+/// `POST /api/v1/workspace/name` — rename a workspace. Defaults to the
+/// caller's own workspace (resolved from `block_id`). Routes through
+/// `workspace.UpdateWorkspace`.
+async fn handle_workspace_name(
+    State(state): State<AppState>,
+    Json(req): Json<WorkspaceNameRequest>,
+) -> impl IntoResponse {
+    let name = match clean_name(&req.name, 128) {
+        Some(n) => n,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({ "error": "name must not be empty" }))).into_response(),
+    };
+    let workspace_id = match req.workspace_id.filter(|w| !w.is_empty()) {
+        Some(w) => w,
+        None => match resolve_own(&state, req.block_id, |c| c.workspace_id.clone()) {
+            Ok(w) => w,
+            Err(resp) => return resp,
+        },
+    };
+    let call = crate::backend::service::WebCallType {
+        service: "workspace".to_string(),
+        method: "UpdateWorkspace".to_string(),
+        uicontext: None,
+        args: vec![json!(workspace_id), json!(name)],
+    };
+    finish_name_call(&state, call, json!({ "success": true, "workspace_id": workspace_id, "name": name })).await
+}
+
+/// Resolve a target id from the caller's own context (via `block_id`), using
+/// `pick` to select the field. Returns the route's error response on failure
+/// (missing block_id, unresolvable block, or the field is `None`).
+fn resolve_own(
+    state: &AppState,
+    block_id: Option<String>,
+    pick: impl Fn(&service::AgentContext) -> Option<String>,
+) -> Result<String, Response> {
+    let block_id = block_id.unwrap_or_default();
+    if block_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "provide an explicit target id or block_id" }))).into_response());
+    }
+    let ctx = service::resolve_agent_context(&state.wstore, &block_id)
+        .map_err(|e| (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response())?;
+    pick(&ctx).filter(|s| !s.is_empty()).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "no such target resolved for this agent" })),
+        )
+            .into_response()
+    })
+}
+
+/// Run a naming service call and map the result to a JSON HTTP response.
+async fn finish_name_call(
+    state: &AppState,
+    call: crate::backend::service::WebCallType,
+    ok_body: serde_json::Value,
+) -> Response {
+    let result = service::run_service_call(state, &call).await;
+    if let Some(err) = result.error {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))).into_response();
+    }
+    Json(ok_body).into_response()
 }
 
 // ---- Auth Middleware ----
