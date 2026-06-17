@@ -437,6 +437,18 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
     let textareaRef: HTMLTextAreaElement | undefined;
 
+    // ── Sent-message history (shell-style ArrowUp / ArrowDown recall) ──
+    // Per-pane, in-memory, capped. The component body runs once (SolidJS), so
+    // these closure `let`s persist for the footer's lifetime — same pattern as
+    // the voice/typing flags below. `histPos === sentHistory.length` means
+    // "not navigating — showing the live draft"; lower values point at a prior
+    // sent message. `histDraft` stashes the in-progress text while navigating
+    // so ArrowDown past the newest entry restores it.
+    const HISTORY_MAX = 200;
+    let sentHistory: string[] = [];
+    let histPos = 0;
+    let histDraft = "";
+
     // ── Slash autocomplete state ──────────────────────────────────────
     // Tracks the current `/prefix` (without the leading slash) when the
     // textarea matches `^/\w*$`. Null = dropdown hidden. Reading the
@@ -485,11 +497,28 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         props.onTyping?.();
     };
 
+    // Replace the composer's content programmatically (history recall, queued
+    // un-send) and park the caret at the end. Mirrors the autocomplete/voice
+    // writers: sets the uncontrolled value directly, then refreshes autocomplete
+    // + the typing-scroll. Deliberately does NOT dispatch an `input` event, so
+    // it never trips the history-cursor reset in handleInput.
+    const setComposerValue = (text: string): void => {
+        if (!textareaRef) return;
+        textareaRef.value = text;
+        textareaRef.setSelectionRange(text.length, text.length);
+        updateAutocomplete();
+        props.onTyping?.();
+    };
+
     // RAF debounce for the onTyping callback. Sustained typing in a single
     // frame collapses to one callback; even rapid typing costs ~1 callback
     // per 16ms. Flag is per-component-instance (captured in closure).
     let typingScrollPending = false;
     const handleInput = () => {
+        // A manual edit exits history navigation — the next ArrowUp starts
+        // again from the newest sent message. (Programmatic recall writes the
+        // value without dispatching `input`, so it doesn't reach here.)
+        histPos = sentHistory.length;
         // Perf marks per SPEC_INPUT_RESPONSIVENESS §7.1. Target: handler
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
@@ -580,6 +609,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             // the synchronous onSendMessage cost (WS send, slice dispatch).
             markStart("agent-submit");
             props.onSendMessage(message);
+            // Record in shell-style history (skip a consecutive duplicate) and
+            // reset the navigation cursor back to the live (now empty) draft.
+            if (message !== sentHistory[sentHistory.length - 1]) {
+                sentHistory.push(message);
+                if (sentHistory.length > HISTORY_MAX) sentHistory.shift();
+            }
+            histPos = sentHistory.length;
+            histDraft = "";
             textareaRef.value = "";
             setAutocompletePrefix(null);
             // Scroll the new user message into view. SolidJS flushes the
@@ -637,20 +674,48 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 return;
             }
         }
-        // ArrowUp on an EMPTY composer recalls the most-recently queued
-        // ("send now") message back into the textarea — the Claude-Code-CLI
-        // un-queue gesture. The message was held (not yet sent), so this is a
-        // true un-send. Only when empty so we don't fight cursor movement or
-        // clobber in-progress text. No-op (default behavior) if nothing queued.
-        if (e.key === "ArrowUp" && textareaRef && textareaRef.value.length === 0) {
-            const recalled = props.onRecallLatestQueued?.();
-            if (recalled) {
+        // ── ArrowUp / ArrowDown: queued-message recall + sent-message history ──
+        // On an EMPTY composer, ArrowUp first un-queues the most-recently queued
+        // ("send now") held message — the Claude-Code-CLI gesture (unsent, so a
+        // true un-send). When nothing is queued, ArrowUp walks back through
+        // previously SENT messages (shell-style history) and ArrowDown walks
+        // forward toward the live draft. The caret-on-first/last-line guards let
+        // multiline editing of a recalled message still move line-by-line, and
+        // only cross into history at the top/bottom edge.
+        if (textareaRef && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+            const empty = textareaRef.value.length === 0;
+            const navigating = histPos < sentHistory.length;
+            const caretOnFirstLine = !textareaRef.value.slice(0, textareaRef.selectionStart).includes("\n");
+            const caretOnLastLine = !textareaRef.value.slice(textareaRef.selectionStart).includes("\n");
+
+            // Empty composer: ArrowUp un-queues a held message before history.
+            if (e.key === "ArrowUp" && empty) {
+                const recalled = props.onRecallLatestQueued?.();
+                if (recalled) {
+                    e.preventDefault();
+                    setComposerValue(recalled.text);
+                    return;
+                }
+            }
+
+            // Older: whenever the caret is on the first line (so we don't fight
+            // multiline cursor movement). Covers an empty composer, a partially
+            // typed draft (stashed into histDraft, restorable with ArrowDown),
+            // and continuing further back while already navigating.
+            if (e.key === "ArrowUp" && histPos > 0 && caretOnFirstLine) {
+                if (!navigating) histDraft = textareaRef.value; // stash the live draft
+                histPos--;
                 e.preventDefault();
-                textareaRef.value = recalled.text;
-                textareaRef.setSelectionRange(recalled.text.length, recalled.text.length);
-                // Recompute autocomplete + auto-grow + scroll for the restored text.
-                updateAutocomplete();
-                props.onTyping?.();
+                setComposerValue(sentHistory[histPos]);
+                return;
+            }
+
+            // Newer: only while navigating, caret on the last line. Past the
+            // newest entry, restore the stashed draft.
+            if (e.key === "ArrowDown" && navigating && caretOnLastLine) {
+                histPos++;
+                e.preventDefault();
+                setComposerValue(histPos >= sentHistory.length ? histDraft : sentHistory[histPos]);
                 return;
             }
         }
@@ -667,6 +732,12 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (textareaRef.value.trim().length > 0) {
                 e.preventDefault();
                 textareaRef.value = "";
+                // Clearing exits history navigation — park the cursor at the
+                // newest message so the next ArrowUp doesn't skip an entry.
+                // (The clear doesn't dispatch `input`, so handleInput's reset
+                // wouldn't otherwise fire.)
+                histPos = sentHistory.length;
+                histDraft = "";
                 // Kick the RAF-debounced typing scroll so the footer's
                 // auto-grow collapses and the document stays anchored.
                 props.onTyping?.();
