@@ -38,7 +38,7 @@ Because Window Name falls back to the workspace name (tier 2), a window with no 
 `window:displayname` is written **only** from the frontend UI, via the generic object-meta RPC:
 
 - `ObjectService.UpdateObjectMeta(makeORef("window", id), { "window:displayname": name })`
-  - InstancePanel rename: double-click a window row or **F2** (`frontend/app/statusbar/InstancePanel.tsx:226, 492`)
+  - InstancePanel rename: double-click a window row or **F2** (`frontend/app/statusbar/InstancePanel.tsx:226`)
 - `UpdateObjectMeta` is a **backend service call routed through the reducer** (`agentmux-srv/src/server/service.rs:311`), reached via `WOS.callBackendService("object", "UpdateObjectMeta", …)` — i.e. over the **WebSocket `/ws` RPC**, not a REST endpoint.
 
 ## 4. What the agent API exposes today — and the gap
@@ -86,7 +86,7 @@ e.g. `task dev -- --name "X"` that just sets `AGENTMUX_WINDOW_NAME` for the chil
 | Reactive `document.title` effect | `frontend/app-init.ts` ~675-750, ~877 |
 | Native caption set (Win32 `SetWindowTextW`) | `agentmux-cef/src/client/mod.rs:205-243` |
 | Default "Starter workspace" name | `agentmux-srv/src/backend/wcore/mod.rs:85` |
-| Rename UI (writes `window:displayname`) | `frontend/app/statusbar/InstancePanel.tsx:226,492` |
+| Rename UI (writes `window:displayname`) | `frontend/app/statusbar/InstancePanel.tsx:226` |
 | `UpdateObjectMeta` reducer route (WS RPC) | `agentmux-srv/src/server/service.rs:311` |
 | Window-meta host commands (no displayname setter) | `agentmux-cef/src/commands/window/meta.rs` |
 | HTTP router (no window/title route) | `agentmux-srv/src/server/mod.rs` (`.route(` set) |
