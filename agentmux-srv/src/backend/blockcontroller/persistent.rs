@@ -980,7 +980,21 @@ impl Controller for PersistentSubprocessController {
                 "persistent controller: unsupported signal {sig} (only SIGINT/SIGTERM)"
             ));
         }
-        Err("persistent controller does not accept raw input; use send_message()".to_string())
+        // Raw keystrokes are genuinely unsupported — user messages go through
+        // send_message(), not the PTY input channel.
+        if input.input_data.is_some() {
+            return Err(
+                "persistent controller does not accept raw input; use send_message()".to_string(),
+            );
+        }
+        // Term resize / other benign input types: accepted no-op. A persistent
+        // controller has no PTY, so there is nothing to resize — but the agent
+        // pane's `usePtyWidth` hook sends a `termsize` on every running turn
+        // (it can't tell a PTY-backed controller from a PTY-less one). Returning
+        // an error here surfaced a spurious "resize to N cols failed" warning in
+        // the agent pane's activity log. Mirror SubprocessController, which
+        // already no-ops termsize. See AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+        Ok(())
     }
 
     fn controller_type(&self) -> &str {
@@ -993,5 +1007,47 @@ impl Controller for PersistentSubprocessController {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod send_input_tests {
+    use super::*;
+    use crate::backend::obj::TermSize;
+
+    fn controller() -> PersistentSubprocessController {
+        PersistentSubprocessController::new(
+            "tab".to_string(),
+            "block".to_string(),
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    // A persistent controller has no PTY, but the agent pane's usePtyWidth hook
+    // sends a termsize resize on every running turn. It must be accepted as a
+    // no-op, not rejected — otherwise the pane logs a spurious "resize to N cols
+    // failed" warning. See AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
+    #[test]
+    fn termsize_resize_is_accepted_noop() {
+        let c = controller();
+        let res = c.send_input(BlockInputUnion::resize(TermSize { rows: 25, cols: 117 }), None);
+        assert!(res.is_ok(), "termsize resize should be a no-op Ok, got {res:?}");
+    }
+
+    // Raw keystrokes are genuinely unsupported on a persistent controller —
+    // user messages go through send_message(), so they must still be rejected.
+    #[test]
+    fn raw_input_is_still_rejected() {
+        let c = controller();
+        let err = c
+            .send_input(BlockInputUnion::data(b"ls\n".to_vec()), None)
+            .unwrap_err();
+        assert!(
+            err.contains("does not accept raw input"),
+            "raw input should be rejected, got {err:?}"
+        );
     }
 }
