@@ -371,6 +371,7 @@
 // Faded brain mark watermark + the best few shortcuts, centered.
 
 .editor-empty {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -378,23 +379,32 @@
     height: 100%;
     gap: var(--space-5);
     padding: var(--space-4);
+    overflow: hidden;
     color: var(--secondary-text-color);
     user-select: none;
 }
 
+// Large faded brain mark behind everything — a background watermark.
 .editor-empty-logo {
-    width: 132px;
-    height: 132px;
-    opacity: 0.12;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(70%, 560px);
+    opacity: 0.05;
+    pointer-events: none;
+    z-index: 0;
 
     svg {
         width: 100%;
-        height: 100%;
+        height: auto;
         display: block;
     }
 }
 
 .editor-empty-shortcuts {
+    position: relative;
+    z-index: 1;
     display: grid;
     grid-template-columns: repeat(2, auto);
     gap: var(--space-2) var(--space-5);
@@ -432,6 +442,8 @@
 }
 
 .editor-empty-hint {
+    position: relative;
+    z-index: 1;
     font-size: 11px;
     opacity: 0.55;
     text-align: center;
