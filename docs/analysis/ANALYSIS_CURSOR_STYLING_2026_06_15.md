@@ -1,7 +1,19 @@
 # ANALYSIS: Cursor / pointer styling — scrollbar bug + a clean generalization
 
+> **⚠️ CORRECTION (2026-06-17).** The core claim below — that **deleting** the
+> scrollbar `cursor` declaration makes the thumb "inherit the correct arrow"
+> (§0, §1 Phase 0, §4 Phase 0) — is **wrong**. `cursor` is an *inherited*
+> property, and a `::-webkit-scrollbar*` pseudo-element inherits its **scroll-
+> host's** cursor, not the OS default. The deletion left the main agent-pane
+> scrollbar showing the text I-beam and the live-tool scrollbar showing the link
+> hand. The fix is to **pin** `var(--cursor-default)` on the scrollbar pseudo-
+> elements; the stylelint ban this doc proposed (§3.4) actually *blocks* that fix
+> and was replaced with a value-scoped grep gate. Full post-mortem and the
+> corrected approach: **`docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`**.
+
 **Date:** 2026-06-15
-**Status:** Analysis + refactor proposal (no code landed yet)
+**Status:** Superseded in part — see the correction banner above (2026-06-17).
+~~Analysis + refactor proposal (no code landed yet)~~
 **Scope:** `frontend/` CSS cursor styling, app-wide
 **Trigger:** Scrollbars (notably on agent panes) show the link **hand** (`cursor: pointer`)
 instead of the default **arrow**. It should be the arrow everywhere on scrollbars.

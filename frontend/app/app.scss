@@ -56,6 +56,20 @@ a.plain-link {
     color: var(--secondary-text-color);
 }
 
+// A `::-webkit-scrollbar*` pseudo-element INHERITS the `cursor` of its
+// scroll-host element (cursor is an inherited property). So the arrow must be
+// PINNED here explicitly — deleting the declaration does NOT fall back to the
+// arrow, it falls back to the host's cursor (`text` on the conversation,
+// `pointer` on clickable tool blocks). That regression is why every native
+// scrollbar pseudo-element below sets `var(--cursor-default)` (arrow), never
+// `pointer`/`text`. See docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md.
+*::-webkit-scrollbar,
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-corner {
+    cursor: var(--cursor-default);
+}
+
 *::-webkit-scrollbar {
     width: 14px;
     height: 14px;
@@ -66,9 +80,6 @@ a.plain-link {
 }
 
 *::-webkit-scrollbar-thumb {
-    // No cursor override: a scrollbar is a scroll affordance, not a link, so it
-    // keeps the default arrow. (Was `cursor: pointer`, which showed the link
-    // hand on every scrollbar — including agent panes.)
     background-color: var(--scrollbar-thumb-color);
     border-radius: 0;
     margin: 0 1px 0 1px;
@@ -104,10 +115,11 @@ a.plain-link {
 
 .os-scrollbar-handle {
     // Arrow, not the link hand — the OverlayScrollbars drag handle is a scroll
-    // affordance. (Agent panes scroll through OverlayScrollbars, so this is
-    // what made the conversation scrollbar show the hand.) Token-driven via the
-    // cursor design tokens; the `-webkit-scrollbar` guard in `.stylelintrc.json`
-    // can't cover this OS-library class, so it is set explicitly here.
+    // affordance. Like the native `::-webkit-scrollbar*` pseudo-elements above,
+    // the handle would otherwise inherit its host's cursor (`text`/`pointer`),
+    // so the arrow is pinned explicitly via the cursor design token. The
+    // `scripts/check-scrollbar-cursor.sh` grep gate forbids `pointer`/`text` on
+    // any scrollbar/os-scrollbar selector to keep this from regressing.
     cursor: var(--cursor-default);
 }
 
