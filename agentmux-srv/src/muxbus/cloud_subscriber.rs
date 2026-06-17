@@ -126,6 +126,15 @@ impl CloudSubscriber {
     pub fn reload_token(&self) {
         let _ = self.ctrl_tx.send(CtrlMsg::ReloadToken);
     }
+
+    /// Snapshot of the agents this sidecar has subscribed to the cloud relay
+    /// (Tier-4), sorted for stable output. Empty when no MUXBUS_TOKEN is set
+    /// (cloud disabled). Read-only; used by the discovery endpoint.
+    pub fn subscribed_agents(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.agents.lock().unwrap().iter().cloned().collect();
+        v.sort();
+        v
+    }
 }
 
 // ── Background loop ───────────────────────────────────────────────────────────
