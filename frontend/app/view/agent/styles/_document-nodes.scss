@@ -1284,3 +1284,28 @@
         overflow: hidden;
     }
 }
+
+// Terminal-style tool/task output (TerminalOutput.tsx) — monospace, scroll-
+// capped panel rendering AnsiLine rows. Replaces the JSON blob for results that
+// carry a terminal string body (stdout/output/content).
+.agent-terminal-output {
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    padding: var(--space-1) var(--space-1-5);
+    margin: var(--space-1) 0 0 0;
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: var(--fixed-font, monospace);
+    font-size: 11px;
+    line-height: 1.45;
+
+    // AnsiLine renders one <div> per line — preserve runs of spaces and wrap
+    // long lines instead of forcing a horizontal scrollbar. min-height keeps a
+    // blank line (empty <div>) occupying a row instead of collapsing to zero.
+    > div {
+        min-height: 1.45em;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+}
