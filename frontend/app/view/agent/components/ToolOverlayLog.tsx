@@ -25,6 +25,12 @@ import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { detectLanguage } from "./detectLanguage";
+import {
+    registerToolRenderer,
+    resolveToolRenderer,
+    byKind,
+    anyTool,
+} from "./tool-renderers/registry";
 
 interface ToolOverlayLogProps {
     node: ToolNode;
@@ -230,84 +236,110 @@ function ToolOverlayResult(props: { node: ToolNode }): JSX.Element {
     );
 }
 
-function renderToolResultBody(node: ToolNode): JSX.Element {
-    switch (node.tool) {
-        case "Edit":
-            return <DiffViewer params={node.params as any} result={node.result as any} />;
+// Per-tool result renderers. Each is registered with the tool-renderer registry
+// (below) so the open-ended tool universe can be routed by name/shape rather than
+// a closed switch — these are the built-in (coarse-kind) entries. The bodies are
+// the former `switch` arms verbatim; behavior is unchanged. See
+// SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md (Phase 1).
 
-        case "Bash":
-            return <BashOutputViewer params={node.params as any} result={node.result as any} />;
+function renderEdit(node: ToolNode): JSX.Element {
+    return <DiffViewer params={node.params as any} result={node.result as any} />;
+}
 
-        case "Read": {
-            const filePath = (node.params as any).file_path ?? "";
-            const content: string | undefined = (node.result as any)?.content;
-            // Head-cap file content (read top-down) so a huge Read can't bloat
-            // the conversation DOM; HighlightedCode stays simple (it injects
-            // innerHTML, so capping here is cleaner than inside it).
-            const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-            return (
-                <div class="agent-tool-read">
-                    <div class="agent-tool-file-path">{filePath}</div>
-                    <Show
-                        when={capped}
-                        fallback={
-                            <Show when={node.result}>
-                                <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                            </Show>
-                        }
-                    >
-                        <HighlightedCode
-                            code={capped!.text}
-                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
-                            class="agent-tool-read-content"
-                        />
-                        <Show when={capped!.hiddenLines > 0}>
-                            <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
-                        </Show>
-                    </Show>
-                </div>
-            );
-        }
+function renderBash(node: ToolNode): JSX.Element {
+    return <BashOutputViewer params={node.params as any} result={node.result as any} />;
+}
 
-        case "Write":
-            return (
-                <div class="agent-tool-write">
-                    <div class="agent-tool-file-path">{(node.params as any).file_path}</div>
-                    <div class="agent-tool-write-info">
-                        {node.result && `Wrote ${(node.result as any).bytesWritten || 0} bytes`}
-                    </div>
-                </div>
-            );
-
-        case "Grep":
-        case "Glob":
-            return (
-                <div class="agent-tool-search">
-                    <div class="agent-tool-pattern">Pattern: {(node.params as any).pattern}</div>
-                    <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                </div>
-            );
-
-        case "Agent":
-            return (
-                <div class="agent-tool-agent">
-                    <Show when={(node.params as any).description}>
-                        <div class="agent-tool-agent-desc">{(node.params as any).description}</div>
-                    </Show>
+function renderRead(node: ToolNode): JSX.Element {
+    const filePath = (node.params as any).file_path ?? "";
+    const content: string | undefined = (node.result as any)?.content;
+    // Head-cap file content (read top-down) so a huge Read can't bloat
+    // the conversation DOM; HighlightedCode stays simple (it injects
+    // innerHTML, so capping here is cleaner than inside it).
+    const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    return (
+        <div class="agent-tool-read">
+            <div class="agent-tool-file-path">{filePath}</div>
+            <Show
+                when={capped}
+                fallback={
                     <Show when={node.result}>
                         <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
                     </Show>
-                </div>
-            );
+                }
+            >
+                <HighlightedCode
+                    code={capped!.text}
+                    lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
+                    class="agent-tool-read-content"
+                />
+                <Show when={capped!.hiddenLines > 0}>
+                    <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
+                </Show>
+            </Show>
+        </div>
+    );
+}
 
-        case "Task":
-            return (
-                <div class="agent-tool-task">
-                    <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
-                </div>
-            );
+function renderWrite(node: ToolNode): JSX.Element {
+    return (
+        <div class="agent-tool-write">
+            <div class="agent-tool-file-path">{(node.params as any).file_path}</div>
+            <div class="agent-tool-write-info">
+                {node.result && `Wrote ${(node.result as any).bytesWritten || 0} bytes`}
+            </div>
+        </div>
+    );
+}
 
-        default:
-            return <CompactResult tool={node.tool} params={node.params as any} result={node.result} />;
-    }
+function renderSearch(node: ToolNode): JSX.Element {
+    return (
+        <div class="agent-tool-search">
+            <div class="agent-tool-pattern">Pattern: {(node.params as any).pattern}</div>
+            <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+        </div>
+    );
+}
+
+function renderAgent(node: ToolNode): JSX.Element {
+    return (
+        <div class="agent-tool-agent">
+            <Show when={(node.params as any).description}>
+                <div class="agent-tool-agent-desc">{(node.params as any).description}</div>
+            </Show>
+            <Show when={node.result}>
+                <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+            </Show>
+        </div>
+    );
+}
+
+function renderTask(node: ToolNode): JSX.Element {
+    return (
+        <div class="agent-tool-task">
+            <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+        </div>
+    );
+}
+
+function renderCompactDefault(node: ToolNode): JSX.Element {
+    return <CompactResult tool={node.tool} params={node.params as any} result={node.result} />;
+}
+
+// Register the built-ins (priority 0; the catch-all sits below everything). Rich,
+// name/shape-matched renderers (WebSearch cards, mcp__* tools, …) register from
+// their own modules at a higher priority.
+registerToolRenderer({ priority: 0, label: "builtin:Edit", match: byKind("Edit"), render: renderEdit });
+registerToolRenderer({ priority: 0, label: "builtin:Bash", match: byKind("Bash"), render: renderBash });
+registerToolRenderer({ priority: 0, label: "builtin:Read", match: byKind("Read"), render: renderRead });
+registerToolRenderer({ priority: 0, label: "builtin:Write", match: byKind("Write"), render: renderWrite });
+registerToolRenderer({ priority: 0, label: "builtin:Search", match: byKind("Grep", "Glob"), render: renderSearch });
+registerToolRenderer({ priority: 0, label: "builtin:Agent", match: byKind("Agent"), render: renderAgent });
+registerToolRenderer({ priority: 0, label: "builtin:Task", match: byKind("Task"), render: renderTask });
+registerToolRenderer({ priority: -Infinity, label: "builtin:default", match: anyTool, render: renderCompactDefault });
+
+function renderToolResultBody(node: ToolNode): JSX.Element {
+    // Hard fallback to the default renderer if (somehow) nothing is registered.
+    const render = resolveToolRenderer(node) ?? renderCompactDefault;
+    return render(node);
 }
