@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Request, State},
+    extract::{Query, Request, State},
     http::{header, Method, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
@@ -247,6 +247,12 @@ pub fn build_router(state: AppState) -> Router {
         // shares the exact pane.open logic with the WebSocket RPC handler
         // (app_api::open_pane). See ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.
         .route("/api/v1/pane/open", post(handle_pane_open))
+        // First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md).
+        // `GET /api/v1/self?block_id=` resolves the caller's place in the tree;
+        // `POST /api/v1/window/name` sets the window display name (taskbar title).
+        // agentmux-mcp's `WhoAmI` / `SetWindowName` tools call these.
+        .route("/api/v1/self", get(handle_self))
+        .route("/api/v1/window/name", post(handle_window_name))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -636,6 +642,99 @@ async fn handle_pane_open(
             (status, Json(json!({ "error": e }))).into_response()
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+struct SelfQuery {
+    /// Block UUID of the calling agent pane (its `AGENTMUX_BLOCKID`).
+    block_id: Option<String>,
+}
+
+/// `GET /api/v1/self?block_id=<id>` — resolve the calling agent's place in the
+/// object tree (block → tab → window → workspace, with their names). The
+/// sidecar serves many agents, so the caller identifies itself by its block id
+/// (the MCP `WhoAmI` tool passes `AGENTMUX_BLOCKID`). Naming verbs reuse the
+/// same resolver to default their target to the agent's own context.
+async fn handle_self(
+    State(state): State<AppState>,
+    Query(q): Query<SelfQuery>,
+) -> impl IntoResponse {
+    let block_id = q.block_id.unwrap_or_default();
+    if block_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing block_id" }))).into_response();
+    }
+    match service::resolve_agent_context(&state.wstore, &block_id) {
+        Ok(ctx) => Json(serde_json::to_value(&ctx).unwrap_or_default()).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct WindowNameRequest {
+    /// Block UUID of the calling agent pane (`AGENTMUX_BLOCKID`); used to
+    /// resolve the caller's own window when `window_id` is omitted.
+    #[serde(default)]
+    block_id: Option<String>,
+    /// New display name; drives the OS/taskbar title. Trimmed; clamped to 64.
+    name: String,
+    /// Explicit target window. Defaults to the caller's own window.
+    #[serde(default)]
+    window_id: Option<String>,
+}
+
+/// `POST /api/v1/window/name` — set a window's display name
+/// (`window:displayname`), which the frontend turns into the OS/taskbar title.
+/// Defaults to the caller's own window (resolved from `block_id`). Routes
+/// through the same `object.UpdateObjectMeta` service path the InstancePanel
+/// rename uses, so persistence + live-title update are identical.
+/// agentmux-mcp's `SetWindowName` tool POSTs here.
+async fn handle_window_name(
+    State(state): State<AppState>,
+    Json(req): Json<WindowNameRequest>,
+) -> impl IntoResponse {
+    // window:displayname is documented as ≤64 chars (window-title.ts).
+    let name: String = req.name.trim().chars().take(64).collect();
+    if name.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "name must not be empty" }))).into_response();
+    }
+
+    let window_id = match req.window_id.filter(|w| !w.is_empty()) {
+        Some(w) => w,
+        None => {
+            let block_id = req.block_id.unwrap_or_default();
+            if block_id.is_empty() {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": "provide window_id or block_id" }))).into_response();
+            }
+            match service::resolve_agent_context(&state.wstore, &block_id) {
+                Ok(ctx) => match ctx.window_id {
+                    Some(w) => w,
+                    None => {
+                        return (
+                            StatusCode::NOT_FOUND,
+                            Json(json!({ "error": "no live window for this agent (tab not attached to a window)" })),
+                        )
+                            .into_response()
+                    }
+                },
+                Err(e) => return (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
+            }
+        }
+    };
+
+    let call = crate::backend::service::WebCallType {
+        service: "object".to_string(),
+        method: "UpdateObjectMeta".to_string(),
+        uicontext: None,
+        args: vec![
+            json!(format!("window:{window_id}")),
+            json!({ "window:displayname": name }),
+        ],
+    };
+    let result = service::run_service_call(&state, &call).await;
+    if let Some(err) = result.error {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))).into_response();
+    }
+    Json(json!({ "success": true, "window_id": window_id, "name": name })).into_response()
 }
 
 // ---- Auth Middleware ----
