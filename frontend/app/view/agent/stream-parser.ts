@@ -315,6 +315,7 @@ export class ClaudeCodeStreamParser {
                     type: "tool",
                     id: event.id,
                     tool: this.normalizeToolName(event.tool),
+                    toolName: event.tool,
                     params: event.params,
                     status: "awaiting_answer",
                     collapsed: false,
@@ -334,6 +335,7 @@ export class ClaudeCodeStreamParser {
             type: "tool",
             id: event.id,
             tool: this.normalizeToolName(event.tool),
+            toolName: event.tool,
             params: event.params,
             status: "running",
             collapsed: false, // Show running tools
@@ -368,6 +370,7 @@ export class ClaudeCodeStreamParser {
             type: "tool",
             id: event.id,
             tool: this.normalizeToolName(toolName),
+            toolName,
             params,
             status: event.status,
             duration: event.duration,
