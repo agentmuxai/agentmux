@@ -298,8 +298,29 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         }
 
         if (trimmed.startsWith("/")) {
-            const outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
-            if (outcome.kind === "handled") return;
+            let outcome;
+            try {
+                outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
+            } catch {
+                // dispatchSlashCommand threw — reset TurnStart so the pane
+                // doesn't stay locked for the 30s watchdog window.
+                if (!wasAlreadyWorking) {
+                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                }
+                return;
+            }
+            if (outcome.kind === "handled") {
+                // TurnStart was dispatched by handleSendMessage before sendMessage
+                // was called. Reset it so the pane returns to Idle — no real agent
+                // turn was initiated, only a client-side command. Mirrors the bang
+                // command's finally-TurnReset above.
+                if (!wasAlreadyWorking) {
+                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                }
+                return;
+            }
+            // outcome.kind === "passthrough" — fall through to the real turn;
+            // TurnStart stays active because an actual agent turn is about to happen.
         }
 
         // Init guard (issue #728 gap 1, codex P2 on PR #742). The
