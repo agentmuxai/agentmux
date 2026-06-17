@@ -211,6 +211,15 @@ export interface ToolNode {
     type: "tool";
     id: string;
     tool: "Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Agent" | "Other";
+    /**
+     * The raw provider tool name (e.g. "WebSearch", "TodoWrite",
+     * "mcp__github__search_issues"). `tool` above is the coarse, closed "kind"
+     * (unknown → "Other"); `toolName` preserves the real name so the tool-result
+     * renderer registry can route the open-ended tool universe by name. Optional
+     * for back-compat with older nodes that predate the field — matchers fall
+     * back to `tool`. See SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md §5.1.
+     */
+    toolName?: string;
     params: ToolParams;
     /** Lifecycle:
      *  - `running`           — call dispatched, awaiting result

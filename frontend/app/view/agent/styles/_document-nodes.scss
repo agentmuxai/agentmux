@@ -1191,3 +1191,96 @@
         }
     }
 }
+
+// Record table (RecordTable.tsx) — a top-level array of flat records renders as
+// a table instead of a JSON blob (unknown-tool path).
+.agent-tool-record-table {
+    margin: var(--space-1) 0 0 0;
+    max-height: 400px;
+    overflow: auto;
+
+    table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 11px;
+        font-family: var(--fixed-font, monospace);
+    }
+
+    th,
+    td {
+        border: 1px solid var(--border-color);
+        padding: 2px var(--space-1);
+        text-align: left;
+        vertical-align: top;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-width: 320px;
+    }
+
+    th {
+        position: sticky;
+        top: 0;
+        background: var(--main-bg-color);
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+
+    td {
+        color: var(--main-text-color);
+        opacity: 0.9;
+    }
+}
+
+// Web-search result cards (SearchResults.tsx) — replaces the JSON blob for
+// WebSearch-shaped results. Each card opens its URL in the system browser.
+.agent-tool-search-results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: var(--space-1) 0 0 0;
+    max-height: 400px;
+    overflow-y: auto;
+
+    .agent-search-card {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        padding: var(--space-1) var(--space-1-5);
+        border: 1px solid var(--border-color);
+        border-radius: 0;
+        background: var(--main-bg-color);
+        cursor: pointer;
+
+        &:hover {
+            border-color: var(--accent-color);
+        }
+    }
+
+    .agent-search-card-title {
+        color: var(--accent-color);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .agent-search-card-url {
+        color: var(--success-color);
+        font-size: 10px;
+        opacity: 0.85;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .agent-search-card-snippet {
+        color: var(--main-text-color);
+        opacity: 0.8;
+        font-size: 11px;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+}
