@@ -392,6 +392,13 @@ interface AgentFooterProps {
      */
     onStopAgent?: () => void;
     /**
+     * Recall the most-recently queued ("send now") message — invoked on
+     * ArrowUp when the composer is empty (Claude-Code-CLI un-queue gesture).
+     * Returns the recalled message text (and removes it from the queue), or
+     * null when nothing is queued. The composer restores the text for editing.
+     */
+    onRecallLatestQueued?: () => { text: string } | null;
+    /**
      * Slash command completions. When the textarea value matches
      * `^/\w*$` (no space), AgentFooter calls this with the prefix
      * (no leading slash) and renders the SlashAutocomplete dropdown.
@@ -627,6 +634,23 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (e.key === "Escape") {
                 e.preventDefault();
                 setAutocompletePrefix(null);
+                return;
+            }
+        }
+        // ArrowUp on an EMPTY composer recalls the most-recently queued
+        // ("send now") message back into the textarea — the Claude-Code-CLI
+        // un-queue gesture. The message was held (not yet sent), so this is a
+        // true un-send. Only when empty so we don't fight cursor movement or
+        // clobber in-progress text. No-op (default behavior) if nothing queued.
+        if (e.key === "ArrowUp" && textareaRef && textareaRef.value.length === 0) {
+            const recalled = props.onRecallLatestQueued?.();
+            if (recalled) {
+                e.preventDefault();
+                textareaRef.value = recalled.text;
+                textareaRef.setSelectionRange(recalled.text.length, recalled.text.length);
+                // Recompute autocomplete + auto-grow + scroll for the restored text.
+                updateAutocomplete();
+                props.onTyping?.();
                 return;
             }
         }
