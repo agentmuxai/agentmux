@@ -14,6 +14,7 @@ import { keymap } from "@codemirror/view";
 import { search } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
 import { editorTheme } from "./editor-theme";
+import { Markdown } from "@/app/element/markdown";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
@@ -77,6 +78,29 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     let cmView: EditorView | null = null;
     const [fileInput, setFileInput] = createSignal("");
 
+    // ── Markdown rendered/source view ────────────────────────────────────────
+    // Markdown files open in the styled <Markdown> renderer by default; a
+    // toolbar toggle (and Mod-Shift-V) flips the active tab to CodeMirror
+    // source to edit, and back. We track only the tabs the user flipped TO
+    // source (default = rendered), keyed by tab id so each tab remembers its
+    // own mode. CodeMirror stays mounted underneath the preview (markdown isn't
+    // LSP-backed, so this is cheap) — the preview is an overlay, which keeps
+    // cursor/scroll/undo intact across toggles and sidesteps CM build-timing.
+    const [mdSourceTabs, setMdSourceTabs] = createSignal<Set<string>>(new Set());
+    const isMarkdown = (): boolean => model.languageAtom() === "markdown";
+    const showRendered = (): boolean =>
+        isMarkdown() && !mdSourceTabs().has(model.activeIdAtom() ?? "");
+    const toggleMdMode = () => {
+        const id = model.activeIdAtom();
+        if (!id || !isMarkdown()) return;
+        setMdSourceTabs((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
     // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
     // block meta, same path used by terminal/agent/swarm). Capture phase so
     // we intercept before CodeMirror's bubble-phase wheel; preventDefault
@@ -99,6 +123,20 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         };
         rootRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => rootRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
+
+        // Mod-Shift-V toggles markdown rendered/source for the active tab.
+        // Capture phase so it works in rendered mode (no CodeMirror) and isn't
+        // swallowed by CM in source mode (CM doesn't bind this combo).
+        const handleToggleKey = (ev: KeyboardEvent) => {
+            if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && (ev.key === "v" || ev.key === "V")) {
+                if (!isMarkdown()) return;
+                ev.preventDefault();
+                ev.stopPropagation();
+                toggleMdMode();
+            }
+        };
+        rootRef.addEventListener("keydown", handleToggleKey, { capture: true });
+        onCleanup(() => rootRef?.removeEventListener("keydown", handleToggleKey, { capture: true }));
     });
 
     // ── LSP integration (Phase 1 — diagnostics for TS/JS) ────────────
@@ -407,6 +445,14 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     const unsubSliceEvents = model.onSliceEvent((event) => {
         if (event.type === "TabClosed") {
             cmStates.delete(event.tabId);
+            // Drop any remembered rendered/source mode for the closed tab.
+            if (mdSourceTabs().has(event.tabId)) {
+                setMdSourceTabs((prev) => {
+                    const next = new Set(prev);
+                    next.delete(event.tabId);
+                    return next;
+                });
+            }
         }
     });
 
@@ -772,7 +818,31 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         </Show>
                     }
                 >
-                    <div class="editor-codemirror" ref={containerRef} />
+                    <div class="editor-body-wrap">
+                        <div class="editor-codemirror" ref={containerRef} />
+                        {/* Styled markdown preview, overlaid over CodeMirror for
+                            .md tabs in rendered mode. CM stays mounted beneath so
+                            toggling back keeps cursor/scroll/undo. */}
+                        <Show when={showRendered()}>
+                            <div class="editor-md-preview">
+                                <Markdown textAtom={() => model.contentAtom()} />
+                            </div>
+                        </Show>
+                        {/* Rendered/Source toggle — markdown tabs only. */}
+                        <Show when={isMarkdown()}>
+                            <button
+                                class="editor-md-toggle"
+                                title={
+                                    showRendered()
+                                        ? "Edit source (Ctrl+Shift+V)"
+                                        : "Show rendered preview (Ctrl+Shift+V)"
+                                }
+                                onClick={toggleMdMode}
+                            >
+                                {showRendered() ? "✎ Source" : "👁 Preview"}
+                            </button>
+                        </Show>
+                    </div>
                 </Show>
 
                 {/* LSP status chip — bottom-of-pane indicator. Only shown when
