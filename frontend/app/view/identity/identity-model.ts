@@ -12,6 +12,7 @@ import { createSignal, type Accessor, type Setter } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
+import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -373,11 +374,16 @@ export class IdentityViewModel implements ViewModel {
 
     // ── Derived helpers ──────────────────────────────────────────────────────
 
+    // Group by *brand*, not raw provider, so a CLI-OAuth account (e.g.
+    // provider "claude" — the Claude CLI's `~/.claude` login) surfaces under
+    // its brand tile ("anthropic"). Display-only: the account's stored
+    // `provider` is unchanged, so spawn-time env injection is unaffected.
+    // See SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
         const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom"];
         for (const p of order) {
-            const group = this.accountsAtom().filter((a) => a.provider === p);
+            const group = this.accountsAtom().filter((a) => brandForProvider(a.provider) === p);
             if (group.length > 0) map.set(p, group);
         }
         return map;
