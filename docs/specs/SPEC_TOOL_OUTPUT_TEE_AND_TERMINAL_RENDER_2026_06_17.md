@@ -108,21 +108,26 @@ one **regular-file** target token, with `2>&1` in the trailing position (`> F 2>
 - fd-specific or dup redirects only (`2> f`, `>&2`, `3> f`), the leading-`2>&1` order
   (`2>&1 > F`, whose semantics differ), or process substitution `>(…)`,
 - the redirect isn't trailing (`CMD > f | grep x`, `CMD > f && other`),
-- more than one output redirect, or a top-level list operator (`&&`/`||`/`;`/`&`) is present
-  (the redirect would bind to only one command of the list),
+- more than one output redirect, or a top-level list operator (`&&`/`||`/`;`/`&`) **or an
+  unquoted newline** is present (the redirect would bind to only one command of the list, and
+  for a multi-line command wrapping `{ … }` would tee the earlier lines' stdout into the file),
+- a top-level **pipe** (`a | b > f`) is present — `set -o pipefail` on the tee wrapper would
+  change the inner pipeline's exit-code semantics (report the first failure instead of the last
+  stage's exit) vs the original, so only single commands are rewritten,
 - the command already starts with `agentmux-bashwrap exec` (idempotence, like today).
 
-Pipelines (`CMD | grep x > f`) and subshell groups (`(a && b) > f`) ARE handled — a pipeline's
-stdout is its last stage's stdout, exactly what the trailing `>` redirected, so wrapping the
-whole command in `{ ; }` is correct. Bailing is always safe: it yields exactly the current
-behavior for that call. Start narrow; widen the grammar later if real commands need it.
+Subshell groups (`(a && b) > f`) ARE handled — the group's stdout is exactly what the trailing
+`>` redirected, so wrapping it in `{ ; }` is correct (the `&&` inside the parens doesn't bind the
+redirect). Backslash-newline line continuations are also fine (the escape consumes the newline).
+Bailing is always safe: it yields exactly the current behavior for that call. Start narrow; widen
+the grammar later if real commands need it.
 
 ### 3.4 Tests (`agentmux-bashwrap`, alongside `hook.rs` tests) — implemented
 - each row of §3.2 rewrites correctly and round-trips through base64;
-- pipeline + subshell + quoted-target forms rewrite correctly;
-- `/dev/null`, quoted `>`, comment, heredoc, process-subst, mid-pipeline `>`, `2>f`-only,
-  `>&2`, `2>&1 > f`, double-redirect, background, and no-redirect commands are **passed
-  through unchanged**;
+- subshell + quoted-target + backslash-newline-continuation forms rewrite correctly;
+- `/dev/null`, quoted `>`, comment, heredoc, process-subst, `>` in/after a pipe, a multi-line
+  command, `2>f`-only, `>&2`, `2>&1 > f`, double-redirect, background, and no-redirect commands
+  are **passed through unchanged**;
 - exit-code preservation: the rewritten form starts with `set -o pipefail`.
 
 ---
