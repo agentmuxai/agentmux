@@ -15,6 +15,7 @@ import { search } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
 import { editorTheme } from "./editor-theme";
 import { Markdown } from "@/app/element/markdown";
+import brainLogoSvg from "@/app/asset/logo-brain.svg?raw";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
@@ -76,7 +77,17 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     let containerRef: HTMLDivElement | undefined;
     let rootRef: HTMLDivElement | undefined;
     let cmView: EditorView | null = null;
-    const [fileInput, setFileInput] = createSignal("");
+
+    // Platform-aware modifier glyph for the empty-state shortcut hints.
+    const isMac = /mac/i.test(navigator.platform || navigator.userAgent || "");
+    const MOD = isMac ? "⌘" : "Ctrl";
+    // The handful of shortcuts worth surfacing on the empty editor.
+    const emptyShortcuts: { keys: string[]; label: string }[] = [
+        { keys: [MOD, "S"], label: "Save" },
+        { keys: [MOD, "F"], label: "Find" },
+        { keys: [MOD, "⇧", "V"], label: "Toggle .md preview" },
+        { keys: [MOD, "+ / −"], label: "Zoom" },
+    ];
 
     // ── Markdown rendered/source view ────────────────────────────────────────
     // Markdown files open in the styled <Markdown> renderer by default; a
@@ -478,13 +489,30 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         cmView = null;
     });
 
-    const handleOpenFile = () => {
-        const path = fileInput().trim();
-        if (path) {
-            void model.openFile(path);
-            setFileInput("");
-        }
-    };
+    // Empty-editor state — faded brain mark + the best few shortcuts. Shown
+    // in the main column whenever no file is open (replaces the old path
+    // input; the file tree is the way to open files).
+    const EmptyEditor = () => (
+        <div class="editor-empty">
+            {/* eslint-disable-next-line solid/no-innerhtml */}
+            <div class="editor-empty-logo" innerHTML={brainLogoSvg} aria-hidden="true" />
+            <div class="editor-empty-shortcuts">
+                {emptyShortcuts.map((s) => (
+                    <div class="editor-empty-shortcut">
+                        <span class="editor-empty-keys">
+                            {s.keys.map((k) => (
+                                <kbd>{k}</kbd>
+                            ))}
+                        </span>
+                        <span class="editor-empty-label">{s.label}</span>
+                    </div>
+                ))}
+            </div>
+            <Show when={!model.treeExpandedAtom()}>
+                <div class="editor-empty-hint">Open the file tree (chevron) to browse files.</div>
+            </Show>
+        </div>
+    );
 
     // ── Save As flow (scratch tabs) ───────────────────────────────────
     const [saveAsTabId, setSaveAsTabId] = createSignal<string | null>(null);
@@ -678,27 +706,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         onNewEntryCancel={() => setNewEntry(null)}
                         onStartRename={(path) => setRenamingPath(path)}
                     />
-                    <Show when={!model.filePathAtom()}>
-                        <div class="editor-tree-path-input">
-                            <input
-                                class="editor-open-input"
-                                type="text"
-                                placeholder="/path/to/file.ts"
-                                value={fileInput()}
-                                onInput={(e) => setFileInput(e.currentTarget.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") handleOpenFile();
-                                }}
-                            />
-                            <button
-                                class="editor-open-btn"
-                                onClick={handleOpenFile}
-                                disabled={!fileInput().trim()}
-                            >
-                                Open
-                            </button>
-                        </div>
-                    </Show>
                 </div>
                 <div
                     class="editor-tree-resize-handle"
@@ -806,31 +813,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         // to load — the centered error panel takes the body.
                         !(model.errorAtom() && model.activeTabAtom() && !model.activeTabAtom()?.contentLoaded)
                     }
-                    fallback={
-                        <Show when={!model.treeExpandedAtom()}>
-                            <div class="editor-open-prompt">
-                                <div class="editor-open-label">Open a file</div>
-                                <div class="editor-open-row">
-                                    <input
-                                        class="editor-open-input"
-                                        type="text"
-                                        placeholder="/path/to/file.ts"
-                                        value={fileInput()}
-                                        onInput={(e) => setFileInput(e.currentTarget.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter") handleOpenFile();
-                                        }}
-                                    />
-                                    <button class="editor-open-btn" onClick={handleOpenFile}>
-                                        Open
-                                    </button>
-                                </div>
-                                <div class="editor-open-hint">
-                                    Show the file tree from the header chevron to browse your files.
-                                </div>
-                            </div>
-                        </Show>
-                    }
+                    fallback={<EmptyEditor />}
                 >
                     <div class="editor-body-wrap">
                         <div class="editor-codemirror" ref={containerRef} />
