@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { EditorView, basicSetup } from "codemirror";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
-import { search } from "@codemirror/search";
+import { search, openSearchPanel } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
 import { editorTheme } from "./editor-theme";
 import { Markdown } from "@/app/element/markdown";
@@ -144,19 +144,34 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         rootRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => rootRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
 
-        // Mod-Shift-V toggles markdown rendered/source for the active tab.
-        // Capture phase so it works in rendered mode (no CodeMirror) and isn't
-        // swallowed by CM in source mode (CM doesn't bind this combo).
-        const handleToggleKey = (ev: KeyboardEvent) => {
-            if ((ev.ctrlKey || ev.metaKey) && ev.shiftKey && (ev.key === "v" || ev.key === "V")) {
+        // Editor-pane key handling, capture phase. We intercept here so the
+        // app-wide Cmd/Ctrl+F binding (keymodel.ts → universal block-search,
+        // which the editor doesn't implement) never swallows these — and so a
+        // single deterministic path handles them regardless of CM focus state.
+        const handleEditorKeys = (ev: KeyboardEvent) => {
+            const mod = ev.ctrlKey || ev.metaKey;
+            if (!mod) return;
+            // Ctrl/Cmd+F → CodeMirror's native find panel (find/replace, regex,
+            // case, whole-word). Only in source view — in rendered markdown
+            // there's nothing editable to search. See
+            // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
+            if (!ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
+                if (!cmView || showRendered()) return;
+                ev.preventDefault();
+                ev.stopPropagation();
+                openSearchPanel(cmView);
+                return;
+            }
+            // Mod-Shift-V toggles markdown rendered/source for the active tab.
+            if (ev.shiftKey && (ev.key === "v" || ev.key === "V")) {
                 if (!isMarkdown()) return;
                 ev.preventDefault();
                 ev.stopPropagation();
                 toggleMdMode();
             }
         };
-        rootRef.addEventListener("keydown", handleToggleKey, { capture: true });
-        onCleanup(() => rootRef?.removeEventListener("keydown", handleToggleKey, { capture: true }));
+        rootRef.addEventListener("keydown", handleEditorKeys, { capture: true });
+        onCleanup(() => rootRef?.removeEventListener("keydown", handleEditorKeys, { capture: true }));
     });
 
     // ── LSP integration (Phase 1 — diagnostics for TS/JS) ────────────
