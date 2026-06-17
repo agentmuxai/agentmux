@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * terminalText — extract a terminal-style text body from a tool result, using
- * the same field precedence `CompactResult.summarize()` uses: a raw string
- * result, else `stdout`(+`stderr`), else `output`, else `content`. Returns
- * `null` for a purely structured result (no string body) or an empty body, so
- * callers fall back to the JSON view.
+ * terminalText — extract a terminal-style text body from a tool result. Field
+ * precedence: a raw string result, else `stdout`(+`stderr`), else `output`,
+ * else `content`. Returns `null` for a purely structured result (no string
+ * body) or an empty body, so callers fall back to the JSON view.
  *
- * Centralizing the precedence lets the feed render task/tool output as a
- * terminal instead of a JSON blob.
+ * This peeks at the same kind of string fields that `CompactResult.summarize()`
+ * uses for its one-liner, but with a different precedence (summarize never
+ * inspects `stdout` and orders `content` before `output`) — so it's deliberately
+ * its own function, tuned for "render the whole body as a terminal".
  * See docs/specs/SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md §4.2.
  */
 export function terminalText(result: unknown): string | null {

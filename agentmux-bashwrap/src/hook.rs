@@ -337,14 +337,21 @@ fn scan_redirect(cmd: &str) -> Option<ScanResult> {
                 }
             }
             b'|' => {
-                if i + 1 < n && b[i + 1] == b'|' {
-                    list_op = true;
-                    i += 2;
-                } else {
-                    i += 1; // pipe — allowed inside CMD
-                }
+                // Both `||` and a plain pipe bail. A plain pipe is bailed (not
+                // wrapped) because `set -o pipefail` on `{ a | b ; } | tee` would
+                // make the INNER pipeline report its first failure instead of the
+                // last stage's exit — changing the exit code the original
+                // `a | b > f` reported. Single commands have no inner pipe, so
+                // pipefail correctly surfaces their exit through the tee.
+                list_op = true;
+                i += if i + 1 < n && b[i + 1] == b'|' { 2 } else { 1 };
             }
-            b';' => {
+            // `;` and an unquoted/unescaped newline both separate commands. A
+            // multi-line command whose LAST line has a trailing redirect must not
+            // be wrapped, or `{ <all lines> ; } | tee` would tee the earlier
+            // lines' stdout into the file too (violating the "same bytes to FILE"
+            // guarantee). Quoted/heredoc/escaped newlines never reach here.
+            b';' | b'\n' | b'\r' => {
                 list_op = true;
                 i += 1;
             }
@@ -674,11 +681,22 @@ line' && cat $HOME/.env"#;
     }
 
     #[test]
-    fn tee_handles_pipeline_with_trailing_redirect() {
-        // A pipeline's stdout is its last stage's stdout — wrapping is correct.
+    fn tee_bails_on_internal_pipeline() {
+        // A pipe inside the command bails: `set -o pipefail` on the tee wrapper
+        // would change the inner pipeline's exit-code semantics vs the original.
+        assert!(tee_redirect_rewrite("cargo build | grep error > errors.log").is_none());
+    }
+
+    #[test]
+    fn tee_bails_on_multiline_command() {
+        // A multi-line command with a trailing redirect on the last line must NOT
+        // be wrapped — wrapping would tee the earlier lines' output into the file.
+        assert!(tee_redirect_rewrite("echo building\nmake > build.log").is_none());
+        assert!(tee_redirect_rewrite("cd src\nmake > build.log 2>&1").is_none());
+        // A backslash-newline line continuation is NOT a separator — still rewritten.
         assert_eq!(
-            tee_redirect_rewrite("cargo build | grep error > errors.log").unwrap(),
-            "set -o pipefail; { cargo build | grep error ; } | tee -- errors.log"
+            tee_redirect_rewrite("make \\\n  --flag > build.log").unwrap(),
+            "set -o pipefail; { make \\\n  --flag ; } | tee -- build.log"
         );
     }
 
