@@ -539,12 +539,23 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if agent_mode == "container" {
                         return Err("container agents require a subprocess controller; this provider uses a persistent controller".to_string());
                     }
+                    // Resume parity with the subprocess path: pass the resume
+                    // flag + captured session id so a respawn (e.g. after a
+                    // /model change) continues the same conversation.
+                    let resume_flag = obj::meta_get_string(
+                        &block.meta, "agent:resume_flag", "--resume",
+                    );
+                    let persisted_session_id = obj::meta_get_string(
+                        &block.meta, "agent:sessionid", "",
+                    );
                     let config = blockcontroller::persistent::PersistentSpawnConfig {
                         cli_command,
                         cli_args,
                         working_dir,
                         env_vars,
                         session_id_field,
+                        resume_flag,
+                        session_id: persisted_session_id,
                         message_id: None,
                     };
                     persistent_ctrl.send_message(cmd.message, config)?;
