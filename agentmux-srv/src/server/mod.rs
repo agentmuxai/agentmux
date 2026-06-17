@@ -259,6 +259,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tab/name", post(handle_tab_name))
         .route("/api/v1/pane/title", post(handle_pane_title))
         .route("/api/v1/workspace/name", post(handle_workspace_name))
+        // Introspection verbs (SPEC §4.6): read-only views of the UI tree so an
+        // agent can see what's around it. agentmux-mcp's GetLayout / ListWindows
+        // / ListWorkspaces / ListTabs tools GET these.
+        .route("/api/v1/layout", get(handle_layout))
+        .route("/api/v1/windows", get(handle_list_windows))
+        .route("/api/v1/workspaces", get(handle_list_workspaces))
+        .route("/api/v1/tabs", get(handle_list_tabs))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -900,6 +907,47 @@ async fn finish_name_call(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": err }))).into_response();
     }
     Json(ok_body).into_response()
+}
+
+/// `GET /api/v1/layout` — read-only window → workspace → tab → pane tree.
+async fn handle_layout(State(state): State<AppState>) -> impl IntoResponse {
+    Json(service::agent_layout(&state.wstore))
+}
+
+/// `GET /api/v1/windows` — flat list of windows.
+async fn handle_list_windows(State(state): State<AppState>) -> impl IntoResponse {
+    Json(service::agent_windows(&state.wstore))
+}
+
+/// `GET /api/v1/workspaces` — flat list of workspaces.
+async fn handle_list_workspaces(State(state): State<AppState>) -> impl IntoResponse {
+    Json(service::agent_workspaces(&state.wstore))
+}
+
+#[derive(serde::Deserialize)]
+struct ListTabsQuery {
+    /// Limit to this workspace's tabs. Omit (or pass `block_id`) for all tabs.
+    #[serde(default)]
+    workspace_id: Option<String>,
+    /// Calling agent's block id — scopes to the caller's own workspace when
+    /// `workspace_id` is omitted.
+    #[serde(default)]
+    block_id: Option<String>,
+}
+
+/// `GET /api/v1/tabs` — flat list of tabs, optionally scoped to a workspace
+/// (explicit `workspace_id`, or the caller's own via `block_id`).
+async fn handle_list_tabs(
+    State(state): State<AppState>,
+    Query(q): Query<ListTabsQuery>,
+) -> impl IntoResponse {
+    let ws_id = q.workspace_id.filter(|w| !w.is_empty()).or_else(|| {
+        q.block_id
+            .filter(|b| !b.is_empty())
+            .and_then(|b| service::resolve_agent_context(&state.wstore, &b).ok())
+            .and_then(|ctx| ctx.workspace_id)
+    });
+    Json(service::agent_tabs(&state.wstore, ws_id.as_deref()))
 }
 
 // ---- Auth Middleware ----

@@ -80,6 +80,133 @@ pub(crate) struct AgentContext {
     pub workspace_name: String,
 }
 
+/// Read-only snapshot of the window → workspace → tab → pane tree, for agent
+/// introspection (`GET /api/v1/layout`). Pure wstore reads — no reducer, so
+/// it's hermetic and safe. Lookups use linear scans (a handful of objects).
+pub(crate) fn agent_layout(store: &Store) -> serde_json::Value {
+    let windows = store.get_all::<Window>().unwrap_or_default();
+    let workspaces = store.get_all::<Workspace>().unwrap_or_default();
+    let tabs = store.get_all::<Tab>().unwrap_or_default();
+    let blocks = store.get_all::<Block>().unwrap_or_default();
+
+    let panes_of = |tab: &Tab| -> Vec<serde_json::Value> {
+        tab.blockids
+            .iter()
+            .filter_map(|bid| blocks.iter().find(|b| &b.oid == bid))
+            .map(|b| {
+                json!({
+                    "block_id": b.oid,
+                    "view": meta_get_string(&b.meta, "view", ""),
+                    "title": meta_get_string(&b.meta, "frame:title", ""),
+                })
+            })
+            .collect()
+    };
+
+    let windows_json: Vec<serde_json::Value> = windows
+        .iter()
+        .map(|w| {
+            let ws = workspaces.iter().find(|x| x.oid == w.workspaceid);
+            let tabs_json: Vec<serde_json::Value> = ws
+                .map(|ws| {
+                    // Pinned tabs render first, then the regular tab order.
+                    ws.pinnedtabids
+                        .iter()
+                        .chain(ws.tabids.iter())
+                        .filter_map(|tid| tabs.iter().find(|t| &t.oid == tid))
+                        .map(|t| {
+                            json!({
+                                "tab_id": t.oid,
+                                "name": t.name,
+                                "active": ws.activetabid == t.oid,
+                                "panes": panes_of(t),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            json!({
+                "window_id": w.oid,
+                "name": meta_get_string(&w.meta, "window:displayname", ""),
+                "workspace_id": w.workspaceid,
+                "workspace_name": ws.map(|x| x.name.clone()).unwrap_or_default(),
+                "tabs": tabs_json,
+            })
+        })
+        .collect();
+
+    json!({ "windows": windows_json })
+}
+
+/// Flat list of all windows (id, display name, assigned workspace).
+pub(crate) fn agent_windows(store: &Store) -> serde_json::Value {
+    let workspaces = store.get_all::<Workspace>().unwrap_or_default();
+    let windows: Vec<serde_json::Value> = store
+        .get_all::<Window>()
+        .unwrap_or_default()
+        .iter()
+        .map(|w| {
+            let ws_name = workspaces
+                .iter()
+                .find(|x| x.oid == w.workspaceid)
+                .map(|x| x.name.clone())
+                .unwrap_or_default();
+            json!({
+                "window_id": w.oid,
+                "name": meta_get_string(&w.meta, "window:displayname", ""),
+                "workspace_id": w.workspaceid,
+                "workspace_name": ws_name,
+            })
+        })
+        .collect();
+    json!({ "windows": windows })
+}
+
+/// Flat list of all workspaces (id, name, tab count, active tab).
+pub(crate) fn agent_workspaces(store: &Store) -> serde_json::Value {
+    let workspaces: Vec<serde_json::Value> = store
+        .get_all::<Workspace>()
+        .unwrap_or_default()
+        .iter()
+        .map(|w| {
+            json!({
+                "workspace_id": w.oid,
+                "name": w.name,
+                "tab_count": w.tabids.len() + w.pinnedtabids.len(),
+                "active_tab_id": w.activetabid,
+            })
+        })
+        .collect();
+    json!({ "workspaces": workspaces })
+}
+
+/// Flat list of tabs (id, name, pane count). When `workspace_id` is given,
+/// only that workspace's tabs are returned.
+pub(crate) fn agent_tabs(store: &Store, workspace_id: Option<&str>) -> serde_json::Value {
+    let workspaces = store.get_all::<Workspace>().unwrap_or_default();
+    let scope: Option<Vec<String>> = workspace_id.map(|wid| {
+        workspaces
+            .iter()
+            .find(|w| w.oid == wid)
+            .map(|w| w.pinnedtabids.iter().chain(w.tabids.iter()).cloned().collect())
+            .unwrap_or_default()
+    });
+    let tabs: Vec<serde_json::Value> = store
+        .get_all::<Tab>()
+        .unwrap_or_default()
+        .iter()
+        .filter(|t| scope.as_ref().map(|ids| ids.contains(&t.oid)).unwrap_or(true))
+        .map(|t| {
+            json!({
+                "tab_id": t.oid,
+                "name": t.name,
+                "pane_count": t.blockids.len(),
+            })
+        })
+        .collect();
+    json!({ "tabs": tabs })
+}
+
 /// Walk block → tab → workspace → window from an agent pane's block id.
 ///
 /// Tabs carry no parent reference, so the workspace and window are found by
