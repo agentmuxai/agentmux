@@ -47,32 +47,6 @@
     }
 }
 
-.editor-tree-path-input {
-    display: flex;
-    gap: var(--space-1);
-    padding: var(--space-1) var(--space-1-5);
-    border-top: 1px solid var(--border-color);
-    background: var(--block-bg-color);
-
-    .editor-open-input {
-        flex: 1;
-        min-width: 0;
-        width: auto;
-        padding: var(--space-1) var(--space-1-5);
-        font-size: 11px;
-    }
-
-    .editor-open-btn {
-        padding: var(--space-1) var(--space-2);
-        font-size: 11px;
-
-        &:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-    }
-}
-
 // ── File tree ───────────────────────────────────────────────────────────────
 
 .file-tree {
@@ -393,61 +367,75 @@
     min-width: 180px;
 }
 
-.editor-open-prompt {
+// ── Empty editor (no file open) ──────────────────────────────────────
+// Faded brain mark watermark + the best few shortcuts, centered.
+
+.editor-empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     height: 100%;
-    gap: var(--space-3);
-    color: var(--secondary-text-color);
+    gap: var(--space-5);
     padding: var(--space-4);
+    color: var(--secondary-text-color);
+    user-select: none;
 }
 
-.editor-open-label {
-    font-size: 14px;
+.editor-empty-logo {
+    width: 132px;
+    height: 132px;
+    opacity: 0.12;
+
+    svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+    }
 }
 
-.editor-open-hint {
+.editor-empty-shortcuts {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    gap: var(--space-2) var(--space-5);
+}
+
+.editor-empty-shortcut {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 12px;
+}
+
+.editor-empty-keys {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+
+    kbd {
+        display: inline-block;
+        min-width: 16px;
+        padding: 1px 6px;
+        font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+        font-size: 11px;
+        line-height: 16px;
+        text-align: center;
+        color: var(--main-text-color);
+        background: var(--secondary-bg-color, var(--block-bg-color));
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+    }
+}
+
+.editor-empty-label {
+    opacity: 0.8;
+}
+
+.editor-empty-hint {
     font-size: 11px;
-    opacity: 0.6;
+    opacity: 0.55;
     text-align: center;
     max-width: 320px;
-}
-
-.editor-open-row {
-    display: flex;
-    gap: var(--space-2);
-}
-
-.editor-open-input {
-    width: 350px;
-    padding: var(--space-1-5) 10px;
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    background: var(--form-element-bg-color);
-    color: var(--main-text-color);
-    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
-    font-size: 13px;
-
-    &:focus {
-        outline: none;
-        border-color: var(--accent-color);
-    }
-}
-
-.editor-open-btn {
-    padding: var(--space-1-5) var(--space-4);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    background: var(--accent-color);
-    color: var(--main-text-color);
-    cursor: pointer;
-    font-size: 13px;
-
-    &:hover {
-        opacity: 0.9;
-    }
 }
 
 .editor-loading {
