@@ -574,7 +574,10 @@
     inset: 0;
     z-index: 1;
     overflow: auto;
-    background: var(--block-bg-color);
+    // Opaque surface — --block-bg-color is rgba(0,0,0,0.5), which let the
+    // CodeMirror source bleed through (a dim ghost) behind the preview. Use
+    // the solid block surface so the source is fully hidden.
+    background: var(--block-bg-solid-color);
     // Center the rendered doc with comfortable reading measure, scaled by
     // the same per-pane zoom CodeMirror uses.
     padding: calc(16px * var(--editor-zoom, 1)) calc(24px * var(--editor-zoom, 1));
