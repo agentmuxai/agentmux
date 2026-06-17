@@ -558,6 +558,56 @@
     }
 }
 
+// ── Markdown rendered/source view ────────────────────────────────────
+// Wraps the CodeMirror body so the styled <Markdown> preview can overlay
+// it for .md tabs (CM stays mounted underneath). See editor-view.tsx.
+
+.editor-body-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+}
+
+.editor-md-preview {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: auto;
+    background: var(--block-bg-color);
+    // Center the rendered doc with comfortable reading measure, scaled by
+    // the same per-pane zoom CodeMirror uses.
+    padding: calc(16px * var(--editor-zoom, 1)) calc(24px * var(--editor-zoom, 1));
+
+    .markdown {
+        max-width: 860px;
+        margin: 0 auto;
+        font-size: calc(var(--markdown-font-size, 14px) * var(--editor-zoom, 1));
+    }
+}
+
+.editor-md-toggle {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-3);
+    z-index: 2;
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 18px;
+    color: var(--secondary-text-color, var(--main-text-color));
+    background: var(--secondary-bg-color, var(--block-bg-color));
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0.75;
+    user-select: none;
+
+    &:hover {
+        opacity: 1;
+        background: var(--hover-bg-color);
+    }
+}
+
 // ── LSP install banner (Phase 1 of SPEC_EDITOR_LSP_AND_THEMES) ────────
 // Appears above CodeMirror when the language server's binary isn't on
 // PATH. Dismissable per session via the × button.
