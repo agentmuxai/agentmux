@@ -672,7 +672,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // where the message flashed in the amber zone between Streaming
         // promotion and agent-message-accepted. See ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
         const wasAlreadyWorking = workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" });
-        dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
+        // Only start a NEW turn when the agent is idle. Dispatching TurnStart
+        // while a turn is already running regresses Streaming → Submitting, which
+        // hides the "Send now" affordance (isInterruptibleTurn is false during
+        // Submitting) until the next stream event — the "panel shows up a couple
+        // seconds late" bug. A queued-while-busy message rides the running turn;
+        // the queue-drain (agent-message-accepted) re-enters Submitting if needed.
+        if (!wasAlreadyWorking) {
+            dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
+        }
         return commands.sendMessage(message, wasAlreadyWorking);
     };
 
@@ -712,6 +720,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             log("auth", "Login Again — re-running the provider login flow");
             void status.startLaunchFlow();
         },
+    });
+
+    // Deliver queued-while-busy ("send now") messages at the next tool-call
+    // boundary — the agent finishes its current step and then picks them up
+    // (the CLI consumes a stdin message at its next inference, after the
+    // in-flight tool's result). Falls back to turn end (Idle/Done) so a
+    // tool-less turn still delivers. Holding until here is what lets ArrowUp
+    // recall an un-sent message first.
+    let prevTool: string | null = null;
+    createEffect(() => {
+        const tool = agentAtoms().currentToolAtom[0]();
+        const phaseKind = agentAtoms().turnPhaseAtom[0]().kind;
+        const newToolCall = tool !== null && tool !== prevTool;
+        prevTool = tool;
+        const turnIdle = phaseKind === "Idle" || phaseKind === "Done";
+        if ((newToolCall || turnIdle) && commands.hasHeldMessages()) {
+            void commands.flushHeldMessages();
+        }
     });
 
     // AskUserQuestion answer handler. Defined after handleSendMessage because
@@ -1218,6 +1244,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onSendMessage={handleSendMessage}
                     onTyping={() => scrollToBottomFn?.()}
                     onStopAgent={commands.stopAgent}
+                    onRecallLatestQueued={commands.recallLatestHeld}
                     getCompletions={commands.completions}
                     viewModel={model}
                 />

@@ -48,7 +48,7 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                 <div class="agent-pending-header">
                     <span class="agent-spinner-dot" />
                     <span class="agent-pending-header-text">
-                        Queued — will send when the agent is idle (
+                        Queued — sends at the agent's next step; ↑ to edit (
                         {queuedMessages().length}
                         {queuedMessages().length === 1 ? " message" : " messages"})
                     </span>
