@@ -124,6 +124,25 @@ export class TermWrap {
         //   even when no PTY output is arriving. Focus/blur listeners re-enable blink only
         //   for the active pane.
         this.terminal = new Terminal({ ...options, cursorBlink: false, scrollOnUserInput: false, smoothScrollDuration: 0 });
+        // Reverse-wraparound (DECSET ?45): Backspace at column 0 of a soft-wrapped
+        // line moves to the END of the previous row, matching real terminals.
+        // bash/readline emits a bare BS (0x08) for the cross-wrap delete and relies
+        // on the terminal honoring reverse-wrap (xterm-256color has no `bw`). xterm.js
+        // defaults this mode OFF — so on a raw PTY (Linux/macOS) backspacing across a
+        // wrap is stuck at col 0. (Windows is unaffected: ConPTY re-renders with
+        // absolute cursor positioning, so the bare BS never reaches xterm.js.) The
+        // enabled branch only wraps when the row is genuinely `isWrapped`, so hard
+        // line breaks are never crossed. We assert it here AND re-assert on RIS reset.
+        this.terminal.write("\x1b[?45h");
+        // A full reset (RIS, `ESC c` — e.g. `reset` / `tput reset`) restores DEC
+        // private modes to defaults, turning reverse-wrap back OFF. Re-assert it
+        // immediately after, so a reset doesn't silently reintroduce the stuck-
+        // backspace bug. Returning false lets xterm run its built-in RIS first;
+        // the microtask then re-applies the mode once that synchronous parse ends.
+        this.terminal.parser.registerEscHandler({ final: "c" }, () => {
+            queueMicrotask(() => this.terminal.write("\x1b[?45h"));
+            return false;
+        });
         this.fitAddon = new FitAddon();
         this.serializeAddon = new SerializeAddon();
         this.searchAddon = new SearchAddon();
