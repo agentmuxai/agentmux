@@ -84,7 +84,7 @@ The only reason to `forcerestart` would be to apply a change to an actively-stre
 
 ## Immediate fixes (this PR)
 
-### Fix 1: TurnReset on handled slash commands (useAgentCommands.ts)
+### Fix 1 (the actual fix): TurnReset on handled slash commands (useAgentCommands.ts)
 
 ```typescript
 if (trimmed.startsWith("/")) {
@@ -100,19 +100,13 @@ if (trimmed.startsWith("/")) {
 
 Mirrors the bang-command fix exactly.
 
-### Fix 2: Drop `forcerestart` from `applyRuntimeChange` (runtime-apply.ts)
+### `forcerestart` is still required
 
-```typescript
-// Before: kills the process, risks mid-turn corruption, races on status
-await RpcApi.ControllerResyncCommand(TabRpcClient, {
-    tabid: staticTabId(), blockid: blockId, forcerestart: true,
-});
-
-// After: just write cmd:args — next spawn picks them up automatically
-// (no resync call at all; the meta write is enough)
-```
-
-This simplifies `applyRuntimeChange` to two SetMetaCommand calls and nothing else for persistent controllers.
+The `forcerestart` call in `applyRuntimeChange` must be kept. The persistent controller
+stays alive between turns and never re-reads `cmd:args` on its own — killing it and
+letting `send_message` respawn with the new flags is the only way to apply a model/effort
+change without waiting for an unrelated crash or user restart. The stuck-pane bug was
+caused by the missing `TurnReset`, not by the `forcerestart` itself.
 
 ---
 

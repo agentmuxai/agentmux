@@ -6,9 +6,14 @@
  * (model / effort / permission) so it takes effect on the live agent.
  *
  * For persistent controllers (Claude stream-json), flags are baked in at spawn
- * time, so we also rebuild `cmd:args` — the next turn's spawn picks them up.
- * We do NOT forcerestart: "applies to next turn" is the correct semantic, and
- * a forcerestart creates a kill-race and can corrupt a streaming turn.
+ * time. The process stays alive between turns and never re-reads cmd:args on
+ * its own, so we rebuild cmd:args AND forcerestart — killing the idle process
+ * so the next send_message spawns with the new flags.
+ *
+ * forcerestart is safe when the agent is idle (STATUS_DONE). If triggered
+ * mid-turn the streaming turn is interrupted; the partial response stays in the
+ * blockfile but the pane recovers via TurnReset (slash path) or has no
+ * TurnStart outstanding (UI dropdown path).
  *
  * Shared by the `/model`·`/effort`·`/mode` slash commands
  * (`commands/global/runtime.ts`) AND the GUI control-bar dropdowns
@@ -18,22 +23,15 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
+import { staticTabId } from "@/app/store/global";
 import { buildRuntimeArgs } from "./buildRuntimeArgs";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
 
 /**
  * Persist `updated` to `agent:runtime` and, for persistent controllers, rebuild
- * `cmd:args` so the change applies at next spawn. May throw on RPC failure —
- * callers decide how to surface it.
- *
- * We intentionally do NOT forcerestart here. Persistent controllers re-read
- * `cmd:args` on every spawn, so the new model/effort/permission is already
- * baked in for the next turn — which is exactly what "applies to next turn"
- * means. A forcerestart would kill a potentially-streaming turn, leave the
- * blockfile with a partial response, and create a status-update race between
- * the old controller's async kill task and the new controller registration.
- * See docs/retros/RETRO_MODEL_SLASH_CMD_STUCK_2026_06_17.md.
+ * `cmd:args` + forcerestart so the change applies immediately. May throw on RPC
+ * failure — callers decide how to surface it.
  */
 export async function applyRuntimeChange(
     blockId: string,
@@ -52,6 +50,11 @@ export async function applyRuntimeChange(
         await RpcApi.SetMetaCommand(TabRpcClient, {
             oref,
             meta: { "cmd:args": updatedArgs },
+        });
+        await RpcApi.ControllerResyncCommand(TabRpcClient, {
+            tabid: staticTabId(),
+            blockid: blockId,
+            forcerestart: true,
         });
     }
 }
