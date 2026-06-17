@@ -95,7 +95,10 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     const [liveDoc, setLiveDoc] = createSignal("");
     const isMarkdown = (): boolean => model.languageAtom() === "markdown";
     const showRendered = (): boolean =>
-        isMarkdown() && !mdSourceTabs().has(model.activeIdAtom() ?? "");
+        isMarkdown() &&
+        // Never auto-render an untitled scratch buffer — it's for typing.
+        !model.activeTabAtom()?.isScratch &&
+        !mdSourceTabs().has(model.activeIdAtom() ?? "");
     const toggleMdMode = () => {
         const id = model.activeIdAtom();
         if (!id || !isMarkdown()) return;
