@@ -26,6 +26,43 @@
     50%       { border-left-color: color-mix(in srgb, var(--term-bright-green) 35%, transparent); }
 }
 
+// The persistent-shell log reuses the `.agent-tool-panel` markup
+// (PersistentShellBlock.tsx) but lives under `.agent-shell-block`, NOT
+// `.agent-tool-block`. The container + collapse-clip rules in
+// _document-nodes.scss are scoped to `.agent-tool-block .agent-tool-panel`,
+// so they never reach the shell's panel. Without the clip the "hidden"
+// (collapsed) panel isn't bounded: the full build log lays out at natural
+// height inside a row the virtualizer sized at SHELL_COLLAPSED_PX (32px,
+// renderers.ts), so it overflows and paints across the absolutely-positioned
+// rows below it — the "build shows on a layer behind the conversation" bug.
+// Mirror the tool-block panel rules here, scoped to the shell block.
+.agent-shell-block .agent-tool-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: 50vh;
+    overflow: hidden;
+    transition:
+        max-height 120ms cubic-bezier(0.4, 0, 0.2, 1),
+        padding 120ms cubic-bezier(0.4, 0, 0.2, 1),
+        margin 120ms cubic-bezier(0.4, 0, 0.2, 1),
+        opacity 100ms ease-out,
+        content-visibility 120ms allow-discrete;
+
+    // Collapsed: clip to zero so the row matches its 32px estimate. Body
+    // stays in the DOM (content-visibility, not display:none) so the
+    // virtualizer keeps a stable subtree and the 120ms shrink can animate.
+    &--hidden {
+        max-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        margin-top: 0;
+        margin-bottom: 0;
+        opacity: 0;
+        content-visibility: hidden;
+    }
+}
+
 .agent-shell-summary {
     display: flex;
     align-items: baseline;
