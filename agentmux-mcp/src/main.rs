@@ -77,6 +77,27 @@ const DISCOVER_AGENTS_TOOL: &str = r#"{
   }
 }"#;
 
+const WHOAMI_TOOL: &str = r#"{
+  "name": "WhoAmI",
+  "description": "Return your own place in the AgentMux UI: your block (pane), tab, window, and workspace ids plus their names. Use it to discover the targets for naming/layout verbs (e.g. before SetWindowName). Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const SET_WINDOW_NAME_TOOL: &str = r#"{
+  "name": "SetWindowName",
+  "description": "Set the name of your AgentMux window as it appears in the OS taskbar / window title (e.g. \"Starter Workspace\" → a label you choose). Defaults to your own window. Useful for making an instance easy to identify. Name is trimmed and clamped to 64 characters.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "description": "The window display name to show in the taskbar / title bar" }
+    },
+    "required": ["name"]
+  }
+}"#;
+
 const OPEN_EDITOR_TOOL: &str = r#"{
   "name": "OpenEditor",
   "description": "Open a file in an AgentMux editor pane next to this conversation. Use when you want the user to see a file you're discussing or editing. Pass an absolute host path. Fire-and-forget: returns once the pane is opened.",
@@ -169,10 +190,13 @@ async fn main() {
                 let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
                 let discover_agents: Value =
                     serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
+                let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
+                let set_window_name: Value =
+                    serde_json::from_str(SET_WINDOW_NAME_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name] }
                 })
             }
             "tools/call" => {
@@ -490,6 +514,88 @@ async fn call_tool(
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "WhoAmI" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            if block_id.is_empty() {
+                anyhow::bail!(
+                    "neither AGENTMUX_AGENT_BUS_ID nor AGENTMUX_BLOCKID is set \
+                     — cannot resolve this agent's pane. Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/self", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("block_id", block_id)])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("self lookup failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "SetWindowName" => {
+            let new_name = arguments
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            if block_id.is_empty() {
+                anyhow::bail!(
+                    "neither AGENTMUX_AGENT_BUS_ID nor AGENTMUX_BLOCKID is set \
+                     — cannot resolve this agent's window. Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/window/name", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&json!({ "block_id": block_id, "name": new_name }))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("set window name failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            let applied = result
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(new_name);
+            Ok(format!("Window name set to \"{applied}\""))
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }
