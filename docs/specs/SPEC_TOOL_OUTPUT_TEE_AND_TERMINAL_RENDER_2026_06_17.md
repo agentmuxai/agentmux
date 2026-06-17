@@ -102,8 +102,8 @@ trailing** element of the command. Recognize: optional `2>&1`/`&>`/`&>>`, a sing
 one **regular-file** target token, with `2>&1` in the trailing position (`> F 2>&1`).
 
 **Bail (encode the original unchanged — today's behavior) when any of:**
-- the `>`/`>>` is inside single/double quotes, backticks, a `$(…)`/subshell group, a comment,
-  or a heredoc body (it's literal / not top-level),
+- the `>`/`>>` is inside single/double quotes, backticks, a `$(…)`/subshell group, a `${…}`
+  parameter expansion, a comment, or a heredoc body (it's literal / not top-level),
 - the target is `/dev/null` (intentional discard — don't resurrect it to the feed),
 - fd-specific or dup redirects only (`2> f`, `>&2`, `3> f`), the leading-`2>&1` order
   (`2>&1 > F`, whose semantics differ), or process substitution `>(…)`,

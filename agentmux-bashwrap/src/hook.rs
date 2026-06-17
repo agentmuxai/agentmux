@@ -203,6 +203,7 @@ fn scan_redirect(cmd: &str) -> Option<ScanResult> {
     let mut in_double = false;
     let mut in_backtick = false;
     let mut paren_depth: i32 = 0;
+    let mut brace_depth: i32 = 0; // `${...}` parameter-expansion nesting
 
     let mut out_redirs: Vec<(OutKind, usize, usize)> = Vec::new();
     let mut dups: Vec<(usize, usize)> = Vec::new(); // 2>&1 occurrences (start, end)
@@ -278,11 +279,31 @@ fn scan_redirect(cmd: &str) -> Option<ScanResult> {
                 i += 1;
                 continue;
             }
+            b'$' => {
+                // `${...}` parameter expansion: a literal `>`/`<`/`|` inside it
+                // (e.g. `${X:->f}`, `${X/>/_}`) must not be read as an operator.
+                // `$(...)` is handled by paren_depth via the `(` below.
+                if i + 1 < n && b[i + 1] == b'{' {
+                    brace_depth += 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            b'}' => {
+                if brace_depth > 0 {
+                    brace_depth -= 1;
+                }
+                i += 1;
+                continue;
+            }
             _ => {}
         }
-        // Inside a subshell / $(...) group: ignore operators (the redirect there
-        // doesn't bind the outer command), but keep tracking quotes (above).
-        if paren_depth > 0 {
+        // Inside a subshell / $(...) / ${...} group: ignore operators (the
+        // redirect there doesn't bind the outer command), but keep tracking
+        // quotes (above).
+        if paren_depth > 0 || brace_depth > 0 {
             i += 1;
             continue;
         }
@@ -742,6 +763,23 @@ line' && cat $HOME/.env"#;
         assert!(tee_redirect_rewrite("cmd 2>&1 > f").is_none()); // leading 2>&1 order
         assert!(tee_redirect_rewrite("echo hi").is_none()); // no redirect
         assert!(tee_redirect_rewrite("server > log &").is_none()); // background
+    }
+
+    #[test]
+    fn tee_handles_param_expansion() {
+        // A literal `>` inside a ${...} expansion is NOT a redirect → no rewrite.
+        assert!(tee_redirect_rewrite("echo ${X:->f}").is_none());
+        assert!(tee_redirect_rewrite("echo ${X/>/_}").is_none());
+        // A real trailing redirect to a ${...}-bearing target IS rewritten.
+        assert_eq!(
+            tee_redirect_rewrite("make > ${LOG}/out.log").unwrap(),
+            "set -o pipefail; { make ; } | tee -- ${LOG}/out.log"
+        );
+        // ...and a ${...} with an inner `>` plus a real trailing redirect.
+        assert_eq!(
+            tee_redirect_rewrite("echo ${X/>/_} > out.log").unwrap(),
+            "set -o pipefail; { echo ${X/>/_} ; } | tee -- out.log"
+        );
     }
 
     #[test]
