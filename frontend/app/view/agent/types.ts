@@ -600,7 +600,6 @@ export const DEFAULT_RUNTIME_CONFIG: AgentRuntimeConfig = {
     permissionMode: "bypass",
     // Sonnet at high effort — faster default for routine/conversational turns.
     // Use the model picker or /model opus to escalate to Opus for complex work.
-    // See docs/retros/RETRO_MODEL_SLASH_CMD_STUCK_2026_06_17.md §2.1.
     model: "sonnet",
     effort: "high",
 };
