@@ -1,5 +1,5 @@
 ---
-type: patch
+type: minor
 ---
 
-refactor(agent): tool-result renderer registry foundation (raw tool name + registry)
+feat(agent): tool-result renderer registry — rich per-tool result UIs (WebSearch cards, record tables) routed by tool name/shape instead of a closed switch

@@ -88,7 +88,7 @@ function SearchResultCards(props: { items: SearchResultItem[] }): JSX.Element {
                 )}
             </For>
             <Show when={hidden() > 0}>
-                <OutputHiddenMarker hidden={hidden()} noun="line" from="head" />
+                <OutputHiddenMarker hidden={hidden()} noun="result" from="head" />
             </Show>
         </div>
     );
