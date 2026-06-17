@@ -29,6 +29,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
+import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { dispatchSlashCommand } from "../commands/dispatch";
@@ -478,6 +479,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     };
 
     const stopAgent = (): void => {
+        // Only attempt a stop when a turn is actually in flight. Pressing Esc on
+        // an empty composer when the agent is idle/finished/disconnected should
+        // be a quiet no-op — not a SIGINT that lands nowhere and logs a spurious
+        // "stop failed" warning. RequestStop is already a no-op off a working
+        // phase; this also suppresses the unnecessary control RPC.
+        const phase = paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" as const };
+        if (!workingFromPhase(phase)) return;
+
         // Transition turnPhase → Interrupting; the status line renders
         // "Stopping…" immediately (via the turnPhase.kind ===
         // "Interrupting" binding in agent-view.tsx). `useAgentStream`

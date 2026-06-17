@@ -1540,6 +1540,39 @@ describe("agent-pane-state reducer", () => {
             });
         });
 
+        it("StreamFlushObserved from Idle after a reconnect promotes to Streaming (resumed content ⇒ working)", () => {
+            // A stream drop + resubscribe lands the phase in Idle (PR F). Resumed
+            // LIVE content must re-enter the working set, or the "in progress"
+            // indicator stays off while output streams (the kill+respawn-during-
+            // stall bug). See ANALYSIS_AGENT_WORKING_STATE_AND_INPUT_REDUCER.
+            const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+            const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+            const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+            const s3 = update(s2, { type: "StreamFlushObserved", addedCount: 1, at: 120 }).state;
+            expect(s3.turnPhase.kind).toBe("Streaming");
+            const s4 = update(s3, { type: "StreamUnsubscribe", at: 130 }).state;
+            expect(s4.turnPhase.kind).toBe("Disconnected");
+            const s5 = update(s4, { type: "StreamSubscribe", at: 140 }).state;
+            expect(s5.turnPhase.kind).toBe("Idle"); // PR F: reconnect → Idle
+            const r = update(s5, { type: "StreamFlushObserved", addedCount: 2, at: 150 });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+        });
+
+        it("ToolStart/TokensIn from Idle after a reconnect promotes to Streaming", () => {
+            const base = (() => {
+                const s0 = update(mk(), { type: "InitReady", at: 100 }).state;
+                const s1 = update(s0, { type: "StreamSubscribe", at: 100 }).state;
+                const s2 = update(s1, { type: "TurnStart", at: 110 }).state;
+                const s3 = update(s2, { type: "StreamFlushObserved", addedCount: 1, at: 120 }).state;
+                const s4 = update(s3, { type: "StreamUnsubscribe", at: 130 }).state;
+                const s5 = update(s4, { type: "StreamSubscribe", at: 140 }).state;
+                expect(s5.turnPhase.kind).toBe("Idle");
+                return s5;
+            })();
+            expect(update(base, { type: "ToolStart", name: "Bash" }, 150).state.turnPhase.kind).toBe("Streaming");
+            expect(update(base, { type: "TokensIn", input: 10 }, 150).state.turnPhase.kind).toBe("Streaming");
+        });
+
         it("subsequent stream activity within Streaming re-emits schedule-stream-watchdog with refreshed deadline", () => {
             // Idempotent re-arm: every chunk / tool / token / flush
             // while Streaming must extend the deadline. The dispatcher
