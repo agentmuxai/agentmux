@@ -42,6 +42,58 @@ pub const PERSISTENT_OUTPUT_SUBJECT: &str = "output";
 /// Controller type constant.
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 
+/// Resolve the muxbus address (the agent's display name) from a spawn env map.
+/// `AGENTMUX_AGENT_ID` (= `agent.name`, set at block creation) is canonical;
+/// `WAVEMUX_AGENT_ID` is the legacy fallback. Returns `None` — i.e. not
+/// muxbus-addressable — when neither is present (a non-agent persistent block).
+fn muxbus_agent_id_from_env(env: &HashMap<String, String>) -> Option<String> {
+    for key in ["AGENTMUX_AGENT_ID", "WAVEMUX_AGENT_ID"] {
+        if let Some(v) = env.get(key) {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod muxbus_registration_tests {
+    use super::muxbus_agent_id_from_env;
+    use std::collections::HashMap;
+
+    #[test]
+    fn resolves_agentmux_agent_id() {
+        let mut env = HashMap::new();
+        env.insert("AGENTMUX_AGENT_ID".to_string(), "Naki".to_string());
+        assert_eq!(muxbus_agent_id_from_env(&env), Some("Naki".to_string()));
+    }
+
+    #[test]
+    fn falls_back_to_legacy_wavemux_id() {
+        let mut env = HashMap::new();
+        env.insert("WAVEMUX_AGENT_ID".to_string(), "clamk".to_string());
+        assert_eq!(muxbus_agent_id_from_env(&env), Some("clamk".to_string()));
+    }
+
+    #[test]
+    fn prefers_agentmux_over_legacy() {
+        let mut env = HashMap::new();
+        env.insert("AGENTMUX_AGENT_ID".to_string(), "new".to_string());
+        env.insert("WAVEMUX_AGENT_ID".to_string(), "old".to_string());
+        assert_eq!(muxbus_agent_id_from_env(&env), Some("new".to_string()));
+    }
+
+    #[test]
+    fn none_when_absent_or_blank() {
+        let mut env: HashMap<String, String> = HashMap::new();
+        assert_eq!(muxbus_agent_id_from_env(&env), None);
+        env.insert("AGENTMUX_AGENT_ID".to_string(), "   ".to_string());
+        assert_eq!(muxbus_agent_id_from_env(&env), None);
+    }
+}
+
 /// Configuration for spawning the persistent process.
 #[derive(Debug, Clone)]
 pub struct PersistentSpawnConfig {
@@ -544,6 +596,45 @@ impl PersistentSubprocessController {
         }
         self.publish_status();
 
+        // Auto-register with the muxbus reactive handler so inter-agent
+        // messages reach this persistent (no-PTY) agent. The PTY shell
+        // controller (shell.rs) was the only prior auto-register path, so
+        // stream-json agents were in the directory but absent from the
+        // delivery registry — `inject_message` returned "agent not found"
+        // (issue #1470). Tier-1 delivery is routed through the controller-
+        // aware MessageSender (→ send_user_message), not PTY keystrokes.
+        // See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
+        let agent_id_for_muxbus = muxbus_agent_id_from_env(&config.env_vars);
+        if let Some(ref agent_id) = agent_id_for_muxbus {
+            match crate::backend::reactive::get_global_handler()
+                .register_agent(agent_id, &self.block_id, Some(&self.tab_id))
+            {
+                Ok(()) => {
+                    tracing::info!(
+                        block_id = %self.block_id,
+                        agent_id = %agent_id,
+                        "muxbus: auto-registered persistent agent"
+                    );
+                    // Also write the cross-instance (Tier-2) file registry.
+                    if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
+                        let data_dir = crate::backend::base::get_wave_data_dir();
+                        crate::backend::reactive::registry::write(
+                            &data_dir,
+                            agent_id,
+                            &local_url,
+                            &self.block_id,
+                        );
+                    }
+                }
+                Err(e) => tracing::warn!(
+                    block_id = %self.block_id,
+                    agent_id = %agent_id,
+                    error = %e,
+                    "muxbus: persistent auto-register failed"
+                ),
+            }
+        }
+
         // Record active pid for crash recovery (Phase 4.2). If the server
         // dies while this subprocess is running, scan_orphans() will find
         // the stale pid on next boot and flag the session as interrupted.
@@ -716,6 +807,8 @@ impl PersistentSubprocessController {
         let broker_wait = self.broker.clone();
         let wstore_wait = self.wstore.clone();
         let health_wait = Arc::clone(&self.health_monitor);
+        // Captured so the waiter can deregister this agent from muxbus on exit.
+        let agent_id_wait = agent_id_for_muxbus.clone();
 
         tokio::spawn(async move {
             tokio::select! {
@@ -737,6 +830,16 @@ impl PersistentSubprocessController {
                     inner.kill_tx = None;
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
+
+                    // Deregister from muxbus so later sends fall through to the
+                    // lower tiers instead of resolving to a dead block. Mirrors
+                    // the shell controller's exit path.
+                    crate::backend::reactive::get_global_handler()
+                        .unregister_block(&block_id_wait);
+                    if let Some(ref agent_id) = agent_id_wait {
+                        let data_dir = crate::backend::base::get_wave_data_dir();
+                        crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                    }
 
                     // Clear active pid — clean exit, no recovery needed.
                     if let Some(ref wstore) = wstore_wait {
@@ -788,6 +891,14 @@ impl PersistentSubprocessController {
                     inner.kill_tx = None;
                     Self::set_status(&mut inner, STATUS_DONE);
                     drop(inner);
+
+                    // Deregister from muxbus (see the clean-exit arm above).
+                    crate::backend::reactive::get_global_handler()
+                        .unregister_block(&block_id_wait);
+                    if let Some(ref agent_id) = agent_id_wait {
+                        let data_dir = crate::backend::base::get_wave_data_dir();
+                        crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                    }
 
                     // Clear active pid — user-initiated stop, no recovery needed.
                     if let Some(ref wstore) = wstore_wait {
