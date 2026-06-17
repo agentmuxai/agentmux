@@ -50,6 +50,17 @@ pub struct PersistentSpawnConfig {
     pub working_dir: String,
     pub env_vars: HashMap<String, String>,
     pub session_id_field: String,
+    /// Resume flag for this provider (e.g. "--resume"), read from
+    /// `agent:resume_flag` meta. Empty = provider has no simple-flag resume.
+    /// Mirrors `SubprocessSpawnConfig::resume_flag` so a respawn (after a
+    /// runtime/model change or the picker reattach path) continues the same
+    /// conversation instead of starting fresh.
+    pub resume_flag: String,
+    /// Session id to hydrate `inner.session_id` with BEFORE spawning, when the
+    /// controller hasn't captured one yet (fresh controller after a forced
+    /// restart, or picker reattach). Read from `agent:sessionid` meta. With a
+    /// non-empty `resume_flag` this makes `--resume <sid>` land on the respawn.
+    pub session_id: String,
     /// Echoed back as `agent-message-accepted` so the frontend can promote the
     /// pending entry. Matches `CommandAgentInputData.message_id` on the AgentInput
     /// command; absent for legacy callers.
@@ -369,7 +380,36 @@ impl PersistentSubprocessController {
     fn spawn_process(&self, config: PersistentSpawnConfig) -> Result<(), String> {
         // Build command — use make_cli_cmd to resolve .cmd wrappers to node on Windows
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&config.cli_command);
-        cmd.args(&config.cli_args);
+
+        // Hydrate the captured session id from the config when we don't have one
+        // yet (fresh controller after a forced restart — e.g. a /model change —
+        // or the picker reattach path). Mirrors SubprocessController::
+        // hydrate_session_id_from_config so the respawn resumes the same
+        // conversation instead of starting blank.
+        if !config.session_id.is_empty() {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.session_id.is_none() {
+                inner.session_id = Some(config.session_id.clone());
+            }
+        }
+
+        // Append `--resume <sid>` when we have a session id and the provider
+        // supports simple-flag resume — same construction as
+        // SubprocessController::spawn_turn. This is what makes a model/effort
+        // change (which respawns the persistent CLI with new flags) preserve the
+        // conversation. cli_args carries the runtime flags (model/effort/perm)
+        // already rebuilt by the frontend (useAgentCommands buildRuntimeArgs).
+        let mut spawn_args = config.cli_args.clone();
+        {
+            let inner = self.inner.lock().unwrap();
+            if let Some(ref sid) = inner.session_id {
+                if !config.resume_flag.is_empty() {
+                    spawn_args.push(config.resume_flag.clone());
+                    spawn_args.push(sid.clone());
+                }
+            }
+        }
+        cmd.args(&spawn_args);
 
         // Working directory
         if !config.working_dir.is_empty() {
@@ -450,7 +490,7 @@ impl PersistentSubprocessController {
             block_id = %self.block_id,
             pid = pid,
             cmd = %config.cli_command,
-            args = ?config.cli_args,
+            args = ?spawn_args,
             working_dir = %config.working_dir,
             "persistent process spawned"
         );
