@@ -31,6 +31,8 @@ import {
     byKind,
     anyTool,
 } from "./tool-renderers/registry";
+// Side-effect: registers the rich, name-matched renderers (WebSearch cards, …).
+import "./tool-renderers/SearchResults";
 
 interface ToolOverlayLogProps {
     node: ToolNode;
