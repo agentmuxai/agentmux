@@ -16,6 +16,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
 import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
+import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
 
@@ -184,7 +185,15 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
             </div>
 
             <div class="identity-detail-body">
-                <DetailField label="Provider" value={PROVIDER_LABELS[account.provider]} />
+                {/* Resolve the label via the brand so CLI-OAuth accounts
+                    (provider "claude"/"codex"/…) don't render a blank Provider
+                    field; surface "via <CLI>" so the origin is clear. */}
+                <DetailField
+                    label="Provider"
+                    value={`${PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider}${
+                        isCliOAuthProvider(account.provider) ? ` (via ${account.provider} CLI)` : ""
+                    }`}
+                />
                 <DetailField label="Kind" value={KIND_LABELS[account.kind]} />
 
                 {/* Secret reference */}
