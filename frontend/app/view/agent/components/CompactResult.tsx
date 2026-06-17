@@ -13,6 +13,8 @@
 import { For, createSignal, Show, type JSX } from "solid-js";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { TerminalOutput } from "./TerminalOutput";
+import { terminalText } from "./terminal-text";
 
 interface CompactResultProps {
     tool: string;
@@ -101,8 +103,17 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
     const [expanded, setExpanded] = createSignal(tool === "Glob");
 
     const summary = summarize(tool, params, result);
+    // When the result carries a terminal-style string body (stdout/output/
+    // content), render it as a terminal instead of a JSON blob. Structured
+    // results (no string body) fall back to JSON.
+    const termText = terminalText(result);
     const fullJson = result != null ? JSON.stringify(result, null, 2) : "";
-    const hasDetail = fullJson.length > summary.length + 10;
+    // Expandable when there's more to show than the one-line summary. A terminal
+    // body is worth expanding whenever it's multi-line (the summary collapses
+    // it) or longer than the summary.
+    const hasDetail = termText != null
+        ? termText.includes("\n") || termText.length > summary.length
+        : fullJson.length > summary.length + 10;
     // Head-cap the expanded JSON so a large structured payload (Glob / Grep /
     // Agent) can't add an unbounded <pre> once the summary is expanded.
     const jsonCap = capText(fullJson, MAX_TOOL_OUTPUT_LINES, "head");
@@ -139,6 +150,8 @@ export const CompactResult = ({ tool, params, result }: CompactResultProps): JSX
                             </>
                         );
                     })()
+                    : termText != null
+                    ? <TerminalOutput text={termText} from="tail" />
                     : (
                         <>
                             <pre class="agent-tool-compact-json">{jsonCap.text}</pre>
