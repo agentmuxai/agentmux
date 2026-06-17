@@ -266,6 +266,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/windows", get(handle_list_windows))
         .route("/api/v1/workspaces", get(handle_list_workspaces))
         .route("/api/v1/tabs", get(handle_list_tabs))
+        // Layout / navigation verbs (SPEC §4.5): switch the active tab, open a
+        // new tab, focus a window. agentmux-mcp's SetActiveTab / NewTab /
+        // FocusWindow tools POST here.
+        .route("/api/v1/tab/activate", post(handle_tab_activate))
+        .route("/api/v1/tab/new", post(handle_tab_new))
+        .route("/api/v1/window/focus", post(handle_window_focus))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
@@ -948,6 +954,107 @@ async fn handle_list_tabs(
             .and_then(|ctx| ctx.workspace_id)
     });
     Json(service::agent_tabs(&state.wstore, ws_id.as_deref()))
+}
+
+#[derive(serde::Deserialize)]
+struct TabActivateRequest {
+    /// Tab to switch to (required).
+    tab_id: String,
+}
+
+/// `POST /api/v1/tab/activate` — make `tab_id` the active tab in its
+/// workspace. Routes through `workspace.SetActiveTab`.
+async fn handle_tab_activate(
+    State(state): State<AppState>,
+    Json(req): Json<TabActivateRequest>,
+) -> impl IntoResponse {
+    let tab_id = req.tab_id.trim().to_string();
+    if tab_id.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing tab_id" }))).into_response();
+    }
+    let ws_id = match service::workspace_id_for_tab(&state.wstore, &tab_id) {
+        Some(w) => w,
+        None => return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no workspace owns tab {tab_id}") }))).into_response(),
+    };
+    let call = crate::backend::service::WebCallType {
+        service: "workspace".to_string(),
+        method: "SetActiveTab".to_string(),
+        uicontext: None,
+        args: vec![json!(ws_id), json!(tab_id)],
+    };
+    finish_name_call(&state, call, json!({ "success": true, "tab_id": tab_id })).await
+}
+
+#[derive(serde::Deserialize)]
+struct TabNewRequest {
+    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the workspace
+    /// the new tab is created in when `workspace_id` is omitted.
+    #[serde(default)]
+    block_id: Option<String>,
+    /// Explicit target workspace; defaults to the caller's own.
+    #[serde(default)]
+    workspace_id: Option<String>,
+    /// Optional tab name; the backend auto-generates `tab{N}` when empty.
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// `POST /api/v1/tab/new` — create (and activate) a new tab in the caller's
+/// workspace (or an explicit `workspace_id`). Routes through
+/// `workspace.CreateTab`.
+async fn handle_tab_new(
+    State(state): State<AppState>,
+    Json(req): Json<TabNewRequest>,
+) -> impl IntoResponse {
+    let name = req.name.map(|n| n.trim().chars().take(128).collect::<String>()).unwrap_or_default();
+    let workspace_id = match req.workspace_id.filter(|w| !w.is_empty()) {
+        Some(w) => w,
+        None => match resolve_own(&state, req.block_id, |c| c.workspace_id.clone()) {
+            Ok(w) => w,
+            Err(resp) => return resp,
+        },
+    };
+    let call = crate::backend::service::WebCallType {
+        service: "workspace".to_string(),
+        method: "CreateTab".to_string(),
+        uicontext: None,
+        // [ws_id, name, activate]; empty name → backend auto-names tab{N}.
+        args: vec![json!(workspace_id), json!(name), json!(true)],
+    };
+    finish_name_call(&state, call, json!({ "success": true, "workspace_id": workspace_id })).await
+}
+
+#[derive(serde::Deserialize)]
+struct WindowFocusRequest {
+    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the caller's
+    /// own window when `window_id` is omitted.
+    #[serde(default)]
+    block_id: Option<String>,
+    /// Explicit target window; defaults to the caller's own.
+    #[serde(default)]
+    window_id: Option<String>,
+}
+
+/// `POST /api/v1/window/focus` — bring a window to the foreground. Defaults to
+/// the caller's own window. Routes through `client.FocusWindow`.
+async fn handle_window_focus(
+    State(state): State<AppState>,
+    Json(req): Json<WindowFocusRequest>,
+) -> impl IntoResponse {
+    let window_id = match req.window_id.filter(|w| !w.is_empty()) {
+        Some(w) => w,
+        None => match resolve_own(&state, req.block_id, |c| c.window_id.clone()) {
+            Ok(w) => w,
+            Err(resp) => return resp,
+        },
+    };
+    let call = crate::backend::service::WebCallType {
+        service: "client".to_string(),
+        method: "FocusWindow".to_string(),
+        uicontext: None,
+        args: vec![json!(window_id)],
+    };
+    finish_name_call(&state, call, json!({ "success": true, "window_id": window_id })).await
 }
 
 // ---- Auth Middleware ----

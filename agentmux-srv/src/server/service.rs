@@ -80,6 +80,19 @@ pub(crate) struct AgentContext {
     pub workspace_name: String,
 }
 
+/// Find the id of the workspace that owns `tab_id` (in `tabids` or
+/// `pinnedtabids`), or `None` if no workspace references it.
+pub(crate) fn workspace_id_for_tab(store: &Store, tab_id: &str) -> Option<String> {
+    store
+        .get_all::<Workspace>()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|w| {
+            w.tabids.iter().any(|t| t == tab_id) || w.pinnedtabids.iter().any(|t| t == tab_id)
+        })
+        .map(|w| w.oid)
+}
+
 /// Read-only snapshot of the window → workspace → tab → pane tree, for agent
 /// introspection (`GET /api/v1/layout`). Pure wstore reads — no reducer, so
 /// it's hermetic and safe. Lookups use linear scans (a handful of objects).
@@ -2827,10 +2840,24 @@ fn wstore_workspace_exists(
 
 #[cfg(test)]
 mod agent_context_tests {
-    use super::resolve_agent_context;
+    use super::{resolve_agent_context, workspace_id_for_tab};
     use crate::backend::obj::Tab;
     use crate::backend::storage::store::Store;
     use crate::backend::wcore;
+
+    #[test]
+    fn workspace_id_for_tab_finds_owner_and_misses_cleanly() {
+        let store = Store::open_in_memory().unwrap();
+        wcore::ensure_initial_data(&store).unwrap();
+        let tab = store
+            .get_all::<Tab>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("seeded tab");
+        assert!(workspace_id_for_tab(&store, &tab.oid).is_some(), "owner found");
+        assert!(workspace_id_for_tab(&store, "nope").is_none(), "miss is None");
+    }
 
     // `ensure_initial_data` seeds one workspace ("Starter workspace") with a
     // window and an initial tab holding a default agent block. The resolver
