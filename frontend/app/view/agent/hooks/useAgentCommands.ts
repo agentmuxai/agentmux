@@ -299,7 +299,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
 
         if (trimmed.startsWith("/")) {
             const outcome = await dispatchSlashCommand(trimmed, registry(), buildCommandContext());
-            if (outcome.kind === "handled") return;
+            if (outcome.kind === "handled") {
+                // TurnStart was dispatched by handleSendMessage before sendMessage
+                // was called. Reset it so the pane returns to Idle — no real agent
+                // turn was initiated, only a client-side command. Mirrors the bang
+                // command's finally-TurnReset above.
+                if (!wasAlreadyWorking) {
+                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                }
+                return;
+            }
         }
 
         // Init guard (issue #728 gap 1, codex P2 on PR #742). The
