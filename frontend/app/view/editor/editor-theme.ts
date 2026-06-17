@@ -66,6 +66,83 @@ const editorChromeTheme = EditorView.theme(
             border: "1px solid var(--border-color)",
             color: "var(--main-text-color)",
         },
+
+        // ── Find/replace panel — refined to match the app design system ──
+        // (tokens from theme.scss; mirrors the look of element/search.scss).
+        ".cm-panels.cm-panels-top": {
+            borderBottom: "1px solid var(--border-color)",
+        },
+        ".cm-panel.cm-search": {
+            position: "relative",
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "6px",
+            padding: "7px 32px 7px 10px",
+            fontFamily: "inherit",
+            fontSize: "12px",
+        },
+        ".cm-panel.cm-search label": {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            margin: "0",
+            color: "var(--secondary-text-color)",
+            fontSize: "11px",
+            textTransform: "none",
+            cursor: "pointer",
+        },
+        ".cm-panel.cm-search input[type=checkbox]": {
+            accentColor: "var(--accent-color)",
+            margin: "0",
+            cursor: "pointer",
+        },
+        ".cm-textfield": {
+            backgroundColor: "var(--form-element-bg-color)",
+            color: "var(--main-text-color)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "4px",
+            padding: "3px 8px",
+            fontSize: "12px",
+            fontFamily: "inherit",
+        },
+        ".cm-textfield:focus": {
+            outline: "none",
+            borderColor: "var(--accent-color)",
+        },
+        ".cm-button": {
+            backgroundColor: "transparent",
+            backgroundImage: "none",
+            color: "var(--secondary-text-color)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "4px",
+            padding: "2px 9px",
+            fontSize: "11px",
+            cursor: "pointer",
+        },
+        ".cm-button:hover": {
+            backgroundColor: "var(--hover-bg-color)",
+            color: "var(--main-text-color)",
+        },
+        ".cm-button:active": {
+            backgroundColor: "var(--hover-bg-color)",
+        },
+        ".cm-search button[name=close]": {
+            position: "absolute",
+            top: "6px",
+            right: "8px",
+            padding: "0 4px",
+            border: "none",
+            background: "transparent",
+            color: "var(--secondary-text-color)",
+            fontSize: "16px",
+            lineHeight: "1",
+            cursor: "pointer",
+        },
+        ".cm-search button[name=close]:hover": {
+            color: "var(--main-text-color)",
+            backgroundColor: "transparent",
+        },
     },
     { dark: true },
 );
