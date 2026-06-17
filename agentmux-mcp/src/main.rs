@@ -98,6 +98,42 @@ const SET_WINDOW_NAME_TOOL: &str = r#"{
   }
 }"#;
 
+const SET_TAB_NAME_TOOL: &str = r#"{
+  "name": "SetTabName",
+  "description": "Rename your AgentMux tab (the label in the tab bar). Defaults to your own tab. Trimmed; clamped to 128 characters.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "description": "The tab name to display" }
+    },
+    "required": ["name"]
+  }
+}"#;
+
+const SET_PANE_TITLE_TOOL: &str = r#"{
+  "name": "SetPaneTitle",
+  "description": "Set the title of your own conversation pane (the header label on this agent pane). Trimmed; clamped to 128 characters.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "title": { "type": "string", "description": "The pane title to display" }
+    },
+    "required": ["title"]
+  }
+}"#;
+
+const SET_WORKSPACE_NAME_TOOL: &str = r#"{
+  "name": "SetWorkspaceName",
+  "description": "Rename your AgentMux workspace. The workspace name also appears in the window/taskbar title when no explicit window name is set. Defaults to your own workspace. Trimmed; clamped to 128 characters.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "description": "The workspace name to display" }
+    },
+    "required": ["name"]
+  }
+}"#;
+
 const OPEN_EDITOR_TOOL: &str = r#"{
   "name": "OpenEditor",
   "description": "Open a file in an AgentMux editor pane next to this conversation. Use when you want the user to see a file you're discussing or editing. Pass an absolute host path. Fire-and-forget: returns once the pane is opened.",
@@ -193,10 +229,15 @@ async fn main() {
                 let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
                 let set_window_name: Value =
                     serde_json::from_str(SET_WINDOW_NAME_TOOL).expect("static json");
+                let set_tab_name: Value = serde_json::from_str(SET_TAB_NAME_TOOL).expect("static json");
+                let set_pane_title: Value =
+                    serde_json::from_str(SET_PANE_TITLE_TOOL).expect("static json");
+                let set_workspace_name: Value =
+                    serde_json::from_str(SET_WORKSPACE_NAME_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name, set_tab_name, set_pane_title, set_workspace_name] }
                 })
             }
             "tools/call" => {
@@ -225,6 +266,25 @@ async fn main() {
         let _ = stdout.write_all(b"\n").await;
         let _ = stdout.flush().await;
     }
+}
+
+/// Guard for the self-scoped agent-API verbs: they need the sidecar URL +
+/// auth key to reach it, and the caller's block id to resolve "my own"
+/// tab/pane/window/workspace.
+fn require_agent_env(local_url: &str, auth_key: &str, block_id: &str) -> Result<()> {
+    if local_url.is_empty() || auth_key.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    if block_id.is_empty() {
+        anyhow::bail!(
+            "neither AGENTMUX_AGENT_BUS_ID nor AGENTMUX_BLOCKID is set \
+             — cannot resolve this agent's context. Is this agent pane opened via AgentMux?"
+        );
+    }
+    Ok(())
 }
 
 async fn call_tool(
@@ -596,6 +656,59 @@ async fn call_tool(
                 .and_then(|v| v.as_str())
                 .unwrap_or(new_name);
             Ok(format!("Window name set to \"{applied}\""))
+        }
+        "SetTabName" | "SetWorkspaceName" => {
+            let new_name = arguments
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+
+            let (path, kind) = if name == "SetTabName" {
+                ("tab/name", "Tab")
+            } else {
+                ("workspace/name", "Workspace")
+            };
+            let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&json!({ "block_id": block_id, "name": new_name }))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("set {kind} name failed: HTTP {status} — {text}");
+            }
+            Ok(format!("{kind} name set to \"{new_name}\""))
+        }
+        "SetPaneTitle" => {
+            let new_title = arguments
+                .get("title")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+
+            let url = format!("{}/api/v1/pane/title", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&json!({ "block_id": block_id, "title": new_title }))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("set pane title failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Pane title set to \"{new_title}\""))
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }

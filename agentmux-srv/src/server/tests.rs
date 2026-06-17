@@ -397,3 +397,76 @@ async fn wps_publish_omits_persist_defaults_to_zero() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+// ---- First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE) ----
+
+/// `GET /api/v1/self` resolves the seeded agent block to its tab / window /
+/// workspace. Read-only (no reducer), so it's hermetic in the test harness.
+#[tokio::test]
+async fn self_endpoint_resolves_seeded_agent() {
+    let state = test_state();
+    let wstore = state.wstore.clone();
+    let tab = wstore
+        .get_all::<crate::backend::obj::Tab>()
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("seeded tab");
+    let block_id = tab.blockids.first().expect("seeded agent block").clone();
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/v1/self?block_id={block_id}"))
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["block_id"], block_id);
+    assert_eq!(json["tab_id"], tab.oid);
+    assert_eq!(json["workspace_name"], "Starter workspace");
+    assert!(json["workspace_id"].is_string(), "workspace_id resolved");
+    assert!(json["window_id"].is_string(), "window_id resolved via reverse lookup");
+}
+
+/// `/api/v1/self` is auth-gated like every other route.
+#[tokio::test]
+async fn self_endpoint_requires_auth() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/self?block_id=anything")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// `/api/v1/self` without a block_id is a client error, not a 500.
+#[tokio::test]
+async fn self_endpoint_missing_block_id_is_400() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/self")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn clean_name_trims_clamps_and_rejects_empty() {
+    use super::clean_name;
+    assert_eq!(clean_name("  hi  ", 64).as_deref(), Some("hi"));
+    assert_eq!(clean_name("   ", 64), None);
+    assert_eq!(clean_name("", 64), None);
+    // clamps to `max` chars (counted by char, not byte)
+    let long = "x".repeat(200);
+    assert_eq!(clean_name(&long, 64).unwrap().chars().count(), 64);
+}
