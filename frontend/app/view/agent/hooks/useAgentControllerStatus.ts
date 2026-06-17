@@ -48,6 +48,11 @@ export interface UseAgentControllerStatusOptions {
     onLoginSuccess?: (email: string | null) => void;
     /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
     onReady?: () => void;
+    /**
+     * Returns the pane's current `{rows, cols}` (or undefined if not laid out
+     * yet). Forwarded to the launch flow to seed the PTY size at spawn.
+     */
+    getInitialTermSize?: () => { rows: number; cols: number } | undefined;
 }
 
 export interface UseAgentControllerStatus {
@@ -115,6 +120,7 @@ export function useAgentControllerStatus(
                 setLoginWaiting,
                 authEnv,
                 onLoginSuccess: opts.onLoginSuccess,
+                getInitialTermSize: opts.getInitialTermSize,
             });
             if (result === "success") {
                 setAgentReady(true);
