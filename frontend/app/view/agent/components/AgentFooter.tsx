@@ -698,13 +698,11 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 }
             }
 
-            // Older: enter from an empty composer, or continue while navigating
-            // with the caret on the first line.
-            if (
-                e.key === "ArrowUp" &&
-                histPos > 0 &&
-                (empty || (navigating && caretOnFirstLine))
-            ) {
+            // Older: whenever the caret is on the first line (so we don't fight
+            // multiline cursor movement). Covers an empty composer, a partially
+            // typed draft (stashed into histDraft, restorable with ArrowDown),
+            // and continuing further back while already navigating.
+            if (e.key === "ArrowUp" && histPos > 0 && caretOnFirstLine) {
                 if (!navigating) histDraft = textareaRef.value; // stash the live draft
                 histPos--;
                 e.preventDefault();
@@ -734,6 +732,12 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (textareaRef.value.trim().length > 0) {
                 e.preventDefault();
                 textareaRef.value = "";
+                // Clearing exits history navigation — park the cursor at the
+                // newest message so the next ArrowUp doesn't skip an entry.
+                // (The clear doesn't dispatch `input`, so handleInput's reset
+                // wouldn't otherwise fire.)
+                histPos = sentHistory.length;
+                histDraft = "";
                 // Kick the RAF-debounced typing scroll so the footer's
                 // auto-grow collapses and the document stays anchored.
                 props.onTyping?.();
