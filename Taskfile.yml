@@ -160,6 +160,16 @@ tasks:
             rule #3 from SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.
         cmd: bash tools/lint/check-input-handler-layout-reads.sh
 
+    check:scrollbar-cursor:
+        desc: >-
+            Grep gate — fails if a scrollbar/os-scrollbar selector sets
+            `cursor` to a link/text value (pointer/text or the
+            --cursor-interactive/--cursor-text tokens). Scrollbar pseudo-
+            elements inherit their host's cursor, so the arrow is pinned in
+            app.scss; this keeps the regression from recurring. See
+            docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md.
+        cmd: bash scripts/check-scrollbar-cursor.sh
+
     build:frontend:
         desc: Build the frontend (production mode).
         cmd: bash scripts/vite-build.sh --mode production --config vite.config.ts
@@ -167,6 +177,7 @@ tasks:
             - npm:install
             - check:menu-positioning
             - check:input-handler-layout
+            - check:scrollbar-cursor
         env:
             VITE_PLATFORM: "{{OS}}"
 

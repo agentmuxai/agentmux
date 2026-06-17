@@ -299,9 +299,12 @@
     // so components read semantically and the mapping can move in one place.
     // A scroll affordance (scrollbar thumb / handle) is NOT interactive in the
     // click sense — it stays the arrow (`--cursor-default`), never the link
-    // hand. The `.u-cursor-*` utilities + the scrollbar guard in
-    // `.stylelintrc.json` keep this honest. See
-    // `docs/analysis/ANALYSIS_CURSOR_STYLING_2026_06_15.md`.
+    // hand. IMPORTANT: a scrollbar pseudo-element INHERITS its host's cursor, so
+    // the arrow must be PINNED on the scrollbar selector (`cursor:
+    // var(--cursor-default)` in app.scss) — removing the declaration does NOT
+    // give the arrow, it gives the host's `text`/`pointer`. The `.u-cursor-*`
+    // utilities + the `scripts/check-scrollbar-cursor.sh` grep gate keep this
+    // honest. See `docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`.
     --cursor-interactive: pointer;     // buttons, links, clickable rows
     --cursor-default:     default;     // arrow — surfaces, scroll thumbs, chrome
     --cursor-text:        text;        // editable text
