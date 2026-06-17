@@ -535,7 +535,13 @@ export class EditorViewModel implements ViewModel {
                 filePath: result.file_path,
                 scratchId: result.scratch_id,
                 displayName: result.display_name,
-                language: "markdown",
+                // Plain-text scratch: an untitled buffer is for typing, not a
+                // markdown doc. The backing file is `.md` on disk (persistence
+                // detail), but treating the tab as markdown made the new
+                // styled-preview feature open a fresh scratch as a blank
+                // rendered pane. "text" → editable, no syntax-render. The user
+                // can Save As `.md` to get markdown behavior.
+                language: "text",
                 source: "system",
             });
             const opened = events.find((e) => e.type === "TabOpened" || e.type === "TabActivated");
