@@ -17,12 +17,21 @@ pub(super) async fn handle_service(
     State(state): State<AppState>,
     body: axum::body::Bytes,
 ) -> Json<WebReturnType> {
-    let service_start = std::time::Instant::now();
     let call: WebCallType = match serde_json::from_slice(&body) {
         Ok(c) => c,
         Err(e) => return Json(WebReturnType::error(format!("invalid request body: {e}"))),
     };
-    let result = dispatch_service(&state, &call).await;
+    Json(run_service_call(&state, &call).await)
+}
+
+/// Dispatch a service call and broadcast any resulting `WaveObjUpdate`s to the
+/// event bus — the shared core of `handle_service`. Factored out so the typed
+/// first-class agent-API verbs (e.g. `/api/v1/window/name`) get byte-identical
+/// persistence + broadcast to a raw `/agentmux/service` call without
+/// re-implementing it. See SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md.
+pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let service_start = std::time::Instant::now();
+    let result = dispatch_service(state, call).await;
     let elapsed = service_start.elapsed();
     tracing::info!(
         "[http-perf] {}.{}: {:.2}ms",
@@ -54,7 +63,73 @@ pub(super) async fn handle_service(
         }
     }
 
-    Json(result)
+    result
+}
+
+/// The agent pane's place in the object tree, resolved from its block id.
+/// Powers `GET /api/v1/self` and lets naming verbs default to "my own X".
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct AgentContext {
+    pub block_id: String,
+    pub block_title: String,
+    pub tab_id: String,
+    pub tab_name: String,
+    pub window_id: Option<String>,
+    pub window_name: String,
+    pub workspace_id: Option<String>,
+    pub workspace_name: String,
+}
+
+/// Walk block → tab → workspace → window from an agent pane's block id.
+///
+/// Tabs carry no parent reference, so the workspace and window are found by
+/// reverse lookup: the workspace whose `tabids`/`pinnedtabids` contains the
+/// tab, then the window assigned that workspace. `window_id`/`workspace_id`
+/// are `None` when the tab isn't attached to a live window (e.g. a torn-off
+/// tab mid-transition) — callers should treat that as "no window to name".
+pub(crate) fn resolve_agent_context(store: &Store, block_id: &str) -> Result<AgentContext, String> {
+    let block = store
+        .get::<Block>(block_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("block not found: {block_id}"))?;
+    let block_title = meta_get_string(&block.meta, "frame:title", "");
+    let tab_id = block.parentoref.strip_prefix("tab:").unwrap_or("").to_string();
+    let tab = store
+        .get::<Tab>(&tab_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("tab not found for block {block_id}"))?;
+
+    let mut workspace_id = None;
+    let mut workspace_name = String::new();
+    let mut window_id = None;
+    let mut window_name = String::new();
+
+    if let Ok(workspaces) = store.get_all::<Workspace>() {
+        if let Some(ws) = workspaces
+            .into_iter()
+            .find(|w| w.tabids.contains(&tab_id) || w.pinnedtabids.contains(&tab_id))
+        {
+            workspace_name = ws.name.clone();
+            workspace_id = Some(ws.oid.clone());
+            if let Ok(windows) = store.get_all::<Window>() {
+                if let Some(win) = windows.into_iter().find(|w| w.workspaceid == ws.oid) {
+                    window_name = meta_get_string(&win.meta, "window:displayname", "");
+                    window_id = Some(win.oid);
+                }
+            }
+        }
+    }
+
+    Ok(AgentContext {
+        block_id: block_id.to_string(),
+        block_title,
+        tab_id,
+        tab_name: tab.name,
+        window_id,
+        window_name,
+        workspace_id,
+        workspace_name,
+    })
 }
 
 async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
@@ -2622,3 +2697,42 @@ fn wstore_workspace_exists(
 // vs wcore-direct tab ops). It will be reintroduced in E.2c.3
 // when tabs migrate into the reducer and pinned/active state is
 // authoritative there. (reagent + codex P1 #615.)
+
+#[cfg(test)]
+mod agent_context_tests {
+    use super::resolve_agent_context;
+    use crate::backend::obj::Tab;
+    use crate::backend::storage::store::Store;
+    use crate::backend::wcore;
+
+    // `ensure_initial_data` seeds one workspace ("Starter workspace") with a
+    // window and an initial tab holding a default agent block. The resolver
+    // must walk that agent block back up to its tab, workspace, and window.
+    #[test]
+    fn resolves_block_to_tab_workspace_and_window() {
+        let store = Store::open_in_memory().unwrap();
+        wcore::ensure_initial_data(&store).unwrap();
+
+        let tab = store
+            .get_all::<Tab>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("seeded tab");
+        let block_id = tab.blockids.first().expect("seeded agent block").clone();
+
+        let ctx = resolve_agent_context(&store, &block_id).expect("resolves context");
+        assert_eq!(ctx.tab_id, tab.oid);
+        assert_eq!(ctx.workspace_name, "Starter workspace");
+        assert!(ctx.workspace_id.is_some(), "workspace should resolve");
+        assert!(ctx.window_id.is_some(), "window should resolve via reverse lookup");
+    }
+
+    #[test]
+    fn unknown_block_errors() {
+        let store = Store::open_in_memory().unwrap();
+        wcore::ensure_initial_data(&store).unwrap();
+        let err = resolve_agent_context(&store, "does-not-exist").unwrap_err();
+        assert!(err.contains("block not found"), "unexpected error: {err}");
+    }
+}

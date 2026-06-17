@@ -85,7 +85,24 @@ pub fn ensure_initial_data(store: &Store) -> Result<bool, StoreError> {
     let ws = create_workspace(store, "Starter workspace")?;
 
     // Create window pointing to workspace
-    let win = create_window(store, &ws.oid)?;
+    let mut win = create_window(store, &ws.oid)?;
+
+    // Seed the window's display name (drives the OS/taskbar title) from
+    // AGENTMUX_WINDOW_NAME if the launcher/caller set it. This lets an agent
+    // bring up a recognizable instance, e.g. `AGENTMUX_WINDOW_NAME="repro #1503"
+    // task dev`. Only applies to a fresh instance's first window (this
+    // initial-data path); the runtime `SetWindowName` verb renames later.
+    // See SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md §4.4.
+    if let Ok(name) = std::env::var("AGENTMUX_WINDOW_NAME") {
+        let name = name.trim();
+        if !name.is_empty() {
+            win.meta.insert(
+                "window:displayname".to_string(),
+                serde_json::json!(name.chars().take(64).collect::<String>()),
+            );
+            store.update(&mut win)?;
+        }
+    }
 
     // Update client with window ID
     client.windowids.push(win.oid.clone());
