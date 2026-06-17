@@ -598,11 +598,10 @@ export interface AgentRuntimeConfig {
 
 export const DEFAULT_RUNTIME_CONFIG: AgentRuntimeConfig = {
     permissionMode: "bypass",
-    // Default to Opus (the `claude` CLI resolves `--model opus` to the current
-    // Opus, i.e. Opus 4.8) at xhigh effort — the coding/agentic sweet spot and
-    // Claude Code's own default. effort is Claude-only and works on Opus/Sonnet.
-    model: "opus",
-    effort: "xhigh",
+    // Sonnet at high effort — faster default for routine/conversational turns.
+    // Use the model picker or /model opus to escalate to Opus for complex work.
+    model: "sonnet",
+    effort: "high",
 };
 
 /**
