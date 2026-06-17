@@ -77,6 +77,42 @@ const DISCOVER_AGENTS_TOOL: &str = r#"{
   }
 }"#;
 
+const GET_LAYOUT_TOOL: &str = r#"{
+  "name": "GetLayout",
+  "description": "Get the AgentMux UI tree: every window with its workspace, tabs, and panes (block_id, view, title), and which tab is active. Use it to see what's around you before naming or focusing things. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const LIST_WINDOWS_TOOL: &str = r#"{
+  "name": "ListWindows",
+  "description": "List all AgentMux windows (window_id, display name, assigned workspace). Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const LIST_WORKSPACES_TOOL: &str = r#"{
+  "name": "ListWorkspaces",
+  "description": "List all AgentMux workspaces (workspace_id, name, tab count, active tab). Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const LIST_TABS_TOOL: &str = r#"{
+  "name": "ListTabs",
+  "description": "List tabs (tab_id, name, pane count) in your own workspace by default. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
 const WHOAMI_TOOL: &str = r#"{
   "name": "WhoAmI",
   "description": "Return your own place in the AgentMux UI: your block (pane), tab, window, and workspace ids plus their names. Use it to discover the targets for naming/layout verbs (e.g. before SetWindowName). Takes no arguments.",
@@ -234,10 +270,16 @@ async fn main() {
                     serde_json::from_str(SET_PANE_TITLE_TOOL).expect("static json");
                 let set_workspace_name: Value =
                     serde_json::from_str(SET_WORKSPACE_NAME_TOOL).expect("static json");
+                let get_layout: Value = serde_json::from_str(GET_LAYOUT_TOOL).expect("static json");
+                let list_windows: Value =
+                    serde_json::from_str(LIST_WINDOWS_TOOL).expect("static json");
+                let list_workspaces: Value =
+                    serde_json::from_str(LIST_WORKSPACES_TOOL).expect("static json");
+                let list_tabs: Value = serde_json::from_str(LIST_TABS_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name, set_tab_name, set_pane_title, set_workspace_name] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name, set_tab_name, set_pane_title, set_workspace_name, get_layout, list_windows, list_workspaces, list_tabs] }
                 })
             }
             "tools/call" => {
@@ -709,6 +751,40 @@ async fn call_tool(
                 anyhow::bail!("set pane title failed: HTTP {status} — {text}");
             }
             Ok(format!("Pane title set to \"{new_title}\""))
+        }
+        "GetLayout" | "ListWindows" | "ListWorkspaces" | "ListTabs" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            let path = match name {
+                "GetLayout" => "layout",
+                "ListWindows" => "windows",
+                "ListWorkspaces" => "workspaces",
+                _ => "tabs",
+            };
+            let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
+            let mut reqb = client.get(&url).header("X-AuthKey", auth_key);
+            // ListTabs scopes to the caller's own workspace when we know it.
+            if name == "ListTabs" && !block_id.is_empty() {
+                reqb = reqb.query(&[("block_id", block_id)]);
+            }
+            let resp = reqb
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("{name} failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
         _ => anyhow::bail!("unknown tool: {name}"),
     }

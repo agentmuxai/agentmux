@@ -470,3 +470,54 @@ fn clean_name_trims_clamps_and_rejects_empty() {
     let long = "x".repeat(200);
     assert_eq!(clean_name(&long, 64).unwrap().chars().count(), 64);
 }
+
+/// `GET /api/v1/layout` returns the seeded window → workspace → tab → pane
+/// tree. Read-only, hermetic.
+#[tokio::test]
+async fn layout_endpoint_returns_seeded_tree() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/layout")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let windows = json["windows"].as_array().expect("windows array");
+    assert_eq!(windows.len(), 1, "one seeded window");
+    let win = &windows[0];
+    assert_eq!(win["workspace_name"], "Starter workspace");
+    let tabs = win["tabs"].as_array().expect("tabs array");
+    assert!(!tabs.is_empty(), "seeded tab present");
+    // The seeded tab carries the default agent/sysinfo/swarm panes.
+    let panes = tabs[0]["panes"].as_array().expect("panes array");
+    assert!(panes.iter().any(|p| p["view"] == "agent"), "agent pane present");
+}
+
+/// Introspection list endpoints are auth-gated and return their wrapper keys.
+#[tokio::test]
+async fn introspection_lists_return_collections() {
+    for (path, key) in [
+        ("/api/v1/windows", "windows"),
+        ("/api/v1/workspaces", "workspaces"),
+        ("/api/v1/tabs", "tabs"),
+    ] {
+        let app = test_router();
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .header("X-AuthKey", "test-secret-key")
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{path}");
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json[key].is_array(), "{path} should return a {key} array");
+        assert!(!json[key].as_array().unwrap().is_empty(), "{path} non-empty");
+    }
+}
