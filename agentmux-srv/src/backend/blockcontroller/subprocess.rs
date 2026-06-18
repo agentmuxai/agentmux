@@ -526,6 +526,12 @@ impl SubprocessController {
         // process_waiter below.
         let last_result_frame: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
         let last_result_frame_read = Arc::clone(&last_result_frame);
+        // Track in-band API errors delivered as `assistant` frames (e.g. a
+        // 401 auth failure that claude wraps in a synthetic assistant message
+        // with `"error":"authentication_failed"` and exit 0 — bypasses the
+        // `is_error` flag on the `result` frame entirely).
+        let last_inband_error: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+        let last_inband_error_read = Arc::clone(&last_inband_error);
         let stdout_reader_handle = tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
@@ -564,6 +570,14 @@ impl SubprocessController {
                             }
                             if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
                                 *last_result_frame_read.lock().unwrap() = Some(parsed);
+                            } else if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant")
+                                && (parsed.get("isApiErrorMessage").and_then(|v| v.as_bool()).unwrap_or(false)
+                                    || parsed.get("error").is_some())
+                            {
+                                // In-band API error: 401 / auth failures arrive as a synthetic
+                                // assistant message (exit 0, is_error:false on result frame) —
+                                // capture it so the process_waiter can trip the failure gate.
+                                *last_inband_error_read.lock().unwrap() = Some(parsed);
                             }
                         }
 
@@ -668,6 +682,7 @@ impl SubprocessController {
         let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
+        let last_inband_error_wait = Arc::clone(&last_inband_error);
         tokio::spawn(async move {
             // Classified failure cause, surfaced to the pane after the readers drain.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
@@ -772,12 +787,31 @@ impl SubprocessController {
                     .and_then(|f| f.get("is_error"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                if exit_code != 0 || frame_is_error {
+                // Also catch in-band API errors (e.g. auth 401) delivered as
+                // synthetic assistant messages with exit 0 and is_error:false.
+                let inband_error_frame = last_inband_error_wait.lock().unwrap().clone();
+                let inband_is_api_error = inband_error_frame.is_some();
+                if exit_code != 0 || frame_is_error || inband_is_api_error {
                     let tail = stderr_tail_wait.lock().unwrap().join("\n");
+                    // Merge the in-band error text so classify() sees the
+                    // "authentication_failed" / "401" string even though it
+                    // arrived on stdout, not stderr.
+                    let inband_text = inband_error_frame.as_ref().map(|f| {
+                        let err_str = f.get("error").and_then(|v| v.as_str()).unwrap_or("");
+                        let content_text = f.pointer("/message/content/0/text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        format!("{err_str} {content_text}")
+                    }).unwrap_or_default();
+                    let combined_tail = if inband_text.trim().is_empty() {
+                        tail
+                    } else {
+                        format!("{tail}\n{inband_text}")
+                    };
                     run_failure = Some(crate::agents::failure::classify(
                         Some(exit_code),
                         exit_signal,
-                        &tail,
+                        &combined_tail,
                         result_frame.as_ref(),
                     ));
                 }

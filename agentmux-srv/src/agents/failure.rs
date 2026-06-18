@@ -177,6 +177,8 @@ pub fn classify(
         );
     }
     if hay.contains("authentication_error")
+        || hay.contains("authentication_failed")
+        || hay.contains("invalid authentication")
         || hay.contains("invalid api key")
         || hay.contains("invalid x-api-key")
         || hay.contains("unauthorized")
@@ -372,6 +374,7 @@ fn mentions_http_status(hay: &str, code: &str) -> bool {
         format!("code {code}"),
         format!("code: {code}"),
         format!("error {code}"),
+        format!("error: {code}"),
         format!("[{code}]"),
         format!("({code})"),
     ]
@@ -500,6 +503,34 @@ mod tests {
         let f = classify(Some(2), None, "something unexpected happened", None);
         assert_eq!(f.code, FailureClass::UnknownNonZero);
         assert!(f.explain().contains("[exit 2]"));
+    }
+
+    #[test]
+    fn authentication_failed_string_is_auth() {
+        // In-band 401: claude wraps the error in a synthetic assistant message
+        // with `"error":"authentication_failed"`. The inband_text is appended
+        // to the stderr tail before classify() is called, so it must match.
+        let f = classify(
+            Some(0),
+            None,
+            "authentication_failed Failed to authenticate. API Error: 401 Invalid authentication credentials",
+            None,
+        );
+        assert_eq!(f.code, FailureClass::Auth);
+        assert!(!f.retryable);
+    }
+
+    #[test]
+    fn invalid_authentication_credentials_is_auth() {
+        let f = classify(Some(0), None, "invalid authentication credentials", None);
+        assert_eq!(f.code, FailureClass::Auth);
+    }
+
+    #[test]
+    fn api_error_colon_401_is_auth() {
+        // "API Error: 401" lowercased → "api error: 401" → matches "error: 401".
+        let f = classify(Some(0), None, "api error: 401 invalid authentication credentials", None);
+        assert_eq!(f.code, FailureClass::Auth);
     }
 
     #[test]
