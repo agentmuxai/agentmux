@@ -55,7 +55,18 @@ CERT="${MACOS_SIGN_CERT:-$(security find-identity -v -p codesigning 2>/dev/null 
         | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
 [ -n "$CERT" ] || { echo "❌ No 'Developer ID Application' identity in the keychain (and MACOS_SIGN_CERT unset)." >&2; exit 1; }
 ENTITLEMENTS="$REPO_ROOT/build/entitlements.mac.plist"
-BUNDLE_ID="ai.agentmux.cef"
+# Bundle id follows the build CHANNEL so LaunchServices' app identity matches the
+# runtime data-dir channel (~/.agentmux/channels/<channel>/…). The channel is the
+# SAME value compiled into the binaries via AGENTMUX_BUILD_CHANNEL_DEFAULT
+# (agentmux-common/src/data_paths.rs; default "stable"), so the OS identity and the
+# launcher's per-(channel,version) instance key can't drift apart. dev/local builds
+# thus become distinct macOS apps (double-click-launchable beside a running stable);
+# only two stable RELEASES still share an id (by design — avoids per-release sprawl).
+# Sanitize to the bundle-id charset [A-Za-z0-9.-].
+# See docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
+CHANNEL="${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}"
+CHANNEL_ID="$(printf '%s' "$CHANNEL" | tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]')"
+BUNDLE_ID="ai.agentmux.cef.${CHANNEL_ID}"
 NOTARIZE="${NOTARIZE:-1}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-notarytool}"
 SRV="dist/bin/agentmux-srv-${VERSION}-darwin.${ARCH}"

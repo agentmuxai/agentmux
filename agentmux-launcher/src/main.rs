@@ -502,7 +502,11 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
 /// site comment. Two-launcher concurrent stale-cleanup would otherwise
 /// produce two live launchers for one data dir.
 #[cfg(not(target_os = "windows"))]
-fn bind_socket_with_recovery(socket_path: &str) -> tokio::net::UnixListener {
+fn bind_socket_with_recovery(
+    socket_path: &str,
+    data_dir: &std::path::Path,
+    dir_hash: &str,
+) -> tokio::net::UnixListener {
     use std::os::unix::io::AsRawFd as _;
 
     // Fast path: bind without contention.
@@ -583,13 +587,14 @@ fn bind_socket_with_recovery(socket_path: &str) -> tokio::net::UnixListener {
     // or a stale file?
     match std::os::unix::net::UnixStream::connect(socket_path) {
         Ok(_) => {
-            // Real second-instance. Exit cleanly so the existing
-            // launcher's window gets focus (Phase-2 arg-forwarding
-            // is a separate PR).
+            // Real second-instance. Forward an `open_new_window` request to the
+            // already-running launcher's host (Windows-parity — main.rs:1292),
+            // then exit cleanly. SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
             eprintln!(
                 "AgentMux is already running for this data directory.\n\nSocket: {}",
                 socket_path
             );
+            forward_open_new_window_or_log(data_dir, dir_hash);
             log(&format!(
                 "[ipc] second-instance detected — existing launcher owns {}",
                 socket_path
@@ -622,6 +627,7 @@ fn bind_socket_with_recovery(socket_path: &str) -> tokio::net::UnixListener {
                         "AgentMux is already running for this data directory.\n\nSocket: {}",
                         socket_path
                     );
+                    forward_open_new_window_or_log(data_dir, dir_hash);
                     log(&format!(
                         "[ipc] post-recovery bind lost the race to a fresh launcher on {} — exiting as second instance",
                         socket_path
@@ -779,7 +785,7 @@ async fn run_unix(
     // tiny, and leaving it lets the next launcher reuse it without a
     // create-race. (Stale-lock-file scenarios are bounded: flock(2)
     // is auto-released on process exit even for SIGKILL.)
-    let first_socket = bind_socket_with_recovery(&socket_path);
+    let first_socket = bind_socket_with_recovery(&socket_path, &paths.data_dir, &dir_hash);
 
     // Broadcast bus for reducer-emitted events. Same capacity (1024)
     // and rationale as the Windows path.
@@ -1988,6 +1994,25 @@ fn forward_open_new_window(data_dir: &std::path::Path, dir_hash: &str) -> Result
     let mut sink = [0u8; 64];
     let _ = stream.read(&mut sink);
     Ok(())
+}
+
+/// Best-effort `open_new_window` forward for the unix second-instance path.
+/// Unlike the Windows path (which pops a dialog on a fatal forward), unix just
+/// logs and lets the caller exit 0: the existing instance is alive (its socket
+/// answered our connect probe), so a transient/fatal forward failure shouldn't
+/// block — at worst the relaunch is a silent no-op instead of a new window.
+/// SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
+#[cfg(not(target_os = "windows"))]
+fn forward_open_new_window_or_log(data_dir: &std::path::Path, dir_hash: &str) {
+    match forward_open_new_window(data_dir, dir_hash) {
+        Ok(()) => log("forwarded open_new_window to existing instance"),
+        Err(ForwardError::Transient(reason)) => {
+            log(&format!("open_new_window forward transient (host mid-startup?): {}", reason))
+        }
+        Err(ForwardError::Fatal(reason)) => {
+            log(&format!("open_new_window forward failed: {}", reason))
+        }
+    }
 }
 
 /// Show a modal error dialog before the launcher exits. Used for

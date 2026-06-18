@@ -814,6 +814,14 @@ fn main() {
     #[cfg(target_os = "macos")]
     macos_menu::install_menu_bar(app_state.clone());
 
+    // kAEReopenApplication handler — a plain re-launch / Dock click opens a new
+    // window (Windows-parity) instead of a silent no-op, and a same-bundle-id
+    // reactivation no longer leaves LaunchServices reporting "not responding".
+    // After menu install (NSApplication + the AppleEvent manager exist by now).
+    // SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
+    #[cfg(target_os = "macos")]
+    macos_menu::install_reopen_handler(app_state.clone());
+
     // Start memory heartbeat — logs system/process memory stats every 20s.
     // Provides forensic data if the process later crashes from OOM / VA
     // exhaustion, and drives the debounced mem_pressure level + low-memory
