@@ -127,7 +127,11 @@ static REOPEN_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
 /// method AppKit invokes when macOS re-activates the already-running app
 /// (Finder/Dock double-click, `open` without `-n`). We answer it by opening a
 /// new window — matching the Windows relaunch-forwards-`open_new_window`
-/// behavior — and return YES so AppKit performs no further default reopen.
+/// behavior — and returns **NO**: we've taken responsibility for this reopen, so
+/// AppKit must not *also* run its own default reopen handling on top of ours.
+/// (Per the AppKit contract, returning YES means "AppKit, perform your default
+/// reopen too" — which could raise/create an extra window, especially in the
+/// no-visible-windows case. NO = "handled; do nothing further.")
 ///
 /// Why the delegate, not a raw `kAEReopenApplication` `NSAppleEventManager`
 /// handler (the previous attempt): Chromium re-registers its own AE handler
@@ -153,7 +157,7 @@ unsafe extern "C" fn should_handle_reopen(
         },
         None => tracing::warn!("reopen-hook fired before REOPEN_STATE was set"),
     }
-    1 // YES — we handled it
+    0 // NO — we opened the window; AppKit must not also run its default reopen
 }
 
 /// Install the reopen handler by wiring `applicationShouldHandleReopen:` onto
