@@ -53,6 +53,7 @@ import { fireAndForget } from "@/util/util";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
+import { REDOCK_DWELL_MS } from "@/app/workspace/floating-pane-constants";
 import {
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
@@ -161,6 +162,19 @@ function installFloatingRedockHoverListener(): void {
         }
     };
 
+    // Dwell gate for the redock ghost.
+    // On Windows, Win32BeginMoveTask emits floating-redock:hover-state every 50ms
+    // with no dwell awareness — we must gate the ghost ourselves to 180ms.
+    // On non-Windows, the floater's onMouseMove path already waits REDOCK_DWELL_MS
+    // before calling update_floating_redock_hover, so the first event arrives at
+    // ~T=180ms; applying our own 180ms clock on top would delay to ~T=360ms and
+    // would never fire if the cursor is held still (no further mousemoves = no
+    // further events). Set ghostDwellMs=0 on non-Windows so the ghost appears on
+    // the first event (already pre-gated by the floater).
+    const ghostDwellMs = isWindows() ? REDOCK_DWELL_MS : 0;
+    let dwellTarget: string | null = null;
+    let dwellSince = 0;
+
     fireAndForget(async () => {
         const { listenEvent } = await import("@/app/platform/ipc");
         const { determineDropDirection } = await import("@/layout/lib/utils");
@@ -170,10 +184,25 @@ function installFloatingRedockHoverListener(): void {
             cursor_x?: number;
             cursor_y?: number;
         }>("floating-redock:hover-state", (payload) => {
-            if (!payload || payload.target_label !== myLabel) {
+            const newTarget = payload?.target_label ?? null;
+            if (!payload || newTarget !== myLabel) {
+                // Target changed away from us or cleared — reset dwell and hide ghost.
+                if (dwellTarget !== null) {
+                    dwellTarget = null;
+                    dwellSince = 0;
+                }
                 clearPlaceholder();
                 return;
             }
+            // Cursor is over our window. Start or continue dwell clock.
+            const now = performance.now();
+            if (dwellTarget !== myLabel) {
+                dwellTarget = myLabel;
+                dwellSince = now;
+            }
+            // Ghost only appears after the dwell has elapsed (0 on non-Windows).
+            if (now - dwellSince < ghostDwellMs) return;
+
             const cursorX = payload.cursor_x;
             const cursorY = payload.cursor_y;
             if (typeof cursorX !== "number" || typeof cursorY !== "number") {
