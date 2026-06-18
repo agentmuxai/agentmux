@@ -67,34 +67,46 @@ use crate::state::AppState;
 // ---------------------------------------------------------------------------
 // Global floater HWND registry — used by the main-window cascade hook to
 // minimize/restore/destroy/z-order floaters without the owned-window
-// invariant. Keyed by window label ("floating-<uuid>"), value is the raw
-// outer HWND as isize (Send-safe). Populated at floater creation, removed
-// on WM_DESTROY in floating_pane_wndproc.
+// invariant. Keyed by window label ("floating-<uuid>"); value is
+// (floater_hwnd, parent_main_hwnd), both as isize (Send-safe).
+// The parent_main_hwnd binding lets the cascade hook in wndproc.rs filter
+// to ONLY the floaters that belong to the window sending the message —
+// prevents closing a secondary full window from destroying floaters that
+// belong to a different window. Populated at floater creation, removed on
+// WM_DESTROY in floating_pane_wndproc.
 // ---------------------------------------------------------------------------
-static ACTIVE_FLOATER_HWNDS: LazyLock<Mutex<HashMap<String, isize>>> =
+static ACTIVE_FLOATER_HWNDS: LazyLock<Mutex<HashMap<String, (isize, isize)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub(crate) fn register_floater_hwnd(label: String, hwnd: isize) {
+/// Register a floater. `parent_hwnd` is the HWND of the FullInstance main
+/// window that spawned this floater — used by the cascade hook to restrict
+/// min/restore/destroy operations to only that window's floaters.
+pub(crate) fn register_floater_hwnd(label: String, floater_hwnd: isize, parent_hwnd: isize) {
     if let Ok(mut m) = ACTIVE_FLOATER_HWNDS.lock() {
-        m.insert(label, hwnd);
+        m.insert(label, (floater_hwnd, parent_hwnd));
     }
 }
 
-/// Called from `floating_pane_wndproc` on WM_DESTROY and from the cascade
-/// hook on explicit close; reverse-scans by HWND value since the wndproc
-/// doesn't have the label in scope.
+/// Called from `floating_pane_wndproc` on WM_DESTROY; reverse-scans by
+/// floater HWND value since the wndproc doesn't have the label in scope.
 pub(crate) fn unregister_floater_by_hwnd(hwnd: isize) {
     if let Ok(mut m) = ACTIVE_FLOATER_HWNDS.lock() {
-        m.retain(|_, v| *v != hwnd);
+        m.retain(|_, (fh, _)| *fh != hwnd);
     }
 }
 
-/// Snapshot of all active floater HWNDs. Used by the cascade hook and the
-/// diagnostic command.
-pub(crate) fn all_floater_hwnds() -> Vec<isize> {
+/// Floater HWNDs whose parent main window matches `parent_hwnd`. Used by the
+/// cascade hook — only fires on the floaters belonging to the activating /
+/// minimizing / destroying window, not the entire global set.
+pub(crate) fn floater_hwnds_for_parent(parent_hwnd: isize) -> Vec<isize> {
     ACTIVE_FLOATER_HWNDS
         .lock()
-        .map(|m| m.values().copied().collect())
+        .map(|m| {
+            m.values()
+                .filter(|(_, ph)| *ph == parent_hwnd)
+                .map(|(fh, _)| *fh)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -102,7 +114,7 @@ pub(crate) fn all_floater_hwnds() -> Vec<isize> {
 pub(crate) fn floater_debug_snapshot() -> Vec<(String, isize)> {
     ACTIVE_FLOATER_HWNDS
         .lock()
-        .map(|m| m.iter().map(|(l, h)| (l.clone(), *h)).collect())
+        .map(|m| m.iter().map(|(l, (fh, _))| (l.clone(), *fh)).collect())
         .unwrap_or_default()
 }
 
@@ -132,27 +144,22 @@ wrap_task! {
         y: i32,
         width: i32,
         height: i32,
+        // HWND of the FullInstance main window that initiated the tear-off.
+        // 0 if the caller didn't provide a source_window_label (back-compat).
+        parent_main_hwnd: isize,
     }
 
     impl Task {
         fn execute(&self) {
             // Runs on the CEF UI thread.
             //
-            //   1. Find the source main window's HWND (we own this).
-            //   2. CreateWindowExW with WS_EX_TOOLWINDOW + WS_POPUP +
-            //      owner HWND. That's what gives us no taskbar / no
-            //      Alt-Tab and the minimize / restore / destroy cascade.
+            //   1. CreateWindowExW with WS_EX_TOOLWINDOW + WS_POPUP (no owner
+            //      — see module doc §"Why no owner (issue #1560)").
+            //   2. Register in ACTIVE_FLOATER_HWNDS keyed by parent_main_hwnd
+            //      so the cascade hook affects only this window's floaters.
             //   3. Embed a CEF browser inside via `set_as_child` —
             //      same pattern as `browser_pane/creation.rs:109`.
 
-            // TODO(phase-6, codex P2 on #811): With multiple main
-            // windows in the same process (future tab-tear-off-to-same-
-            // process scenarios, sub-windows, etc.), `find_own_top_level_window`
-            // returns the FIRST visible window of this process, which
-            // may not be the source of the tear-off. The right fix is
-            // an API change to thread the source window's label/HWND
-            // through `OpenFloatingPaneArgs`. Today (Phase 1) there's
-            // exactly one main window per process, so this is harmless.
             // Every early-return from execute() AFTER the host's
             // `post_create_floating_window` enqueued a
             // `PendingWindowCreation` must dispatch
@@ -214,9 +221,13 @@ wrap_task! {
                 .insert(self.window_label.clone(), outer_hwnd as isize);
             // Register in the global cascade registry so the main-window
             // WM_ACTIVATE/WM_SIZE/WM_DESTROY hook can reach this floater.
+            // parent_main_hwnd binds this floater to its source window so
+            // the hook only cascades its own floaters (not those of other
+            // full-instance windows in the same process).
             crate::floating_pane::register_floater_hwnd(
                 self.window_label.clone(),
                 outer_hwnd as isize,
+                self.parent_main_hwnd,
             );
 
             // CEF embed — the browser is a WS_CHILD of the outer HWND.
@@ -292,6 +303,7 @@ pub fn post_create_floating_window(
     state: &Arc<AppState>,
     args: &crate::commands::floating_pane::OpenFloatingPaneArgs,
     window_label: &str,
+    parent_main_hwnd: isize,
 ) {
     // Compose the URL the floating window's CEF browser will load. The
     // frontend's cef-init detects `floatingPaneId` and routes to the
@@ -362,6 +374,7 @@ pub fn post_create_floating_window(
         args.y,
         args.width,
         args.height,
+        parent_main_hwnd,
     );
     post_task(ThreadId::UI, Some(&mut task));
 }
@@ -480,6 +493,11 @@ unsafe extern "system" fn floating_pane_wndproc(
             // we don't map any zone to HTCAPTION here. Fall through to
             // HTCLIENT so clicks reach CEF and the JS handler.
         }
+        // Unregister from the cascade registry so the main-window hook no
+        // longer tries to show/hide/z-order a destroyed HWND.
+        WM_DESTROY => {
+            crate::floating_pane::unregister_floater_by_hwnd(hwnd as isize);
+        }
         // Resize the floater's FRONTEND browser (header + layout) to fill the
         // client area on every outer-window resize (maximize / restore, and
         // future edge-resize). CEF `set_as_child` browsers don't self-resize,
@@ -500,11 +518,6 @@ unsafe extern "system" fn floating_pane_wndproc(
         // cascades the resize to the frontend's inner render-widget children.
         // (Terminal/agent floaters have a single child, so bottom-most == that
         // child — unchanged.) Falls through to DefWindowProcW afterwards.
-        // Unregister from the cascade registry so the main-window hook no
-        // longer tries to show/hide/z-order a destroyed HWND.
-        WM_DESTROY => {
-            crate::floating_pane::unregister_floater_by_hwnd(hwnd as isize);
-        }
         WM_SIZE => {
             // Walk the sibling Z-order from topmost (GW_CHILD) to the
             // bottom-most direct child = the frontend browser.

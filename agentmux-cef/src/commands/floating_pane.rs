@@ -65,6 +65,12 @@ pub struct OpenFloatingPaneArgs {
     /// - **macOS/Linux**: passed through unscaled — CEF Views sizes in DIP.
     pub width: i32,
     pub height: i32,
+    /// Window label of the FullInstance window initiating the tear-off.
+    /// Used on Windows to bind the new floater to its parent's cascade hook
+    /// so that minimize/restore/destroy only affects that window's floaters.
+    /// Optional for back-compat; callers should always provide it.
+    #[serde(default)]
+    pub source_window_label: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -151,7 +157,14 @@ pub fn open_floating_pane_window(
 
     #[cfg(target_os = "windows")]
     {
-        crate::floating_pane::post_create_floating_window(state, &parsed, &window_label);
+        // Resolve source window → parent HWND so the cascade hook can restrict
+        // min/restore/destroy to only the floaters belonging to that window.
+        let parent_main_hwnd: isize = parsed
+            .source_window_label
+            .as_deref()
+            .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+            .unwrap_or(0);
+        crate::floating_pane::post_create_floating_window(state, &parsed, &window_label, parent_main_hwnd);
         Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }
 

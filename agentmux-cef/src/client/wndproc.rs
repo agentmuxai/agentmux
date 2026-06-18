@@ -273,7 +273,7 @@ unsafe extern "system" fn floater_cascade_wndproc(
             // This lets the user click the main window and have it visually
             // appear in front of the floating pane (replaces the owned-window
             // always-on-top invariant with a cooperative z-order contract).
-            for fhwnd in crate::floating_pane::all_floater_hwnds() {
+            for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
                 SetWindowPos(
                     fhwnd as *mut _,
                     hwnd, // insertAfter=main → floater is placed below main
@@ -284,16 +284,16 @@ unsafe extern "system" fn floater_cascade_wndproc(
         }
     } else if msg == WM_SIZE {
         if wparam == SIZE_MINIMIZED {
-            for fhwnd in crate::floating_pane::all_floater_hwnds() {
+            for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
                 ShowWindow(fhwnd as *mut _, SW_HIDE);
             }
         } else {
-            for fhwnd in crate::floating_pane::all_floater_hwnds() {
+            for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
                 ShowWindow(fhwnd as *mut _, SW_SHOWNOACTIVATE);
             }
         }
     } else if msg == WM_DESTROY {
-        for fhwnd in crate::floating_pane::all_floater_hwnds() {
+        for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
             PostMessageW(fhwnd as *mut _, WM_CLOSE, 0, 0);
         }
     }

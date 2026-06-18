@@ -297,6 +297,7 @@ async function performTearOff(
                 y: screenY,
                 width: floaterWidth,
                 height: floaterHeight,
+                source_window_label: windowLabelRef,
             });
             Logger.info("dnd:cross", "floating pane spawned", {
                 blockId: payload.blockId,
@@ -320,6 +321,7 @@ async function performTearOff(
                         y: screenY,
                         width: floaterWidth,
                         height: floaterHeight,
+                        source_window_label: windowLabelRef,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {
