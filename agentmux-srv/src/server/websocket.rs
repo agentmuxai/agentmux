@@ -1633,12 +1633,27 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // Re-encode to the file's original encoding (+ BOM + line
                 // endings) so a non-UTF-8 file round-trips instead of being
                 // silently rewritten as UTF-8. Absent fields default to UTF-8.
-                let (out_bytes, _had_unmappable) = crate::backend::text_encoding::encode_file(
+                let (out_bytes, had_unmappable) = crate::backend::text_encoding::encode_file(
                     &cmd.content,
                     cmd.encoding.as_deref().unwrap_or(""),
                     cmd.bom.as_deref().unwrap_or("none"),
                     cmd.line_ending.as_deref().unwrap_or("lf"),
                 );
+                // Refuse a lossy write: rather than silently emit
+                // numeric-character-reference replacements (corrupting the
+                // file), fail loudly so the user can save as UTF-8. The UI for
+                // an in-place "Save with Encoding → UTF-8" is Phase 3 of
+                // SPEC_EDITOR_FILE_ENCODINGS.
+                if had_unmappable {
+                    let enc = cmd
+                        .encoding
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("its current encoding");
+                    return Err(format!(
+                        "writeeditorfile: file contains characters that can't be represented in {enc} — save it as UTF-8 instead"
+                    ));
+                }
                 std::fs::write(&canonical, &out_bytes)
                     .map_err(|e| format!("writeeditorfile: {e}"))?;
                 tracing::info!(path = %canonical.display(), bytes = out_bytes.len(), "editor file saved");

@@ -34,6 +34,16 @@ pub struct DecodedFile {
 /// `chardetng` heuristic. encoding_rs always succeeds (replacement on malformed
 /// input), with `had_decode_errors` flagging low-confidence results.
 pub fn decode_file(bytes: &[u8]) -> DecodedFile {
+    // UTF-32 BOMs must be checked BEFORE UTF-16: a UTF-32LE BOM (FF FE 00 00)
+    // starts with the UTF-16LE BOM (FF FE) and would otherwise be misdecoded.
+    // encoding_rs has no UTF-32 codec, so we handle it by hand.
+    if bytes.starts_with(b"\xFF\xFE\x00\x00") {
+        return decode_utf32(&bytes[4..], false, "utf-32le", "UTF-32LE");
+    }
+    if bytes.starts_with(b"\x00\x00\xFE\xFF") {
+        return decode_utf32(&bytes[4..], true, "utf-32be", "UTF-32BE");
+    }
+
     let (enc, bom, body): (&'static Encoding, &'static str, &[u8]) =
         if bytes.starts_with(b"\xEF\xBB\xBF") {
             (UTF_8, "utf-8", &bytes[3..])
@@ -63,6 +73,55 @@ pub fn decode_file(bytes: &[u8]) -> DecodedFile {
     }
 }
 
+/// Decode UTF-32 (LE/BE) bytes by hand — encoding_rs has no UTF-32 codec.
+fn decode_utf32(body: &[u8], big_endian: bool, bom: &'static str, label: &'static str) -> DecodedFile {
+    let mut content = String::new();
+    let mut had_decode_errors = false;
+    for chunk in body.chunks(4) {
+        if chunk.len() < 4 {
+            had_decode_errors = true; // trailing partial code unit
+            break;
+        }
+        let cp = if big_endian {
+            u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+        } else {
+            u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+        };
+        match char::from_u32(cp) {
+            Some(c) => content.push(c),
+            None => {
+                content.push('\u{FFFD}');
+                had_decode_errors = true;
+            }
+        }
+    }
+    let line_ending = if content.contains("\r\n") { "crlf" } else { "lf" };
+    DecodedFile {
+        content,
+        encoding: label.to_string(),
+        bom,
+        line_ending,
+        had_decode_errors,
+    }
+}
+
+fn utf16_bytes(s: &str, big_endian: bool) -> Vec<u8> {
+    let mut v = Vec::with_capacity(s.len() * 2);
+    for u in s.encode_utf16() {
+        v.extend_from_slice(&if big_endian { u.to_be_bytes() } else { u.to_le_bytes() });
+    }
+    v
+}
+
+fn utf32_bytes(s: &str, big_endian: bool) -> Vec<u8> {
+    let mut v = Vec::with_capacity(s.chars().count() * 4);
+    for c in s.chars() {
+        let u = c as u32;
+        v.extend_from_slice(&if big_endian { u.to_be_bytes() } else { u.to_le_bytes() });
+    }
+    v
+}
+
 /// Encode editor text (`\n`-delimited UTF-8) back to bytes in `encoding_label`,
 /// applying `bom` and `line_ending`. Returns the bytes to write plus whether any
 /// character was unmappable in the target encoding (the caller may warn).
@@ -83,30 +142,25 @@ pub fn encode_file(
         content.to_string()
     };
 
-    let enc = if encoding_label.is_empty() {
-        UTF_8
-    } else {
-        Encoding::for_label(encoding_label.as_bytes()).unwrap_or(UTF_8)
-    };
-
-    // encoding_rs has no UTF-16 *encoder* (per the Encoding Standard its
-    // `encode()` emits UTF-8). Round-trip UTF-16 by hand so a UTF-16 file saves
-    // back as UTF-16, not UTF-8.
-    let (mut out, had_unmappable): (Vec<u8>, bool) = if enc == UTF_16LE {
-        let mut v = Vec::with_capacity(normalized.len() * 2);
-        for u in normalized.encode_utf16() {
-            v.extend_from_slice(&u.to_le_bytes());
+    // UTF-16/UTF-32 are encoded by hand: encoding_rs has no UTF-16/32 *encoder*
+    // (per the Encoding Standard its `encode()` emits UTF-8), so a UTF-16/32
+    // file would otherwise save back as UTF-8. Match on the label first; the
+    // encoding_rs fallback handles legacy single-byte/CJK encodings, where
+    // `had_unmappable` reports characters outside the target charset.
+    let (mut out, had_unmappable): (Vec<u8>, bool) = match encoding_label.to_ascii_lowercase().as_str() {
+        "utf-16le" => (utf16_bytes(&normalized, false), false),
+        "utf-16be" => (utf16_bytes(&normalized, true), false),
+        "utf-32le" => (utf32_bytes(&normalized, false), false),
+        "utf-32be" => (utf32_bytes(&normalized, true), false),
+        other => {
+            let enc = if other.is_empty() {
+                UTF_8
+            } else {
+                Encoding::for_label(other.as_bytes()).unwrap_or(UTF_8)
+            };
+            let (bytes, _enc, had_unmappable) = enc.encode(&normalized);
+            (bytes.into_owned(), had_unmappable)
         }
-        (v, false)
-    } else if enc == UTF_16BE {
-        let mut v = Vec::with_capacity(normalized.len() * 2);
-        for u in normalized.encode_utf16() {
-            v.extend_from_slice(&u.to_be_bytes());
-        }
-        (v, false)
-    } else {
-        let (bytes, _enc, had_unmappable) = enc.encode(&normalized);
-        (bytes.into_owned(), had_unmappable)
     };
 
     // Re-emit a BOM if the file had/uses one.
@@ -114,6 +168,8 @@ pub fn encode_file(
         "utf-8" => b"\xEF\xBB\xBF",
         "utf-16le" => b"\xFF\xFE",
         "utf-16be" => b"\xFE\xFF",
+        "utf-32le" => b"\xFF\xFE\x00\x00",
+        "utf-32be" => b"\x00\x00\xFE\xFF",
         _ => b"",
     };
     if !bom_bytes.is_empty() {
@@ -198,5 +254,35 @@ mod tests {
     fn unknown_label_falls_back_to_utf8() {
         let (bytes, _) = encode_file("hi", "definitely-not-an-encoding", "none", "lf");
         assert_eq!(bytes, b"hi");
+    }
+
+    #[test]
+    fn utf32le_bom_decodes_not_as_utf16() {
+        // "Hi" in UTF-32LE with BOM (FF FE 00 00) — must NOT be read as UTF-16LE.
+        let bytes = b"\xFF\xFE\x00\x00H\x00\x00\x00i\x00\x00\x00";
+        let d = decode_file(bytes);
+        assert_eq!(d.content, "Hi");
+        assert_eq!(d.bom, "utf-32le");
+        assert_eq!(d.encoding, "UTF-32LE");
+    }
+
+    #[test]
+    fn utf32_round_trips() {
+        let (bytes, _) = encode_file("Hi", "utf-32le", "utf-32le", "lf");
+        assert_eq!(&bytes[..4], b"\xFF\xFE\x00\x00");
+        let back = decode_file(&bytes);
+        assert_eq!(back.content, "Hi");
+        assert_eq!(back.bom, "utf-32le");
+    }
+
+    #[test]
+    fn unmappable_char_is_flagged_not_lossy() {
+        // An emoji can't be represented in windows-1252 → had_unmappable=true
+        // (the caller refuses the write instead of emitting NCR garbage).
+        let (_bytes, had_unmappable) = encode_file("hi 😀", "windows-1252", "none", "lf");
+        assert!(had_unmappable, "emoji in cp1252 must flag unmappable");
+        // UTF-8 represents everything → never unmappable.
+        let (_b, u8_unmappable) = encode_file("hi 😀", "UTF-8", "none", "lf");
+        assert!(!u8_unmappable);
     }
 }
