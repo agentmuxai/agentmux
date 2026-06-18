@@ -44,6 +44,7 @@ import {
     TurnPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
+import { learnContextWindow } from "./context-window";
 
 /**
  * If `phase` is `Streaming`, return the `schedule-stream-watchdog` event
@@ -483,8 +484,19 @@ export function update(
                 input: command.input,
                 output: state.turnTokens?.output ?? 0,
             };
+            // Learn the context window from the resolved model + observed fill
+            // (seed-then-high-water-upgrade); null until a recognised model is
+            // seen, so the view falls back to the provider's static window.
+            const learnedWindow =
+                learnContextWindow(state.lastContextWindow, command.input, command.model) ??
+                state.lastContextWindow;
             const nextState = bumpEvent(
-                { ...state, turnTokens: next, lastContextTokens: command.input },
+                {
+                    ...state,
+                    turnTokens: next,
+                    lastContextTokens: command.input,
+                    lastContextWindow: learnedWindow ?? null,
+                },
                 nowMs,
                 0,
             );

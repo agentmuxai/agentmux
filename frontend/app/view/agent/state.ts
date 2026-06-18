@@ -61,6 +61,8 @@ export interface AgentAtoms {
      * on that turn. Persists through TurnEnd; clears on TurnReset (session wipe).
      */
     contextTokensAtom: SignalPair<number | null>;
+    /** Learned context-window for the current model (null → provider fallback). */
+    contextWindowAtom: SignalPair<number | null>;
     /**
      * Messages sent by the user that the backend hasn't picked up yet.
      * Rendered in a pending zone between the conversation and the composer.
@@ -156,6 +158,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         currentToolAtom: createSignal<string | null>(null),
         turnTokensAtom: createSignal<TurnTokens | null>(null),
         contextTokensAtom: createSignal<number | null>(null),
+        contextWindowAtom: createSignal<number | null>(null),
         pendingMessagesAtom: createSignal<PendingMessage[]>([]),
         // gap1 (#993) reshaped InitPhase from string union to discriminated
         // union; turnPhase from PR B is now the sole working-state encoding

@@ -240,6 +240,14 @@ export interface AgentPaneState {
      * explicit TurnReset (session wipe).
      */
     lastContextTokens: number | null;
+    /**
+     * Learned context-window size for the current model — seeded from the
+     * resolved model id on the first TokensIn and upgraded if observed context
+     * ever exceeds it (Sonnet-1M detection). NOT a per-provider constant.
+     * Null until a recognised model is seen; the view falls back to the
+     * provider's static window. See store/agent-pane-state/context-window.ts.
+     */
+    lastContextWindow: number | null;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -248,6 +256,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentTool: null,
     turnTokens: null,
     lastContextTokens: null,
+    lastContextWindow: null,
     pending: [],
     initPhase: { kind: "InitPending" },
     lastEventMs: null,
@@ -390,7 +399,7 @@ export type AgentPaneCommand =
     | { type: "ToolEnd" }
 
     // ── Tokens (live deltas during a turn) ────────────────────────
-    | { type: "TokensIn"; input: number }
+    | { type: "TokensIn"; input: number; model?: string }
     | { type: "TokensOut"; output: number }
 
     // ── Stop flow ──────────────────────────────────────────────────

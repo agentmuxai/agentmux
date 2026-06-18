@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Show, type JSX } from "solid-js";
+import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
 
 interface ContextWindowBarProps {
     /** Current input-token count (context fill). null = no turn yet. */
@@ -27,12 +28,18 @@ export function ContextWindowBar(props: ContextWindowBarProps): JSX.Element {
     // Reactive accessors so updates to props.tokens mid-turn (successive
     // message_start events) re-render the bar. An IIFE inside <Show> only
     // runs once when `when` first becomes truthy and freezes thereafter.
-    const fraction = () =>
+    // Bar FILL is fraction of the real window (clamped — never implies >100%).
+    // The COLOUR BAND tracks proximity to the auto-compaction threshold (~33K
+    // below the window), so "critical" means "about to compact" rather than
+    // "at 100% of the window".
+    const fillPct = () =>
         props.tokens != null && props.contextWindow != null
-            ? props.tokens / props.contextWindow
-            : null;
-    const b = () => { const f = fraction(); return f != null ? band(f) : "low"; };
-    const pct = () => { const f = fraction(); return f != null ? Math.min(100, Math.round(f * 100)) : 0; };
+            ? Math.min(100, Math.round((props.tokens / props.contextWindow) * 100))
+            : 0;
+    const b = () =>
+        props.tokens != null && props.contextWindow != null
+            ? band(props.tokens / compactionThreshold(props.contextWindow))
+            : "low";
 
     return (
         <Show when={props.tokens != null && props.tokens! > 0}>
@@ -52,7 +59,7 @@ export function ContextWindowBar(props: ContextWindowBarProps): JSX.Element {
                     <div class={`ctx-window-track ctx-window-track--${b()}`}>
                         <div
                             class="ctx-window-fill"
-                            style={{ width: `${pct()}%` }}
+                            style={{ width: `${fillPct()}%` }}
                         />
                         <span class="ctx-window-label">
                             {fmtK(props.tokens!)} / {fmtK(props.contextWindow!)}
@@ -69,7 +76,7 @@ function contextTitle(tokens: number, contextWindow: number | undefined): string
         return `Context: ${tokens.toLocaleString()} tokens`;
     }
     const pct = ((tokens / contextWindow) * 100).toFixed(1);
-    return `Context window: ${tokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)\nThis is the total conversation history sent to the model on each turn.`;
+    return `Context window: ${tokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)\nThis is the total conversation history sent to the model on each turn.\nAuto-compacts around ${compactionThreshold(contextWindow).toLocaleString()} tokens.`;
 }
 
 ContextWindowBar.displayName = "ContextWindowBar";

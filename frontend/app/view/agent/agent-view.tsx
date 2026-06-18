@@ -189,6 +189,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 currentTool: a.currentToolAtom[1],
                 turnTokens: a.turnTokensAtom[1],
                 contextTokens: a.contextTokensAtom[1],
+                contextWindow: a.contextWindowAtom[1],
                 pending: a.pendingMessagesAtom[1],
                 initPhase: a.initPhaseAtom[1],
                 turnPhase: a.turnPhaseAtom[1],
@@ -1204,7 +1205,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")
                 }
                 contextTokens={agentAtoms().contextTokensAtom[0]()}
-                contextWindow={provider()?.contextWindow}
+                contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
             />
 
             <div class="agent-composer-region">
