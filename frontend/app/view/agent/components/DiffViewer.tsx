@@ -39,6 +39,61 @@ const CAP_LINES = 1500;
 // Cache keyed on (filePath, diffText) since diffs are immutable once rendered.
 const diffCache = new Map<string, string>();
 
+// LCS line-diff used when result.diff is absent (the common case — Claude's
+// translator returns a plain-text string, not a structured EditResult, so
+// result.diff is always undefined in the current pipeline).
+const LCS_LINE_LIMIT = 300;
+
+function lcsUnifiedDiff(oldLines: string[], newLines: string[]): string {
+    const m = oldLines.length;
+    const n = newLines.length;
+    // Uint16Array: max LCS score 65535; safe for ≤ LCS_LINE_LIMIT lines.
+    const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            dp[i][j] = oldLines[i - 1] === newLines[j - 1]
+                ? dp[i - 1][j - 1] + 1
+                : Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+    }
+    const edits: Array<[string, string]> = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+            edits.unshift([" ", oldLines[i - 1]]);
+            i--; j--;
+        } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+            edits.unshift(["+", newLines[j - 1]]);
+            j--;
+        } else {
+            edits.unshift(["-", oldLines[i - 1]]);
+            i--;
+        }
+    }
+    let oldCount = 0, newCount = 0;
+    for (const [op] of edits) {
+        if (op !== "+") oldCount++;
+        if (op !== "-") newCount++;
+    }
+    const out = [`@@ -1,${oldCount} +1,${newCount} @@`];
+    for (const [op, line] of edits) out.push(op + line);
+    return out.join("\n");
+}
+
+function buildDiffFromParams(oldStr: string, newStr: string): string {
+    const oldLines = oldStr.split("\n");
+    const newLines = newStr.split("\n");
+    if (oldLines.length <= LCS_LINE_LIMIT && newLines.length <= LCS_LINE_LIMIT) {
+        return lcsUnifiedDiff(oldLines, newLines);
+    }
+    // Large edit: plain del+add block — no LCS cost, still legible.
+    return [
+        `@@ -1,${oldLines.length} +1,${newLines.length} @@`,
+        ...oldLines.map(l => "-" + l),
+        ...newLines.map(l => "+" + l),
+    ].join("\n");
+}
+
 type LineType = "add" | "del" | "hunk" | "ctx";
 
 interface DiffLine {
@@ -62,7 +117,17 @@ interface DiffViewerProps {
 }
 
 export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
-    const rawDiff = () => props.result?.diff;
+    const rawDiff = () => {
+        // Prefer the pre-computed diff from result (populated by some providers).
+        // Fall back to computing from params — Claude's translator returns a
+        // plain-text string, so result.diff is absent in the current pipeline.
+        if (props.result?.diff) return props.result.diff;
+        const p = props.params;
+        if (p && (p.old_string != null || p.new_string != null)) {
+            return buildDiffFromParams(p.old_string ?? "", p.new_string ?? "");
+        }
+        return undefined;
+    };
     // Head-cap the diff (read top-down) so the plain fallback (one <div> per
     // line, used for diffs > CAP_LINES) can't bloat the conversation DOM.
     // Memoized: this is read several times per render (highlight effect,
