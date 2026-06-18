@@ -1,0 +1,293 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * RPC contract guard (architecture-audit action A1).
+ *
+ * The frontend↔backend RPC wire contract is hand-maintained. The FE
+ * declares command bindings in `frontend/app/store/rpc-api.ts` (each
+ * method wraps exactly one `client.rpcCall("name", …)`), and the
+ * backend registers handlers in `agentmux-srv` via
+ * `engine.register_handler(NAME, …)` where NAME is either a string
+ * literal or a `pub const … : &str = "name"`. The Go-era generator that
+ * used to keep the two sides in sync (`cmd/generate/main-generatets.go`)
+ * was removed with the Go backend and never replaced — so nothing but
+ * reviewer diligence prevents the contract from drifting. See
+ * `docs/analysis/ANALYSIS_CODEBASE_ARCHITECTURE_AUDIT_2026_06_18.md` (§2, A1).
+ *
+ * This test re-derives both sides from source at run time and freezes
+ * the three drift sets as committed baselines that may only SHRINK:
+ *
+ *   • liveUnregistered — commands the FE actually CALLS (`RpcApi.X(…)`
+ *     or a direct `rpcCall("name")`) that the backend never registers.
+ *     These are latent "not-found" calls (the engine logs-once and the
+ *     FE ignores them — see `rpc-client.ts` `notFoundLogMap`). Mostly
+ *     Wave-inherited telemetry / conn / wsl surface never reimplemented
+ *     in Rust. Fix by implementing the handler or deleting the dead FE
+ *     call — never add a new entry here.
+ *   • declaredUnregistered — `rpc-api.ts` methods with no backend
+ *     handler (dead Wave-inherited binding surface; see A12). Shrinks as
+ *     dead methods are deleted.
+ *   • registeredUndeclared — backend handlers with no FE binding:
+ *     server-driven `agent.*` verbs, `pane.open` (called via a direct
+ *     `rpcCall`, not an `RpcApi` method), and the RPC engine's test
+ *     stubs (`echo`/`failme`/`slow`/`checkctx`).
+ *
+ * A NEW drift — a fresh `rpc-api.ts` method without a handler, a new
+ * live call to an unhandled command, or a removed handler still bound
+ * by the FE — changes one of these sets and fails this test. That is
+ * the guardrail the deleted generator used to provide, at a fraction of
+ * the cost. When a change legitimately shrinks a set (a cleanup or a
+ * newly-wired handler), update the corresponding baseline below.
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+// ── Locate the repo root (the dir holding both trees) ─────────────────
+function repoRoot(): string {
+    let dir = path.dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 8; i++) {
+        if (
+            fs.existsSync(path.join(dir, "agentmux-srv")) &&
+            fs.existsSync(path.join(dir, "frontend"))
+        ) {
+            return dir;
+        }
+        dir = path.dirname(dir);
+    }
+    throw new Error("rpc-contract: could not locate repo root from " + import.meta.url);
+}
+
+function walk(dir: string, exts: string[], acc: string[] = []): string[] {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (ent.name === "node_modules" || ent.name === "target" || ent.name === ".git") {
+            continue;
+        }
+        const p = path.join(dir, ent.name);
+        if (ent.isDirectory()) walk(p, exts, acc);
+        else if (exts.some((e) => ent.name.endsWith(e))) acc.push(p);
+    }
+    return acc;
+}
+
+const sortedDiff = (a: Set<string>, b: Set<string>): string[] =>
+    [...a].filter((x) => !b.has(x)).sort();
+
+interface Contract {
+    registered: Set<string>;
+    declared: Set<string>;
+    liveCommands: Set<string>;
+}
+
+function deriveContract(root: string): Contract {
+    // ── Backend: resolve `register_handler(NAME, …)` to command names.
+    // NAME is a string literal or a `pub const … &str = "…"`. Both forms
+    // appear; consts are resolved against every const defined in the
+    // crate (not just COMMAND_*-prefixed ones).
+    const rsFiles = walk(path.join(root, "agentmux-srv", "src"), [".rs"]);
+    const constMap = new Map<string, string>();
+    const constRe = /pub const (\w+)\s*:\s*&str\s*=\s*"([^"]+)"\s*;/g;
+    for (const f of rsFiles) {
+        const src = fs.readFileSync(f, "utf8");
+        let m: RegExpExecArray | null;
+        while ((m = constRe.exec(src))) constMap.set(m[1], m[2]);
+    }
+
+    const registered = new Set<string>();
+    const unresolved: string[] = [];
+    const regRe = /register_handler\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_:]*))/g;
+    for (const f of rsFiles) {
+        const src = fs.readFileSync(f, "utf8");
+        let m: RegExpExecArray | null;
+        while ((m = regRe.exec(src))) {
+            if (m[1] !== undefined) {
+                registered.add(m[1]);
+                continue;
+            }
+            const ident = m[2].split("::").pop() as string;
+            const val = constMap.get(ident);
+            if (val !== undefined) registered.add(val);
+            else unresolved.push(ident);
+        }
+    }
+    // A register_handler arg we can't resolve means the extractor is
+    // blind to part of the contract — fail loudly rather than pass with
+    // an incomplete `registered` set.
+    expect(unresolved, `unresolved register_handler args: ${unresolved.join(", ")}`).toEqual([]);
+
+    // ── Frontend: declared bindings (method → command) in rpc-api.ts.
+    const rpcApiPath = path.join(root, "frontend", "app", "store", "rpc-api.ts");
+    const rpcApiSrc = fs.readFileSync(rpcApiPath, "utf8");
+    const methodToCmd = new Map<string, string>();
+    const methodRe = /(\w+)\s*\(\s*client:\s*RpcClient[\s\S]*?rpcCall\(\s*"([^"]+)"/g;
+    let mm: RegExpExecArray | null;
+    while ((mm = methodRe.exec(rpcApiSrc))) methodToCmd.set(mm[1], mm[2]);
+    const declared = new Set<string>(methodToCmd.values());
+
+    // ── Frontend: live usage — `RpcApi.Method(…)` resolved via the map,
+    // plus any direct `rpcCall("name")` outside rpc-api.ts.
+    const feFiles = walk(path.join(root, "frontend"), [".ts", ".tsx"]).filter(
+        (f) =>
+            !f.endsWith("rpc-api.ts") &&
+            !/\.(test|spec)\.[tj]sx?$/.test(f) &&
+            !f.includes(`${path.sep}__tests__${path.sep}`),
+    );
+    const liveCommands = new Set<string>();
+    for (const f of feFiles) {
+        const src = fs.readFileSync(f, "utf8");
+        let m: RegExpExecArray | null;
+        const useRe = /RpcApi\.(\w+)\s*\(/g;
+        while ((m = useRe.exec(src))) {
+            const cmd = methodToCmd.get(m[1]);
+            if (cmd !== undefined) liveCommands.add(cmd);
+        }
+        const directRe = /rpcCall\(\s*"([^"]+)"/g;
+        while ((m = directRe.exec(src))) liveCommands.add(m[1]);
+    }
+
+    return { registered, declared, liveCommands };
+}
+
+// ── Committed baselines (sorted). These may only shrink. ──────────────
+
+/** FE makes live calls to these, but the backend registers no handler. */
+const KNOWN_LIVE_UNREGISTERED = [
+    "activity",
+    "connconnect",
+    "conndisconnect",
+    "connensure",
+    "connlist",
+    "connlistaws",
+    "deletesubblock",
+    "fileappend",
+    "filejoin",
+    "recordtevent",
+    "resolveids",
+    "setrtinfo",
+    "wsllist",
+];
+
+/** rpc-api.ts declares these methods, but no backend handler exists. */
+const KNOWN_DECLARED_UNREGISTERED = [
+    "activity",
+    "aisendmessage",
+    "authenticate",
+    "authenticatetoken",
+    "blockinfo",
+    "blockslist",
+    "captureblockscreenshot",
+    "connconnect",
+    "conndisconnect",
+    "connensure",
+    "connlist",
+    "connlistaws",
+    "connstatus",
+    "controllerappendoutput",
+    "controllerstop",
+    "createblock",
+    "createsubblock",
+    "deleteblock",
+    "deletesubblock",
+    "dispose",
+    "disposesuggestions",
+    "eventpublish",
+    "eventrecv",
+    "fetchsuggestions",
+    "fileappend",
+    "fileappendijson",
+    "filecopy",
+    "filecreate",
+    "filedelete",
+    "fileinfo",
+    "filejoin",
+    "filelist",
+    "filemkdir",
+    "filemove",
+    "fileread",
+    "filesharecapability",
+    "filewrite",
+    "focuswindow",
+    "getrtinfo",
+    "gettab",
+    "getupdatechannel",
+    "getvar",
+    "message",
+    "notify",
+    "path",
+    "recordtevent",
+    "remotefilecopy",
+    "remotefiledelete",
+    "remotefileinfo",
+    "remotefilejoin",
+    "remotefilemove",
+    "remotefiletouch",
+    "remotegetinfo",
+    "remoteinstallrcfiles",
+    "remotemkdir",
+    "remotewritefile",
+    "resolveids",
+    "sendtelemetry",
+    "setconnectionsconfig",
+    "setrtinfo",
+    "setvar",
+    "setview",
+    "termgetscrollbacklines",
+    "test",
+    "waitforroute",
+    "webselector",
+    "workspacelist",
+    "wshactivity",
+    "wsldefaultdistro",
+    "wsllist",
+    "wslstatus",
+];
+
+/** Backend registers these handlers, but rpc-api.ts has no method. */
+const KNOWN_REGISTERED_UNDECLARED = [
+    "agent.define",
+    "agent.list",
+    "agent.open",
+    "agent.output",
+    "agent.send",
+    "agent.status",
+    "agent.stop",
+    "checkctx",
+    "echo",
+    "failme",
+    "getwaveairatelimit",
+    "pane.open",
+    "slow",
+];
+
+describe("RPC frontend↔backend contract (A1)", () => {
+    const { registered, declared, liveCommands } = deriveContract(repoRoot());
+
+    it("extracts a plausible contract surface (extractor sanity)", () => {
+        // Guards against a silently-broken regex passing the diff
+        // assertions vacuously (empty − empty = empty).
+        expect(registered.size).toBeGreaterThan(120);
+        expect(declared.size).toBeGreaterThan(180);
+        expect(liveCommands.size).toBeGreaterThan(80);
+        // A known happy-path command must be visible on every axis.
+        expect(registered.has("setmeta")).toBe(true);
+        expect(declared.has("setmeta")).toBe(true);
+        expect(liveCommands.has("setmeta")).toBe(true);
+    });
+
+    it("no NEW live FE call resolves to a missing backend handler", () => {
+        // The most actionable set: commands the FE invokes at run time
+        // with no handler. Shrink by wiring the handler or deleting the
+        // dead call; never grow.
+        expect(sortedDiff(liveCommands, registered)).toEqual(KNOWN_LIVE_UNREGISTERED);
+    });
+
+    it("no NEW rpc-api.ts binding lacks a backend handler", () => {
+        expect(sortedDiff(declared, registered)).toEqual(KNOWN_DECLARED_UNREGISTERED);
+    });
+
+    it("no NEW backend handler lacks a frontend binding", () => {
+        expect(sortedDiff(registered, declared)).toEqual(KNOWN_REGISTERED_UNDECLARED);
+    });
+});
