@@ -1,19 +1,38 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Win32-native owned-window creator for floating panes. Phase 1 of
+//! Win32-native unowned popup creator for floating panes. Phase 1 of
 //! issue #810 (floating-pane tear-off).
 //!
 //! This module is intentionally Windows-only and intentionally
 //! separate from `crate::ui_tasks` (which posts the standard CEF Views
 //! top-level windows). A floating pane is a *raw* `WS_POPUP` HWND with
-//! `WS_EX_TOOLWINDOW`, owner = source main window. CEF Views does not
-//! expose tool-window / owner semantics in a way that lets us achieve
-//! the no-taskbar + minimize-cascade behavior the spec requires, so we
-//! drop down to `CreateWindowExW` and then embed a CEF browser inside
-//! the resulting HWND via `WindowInfo::set_as_child` — the same
-//! mechanism the browser-pane creation path uses
-//! (`browser_pane/creation.rs`).
+//! `WS_EX_TOOLWINDOW` and **no Win32 owner** (null parent). CEF Views
+//! does not expose tool-window semantics, so we drop down to
+//! `CreateWindowExW` and embed a CEF browser inside the resulting HWND
+//! via `WindowInfo::set_as_child` — the same mechanism the browser-pane
+//! creation path uses (`browser_pane/creation.rs`).
+//!
+//! ## Why no owner (issue #1560)
+//!
+//! The original design used the main window as the Win32 owner, which
+//! gave minimize/restore/destroy cascade for free. However, Win32's
+//! owned-window invariant — owned windows are ALWAYS z-above their owner
+//! and cannot be pushed below with `SetWindowPos` — meant the floater
+//! was permanently stuck above the main window even after the user
+//! activated the main window. The fix is to remove the owner and handle
+//! the cascade explicitly:
+//!
+//! - **Taskbar/Alt+Tab hiding**: `WS_EX_TOOLWINDOW` (already set, not
+//!   ownership-derived).
+//! - **Minimize/restore cascade**: handled by
+//!   `install_main_window_floater_cascade_hook` in `client/wndproc.rs`,
+//!   which intercepts `WM_SIZE` on the main window and
+//!   shows/hides all registered floaters.
+//! - **Destroy cascade**: same hook intercepts `WM_DESTROY`.
+//! - **Z-order on activation**: the hook intercepts `WM_ACTIVATE` on the
+//!   main window and calls `SetWindowPos(floater, main_hwnd, ...)` to
+//!   place each floater below main, so clicking main brings it to front.
 //!
 //! See issue #810 / `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`
 //! for the full design and phase plan.
@@ -38,11 +57,54 @@
 
 #![cfg(target_os = "windows")]
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use cef::*;
 
 use crate::state::AppState;
+
+// ---------------------------------------------------------------------------
+// Global floater HWND registry — used by the main-window cascade hook to
+// minimize/restore/destroy/z-order floaters without the owned-window
+// invariant. Keyed by window label ("floating-<uuid>"), value is the raw
+// outer HWND as isize (Send-safe). Populated at floater creation, removed
+// on WM_DESTROY in floating_pane_wndproc.
+// ---------------------------------------------------------------------------
+static ACTIVE_FLOATER_HWNDS: LazyLock<Mutex<HashMap<String, isize>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(crate) fn register_floater_hwnd(label: String, hwnd: isize) {
+    if let Ok(mut m) = ACTIVE_FLOATER_HWNDS.lock() {
+        m.insert(label, hwnd);
+    }
+}
+
+/// Called from `floating_pane_wndproc` on WM_DESTROY and from the cascade
+/// hook on explicit close; reverse-scans by HWND value since the wndproc
+/// doesn't have the label in scope.
+pub(crate) fn unregister_floater_by_hwnd(hwnd: isize) {
+    if let Ok(mut m) = ACTIVE_FLOATER_HWNDS.lock() {
+        m.retain(|_, v| *v != hwnd);
+    }
+}
+
+/// Snapshot of all active floater HWNDs. Used by the cascade hook and the
+/// diagnostic command.
+pub(crate) fn all_floater_hwnds() -> Vec<isize> {
+    ACTIVE_FLOATER_HWNDS
+        .lock()
+        .map(|m| m.values().copied().collect())
+        .unwrap_or_default()
+}
+
+/// Snapshot for the `get_pane_debug_state` diagnostic command.
+pub(crate) fn floater_debug_snapshot() -> Vec<(String, isize)> {
+    ACTIVE_FLOATER_HWNDS
+        .lock()
+        .map(|m| m.iter().map(|(l, h)| (l.clone(), *h)).collect())
+        .unwrap_or_default()
+}
 
 /// Return the Win32 window-class name for floating panes, suffixed with
 /// the launcher-supplied `AGENTMUX_IPC_HASH` (= `hash(data_dir, version)`)
@@ -104,33 +166,10 @@ wrap_task! {
                 );
             };
 
-            // Use the MAIN window as owner, not whichever top-level happens
-            // to be focused at tear-off time. On Win32, destroying an owner
-            // window cascades to all owned windows — if a secondary window
-            // (Window B) were the owner, closing Window B would destroy the
-            // floater. Using the main window means the floater survives closing
-            // any secondary window and is only destroyed with the whole app.
-            let owner_hwnd_raw = unsafe {
-                let h = crate::commands::window::find_main_window();
-                if h.is_null() {
-                    // Fallback: take whatever top-level is visible
-                    crate::commands::window::find_own_top_level_window()
-                } else {
-                    h
-                }
-            };
-            if owner_hwnd_raw.is_null() {
-                tracing::error!(
-                    pane_id = %self.pane_id,
-                    label = %self.window_label,
-                    "[floating-pane] cannot find main HWND — aborting floater creation",
-                );
-                dequeue();
-                return;
-            }
-
-            let outer_hwnd = match create_owned_popup(
-                owner_hwnd_raw,
+            // No Win32 owner — see module doc §"Why no owner (issue #1560)".
+            // Minimize/restore/destroy cascade is handled by
+            // install_main_window_floater_cascade_hook (client/wndproc.rs).
+            let outer_hwnd = match create_popup(
                 &self.window_label,
                 self.x,
                 self.y,
@@ -173,6 +212,12 @@ wrap_task! {
                 .window_hwnds
                 .lock()
                 .insert(self.window_label.clone(), outer_hwnd as isize);
+            // Register in the global cascade registry so the main-window
+            // WM_ACTIVATE/WM_SIZE/WM_DESTROY hook can reach this floater.
+            crate::floating_pane::register_floater_hwnd(
+                self.window_label.clone(),
+                outer_hwnd as isize,
+            );
 
             // CEF embed — the browser is a WS_CHILD of the outer HWND.
             let rect = Rect {
@@ -455,6 +500,11 @@ unsafe extern "system" fn floating_pane_wndproc(
         // cascades the resize to the frontend's inner render-widget children.
         // (Terminal/agent floaters have a single child, so bottom-most == that
         // child — unchanged.) Falls through to DefWindowProcW afterwards.
+        // Unregister from the cascade registry so the main-window hook no
+        // longer tries to show/hide/z-order a destroyed HWND.
+        WM_DESTROY => {
+            crate::floating_pane::unregister_floater_by_hwnd(hwnd as isize);
+        }
         WM_SIZE => {
             // Walk the sibling Z-order from topmost (GW_CHILD) to the
             // bottom-most direct child = the frontend browser.
@@ -485,13 +535,14 @@ unsafe extern "system" fn floating_pane_wndproc(
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
-/// CreateWindowExW wrapper that produces the owned `WS_POPUP +
+/// CreateWindowExW wrapper that produces an unowned `WS_POPUP +
 /// WS_EX_TOOLWINDOW` HWND used as the floating-pane outer shell.
+/// No Win32 owner — cascade behavior is implemented in the main-window
+/// WndProc hook (`install_main_window_floater_cascade_hook`).
 ///
 /// The class is registered once per process; subsequent calls reuse
 /// the registered atom.
-fn create_owned_popup(
-    owner_hwnd_raw: *mut std::ffi::c_void,
+fn create_popup(
     window_label: &str,
     x: i32,
     y: i32,
@@ -585,7 +636,7 @@ fn create_owned_popup(
             y,
             width,
             height,
-            owner_hwnd_raw as HWND,
+            std::ptr::null_mut(), // no owner — see module doc §"Why no owner"
             std::ptr::null_mut(),
             windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null()),
             std::ptr::null(),

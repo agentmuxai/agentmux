@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Floating-pane tear-off — the `open_floating_pane_window` IPC command.
+//! Floating-pane tear-off — the `open_floating_pane_window` IPC command and
+//! the `get_pane_debug_state` diagnostic command.
 //! Specs: `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` (Windows,
 //! issue #810) + `docs/specs/SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`
 //! (macOS/Linux Phase A).
@@ -15,9 +16,9 @@
 //! and the frontend renders `<FloatingPaneWorkspace>` (chromeless).
 //!
 //! Platform primitive differs by OS:
-//! - **Windows**: a raw `WS_POPUP + WS_EX_TOOLWINDOW` HWND OWNED by the source
-//!   main window (no taskbar/Alt-Tab entry; minimizes/restores/destroys with
-//!   its owner), CEF browser embedded — see `crate::floating_pane`.
+//! - **Windows**: an unowned `WS_POPUP + WS_EX_TOOLWINDOW` HWND (no taskbar/
+//!   Alt-Tab entry; cascade managed by `install_main_window_floater_cascade_hook`
+//!   in `client/wndproc.rs`), CEF browser embedded — see `crate::floating_pane`.
 //! - **macOS / Linux** (Phase A): a frameless CEF Views window created via the
 //!   same `ui_tasks::post_create_window(frameless=true)` path the regular
 //!   tear-off uses, with `&floatingPaneId=` injected into the URL. Owned-window
@@ -228,4 +229,42 @@ pub fn open_floating_pane_window(
 
         Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }
+}
+
+/// Diagnostic snapshot of active floater state — called by the frontend on
+/// every tear-off attempt (before + after) to enable structured logging and
+/// to surface intermittent failures without requiring a host-side repro.
+///
+/// Returns JSON:
+/// ```json
+/// {
+///   "floaters": [{"label": "floating-abc", "hwnd": 12345678}],
+///   "any_browser_pane_closing": false,
+///   "pool_queue_size": 2,
+///   "pending_window_creations": 0
+/// }
+/// ```
+pub fn get_pane_debug_state(state: &Arc<AppState>) -> serde_json::Value {
+    #[cfg(target_os = "windows")]
+    let floaters: Vec<serde_json::Value> = crate::floating_pane::floater_debug_snapshot()
+        .into_iter()
+        .map(|(label, hwnd)| serde_json::json!({ "label": label, "hwnd": hwnd }))
+        .collect();
+    #[cfg(not(target_os = "windows"))]
+    let floaters: Vec<serde_json::Value> = vec![];
+
+    let any_closing = state.any_browser_pane_closing();
+    let pool_queue = state.pool_queue_size();
+    let pending = state
+        .host_state
+        .lock()
+        .pending_window_creations
+        .len();
+
+    serde_json::json!({
+        "floaters": floaters,
+        "any_browser_pane_closing": any_closing,
+        "pool_queue_size": pool_queue,
+        "pending_window_creations": pending,
+    })
 }

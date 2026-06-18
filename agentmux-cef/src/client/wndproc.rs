@@ -243,6 +243,121 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
     }
 }
 
+/// Original WndProc table for the floater cascade hook.
+/// Module-level so `cascade_hook` (an `extern "system" fn`) can access it
+/// — inner-function statics are not in scope for nested `extern fn` items.
+#[cfg(target_os = "windows")]
+static FLOATER_CASCADE_ORIGINALS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Cascade hook body — module-level so it can reference module-level statics.
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn floater_cascade_wndproc(
+    hwnd: *mut std::ffi::c_void,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, DefWindowProcW, PostMessageW, SetWindowPos, ShowWindow,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE,
+        WM_ACTIVATE, WM_CLOSE, WM_DESTROY, WM_SIZE,
+    };
+    const WA_INACTIVE: usize = 0;
+    const SIZE_MINIMIZED: usize = 1;
+
+    if msg == WM_ACTIVATE {
+        if (wparam & 0xFFFF) as usize != WA_INACTIVE {
+            // Main window activated — place every floater below it in z-order.
+            // This lets the user click the main window and have it visually
+            // appear in front of the floating pane (replaces the owned-window
+            // always-on-top invariant with a cooperative z-order contract).
+            for fhwnd in crate::floating_pane::all_floater_hwnds() {
+                SetWindowPos(
+                    fhwnd as *mut _,
+                    hwnd, // insertAfter=main → floater is placed below main
+                    0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+        }
+    } else if msg == WM_SIZE {
+        if wparam == SIZE_MINIMIZED {
+            for fhwnd in crate::floating_pane::all_floater_hwnds() {
+                ShowWindow(fhwnd as *mut _, SW_HIDE);
+            }
+        } else {
+            for fhwnd in crate::floating_pane::all_floater_hwnds() {
+                ShowWindow(fhwnd as *mut _, SW_SHOWNOACTIVATE);
+            }
+        }
+    } else if msg == WM_DESTROY {
+        for fhwnd in crate::floating_pane::all_floater_hwnds() {
+            PostMessageW(fhwnd as *mut _, WM_CLOSE, 0, 0);
+        }
+    }
+
+    // Always pass through — we observe only, never short-circuit.
+    let original = FLOATER_CASCADE_ORIGINALS
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&(hwnd as usize)).copied())
+        .unwrap_or(0);
+    if original != 0 {
+        CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
+    } else {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Subclass a FullInstance window's WndProc to cascade lifecycle events to all
+/// active floating panes (issue #1560 — replaces the owned-window cascade that
+/// was removed when we switched to unowned `WS_POPUP` windows).
+///
+/// Handles:
+/// - `WM_ACTIVATE(active)` → z-order floaters below the main HWND
+/// - `WM_SIZE(SIZE_MINIMIZED)` → `SW_HIDE` every floater
+/// - `WM_SIZE(restored/maximized)` → `SW_SHOWNOACTIVATE` every floater
+/// - `WM_DESTROY` → `PostMessage(WM_CLOSE)` every floater
+///
+/// Idempotent: re-calling on an already-hooked HWND is a no-op.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn install_main_window_floater_cascade_hook(
+    hwnd: *mut std::ffi::c_void,
+) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
+
+    let already_hooked = FLOATER_CASCADE_ORIGINALS
+        .lock()
+        .ok()
+        .map(|m| m.contains_key(&(hwnd as usize)))
+        .unwrap_or(false);
+    if already_hooked {
+        return;
+    }
+
+    let original = SetWindowLongPtrW(
+        hwnd,
+        GWLP_WNDPROC,
+        floater_cascade_wndproc as *const () as isize,
+    );
+    if original != 0 {
+        if let Ok(mut m) = FLOATER_CASCADE_ORIGINALS.lock() {
+            m.insert(hwnd as usize, original);
+        }
+        tracing::info!(
+            "[floater-cascade] installed cascade hook on FullInstance HWND {:p}",
+            hwnd,
+        );
+    } else {
+        tracing::warn!(
+            "[floater-cascade] SetWindowLongPtrW returned 0 for {:p} — cascade not installed",
+            hwnd,
+        );
+    }
+}
+
 /// Hide the given top-level HWND from the Windows taskbar via
 /// `ITaskbarList::DeleteTab`. The window remains fully usable — Alt-Tab still
 /// finds it, it takes focus, repaints, etc. — but the shell paints no taskbar

@@ -272,6 +272,15 @@ async function performTearOff(
             });
             return;
         }
+        // Diagnostic snapshot before the IPC so intermittent failures can
+        // be correlated with pane-closing state or pool exhaustion.
+        invokeCommand("get_pane_debug_state", {}).then((snap) => {
+            Logger.info("dnd:cross", "tear-off pre-flight state", {
+                blockId: payload.blockId,
+                ...snap,
+            });
+        }).catch(() => {});
+
         // CRITICAL: invoke the IPC FIRST, then mutate the layout on
         // success. If we delete the layout node up front and the IPC
         // fails (e.g. the H.7 mid-close gate in
