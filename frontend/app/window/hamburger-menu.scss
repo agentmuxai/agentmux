@@ -20,10 +20,12 @@
     -webkit-app-region: no-drag;
     cursor: pointer;
     align-self: center;
-    // Left-of-tabs placement (Windows/Linux): clear the leading
-    // .tab-separator by ~a tab's inner padding so the icon→first-tab gap
-    // matches the inter-tab gap (icon · 10px · 1px sep · 10px · label).
-    // The `--right` (macOS) variant overrides this below.
+    // Left-of-tabs placement (Windows/Linux): symmetric 4px margin on both
+    // sides so the whitespace left of the hamburger matches the right (which
+    // also clears the leading .tab-separator → icon · 10px · 1px sep · 10px ·
+    // label). Vertical symmetry comes from the icon SVG (centered bars).
+    // The `--right` (macOS) variant overrides both margins below.
+    margin-left: 4px;
     margin-right: 4px;
 
     &:hover {
