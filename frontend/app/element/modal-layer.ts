@@ -254,6 +254,10 @@ export interface CreateFromTemplateRequest {
         identityId: string,
         memoryId: string,
         name: string,
+        /** Runtime the user picked in the modal. The launch override
+         *  uses this directly instead of re-reading the (template-
+         *  derived) `agent_type`, so the choice actually takes effect. */
+        agentType: "host" | "container",
     ) => Promise<void>;
 }
 

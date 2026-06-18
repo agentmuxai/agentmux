@@ -27,11 +27,16 @@ import { createEffect, createMemo, createSignal, For, onMount, Show, type JSX } 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { getCliCatalogEntry } from "../defaults/cli-catalog";
 
 export interface CreateFromTemplateFormData {
     name: string;
     identityId: string;
     memoryId: string;
+    /** Where the new agent runs. Chosen here at instantiation time —
+     *  it is NOT a property of the template (a template is runtime-
+     *  agnostic). "container" requires a reachable Docker runtime. */
+    agentType: "host" | "container";
 }
 
 interface AgentCreateFromTemplateModalPanelProps {
@@ -55,6 +60,62 @@ export const AgentCreateFromTemplateModalPanel = (
     const [memories, setMemories] = createSignal<Memory[]>([]);
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
+
+    // ── Runtime (host vs container) ────────────────────────────────
+    // Runtime is decided HERE, when instantiating the template — it's
+    // not a property of the template. The container option is only
+    // offered when (a) the CLI can run in a container and (b) Docker is
+    // actually reachable on this machine. We default to host so the new
+    // agent always actually starts; container can never be the silent
+    // default on a box without Docker (the bug this fixes).
+    const [runtime, setRuntime] = createSignal<"host" | "container">("host");
+    // undefined = still probing; true/false = Docker daemon answered the
+    // ping (ContainerRuntimeAvailableCommand) or not — NOT a CLI-on-PATH check.
+    const [dockerAvailable, setDockerAvailable] = createSignal<boolean | undefined>(undefined);
+    // Once the user touches the dropdown we stop auto-defaulting so the
+    // Docker-probe result can't yank their choice out from under them.
+    let runtimeTouched = false;
+
+    const containerSupported = createMemo(
+        () => getCliCatalogEntry(props.template.provider)?.containerSupported ?? true,
+    );
+    const canPickContainer = () => containerSupported() && dockerAvailable() === true;
+
+    // Probe for a usable container runtime: ask the backend whether the
+    // Docker DAEMON answers a ping right now — not just whether the
+    // `docker` CLI is on PATH. A binary-only check (resolvecli) would
+    // false-positive when Docker is installed but the daemon is stopped,
+    // re-creating the exact trap this modal exists to avoid: defaulting
+    // to a container agent that then can't start (codex P1 on #1576).
+    // Any failure → treat as unavailable (host-only), the safe fallback.
+    onMount(() => {
+        void (async () => {
+            try {
+                const r = await RpcApi.ContainerRuntimeAvailableCommand(TabRpcClient, {
+                    timeout: 10000,
+                });
+                setDockerAvailable(r?.available === true);
+            } catch {
+                setDockerAvailable(false);
+            }
+        })();
+    });
+
+    // Default-pick the runtime once the probe lands: honour the
+    // template's suggested mode when container is genuinely usable,
+    // otherwise fall back to host. Never auto-selects a mode that can't
+    // run. Skipped once the user has made an explicit choice.
+    createEffect(() => {
+        if (runtimeTouched) return;
+        setRuntime(
+            canPickContainer() && props.template.agent_type === "container" ? "container" : "host",
+        );
+    });
+
+    const pickRuntime = (v: "host" | "container") => {
+        runtimeTouched = true;
+        setRuntime(v);
+    };
 
     // Load bundle lists on mount. Bindings are stored on the
     // db_agent_instances row at launch time; the empty string sentinel
@@ -108,6 +169,7 @@ export const AgentCreateFromTemplateModalPanel = (
                 name: name().trim(),
                 identityId: identityId(),
                 memoryId: memoryId(),
+                agentType: runtime(),
             });
             // Layer unmounts via close-on-success. Reset is defensive.
             setSubmitting(false);
@@ -148,6 +210,39 @@ export const AgentCreateFromTemplateModalPanel = (
                         disabled={submitting()}
                         data-testid="create-from-template-name-input"
                     />
+                </label>
+                <label class="agent-new-bundle-modal-field">
+                    <span class="agent-new-bundle-modal-label">Runtime</span>
+                    <select
+                        class="agent-new-bundle-modal-input"
+                        value={runtime()}
+                        onChange={(e) =>
+                            pickRuntime(e.currentTarget.value as "host" | "container")}
+                        disabled={submitting()}
+                        data-testid="create-from-template-runtime-select"
+                    >
+                        <option value="host">On this computer (host)</option>
+                        <option value="container" disabled={!canPickContainer()}>
+                            In a safe sandbox (container)
+                            {canPickContainer() ? "" : " — Docker not detected"}
+                        </option>
+                    </select>
+                    <Show when={runtime() === "host"}>
+                        <span class="agent-new-bundle-modal-hint">
+                            Runs directly on your machine with full access to your files,
+                            environment, and credentials.
+                        </span>
+                    </Show>
+                    <Show when={runtime() === "container"}>
+                        <span class="agent-new-bundle-modal-hint">
+                            Isolated Docker sandbox — the agent only sees its workspace.
+                        </span>
+                    </Show>
+                    <Show when={!containerSupported()}>
+                        <span class="agent-new-bundle-modal-hint">
+                            {props.template.name} can only run on the host.
+                        </span>
+                    </Show>
                 </label>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Identity</span>

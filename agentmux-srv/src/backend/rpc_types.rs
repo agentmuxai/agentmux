@@ -309,6 +309,15 @@ pub const COMMAND_FORK_AGENT_DEFINITION_SUGGEST: &str = "forkagentdefinitionsugg
 /// launch. Rejects non-template ids + duplicate user-agent names.
 pub const COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE: &str = "agentdefcreatefromtemplate";
 
+/// Returns whether a usable container runtime is reachable RIGHT NOW —
+/// i.e. the Docker daemon answers a `ping`, not merely that the `docker`
+/// CLI is on PATH. Used by the create-from-template modal to decide
+/// whether to offer/default the container runtime; a binary-only check
+/// would false-positive when Docker is installed but the daemon is
+/// stopped, steering the user into a container agent that can't start.
+/// Response: `{ "available": bool }`.
+pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable";
+
 /// Two-tier picker (Phase 2 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
 /// Q2 Decision Y). Set the `user_hidden` flag on a seeded template so
 /// it disappears from the default `+ New from template` list. Idempotent;
@@ -1425,6 +1434,13 @@ pub struct CommandAgentDefCreateFromTemplateData {
     /// Same semantics as `identity_id` above.
     #[serde(default)]
     pub memory_id: String,
+    /// Runtime to persist on the cloned definition: "host" or
+    /// "container". Empty/absent → keep the template's `agent_type`.
+    /// Runtime is chosen at instantiation time, not a property of the
+    /// template, so the clone records the user's pick rather than
+    /// inheriting the (now container-defaulted) template value.
+    #[serde(default)]
+    pub agent_type: String,
 }
 
 /// Response for `agentdefcreatefromtemplate`. The frontend uses

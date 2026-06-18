@@ -19,6 +19,7 @@ use crate::backend::rpc_types::{
     COMMAND_RESEED_AGENTS,
     // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md)
     COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+    COMMAND_CONTAINER_RUNTIME_AVAILABLE,
     CommandAgentDefCreateFromTemplateData, AgentDefCreateFromTemplateResult,
     CommandListAgentDefinitionsData,
     // Two-tier picker — Phase 2 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
@@ -456,6 +457,19 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
+                // Runtime is the user's instantiation-time choice, not a
+                // template property. When supplied, the clone records it
+                // (and the matching `environment`); empty falls back to
+                // the template's value for back-compat with older callers.
+                let chosen_agent_type = match cmd.agent_type.trim() {
+                    "host" | "container" => cmd.agent_type.trim().to_string(),
+                    _ => template.agent_type.clone(),
+                };
+                let chosen_environment = if chosen_agent_type == "container" {
+                    "docker".to_string()
+                } else {
+                    "local".to_string()
+                };
                 let mut new_def = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
                     // agent_def_insert derives a unique slug from the
@@ -477,8 +491,8 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     restart_on_crash: template.restart_on_crash,
                     idle_timeout_minutes: template.idle_timeout_minutes,
                     created_at: now,
-                    agent_type: template.agent_type.clone(),
-                    environment: template.environment.clone(),
+                    agent_type: chosen_agent_type,
+                    environment: chosen_environment,
                     agent_bus_id: String::new(),
                     is_seeded: 0,
                     accounts: String::new(),
@@ -519,6 +533,30 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "agentdefcreatefromtemplate: cloned template into user agent"
                 );
                 Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // containerruntimeavailable → does the Docker DAEMON answer a ping
+    // right now? Returns `{ available: bool }`. The create-from-template
+    // modal uses this to gate/default the container runtime. Distinct
+    // from `resolvecli docker`, which only confirms the CLI binary is on
+    // PATH — that false-positives when Docker is installed but the daemon
+    // is stopped, steering users into a container agent that can't start
+    // (codex P1 on #1576). `None` manager (Docker absent at startup) →
+    // false; `Some` → live `check_available()` ping so a daemon that
+    // came up or went down since launch is reflected.
+    let container_manager_cra = state.container_manager.clone();
+    engine.register_handler(
+        COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+        Box::new(move |_data, _ctx| {
+            let cm = container_manager_cra.clone();
+            Box::pin(async move {
+                let available = match cm {
+                    Some(mgr) => mgr.check_available().await.is_ok(),
+                    None => false,
+                };
+                Ok(Some(serde_json::json!({ "available": available })))
             })
         }),
     );
