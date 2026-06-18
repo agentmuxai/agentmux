@@ -370,7 +370,7 @@ Still 30-150× faster than the pre-#345 regression. Still in the "feels instant"
 
 ### 5.2 Automated (CDP trace)
 
-Capture a fresh trace with `scripts/capture-trace.cjs 10` while typing 30 characters into the composer. Analyze with `scripts/verify-typing-fix.cjs`. Target:
+Capture a fresh CDP trace while typing 30 characters into the composer (`capture-trace.cjs` and `verify-typing-fix.cjs` were removed — use Chrome DevTools → Performance tab or a CDP `Profiler.start` session directly). Target:
 
 - keypress avg < 2 ms (vs 0.10 ms baseline — allow a ~20× slack for the new RAF path, still orders of magnitude better than the 45 ms pre-#345 regression)
 - No new Layout events during keypresses beyond the pre-fix baseline
@@ -380,7 +380,7 @@ If the trace shows keypress avg ≥ 5 ms, the RAF path is too expensive and we n
 
 ### 5.3 Smoke test
 
-`scripts/smoke-test-portable.cjs` against the 0.33.109 build. Must pass all 16 checks (no regression from 0.33.108).
+Manual smoke test against the target build (`smoke-test-portable.cjs` was removed — verify manually: launch portable, open an agent pane, type into the composer, confirm tool overlay renders and scroll-on-type behaves). Must show no regression from pre-fix baseline.
 
 ---
 

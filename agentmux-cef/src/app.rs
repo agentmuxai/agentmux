@@ -612,8 +612,8 @@ wrap_app! {
                 // path, #1223) fire only when sysinfo dirties the status
                 // bar — typing visibly hangs and pumps out on key release.
                 //
-                // Measured locally with `scripts/capture-trace.cjs` +
-                // CDP `Profiler.start`:
+                // Measured locally via CDP `Profiler.start`
+                // (capture-trace.cjs was removed in the scripts cleanup):
                 //
                 //   |                 | Wayland | XWayland |
                 //   | --------------- | ------- | -------- |
