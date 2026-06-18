@@ -224,11 +224,15 @@ export function update(
             }
             const newBuf = state.streaming.bufferSize + command.addedCount;
             // Dual-write: while Streaming, mirror bufferSize + lastEventMs.
-            // From Submitting, PROMOTE — a flush is the first concrete
-            // "stream is producing" signal after a turn submit. codex P1
-            // on #987 (companion to the bumpEvent promotion). Other
-            // phases (Idle, Done, Disconnected, Interrupting) keep their
-            // shape — flushes outside a turn are ambient.
+            // PROMOTE to Streaming from Submitting (the normal hand-off) AND
+            // from Idle / Disconnected. `StreamFlushObserved` is only dispatched
+            // for LIVE stream content (never history replay), so a flush is
+            // proof the agent is producing output — it must re-enter the working
+            // set. After a stream drop + resubscribe (e.g. an agent kill+respawn
+            // during a long upstream stall) the phase lands in Idle/Disconnected,
+            // and without this promotion the "in progress" indicator stays OFF
+            // while output streams in. Done (a completed turn) and Interrupting
+            // (user is stopping) are intentional and kept.
             const nextPhase: TurnPhase =
                 state.turnPhase.kind === "Streaming"
                     ? {
@@ -237,6 +241,8 @@ export function update(
                           lastEventMs: command.at,
                       }
                     : state.turnPhase.kind === "Submitting"
+                        || state.turnPhase.kind === "Idle"
+                        || state.turnPhase.kind === "Disconnected"
                         ? {
                               kind: "Streaming",
                               bufferSize: newBuf,
@@ -896,13 +902,23 @@ function bumpEvent(
             lastEventMs: nowMs,
             toolsActive: Math.max(0, next.turnPhase.toolsActive + toolsDelta),
         };
-    } else if (next.turnPhase.kind === "Submitting") {
+    } else if (
+        next.turnPhase.kind === "Submitting" ||
+        next.turnPhase.kind === "Idle" ||
+        next.turnPhase.kind === "Disconnected"
+    ) {
         // codex P1 on #987: `StreamSubscribe` fires once at mount, so
         // subsequent turns enter Submitting and then no transition
         // arm ever advances them to Streaming — chunks/tokens/tools
         // arrive but phase stayed stuck. First stream activity from
-        // Submitting is the actual "stream is producing" signal;
-        // promote here so the dual-written phase reflects reality.
+        // Submitting is the actual "stream is producing" signal.
+        //
+        // Also promote from Idle / Disconnected: live tool/token activity
+        // (this helper only runs for live stream events, never history) is
+        // proof the agent is working. After a stream drop + resubscribe
+        // (agent kill+respawn during a long upstream stall) the phase lands
+        // in Idle/Disconnected; without this the working indicator stays off
+        // while output streams. Done / Interrupting are intentional and kept.
         next.turnPhase = {
             kind: "Streaming",
             bufferSize: next.streaming.bufferSize,
