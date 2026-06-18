@@ -20,6 +20,11 @@
     -webkit-app-region: no-drag;
     cursor: pointer;
     align-self: center;
+    // Left-of-tabs placement (Windows/Linux): clear the leading
+    // .tab-separator by ~a tab's inner padding so the icon→first-tab gap
+    // matches the inter-tab gap (icon · 10px · 1px sep · 10px · label).
+    // The `--right` (macOS) variant overrides this below.
+    margin-right: 4px;
 
     &:hover {
         color: color-mix(in srgb, var(--accent-color), white 25%);

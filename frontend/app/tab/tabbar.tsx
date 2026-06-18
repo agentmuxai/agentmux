@@ -605,6 +605,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                 <HamburgerMenu />
             </Show>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
+                {/* When the hamburger sits to the left of the tabs (Windows/
+                    Linux), give the hamburger→first-tab boundary the SAME 1px
+                    separator every tab-to-tab boundary has — otherwise the
+                    first tab is flush against the hamburger and reads tighter
+                    than the rest. macOS renders the hamburger at the far right,
+                    so no leading separator there. */}
+                <Show when={!isMacOS()}>
+                    <div class="tab-separator" aria-hidden="true" />
+                </Show>
                 <For each={tabIds()}>
                     {(tabId, i) => (
                         <>
