@@ -12,6 +12,7 @@
 //! - Controllers dispatch I/O between the user and the process/service
 
 pub mod acp;
+pub mod core;
 pub mod health;
 pub mod persistent;
 pub mod pidregistry;
