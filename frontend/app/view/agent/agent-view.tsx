@@ -169,7 +169,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // `streaming.active` fields and their projection setters were
     // removed. The view binds the working animation to
     // `workingFromPhase(turnPhase)` and the "Stopping…" label to
-    // `turnPhase.kind === "Interrupting"` (see AgentStatusLine below).
+    // `turnPhase.kind === "Interrupting"`.
     // Capture the model returned by registerPane (PR-4 of the cascade
     // follow-up) — passed into hooks/views so their dispatch callsites
     // are default-safe against post-unmount races. The disposed flag on

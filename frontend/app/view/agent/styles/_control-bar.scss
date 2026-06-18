@@ -105,10 +105,13 @@
 
     @keyframes agent-gradient-sweep {
         // Sweeps the 3x-wide pseudo-element left→right across the visible
-        // 1x window. translateX percentages are relative to the element
-        // (300% of parent), so ±33.33% = ±100% of parent width.
-        from { transform: translateX(33.33%); }
-        to   { transform: translateX(-33.33%); }
+        // 1x window. The element moves right (translateX increases), so the
+        // visible window scans the gradient from its right side to its left —
+        // the glint enters from the left edge and exits on the right.
+        // translateX percentages are relative to the element (300% of parent),
+        // so ±33.33% = ±100% of parent width.
+        from { transform: translateX(-33.33%); }
+        to   { transform: translateX(33.33%); }
     }
 
     @media (prefers-reduced-motion: reduce) {
