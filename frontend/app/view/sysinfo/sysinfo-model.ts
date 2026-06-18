@@ -9,6 +9,7 @@ import { createSignalAtom } from "@/util/util";
 
 import { getConnStatusAtom } from "@/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
+import { WpsEvent } from "@/app/store/wps-events";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
@@ -174,7 +175,7 @@ class SysinfoViewModel implements ViewModel {
             const numPoints = this.numPoints();
             const connName = this.connection();
             const initialData = await RpcApi.EventReadHistoryCommand(TabRpcClient, {
-                event: "sysinfo",
+                event: WpsEvent.SysInfo,
                 scope: connName,
                 maxitems: numPoints,
             });

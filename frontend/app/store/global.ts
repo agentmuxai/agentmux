@@ -3,6 +3,7 @@
 //
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
+import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { markEnd, markStart } from "@/perf";
@@ -259,21 +260,21 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
     waveEventSubscribe(
         {
-            eventType: "waveobj:update",
+            eventType: WpsEvent.WaveObjUpdate,
             handler: (event) => {
                 const update: WaveObjUpdate = event.data;
                 WOS.updateWaveObject(update);
             },
         },
         {
-            eventType: "config",
+            eventType: WpsEvent.Config,
             handler: (event) => {
                 const fullConfig = (event.data as WatcherUpdate).fullconfig;
                 setFullConfigAtom(fullConfig);
             },
         },
         {
-            eventType: "userinput",
+            eventType: WpsEvent.UserInput,
             handler: (event) => {
                 const data: UserInputRequest = event.data;
                 openModal(UserInputModal, { ...data });
@@ -281,7 +282,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             scope: initOpts.windowId,
         },
         {
-            eventType: "blockfile",
+            eventType: WpsEvent.BlockFile,
             handler: (event) => {
                 const fileData: WSFileEventData = event.data;
                 const fileSubject = getFileSubject(fileData.zoneid, fileData.filename);
@@ -810,7 +811,7 @@ export async function loadConnStatus() {
 
 export function subscribeToConnEvents() {
     waveEventSubscribe({
-        eventType: "connchange",
+        eventType: WpsEvent.ConnChange,
         handler: (event: WaveEvent) => {
             try {
                 const connStatus = event.data as ConnStatus;

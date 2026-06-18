@@ -20,6 +20,7 @@
 
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 
@@ -108,7 +109,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
     onMount(() => {
         const unsubFailure = waveEventSubscribe({
-            eventType: "agentfailure",
+            eventType: WpsEvent.AgentFailure,
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const f = (event as any)?.data as AgentFailure | undefined;
@@ -124,7 +125,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             },
         });
         const unsubStatus = waveEventSubscribe({
-            eventType: "controllerstatus",
+            eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const data = (event as any)?.data;

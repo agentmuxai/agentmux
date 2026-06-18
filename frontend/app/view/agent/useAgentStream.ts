@@ -8,6 +8,7 @@
  */
 
 import { getFileSubject, waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { base64ToArray } from "@/util/util";
 import { trail } from "@/log/render-trail";
@@ -238,7 +239,7 @@ export function useAgentStream({
     const subscribeShellScope = (shellId: string) => {
         if (perShellUnsubs.has(shellId)) return;
         const unsub = waveEventSubscribe({
-            eventType: "shell_chunk",
+            eventType: WpsEvent.ShellChunk,
             scope: `shell:${shellId}`,
             handler: handleShellChunk,
         });
@@ -256,7 +257,7 @@ export function useAgentStream({
     // subscribe to this shell's per-shell `shell_chunk` ring so its chunks/exit
     // replay on remount even if a sibling shell evicted them from the block ring.
     const shellNodeCreateUnsub = waveEventSubscribe({
-        eventType: "shell_node_create",
+        eventType: WpsEvent.ShellNodeCreate,
         scope: `block:${blockId}`,
         handler: (event: any) => {
             const d = event?.data;
@@ -479,7 +480,7 @@ export function useAgentStream({
         if (pendingMessagesAtom) {
             const [getPending] = pendingMessagesAtom;
             const acceptedUnsub = waveEventSubscribe({
-                eventType: "agent-message-accepted",
+                eventType: WpsEvent.AgentMessageAccepted,
                 scope: WOS.makeORef("block", blockId),
                 handler: (event) => {
                     const data = (event as any)?.data;

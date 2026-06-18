@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import clsx from "clsx";
 import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -39,7 +40,7 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     createEffect(() => {
         const cn = connName();
         const unsubFn = waveEventSubscribe({
-            eventType: "sysinfo",
+            eventType: WpsEvent.SysInfo,
             scope: cn,
             handler: (event) => {
                 if (model.loadingAtom()) return;

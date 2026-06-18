@@ -21,6 +21,7 @@ import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import { cpuColor, loadColor } from "./cpu-color";
 
 interface Core {
@@ -79,7 +80,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
 
     onMount(() => {
         const unsub = waveEventSubscribe({
-            eventType: "sysinfo",
+            eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
                 const vals = (event as WaveEvent)?.data?.values;
