@@ -10,7 +10,7 @@ import { fetch } from "@/util/fetchutil";
 import { type SignalAtom, fireAndForget } from "@/util/util";
 import { createSignal, onCleanup } from "solid-js";
 import { ObjectService } from "./services";
-import { getApi } from "./global";
+import { getApi } from "./app-api";
 
 // ---------------------------------------------------------------------------
 // Internal types
