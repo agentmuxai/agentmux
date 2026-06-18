@@ -11,6 +11,11 @@
         height: 100%;
         padding: var(--space-4);
         gap: var(--space-3);
+        // Min tile width for the My Agents / Templates grids. The grids
+        // auto-fill across the full pane width, so column count scales with
+        // the pane ("maximize screen room"). Tunable in one place.
+        // Spec: docs/specs/SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md
+        --agent-tile-min: 240px;
     }
 
     // Two-tier picker (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md):
@@ -19,9 +24,7 @@
     // recent-sessions title visual weight so the two sections feel
     // like peers, not a heading + a free-floating grid.
     .agent-picker-templates-header {
-        max-width: 520px;
         width: 100%;
-        align-self: center;
         font-size: var(--text-sm, 0.875rem);
         font-weight: 600;
         color: color-mix(in srgb, var(--main-text-color) 70%, transparent);
@@ -30,21 +33,18 @@
         margin-top: var(--space-3);
     }
 
+    // Templates tier — a responsive tile grid that fills the pane width
+    // (was a 520px-capped single column). auto-fill + minmax reflows the
+    // column count to the pane; `align-content: start` keeps a short list
+    // top-aligned rather than stretched.
     .agent-picker-list {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(var(--agent-tile-min), 1fr));
+        gap: var(--space-3);
+        align-content: start;
         flex: 1;
         overflow-y: auto;
-        // Cap list width so individual cards don't stretch to an
-        // awkwardly wide pane. The flex:1 info column inside each
-        // card expands to fill the card, which left a large gap
-        // between the title text and the action buttons on wide
-        // layouts. `max-width` + `align-self: center` keeps cards
-        // readable at narrow and wide pane widths alike.
-        max-width: 520px;
         width: 100%;
-        align-self: center;
     }
 
     // Two-tier picker (Phase 2 — Q2 Decision Y: hide templates).
@@ -52,9 +52,7 @@
     // under the templates tier, hidden entirely when no templates are
     // hidden (zero footprint by default).
     .agent-picker-hidden-templates {
-        max-width: 520px;
         width: 100%;
-        align-self: center;
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
@@ -139,10 +137,15 @@
 
     .agent-card {
         position: relative;                // anchor for absolutely-positioned actions
+        // Tile layout: logo + title + caption stacked, uniform height so the
+        // grid rows align. (Was a horizontal row.) Extra bottom padding
+        // leaves room for the corner install ribbon / "+ New" affordance.
         display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-3) 14px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: var(--space-2);
+        min-height: 92px;
+        padding: var(--space-3) var(--space-3) var(--space-4);
         border: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         border-radius: 0;
@@ -271,15 +274,17 @@
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            width: 28px;
-            height: 28px;
+            width: 32px;
+            height: 32px;
         }
 
         .agent-card-info {
             display: flex;
             flex-direction: column;
             gap: var(--space-0-5);
-            flex: 1;
+            // Tile: the info block spans the card width (was flex:1 in the
+            // old horizontal row) so title/caption ellipsis against the tile.
+            width: 100%;
             min-width: 0;
         }
 

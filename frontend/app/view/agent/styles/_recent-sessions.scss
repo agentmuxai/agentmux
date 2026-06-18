@@ -10,10 +10,8 @@
     .agent-recent-sessions {
         display: flex;
         flex-direction: column;
-        gap: var(--space-1);
-        max-width: 520px;
+        gap: var(--space-2);
         width: 100%;
-        align-self: center;
         // Hard cap so the list doesn't swallow the picker when the
         // user has 20 active sessions. Internal scroll instead.
         max-height: 40vh;
@@ -56,9 +54,12 @@
         list-style: none;
         padding: 0;
         margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
+        // Tile grid matching the templates tier — sessions flow across the
+        // full pane width instead of a single 520px column.
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(var(--agent-tile-min, 240px), 1fr));
+        gap: var(--space-2);
+        align-content: start;
         overflow-y: auto;
         // Scroll containment so wheeling inside the list doesn't
         // spill into the picker-list below once we hit the boundary.
