@@ -589,6 +589,20 @@ class RpcApiType {
         return client.rpcCall("agentdefcreatefromtemplate", data, opts);
     }
 
+    // command "containerruntimeavailable" [call]
+    //
+    // True only when the Docker daemon answers a live ping — NOT merely
+    // that the `docker` CLI is on PATH (which `resolvecli` checks). Used
+    // by the create-from-template modal to gate/default the container
+    // runtime so a daemon-down box doesn't get steered into a container
+    // agent that can't start.
+    ContainerRuntimeAvailableCommand(
+        client: RpcClient,
+        opts?: RpcOpts,
+    ): Promise<{ available: boolean }> {
+        return client.rpcCall("containerruntimeavailable", {}, opts);
+    }
+
     // command "createagent" [call]
     CreateAgentDefinitionCommand(client: RpcClient, data: CommandCreateAgentDefinitionData, opts?: RpcOpts): Promise<AgentDefinition> {
         return client.rpcCall("createagent", data, opts);

@@ -21,9 +21,9 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListIdentityBundlesCommand: vi.fn(),
         ListMemoriesCommand: vi.fn(),
-        // Mount-time Docker probe (drives the host/container dropdown).
-        // Default rejects → no sandbox available → host-only.
-        ResolveCliCommand: vi.fn(),
+        // Mount-time daemon probe (drives the host/container dropdown).
+        // Default → no reachable runtime → host-only.
+        ContainerRuntimeAvailableCommand: vi.fn(),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -61,8 +61,8 @@ beforeEach(async () => {
     vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([
         { id: "mem-notes", name: "Notes", is_blank: false } as any,
     ]);
-    // Default: no container runtime resolvable → host-only.
-    vi.mocked(RpcApi.ResolveCliCommand).mockRejectedValue(new Error("not found"));
+    // Default: Docker daemon not reachable → host-only.
+    vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: false });
 });
 
 afterEach(() => cleanup());
@@ -142,10 +142,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
     });
 
     it("defaults to container when Docker is available and the template suggests it", async () => {
-        vi.mocked(RpcApi.ResolveCliCommand).mockResolvedValue({
-            cli_path: "/usr/bin/docker",
-            version: "27.0",
-        } as any);
+        vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
         const containerTemplate = { ...template, agent_type: "container" } as AgentDefinition;
         const onSubmit = vi.fn().mockResolvedValue(undefined);
         render(() => (

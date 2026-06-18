@@ -19,6 +19,7 @@ use crate::backend::rpc_types::{
     COMMAND_RESEED_AGENTS,
     // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md)
     COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+    COMMAND_CONTAINER_RUNTIME_AVAILABLE,
     CommandAgentDefCreateFromTemplateData, AgentDefCreateFromTemplateResult,
     CommandListAgentDefinitionsData,
     // Two-tier picker — Phase 2 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
@@ -532,6 +533,30 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "agentdefcreatefromtemplate: cloned template into user agent"
                 );
                 Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // containerruntimeavailable → does the Docker DAEMON answer a ping
+    // right now? Returns `{ available: bool }`. The create-from-template
+    // modal uses this to gate/default the container runtime. Distinct
+    // from `resolvecli docker`, which only confirms the CLI binary is on
+    // PATH — that false-positives when Docker is installed but the daemon
+    // is stopped, steering users into a container agent that can't start
+    // (codex P1 on #1576). `None` manager (Docker absent at startup) →
+    // false; `Some` → live `check_available()` ping so a daemon that
+    // came up or went down since launch is reflected.
+    let container_manager_cra = state.container_manager.clone();
+    engine.register_handler(
+        COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+        Box::new(move |_data, _ctx| {
+            let cm = container_manager_cra.clone();
+            Box::pin(async move {
+                let available = match cm {
+                    Some(mgr) => mgr.check_available().await.is_ok(),
+                    None => false,
+                };
+                Ok(Some(serde_json::json!({ "available": available })))
             })
         }),
     );

@@ -80,25 +80,20 @@ export const AgentCreateFromTemplateModalPanel = (
     );
     const canPickContainer = () => containerSupported() && dockerAvailable() === true;
 
-    // Probe for a usable container runtime the same way the launch flow
-    // gates container agents (flows/launch-flow.ts Phase 0). ResolveCli
-    // throws when the docker CLI can't be resolved → no sandbox.
+    // Probe for a usable container runtime: ask the backend whether the
+    // Docker DAEMON answers a ping right now — not just whether the
+    // `docker` CLI is on PATH. A binary-only check (resolvecli) would
+    // false-positive when Docker is installed but the daemon is stopped,
+    // re-creating the exact trap this modal exists to avoid: defaulting
+    // to a container agent that then can't start (codex P1 on #1576).
+    // Any failure → treat as unavailable (host-only), the safe fallback.
     onMount(() => {
         void (async () => {
             try {
-                await RpcApi.ResolveCliCommand(
-                    TabRpcClient,
-                    {
-                        provider_id: "docker",
-                        cli_command: "docker",
-                        npm_package: "",
-                        pinned_version: "",
-                        windows_install_command: "",
-                        unix_install_command: "",
-                    },
-                    { timeout: 10000 },
-                );
-                setDockerAvailable(true);
+                const r = await RpcApi.ContainerRuntimeAvailableCommand(TabRpcClient, {
+                    timeout: 10000,
+                });
+                setDockerAvailable(r?.available === true);
             } catch {
                 setDockerAvailable(false);
             }
