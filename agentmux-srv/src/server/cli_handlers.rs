@@ -502,15 +502,18 @@ pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
 ///
 /// Uses `where` on Windows and `which` on Unix. Returns the absolute path
 /// if the command is found and exists, otherwise `None`.
+///
+/// On Windows we pass the bare command name (no `.cmd` suffix) so that
+/// `where` resolves the correct extension via PATHEXT. This correctly finds
+/// `docker.exe`, `git.exe`, `node.exe` AND `npm.cmd` — previously the
+/// hard-coded `.cmd` suffix caused all `.exe`-based tools (docker, git,
+/// node) to report as not installed even when present on PATH.
+/// `make_cli_cmd` then handles `.cmd` vs `.exe` invocation correctly based
+/// on the extension of the path returned here.
 pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
-    let path_cmd = if cfg!(windows) {
-        format!("{}.cmd", cli_command)
-    } else {
-        cli_command.to_string()
-    };
     let which_result = if cfg!(windows) {
         let mut probe = tokio::process::Command::new("where");
-        probe.arg(&path_cmd);
+        probe.arg(cli_command);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -518,7 +521,7 @@ pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
         }
         probe.output().await
     } else {
-        tokio::process::Command::new("which").arg(&path_cmd).output().await
+        tokio::process::Command::new("which").arg(cli_command).output().await
     };
     if let Ok(out) = which_result {
         if out.status.success() {
