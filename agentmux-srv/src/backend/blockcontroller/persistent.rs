@@ -153,6 +153,42 @@ pub struct PersistentSubprocessController {
     health_monitor: Arc<HealthMonitor>,
 }
 
+/// How long to wait after delivering an AskUserQuestion answer before assuming
+/// the turn did not resume and re-delivering the answer as a follow-up message.
+/// See `answer_question` and SPEC_ASK_USER_QUESTION_2026_06_15.md §10.1.
+const ANSWER_RESUME_FALLBACK_MS: u64 = 4000;
+
+/// Compose the directive follow-up message used by the AskUserQuestion dead-air
+/// fallback. `answers` maps each question's text to the selected label(s) or free
+/// text (the same object delivered in the control_response). The message is
+/// deliberately directive so the model resumes the task instead of treating it
+/// as a no-op (the "user sent an empty message" failure mode).
+fn build_answer_resume_message(answers: &serde_json::Value) -> String {
+    let mut out = String::from(
+        "[AgentMux] Your earlier question was answered, but the turn had already ended, \
+         so the answer is delivered here as a follow-up. Resume the task you were working \
+         on using this answer — do not wait for further input:\n",
+    );
+    match answers.as_object() {
+        Some(map) if !map.is_empty() => {
+            for (question, answer) in map {
+                let rendered = match answer {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Array(items) => items
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    other => other.to_string(),
+                };
+                out.push_str(&format!("\n• {question}: {rendered}"));
+            }
+        }
+        _ => out.push_str(&format!("\nAnswer: {answers}")),
+    }
+    out
+}
+
 impl PersistentSubprocessController {
     pub fn new(
         tab_id: String,
@@ -340,13 +376,60 @@ impl PersistentSubprocessController {
                 "request_id": request_id,
                 "response": {
                     "behavior": "allow",
-                    "updatedInput": { "questions": questions, "answers": answers },
+                    "updatedInput": { "questions": questions, "answers": answers.clone() },
                     "toolUseID": tool_use_id,
                 }
             }
         });
         tx.try_send(control_response.to_string())
-            .map_err(|e| format!("control_response send failed: {e}"))
+            .map_err(|e| format!("control_response send failed: {e}"))?;
+
+        // Dead-air safety net. The CLI *abandons* a pending AskUserQuestion
+        // tool_use if its turn already ended, silently dropping the
+        // control_response above — the model then sees an empty message and
+        // stalls (SPEC_ASK_USER_QUESTION_2026_06_15.md §9/§10.1; the dead-air
+        // report). If no stdout activity appears shortly after the answer, the
+        // turn did not resume, so re-deliver the answer as a normal follow-up
+        // user turn — the same resilience the one-shot controllers already use.
+        // Gated on output activity, so it is mutually exclusive with a real
+        // resume and never double-delivers.
+        let inner = Arc::clone(&self.inner);
+        let health = Arc::clone(&self.health_monitor);
+        let block_id = self.block_id.clone();
+        let before_output = health.last_output_at();
+        let resume_msg = build_answer_resume_message(&answers);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
+            // Any stdout line since the answer means the turn resumed — nothing to do.
+            if health.last_output_at() != before_output {
+                return;
+            }
+            let line = serde_json::json!({
+                "type": "user",
+                "message": { "role": "user", "content": resume_msg }
+            })
+            .to_string();
+            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            match stdin_tx {
+                Some(stdin_tx) if stdin_tx.try_send(line).is_ok() => {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        tool_use_id = %tool_use_id,
+                        fallback_ms = ANSWER_RESUME_FALLBACK_MS,
+                        "AskUserQuestion answer did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
+                    );
+                }
+                Some(_) => tracing::warn!(
+                    block_id = %block_id,
+                    "AskUserQuestion dead-air fallback: stdin send failed"
+                ),
+                None => tracing::warn!(
+                    block_id = %block_id,
+                    "AskUserQuestion dead-air fallback skipped: process not running"
+                ),
+            }
+        });
+        Ok(())
     }
 
     /// Push a raw NDJSON line to the live stdin (used to emit control_responses
@@ -1035,6 +1118,31 @@ mod send_input_tests {
         let c = controller();
         let res = c.send_input(BlockInputUnion::resize(TermSize { rows: 25, cols: 117 }), None);
         assert!(res.is_ok(), "termsize resize should be a no-op Ok, got {res:?}");
+    }
+
+    // The AskUserQuestion dead-air fallback re-delivers the answer as a directive
+    // follow-up message; the rendering must surface each Q/A so the model can
+    // resume with the decision in context. See SPEC_ASK_USER_QUESTION §10.1.
+    #[test]
+    fn answer_resume_message_renders_qa_pairs() {
+        let answers = serde_json::json!({
+            "Pick a color": "blue",
+            "Pick toppings": ["cheese", "olives"],
+        });
+        let msg = build_answer_resume_message(&answers);
+        assert!(msg.contains("Resume the task"), "must be directive: {msg}");
+        assert!(msg.contains("Pick a color: blue"), "string answer: {msg}");
+        assert!(
+            msg.contains("Pick toppings: cheese, olives"),
+            "multi-select joins labels: {msg}"
+        );
+    }
+
+    #[test]
+    fn answer_resume_message_handles_non_object() {
+        let msg = build_answer_resume_message(&serde_json::json!("just text"));
+        assert!(msg.contains("Resume the task"), "still directive: {msg}");
+        assert!(msg.contains("Answer: "), "non-object falls back: {msg}");
     }
 
     // Raw keystrokes are genuinely unsupported on a persistent controller —
