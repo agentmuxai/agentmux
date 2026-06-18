@@ -246,7 +246,7 @@ function ToolOverlayResult(props: { node: ToolNode }): JSX.Element {
 // SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md (Phase 1).
 
 function renderEdit(node: ToolNode): JSX.Element {
-    return <DiffViewer params={node.params as any} result={node.result as any} />;
+    return <DiffViewer params={node.params as any} result={node.result as any} status={node.status} />;
 }
 
 function renderBash(node: ToolNode): JSX.Element {
