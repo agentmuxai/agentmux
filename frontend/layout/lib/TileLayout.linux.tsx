@@ -685,37 +685,67 @@ interface ResizeHandleComponentProps {
 
 const ResizeHandle = (props: ResizeHandleComponentProps) => {
     let resizeHandleRef: HTMLDivElement | undefined;
-    const [trackingPointer, setTrackingPointer] = createSignal<number | undefined>(undefined);
 
-    const handlePointerMove = throttle(10, (event: PointerEvent) => {
-        if (trackingPointer() === event.pointerId) {
-            const { clientX, clientY } = event;
-            props.layoutModel.onResizeMove(props.resizeHandleProps, clientX, clientY);
-        }
-    });
+    // CEF/Chromium on Linux (Wayland) does NOT keep a stable PointerEvent.pointerId
+    // across a press → drag: the pointerdown arrives as one id (e.g. 1) but the
+    // subsequent pointermove events arrive as a *different* id (e.g. 2), and
+    // setPointerCapture() does not reliably route those moves once the cursor
+    // leaves the thin handle. The pointerId-match + onGotPointerCapture approach
+    // used on win32/darwin therefore never fires onResizeMove here — verified via
+    // logging: every move logged `tracking=1 id=2 match=false`, so the guard was
+    // always false and the divider never moved.
+    //
+    // Fix: don't depend on pointerId or pointer-capture routing. Arm on pointerdown
+    // and listen for moves on `window`, which receives every pointermove regardless
+    // of pointerId or whether the cursor is still over the handle. End on the
+    // primary-button release (pointerup/pointercancel, or buttons going to 0).
+    let teardown: (() => void) | null = null;
 
     function onPointerDown(event: PointerEvent) {
-        resizeHandleRef?.setPointerCapture(event.pointerId);
+        if (event.button !== 0 || teardown) return; // primary button, not already resizing
+        // Keep the press from also starting a tile tear-off or native window drag.
+        event.preventDefault();
+        // Best-effort capture: helps keep moves flowing over native panes on
+        // platforms where capture works; on Linux/CEF the unstable id makes it
+        // unreliable, which is why the window listeners below drive the resize.
+        try {
+            resizeHandleRef?.setPointerCapture(event.pointerId);
+        } catch {
+            /* ignore — capture is best-effort */
+        }
+
+        const onMove = throttle(10, (e: PointerEvent) => {
+            if (!teardown) return; // trailing throttle call after release
+            if ((e.buttons & 1) === 0) {
+                teardown(); // primary button released without a pointerup reaching us
+                return;
+            }
+            props.layoutModel.onResizeMove(props.resizeHandleProps, e.clientX, e.clientY);
+        });
+        const onUp = () => teardown?.();
+
+        teardown = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            window.removeEventListener("pointercancel", onUp);
+            onMove.cancel();
+            teardown = null;
+            props.layoutModel.onResizeEnd();
+        };
+
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onUp);
     }
 
-    function onPointerCapture(event: PointerEvent) {
-        setTrackingPointer(event.pointerId);
-    }
-
-    const onPointerRelease = debounce(30, (event: PointerEvent) => {
-        setTrackingPointer(undefined);
-        props.layoutModel.onResizeEnd();
-    });
+    onCleanup(() => teardown?.());
 
     return (
         <div
             ref={resizeHandleRef}
             class={clsx("resize-handle", `flex-${props.resizeHandleProps.flexDirection}`)}
             onPointerDown={onPointerDown}
-            onGotPointerCapture={onPointerCapture}
-            onLostPointerCapture={onPointerRelease}
             style={props.resizeHandleProps.transform as JSX.CSSProperties}
-            onPointerMove={handlePointerMove}
         >
             <div class="line" />
         </div>
