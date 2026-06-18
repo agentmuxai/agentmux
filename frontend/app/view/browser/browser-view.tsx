@@ -7,7 +7,7 @@ import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
-import { paneReflowActive } from "@/app/platform/pane-anim";
+import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
 
@@ -202,6 +202,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             });
             setPaneCreated(true);
             diag(`paneCreated=true`);
+            // The HWND is now live — open a fresh settle window so the
+            // per-frame loop positions it if the layout changed while the
+            // async create was in-flight (reflow window may have expired).
+            notifyPaneReflow();
             // Seed the overlay-clip short-circuit registry with the initial
             // rect; subsequent syncPosition ticks keep it current.
             registerPaneRect(model.blockId, paneRectCss());
