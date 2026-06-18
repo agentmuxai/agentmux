@@ -22,18 +22,18 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 | A1 | RPC contract enforcement test | ★★★★★ | Low | Low | ✅ **done** | #1544 | `test/contract/rpc-contract.test.ts`. Keep baselines shrinking. |
 | A2 | Extract srv↔mcp↔bashwrap HTTP DTOs into `agentmux-common` | ★★★★ | Med | Low | 🔴 **blocked** | — | Collides with a5af **#1498** (`agentmux-mcp`). Wait for it to merge. |
 | A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | 🟢 ready | — | Frontend `store/`. Big; do when there's room for churn. |
-| A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | 🟢 ready | — | Backend `server/`. Largest god-function. Mechanical. |
-| A5 | Extract `BlockControllerCore` (3 near-clone controllers) | ★★★★ | Med-High | Med | 🟢 ready | — | Backend `blockcontroller/`. Lifecycle-critical. |
-| A6 | Collapse agent-pane's 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🔴 **blocked** | — | Collides with AgentU **#1543** (agent-pane reducer/store/types). |
+| A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | ✅ **done** | #1552 | Backend `server/`. |
+| A5 | Extract `BlockControllerCore` (3 near-clone controllers) | ★★★★ | Med-High | Med | ✅ **done** | #1564 | Backend `blockcontroller/`. Also fixed ACP session-id persist bug. |
+| A6 | Collapse agent-pane's 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🔴 **blocked** | — | Collides with **#1555** (agent-pane). Wait for it to merge. |
 | A7 | Shared `ToolCorrelator` for translator tool-call/result | ★★★ | Low | Low | ✅ **done** | #1545 | `providers/tool-correlation.ts`. |
-| A8 | Split `websocket.rs` by command family | ★★★ | Med | Low | 🟢 ready | — | Backend `server/`. Follows the file's own delegation pattern. |
-| A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | 🔴 **blocked** | — | Same gate as A6 (#1543). |
+| A8 | Split `websocket.rs` by command family | ★★★ | Med | Low | ✅ **done** | #1554 | Backend `server/`. |
+| A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | 🔴 **blocked** | — | Same gate as A6 (#1555). |
 | A10 | Consolidate data-dir resolution onto `DataPaths` | ★★★ | Med | Med | 🟢 ready | — | Backend; touches where live data lives — migration care. |
-| A11 | Real `BlockRegistry` + registry-driven `ModalLayer` | ★★★ | Low-Med | Low | 🟢 ready | — | Frontend `block/`, `element/`. |
-| A12 | Dead-code sweep (watchdog family; dead RPC constants) | ★★ | Low-Med | Low | 🟡 **partial** | #1542 | StreamStalled removed; submit/interrupt watchdogs + ~66 RPC consts remain. |
-| A13 | Spec/doc hygiene (`INDEX.md`, merge dup dirs, archive) | ★★ | Med | Low | 🟢 ready | — | Docs only. |
-| A14 | Shared FE event-name constants (typed `WaveEvent.event`) | ★★ | Low | Low | 🟢 ready | — | Folds into A1's theme; pairs well after A1. |
-| A15 | Harden srv error handling (mutex poison, `take().unwrap()`, ACP drops) | ★★★ | Low | Low | 🟢 ready | — | Backend; cheapest safety win. |
+| A11 | Real `BlockRegistry` + registry-driven `ModalLayer` | ★★★ | Low-Med | Low | ✅ **done** | #1562 | Frontend `block/`, `element/`. |
+| A12 | Dead-code sweep (watchdog family; dead RPC constants) | ★★ | Low-Med | Low | 🟡 **partial** | #1542 | StreamStalled removed; submit/interrupt watchdogs NOT dead (designed but unwired, skip); ~66 RPC consts remain. |
+| A13 | Spec/doc hygiene (`INDEX.md`, merge dup dirs, archive) | ★★ | Med | Low | ✅ **done** | #1558 | Dirs merged; INDEX added; all path refs updated. |
+| A14 | Shared FE event-name constants (typed `WaveEvent.event`) | ★★ | Low | Low | ✅ **done** | #1556 | Frontend. |
+| A15 | Harden srv error handling (mutex poison, `take().unwrap()`, ACP drops) | ★★★ | Low | Low | ✅ **done** | #1551 | Backend. |
 
 **Legend:** ✅ done · 🟡 partial · 🟢 ready (no known conflict) · 🔴 blocked (active fleet PR).
 
@@ -183,13 +183,14 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Done:** the dead `StreamStalled` streaming-idle watchdog (#1542) — see
   [`ANALYSIS_DEAD_STREAM_STALLED_WATCHDOG_2026_06_18.md`](ANALYSIS_DEAD_STREAM_STALLED_WATCHDOG_2026_06_18.md).
 - **Remaining:**
-  1. The rest of the dead watchdog **family**: `schedule-submit-timeout` (`agent-pane-state/reducer.ts:343`)
-     and `schedule-interrupt-timeout` (`:568`) + their `SubmitTimeoutElapsed`/`InterruptTimeoutElapsed`
-     commands follow the same emitted-but-never-dispatched pattern. Verify unwired, then delete (mirror
-     the #1542 approach). **Gate:** agent-pane (#1543) — coordinate.
+  1. The submit/interrupt timeout watchdog family (`schedule-submit-timeout`, `schedule-interrupt-timeout`,
+     `SubmitTimeoutElapsed`, `InterruptTimeoutElapsed`) — **NOT dead**: confirmed the reducer handles these
+     correctly with extensive test coverage (40+ tests); the dispatch-side setTimeout scheduling was intentionally
+     deferred to a future PR, not omitted by accident. Do NOT delete these. Leave as-is.
+  2. *(Was item 2)*
   2. The ~66 unregistered `COMMAND_*` constants in `rpc_types.rs` and the ~70/13 dead FE-method /
      backend-only commands — A1's test already inventories these (its baselines). Delete in batches;
-     each deletion shrinks an A1 baseline (update it in the same PR).
+     each deletion shrinks an A1 baseline (update it in the same PR). **This is the remaining A12 work.**
 - **Acceptance:** dead symbols gone; A1 baselines shrink accordingly; tsc/cargo green.
 
 ### A13 — Spec/doc hygiene 🟢
