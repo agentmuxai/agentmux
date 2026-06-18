@@ -530,3 +530,19 @@ tool_use can't consume.)
   "answer later" affordance keeps it pending; no silent drop.
 
 No blocking unknowns remain for Phase 1.
+
+---
+
+## 11. Amendment — persistent dead-air fallback (2026-06-17)
+
+**Author:** Claude (claude-2) · **Status:** Implemented (branch `fix/askuserquestion-dead-air-resume`)
+
+**Symptom (observed in a live pane).** After a user answered an `AskUserQuestion`, the agent produced no output and did no work until manually nudged. Diagnosis in `agentmux-askuserquestion-dead-air-report.md`.
+
+**Root cause.** §9/§10.1 already document it for one-shot agents: *when a turn ends while the question is still parked, the CLI abandons the pending tool_use*, so the answer's `control_response` is silently dropped and the model sees an empty message. Phase 1 (persistent) assumed the turn always stays alive until the answer arrives — but if it ends first (the CLI's own turn-end while blocked, a stream hiccup, etc.), `answer_question` had **no recovery**: it fired the `control_response` and returned. (`proc_status` can't detect this — it tracks the *process*, which stays alive across turns, not the turn boundary, which lives in the stdout stream.)
+
+**Fix.** Give the **persistent** path the same resilience the one-shot path already has (§9 Phase 2): after sending the `control_response`, `answer_question` snapshots `HealthMonitor::last_output_at()` and arms a short check (`ANSWER_RESUME_FALLBACK_MS`, 4 s). If **no stdout line** has arrived by then, the turn did not resume → re-deliver the answer as a **directive follow-up user message** (`build_answer_resume_message`) on the live stdin, so the agent resumes with the decision in context. Because it is gated on output activity, it is **mutually exclusive** with a real resume and can never double-deliver. The directive wording ("Resume the task… do not wait for further input") also defends against the secondary failure where a vague "continue" nudge is read as a no-op.
+
+**Scope.** `agentmux-srv/src/backend/blockcontroller/persistent.rs` (`answer_question` + `build_answer_resume_message` + tests) and a `last_output_at()` getter on `HealthMonitor` (`health.rs`). No protocol or frontend change; the happy path (turn still live → `control_response` consumed) is byte-for-byte unchanged.
+
+**Follow-ups (not in this change):** the 4 s window is a heuristic that wants a live-smoke tune (the cross-process timing can't be unit-tested, like the §10 CEF smokes); and the §5 "suspend stall watchdog while a question is parked" idea remains optional (the watchdog is non-destructive, so it's cosmetic, not a turn-killer).
