@@ -27,9 +27,9 @@ follow below so the warning is never pushed below the fold. -->
 
 # AgentMux
 
-**Watch Your Agents. Stay in Control.**
+**Agent Operating Environment**
 
-A rich monitoring and orchestration UI for AI agents. See every tool call, catch regressions mid-task, and tune your agent system in real time.
+Watch your agents. Stay in control. A rich monitoring and orchestration environment for AI agents — see every tool call, catch regressions mid-task, and tune your agent system in real time.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/Website-agentmux.ai-blue)](https://agentmux.ai)
@@ -44,7 +44,7 @@ Knowledge workers running AI agents across long-horizon tasks are blind while it
 
 ## What AgentMux Does
 
-AgentMux is an open-source desktop application that surfaces what agents are doing in real time: tool calls, reasoning steps, source citations, output streams, and conflicts between agents. The human role is observer and supervisor, not driver.
+AgentMux is an open-source agent operating environment that surfaces what agents are doing in real time: tool calls, reasoning steps, source citations, output streams, and conflicts between agents. The human role is observer and supervisor, not driver.
 
 Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF host (bundled Chromium). Apache 2.0.
 
