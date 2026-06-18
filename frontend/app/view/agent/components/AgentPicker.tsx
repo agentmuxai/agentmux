@@ -482,7 +482,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             kind: "create-from-template" as const,
             template,
             originBlockId: props.model.blockId,
-            onCreatedAndLaunch: async (newDefId, identityIdSel, memoryIdSel, name) => {
+            onCreatedAndLaunch: async (newDefId, identityIdSel, memoryIdSel, name, agentType) => {
                 // The new definition is user-owned and carries the
                 // template's provider + cmd config. Build an
                 // AgentDefinition stub good enough for the launch flow
@@ -508,12 +508,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         parent_id: template.id,
                         slug: "",
                         working_directory: "",
+                        // Reflect the runtime the user picked in the
+                        // modal, not the template's — the template is
+                        // runtime-agnostic and the backend persisted this
+                        // choice on the new row.
+                        agent_type: agentType,
+                        environment: agentType === "container" ? "docker" : "local",
                     };
                     await props.model.launchAgentDefinition(stubAgent, {
                         instanceName: name,
-                        agentType: (template.agent_type as "host" | "container") || "host",
-                        environment:
-                            template.agent_type === "container" ? "docker" : "local",
+                        agentType,
+                        environment: agentType === "container" ? "docker" : "local",
                         identityId: identityIdSel,
                         memoryId: memoryIdSel,
                         // No `continueOfInstanceId` — the new definition
