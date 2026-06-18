@@ -173,11 +173,11 @@ mv "$TMP" "$HISTORY"
 # Delete consumed changesets.
 git rm -q -- "${CHANGESETS[@]}"
 
-# Stage version history + lockfiles. bump-wrapper.sh in no-commit mode
-# syncs `package-lock.json` on-disk but does NOT stage it (see its line
-# 23-24); we stage explicitly here so the release commit ships consistent
-# versions across package.json + package-lock.json. Reagent P1 on #865.
-git add -- "$HISTORY" package-lock.json
+# Stage all version-bearing files. bump-wrapper.sh in no-commit mode
+# updates files on-disk but does NOT stage them; we stage explicitly so
+# the release commit ships consistent versions across all 5 locations.
+# Reagent P1 on #865 (package-lock.json); P0 on #1548 (Cargo + package.json).
+git add -- "$HISTORY" package.json Cargo.toml Cargo.lock package-lock.json
 
 # ── Verify the release files agree (retro 2026-05-22 action item) ─────────
 #
