@@ -779,6 +779,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         </label>
                     </fieldset>
 
+                    <Show when={runtime() === "host"}>
+                        <div class="agent-launch-modal-host-warning" role="note">
+                            <i class="fa-solid fa-server" aria-hidden="true" />
+                            <span>
+                                <strong>Full system access.</strong>{" "}
+                                This agent runs directly on your machine and can read any file,
+                                use any credential, and run any command your account can.
+                                Use only for admin or system-level tasks — sandbox mode is
+                                recommended for all regular work.
+                            </span>
+                        </div>
+                    </Show>
+
                     <fieldset class="agent-launch-modal-field agent-launch-modal-bundles">
                         <legend class="agent-launch-modal-label">Profile</legend>
                         <span class="agent-launch-modal-hint">
