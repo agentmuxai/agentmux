@@ -441,7 +441,7 @@ createEffect(() => {
 For each PR in the extraction sequence:
 
 1. **TypeScript clean:** `npx tsc --noEmit` with no new errors in agent/ directory.
-2. **Smoke test:** `scripts/smoke-test-portable.cjs` against a freshly built 0.33.x portable.
+2. **Smoke test:** Launch a freshly built portable, open an agent pane, run a full launch flow, confirm no visual regressions (`smoke-test-portable.cjs` was removed).
 3. **Manual agent launch:** open the portable, pick an agent, run a full launch flow (CLI resolve → auth → spawn → first message → response). Every refactor step must not break this end-to-end path.
 4. **Reagent review:** every PR goes through reagent. Expect ≥1 round of fixes per PR; the extraction touches cross-cutting state and review will catch things like missing cleanup or misplaced effects.
 5. **Size budget:** after Step 12, `wc -l frontend/app/view/agent/agent-view.tsx` must be ≤ 300.
