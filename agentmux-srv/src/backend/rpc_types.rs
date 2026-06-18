@@ -131,22 +131,15 @@ pub const CREATE_BLOCK_ACTION_SPLIT_RIGHT: &str = "splitright";
 // ---- Command constants (match Go's wshrpc.Command_* constants) ----
 
 // Special commands
-pub const COMMAND_AUTHENTICATE: &str = "authenticate";
-pub const COMMAND_AUTHENTICATE_TOKEN: &str = "authenticatetoken";
-pub const COMMAND_DISPOSE: &str = "dispose";
 pub const COMMAND_ROUTE_ANNOUNCE: &str = "routeannounce";
 pub const COMMAND_ROUTE_UNANNOUNCE: &str = "routeunannounce";
 
 // Core commands
-pub const COMMAND_MESSAGE: &str = "message";
 pub const COMMAND_GET_META: &str = "getmeta";
 pub const COMMAND_SET_META: &str = "setmeta";
-pub const COMMAND_SET_VIEW: &str = "setview";
 
 // Controller commands
 pub const COMMAND_CONTROLLER_INPUT: &str = "controllerinput";
-pub const COMMAND_CONTROLLER_RESTART: &str = "controllerrestart";
-pub const COMMAND_CONTROLLER_STOP: &str = "controllerstop";
 pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
 /// Per-tool-call permission decision RPC. Frontend sends after the
@@ -174,27 +167,10 @@ pub const COMMAND_RESOLVE_CLI: &str = "resolvecli";
 pub const COMMAND_CHECK_CLI_AUTH: &str = "checkcliauth";
 
 // Block commands
-pub const COMMAND_MKDIR: &str = "mkdir";
-pub const COMMAND_RESOLVE_IDS: &str = "resolveids";
-pub const COMMAND_BLOCK_INFO: &str = "blockinfo";
-pub const COMMAND_BLOCKS_LIST: &str = "blockslist";
-pub const COMMAND_CREATE_BLOCK: &str = "createblock";
-pub const COMMAND_DELETE_BLOCK: &str = "deleteblock";
 
 // File commands
-pub const COMMAND_FILE_WRITE: &str = "filewrite";
-pub const COMMAND_FILE_READ: &str = "fileread";
-pub const COMMAND_FILE_READ_STREAM: &str = "filereadstream";
-pub const COMMAND_FILE_MOVE: &str = "filemove";
-pub const COMMAND_FILE_COPY: &str = "filecopy";
-pub const COMMAND_FILE_STREAM_TAR: &str = "filestreamtar";
-pub const COMMAND_FILE_APPEND: &str = "fileappend";
-pub const COMMAND_FILE_APPEND_IJSON: &str = "fileappendijson";
-pub const COMMAND_FILE_JOIN: &str = "filejoin";
-pub const COMMAND_FILE_SHARE_CAPABILITY: &str = "filesharecapability";
 
 // Event commands
-pub const COMMAND_EVENT_PUBLISH: &str = "eventpublish";
 pub const COMMAND_EVENT_RECV: &str = "eventrecv";
 pub const COMMAND_EVENT_SUB: &str = "eventsub";
 pub const COMMAND_EVENT_UNSUB: &str = "eventunsub";
@@ -202,75 +178,35 @@ pub const COMMAND_EVENT_UNSUB_ALL: &str = "eventunsuball";
 pub const COMMAND_EVENT_READ_HISTORY: &str = "eventreadhistory";
 
 // Stream/test commands
-pub const COMMAND_STREAM_TEST: &str = "streamtest";
-pub const COMMAND_STREAM_CPU_DATA: &str = "streamcpudata";
-pub const COMMAND_TEST: &str = "test";
 
 // Config commands
 pub const COMMAND_SET_CONFIG: &str = "setconfig";
-pub const COMMAND_SET_CONNECTIONS_CONFIG: &str = "connectionsconfig";
 pub const COMMAND_GET_FULL_CONFIG: &str = "getfullconfig";
 
 // Remote commands
-pub const COMMAND_REMOTE_STREAM_FILE: &str = "remotestreamfile";
-pub const COMMAND_REMOTE_TAR_STREAM: &str = "remotetarstream";
-pub const COMMAND_REMOTE_FILE_INFO: &str = "remotefileinfo";
-pub const COMMAND_REMOTE_FILE_TOUCH: &str = "remotefiletouch";
-pub const COMMAND_REMOTE_WRITE_FILE: &str = "remotewritefile";
-pub const COMMAND_REMOTE_FILE_DELETE: &str = "remotefiledelete";
-pub const COMMAND_REMOTE_FILE_JOIN: &str = "remotefilejoin";
-pub const COMMAND_REMOTE_MKDIR: &str = "remotemkdir";
-pub const COMMAND_REMOTE_GET_INFO: &str = "remotegetinfo";
-pub const COMMAND_REMOTE_INSTALL_RC_FILES: &str = "remoteinstallrcfiles";
 
 // Info/activity commands
 pub const COMMAND_APP_INFO: &str = "waveinfo";
-pub const COMMAND_ACTIVITY: &str = "activity";
-pub const COMMAND_GET_VAR: &str = "getvar";
-pub const COMMAND_SET_VAR: &str = "setvar";
 
 // Connection commands
-pub const COMMAND_CONN_STATUS: &str = "connstatus";
-pub const COMMAND_WSL_STATUS: &str = "wslstatus";
-pub const COMMAND_CONN_ENSURE: &str = "connensure";
-pub const COMMAND_CONN_CONNECT: &str = "connconnect";
-pub const COMMAND_CONN_DISCONNECT: &str = "conndisconnect";
-pub const COMMAND_CONN_LIST: &str = "connlist";
-pub const COMMAND_CONN_LIST_AWS: &str = "connlistaws";
-pub const COMMAND_WSL_LIST: &str = "wsllist";
-pub const COMMAND_WSL_DEFAULT_DISTRO: &str = "wsldefaultdistro";
 // COMMAND_CONN_REINSTALL_WSH / COMMAND_CONN_UPDATE_WSH / COMMAND_DISMISS_WSH_FAIL
 // have been removed — wsh has been retired. See
 // specs/SPEC_RETIRE_WSH_2026_04_12.md.
 
 // Workspace commands
-pub const COMMAND_WORKSPACE_LIST: &str = "workspacelist";
 
 // UI commands
-pub const COMMAND_WEB_SELECTOR: &str = "webselector";
-pub const COMMAND_NOTIFY: &str = "notify";
-pub const COMMAND_FOCUS_WINDOW: &str = "focuswindow";
-pub const COMMAND_GET_UPDATE_CHANNEL: &str = "getupdatechannel";
 
 // VDom commands
-pub const COMMAND_VDOM_CREATE_CONTEXT: &str = "vdomcreatecontext";
-pub const COMMAND_VDOM_ASYNC_INITIATION: &str = "vdomasyncinitiation";
-pub const COMMAND_VDOM_RENDER: &str = "vdomrender";
-pub const COMMAND_VDOM_URL_REQUEST: &str = "vdomurlrequest";
 
 // AI commands
-pub const COMMAND_AI_SEND_MESSAGE: &str = "aisendmessage";
 pub const COMMAND_GET_AI_RATE_LIMIT: &str = "getwaveairatelimit";
 
 // Screenshot
-pub const COMMAND_CAPTURE_BLOCK_SCREENSHOT: &str = "captureblockscreenshot";
 
 // RT info
-pub const COMMAND_GET_RT_INFO: &str = "getrtinfo";
-pub const COMMAND_SET_RT_INFO: &str = "setrtinfo";
 
 // Terminal
-pub const COMMAND_TERM_GET_SCROLLBACK_LINES: &str = "termgetscrollbacklines";
 
 // Agent
 pub const COMMAND_LIST_AGENTS: &str = "listagents";
@@ -407,7 +343,6 @@ pub const COMMAND_AGENT_STOP_API: &str = "agent.stop";
 pub const COMMAND_AGENT_STATUS: &str = "agent.status";
 pub const COMMAND_AGENT_LIST: &str = "agent.list";
 pub const COMMAND_AGENT_OUTPUT: &str = "agent.output";
-pub const COMMAND_AGENT_STREAM: &str = "agent.stream";
 /// List every OS process currently tracked for a given agent block.
 /// Returns `AgentProcessListResult`. Consumed by the swarm activity
 /// panel. See `backend::process_tracker`.
@@ -2343,31 +2278,14 @@ mod tests {
     fn test_all_command_constants_non_empty() {
         // Verify all command constants are non-empty strings
         let commands = [
-            COMMAND_AUTHENTICATE,
-            COMMAND_AUTHENTICATE_TOKEN,
-            COMMAND_DISPOSE,
             COMMAND_ROUTE_ANNOUNCE,
             COMMAND_ROUTE_UNANNOUNCE,
-            COMMAND_MESSAGE,
             COMMAND_GET_META,
             COMMAND_SET_META,
-            COMMAND_SET_VIEW,
             COMMAND_CONTROLLER_INPUT,
-            COMMAND_CONTROLLER_STOP,
             COMMAND_CONTROLLER_RESYNC,
-            COMMAND_CREATE_BLOCK,
-            COMMAND_DELETE_BLOCK,
-            COMMAND_FILE_READ,
-            COMMAND_FILE_WRITE,
-            COMMAND_FILE_APPEND,
-            COMMAND_EVENT_PUBLISH,
             COMMAND_EVENT_SUB,
             COMMAND_EVENT_UNSUB,
-            COMMAND_CONN_CONNECT,
-            COMMAND_CONN_DISCONNECT,
-            COMMAND_WORKSPACE_LIST,
-            COMMAND_FOCUS_WINDOW,
-            COMMAND_AI_SEND_MESSAGE,
         ];
         for cmd in &commands {
             assert!(!cmd.is_empty(), "command constant should not be empty");
