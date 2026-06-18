@@ -503,7 +503,7 @@ fn resolve_channel_and_dir(
     // env-string round-trip or direct test construction) the layout
     // falls back to the original two-level form for back-compat.
     // See SPEC_DATA_CHANNELS_2026_05_24.md §2.4 and
-    // docs/analyses/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md.
+    // docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md.
     if let RuntimeMode::Dev { branch, clone_id } = mode {
         let safe_branch = sanitize_path_segment(branch).ok_or_else(|| {
             format!("invalid dev branch for path: {:?}", branch)
