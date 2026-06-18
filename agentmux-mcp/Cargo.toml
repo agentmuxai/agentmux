@@ -11,6 +11,7 @@ name = "agentmux-mcp"
 path = "src/main.rs"
 
 [dependencies]
+agentmux-common = { path = "../agentmux-common" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "io-std", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }

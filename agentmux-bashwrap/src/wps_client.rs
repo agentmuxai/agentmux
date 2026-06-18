@@ -13,6 +13,7 @@
 //! a `kind: "system"` chunk that surfaces the degradation to the
 //! user without aborting the command itself.
 
+use agentmux_common::api_types::WpsPublishRequest;
 use anyhow::Result;
 use serde::Serialize;
 use std::sync::Arc;
@@ -26,31 +27,6 @@ pub struct WpsClient {
     inner: Arc<reqwest::Client>,
     endpoint: String,
     auth_key: String,
-}
-
-#[derive(Serialize)]
-struct PublishRequest<'a, T: Serialize> {
-    /// WPS event name. Fixed `tool_chunk` for every streaming chunk —
-    /// the tool_use_id lives in the payload, not in the event name.
-    /// Lets the frontend open a single per-block subscription on mount
-    /// instead of per-tool subscriptions racing the tool's execution.
-    event: &'a str,
-    /// Scope filters. Always `["block:<id>"]` for tool_chunk so the
-    /// broker delivers only to the relevant pane.
-    #[serde(skip_serializing_if = "<[String]>::is_empty")]
-    scopes: &'a [String],
-    /// Per-event persistence count (kept by the broker for
-    /// replay-on-subscribe). Captures the wrapper's full output for
-    /// late subscribers when Claude buffers the tool_use stream until
-    /// after the tool runs.
-    #[serde(skip_serializing_if = "is_zero_usize")]
-    persist: usize,
-    /// Event payload. Free-form per event type.
-    data: &'a T,
-}
-
-fn is_zero_usize(n: &usize) -> bool {
-    *n == 0
 }
 
 /// How many `tool_chunk` events the broker keeps per `block:<id>`
@@ -98,14 +74,11 @@ impl WpsClient {
         block_id: Option<&str>,
         payload: &T,
     ) -> Result<()> {
-        let scopes: Vec<String> = block_id
-            .map(|b| vec![format!("block:{}", b)])
-            .unwrap_or_default();
-        let body = PublishRequest {
-            event: TOOL_CHUNK_EVENT,
-            scopes: &scopes,
+        let body = WpsPublishRequest {
+            event: TOOL_CHUNK_EVENT.to_string(),
+            scopes: block_id.map(|b| vec![format!("block:{b}")]).unwrap_or_default(),
             persist: TOOL_CHUNK_PERSIST,
-            data: payload,
+            data: serde_json::to_value(payload)?,
         };
         let url = format!("{}{}", self.endpoint, PUBLISH_PATH);
         let resp = self
