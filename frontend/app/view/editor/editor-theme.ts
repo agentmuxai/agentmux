@@ -67,26 +67,28 @@ const editorChromeTheme = EditorView.theme(
             color: "var(--main-text-color)",
         },
 
-        // ── Find/replace panel — refined to match the app design system ──
-        // (tokens from theme.scss; mirrors the look of element/search.scss).
+        // ── Find/replace panel ──────────────────────────────────────────
+        // Tight spacing + hard corners (app convention) + accent woven in via
+        // color-mix, mirroring the Trust Center gallery (accounts-gallery.scss:
+        // accent-mixed borders/hover, accent toggles). theme.scss tokens only.
         ".cm-panels.cm-panels-top": {
-            borderBottom: "1px solid var(--border-color)",
+            borderBottom: "1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color))",
         },
         ".cm-panel.cm-search": {
             position: "relative",
             display: "flex",
             flexWrap: "wrap",
             alignItems: "center",
-            gap: "6px",
-            padding: "7px 32px 7px 10px",
+            gap: "3px",
+            padding: "4px 26px 4px 6px",
             fontFamily: "inherit",
             fontSize: "12px",
         },
         ".cm-panel.cm-search label": {
             display: "inline-flex",
             alignItems: "center",
-            gap: "4px",
-            margin: "0",
+            gap: "3px",
+            margin: "0 0 0 2px",
             color: "var(--secondary-text-color)",
             fontSize: "11px",
             textTransform: "none",
@@ -101,8 +103,9 @@ const editorChromeTheme = EditorView.theme(
             backgroundColor: "var(--form-element-bg-color)",
             color: "var(--main-text-color)",
             border: "1px solid var(--border-color)",
-            borderRadius: "4px",
-            padding: "3px 8px",
+            borderRadius: "0", // hard corners — app convention
+            margin: "0",
+            padding: "2px 6px",
             fontSize: "12px",
             fontFamily: "inherit",
         },
@@ -110,37 +113,42 @@ const editorChromeTheme = EditorView.theme(
             outline: "none",
             borderColor: "var(--accent-color)",
         },
+        // Accent-tinted buttons — hard corners, theme accent via color-mix
+        // (same technique as the Trust Center tiles), brighter on hover.
         ".cm-button": {
-            backgroundColor: "transparent",
+            backgroundColor: "color-mix(in srgb, var(--accent-color) 12%, transparent)",
             backgroundImage: "none",
-            color: "var(--secondary-text-color)",
-            border: "1px solid var(--border-color)",
-            borderRadius: "4px",
-            padding: "2px 9px",
+            color: "var(--main-text-color)",
+            border: "1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color))",
+            borderRadius: "0",
+            margin: "0",
+            padding: "2px 7px",
             fontSize: "11px",
             cursor: "pointer",
         },
         ".cm-button:hover": {
-            backgroundColor: "var(--hover-bg-color)",
+            backgroundColor: "color-mix(in srgb, var(--accent-color) 26%, transparent)",
+            borderColor: "var(--accent-color)",
             color: "var(--main-text-color)",
         },
         ".cm-button:active": {
-            backgroundColor: "var(--hover-bg-color)",
+            backgroundColor: "color-mix(in srgb, var(--accent-color) 38%, transparent)",
         },
         ".cm-search button[name=close]": {
             position: "absolute",
-            top: "6px",
-            right: "8px",
-            padding: "0 4px",
+            top: "4px",
+            right: "6px",
+            padding: "0 3px",
+            margin: "0",
             border: "none",
             background: "transparent",
             color: "var(--secondary-text-color)",
-            fontSize: "16px",
+            fontSize: "15px",
             lineHeight: "1",
             cursor: "pointer",
         },
         ".cm-search button[name=close]:hover": {
-            color: "var(--main-text-color)",
+            color: "var(--accent-color)",
             backgroundColor: "transparent",
         },
     },
