@@ -1,0 +1,38 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.runtime-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 4px;
+    font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
+
+    &--sm {
+        font-size: 10px;
+        padding: 1px 5px;
+    }
+
+    &--md {
+        font-size: 11px;
+        padding: 2px 6px;
+    }
+
+    &--container {
+        background: color-mix(in srgb, var(--success-color, #22c55e) 15%, transparent);
+        color: var(--success-color, #22c55e);
+        border: 1px solid color-mix(in srgb, var(--success-color, #22c55e) 30%, transparent);
+    }
+
+    &--host {
+        background: color-mix(in srgb, var(--warning-color, #f59e0b) 15%, transparent);
+        color: var(--warning-color, #f59e0b);
+        border: 1px solid color-mix(in srgb, var(--warning-color, #f59e0b) 30%, transparent);
+    }
+
+    i {
+        font-size: 0.85em;
+    }
+}

@@ -51,6 +51,7 @@ import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
+import { RuntimeBadge } from "./components/RuntimeBadge";
 import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -1133,6 +1134,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 `StreamSubscribe` arm clears the phase to Idle. Spec
                 docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md
                 §6.4. */}
+            {/* Runtime pin row — shows host vs container badge for the
+                running agent. "standalone" / unset = no row (legacy agents
+                predating container support). Spec: SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md */}
+            <Show when={block()?.meta?.["agentMode"] === "host" || block()?.meta?.["agentMode"] === "container"}>
+                <PaneRow
+                    sigil={block()?.meta?.["agentMode"] === "container" ? "□" : "⚙"}
+                    title={
+                        block()?.meta?.["agentMode"] === "container"
+                            ? "Container — isolated Docker sandbox"
+                            : "Host — full system access"
+                    }
+                    accent={block()?.meta?.["agentMode"] === "container" ? "done" : "idle"}
+                >
+                    <RuntimeBadge runtime={block()?.meta?.["agentMode"]} size="md" />
+                </PaneRow>
+            </Show>
             {/* Failure-recovery row — per-error-class actions + auto-retry,
                 rendered through the shared PaneRow accessory primitive.
                 SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16. */}

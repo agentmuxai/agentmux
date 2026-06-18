@@ -2326,6 +2326,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         has_snapshot,
                         agent_created_at: def.map(|d| d.created_at).unwrap_or(0),
                         started_at: inst.started_at,
+                        agent_type: def.map(|d| d.agent_type.clone()).unwrap_or_default(),
                     });
                 }
 

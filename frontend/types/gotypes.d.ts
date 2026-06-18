@@ -572,6 +572,8 @@ declare global {
         agent_created_at: number;
         /** When this instance was most recently launched (ms epoch). */
         started_at: number;
+        /** "host" or "container" — drives the runtime badge in the My Agents list. */
+        agent_type?: string;
     };
 
     // AgentContent

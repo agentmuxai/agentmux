@@ -2000,6 +2000,9 @@ pub struct RecentSessionRow {
     /// When this instance was last launched (ms since epoch).
     /// Shown as "Last Launch" in the My Agents card.
     pub started_at: i64,
+    /// "host" or "container" — drives the runtime badge in the My Agents list.
+    #[serde(default)]
+    pub agent_type: String,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is
