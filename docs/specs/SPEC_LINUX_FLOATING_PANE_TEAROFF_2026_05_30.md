@@ -7,7 +7,7 @@
 **Pairs with / refines:**
 - [`SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md`](./SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md) — the macOS sibling that just landed in #1182. Linux Phase A is the same shape.
 - [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md`](./SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) §3.3 (Linux/GTK recipe).
-- [`docs/analysis/ANALYSIS_FLOATING_PANE_LINUX_GAPS_2026-05-28.md`](../analyses/ANALYSIS_FLOATING_PANE_LINUX_GAPS_2026-05-28.md) — analysis from two days ago that called out the missing routing.
+- [`docs/analysis/ANALYSIS_FLOATING_PANE_LINUX_GAPS_2026-05-28.md`](../analysis/ANALYSIS_FLOATING_PANE_LINUX_GAPS_2026-05-28.md) — analysis from two days ago that called out the missing routing.
 
 ---
 
