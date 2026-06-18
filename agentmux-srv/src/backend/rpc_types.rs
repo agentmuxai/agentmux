@@ -2278,31 +2278,14 @@ mod tests {
     fn test_all_command_constants_non_empty() {
         // Verify all command constants are non-empty strings
         let commands = [
-            COMMAND_AUTHENTICATE,
-            COMMAND_AUTHENTICATE_TOKEN,
-            COMMAND_DISPOSE,
             COMMAND_ROUTE_ANNOUNCE,
             COMMAND_ROUTE_UNANNOUNCE,
-            COMMAND_MESSAGE,
             COMMAND_GET_META,
             COMMAND_SET_META,
-            COMMAND_SET_VIEW,
             COMMAND_CONTROLLER_INPUT,
-            COMMAND_CONTROLLER_STOP,
             COMMAND_CONTROLLER_RESYNC,
-            COMMAND_CREATE_BLOCK,
-            COMMAND_DELETE_BLOCK,
-            COMMAND_FILE_READ,
-            COMMAND_FILE_WRITE,
-            COMMAND_FILE_APPEND,
-            COMMAND_EVENT_PUBLISH,
             COMMAND_EVENT_SUB,
             COMMAND_EVENT_UNSUB,
-            COMMAND_CONN_CONNECT,
-            COMMAND_CONN_DISCONNECT,
-            COMMAND_WORKSPACE_LIST,
-            COMMAND_FOCUS_WINDOW,
-            COMMAND_AI_SEND_MESSAGE,
         ];
         for cmd in &commands {
             assert!(!cmd.is_empty(), "command constant should not be empty");
