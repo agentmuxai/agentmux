@@ -19,7 +19,7 @@ gets them alongside `Shell`/`SendMessage`/`OpenEditor`.
 A loop is just *"re-inject this prompt into a conversation every N"*. The delivery primitive already
 exists — `POST /agentmux/reactive/inject` (`reactive_handler.inject_message`), the same path
 `SendMessage` uses, which routes a message to a target agent's active conversation (local → LAN →
-cloud tiers) and supports `wait_for_idle`.
+cloud tiers).
 
 **Where the loop lives: the agentmux-mcp process.** Unlike `Shell` (whose output must stream into a
 conversation document, so its lifecycle lives in srv), a loop has no state beyond "fire the inject on
@@ -27,7 +27,7 @@ a timer." Claude's `/loop` is likewise driven by the tool/client layer, not the 
 is an in-process `tokio` task in the MCP server:
 
 ```
-loop { if !immediate { sleep(interval) first };  POST inject(prompt → target, wait_for_idle); sleep(interval) }
+loop { if !immediate { sleep(interval) first };  POST inject(prompt → target); sleep(interval) }
 ```
 
 - A `LoopRegistry = Mutex<HashMap<loop_id, JoinHandle>>` (created in `main`, passed to `call_tool`)
@@ -46,8 +46,8 @@ possible follow-up if cross-restart loops are wanted.)
 
 **`Loop`** — args: `prompt` (required), `interval` (string `30s`/`5m`/`1h`; bare number = minutes;
 default `10m`; clamped [10s, 24h]), `to` (target agent name; default self via `AGENTMUX_AGENT_ID`),
-`immediate` (run once on start too; default false). Returns `loop-<n>`. Injects with
-`wait_for_idle: true` so a re-prompt lands when the target finishes its turn rather than interrupting.
+`immediate` (run once on start too; default false). Returns `loop-<n>`. Injects on a fixed
+schedule; `InjectionRequest.wait_for_idle` is dead scaffolding that srv never reads and is not sent.
 
 **`LoopStop`** — args: `loop_id`. Aborts the task; idempotent ("not running" if unknown).
 
