@@ -79,7 +79,7 @@ const DISCOVER_AGENTS_TOOL: &str = r#"{
 
 const SET_ACTIVE_TAB_TOOL: &str = r#"{
   "name": "SetActiveTab",
-  "description": "Switch the active (foreground) tab to the given tab_id within its workspace. Get tab ids from ListTabs or GetLayout.",
+  "description": "Switch the active (foreground) tab to the given tab_id within its workspace. Get tab ids from Layout(query:\"tabs\") or Layout(query:\"layout\").",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -102,7 +102,7 @@ const NEW_TAB_TOOL: &str = r#"{
 
 const FOCUS_WINDOW_TOOL: &str = r#"{
   "name": "FocusWindow",
-  "description": "Bring an AgentMux window to the foreground. Defaults to your own window. Pass window_id (from ListWindows/GetLayout) to focus a specific one.",
+  "description": "Bring an AgentMux window to the foreground. Defaults to your own window. Pass window_id (from Layout(query:\"windows\") or Layout(query:\"layout\")) to focus a specific one.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -128,7 +128,7 @@ const LAYOUT_TOOL: &str = r#"{
 
 const WHOAMI_TOOL: &str = r#"{
   "name": "WhoAmI",
-  "description": "Return your own place in the AgentMux UI: your block (pane), tab, window, and workspace ids plus their names. Use it to discover the targets for naming/layout verbs (e.g. before SetWindowName). Takes no arguments.",
+  "description": "Return your own place in the AgentMux UI: your block (pane), tab, window, and workspace ids plus their names. Use it to discover the targets for naming/layout verbs (e.g. before SetName). Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}
@@ -670,7 +670,16 @@ async fn call_tool(
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("{label} change failed: HTTP {status} — {text}");
             }
-            Ok(format!("{label} set to \"{new_name}\""))
+            // Surface the server-applied value (e.g. a window name clamped to 64
+            // chars) when the endpoint echoes it back; fall back to the request.
+            // Restores the pre-consolidation SetWindowName behavior generically.
+            let applied = resp
+                .json::<Value>()
+                .await
+                .ok()
+                .and_then(|v| v.get(field).and_then(|s| s.as_str()).map(str::to_string))
+                .unwrap_or_else(|| new_name.to_string());
+            Ok(format!("{label} set to \"{applied}\""))
         }
         "Layout" => {
             if local_url.is_empty() || auth_key.is_empty() {
