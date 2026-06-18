@@ -21,7 +21,7 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 |---|--------|---|---|---|--------|----|------------------|
 | A1 | RPC contract enforcement test | ★★★★★ | Low | Low | ✅ **done** | #1544 | `test/contract/rpc-contract.test.ts`. Keep baselines shrinking. |
 | A2 | Extract srv↔mcp↔bashwrap HTTP DTOs into `agentmux-common` | ★★★★ | Med | Low | 🔴 **blocked** | — | Collides with a5af **#1498** (`agentmux-mcp`). Wait for it to merge. |
-| A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | 🟢 ready | — | Frontend `store/`. Big; do when there's room for churn. |
+| A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | ✅ **done** | #1566 | global.ts 1047→821 LOC; cycle broken; leaf violations fixed. |
 | A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | ✅ **done** | #1552 | Backend `server/`. |
 | A5 | Extract `BlockControllerCore` (3 near-clone controllers) | ★★★★ | Med-High | Med | ✅ **done** | #1564 | Backend `blockcontroller/`. Also fixed ACP session-id persist bug. |
 | A6 | Collapse agent-pane's 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🔴 **blocked** | — | Collides with **#1555** (agent-pane). Wait for it to merge. |
