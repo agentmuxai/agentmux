@@ -1556,12 +1556,23 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     return Err("File too large (>10MB)".to_string());
                 }
 
-                let content = std::fs::read_to_string(path)
+                // Read bytes and detect the encoding (BOM → UTF-8 → heuristic),
+                // decoding to UTF-8 for the editor. This lets non-UTF-8 files
+                // (Windows-1252 .ini, UTF-16, Shift_JIS, …) open instead of
+                // erroring on read_to_string. The detected encoding/bom/line
+                // ending ride back so save round-trips the original format.
+                // See docs/specs/SPEC_EDITOR_FILE_ENCODINGS_2026_06_17.md.
+                let bytes = std::fs::read(path)
                     .map_err(|e| format!("readeditorfile: {e}"))?;
+                let decoded = crate::backend::text_encoding::decode_file(&bytes);
                 let read_only = metadata.permissions().readonly();
 
                 Ok(Some(serde_json::json!({
-                    "content": content,
+                    "content": decoded.content,
+                    "encoding": decoded.encoding,
+                    "bom": decoded.bom,
+                    "line_ending": decoded.line_ending,
+                    "had_decode_errors": decoded.had_decode_errors,
                     "read_only": read_only,
                 })))
             })
@@ -1574,7 +1585,18 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         Box::new(|data, _ctx| {
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
-                struct Cmd { path: String, content: String }
+                struct Cmd {
+                    path: String,
+                    content: String,
+                    // Encoding to write back in (defaults preserve old UTF-8
+                    // behavior when a caller doesn't send them).
+                    #[serde(default)]
+                    encoding: Option<String>,
+                    #[serde(default)]
+                    bom: Option<String>,
+                    #[serde(default)]
+                    line_ending: Option<String>,
+                }
                 let cmd: Cmd = serde_json::from_value(data)
                     .map_err(|e| format!("writeeditorfile: {e}"))?;
 
@@ -1608,9 +1630,18 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     ));
                 }
 
-                std::fs::write(&canonical, &cmd.content)
+                // Re-encode to the file's original encoding (+ BOM + line
+                // endings) so a non-UTF-8 file round-trips instead of being
+                // silently rewritten as UTF-8. Absent fields default to UTF-8.
+                let (out_bytes, _had_unmappable) = crate::backend::text_encoding::encode_file(
+                    &cmd.content,
+                    cmd.encoding.as_deref().unwrap_or(""),
+                    cmd.bom.as_deref().unwrap_or("none"),
+                    cmd.line_ending.as_deref().unwrap_or("lf"),
+                );
+                std::fs::write(&canonical, &out_bytes)
                     .map_err(|e| format!("writeeditorfile: {e}"))?;
-                tracing::info!(path = %canonical.display(), bytes = cmd.content.len(), "editor file saved");
+                tracing::info!(path = %canonical.display(), bytes = out_bytes.len(), "editor file saved");
 
                 Ok(None)
             })
