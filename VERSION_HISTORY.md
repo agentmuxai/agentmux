@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.46.3 — 2026-06-18
+
+- fix(agent): show 'in progress' when streaming resumes after a stream drop; quiet Esc on idle
+- perf(layout): reduce pane reflow settle window from 220ms to 32ms
+- feat(editor): open and round-trip non-UTF-8 files (Windows-1252 .ini, UTF-16, Shift_JIS, …) via encoding detection
+- feat(mcp): consolidate layout/introspection + naming verbs — `Layout(query)` replaces GetLayout/ListWindows/ListWorkspaces/ListTabs and `SetName(target,name)` replaces SetWindowName/SetTabName/SetPaneTitle/SetWorkspaceName (17→11 MCP tools). WhoAmI and the SetActiveTab/NewTab/FocusWindow navigation verbs are unchanged; every REST endpoint and capability is preserved. Cuts the per-turn MCP tool-definition footprint (see agent-pane latency report §3) while keeping the surface discoverable.
+- fix(agent): auto-resume after AskUserQuestion on persistent (Claude) panes. When a turn ends while a question is still parked, the CLI abandons the pending tool_use and the answer's control_response is silently dropped — the agent stalls ("dead air"). `answer_question` now arms a short post-answer check: if no stdout activity follows the control_response, the answer is re-delivered as a directive follow-up user message so the turn resumes. Gated on output activity, so it is mutually exclusive with a real resume and never double-delivers. Mirrors the one-shot controllers' existing message fallback (SPEC_ASK_USER_QUESTION §9/§10.1).
+- feat(agent-picker): My Agents + Templates render as a responsive tile grid filling the pane (was a 520px single column)
+- fix(agent): harden the AskUserQuestion dead-air fallback (codex review on #1536). Snapshot stdout activity *before* sending the answer (not after), and count *every* stdout frame — including control frames the reader skips for health monitoring — via a dedicated `stdout_seq` counter. A resume whose first activity is a tool-permission round-trip is no longer mistaken for "no activity" (which would have spuriously re-delivered the answer). Happy path unchanged.
+- fix(accounts): fix agentmux provider visibility, remove stale assigned_agents UI, add status CTAs
+- feat(editor): refine the find panel — tight spacing, hard corners, accent-tinted controls
+- fix(tabbar): uniform spacing/separator between the hamburger and the first tab
+- chore(agent-pane): remove dead StreamStalled streaming-idle watchdog (emitted but never dispatched; drops its dead sound + setting)
+- test(rpc): add frontend<->backend RPC command contract guard (architecture audit A1)
+- refactor(agent/providers): extract shared ToolCorrelator for tool-call/result mapping (architecture audit A7)
+
+
 ## 0.46.2 — 2026-06-17
 
 - fix(trust-center): surface already-authorized CLI OAuth under its brand — a Claude CLI login now shows as a connected Anthropic account (and codex→OpenAI, gemini→Google, copilot→GitHub), with its live probe status, instead of being invisible
