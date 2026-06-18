@@ -162,12 +162,16 @@ function installFloatingRedockHoverListener(): void {
         }
     };
 
-    // Dwell gate — mirrors the 180ms gate in floating-pane-workspace.tsx.
-    // On Windows, Win32BeginMoveTask emits floating-redock:hover-state every
-    // 50ms unconditionally; without this gate the ghost appears immediately on
-    // cursor entry. On non-Windows the floater's IPC is already gated so the
-    // event only arrives after 180ms — the gate here is a no-op there but
-    // keeps both paths in sync if the upstream constant changes.
+    // Dwell gate for the redock ghost.
+    // On Windows, Win32BeginMoveTask emits floating-redock:hover-state every 50ms
+    // with no dwell awareness — we must gate the ghost ourselves to 180ms.
+    // On non-Windows, the floater's onMouseMove path already waits REDOCK_DWELL_MS
+    // before calling update_floating_redock_hover, so the first event arrives at
+    // ~T=180ms; applying our own 180ms clock on top would delay to ~T=360ms and
+    // would never fire if the cursor is held still (no further mousemoves = no
+    // further events). Set ghostDwellMs=0 on non-Windows so the ghost appears on
+    // the first event (already pre-gated by the floater).
+    const ghostDwellMs = isWindows() ? REDOCK_DWELL_MS : 0;
     let dwellTarget: string | null = null;
     let dwellSince = 0;
 
@@ -196,8 +200,8 @@ function installFloatingRedockHoverListener(): void {
                 dwellTarget = myLabel;
                 dwellSince = now;
             }
-            // Ghost only appears after the dwell has elapsed.
-            if (now - dwellSince < REDOCK_DWELL_MS) return;
+            // Ghost only appears after the dwell has elapsed (0 on non-Windows).
+            if (now - dwellSince < ghostDwellMs) return;
 
             const cursorX = payload.cursor_x;
             const cursorY = payload.cursor_y;
