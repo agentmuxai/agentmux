@@ -9,17 +9,7 @@ import {
     FullSubBlockProps,
     SubBlockProps,
 } from "@/app/block/blocktypes";
-import { LauncherViewModel } from "@/app/view/launcher/launcher";
-import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
-import { AgentViewModel } from "@/app/view/agent";
-import { SubagentViewModel } from "@/app/view/subagent/subagent";
-import { SwarmViewModel } from "@/app/view/swarm/swarm";
-import { EditorViewModel } from "@/app/view/editor/editor";
-import { BrowserViewModel } from "@/app/view/browser/browser";
-import { MemoryViewModel } from "@/app/view/memory/memory";
-import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
-import { DroneViewModel } from "@/app/view/drone/drone";
-import { WardenViewModel } from "@/app/view/warden/warden";
+import { getBlockViewClass } from "@/app/block/block-registry";
 import { invokeCommand } from "@/app/platform/ipc";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
@@ -33,8 +23,6 @@ import {
 import { getWaveObjectAtom, makeORef, useWaveObjectValue } from "@/store/wos";
 import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
-import { HelpViewModel } from "@/view/helpview/helpview";
-import { TermViewModel } from "@/view/term/term";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
@@ -43,22 +31,6 @@ import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
-
-const BlockRegistry: Map<string, ViewModelClass> = new Map();
-BlockRegistry.set("term", TermViewModel as any);
-BlockRegistry.set("cpuplot", SysinfoViewModel as any);
-BlockRegistry.set("sysinfo", SysinfoViewModel as any);
-BlockRegistry.set("help", HelpViewModel as any);
-BlockRegistry.set("launcher", LauncherViewModel as any);
-BlockRegistry.set("agent", AgentViewModel as any);
-BlockRegistry.set("subagent", SubagentViewModel as any);
-BlockRegistry.set("swarm", SwarmViewModel as any);
-BlockRegistry.set("editor", EditorViewModel as any);
-BlockRegistry.set("browser", BrowserViewModel as any);
-BlockRegistry.set("memory", MemoryViewModel as any);
-BlockRegistry.set("identity", IdentityPaneViewModel as any);
-BlockRegistry.set("drone", DroneViewModel as any);
-BlockRegistry.set("warden", WardenViewModel as any);
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     // Migration shims:
@@ -72,11 +44,11 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
     //
     // "identity" was previously redirected here too, but as of PR-F.2
     // (#748) Identity is once again a first-class pane — `view: "identity"`
-    // resolves to IdentityPaneViewModel via the BlockRegistry above.
+    // resolves to IdentityPaneViewModel via block-registry.ts.
     let effectiveView = blockView;
     if (effectiveView === "forge") effectiveView = "agent";
     if (effectiveView === "workflows") effectiveView = "drone";
-    const ctor = BlockRegistry.get(effectiveView);
+    const ctor = getBlockViewClass(effectiveView);
     if (ctor != null) {
         return new ctor(blockId, nodeModel as any);
     }
