@@ -636,6 +636,9 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                                 <option value="env_ref">Env Reference</option>
                                 <option value="pat">Token</option>
                             </Show>
+                            <Show when={provider() === "agentmux"}>
+                                <option value="api_key">API Key</option>
+                            </Show>
                         </select>
                     </FormField>
 
