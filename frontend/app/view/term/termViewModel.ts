@@ -6,6 +6,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sendWSCommand } from "@/app/store/ws";
 import { makeFeBlockRouteId } from "@/app/store/rpc-router";
@@ -315,7 +316,7 @@ class TermViewModel implements ViewModel {
             this.updateShellProcStatus(rts);
         });
         this.shellProcStatusUnsubFn = waveEventSubscribe({
-            eventType: "controllerstatus",
+            eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", blockId),
             handler: (event) => {
                 let bcRTS: BlockControllerRuntimeStatus = event.data;
