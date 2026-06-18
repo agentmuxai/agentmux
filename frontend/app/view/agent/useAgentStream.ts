@@ -699,7 +699,11 @@ export function useAgentStream({
                                   + ((u.cache_read_input_tokens as number | undefined) ?? 0)
                                 : undefined;
                         if (inputTok != null) {
-                            model.dispatchPane({ type: "TokensIn", input: inputTok });
+                            // message.model is the resolved model id (e.g.
+                            // "claude-opus-4-8") — used to seed the context-window
+                            // meter per model (Opus/Sonnet 1M, Haiku 200K).
+                            const modelId = inner.message?.model as string | undefined;
+                            model.dispatchPane({ type: "TokensIn", input: inputTok, model: modelId });
                         }
                     } else if (inner?.type === "message_delta") {
                         const outputTok = inner.usage?.output_tokens as number | undefined;

@@ -43,6 +43,7 @@ import {
     TurnPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
+import { learnContextWindow } from "./context-window";
 
 export function update(
     state: AgentPaneState,
@@ -453,8 +454,24 @@ export function update(
                 input: command.input,
                 output: state.turnTokens?.output ?? 0,
             };
+            // Learn the context window from the resolved model + observed fill
+            // (seed-then-high-water-upgrade); null until a recognised model is
+            // seen, so the view falls back to the provider's static window.
+            const learnedWindow =
+                learnContextWindow(
+                    state.lastContextWindow,
+                    command.input,
+                    command.model,
+                    state.lastContextModel,
+                ) ?? state.lastContextWindow;
             const nextState = bumpEvent(
-                { ...state, turnTokens: next, lastContextTokens: command.input },
+                {
+                    ...state,
+                    turnTokens: next,
+                    lastContextTokens: command.input,
+                    lastContextWindow: learnedWindow ?? null,
+                    lastContextModel: command.model ?? state.lastContextModel,
+                },
                 nowMs,
                 0,
             );
