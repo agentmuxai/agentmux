@@ -53,6 +53,7 @@ import { fireAndForget } from "@/util/util";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
+import { REDOCK_DWELL_MS } from "@/app/workspace/floating-pane-constants";
 import {
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
@@ -167,7 +168,6 @@ function installFloatingRedockHoverListener(): void {
     // cursor entry. On non-Windows the floater's IPC is already gated so the
     // event only arrives after 180ms — the gate here is a no-op there but
     // keeps both paths in sync if the upstream constant changes.
-    const REDOCK_DWELL_MS = 180;
     let dwellTarget: string | null = null;
     let dwellSince = 0;
 

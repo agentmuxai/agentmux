@@ -50,6 +50,7 @@ import { atoms, getApi } from "@/store/global";
 import * as WOS from "@/store/wos";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
+import { REDOCK_DWELL_MS, REDOCK_VELOCITY_PX_PER_S } from "./floating-pane-constants";
 import "./floating-pane-workspace.scss";
 
 /**
@@ -193,8 +194,6 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // stays near the same target window for REDOCK_DWELL_MS ms at
         // ≤ REDOCK_VELOCITY_PX_PER_S CSS-px/s. All vars hoisted to drag scope so
         // a second drag never inherits state from the first.
-        const REDOCK_DWELL_MS = 180;
-        const REDOCK_VELOCITY_PX_PER_S = 400;
         let hoverArmed = false;
         // Preserves arm state across the Windows mouseup/window_drag_ended race:
         // onMouseUp sets pendingRedockArmed=hoverArmed before clearing hoverArmed,
