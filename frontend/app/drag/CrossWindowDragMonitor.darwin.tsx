@@ -216,11 +216,32 @@ async function performTearOff(
                 screenY,
             });
         } catch (e) {
-            Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
-                error: String(e),
-                blockId: payload.blockId,
-            });
-            return;
+            const msg = String(e);
+            if (msg.includes("currently closing")) {
+                await new Promise<void>((r) => setTimeout(r, 350));
+                try {
+                    await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                        pane_id: payload.blockId,
+                        workspace_id: newWsId,
+                        x: screenX,
+                        y: screenY,
+                        width: floaterWidth,
+                        height: floaterHeight,
+                    });
+                } catch (e2) {
+                    Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {
+                        error: String(e2),
+                        blockId: payload.blockId,
+                    });
+                    return;
+                }
+            } else {
+                Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                    error: msg,
+                    blockId: payload.blockId,
+                });
+                return;
+            }
         }
 
         // IPC succeeded → drop the docked node so the pane doesn't render twice.

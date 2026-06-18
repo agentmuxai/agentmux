@@ -230,12 +230,34 @@ async function performTearOff(
                 height: floaterHeight,
             });
         } catch (err) {
-            Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
-                error: String(err),
-                blockId: payload.blockId,
-                newWsId,
-            });
-            return;
+            const msg = String(err);
+            if (msg.includes("currently closing")) {
+                await new Promise<void>((r) => setTimeout(r, 350));
+                try {
+                    await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                        pane_id: payload.blockId,
+                        workspace_id: newWsId,
+                        x: screenX,
+                        y: screenY,
+                        width: floaterWidth,
+                        height: floaterHeight,
+                    });
+                } catch (e2) {
+                    Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {
+                        error: String(e2),
+                        blockId: payload.blockId,
+                        newWsId,
+                    });
+                    return;
+                }
+            } else {
+                Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                    error: msg,
+                    blockId: payload.blockId,
+                    newWsId,
+                });
+                return;
+            }
         }
 
         // IPC succeeded → drop the docked layout node so the pane

@@ -296,15 +296,40 @@ async function performTearOff(
                 screenY,
             });
         } catch (e) {
-            Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
-                error: String(e),
-                blockId: payload.blockId,
-            });
-            // TODO(phase-5): undo TearOffBlock here to avoid an orphaned
-            // workspace if the host couldn't create the floating window.
-            // For now we leave the new workspace in place; it's reachable
-            // via the workspace switcher and the user can close it.
-            return;
+            const msg = String(e);
+            // The first tear-off auto-closes the source tab, which briefly sets
+            // BrowserPaneLifecycle::Closing and makes any_browser_pane_closing()
+            // true in open_floating_pane_window. A 350ms one-shot retry covers
+            // the typical 100–200ms closing window so back-to-back tear-offs work.
+            if (msg.includes("currently closing")) {
+                await new Promise<void>((r) => setTimeout(r, 350));
+                try {
+                    await invokeCommand<{ window_label: string }>("open_floating_pane_window", {
+                        pane_id: payload.blockId,
+                        workspace_id: newWsId,
+                        x: screenX,
+                        y: screenY,
+                        width: floaterWidth,
+                        height: floaterHeight,
+                    });
+                } catch (e2) {
+                    Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {
+                        error: String(e2),
+                        blockId: payload.blockId,
+                    });
+                    return;
+                }
+            } else {
+                Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                    error: msg,
+                    blockId: payload.blockId,
+                });
+                // TODO(phase-5): undo TearOffBlock here to avoid an orphaned
+                // workspace if the host couldn't create the floating window.
+                // For now we leave the new workspace in place; it's reachable
+                // via the workspace switcher and the user can close it.
+                return;
+            }
         }
         // IPC succeeded → safe to drop the docked node so the pane
         // doesn't render twice.
