@@ -33,6 +33,7 @@ use super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
     STATUS_RUNNING,
 };
+use super::core;
 use super::health::HealthMonitor;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -205,39 +206,7 @@ impl AcpController {
         let mut cmd = crate::server::cli_handlers::make_cli_cmd(&cli_command);
         cmd.args(&cli_args);
 
-        // Working directory
-        if !working_dir.is_empty() {
-            let expanded_dir = if working_dir.starts_with("~/") || working_dir == "~" {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(working_dir.trim_start_matches("~/")).to_string_lossy().to_string()
-                } else {
-                    working_dir.clone()
-                }
-            } else {
-                working_dir.clone()
-            };
-            let dir_path = std::path::Path::new(&expanded_dir);
-            if !dir_path.exists() {
-                if let Err(e) = std::fs::create_dir_all(dir_path) {
-                    tracing::warn!(
-                        block_id = %self.block_id,
-                        dir = %expanded_dir,
-                        error = %e,
-                        "failed to create working directory for ACP agent"
-                    );
-                }
-            }
-            if dir_path.exists() {
-                cmd.current_dir(&expanded_dir);
-            }
-        }
-
-        // Environment variables
-        for (k, v) in &env_vars {
-            let expanded = crate::backend::base::expand_home_dir_safe(v);
-            cmd.env(k, expanded.to_string_lossy().as_ref());
-        }
-
+        core::apply_working_dir(&mut cmd, &self.block_id, &working_dir, &env_vars);
         // On Windows: suppress console-window allocation. Without CREATE_NO_WINDOW,
         // node.exe spawned from a windowless sidecar may try to create/attach to a
         // console, causing stdout to go to that console rather than the pipe.
@@ -338,6 +307,8 @@ impl AcpController {
         let inner_clone = self.inner.clone();
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
+        let wstore_clone = self.wstore.clone();
+        let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
             super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
@@ -366,32 +337,39 @@ impl AcpController {
                     // Extract session ID from initialize result or session/create result
                     if let Some(result) = json.get("result") {
                         if let Some(sid) = result.get("sessionId").and_then(|v| v.as_str()) {
-                            let mut inner = inner_clone.lock().unwrap();
-                            inner.session_id = Some(sid.to_string());
-                            tracing::info!(
-                                block_id = %block_id_stdout,
-                                session_id = %sid,
-                                "ACP session established"
-                            );
-
-                            // Flush pending prompt now that session is ready.
-                            if let Some(prompt) = inner.pending_prompt.take() {
-                                let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
-                                let req = serde_json::json!({
-                                    "jsonrpc": "2.0",
-                                    "id": id,
-                                    "method": "session/prompt",
-                                    "params": {
-                                        "sessionId": sid,
-                                        "prompt": { "type": "text", "text": prompt },
-                                    }
-                                }).to_string();
-                                if let Some(ref tx) = inner.stdin_tx {
-                                    if tx.try_send(req).is_err() {
-                                        tracing::warn!(block_id = %block_id_stdout, "[acp] session/prompt send failed — channel full or closed");
+                            let sid_owned = sid.to_string();
+                            {
+                                let mut inner = inner_clone.lock().unwrap();
+                                inner.session_id = Some(sid_owned.clone());
+                                // Flush pending prompt now that session is ready.
+                                if let Some(prompt) = inner.pending_prompt.take() {
+                                    let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
+                                    let req = serde_json::json!({
+                                        "jsonrpc": "2.0",
+                                        "id": id,
+                                        "method": "session/prompt",
+                                        "params": {
+                                            "sessionId": sid,
+                                            "prompt": { "type": "text", "text": prompt },
+                                        }
+                                    }).to_string();
+                                    if let Some(ref tx) = inner.stdin_tx {
+                                        if tx.try_send(req).is_err() {
+                                            tracing::warn!(block_id = %block_id_stdout, "[acp] session/prompt send failed — channel full or closed");
+                                        }
                                     }
                                 }
                             }
+                            tracing::info!(
+                                block_id = %block_id_stdout,
+                                session_id = %sid_owned,
+                                "ACP session established"
+                            );
+                            // Persist to block metadata and broadcast so the frontend's
+                            // "My Agents" reattach path can read agent:sessionid from
+                            // block.meta. ACP previously captured the ID in memory only —
+                            // this mirrors the careful path from persistent.rs / subprocess.rs.
+                            core::persist_session_id(&block_id_stdout, &sid_owned, &wstore_clone, &event_bus_clone);
                         }
                     }
 

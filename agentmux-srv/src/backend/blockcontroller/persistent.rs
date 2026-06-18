@@ -31,6 +31,7 @@ use super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
     STATUS_RUNNING,
 };
+use super::core;
 use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -560,64 +561,7 @@ impl PersistentSubprocessController {
         }
         cmd.args(&spawn_args);
 
-        // Working directory
-        if !config.working_dir.is_empty() {
-            let expanded_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(config.working_dir.trim_start_matches("~/")).to_string_lossy().to_string()
-                } else {
-                    config.working_dir.clone()
-                }
-            } else {
-                config.working_dir.clone()
-            };
-            let dir_path = std::path::Path::new(&expanded_dir);
-            if !dir_path.exists() {
-                if let Err(e) = std::fs::create_dir_all(dir_path) {
-                    tracing::warn!(
-                        block_id = %self.block_id,
-                        dir = %expanded_dir,
-                        error = %e,
-                        "failed to create working directory"
-                    );
-                }
-            }
-            if dir_path.exists() {
-                cmd.current_dir(&expanded_dir);
-
-                // 4.2 follow-up: warn loudly if the agent's working directory
-                // contains a nested .git (typically because the agent, or the
-                // user on its behalf, cloned a repo into its cwd). A 3.5 GB
-                // nested clone was found under ~/.agentmux/agents/agentx/ in
-                // an earlier session and confused agents into reading stale
-                // pre-SolidJS code. We can't prevent the clone (the agent is
-                // an external process) so the best we can do is make it
-                // impossible to miss in the logs, with the exact cleanup
-                // command the user needs to run. Single fs::metadata call —
-                // no directory walk.
-                let looks_like_agent_workspace = expanded_dir.contains("/.agentmux/agents/")
-                    || expanded_dir.contains("\\.agentmux\\agents\\");
-                if looks_like_agent_workspace {
-                    let git_dir = dir_path.join(".git");
-                    if git_dir.exists() {
-                        tracing::warn!(
-                            block_id = %self.block_id,
-                            cwd = %expanded_dir,
-                            ".git detected inside agent workspace — this is \
-                             usually an unintended nested clone and can waste \
-                             gigabytes of disk. Clean up with: rm -rf {}/.git",
-                            expanded_dir
-                        );
-                    }
-                }
-            }
-        }
-
-        // Environment variables (with tilde expansion)
-        for (k, v) in &config.env_vars {
-            let expanded = crate::backend::base::expand_home_dir_safe(v);
-            cmd.env(k, expanded.to_string_lossy().as_ref());
-        }
+        core::apply_working_dir(&mut cmd, &self.block_id, &config.working_dir, &config.env_vars);
 
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
@@ -819,48 +763,8 @@ impl PersistentSubprocessController {
                                 session_id = %sid_string,
                                 "persistent session ID captured"
                             );
-                            {
-                                let mut inner = inner_read.lock().unwrap();
-                                inner.session_id = Some(sid_string.clone());
-                            }
-                            // Persist to block metadata (same pattern as subprocess.rs)
-                            if let Some(ref store) = wstore_read {
-                                let oref_str = format!("block:{}", block_id_read);
-                                let mut meta_update =
-                                    crate::backend::obj::MetaMapType::new();
-                                meta_update.insert(
-                                    "agent:sessionid".to_string(),
-                                    serde_json::Value::String(sid_string),
-                                );
-                                if let Err(e) = crate::server::service::update_object_meta(
-                                    store, &oref_str, &meta_update,
-                                ) {
-                                    tracing::warn!(
-                                        block_id = %block_id_read,
-                                        error = %e,
-                                        "failed to persist agent:sessionid"
-                                    );
-                                } else if let Some(ref event_bus) = event_bus_read {
-                                    if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&block_id_read) {
-                                        let update_data = serde_json::to_value(
-                                            &crate::backend::obj::WaveObjUpdate {
-                                                updatetype: "update".into(),
-                                                otype: "block".into(),
-                                                oid: block_id_read.clone(),
-                                                obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
-                                            },
-                                        )
-                                        .ok();
-                                        event_bus.broadcast_event(
-                                            &crate::backend::eventbus::WSEventType {
-                                                eventtype: "waveobj:update".to_string(),
-                                                oref: oref_str,
-                                                data: update_data,
-                                            },
-                                        );
-                                    }
-                                }
-                            }
+                            inner_read.lock().unwrap().session_id = Some(sid_string.clone());
+                            core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
                         }
                     }
                 }
@@ -894,17 +798,7 @@ impl PersistentSubprocessController {
         // Emits `agenthealth` WPS events when the process stalls (30 s) or
         // dies (120 s) without producing meaningful output, giving the
         // frontend enough signal to show a "not responding" warning.
-        let health_watchdog = Arc::clone(&self.health_monitor);
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-            loop {
-                interval.tick().await;
-                if !health_watchdog.is_active_turn() {
-                    break;
-                }
-                health_watchdog.check();
-            }
-        });
+        core::spawn_health_watchdog(&self.health_monitor);
 
         // Spawn process waiter task
         let block_id_wait = self.block_id.clone();

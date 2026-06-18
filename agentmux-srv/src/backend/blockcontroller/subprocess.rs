@@ -30,6 +30,7 @@ use super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
     STATUS_RUNNING,
 };
+use super::core;
 use super::health::{classify_output_line, HealthMonitor};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -399,43 +400,7 @@ impl SubprocessController {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        if !config.working_dir.is_empty() {
-            // Expand ~ to home directory (cross-platform)
-            let expanded_dir = if config.working_dir.starts_with("~/") || config.working_dir == "~" {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(config.working_dir.trim_start_matches("~/")).to_string_lossy().to_string()
-                } else {
-                    config.working_dir.clone()
-                }
-            } else {
-                config.working_dir.clone()
-            };
-            // Create directory if it doesn't exist
-            let dir_path = std::path::Path::new(&expanded_dir);
-            if !dir_path.exists() {
-                if let Err(e) = std::fs::create_dir_all(dir_path) {
-                    tracing::warn!(
-                        block_id = %self.block_id,
-                        dir = %expanded_dir,
-                        error = %e,
-                        "failed to create working directory, using current dir"
-                    );
-                } else {
-                    tracing::info!(
-                        block_id = %self.block_id,
-                        dir = %expanded_dir,
-                        "created working directory"
-                    );
-                }
-            }
-            if dir_path.exists() {
-                cmd.current_dir(&expanded_dir);
-            }
-        }
-        for (k, v) in &config.env_vars {
-            let expanded = crate::backend::base::expand_home_dir_safe(v);
-            cmd.env(k, expanded.to_string_lossy().as_ref());
-        }
+        core::apply_working_dir(&mut cmd, &self.block_id, &config.working_dir, &config.env_vars);
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -628,46 +593,7 @@ impl SubprocessController {
                                         session_id = %sid_string,
                                         "captured session id"
                                     );
-
-                                    // Persist session_id to block metadata
-                                    if let Some(ref store) = wstore_read {
-                                        let oref_str = format!("block:{}", block_id_read);
-                                        let mut meta_update =
-                                            crate::backend::obj::MetaMapType::new();
-                                        meta_update.insert(
-                                            "agent:sessionid".to_string(),
-                                            serde_json::Value::String(sid_string),
-                                        );
-                                        if let Err(e) = crate::server::service::update_object_meta(
-                                            store, &oref_str, &meta_update,
-                                        ) {
-                                            tracing::warn!(
-                                                block_id = %block_id_read,
-                                                error = %e,
-                                                "failed to persist agent:sessionid"
-                                            );
-                                        } else if let Some(ref event_bus) = event_bus_read {
-                                            // Broadcast metadata update to frontend
-                                            if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&block_id_read) {
-                                                let update_data = serde_json::to_value(
-                                                    &crate::backend::obj::WaveObjUpdate {
-                                                        updatetype: "update".into(),
-                                                        otype: "block".into(),
-                                                        oid: block_id_read.clone(),
-                                                        obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
-                                                    },
-                                                )
-                                                .ok();
-                                                event_bus.broadcast_event(
-                                                    &crate::backend::eventbus::WSEventType {
-                                                        eventtype: "waveobj:update".to_string(),
-                                                        oref: oref_str,
-                                                        data: update_data,
-                                                    },
-                                                );
-                                            }
-                                        }
-                                    }
+                                    core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
                                 }
                             }
                         }
@@ -731,18 +657,7 @@ impl SubprocessController {
             }
         });
 
-        // Spawn health watchdog (checks every 5s while turn is active)
-        let health_watchdog = Arc::clone(&self.health_monitor);
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-            loop {
-                interval.tick().await;
-                if !health_watchdog.is_active_turn() {
-                    break;
-                }
-                health_watchdog.check();
-            }
-        });
+        core::spawn_health_watchdog(&self.health_monitor);
 
         // Spawn process_waiter task
         let inner_wait = Arc::clone(&self.inner);
@@ -1125,19 +1040,7 @@ impl SubprocessController {
             // check(), so without this a container turn gets no Stalled/Dead
             // detection. Self-terminates when the turn ends — completion calls
             // health_monitor.set_exited(), which clears the active-turn flag.
-            {
-                let health_watchdog = Arc::clone(&health_monitor);
-                tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-                    loop {
-                        interval.tick().await;
-                        if !health_watchdog.is_active_turn() {
-                            break;
-                        }
-                        health_watchdog.check();
-                    }
-                });
-            }
+            core::spawn_health_watchdog(&health_monitor);
 
             let crate::backend::container::ExecSession { exec_id, mut input, output } = exec_session;
 
@@ -1365,32 +1268,7 @@ impl SubprocessController {
                 let changed = SubprocessController::record_captured_session_id_inner(inner, sid);
                 if changed {
                     tracing::info!(block_id = %block_id, session_id = %sid, "container exec: captured session id");
-                    if let Some(ref store) = wstore {
-                        let oref_str = format!("block:{}", block_id);
-                        let mut meta_update = crate::backend::obj::MetaMapType::new();
-                        meta_update.insert("agent:sessionid".to_string(), serde_json::Value::String(sid.to_string()));
-                        if let Err(e) = crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
-                            tracing::warn!(block_id = %block_id, error = %e, "failed to persist agent:sessionid");
-                        } else if let Some(ref bus) = event_bus {
-                            if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(block_id) {
-                                let update_data = serde_json::to_value(
-                                    &crate::backend::obj::WaveObjUpdate {
-                                        updatetype: "update".into(),
-                                        otype: "block".into(),
-                                        oid: block_id.to_string(),
-                                        obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
-                                    },
-                                ).ok();
-                                bus.broadcast_event(
-                                    &crate::backend::eventbus::WSEventType {
-                                        eventtype: "waveobj:update".to_string(),
-                                        oref: oref_str,
-                                        data: update_data,
-                                    },
-                                );
-                            }
-                        }
-                    }
+                    core::persist_session_id(block_id, sid, &wstore, &event_bus);
                 }
             }
         }
