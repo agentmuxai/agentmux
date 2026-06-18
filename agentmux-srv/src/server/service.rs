@@ -273,12 +273,20 @@ pub(crate) fn resolve_agent_context(store: &Store, block_id: &str) -> Result<Age
 }
 
 async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+    match call.service.as_str() {
+        "object" => handle_object_service(state, call).await,
+        "client" => handle_client_service(state, call).await,
+        "window" => handle_window_service(state, call).await,
+        "workspace" => handle_workspace_service(state, call).await,
+        _ => handle_misc_service(state, call).await,
+    }
+}
+
+async fn handle_object_service(state: &AppState, call: &WebCallType) -> WebReturnType {
     let store = &state.wstore;
     let args = &call.args;
-
-    match (call.service.as_str(), call.method.as_str()) {
-        // ---- ObjectService ----
-        ("object", "GetObject") => {
+    match call.method.as_str() {
+        "GetObject" => {
             let oref_str: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -288,7 +296,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e),
             }
         }
-        ("object", "GetObjects") => {
+        "GetObjects" => {
             let orefs: Vec<String> = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -302,7 +310,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             WebReturnType::success(serde_json::json!(results))
         }
-        ("object", "CreateBlock") => {
+        "CreateBlock" => {
             let block_def: BlockDef = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -416,7 +424,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // routes through the reducer + persist subscriber. The saga
         // also handles the controller-kill cascade (matches the old
         // ordering: controller down → reducer dispatch → SQLite).
-        ("object", "DeleteBlock") => {
+        "DeleteBlock" => {
             let tab_id = match call
                 .uicontext
                 .as_ref()
@@ -434,7 +442,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             WebReturnType::success_empty()
         }
-        ("object", "UpdateObject") => {
+        "UpdateObject" => {
             let wave_obj_value: serde_json::Value = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -523,7 +531,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // command. Reducer is pass-through (validates entity exists;
         // emits event); subscriber's apply_*_meta_updated does the
         // shallow merge against wstore.
-        ("object", "UpdateObjectMeta") => {
+        "UpdateObjectMeta" => {
             let oref_str: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -613,7 +621,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             WebReturnType::success_empty()
         }
         // Phase E.5.3 — UpdateTabName migrated through the reducer.
-        ("object", "UpdateTabName") => {
+        "UpdateTabName" => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -656,14 +664,21 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             WebReturnType::success_empty()
         }
-        // ---- ClientService ----
-        ("client", "GetClientData") => match wcore::get_client(store) {
+        _ => WebReturnType::error(format!("unknown object method: {}", call.method)),
+    }
+}
+
+async fn handle_client_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let store = &state.wstore;
+    let args = &call.args;
+    match call.method.as_str() {
+        "GetClientData" => match wcore::get_client(store) {
             Ok(client) => {
                 WebReturnType::success(serde_json::to_value(&client).unwrap_or_default())
             }
             Err(e) => WebReturnType::error(e.to_string()),
         },
-        ("client", "GetTab") => {
+        "GetTab" => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -673,7 +688,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
-        ("client", "FocusWindow") => {
+        "FocusWindow" => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -683,7 +698,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
-        ("client", "AgreeTos") => match wcore::get_client(store) {
+        "AgreeTos" => match wcore::get_client(store) {
             Ok(mut client) => {
                 client.tosagreed = chrono::Utc::now().timestamp_millis();
                 match store.update(&mut client) {
@@ -693,18 +708,24 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             }
             Err(e) => WebReturnType::error(e.to_string()),
         },
-        ("client", "GetAllConnStatus") => {
+        "GetAllConnStatus" => {
             // Return empty — connection manager not yet wired
             // Go returns success with no data (nil slice omitted by omitempty)
             WebReturnType::success_empty()
         }
-        ("client", "TelemetryUpdate") => {
+        "TelemetryUpdate" => {
             // Accept but ignore — telemetry not implemented
             WebReturnType::success_empty()
         }
+        _ => WebReturnType::error(format!("unknown client method: {}", call.method)),
+    }
+}
 
-        // ---- WindowService ----
-        ("window", "GetWindow") => {
+async fn handle_window_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let store = &state.wstore;
+    let args = &call.args;
+    match call.method.as_str() {
+        "GetWindow" => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -723,7 +744,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // and Window-row creation. Layout setup for the new tab uses
         // the apply_tab_created provisioning (E.4 layout migration is
         // separate; default rootnode = None matches wcore behaviour).
-        ("window", "CreateWindow") => {
+        "CreateWindow" => {
             let requested_ws_id: String = service::get_arg(args, 1).unwrap_or_default();
             // Resolve / create the workspace.
             let (ws_id, fresh_workspace_events): (String, Vec<agentmux_common::ipc::Event>) =
@@ -903,7 +924,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // owns one workspace, but uses the reducer-routed conditional
         // pattern so future multi-window-on-same-workspace flows
         // don't accidentally drop user state.
-        ("window", "CloseWindow") => {
+        "CloseWindow" => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -985,7 +1006,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // reducer dispatch. The reducer validates window + workspace
         // both exist + emits SrvWindowWorkspaceChanged; subscriber
         // writes Window.workspaceid in SQLite.
-        ("window", "SwitchWorkspace") => {
+        "SwitchWorkspace" => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1019,7 +1040,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
             publish_events(state, &events);
             WebReturnType::success_empty()
         }
-        ("window", "SetWindowPosAndSize") => {
+        "SetWindowPosAndSize" => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1042,30 +1063,36 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        _ => WebReturnType::error(format!("unknown window method: {}", call.method)),
+    }
+}
 
-        // ---- WorkspaceService ----
-        // Phase E.2c.2 — workspace lifecycle dispatches through the
-        // srv reducer for event emission (sagas / renderer / persist
-        // subscriber consume them) AND synchronously applies the
-        // emitted events to SQLite via the subscriber's apply path.
-        // Synchronous SQLite writes are required during the migration
-        // window because tab/block RPC still hits wcore directly and
-        // expects workspaces to be present in SQLite by the time the
-        // RPC reply returns (e.g., a CreateTab call right after
-        // CreateWorkspace would 404 on the workspace lookup if we
-        // only relied on the async subscriber). The subscriber later
-        // receives the same event on the broadcast bus and re-applies
-        // idempotently — safe because each apply arm checks SQLite
-        // state before writing. (Both reagent + codex flagged this
-        // race as P1 #615.)
-        //
-        // Reads (`GetWorkspace` / `ListWorkspaces`) stay on wstore
-        // until the tab + block RPC layers also migrate (E.2c.3 +
-        // E.2c.4). The reducer's `WorkspaceRecord` doesn't track
-        // `pinnedtabids` and its `tabids` / `activetabid` go stale
-        // immediately after any wcore-direct tab op — reading from
-        // it before tabs are migrated returns wrong data.
-        ("workspace", "CreateWorkspace") => {
+async fn handle_workspace_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let store = &state.wstore;
+    let args = &call.args;
+    // Phase E.2c.2 — workspace lifecycle dispatches through the
+    // srv reducer for event emission (sagas / renderer / persist
+    // subscriber consume them) AND synchronously applies the
+    // emitted events to SQLite via the subscriber's apply path.
+    // Synchronous SQLite writes are required during the migration
+    // window because tab/block RPC still hits wcore directly and
+    // expects workspaces to be present in SQLite by the time the
+    // RPC reply returns (e.g., a CreateTab call right after
+    // CreateWorkspace would 404 on the workspace lookup if we
+    // only relied on the async subscriber). The subscriber later
+    // receives the same event on the broadcast bus and re-applies
+    // idempotently — safe because each apply arm checks SQLite
+    // state before writing. (Both reagent + codex flagged this
+    // race as P1 #615.)
+    //
+    // Reads (`GetWorkspace` / `ListWorkspaces`) stay on wstore
+    // until the tab + block RPC layers also migrate (E.2c.3 +
+    // E.2c.4). The reducer's `WorkspaceRecord` doesn't track
+    // `pinnedtabids` and its `tabids` / `activetabid` go stale
+    // immediately after any wcore-direct tab op — reading from
+    // it before tabs are migrated returns wrong data.
+    match call.method.as_str() {
+        "CreateWorkspace" => {
             let name: String = service::get_arg(args, 0).unwrap_or_default();
             let events = dispatch_to_reducer(
                 state,
@@ -1126,7 +1153,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 ),
             }
         }
-        ("workspace", "GetWorkspace") => {
+        "GetWorkspace" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1140,7 +1167,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
-        ("workspace", "DeleteWorkspace") => {
+        "DeleteWorkspace" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1196,7 +1223,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(e) => WebReturnType::error(format!("DeleteWorkspace failed: {}", e)),
             }
         }
-        ("workspace", "ListWorkspaces") => match wcore::list_workspaces(store) {
+        "ListWorkspaces" => match wcore::list_workspaces(store) {
             Ok(list) => WebReturnType::success(serde_json::to_value(&list).unwrap_or_default()),
             Err(e) => WebReturnType::error(e.to_string()),
         },
@@ -1206,7 +1233,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // Legacy SQLite databases may still have entries in
         // `Workspace.pinnedtabids`; bootstrap merges them into
         // `tab_ids` so they behave as regular tabs.
-        ("workspace", "CreateTab") => {
+        "CreateTab" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1354,7 +1381,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // Read-through reads (e.g., GetWorkspace) still hit wstore
         // during the migration window, so the synchronous
         // apply-to-wstore keeps them consistent.
-        ("workspace", "SetActiveTab") => {
+        "SetActiveTab" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1459,7 +1486,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // workspace to zero tabs (callers wanting full teardown
         // should issue DeleteWorkspace instead — that path migrates
         // in Step 5 PR 2).
-        ("workspace", "CloseTab") => {
+        "CloseTab" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1500,7 +1527,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // Currently only handles rename (the only field this RPC ever
         // mutated). Meta-only updates are dispatched as
         // UpdateWorkspaceMeta separately by frontends.
-        ("workspace", "UpdateWorkspace") => {
+        "UpdateWorkspace" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1544,7 +1571,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // UI's `[...pinnedtabids, ...tabids]` combine never
         // double-counts a tab once a workspace's tabs are
         // reordered through the reducer.
-        ("workspace", "UpdateTabIds") => {
+        "UpdateTabIds" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1593,7 +1620,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // source tab still uses Command::DeleteTab. ws_id arg kept
         // for backward compat — used only for the post-op SQLite
         // refresh + auto-close workspace check.
-        ("workspace", "MoveBlockToTab") => {
+        "MoveBlockToTab" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1716,7 +1743,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // (CreateTab + MoveBlock). Layout setup + SetActiveTab +
         // auto-close source tab stay wcore-direct here (E.4 layout
         // territory). Same shape as TearOffBlock's RPC handler.
-        ("workspace", "PromoteBlockToTab") => {
+        "PromoteBlockToTab" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1842,7 +1869,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // error and the reducer state ends up ahead of disk for the
         // remainder of the session — converges back at next restart
         // via bootstrap.
-        ("workspace", "ReorderTab") => {
+        "ReorderTab" => {
             let ws_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -1907,7 +1934,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // a wcore-direct cross-window drag had left state.tabs stale)
         // by routing all tab moves through the reducer so its view
         // always matches SQLite.
-        ("workspace", "MoveTabToWorkspace") => {
+        "MoveTabToWorkspace" => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -2014,7 +2041,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // empty). The legacy `was_pinned` arg is ignored — pinning
         // was removed from AgentMux in E.2c.3b; restored tabs always
         // land in `tab_ids`.
-        ("workspace", "RestoreTornOffTab") => {
+        "RestoreTornOffTab" => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -2085,7 +2112,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // for the smoke regression fix; full atomicity is a Phase F+
         // gap (see saga-coordinator-location-analysis-2026-04-30.md
         // §4.2).
-        ("workspace", "TearOffBlock") => {
+        "TearOffBlock" => {
             let block_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -2210,7 +2237,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // a delete action). Source floater closes via PR #1089's
         // empty-tab watcher once its tab.blockids is empty.
         // Spec: docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md
-        ("workspace", "RedockFloatingPane") => {
+        "RedockFloatingPane" => {
             let block_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -2362,7 +2389,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         // workspace bypassing the reducer, leaving the new window's
         // CreateTab/etc. calls failing on "workspace not found"
         // checks against the reducer's stale view.
-        ("workspace", "TearOffTab") => {
+        "TearOffTab" => {
             let tab_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
@@ -2404,6 +2431,14 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
                 Err(reason) => WebReturnType::error(reason),
             }
         }
+        _ => WebReturnType::error(format!("unknown workspace method: {}", call.method)),
+    }
+}
+
+async fn handle_misc_service(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let _store = &state.wstore;
+    let args = &call.args;
+    match (call.service.as_str(), call.method.as_str()) {
         // ---- UserInputService ----
         ("userinput", "SendUserInputResponse") => {
             // Accept but drop — user input routing not yet wired
@@ -2535,6 +2570,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         )),
     }
 }
+
 
 /// Phase E.4 (Option A) — reverse lookup: given a `LayoutState.oid`,
 /// find the `Tab.oid` that owns it (i.e., the tab whose `layoutstate`
