@@ -580,6 +580,9 @@ class RpcApiType {
             name: string;
             identity_id?: string;
             memory_id?: string;
+            /** Runtime to persist on the cloned definition ("host" |
+             *  "container"). Omitted → backend keeps the template's. */
+            agent_type?: string;
         },
         opts?: RpcOpts,
     ): Promise<{ definition_id: string; identity_id: string; memory_id: string }> {

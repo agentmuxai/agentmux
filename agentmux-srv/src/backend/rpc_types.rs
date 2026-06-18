@@ -1425,6 +1425,13 @@ pub struct CommandAgentDefCreateFromTemplateData {
     /// Same semantics as `identity_id` above.
     #[serde(default)]
     pub memory_id: String,
+    /// Runtime to persist on the cloned definition: "host" or
+    /// "container". Empty/absent → keep the template's `agent_type`.
+    /// Runtime is chosen at instantiation time, not a property of the
+    /// template, so the clone records the user's pick rather than
+    /// inheriting the (now container-defaulted) template value.
+    #[serde(default)]
+    pub agent_type: String,
 }
 
 /// Response for `agentdefcreatefromtemplate`. The frontend uses

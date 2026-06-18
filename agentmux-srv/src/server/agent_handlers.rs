@@ -456,6 +456,19 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
+                // Runtime is the user's instantiation-time choice, not a
+                // template property. When supplied, the clone records it
+                // (and the matching `environment`); empty falls back to
+                // the template's value for back-compat with older callers.
+                let chosen_agent_type = match cmd.agent_type.trim() {
+                    "host" | "container" => cmd.agent_type.trim().to_string(),
+                    _ => template.agent_type.clone(),
+                };
+                let chosen_environment = if chosen_agent_type == "container" {
+                    "docker".to_string()
+                } else {
+                    "local".to_string()
+                };
                 let mut new_def = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
                     // agent_def_insert derives a unique slug from the
@@ -477,8 +490,8 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     restart_on_crash: template.restart_on_crash,
                     idle_timeout_minutes: template.idle_timeout_minutes,
                     created_at: now,
-                    agent_type: template.agent_type.clone(),
-                    environment: template.environment.clone(),
+                    agent_type: chosen_agent_type,
+                    environment: chosen_environment,
                     agent_bus_id: String::new(),
                     is_seeded: 0,
                     accounts: String::new(),
