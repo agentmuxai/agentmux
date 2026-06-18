@@ -192,6 +192,14 @@ pub struct WshRpcEngine {
 }
 
 impl WshRpcEngine {
+    /// Lock `inner`, recovering from mutex poison instead of propagating
+    /// the panic. A poisoned mutex means a previous handler panicked while
+    /// holding the lock — the data is still consistent for our purposes
+    /// (inserts/removes on HashMaps), so recovery is safe here.
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, EngineInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Create a new RPC engine.
     /// Returns the engine and a receiver for outgoing messages.
     pub fn new() -> (Arc<Self>, mpsc::UnboundedReceiver<RpcMessage>) {
@@ -211,7 +219,7 @@ impl WshRpcEngine {
 
     /// Register a call handler (single request → single response).
     pub fn register_handler(&self, command: &str, handler: CommandHandler) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner();
         inner
             .handlers
             .insert(command.to_string(), Handler::Call(handler));
@@ -220,7 +228,7 @@ impl WshRpcEngine {
     /// Register a streaming handler (single request → stream of responses).
     #[allow(dead_code)]
     pub fn register_stream_handler(&self, command: &str, handler: StreamHandler) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner();
         inner
             .handlers
             .insert(command.to_string(), Handler::Stream(handler));
@@ -229,21 +237,21 @@ impl WshRpcEngine {
     /// Set the authentication token.
     #[allow(dead_code)]
     pub fn set_auth_token(&self, token: &str) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner();
         inner.auth_token = token.to_string();
     }
 
     /// Get the authentication token.
     #[allow(dead_code)]
     pub fn get_auth_token(&self) -> String {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock_inner();
         inner.auth_token.clone()
     }
 
     /// Set the RPC context.
     #[allow(dead_code)]
     pub fn set_rpc_context(&self, ctx: RpcContext) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner();
         inner.rpc_context = Some(ctx);
     }
 
@@ -305,7 +313,7 @@ impl WshRpcEngine {
         let (resp_tx, resp_rx) = mpsc::channel(RESP_CH_SIZE);
 
         {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.lock_inner();
             inner
                 .pending_responses
                 .insert(req_id.clone(), resp_tx);
@@ -361,7 +369,9 @@ impl WshRpcEngine {
     // ---- Internal ----
 
     fn send_output(&self, msg: RpcMessage) {
-        let _ = self.output_tx.send(msg);
+        if self.output_tx.send(msg).is_err() {
+            tracing::warn!("[rpc-engine] output channel closed — message dropped");
+        }
     }
 
     async fn handle_request(self: Arc<Self>, msg: RpcMessage) {
@@ -382,14 +392,14 @@ impl WshRpcEngine {
 
         // Register the active handler
         if !msg.reqid.is_empty() {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.lock_inner();
             inner
                 .active_handlers
                 .insert(msg.reqid.clone(), handler.clone());
         }
 
         let rpc_context = {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.lock_inner();
             inner.rpc_context.clone().unwrap_or_default()
         };
 
@@ -400,7 +410,7 @@ impl WshRpcEngine {
         let has_call;
         let has_stream;
         {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.lock_inner();
             match inner.handlers.get(&command) {
                 Some(Handler::Call(_)) => {
                     has_call = true;
@@ -432,7 +442,7 @@ impl WshRpcEngine {
             // Create the future while holding the lock, then drop the lock before awaiting.
             let handler_start = std::time::Instant::now();
             let fut = {
-                let inner = self.inner.lock().unwrap();
+                let inner = self.lock_inner();
                 match inner.handlers.get(&command) {
                     Some(Handler::Call(h)) => h(data.clone(), rpc_context.clone()),
                     _ => Box::pin(async { Err("handler disappeared".to_string()) }),
@@ -458,7 +468,7 @@ impl WshRpcEngine {
         } else {
             // Stream handler: same pattern — build future under lock, await outside.
             let fut = {
-                let inner = self.inner.lock().unwrap();
+                let inner = self.lock_inner();
                 match inner.handlers.get(&command) {
                     Some(Handler::Stream(h)) => h(data.clone(), rpc_context.clone()),
                     _ => Box::pin(async { Err("handler disappeared".to_string()) }),
@@ -504,20 +514,22 @@ impl WshRpcEngine {
     }
 
     fn handle_response(&self, msg: RpcMessage) {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock_inner();
         if let Some(tx) = inner.pending_responses.get(&msg.resid) {
             let is_done = !msg.cont;
-            let _ = tx.try_send(msg.clone());
+            if tx.try_send(msg.clone()).is_err() {
+                tracing::warn!(resid = %msg.resid, "[rpc-engine] response channel full/closed — reply dropped");
+            }
             if is_done {
                 drop(inner);
-                let mut inner = self.inner.lock().unwrap();
+                let mut inner = self.lock_inner();
                 inner.pending_responses.remove(&msg.resid);
             }
         }
     }
 
     fn handle_cancel_request(&self, req_id: &str) {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock_inner();
         if let Some(handler) = inner.active_handlers.get(req_id) {
             handler.cancel();
         }
@@ -527,7 +539,7 @@ impl WshRpcEngine {
         if req_id.is_empty() {
             return;
         }
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner();
         inner.active_handlers.remove(req_id);
     }
 }

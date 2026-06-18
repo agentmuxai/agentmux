@@ -267,8 +267,10 @@ impl AcpController {
         );
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
+        let stdin = child.stdin.take()
+            .ok_or_else(|| format!("[acp] stdin not captured for block {}", self.block_id))?;
+        let stdout = child.stdout.take()
+            .ok_or_else(|| format!("[acp] stdout not captured for block {}", self.block_id))?;
         let stderr = child.stderr.take();
 
         // Drain stderr with explicit error/EOF logging
@@ -385,7 +387,9 @@ impl AcpController {
                                     }
                                 }).to_string();
                                 if let Some(ref tx) = inner.stdin_tx {
-                                    let _ = tx.try_send(req);
+                                    if tx.try_send(req).is_err() {
+                                        tracing::warn!(block_id = %block_id_stdout, "[acp] session/prompt send failed — channel full or closed");
+                                    }
                                 }
                             }
                         }
@@ -500,9 +504,11 @@ impl AcpController {
         // Queue the handshake messages
         let inner = self.inner.lock().unwrap();
         if let Some(ref tx) = inner.stdin_tx {
-            let _ = tx.try_send(init_req);
-            let _ = tx.try_send(init_notification);
-            let _ = tx.try_send(session_req);
+            for (label, msg) in [("initialize", init_req), ("initialized", init_notification), ("session/create", session_req)] {
+                if tx.try_send(msg).is_err() {
+                    tracing::error!(block_id = %self.block_id, method = label, "[acp] handshake message dropped — channel full or closed; agent will not start");
+                }
+            }
         }
 
         Ok(())
@@ -539,8 +545,11 @@ impl Controller for AcpController {
             if let Some(ref tx) = inner.stdin_tx {
                 let shutdown = self.make_request("shutdown", serde_json::json!({}));
                 let exit = self.make_notification("exit", serde_json::json!({}));
-                let _ = tx.try_send(shutdown);
-                let _ = tx.try_send(exit);
+                for (label, msg) in [("shutdown", shutdown), ("exit", exit)] {
+                    if tx.try_send(msg).is_err() {
+                        tracing::debug!(block_id = %self.block_id, method = label, "[acp] shutdown message dropped — process likely already gone");
+                    }
+                }
             }
         }
 
