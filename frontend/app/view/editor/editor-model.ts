@@ -115,6 +115,13 @@ export class EditorViewModel implements ViewModel {
     private _contentByTab = new Map<string, string>();
     // Bump-counter signal so contentAtom re-evaluates when we mutate the Map.
     private _contentVersion = createSignal<number>(0);
+    // Detected text encoding per tab (SPEC_EDITOR_FILE_ENCODINGS), captured on
+    // read so save round-trips the original encoding/bom/line-ending instead of
+    // silently rewriting the file as UTF-8.
+    private _encodingByTab = new Map<
+        string,
+        { encoding: string; bom: string; lineEnding: string; hadDecodeErrors: boolean }
+    >();
 
     // ── Tree state (per-pane, persisted in block meta) ──────────────────
     private _treeExpanded = createSignal<boolean>(true);
@@ -166,6 +173,7 @@ export class EditorViewModel implements ViewModel {
             for (const ev of events) {
                 if (ev.type === "TabClosed") {
                     this._contentByTab.delete(ev.tabId);
+                    this._encodingByTab.delete(ev.tabId);
                 }
                 for (const sub of this._eventSubscribers) sub(ev);
             }
@@ -413,6 +421,7 @@ export class EditorViewModel implements ViewModel {
             }
 
             this._contentByTab.set(tabId, content);
+            this._rememberEncoding(tabId, result);
             this._contentVersion[1]((v) => v + 1);
 
             const hash = await sha256Hex(content);
@@ -476,16 +485,66 @@ export class EditorViewModel implements ViewModel {
         }
     }
 
+    /** Capture detected encoding metadata from a read result so save can
+     *  round-trip it. Missing fields default to UTF-8 (back-compat). */
+    private _rememberEncoding(
+        tabId: string,
+        result: CommandReadEditorFileResult | undefined | null,
+    ): void {
+        if (!result) return;
+        this._encodingByTab.set(tabId, {
+            encoding: result.encoding ?? "UTF-8",
+            bom: result.bom ?? "none",
+            lineEnding: result.line_ending ?? "lf",
+            hadDecodeErrors: result.had_decode_errors ?? false,
+        });
+    }
+
+    /** True when the file was decoded with U+FFFD replacements (likely the
+     *  wrong encoding). Saving would re-encode the lossy buffer over the
+     *  original bytes, so callers must refuse the write. */
+    private _decodedWithErrors(tabId: string): boolean {
+        return this._encodingByTab.get(tabId)?.hadDecodeErrors ?? false;
+    }
+
+    /** Encoding fields to spread onto a WriteEditorFileCommand so the file
+     *  saves back in its original encoding. Empty (⇒ backend UTF-8 default)
+     *  when the tab's encoding is unknown. */
+    private _encodingFor(
+        tabId: string,
+    ): { encoding?: string; bom?: string; line_ending?: string } {
+        const e = this._encodingByTab.get(tabId);
+        if (!e) return {};
+        return { encoding: e.encoding, bom: e.bom, line_ending: e.lineEnding };
+    }
+
     async saveFile(): Promise<void> {
         if (this.readOnlyAtom()) return;
         const tab = this.activeTabAtom();
         if (!tab) return;
+
+        // Refuse to save a file that decoded with replacement characters
+        // (likely the wrong encoding) — re-encoding the lossy buffer would
+        // overwrite the original bytes (silent data loss), and is the symmetric
+        // counterpart to the encode-side lossy-write refusal. Recovery is
+        // Reopen-with-Encoding (Phase 3 of SPEC_EDITOR_FILE_ENCODINGS).
+        if (this._decodedWithErrors(tab.id)) {
+            dispatch(this.blockId, {
+                type: "TabContentLoadFailed",
+                tabId: tab.id,
+                error: "Save blocked: this file didn't decode cleanly (replacement characters present) — likely the wrong encoding. Reopen with the correct encoding before saving to avoid data loss.",
+                source: "system",
+            });
+            return;
+        }
+
         const content = this._contentByTab.get(tab.id) ?? "";
 
         try {
             await RpcApi.WriteEditorFileCommand(TabRpcClient, {
                 path: tab.filePath,
                 content,
+                ...this._encodingFor(tab.id),
             });
             dispatch(this.blockId, {
                 type: "ClearDirty",
@@ -553,6 +612,7 @@ export class EditorViewModel implements ViewModel {
             const fileResult = await RpcApi.ReadEditorFileCommand(TabRpcClient, { path: result.file_path });
             const content = fileResult?.content ?? "";
             this._contentByTab.set(tabId, content);
+            this._rememberEncoding(tabId, fileResult);
             this._contentVersion[1]((v) => v + 1);
             const hash = content === "" ? "" : await sha256Hex(content);
             dispatch(this.blockId, {
@@ -581,6 +641,7 @@ export class EditorViewModel implements ViewModel {
                 await RpcApi.WriteEditorFileCommand(TabRpcClient, {
                     path: tab.filePath,
                     content: liveContent,
+                    ...this._encodingFor(tab.id),
                 });
             }
             const result = await RpcApi.MoveScratchFileCommand(TabRpcClient, {
@@ -777,6 +838,7 @@ export class EditorViewModel implements ViewModel {
         _instanceHandlers.delete(this._globalHandler);
         this._eventSubscribers.clear();
         this._contentByTab.clear();
+        this._encodingByTab.clear();
         unregisterEditorPane(this.blockId);
     }
 }

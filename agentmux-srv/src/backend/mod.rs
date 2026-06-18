@@ -33,6 +33,7 @@ pub mod sysinfo;
 pub mod storage;
 pub mod subagent_watcher;
 pub mod userinput;
+pub mod text_encoding;
 pub mod base;
 pub mod obj;
 pub mod wconfig;
