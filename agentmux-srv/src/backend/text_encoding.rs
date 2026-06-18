@@ -56,8 +56,10 @@ pub fn decode_file(bytes: &[u8]) -> DecodedFile {
         } else {
             let mut det = chardetng::EncodingDetector::new();
             det.feed(bytes, true);
-            // allow_utf8=true: detector may still pick UTF-8 for ASCII-heavy input.
-            (det.guess(None, true), "none", bytes)
+            // guess(tld, allow_eu): allow_eu=false — don't bias toward
+            // Central-European windows-1250 (no locale signal here; biasing
+            // would misread ambiguous Western text). tld=None: no domain hint.
+            (det.guess(None, false), "none", bytes)
         };
 
     let (cow, had_decode_errors) = enc.decode_without_bom_handling(body);
