@@ -3,6 +3,7 @@
 
 import type { StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
+import { ToolCorrelator } from "./tool-correlation";
 
 /**
  * Translates Kimi Code CLI `--output-format stream-json` events into StreamEvent format.
@@ -20,7 +21,7 @@ import type { OutputTranslator } from "./translator";
  *   {"type":"function","id":"tc_1","function":{"name":"Shell","arguments":"{...}"}}
  */
 export class KimiTranslator implements OutputTranslator {
-    private toolNameById: Map<string, string> = new Map();
+    private tools = new ToolCorrelator();
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -63,8 +64,7 @@ export class KimiTranslator implements OutputTranslator {
                             } catch {
                                 params = {};
                             }
-                            this.toolNameById.set(toolId, toolName);
-                            events.push({ type: "tool_call", tool: toolName, id: toolId, params });
+                            events.push(this.tools.call(toolName, toolId, params));
                         }
                     }
                 }
@@ -74,7 +74,6 @@ export class KimiTranslator implements OutputTranslator {
 
             case "tool": {
                 const toolId: string = rawEvent.tool_call_id ?? "";
-                const toolName = this.toolNameById.get(toolId) ?? "unknown";
                 const content = rawEvent.content;
                 let resultText = "";
                 if (Array.isArray(content)) {
@@ -85,13 +84,7 @@ export class KimiTranslator implements OutputTranslator {
                 } else if (typeof content === "string") {
                     resultText = content;
                 }
-                return [{
-                    type: "tool_result",
-                    tool: toolName,
-                    id: toolId,
-                    status: "success",
-                    result: { content: resultText },
-                }];
+                return [this.tools.result(toolId, "success", { content: resultText })];
             }
 
             default:
@@ -100,6 +93,6 @@ export class KimiTranslator implements OutputTranslator {
     }
 
     reset(): void {
-        this.toolNameById.clear();
+        this.tools.reset();
     }
 }

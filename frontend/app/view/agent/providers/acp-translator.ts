@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { StreamEvent, ToolCallEvent, ToolResultEvent } from "../types";
+import type { StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
+import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 
 /**
  * Universal translator for agents speaking the Agent Client Protocol (ACP).
@@ -21,8 +22,8 @@ import type { OutputTranslator } from "./translator";
  * See: https://github.com/agentclientprotocol/agent-client-protocol
  */
 export class AcpTranslator implements OutputTranslator {
-    // Map tool call IDs to tool names for result correlation
-    private toolNameById: Map<string, string> = new Map();
+    // Correlates tool call IDs to tool names for result resolution.
+    private tools = new ToolCorrelator();
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -49,29 +50,23 @@ export class AcpTranslator implements OutputTranslator {
                 const toolName: string = params.toolName ?? params.name ?? "unknown";
                 const toolId: string = params.toolCallId ?? params.id ?? `tool-${Date.now()}`;
                 const toolParams: Record<string, any> = params.input ?? params.parameters ?? {};
-                this.toolNameById.set(toolId, toolName);
-                const ev: ToolCallEvent = {
-                    type: "tool_call",
-                    tool: toolName,
-                    id: toolId,
-                    params: toolParams,
-                };
-                return [ev];
+                return [this.tools.call(toolName, toolId, toolParams)];
             }
 
             case "tool_result": {
                 const toolId: string = params.toolCallId ?? params.id ?? "";
-                const toolName = this.toolNameById.get(toolId) ?? params.toolName ?? "unknown";
                 const isError = params.isError === true || params.status === "error";
                 const output = params.content ?? params.output ?? "";
-                const ev: ToolResultEvent = {
-                    type: "tool_result",
-                    tool: toolName,
-                    id: toolId,
-                    status: isError ? "failed" : "success",
-                    result: typeof output === "string" ? { output } : output,
-                };
-                return [ev];
+                // Fallback chain `map ?? params.toolName ?? "unknown"` —
+                // `a ?? (b ?? c)` is equivalent, so this preserves it.
+                return [
+                    this.tools.result(
+                        toolId,
+                        isError ? "failed" : "success",
+                        wrapOutput(output),
+                        params.toolName ?? "unknown",
+                    ),
+                ];
             }
 
             default:
@@ -81,6 +76,6 @@ export class AcpTranslator implements OutputTranslator {
     }
 
     reset(): void {
-        this.toolNameById.clear();
+        this.tools.reset();
     }
 }

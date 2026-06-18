@@ -1,8 +1,9 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SessionStats, StreamEvent, ToolCallEvent, ToolResultEvent } from "../types";
+import type { SessionStats, StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
+import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 
 /**
  * Translates Gemini CLI `--output-format stream-json` events into StreamEvent format.
@@ -21,8 +22,8 @@ import type { OutputTranslator } from "./translator";
  *   - tool_use and tool_result arrive as discrete events (not streaming).
  */
 export class GeminiTranslator implements OutputTranslator {
-    // Map tool_id → tool_name so tool_result can report the right tool name
-    private toolNameById: Map<string, string> = new Map();
+    // Correlates tool_id → tool_name so tool_result reports the right tool name.
+    private tools = new ToolCorrelator();
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -69,29 +70,14 @@ export class GeminiTranslator implements OutputTranslator {
                 const toolName: string = rawEvent.tool_name ?? "unknown";
                 const toolId: string = rawEvent.tool_id ?? `tool-${Date.now()}`;
                 const params: Record<string, any> = rawEvent.parameters ?? {};
-                this.toolNameById.set(toolId, toolName);
-                const ev: ToolCallEvent = {
-                    type: "tool_call",
-                    tool: toolName,
-                    id: toolId,
-                    params,
-                };
-                return [ev];
+                return [this.tools.call(toolName, toolId, params)];
             }
 
             case "tool_result": {
                 const toolId: string = rawEvent.tool_id ?? "";
-                const toolName = this.toolNameById.get(toolId) ?? "unknown";
                 const status: "success" | "failed" = rawEvent.status === "success" ? "success" : "failed";
                 const output = rawEvent.output ?? "";
-                const ev: ToolResultEvent = {
-                    type: "tool_result",
-                    tool: toolName,
-                    id: toolId,
-                    status,
-                    result: typeof output === "string" ? { output } : output,
-                };
-                return [ev];
+                return [this.tools.result(toolId, status, wrapOutput(output))];
             }
 
             default:
@@ -100,6 +86,6 @@ export class GeminiTranslator implements OutputTranslator {
     }
 
     reset(): void {
-        this.toolNameById.clear();
+        this.tools.reset();
     }
 }
