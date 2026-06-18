@@ -44,6 +44,9 @@ keyring = "2"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 mdns-sd = "0.12"
 which = "7"
+# Text encoding detection + transcoding for the editor (SPEC_EDITOR_FILE_ENCODINGS).
+encoding_rs = "0.8"
+chardetng = "0.1"
 flate2 = "1"
 sha2 = "0.10"
 hex = "0.4"

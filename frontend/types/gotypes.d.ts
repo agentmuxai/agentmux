@@ -1960,12 +1960,22 @@ declare global {
     type CommandReadEditorFileResult = {
         content: string;
         read_only: boolean;
+        // Detected text encoding (SPEC_EDITOR_FILE_ENCODINGS). Optional for
+        // back-compat; absent ⇒ treat as UTF-8.
+        encoding?: string;
+        bom?: string;
+        line_ending?: string;
+        had_decode_errors?: boolean;
     };
 
     // wshrpc.CommandWriteEditorFileData
     type CommandWriteEditorFileData = {
         path: string;
         content: string;
+        // Encoding to write back in; omit ⇒ UTF-8 (back-compat).
+        encoding?: string;
+        bom?: string;
+        line_ending?: string;
     };
 
     // wshrpc.CommandResolveCliData
