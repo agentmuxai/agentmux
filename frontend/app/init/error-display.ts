@@ -117,7 +117,14 @@ async function spawnFreshWindowViaHost(): Promise<boolean> {
             },
             body: JSON.stringify({ cmd: "open_new_window", args: {} }),
         });
-        return resp.ok;
+        // The IPC handler returns HTTP 200 even when the command FAILED, encoding
+        // the outcome as { success, data, error }. A command-level rejection (e.g.
+        // the any_browser_pane_closing() gate in open_window_with_kind) must NOT
+        // be read as success — otherwise the caller closes this window with no
+        // replacement opened. Require success === true.
+        if (!resp.ok) return false;
+        const json = (await resp.json().catch(() => null)) as { success?: boolean } | null;
+        return json?.success === true;
     } catch {
         return false;
     }
