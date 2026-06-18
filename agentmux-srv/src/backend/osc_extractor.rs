@@ -193,7 +193,7 @@ fn normalise_title(s: &str) -> String {
     let trimmed = stripped.trim();
     if trimmed.is_empty()
         || trimmed.eq_ignore_ascii_case("claude")
-        || trimmed == "Claude Code"
+        || trimmed.eq_ignore_ascii_case("claude code")
     {
         return String::new();
     }
@@ -250,12 +250,12 @@ mod tests {
 
     #[test]
     fn bare_startup_title_discarded() {
-        let mut ext = OscExtractor::new();
-        let (_, evs) = feed_str(&mut ext, "\x1b]0;claude\x07");
-        assert!(evs.is_empty());
-        let mut ext2 = OscExtractor::new();
-        let (_, evs2) = feed_str(&mut ext2, "\x1b]0;Claude Code\x07");
-        assert!(evs2.is_empty());
+        for title in &["claude", "CLAUDE", "Claude Code", "claude code", "CLAUDE CODE"] {
+            let input = format!("\x1b]0;{}\x07", title);
+            let mut ext = OscExtractor::new();
+            let (_, evs) = ext.feed(input.as_bytes());
+            assert!(evs.is_empty(), "expected discard for '{title}' but got event");
+        }
     }
 
     #[test]
