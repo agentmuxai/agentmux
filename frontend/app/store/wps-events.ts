@@ -22,6 +22,7 @@ export const WpsEvent = {
     AgentFailure: "agentfailure",
     ShellNodeCreate: "shell_node_create",
     ShellChunk: "shell_chunk",
+    BlockActivity: "block:activity",
 } as const;
 
 export type WpsEventName = (typeof WpsEvent)[keyof typeof WpsEvent];
