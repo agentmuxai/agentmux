@@ -900,7 +900,7 @@ wrap_browser_process_handler! {
                 // CefSettings::background_color flip in main.rs and the
                 // is_frameless=true main window delegate. See
                 // docs/research/cef-transparency-research-2026-05-10.md and
-                // docs/retros/cef-transparency-empirical-2026-05-11.md.
+                // docs/retro/cef-transparency-empirical-2026-05-11.md.
                 background_color: 0x00000000,
                 ..Default::default()
             };
@@ -938,7 +938,7 @@ wrap_browser_process_handler! {
                 } else {
                     // Dev mode only: Vite HMR server. Honor AGENTMUX_VITE_PORT
                     // (per-clone port from Taskfile.yml dev:serve); see
-                    // docs/analyses/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md.
+                    // docs/analysis/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md.
                     let port: u16 = std::env::var("AGENTMUX_VITE_PORT")
                         .ok()
                         .and_then(|s| s.parse().ok())

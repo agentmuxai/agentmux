@@ -201,5 +201,5 @@ No Rust changes. No RPC changes. No prop-shape changes (dead `tabWidth` prop sta
 - VS Code `tabsTitleControl.ts` — `computeTabLabels`, `redrawTab`, tab width calculation
 - `SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md` — prior fixed-basis spec (superseded by §3 here)
 - `frontend/app/tab/tabbar.scss` — current flex contract
-- `docs/retros/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md` — why old JS-width approach failed (avoid repeating)
+- `docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md` — why old JS-width approach failed (avoid repeating)
 - MDN `CanvasRenderingContext2D.measureText()` — layout-free text measurement

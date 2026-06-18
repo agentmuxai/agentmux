@@ -2,8 +2,8 @@
 
 **Status:** Draft — investigation complete, implementation pending approval
 **Origin:** Open questions from two retros written on 2026-04-12:
-- `docs/retros/2026-04-12-ultra-long-sessions.md` §7
-- `docs/retros/2026-04-12-portable-size-audit.md` §6
+- `docs/retro/2026-04-12-ultra-long-sessions.md` §7
+- `docs/retro/2026-04-12-portable-size-audit.md` §6
 
 This spec investigates each open question, diagnoses the root cause, and
 proposes a concrete implementation fix with exact file paths and line numbers.

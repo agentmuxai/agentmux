@@ -204,7 +204,7 @@ body:not(.nohover) .tab.active:hover {
 // passes 0), so combined with `min-width: 60px` every tab snapped
 // to 60 px and refused to grow when renamed. This was the actual
 // "tabs retain original width on rename" bug — see the analysis at
-// docs/retros/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
+// docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
 // Now: simple opacity fade-in only; width follows content via the
 // flex layout's `width: auto` + min/max-width constraints.
 @keyframes new-tab-fade-in {

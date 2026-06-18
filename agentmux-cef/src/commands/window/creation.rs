@@ -30,7 +30,7 @@ use super::lifecycle::find_own_top_level_window;
 /// every child window (pool warmups, tab tear-off, floating pane) loads
 /// `localhost:5173` and hits `ERR_CONNECTION_REFUSED` on any other port —
 /// only the main window survives because the launcher passes `--url=…`
-/// on the CLI. See `docs/analyses/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md`.
+/// on the CLI. See `docs/analysis/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md`.
 fn dev_vite_port() -> u16 {
     std::env::var("AGENTMUX_VITE_PORT")
         .ok()
