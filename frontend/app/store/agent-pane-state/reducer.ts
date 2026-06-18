@@ -37,30 +37,12 @@ import {
     INTERRUPT_TIMEOUT_MS,
     KindBeforeDisconnect,
     ReducerResult,
-    STREAMING_IDLE_TIMEOUT_MS,
     STUCK_THRESHOLD_MS,
     SUBMIT_TIMEOUT_MS,
     TurnOutcome,
     TurnPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
-
-/**
- * If `phase` is `Streaming`, return the `schedule-stream-watchdog` event
- * that re-arms the bounded idle-timeout against the latest event time.
- * The dispatcher cancels any prior arm and reschedules — so this is
- * called on EVERY stream-activity command that lands inside Streaming.
- * Spec §10 / PR E.
- */
-function streamWatchdogEvent(
-    phase: TurnPhase,
-): AgentPaneEvent | null {
-    if (phase.kind !== "Streaming") return null;
-    return {
-        type: "schedule-stream-watchdog",
-        deadlineMs: phase.lastEventMs + STREAMING_IDLE_TIMEOUT_MS,
-    };
-}
 
 export function update(
     state: AgentPaneState,
@@ -114,11 +96,10 @@ export function update(
             // Dual-write: if a turn was Submitting, the subscription is
             // its expected hand-off to Streaming. If already Streaming,
             // the resubscribe IS fresh activity — refresh
-            // `lastEventMs` to `command.at` so the re-armed watchdog
-            // deadline is in the future. (P1 on #995 from reagent +
-            // codex: stale `lastEventMs` could schedule a deadline in
-            // the past, firing `StreamStalled` immediately on a freshly-
-            // resubscribed turn.)
+            // `lastEventMs` to `command.at` so the stuck-stream
+            // diagnostic (`StreamWatchdogTick` → `stream-stuck`) measures
+            // idle time from the resubscribe, not from a stale prior
+            // event. (P1 on #995 from reagent + codex.)
             //
             // PR F: a subscribe from `Disconnected` clears the
             // disconnect — we land in `Idle` (not back in the working
@@ -144,12 +125,6 @@ export function update(
             const events: AgentPaneEvent[] = [
                 { type: "stream-subscribed", at: command.at },
             ];
-            // PR E: re-arm the bounded streaming watchdog on every
-            // activity that lands inside Streaming. The refresh of
-            // `lastEventMs` above ensures the new deadline is always
-            // `command.at + STREAMING_IDLE_TIMEOUT_MS`, never in the past.
-            const wd = streamWatchdogEvent(nextPhase);
-            if (wd) events.push(wd);
             return {
                 state: {
                     ...state,
@@ -193,7 +168,7 @@ export function update(
                     ...state,
                     // Per-turn sidecar cleanup mirrors the bounded
                     // force-transition arms (InterruptTimeoutElapsed /
-                    // SubmitTimeoutElapsed / StreamStalled): a forced
+                    // SubmitTimeoutElapsed): a forced
                     // exit from a working state settles the animation
                     // and clears tool / token chips so the header
                     // doesn't show ghosts.
@@ -253,10 +228,6 @@ export function update(
             const events: AgentPaneEvent[] = [
                 { type: "stream-flush-observed", addedCount: command.addedCount },
             ];
-            // PR E: flushes are the primary stream-activity signal; if
-            // we landed inside Streaming, re-arm the idle watchdog.
-            const wd = streamWatchdogEvent(nextPhase);
-            if (wd) events.push(wd);
             return {
                 state: {
                     ...state,
@@ -401,7 +372,7 @@ export function update(
             // Dual-write outcome: stop-in-flight → "stopped"; otherwise
             // "completed". "interrupted" / "errored" are reserved for
             // bounded force-transition arms (InterruptTimeoutElapsed,
-            // SubmitTimeoutElapsed, StreamStalled).
+            // SubmitTimeoutElapsed).
             //
             // TS narrowing: read the phase via a local so the
             // `.kind === "Done"` ternary below narrows `outcome` /
@@ -464,11 +435,6 @@ export function update(
             const events: AgentPaneEvent[] = [
                 { type: "tool-started", name: command.name },
             ];
-            // PR E: re-arm the streaming watchdog when activity lands
-            // inside Streaming (covers both promote-from-Submitting and
-            // tools-active bump within Streaming).
-            const wd = streamWatchdogEvent(nextState.turnPhase);
-            if (wd) events.push(wd);
             return { state: nextState, events };
         }
 
@@ -479,8 +445,6 @@ export function update(
                 /* toolsDelta */ -1,
             );
             const events: AgentPaneEvent[] = [{ type: "tool-ended" }];
-            const wd = streamWatchdogEvent(nextState.turnPhase);
-            if (wd) events.push(wd);
             return { state: nextState, events };
         }
 
@@ -497,8 +461,6 @@ export function update(
             const events: AgentPaneEvent[] = [
                 { type: "tokens-updated", input: command.input, output: null },
             ];
-            const wd = streamWatchdogEvent(nextState.turnPhase);
-            if (wd) events.push(wd);
             return { state: nextState, events };
         }
 
@@ -515,8 +477,6 @@ export function update(
             const events: AgentPaneEvent[] = [
                 { type: "tokens-updated", input: null, output: command.output },
             ];
-            const wd = streamWatchdogEvent(nextState.turnPhase);
-            if (wd) events.push(wd);
             return { state: nextState, events };
         }
 
@@ -672,61 +632,6 @@ export function update(
                     },
                 },
                 events: [{ type: "submit-timed-out", at: command.at }],
-            };
-        }
-
-        case "StreamStalled": {
-            // PR E — bounded `Streaming → Done.errored("stream-stalled")`.
-            //
-            // The dispatcher schedules a setTimeout when it sees the
-            // `schedule-stream-watchdog` event; on every fresh stream
-            // event the reducer re-emits the schedule and the
-            // dispatcher cancels the previous timer (shared cancel
-            // flag — JS analogue of `Arc<AtomicBool>`). When the timer
-            // finally fires, the reducer makes the final decision:
-            //
-            //   - `Streaming` + idle ≥ `STREAMING_IDLE_TIMEOUT_MS` →
-            //     force-transition to `Done.errored`. Legacy fields are
-            //     cleared the same way TurnEnd / interrupt-timeout do.
-            //   - `Streaming` + NOT yet stale (early callback or a
-            //     just-arrived event already refreshed `lastEventMs`)
-            //     → same-ref no-op. The dispatcher re-arms on the next
-            //     activity command — defence in depth against a leaked
-            //     timer firing right after an event landed.
-            //   - any other phase → same-ref no-op. The timer is a
-            //     stale leftover from a prior turn; harmless.
-            //
-            // First-done-wins: if a graceful `TurnEnd` already landed
-            // us in `Done`, the late stalled tick can't reach this arm
-            // (the phase check is `=== "Streaming"`), so the outcome
-            // is preserved. Mirrors the `Interrupting → Done` timeout
-            // pattern from PR C. Spec §10.
-            if (state.turnPhase.kind !== "Streaming") {
-                return { state, events: [] };
-            }
-            const idleMs = command.at - state.turnPhase.lastEventMs;
-            if (idleMs < STREAMING_IDLE_TIMEOUT_MS) {
-                // Early callback / race: real activity refreshed
-                // `lastEventMs` between the dispatcher seeing the timer
-                // pop and the command landing. No-op; the next activity
-                // command will re-arm.
-                return { state, events: [] };
-            }
-            return {
-                state: {
-                    ...state,
-                    // Per-turn sidecar cleanup mirrors TurnEnd —
-                    // animation settles, currentTool/turnTokens cleared
-                    // so the header doesn't show ghost tool/token chips.
-                    currentTool: null,
-                    turnTokens: null,
-                    turnPhase: {
-                        kind: "Done",
-                        outcome: "errored",
-                        finishedAt: command.at,
-                    },
-                },
-                events: [{ type: "stream-stalled", at: command.at }],
             };
         }
 

@@ -67,7 +67,6 @@
     // "notify:sound:agent.turn.interrupted":    true,
     // "notify:sound:agent.message.accepted":    true,
     // "notify:sound:agent.message.rejected":    true,
-    // "notify:sound:agent.stream.stalled":      true,
 
     // -- Tool-call tones (subliminal per-tool "voice") --
     // "notify:tooltones:enabled":               true,
