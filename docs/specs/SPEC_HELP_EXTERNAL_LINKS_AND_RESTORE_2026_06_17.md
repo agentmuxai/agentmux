@@ -177,14 +177,21 @@ is not. So Restore can use the low-level creds directly.
 ```
 buildCredentialedUrl():
   read window.__AGENTMUX_IPC_PORT__ / __TOKEN__   (re-injected by host)
-  read windowLabel from current URL               (preserves workspace binding)
-  return  <origin>/?ipc_port=..&ipc_token=..&windowLabel=..   (or null if no creds)
+  start from the CURRENT URL (new URL(location.href))   (keeps ALL params)
+  set ipc_port, ipc_token                          (only the two creds change)
+  return that URL                                  (or null if no creds)
 ```
 
 `location.assign(credentialedUrl)` reloads the app with creds **in the URL**, so
 `setupCefApi` reads them synchronously (no `waitForIpcCreds` race) and bootstrap
-is deterministic. Because `windowLabel` is preserved, the window rebinds to the
-**same workspace** (`registerBackendWindow(windowLabel, windowId)` re-links it).
+is deterministic. Building from the current URL preserves **every** existing
+query param, not just `windowLabel`: `windowLabel` rebinds the window to its
+**same workspace** (`registerBackendWindow(windowLabel, windowId)`), and
+`workspaceId` (torn-off workspace reuse), `floatingPaneId` (floating-pane
+layout) and `pool=1` (prewarmed pool windows) all survive so a restore in a
+tear-off / floating / pool window comes back as the correct window kind. Only
+`ipc_port` / `ipc_token` are (re)set; cef-init.ts strips just those, leaving the
+rest on `location.search`.
 This is the same shape as the host's own new-window URL, so the brief token-in-URL
 exposure is identical to existing behavior and cef-init strips it on load.
 

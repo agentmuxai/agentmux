@@ -69,9 +69,16 @@ function writeRestoreTried(v: boolean): void {
  * THIS url lets `cef-init.ts setupCefApi` read the creds synchronously from the
  * URL instead of waiting for the post-load re-injection — closing the
  * `waitForIpcCreds` race that makes a plain `location.reload()` fail to
- * reconnect. `windowLabel` is preserved so the restored window rebinds to its
- * SAME workspace. Returns null when the creds aren't present (host never
- * injected — genuinely down), so callers can fall back.
+ * reconnect. Returns null when the creds aren't present (host never injected —
+ * genuinely down), so callers can fall back.
+ *
+ * Built from the CURRENT URL so EVERY existing query param survives — only the
+ * two IPC creds are (re)set. `windowLabel` (same-workspace rebind), but also
+ * `workspaceId` (torn-off workspace reuse), `floatingPaneId` (floating-pane
+ * layout), and `pool=1` (prewarmed pool windows) must be preserved, or a
+ * restore in a tear-off / floating / pool window would come back as the wrong
+ * window kind. cef-init.ts strips only ipc_port/ipc_token, so the rest persist
+ * on `location.search` for us to carry forward.
  *
  * The token rides in the URL only until cef-init.ts strips it back into a global
  * (same handling, and same brief exposure, as the host's own new-window URLs).
@@ -81,11 +88,9 @@ function buildCredentialedUrl(): string | null {
     const token = window.__AGENTMUX_IPC_TOKEN__;
     if (!port || !token) return null;
     try {
-        const label = new URLSearchParams(location.search).get("windowLabel") || "main";
-        const url = new URL(location.origin + location.pathname);
+        const url = new URL(location.href);
         url.searchParams.set("ipc_port", String(port));
         url.searchParams.set("ipc_token", token);
-        url.searchParams.set("windowLabel", label);
         return url.toString();
     } catch {
         return null;
