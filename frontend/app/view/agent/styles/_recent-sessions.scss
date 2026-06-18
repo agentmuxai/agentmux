@@ -57,7 +57,9 @@
         // Tile grid matching the templates tier — sessions flow across the
         // full pane width instead of a single 520px column.
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(var(--agent-tile-min, 240px), 1fr));
+        // min(..., 100%) so a sub-tile-width pane collapses to one column
+        // instead of overflowing (matches .agent-picker-list).
+        grid-template-columns: repeat(auto-fill, minmax(min(var(--agent-tile-min, 240px), 100%), 1fr));
         gap: var(--space-2);
         align-content: start;
         overflow-y: auto;

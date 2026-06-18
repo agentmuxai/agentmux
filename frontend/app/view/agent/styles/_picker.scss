@@ -39,7 +39,10 @@
     // top-aligned rather than stretched.
     .agent-picker-list {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(var(--agent-tile-min), 1fr));
+        // min(tile-min, 100%) so a pane narrower than the tile floor (tiled
+        // multi-pane layouts) collapses to one full-width column instead of
+        // forcing a 240px track that overflows/clips.
+        grid-template-columns: repeat(auto-fill, minmax(min(var(--agent-tile-min), 100%), 1fr));
         gap: var(--space-3);
         align-content: start;
         flex: 1;
