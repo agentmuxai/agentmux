@@ -182,7 +182,11 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                  * changed. Filled rects scale uniformly with the
                  * parent's CSS zoom, no rasterization unevenness.
                  */}
-                <svg width="26" height="22" viewBox="0 0 26 22" fill="currentColor">
+                {/* height 23 (not 22) centers the bars vertically: 3px above
+                    AND below (bars span y=3..20). At 22 they sat 1px low (3px
+                    top / 2px bottom). 23 also gives a crisp 2px button inset
+                    (was a sub-pixel 2.5px). */}
+                <svg width="26" height="23" viewBox="0 0 26 23" fill="currentColor">
                     <rect x="2" y="3" width="22" height="3" rx="1" />
                     <rect x="2" y="10" width="22" height="3" rx="1" />
                     <rect x="2" y="17" width="22" height="3" rx="1" />

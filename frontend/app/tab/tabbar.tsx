@@ -192,7 +192,13 @@ function TabBar(props: TabBarProps): JSX.Element {
                             0,
                             window.outerHeight - window.innerHeight - chromeBorderX,
                         );
-                        const firstTabEl = tabBarScrollRef?.firstElementChild as HTMLElement | null;
+                        // Select the first TAB, not firstElementChild — the
+                        // leading .tab-separator (non-macOS hamburger boundary)
+                        // is the first child but a centered 18px sliver, so its
+                        // rect would skew the tear-off anchor's top/left.
+                        const firstTabEl = tabBarScrollRef?.querySelector(
+                            ".tab-drop-wrapper",
+                        ) as HTMLElement | null;
                         const firstTabRect = firstTabEl?.getBoundingClientRect();
                         const tabAnchorX =
                             grabOffset && firstTabRect
@@ -605,6 +611,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                 <HamburgerMenu />
             </Show>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
+                {/* When the hamburger sits to the left of the tabs (Windows/
+                    Linux), give the hamburger→first-tab boundary the SAME 1px
+                    separator every tab-to-tab boundary has — otherwise the
+                    first tab is flush against the hamburger and reads tighter
+                    than the rest. macOS renders the hamburger at the far right,
+                    so no leading separator there. */}
+                <Show when={!isMacOS()}>
+                    <div class="tab-separator" aria-hidden="true" />
+                </Show>
                 <For each={tabIds()}>
                     {(tabId, i) => (
                         <>
