@@ -223,14 +223,6 @@ impl HealthMonitor {
         self.inner.lock().unwrap().active_turn
     }
 
-    /// `Instant` of the most recent stdout line (meaningful or not). Used by the
-    /// AskUserQuestion dead-air fallback (`persistent.rs::answer_question`) to
-    /// detect whether the turn resumed after an answer was delivered: if this is
-    /// unchanged a few seconds later, no output arrived and the turn stalled.
-    pub fn last_output_at(&self) -> Instant {
-        self.inner.lock().unwrap().last_output_ts
-    }
-
     /// Periodic health check — call this every ~5 seconds while a turn is active.
     pub fn check(&self) {
         self.evaluate_and_transition();
