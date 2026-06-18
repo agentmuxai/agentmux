@@ -249,12 +249,17 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
             </div>
 
             <div class="identity-detail-actions">
-                <Show when={account.status === "expired"}>
+                {/* Reauth: expired non-OAuth accounts only. OAuth reauth goes through
+                    OAuthConnectPanel which needs the existing accountId threaded through
+                    (not yet wired); opening the edit form here would create a duplicate. */}
+                <Show when={account.status === "expired" && account.kind !== "oauth"}>
                     <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
                         Reauth
                     </button>
                 </Show>
-                <Show when={account.status === "unknown" && (account.secret_ref.backend === "keychain" || account.secret_ref.backend === "plaintext_dev")}>
+                {/* Validate: keychain only. plaintext_dev routes through handleSubmit →
+                    updateAccount with no verify call, so it cannot clear unknown status. */}
+                <Show when={account.status === "unknown" && account.secret_ref.backend === "keychain"}>
                     <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
                         Validate…
                     </button>
@@ -602,6 +607,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             <option value="anthropic">Anthropic</option>
                             <option value="slack">Slack</option>
                             <option value="custom">Custom</option>
+                            <option value="agentmux">AgentMux</option>
                         </select>
                     </FormField>
 
