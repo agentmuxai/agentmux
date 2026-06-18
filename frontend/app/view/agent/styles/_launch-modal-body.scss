@@ -203,6 +203,27 @@
     opacity: 0.6;
 }
 
+// Host-mode warning — shown between runtime fieldset and bundles when
+// the user selects "On this computer". Amber left-border callout.
+.agent-launch-modal-host-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--warning-color, #f59e0b);
+    background: color-mix(in srgb, var(--warning-color, #f59e0b) 8%, transparent);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--main-text-color);
+
+    i {
+        color: var(--warning-color, #f59e0b);
+        margin-top: 2px;
+        flex-shrink: 0;
+    }
+}
+
 // v7 — Identity + Memory bundle pickers. Two compact dropdown rows
 // rendered between the runtime fieldset and the advanced disclosure.
 // Layout mirrors the rest of the modal; the leading label keeps the

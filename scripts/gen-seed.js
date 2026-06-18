@@ -81,6 +81,7 @@ const CLI_DEFS = [
         icon: "\u2716",                  // ✖
         description: "Anthropic's coding agent",
         bus: "claude",
+        containerSupported: true,
     },
     {
         id: "codex",
@@ -89,6 +90,7 @@ const CLI_DEFS = [
         icon: "\u2726",                  // ✦
         description: "OpenAI's coding agent",
         bus: "codex",
+        containerSupported: true,
     },
     {
         id: "gemini",
@@ -97,6 +99,7 @@ const CLI_DEFS = [
         icon: "\u26A1",                  // ⚡
         description: "Google's coding agent",
         bus: "gemini",
+        containerSupported: true,
     },
     {
         id: "kimi",
@@ -105,6 +108,7 @@ const CLI_DEFS = [
         icon: "\u25C8",                  // ◈
         description: "Moonshot's 262k-context agent",
         bus: "kimi",
+        containerSupported: true,
     },
     {
         id: "pi",
@@ -113,6 +117,7 @@ const CLI_DEFS = [
         icon: "\u03C0",                  // π
         description: "Plandex's multi-provider agent",
         bus: "pi",
+        containerSupported: true,
     },
     {
         id: "openclaw",
@@ -121,6 +126,8 @@ const CLI_DEFS = [
         icon: "\u25CE",                  // ◎
         description: "ACP orchestration platform",
         bus: "openclaw",
+        // Needs host access to orchestrate other agents.
+        containerSupported: false,
     },
     {
         id: "copilot",
@@ -129,17 +136,18 @@ const CLI_DEFS = [
         icon: "\u26F6",                  // ⛶
         description: "Microsoft's coding agent",
         bus: "copilot",
+        containerSupported: true,
     },
 ];
 
 const manifest = {
-    version: 6,
+    version: 7,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
         icon: d.icon,
         provider: d.provider,
-        agent_type: "host",
+        agent_type: d.containerSupported ? "container" : "host",
         description: d.description,
         working_directory: "",
         shell: "pwsh",
