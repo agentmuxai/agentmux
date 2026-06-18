@@ -1,5 +1,26 @@
 # AgentMux Version History
 
+## 0.46.4 — 2026-06-18
+
+- fix(agent): context meter resolves the window per-model and learns it from usage
+- docs(analysis): architecture refactor tracking/handoff board (A1-A15)
+- fix(cef): open external links in system browser; consolidate Can't-reconnect to a single robust Restore
+- chore(scripts): remove 8 orphaned one-off diagnostic JS/CJS/MJS files from closed investigations
+- fix(release): stage all version files, avoid lockfile churn, add task release:patch/minor shortcuts
+- Harden srv error paths: poison-tolerant mutex in rpc/engine, log silent channel drops, guard unguarded take().unwrap() in subprocess/persistent/acp controllers with proper Err returns
+- Refactor: split 46-arm dispatch_service monolith into per-service handler functions (object/client/window/workspace/misc). No logic change — mechanical reorganization only (A4)
+- Refactor: split websocket.rs inline command handlers into per-family submodules. websocket.rs shrinks from 2371 to 939 lines. Extracted: agent input/subprocess (agent_handlers.rs), shell exec/stop (shell_handlers.rs), editor/file-ops (editor_handlers.rs), LSP (lsp_handlers.rs). No logic changes (A8)
+- Refactor: shared WPS event-name constants in frontend. Add wps-events.ts mirroring wps.rs constants; replace 25+ bare string literals across 12 files with typed WpsEvent.X references (A14)
+- fix(agent): Edit tool expand panel now shows a diff instead of 'No diff available'
+- fix(floater): dwell gate for redock ghost + retry on back-to-back tear-off
+- fix(agent): DiffViewer skips synthetic diff for failed/denied Edit calls
+- refactor(A11): extract BlockRegistry + ModalLayer dispatch to dedicated modules
+- refactor(A12): remove 65 dead COMMAND_* constants from rpc_types.rs
+- docs(A13): merge duplicate dirs, add specs index, fix stale doc-path refs
+- refactor(A3): split global.ts god-module; break global.ts ⇄ wos.ts cycle
+- refactor(A5): extract BlockControllerCore shared helpers; fix ACP session-id persist
+
+
 ## 0.46.3 — 2026-06-18
 
 - fix(agent): show 'in progress' when streaming resumes after a stream drop; quiet Esc on idle
