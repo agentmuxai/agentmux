@@ -502,15 +502,22 @@ pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
 ///
 /// Uses `where` on Windows and `which` on Unix. Returns the absolute path
 /// if the command is found and exists, otherwise `None`.
+///
+/// On Windows we pass the bare command name (no `.cmd` suffix) so that
+/// `where` resolves the correct extension via PATHEXT. This correctly finds
+/// `docker.exe`, `git.exe`, `node.exe` AND `npm.cmd` — previously the
+/// hard-coded `.cmd` suffix caused all `.exe`-based tools (docker, git,
+/// node) to report as not installed even when present on PATH.
+///
+/// `where` can return multiple lines (e.g. Node.js ships both an extensionless
+/// `npm` Unix shell script and `npm.cmd` on Windows). We filter to the first
+/// line whose extension `make_cli_cmd` can actually spawn (.exe / .cmd / .bat).
+/// Taking the raw first line would yield the extensionless entry, which
+/// `Command::new` cannot run on Windows without a shell.
 pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
-    let path_cmd = if cfg!(windows) {
-        format!("{}.cmd", cli_command)
-    } else {
-        cli_command.to_string()
-    };
     let which_result = if cfg!(windows) {
         let mut probe = tokio::process::Command::new("where");
-        probe.arg(&path_cmd);
+        probe.arg(cli_command);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -518,12 +525,22 @@ pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
         }
         probe.output().await
     } else {
-        tokio::process::Command::new("which").arg(&path_cmd).output().await
+        tokio::process::Command::new("which").arg(cli_command).output().await
     };
     if let Ok(out) = which_result {
         if out.status.success() {
             let stdout_str = String::from_utf8_lossy(&out.stdout);
-            let path = stdout_str.lines().next().unwrap_or("").trim();
+            #[cfg(windows)]
+            let path: &str = stdout_str
+                .lines()
+                .map(str::trim)
+                .find(|l| {
+                    let lo = l.to_lowercase();
+                    lo.ends_with(".exe") || lo.ends_with(".cmd") || lo.ends_with(".bat")
+                })
+                .unwrap_or("");
+            #[cfg(not(windows))]
+            let path: &str = stdout_str.lines().next().unwrap_or("").trim();
             if !path.is_empty() && std::path::Path::new(path).exists() {
                 return Some(path.to_string());
             }
