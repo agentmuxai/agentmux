@@ -202,10 +202,6 @@
         flex-direction: column;
         flex-shrink: 0;
 
-        // NOTE: the `.agent-status-line` used to live here scoped to
-        // `.agent-composer-region`, but PR #502 hoisted it above the
-        // activity log so long agent output can't push it off-screen.
-        // The rules now live at `.agent-view` top-level (below).
     }
 
 
