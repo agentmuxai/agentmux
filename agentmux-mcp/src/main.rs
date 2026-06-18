@@ -181,7 +181,7 @@ const OPEN_EDITOR_TOOL: &str = r#"{
 
 const LOOP_TOOL: &str = r#"{
   "name": "Loop",
-  "description": "Run a prompt or slash command on a recurring interval by re-injecting it into a conversation. AgentMux's analogue of Claude's /loop. Returns immediately with a loop_id; the prompt is injected every interval (when the target is idle) until you stop it with LoopStop(loop_id). Use for polling/babysitting tasks ('check the deploy every 5m', 'keep running /babysit-prs'). Loops stop automatically when the agent pane closes. Do NOT use for one-off tasks.",
+  "description": "Run a prompt or slash command on a recurring interval by re-injecting it into a conversation. AgentMux's analogue of Claude's /loop. Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you stop it with LoopStop(loop_id). Use for polling/babysitting tasks ('check the deploy every 5m', 'keep running /babysit-prs'). Loops stop automatically when the agent pane closes. Do NOT use for one-off tasks.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -880,8 +880,9 @@ async fn call_tool(
             let loop_id = format!("loop-{n}");
 
             // Each loop is an independent task that re-injects the prompt on the
-            // interval. `wait_for_idle` so a re-prompt lands when the target has
-            // finished its turn rather than interrupting mid-stream.
+            // fixed interval (fire-and-forget; no idle-wait — InjectionRequest
+            // .wait_for_idle is dead scaffolding that srv never reads).
+            let interval_display = format_duration(interval);
             let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
             let task_client = client.clone();
             let task_auth = auth_key.to_string();
@@ -895,7 +896,6 @@ async fn call_tool(
                     let mut body = json!({
                         "target_agent": task_target,
                         "message": prompt,
-                        "wait_for_idle": true,
                     });
                     if let Some(src) = &task_source {
                         body["source_agent"] = json!(src);
@@ -916,7 +916,7 @@ async fn call_tool(
                 .insert(loop_id.clone(), handle);
 
             Ok(format!(
-                "Started {loop_id}: injecting to '{target}' every {interval_str}\
+                "Started {loop_id}: injecting to '{target}' every {interval_display}\
                  {}. Stop with LoopStop({loop_id}).",
                 if immediate { " (first run now)" } else { "" }
             ))
@@ -967,6 +967,19 @@ fn parse_interval(s: &str) -> Result<Duration> {
     }
     let secs = (val * mult_secs).round() as u64;
     Ok(Duration::from_secs(secs.clamp(10, 24 * 3600)))
+}
+
+/// Human-readable representation of a clamped Duration — used in the Loop
+/// success message so the reported cadence matches the actual run cadence.
+fn format_duration(d: Duration) -> String {
+    let s = d.as_secs();
+    if s % 3600 == 0 {
+        format!("{}h", s / 3600)
+    } else if s % 60 == 0 {
+        format!("{}m", s / 60)
+    } else {
+        format!("{}s", s)
+    }
 }
 
 #[cfg(test)]
