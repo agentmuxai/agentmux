@@ -27,8 +27,18 @@ describe("showStartupError", () => {
     it("shows the error message in #main", () => {
         showStartupError("something broke");
         const main = document.getElementById("main");
-        expect(main?.textContent).toContain("AgentMux failed to start");
+        // The raw error lives in the collapsible technical-details <pre>.
         expect(main?.textContent).toContain("something broke");
+    });
+
+    it("renders a single Restore button (the two old buttons are consolidated)", () => {
+        showStartupError("test error");
+        const main = document.getElementById("main");
+        const buttons = main?.querySelectorAll("button") ?? [];
+        expect(buttons.length).toBe(1);
+        expect(buttons[0]?.textContent).toContain("Restore");
+        // The retired labels must not reappear.
+        expect(main?.textContent).not.toContain("Reopen window");
     });
 
     it("handles missing #main gracefully", () => {
