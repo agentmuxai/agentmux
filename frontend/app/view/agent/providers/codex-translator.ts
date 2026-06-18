@@ -1,8 +1,9 @@
 // Copyright 2025, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SessionStats, StreamEvent, ToolCallEvent, ToolResultEvent } from "../types";
+import type { SessionStats, StreamEvent } from "../types";
 import type { OutputTranslator } from "./translator";
+import { ToolCorrelator, wrapOutput } from "./tool-correlation";
 
 /**
  * Translates Codex CLI `exec --json` NDJSON events into StreamEvent format.
@@ -27,8 +28,8 @@ import type { OutputTranslator } from "./translator";
  * The item.completed events are complete (not streaming deltas) — each carries the full content.
  */
 export class CodexTranslator implements OutputTranslator {
-    // Map call_id → function name so function_call_output can report the right tool
-    private toolNameByCallId: Map<string, string> = new Map();
+    // Correlates call_id → function name so function_call_output reports the right tool.
+    private tools = new ToolCorrelator();
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -124,7 +125,6 @@ export class CodexTranslator implements OutputTranslator {
             case "function_call": {
                 const name: string = item.name ?? "unknown";
                 const callId: string = item.call_id ?? item.id ?? `call-${Date.now()}`;
-                this.toolNameByCallId.set(callId, name);
                 let params: Record<string, any> = {};
                 if (item.arguments) {
                     try {
@@ -133,27 +133,13 @@ export class CodexTranslator implements OutputTranslator {
                         params = { _raw: item.arguments };
                     }
                 }
-                const ev: ToolCallEvent = {
-                    type: "tool_call",
-                    tool: name,
-                    id: callId,
-                    params,
-                };
-                return [ev];
+                return [this.tools.call(name, callId, params)];
             }
 
             case "function_call_output": {
                 const callId: string = item.call_id ?? "";
-                const toolName = this.toolNameByCallId.get(callId) ?? "unknown";
                 const output = item.output ?? "";
-                const ev: ToolResultEvent = {
-                    type: "tool_result",
-                    tool: toolName,
-                    id: callId,
-                    status: "success",
-                    result: typeof output === "string" ? { output } : output,
-                };
-                return [ev];
+                return [this.tools.result(callId, "success", wrapOutput(output))];
             }
 
             case "error": {
@@ -167,6 +153,6 @@ export class CodexTranslator implements OutputTranslator {
     }
 
     reset(): void {
-        this.toolNameByCallId.clear();
+        this.tools.reset();
     }
 }
