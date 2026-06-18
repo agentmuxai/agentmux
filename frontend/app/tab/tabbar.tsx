@@ -192,7 +192,13 @@ function TabBar(props: TabBarProps): JSX.Element {
                             0,
                             window.outerHeight - window.innerHeight - chromeBorderX,
                         );
-                        const firstTabEl = tabBarScrollRef?.firstElementChild as HTMLElement | null;
+                        // Select the first TAB, not firstElementChild — the
+                        // leading .tab-separator (non-macOS hamburger boundary)
+                        // is the first child but a centered 18px sliver, so its
+                        // rect would skew the tear-off anchor's top/left.
+                        const firstTabEl = tabBarScrollRef?.querySelector(
+                            ".tab-drop-wrapper",
+                        ) as HTMLElement | null;
                         const firstTabRect = firstTabEl?.getBoundingClientRect();
                         const tabAnchorX =
                             grabOffset && firstTabRect
