@@ -487,10 +487,13 @@ impl SubprocessController {
             inner.kill_tx = Some(kill_tx);
         }
 
-        // Take ownership of stdin/stdout
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
+        // Take ownership of stdin/stdout (piped via Stdio::piped() in spawn config).
+        let stdin = child.stdin.take()
+            .ok_or_else(|| format!("[subprocess] stdin not captured for block {}", self.block_id))?;
+        let stdout = child.stdout.take()
+            .ok_or_else(|| format!("[subprocess] stdout not captured for block {}", self.block_id))?;
+        let stderr = child.stderr.take()
+            .ok_or_else(|| format!("[subprocess] stderr not captured for block {}", self.block_id))?;
 
         // Write user message to stdin, then close it.
         // CRITICAL: This must complete BEFORE the child's stdin timeout

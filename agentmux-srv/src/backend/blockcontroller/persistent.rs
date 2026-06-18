@@ -662,8 +662,10 @@ impl PersistentSubprocessController {
         }
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
-        let stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
+        let stdin = child.stdin.take()
+            .ok_or_else(|| format!("[persistent] stdin not captured for block {}", self.block_id))?;
+        let stdout = child.stdout.take()
+            .ok_or_else(|| format!("[persistent] stdout not captured for block {}", self.block_id))?;
         let stderr = child.stderr.take();
 
         // Drain stderr in background — log lines for debugging
