@@ -191,7 +191,7 @@ function BlockErrorFallback(props: {
                     <strong>{errName()}:</strong> {errMessage()}
                 </div>
                 <div class="block-error-fallback-meta">
-                    block <code>{shortId()}</code>
+                    pane <code>{shortId()}</code>
                     <Show when={props.viewType}>
                         {" · view "}
                         <code>{props.viewType}</code>
