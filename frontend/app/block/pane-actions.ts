@@ -207,10 +207,10 @@ export function buildPaneContextMenu(
         { type: "separator" },
         ...buildReplaceSubmenu(blockData),
         {
-            label: opts.magnified ? "Un-Magnify Block" : "Magnify Block",
+            label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane",
             click: opts.onMagnifyToggle,
         },
-        { label: "Close Block", click: opts.onClose },
+        { label: "Close Pane", click: opts.onClose },
         // Inspect Element — opens CEF DevTools focused on whatever was
         // under the right-click. Only appears when `inspectAt` was supplied
         // (call sites that don't capture click coords don't get the entry).
