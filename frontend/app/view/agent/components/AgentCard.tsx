@@ -22,6 +22,7 @@
 import { createMemo, onMount, Show, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { RuntimeBadge } from "./RuntimeBadge";
 
 interface AgentCardProps {
     agent: AgentDefinition;
@@ -123,6 +124,9 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>
             </span>
+            <Show when={props.agent.agent_type === "host" || props.agent.agent_type === "container"}>
+                <RuntimeBadge runtime={props.agent.agent_type} size="sm" />
+            </Show>
             <Show when={props.installed === false}>
                 <span class="agent-card-install-ribbon" aria-hidden="true">
                     Click to install

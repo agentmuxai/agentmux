@@ -52,6 +52,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import { RuntimeBadge } from "./RuntimeBadge";
 
 /** ms epoch → human-readable relative timestamp. Centralized here +
  * exported so unit tests can pin its boundary behavior. */
@@ -289,6 +290,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         title="Open in another pane"
                                                         aria-label="Active"
                                                     />
+                                                </Show>
+                                                <Show when={row.agent_type === "host" || row.agent_type === "container"}>
+                                                    <RuntimeBadge runtime={row.agent_type} size="sm" />
                                                 </Show>
                                                 <span class="agent-recent-sessions-meta">
                                                     {row.identity_name || "(ambient creds)"}
