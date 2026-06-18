@@ -61,7 +61,7 @@ import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentQuestionPanel, type AnswerOutcome } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
-import { AgentFooter, AgentWorkingRow, AgentAuxInfoBar } from "./components/AgentFooter";
+import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
