@@ -61,12 +61,22 @@ fi
 # Run the real bump CLI.
 bump "$@"
 
-# Sync package-lock.json directly. --ignore-scripts keeps lifecycle hooks from
-# running during what should be a pure metadata operation.
+# Sync package-lock.json: update only the version field(s) instead of running
+# npm install --package-lock-only. The full-install path regenerates peer/dev
+# metadata based on the local npm version, producing large noisy diffs when
+# the machine's npm differs from whatever wrote the committed lockfile (P2 on
+# #1548). A targeted node edit avoids that churn — dependency graph unchanged.
 echo ""
 echo "bump-wrapper: syncing package-lock.json …"
-npm install --package-lock-only --ignore-scripts >/dev/null 2>&1 || {
-    echo "ERROR: npm install --package-lock-only failed; lockfile is out of sync" >&2
+node -e "
+  const fs = require('fs');
+  const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+  const ver = require('./package.json').version;
+  lock.version = ver;
+  if (lock.packages && lock.packages['']) lock.packages[''].version = ver;
+  fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
+" 2>/dev/null || {
+    echo "ERROR: package-lock.json version update failed" >&2
     exit 1
 }
 

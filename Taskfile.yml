@@ -28,9 +28,19 @@ tasks:
             - bash scripts/changeset.sh {{.CLI_ARGS}}
 
     release:
-        desc: 'Consume pending changesets, bump version, update VERSION_HISTORY (no commit). Pass --dry-run to preview. RFC #857 Phase 2.'
+        desc: 'Consume pending changesets, auto-detect bump type (major>minor>patch), update VERSION_HISTORY (no commit). Use release:patch or release:minor to force a type. Pass -- --dry-run to preview.'
         cmds:
             - bash scripts/release.sh {{.CLI_ARGS}}
+
+    release:patch:
+        desc: 'Consume pending changesets, force PATCH bump regardless of changeset types, update VERSION_HISTORY (no commit). Then: git commit -m "chore: release vX.Y.Z" && git push.'
+        cmds:
+            - bash scripts/release.sh --as patch
+
+    release:minor:
+        desc: 'Consume pending changesets, force MINOR bump regardless of changeset types, update VERSION_HISTORY (no commit). Then: git commit -m "chore: release vX.Y.Z" && git push.'
+        cmds:
+            - bash scripts/release.sh --as minor
 
     package:local:
         desc: 'Alias of `task package` (which is now itself ephemeral — no bump, no git mutation, unique stamped label per build). Kept for muscle memory.'

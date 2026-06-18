@@ -20,8 +20,8 @@ The benchmark was written to:
    reduces P95 echo latency before/after.
 2. Give agents and CI a repeatable, non-visual, agent-driveable tool for
    catching future regressions on the terminal render path.
-3. Complement the CDP-based `scripts/bench-cdp.mjs` (scroll FPS / heap
-   baseline) with a PTY-path-specific instrument.
+3. Complement CDP-based scroll FPS / heap baselines with a PTY-path-specific
+   instrument (`scripts/bench-cdp.mjs` was removed in the scripts cleanup).
 
 ---
 
@@ -157,7 +157,7 @@ Full format documented in `SPEC_TEST_API_ACCESS.md` §5.
 
 | File | Purpose |
 |---|---|
-| `scripts/bench-cdp.mjs` | CDP-based scroll FPS + heap measurement |
+| ~~`scripts/bench-cdp.mjs`~~ | *(removed — scripts cleanup 2026-06-18)* |
 | `scripts/benchmarks/` | Startup time + memory + bundle size |
 | `tools/tests/authfile.ps1` | PowerShell helper to read `authkey.dev` |
 | `tools/tests/pane-focus-stress.ps1` | App API harness via service endpoint |
@@ -332,6 +332,6 @@ This is left to a follow-up PR once baselines are established.
 - `SPEC_TEST_API_ACCESS.md` — authkey.dev format, security model
 - `tools/tests/README.md` — test harness documentation
 - `tools/tests/authfile.ps1` — PowerShell equivalent helper
-- `scripts/bench-cdp.mjs` — CDP-based scroll FPS benchmark
+- ~~`scripts/bench-cdp.mjs`~~ — removed (scripts cleanup 2026-06-18)
 - `frontend/app/view/term/termwrap.ts` — the fixed code
 - PR #926 — writeInFlight fix + perf marks

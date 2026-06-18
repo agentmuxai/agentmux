@@ -238,12 +238,27 @@ task changeset -- patch "fix(scope): short description"
 
 This creates a uniquely-named `.changesets/<id>.md` you commit with your code. Parallel-agent PRs never conflict on version files because they each have their own changeset filename.
 
-A separate **release PR** consumes pending changesets:
+A separate **release PR** consumes pending changesets. The bump type is auto-detected from the highest changeset type present (`major > minor > patch`). To force a specific type, use the explicit task variants:
 
 ```bash
-task release    # processes .changesets/, bumps version, updates VERSION_HISTORY
+# Auto-detect bump type (recommended for normal releases):
+task release
+
+# Force a specific type regardless of changeset contents:
+task release:patch   # force patch even if feat changesets are present
+task release:minor   # force minor even if only fix changesets are present
+
+# Preview what would land without touching anything:
+task release -- --dry-run
+
+# After any of the above — all 5 version files are staged automatically:
 git commit -m "chore: release v<X.Y.Z>"
+git push -u origin <branch>
 ```
+
+> **Do not** use `task release --as patch` — `task` parses `--as` as its own flag and exits with an error. Use `task release:patch` instead.
+
+Release PRs must contain **only**: changeset deletions, `VERSION_HISTORY.md` entry, and version bumps in `package.json`, `Cargo.toml`, `Cargo.lock`, `package-lock.json`. No feature code, cleanup, or analysis docs.
 
 The release flow internally uses [`@a5af/bump-cli`](https://github.com/a5af/bump-cli) via `scripts/bump-wrapper.sh`. Config lives in `.bump.json`. See [BUILD.md](./BUILD.md), [.changesets/README.md](./.changesets/README.md), and [docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md](./docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md) for the full workflow.
 
@@ -281,10 +296,12 @@ gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
 
 ```bash
 # 1. Consume pending changesets, bump version, update VERSION_HISTORY
-task release
-git diff --staged                      # review what would land
+#    All 5 version files are staged automatically — no manual git add.
+task release              # auto-detect bump type from changesets
+task release:patch        # or force patch / minor regardless of changeset types
+git diff --staged         # review: should contain ONLY changeset deletions + version bumps
 git commit -m "chore: release v0.X.Y"
-git push -u origin agenta/release-v0.X.Y
+git push -u origin <agent>/release-v0.X.Y
 # ... open release PR, merge to main after review
 
 # 2. Tag once merged on main
