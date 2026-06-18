@@ -161,6 +161,16 @@ function installFloatingRedockHoverListener(): void {
         }
     };
 
+    // Dwell gate — mirrors the 180ms gate in floating-pane-workspace.tsx.
+    // On Windows, Win32BeginMoveTask emits floating-redock:hover-state every
+    // 50ms unconditionally; without this gate the ghost appears immediately on
+    // cursor entry. On non-Windows the floater's IPC is already gated so the
+    // event only arrives after 180ms — the gate here is a no-op there but
+    // keeps both paths in sync if the upstream constant changes.
+    const REDOCK_DWELL_MS = 180;
+    let dwellTarget: string | null = null;
+    let dwellSince = 0;
+
     fireAndForget(async () => {
         const { listenEvent } = await import("@/app/platform/ipc");
         const { determineDropDirection } = await import("@/layout/lib/utils");
@@ -170,10 +180,25 @@ function installFloatingRedockHoverListener(): void {
             cursor_x?: number;
             cursor_y?: number;
         }>("floating-redock:hover-state", (payload) => {
-            if (!payload || payload.target_label !== myLabel) {
+            const newTarget = payload?.target_label ?? null;
+            if (!payload || newTarget !== myLabel) {
+                // Target changed away from us or cleared — reset dwell and hide ghost.
+                if (dwellTarget !== null) {
+                    dwellTarget = null;
+                    dwellSince = 0;
+                }
                 clearPlaceholder();
                 return;
             }
+            // Cursor is over our window. Start or continue dwell clock.
+            const now = performance.now();
+            if (dwellTarget !== myLabel) {
+                dwellTarget = myLabel;
+                dwellSince = now;
+            }
+            // Ghost only appears after the dwell has elapsed.
+            if (now - dwellSince < REDOCK_DWELL_MS) return;
+
             const cursorX = payload.cursor_x;
             const cursorY = payload.cursor_y;
             if (typeof cursorX !== "number" || typeof cursorY !== "number") {
