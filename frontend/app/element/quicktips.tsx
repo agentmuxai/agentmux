@@ -109,7 +109,7 @@ const QuickTips = (): JSX.Element => {
                             <i class="fa-solid fa-sharp fa-window-maximize fa-fw" />
                         </IconBox>
                         <div class="flex flex-col gap-0.5 flex-1">
-                            <span class="text-[15px]">Maximize a Block</span>
+                            <span class="text-[15px]">Maximize a Pane</span>
                             <KeyBinding keyDecl="Cmd:m" />
                         </div>
                     </div>
@@ -126,14 +126,14 @@ const QuickTips = (): JSX.Element => {
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-cog fa-fw" />
                         </IconBox>
-                        <span class="text-[15px]">Block Settings</span>
+                        <span class="text-[15px]">Pane Settings</span>
                     </div>
                     <div class="flex items-center gap-3 p-2 rounded-md hover:bg-white/5 transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-xmark-large fa-fw" />
                         </IconBox>
                         <div class="flex flex-col gap-0.5 flex-1">
-                            <span class="text-[15px]">Close Block</span>
+                            <span class="text-[15px]">Close Pane</span>
                             <KeyBinding keyDecl="Cmd:w" />
                         </div>
                     </div>
@@ -156,7 +156,7 @@ const QuickTips = (): JSX.Element => {
                             <KeyBinding keyDecl="Cmd:t" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">New Terminal Block</span>
+                            <span class="text-[15px]">New Terminal Pane</span>
                             <KeyBinding keyDecl="Cmd:n" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
@@ -185,14 +185,14 @@ const QuickTips = (): JSX.Element => {
 
                     <div class="flex flex-col gap-1.5">
                         <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
-                            Block Navigation (Ctrl-Shift)
+                            Pane Navigation (Ctrl-Shift)
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">Navigate Between Blocks</span>
+                            <span class="text-[15px]">Navigate Between Panes</span>
                             <KeyBinding keyDecl="Ctrl:Shift:Arrows" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">Focus Nth Block</span>
+                            <span class="text-[15px]">Focus Nth Pane</span>
                             <KeyBinding keyDecl="Ctrl:Shift:Digit" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
@@ -203,7 +203,7 @@ const QuickTips = (): JSX.Element => {
 
                     <div class="flex flex-col gap-1.5">
                         <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
-                            Split Blocks
+                            Split Panes
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
                             <span class="text-[15px]">Split Right</span>
