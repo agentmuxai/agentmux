@@ -24,9 +24,20 @@
 //!                           AGENTMUX_AGENT_BUS_ID, so this fallback is what
 //!                           makes the Shell tool functional.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::time::Duration;
+
 use anyhow::Result;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::task::JoinHandle;
+
+/// In-process registry of running loops (loop_id → task handle), used by
+/// `Loop` (insert) and `LoopStop` (remove + abort). Loops live in this MCP
+/// process, so they stop automatically when the agent pane / session ends.
+type LoopRegistry = Mutex<HashMap<String, JoinHandle<()>>>;
 
 const SHELL_TOOL: &str = r#"{
   "name": "Shell",
@@ -168,6 +179,33 @@ const OPEN_EDITOR_TOOL: &str = r#"{
   }
 }"#;
 
+const LOOP_TOOL: &str = r#"{
+  "name": "Loop",
+  "description": "Run a prompt or slash command on a recurring interval by re-injecting it into a conversation. AgentMux's analogue of Claude's /loop. Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you stop it with LoopStop(loop_id). Use for polling/babysitting tasks ('check the deploy every 5m', 'keep running /babysit-prs'). Loops stop automatically when the agent pane closes. Do NOT use for one-off tasks.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "prompt":    { "type": "string", "description": "The prompt or slash command to inject each interval (e.g. 'check the PR status' or '/babysit-prs')" },
+      "interval":  { "type": "string", "description": "How often to run: a number with optional unit s/m/h (e.g. '30s', '5m', '1h'). A bare number is minutes. Default '10m'. Minimum 10s." },
+      "to":        { "type": "string", "description": "Target agent name (its AGENTMUX_AGENT_ID) to inject into. Defaults to this agent itself (a self-loop)." },
+      "immediate": { "type": "boolean", "description": "Run once immediately on start in addition to every interval. Default false (first run after one interval)." }
+    },
+    "required": ["prompt"]
+  }
+}"#;
+
+const LOOP_STOP_TOOL: &str = r#"{
+  "name": "LoopStop",
+  "description": "Stop a recurring loop started by Loop(). Pass the loop_id it returned. Loops also stop automatically when the agent pane closes.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "loop_id": { "type": "string", "description": "The loop_id returned by a prior Loop() call" }
+    },
+    "required": ["loop_id"]
+  }
+}"#;
+
 #[tokio::main]
 async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
@@ -192,6 +230,11 @@ async fn main() {
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("http client");
+
+    // Running loops, keyed by loop_id. Lives for this MCP process's lifetime
+    // (== the agent session), so loops are reaped when the agent pane closes.
+    let loops: LoopRegistry = Mutex::new(HashMap::new());
+    let loop_counter = AtomicU64::new(0);
 
     let stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
@@ -252,14 +295,16 @@ async fn main() {
                 let new_tab: Value = serde_json::from_str(NEW_TAB_TOOL).expect("static json");
                 let focus_window: Value =
                     serde_json::from_str(FOCUS_WINDOW_TOOL).expect("static json");
+                let loop_tool: Value = serde_json::from_str(LOOP_TOOL).expect("static json");
+                let loop_stop: Value = serde_json::from_str(LOOP_STOP_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop] }
                 })
             }
             "tools/call" => {
-                match call_tool(&params, &local_url, &auth_key, &block_id, &client).await {
+                match call_tool(&params, &local_url, &auth_key, &block_id, &client, &loops, &loop_counter).await {
                     Ok(content) => json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -311,6 +356,8 @@ async fn call_tool(
     auth_key: &str,
     block_id: &str,
     client: &reqwest::Client,
+    loops: &LoopRegistry,
+    loop_counter: &AtomicU64,
 ) -> Result<String> {
     let name = params
         .get("name")
@@ -787,7 +834,151 @@ async fn call_tool(
             }
             Ok("Focused window".to_string())
         }
+        "Loop" => {
+            let prompt = arguments
+                .get("prompt")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: prompt"))?
+                .to_string();
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            // Target: explicit `to`, else self (this agent's AGENTMUX_AGENT_ID).
+            let self_id = std::env::var("AGENTMUX_AGENT_ID")
+                .ok()
+                .filter(|s| !s.is_empty());
+            let target = arguments
+                .get("to")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| self_id.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no loop target: pass `to`, or ensure AGENTMUX_AGENT_ID is set for a self-loop"
+                    )
+                })?;
+
+            let interval_str = arguments
+                .get("interval")
+                .and_then(|v| v.as_str())
+                .unwrap_or("10m")
+                .to_string();
+            let interval = parse_interval(&interval_str)?;
+            let immediate = arguments
+                .get("immediate")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let n = loop_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            let loop_id = format!("loop-{n}");
+
+            // Each loop is an independent task that re-injects the prompt on the
+            // fixed interval (fire-and-forget; no idle-wait — InjectionRequest
+            // .wait_for_idle is dead scaffolding that srv never reads).
+            let interval_display = format_duration(interval);
+            let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
+            let task_client = client.clone();
+            let task_auth = auth_key.to_string();
+            let task_target = target.clone();
+            let task_source = self_id;
+            let handle = tokio::spawn(async move {
+                if !immediate {
+                    tokio::time::sleep(interval).await;
+                }
+                loop {
+                    let mut body = json!({
+                        "target_agent": task_target,
+                        "message": prompt,
+                    });
+                    if let Some(src) = &task_source {
+                        body["source_agent"] = json!(src);
+                    }
+                    let _ = task_client
+                        .post(&url)
+                        .header("X-AuthKey", &task_auth)
+                        .json(&body)
+                        .send()
+                        .await;
+                    tokio::time::sleep(interval).await;
+                }
+            });
+
+            loops
+                .lock()
+                .unwrap()
+                .insert(loop_id.clone(), handle);
+
+            Ok(format!(
+                "Started {loop_id}: injecting to '{target}' every {interval_display}\
+                 {}. Stop with LoopStop({loop_id}).",
+                if immediate { " (first run now)" } else { "" }
+            ))
+        }
+        "LoopStop" => {
+            let loop_id = arguments
+                .get("loop_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: loop_id"))?;
+
+            let removed = loops.lock().unwrap().remove(loop_id);
+            match removed {
+                Some(handle) => {
+                    handle.abort();
+                    Ok(format!("stopped {loop_id}"))
+                }
+                None => Ok(format!("{loop_id} was not running (unknown or already stopped)")),
+            }
+        }
         _ => anyhow::bail!("unknown tool: {name}"),
+    }
+}
+
+/// Parse a loop interval string into a `Duration`. Accepts a number with an
+/// optional unit suffix: `s` (seconds), `m` (minutes), `h` (hours); a bare
+/// number is treated as minutes. Clamped to [10s, 24h].
+fn parse_interval(s: &str) -> Result<Duration> {
+    let s = s.trim();
+    if s.is_empty() {
+        anyhow::bail!("interval is empty");
+    }
+    let (num_part, mult_secs) = if let Some(n) = s.strip_suffix('s').or_else(|| s.strip_suffix('S')) {
+        (n, 1.0_f64)
+    } else if let Some(n) = s.strip_suffix('m').or_else(|| s.strip_suffix('M')) {
+        (n, 60.0)
+    } else if let Some(n) = s.strip_suffix('h').or_else(|| s.strip_suffix('H')) {
+        (n, 3600.0)
+    } else {
+        (s, 60.0) // bare number → minutes
+    };
+    let val: f64 = num_part
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid interval '{s}' (expected e.g. 30s, 5m, 1h)"))?;
+    if !val.is_finite() || val <= 0.0 {
+        anyhow::bail!("interval must be a positive number: '{s}'");
+    }
+    let secs = (val * mult_secs).round() as u64;
+    Ok(Duration::from_secs(secs.clamp(10, 24 * 3600)))
+}
+
+/// Human-readable representation of a clamped Duration — used in the Loop
+/// success message so the reported cadence matches the actual run cadence.
+fn format_duration(d: Duration) -> String {
+    let s = d.as_secs();
+    if s % 3600 == 0 {
+        format!("{}h", s / 3600)
+    } else if s % 60 == 0 {
+        format!("{}m", s / 60)
+    } else {
+        format!("{}s", s)
     }
 }
 
@@ -798,7 +989,7 @@ mod tests {
     /// Every tool advertised by `tools/list` must be valid JSON with a `name`
     /// and `inputSchema` — the server `expect("static json")`s these at runtime,
     /// so a malformed const would panic on the first `tools/list`. Also pins the
-    /// post-consolidation tool count (was 17; now 11). See
+    /// tool count (11 original + 2 loop tools = 13). See
     /// SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md §10.
     #[test]
     fn all_tool_defs_are_valid_json_with_names() {
@@ -814,8 +1005,10 @@ mod tests {
             SET_ACTIVE_TAB_TOOL,
             NEW_TAB_TOOL,
             FOCUS_WINDOW_TOOL,
+            LOOP_TOOL,
+            LOOP_STOP_TOOL,
         ];
-        assert_eq!(defs.len(), 11, "tools/list advertises 11 tools after the 17→11 consolidation");
+        assert_eq!(defs.len(), 13, "tools/list advertises 13 tools (11 original + Loop + LoopStop)");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
@@ -845,5 +1038,18 @@ mod tests {
             .as_array()
             .expect("SetName.required is an array");
         assert_eq!(required.len(), 2, "SetName requires both target and name");
+    }
+
+    #[test]
+    fn parse_interval_handles_units() {
+        assert_eq!(parse_interval("30s").unwrap(), Duration::from_secs(30));
+        assert_eq!(parse_interval("5m").unwrap(), Duration::from_secs(300));
+        assert_eq!(parse_interval("1h").unwrap(), Duration::from_secs(3600));
+        assert_eq!(parse_interval("10").unwrap(), Duration::from_secs(600)); // bare = minutes
+    }
+
+    #[test]
+    fn parse_interval_clamps_minimum() {
+        assert_eq!(parse_interval("1s").unwrap(), Duration::from_secs(10)); // clamp to 10s
     }
 }
