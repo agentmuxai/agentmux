@@ -47,6 +47,11 @@ use crate::backend::history::HistoryService;
 use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
 use crate::backend::wps::Broker;
+use agentmux_common::api_types::{
+    PaneTitleRequest, ShellCreateRequest, ShellCreateResponse, ShellStopRequest,
+    TabActivateRequest, TabNameRequest, TabNewRequest, WindowFocusRequest, WindowNameRequest,
+    WorkspaceNameRequest, WpsPublishRequest,
+};
 
 // ---- AppState ----
 
@@ -437,34 +442,6 @@ async fn stub_501() -> impl IntoResponse {
     )
 }
 
-/// Wire shape for `POST /agentmux/wps/publish`. Mirrors `WaveEvent`
-/// but keeps the field set narrow for what `agentmux-bashwrap`
-/// actually needs (no `sender`).
-#[derive(serde::Deserialize)]
-struct WpsPublishRequest {
-    /// WPS event name. We use a fixed `tool_chunk` for every
-    /// streaming chunk (the tool_use_id lives in the payload), but
-    /// the handler is general-purpose.
-    event: String,
-    /// Optional scope filters (e.g. `["block:<id>"]`) so only
-    /// subscribers watching that block receive the event.
-    #[serde(default)]
-    scopes: Vec<String>,
-    /// Per-scope event ring size. Lets late subscribers replay
-    /// events that landed before they subscribed. agentmux-bashwrap
-    /// sets this to 1024 for `tool_chunk` so the frontend's
-    /// subscription (installed on pane mount) picks up chunks that
-    /// flew before Claude's stream-json caught up enough to surface
-    /// the tool_use_id. Zero (or omitted) disables persistence —
-    /// pure fan-out. See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §6.
-    #[serde(default)]
-    persist: usize,
-    /// Free-form payload. For tool_chunk events this is the
-    /// `{op, kind, content, timestamp}` shape from
-    /// `SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.3.
-    data: serde_json::Value,
-}
-
 /// Auth-gated WPS publish endpoint
 /// (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §3.2). `agentmux-bashwrap`
 /// POSTs here while running a Bash command; we forward to the
@@ -482,28 +459,6 @@ async fn handle_wps_publish(
     };
     state.broker.publish(event);
     (StatusCode::OK, Json(json!({"ok": true})))
-}
-
-// ---- Shell create ----
-
-#[derive(serde::Deserialize)]
-struct ShellCreateRequest {
-    /// Block UUID of the agent pane that launched the shell.
-    /// Events will be scoped to `block:<agent_block_id>` so only
-    /// that pane's subscription receives them.
-    agent_block_id: String,
-    cmd: String,
-    #[serde(default)]
-    cwd: Option<String>,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    env: Option<std::collections::HashMap<String, String>>,
-}
-
-#[derive(serde::Serialize)]
-struct ShellCreateResponse {
-    shell_id: String,
 }
 
 /// `POST /api/v1/shell/create` — start a persistent background shell.
@@ -619,13 +574,6 @@ async fn handle_shell_create(
     (StatusCode::OK, Json(ShellCreateResponse { shell_id }))
 }
 
-// ---- Shell stop ----
-
-#[derive(serde::Deserialize)]
-struct ShellStopRequest {
-    shell_id: String,
-}
-
 /// `POST /api/v1/shell/stop` — stop a running persistent shell.
 ///
 /// Called by `agentmux-mcp`'s `ShellStop` tool. Tree-kills the shell's
@@ -689,19 +637,6 @@ async fn handle_self(
         Ok(ctx) => Json(serde_json::to_value(&ctx).unwrap_or_default()).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
     }
-}
-
-#[derive(serde::Deserialize)]
-struct WindowNameRequest {
-    /// Block UUID of the calling agent pane (`AGENTMUX_BLOCKID`); used to
-    /// resolve the caller's own window when `window_id` is omitted.
-    #[serde(default)]
-    block_id: Option<String>,
-    /// New display name; drives the OS/taskbar title. Trimmed; clamped to 64.
-    name: String,
-    /// Explicit target window. Defaults to the caller's own window.
-    #[serde(default)]
-    window_id: Option<String>,
 }
 
 /// `POST /api/v1/window/name` — set a window's display name
@@ -769,18 +704,6 @@ fn clean_name(raw: &str, max: usize) -> Option<String> {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct TabNameRequest {
-    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the caller's
-    /// own tab when `tab_id` is omitted.
-    #[serde(default)]
-    block_id: Option<String>,
-    /// Explicit target tab; defaults to the caller's own tab.
-    #[serde(default)]
-    tab_id: Option<String>,
-    name: String,
-}
-
 /// `POST /api/v1/tab/name` — rename a tab. Defaults to the caller's own tab
 /// (resolved from `block_id`). Routes through `object.UpdateTabName`.
 async fn handle_tab_name(
@@ -805,15 +728,6 @@ async fn handle_tab_name(
         args: vec![json!(tab_id), json!(name)],
     };
     finish_name_call(&state, call, json!({ "success": true, "tab_id": tab_id, "name": name })).await
-}
-
-#[derive(serde::Deserialize)]
-struct PaneTitleRequest {
-    /// Calling agent's block id (`AGENTMUX_BLOCKID`) — the pane to title by
-    /// default. Set `block_id` to title a different pane you own.
-    #[serde(default)]
-    block_id: Option<String>,
-    title: String,
 }
 
 /// `POST /api/v1/pane/title` — set a pane's display title (`frame:title`).
@@ -841,18 +755,6 @@ async fn handle_pane_title(
         ],
     };
     finish_name_call(&state, call, json!({ "success": true, "block_id": block_id, "title": title })).await
-}
-
-#[derive(serde::Deserialize)]
-struct WorkspaceNameRequest {
-    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the caller's
-    /// own workspace when `workspace_id` is omitted.
-    #[serde(default)]
-    block_id: Option<String>,
-    /// Explicit target workspace; defaults to the caller's own.
-    #[serde(default)]
-    workspace_id: Option<String>,
-    name: String,
 }
 
 /// `POST /api/v1/workspace/name` — rename a workspace. Defaults to the
@@ -959,12 +861,6 @@ async fn handle_list_tabs(
     Json(service::agent_tabs(&state.wstore, ws_id.as_deref()))
 }
 
-#[derive(serde::Deserialize)]
-struct TabActivateRequest {
-    /// Tab to switch to (required).
-    tab_id: String,
-}
-
 /// `POST /api/v1/tab/activate` — make `tab_id` the active tab in its
 /// workspace. Routes through `workspace.SetActiveTab`.
 async fn handle_tab_activate(
@@ -986,20 +882,6 @@ async fn handle_tab_activate(
         args: vec![json!(ws_id), json!(tab_id)],
     };
     finish_name_call(&state, call, json!({ "success": true, "tab_id": tab_id })).await
-}
-
-#[derive(serde::Deserialize)]
-struct TabNewRequest {
-    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the workspace
-    /// the new tab is created in when `workspace_id` is omitted.
-    #[serde(default)]
-    block_id: Option<String>,
-    /// Explicit target workspace; defaults to the caller's own.
-    #[serde(default)]
-    workspace_id: Option<String>,
-    /// Optional tab name; the backend auto-generates `tab{N}` when empty.
-    #[serde(default)]
-    name: Option<String>,
 }
 
 /// `POST /api/v1/tab/new` — create (and activate) a new tab in the caller's
@@ -1025,17 +907,6 @@ async fn handle_tab_new(
         args: vec![json!(workspace_id), json!(name), json!(true)],
     };
     finish_name_call(&state, call, json!({ "success": true, "workspace_id": workspace_id })).await
-}
-
-#[derive(serde::Deserialize)]
-struct WindowFocusRequest {
-    /// Calling agent's block id (`AGENTMUX_BLOCKID`); resolves the caller's
-    /// own window when `window_id` is omitted.
-    #[serde(default)]
-    block_id: Option<String>,
-    /// Explicit target window; defaults to the caller's own.
-    #[serde(default)]
-    window_id: Option<String>,
 }
 
 /// `POST /api/v1/window/focus` — bring a window to the foreground. Defaults to

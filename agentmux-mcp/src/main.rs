@@ -29,6 +29,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use agentmux_common::api_types::{
+    InjectRequest, PaneOpenRequest, PaneOpenResponse, ShellCreateRequest, ShellCreateResponse,
+    ShellStopRequest, ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest,
+    WindowFocusRequest, WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest,
+};
 use anyhow::Result;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -393,29 +398,27 @@ async fn call_tool(
                 .get("title")
                 .and_then(|v| v.as_str())
                 .unwrap_or(cmd);
-            let cwd = arguments.get("cwd").and_then(|v| v.as_str());
-            let env = arguments.get("env").cloned();
+            let cwd = arguments.get("cwd").and_then(|v| v.as_str()).map(str::to_string);
+            let env = arguments
+                .get("env")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
 
             let url = format!(
                 "{}/api/v1/shell/create",
                 local_url.trim_end_matches('/')
             );
-            let mut body = json!({
-                "agent_block_id": block_id,
-                "cmd": cmd,
-                "title": title,
-            });
-            if let Some(cwd) = cwd {
-                body["cwd"] = json!(cwd);
-            }
-            if let Some(env) = env {
-                body["env"] = env;
-            }
+            let req = ShellCreateRequest {
+                agent_block_id: block_id.to_string(),
+                cmd: cmd.to_string(),
+                title: Some(title.to_string()),
+                cwd,
+                env,
+            };
 
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&body)
+                .json(&req)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -426,16 +429,12 @@ async fn call_tool(
                 anyhow::bail!("shell/create failed: HTTP {status} — {text}");
             }
 
-            let result: Value = resp
+            let result: ShellCreateResponse = resp
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            let shell_id = result
-                .get("shell_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
 
-            Ok(shell_id.to_string())
+            Ok(result.shell_id)
         }
         "ShellStop" => {
             let shell_id = arguments
@@ -454,7 +453,7 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&json!({ "shell_id": shell_id }))
+                .json(&ShellStopRequest { shell_id: shell_id.to_string() })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -465,12 +464,11 @@ async fn call_tool(
                 anyhow::bail!("shell/stop failed: HTTP {status} — {text}");
             }
 
-            let result: Value = resp
+            let result: ShellStopResponse = resp
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            let stopped = result.get("stopped").and_then(|v| v.as_bool()).unwrap_or(false);
-            Ok(if stopped {
+            Ok(if result.stopped {
                 format!("stopped shell {shell_id}")
             } else {
                 format!("shell {shell_id} was not running (unknown or already exited)")
@@ -497,35 +495,43 @@ async fn call_tool(
                 .unwrap_or("right");
 
             let url = format!("{}/api/v1/pane/open", local_url.trim_end_matches('/'));
-            let mut body = json!({
-                "view": "editor",
-                "file": file,
-                "focus": true,
-            });
             // Place the editor relative to the calling agent pane when we know
             // its block id (AGENTMUX_BLOCKID); otherwise the sidecar inserts it
             // at the tab root.
-            if !block_id.is_empty() {
-                body["split_direction"] = json!(split);
-                body["split_reference_block_id"] = json!(block_id);
-            }
-            if let Some(title) = arguments.get("title").and_then(|v| v.as_str()) {
-                body["title"] = json!(title);
-            }
-            // `collapse_tree: true` → open with the file-tree sidebar collapsed.
-            // Maps to the editor's `tree_expanded` meta (collapsed == not expanded).
-            if arguments.get("collapse_tree").and_then(|v| v.as_bool()) == Some(true) {
-                body["tree_expanded"] = json!(false);
-            }
-            // `floating: true` → open in a floating window instead of a docked split.
-            if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
-                body["floating"] = json!(true);
-            }
+            let (split_direction, split_reference_block_id) = if block_id.is_empty() {
+                (None, None)
+            } else {
+                (Some(split.to_string()), Some(block_id.to_string()))
+            };
+            let req = PaneOpenRequest {
+                view: "editor".to_string(),
+                file: Some(file.to_string()),
+                focus: Some(true),
+                split_direction,
+                split_reference_block_id,
+                title: arguments.get("title").and_then(|v| v.as_str()).map(str::to_string),
+                // `collapse_tree: true` → open with the file-tree sidebar collapsed.
+                // Maps to the editor's `tree_expanded` meta (collapsed == not expanded).
+                tree_expanded: if arguments.get("collapse_tree").and_then(|v| v.as_bool()) == Some(true) {
+                    Some(false)
+                } else {
+                    None
+                },
+                // `floating: true` → open in a floating window instead of a docked split.
+                floating: if arguments.get("floating").and_then(|v| v.as_bool()) == Some(true) {
+                    Some(true)
+                } else {
+                    None
+                },
+                url: None,
+                cwd: None,
+                tab_id: None,
+            };
 
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&body)
+                .json(&req)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -536,16 +542,12 @@ async fn call_tool(
                 anyhow::bail!("pane.open failed: HTTP {status} — {text}");
             }
 
-            let result: Value = resp
+            let result: PaneOpenResponse = resp
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            let block = result
-                .get("block_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
 
-            Ok(format!("Opened {file} in editor pane (block {block})"))
+            Ok(format!("Opened {file} in editor pane (block {})", result.block_id))
         }
         "SendMessage" => {
             let to = arguments
@@ -574,18 +576,16 @@ async fn call_tool(
                 "{}/agentmux/reactive/inject",
                 local_url.trim_end_matches('/')
             );
-            let mut body = json!({
-                "target_agent": to,
-                "message": message,
-            });
-            if let Some(src) = source_agent {
-                body["source_agent"] = json!(src);
-            }
+            let req = InjectRequest {
+                target_agent: to.to_string(),
+                message: message.to_string(),
+                source_agent,
+            };
 
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&body)
+                .json(&req)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -692,19 +692,34 @@ async fn call_tool(
             require_agent_env(local_url, auth_key, block_id)?;
 
             // window/tab/workspace POST {"name": …} to /…/name; pane POSTs
-            // {"title": …} to /pane/title. `label` is the human-facing echo.
-            let (path, field, label) = match target {
-                "window" => ("window/name", "name", "Window name"),
-                "tab" => ("tab/name", "name", "Tab name"),
-                "workspace" => ("workspace/name", "name", "Workspace name"),
-                "pane" => ("pane/title", "title", "Pane title"),
+            // {"title": …} to /pane/title. `label` and `resp_field` are the
+            // human-facing echo and the response key used to surface the
+            // server-applied value (e.g. a window name clamped to 64 chars).
+            let (path, label, resp_field, body) = match target {
+                "window" => ("window/name", "Window name", "name", serde_json::to_value(WindowNameRequest {
+                    block_id: Some(block_id.to_string()),
+                    name: new_name.to_string(),
+                    window_id: None,
+                })?),
+                "tab" => ("tab/name", "Tab name", "name", serde_json::to_value(TabNameRequest {
+                    block_id: Some(block_id.to_string()),
+                    tab_id: None,
+                    name: new_name.to_string(),
+                })?),
+                "workspace" => ("workspace/name", "Workspace name", "name", serde_json::to_value(WorkspaceNameRequest {
+                    block_id: Some(block_id.to_string()),
+                    workspace_id: None,
+                    name: new_name.to_string(),
+                })?),
+                "pane" => ("pane/title", "Pane title", "title", serde_json::to_value(PaneTitleRequest {
+                    block_id: Some(block_id.to_string()),
+                    title: new_name.to_string(),
+                })?),
                 other => anyhow::bail!(
                     "invalid target '{other}' — expected one of: window, tab, pane, workspace"
                 ),
             };
             let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
-            let mut body = json!({ "block_id": block_id });
-            body[field] = json!(new_name);
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
@@ -719,12 +734,11 @@ async fn call_tool(
             }
             // Surface the server-applied value (e.g. a window name clamped to 64
             // chars) when the endpoint echoes it back; fall back to the request.
-            // Restores the pre-consolidation SetWindowName behavior generically.
             let applied = resp
                 .json::<Value>()
                 .await
                 .ok()
-                .and_then(|v| v.get(field).and_then(|s| s.as_str()).map(str::to_string))
+                .and_then(|v| v.get(resp_field).and_then(|s| s.as_str()).map(str::to_string))
                 .unwrap_or_else(|| new_name.to_string());
             Ok(format!("{label} set to \"{applied}\""))
         }
@@ -783,7 +797,7 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&json!({ "tab_id": tab_id }))
+                .json(&TabActivateRequest { tab_id: tab_id.to_string() })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -801,7 +815,11 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&json!({ "block_id": block_id, "name": name }))
+                .json(&TabNewRequest {
+                    block_id: Some(block_id.to_string()),
+                    workspace_id: None,
+                    name: if name.is_empty() { None } else { Some(name.to_string()) },
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -823,7 +841,10 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&json!({ "block_id": block_id, "window_id": window_id }))
+                .json(&WindowFocusRequest {
+                    block_id: Some(block_id.to_string()),
+                    window_id: if window_id.is_empty() { None } else { Some(window_id.to_string()) },
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -893,17 +914,15 @@ async fn call_tool(
                     tokio::time::sleep(interval).await;
                 }
                 loop {
-                    let mut body = json!({
-                        "target_agent": task_target,
-                        "message": prompt,
-                    });
-                    if let Some(src) = &task_source {
-                        body["source_agent"] = json!(src);
-                    }
+                    let req = InjectRequest {
+                        target_agent: task_target.clone(),
+                        message: prompt.clone(),
+                        source_agent: task_source.clone(),
+                    };
                     let _ = task_client
                         .post(&url)
                         .header("X-AuthKey", &task_auth)
-                        .json(&body)
+                        .json(&req)
                         .send()
                         .await;
                     tokio::time::sleep(interval).await;
