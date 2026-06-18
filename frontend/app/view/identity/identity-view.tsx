@@ -155,9 +155,6 @@ function AccountRow(props: { account: Account; selected: boolean; onClick: () =>
                 <Show when={a.display_name}>
                     <span class="identity-display-name">{a.display_name}</span>
                 </Show>
-                <Show when={(a.assigned_agents ?? []).length > 0}>
-                    <span class="identity-agent-count">{a.assigned_agents.length} agent{a.assigned_agents.length !== 1 ? "s" : ""}</span>
-                </Show>
             </div>
             <span class={STATUS_DOT[a.status] ?? STATUS_DOT["unknown"]} title={a.status} />
         </div>
@@ -244,23 +241,29 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                     <DetailField label="Notes" value={account.context.description!} />
                 </Show>
 
-                {/* Assigned agents */}
+                {/* Agent assignments are managed via identity bundles — see Identities tab */}
                 <div class="identity-detail-section">Agents</div>
-                <Show
-                    when={(account.assigned_agents ?? []).length > 0}
-                    fallback={<span class="identity-detail-empty">No agents assigned</span>}
-                >
-                    <div class="identity-agent-chips">
-                        <For each={account.assigned_agents}>
-                            {(agentId) => <span class="identity-agent-chip">{agentId}</span>}
-                        </For>
-                    </div>
-                </Show>
+                <span class="identity-detail-empty">Assigned via Identities tab</span>
 
                 <DetailField label="Created" value={new Date(account.created_at).toLocaleString()} />
             </div>
 
             <div class="identity-detail-actions">
+                {/* Reauth: expired non-OAuth accounts only. OAuth reauth goes through
+                    OAuthConnectPanel which needs the existing accountId threaded through
+                    (not yet wired); opening the edit form here would create a duplicate. */}
+                <Show when={account.status === "expired" && account.kind !== "oauth"}>
+                    <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
+                        Reauth
+                    </button>
+                </Show>
+                {/* Validate: keychain only. plaintext_dev routes through handleSubmit →
+                    updateAccount with no verify call, so it cannot clear unknown status. */}
+                <Show when={account.status === "unknown" && account.secret_ref.backend === "keychain"}>
+                    <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
+                        Validate…
+                    </button>
+                </Show>
                 <button class="identity-btn identity-btn-secondary" onClick={() => model.openEditForm(account)}>
                     Edit
                 </button>
@@ -292,7 +295,7 @@ function DetailField({ label, value }: { label: string; value: string }): JSX.El
 
 function AssignmentsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const accounts = () => model.accountsAtom();
-    const providers = (): AccountProvider[] => ["github", "google", "aws", "openai", "anthropic", "slack", "custom"];
+    const providers = (): AccountProvider[] => ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];
 
     // Collect all unique agent IDs across all accounts
     const agentIds = () => {
@@ -604,6 +607,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             <option value="anthropic">Anthropic</option>
                             <option value="slack">Slack</option>
                             <option value="custom">Custom</option>
+                            <option value="agentmux">AgentMux</option>
                         </select>
                     </FormField>
 
@@ -631,6 +635,9 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                                 <option value="api_key">API Key</option>
                                 <option value="env_ref">Env Reference</option>
                                 <option value="pat">Token</option>
+                            </Show>
+                            <Show when={provider() === "agentmux"}>
+                                <option value="api_key">API Key</option>
                             </Show>
                         </select>
                     </FormField>

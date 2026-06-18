@@ -381,7 +381,7 @@ export class IdentityViewModel implements ViewModel {
     // See SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
-        const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom"];
+        const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];
         for (const p of order) {
             const group = this.accountsAtom().filter((a) => brandForProvider(a.provider) === p);
             if (group.length > 0) map.set(p, group);
