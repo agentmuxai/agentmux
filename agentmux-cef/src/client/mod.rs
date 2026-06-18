@@ -660,14 +660,20 @@ impl AgentMuxHandler {
     }
 
     /// Intercept `target="_blank"` / `window.open()` from embedded pages so
-    /// they don't spawn rogue top-level CEF windows. Instead navigate the
-    /// **current** frame to the target URL — matches the UX expectation
-    /// that AgentMux owns window management, not the page.
+    /// they don't spawn rogue top-level CEF windows.
     ///
-    /// Returning non-zero cancels popup creation. Applies to both main
-    /// and pane clients: main's frontend never relies on `window.open`
-    /// (link clicks go through `openExternal` IPC), and panes explicitly
-    /// don't want popups. See
+    /// Routing depends on who fired the popup and where it points:
+    /// * **App UI → external site** (e.g. the Help pane's GitHub / docs /
+    ///   Discord links): open in the **system browser** and cancel. Navigating
+    ///   the app window itself to an external origin replaces the AgentMux UI
+    ///   and strands the window on "Can't reconnect". See
+    ///   `SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md`.
+    /// * **Browser pane, or internal URL**: navigate the **current** frame to
+    ///   the target URL — matches the UX that AgentMux owns window management,
+    ///   and in a browser pane following a link IS the point.
+    ///
+    /// Returning non-zero cancels popup creation. Applies to both main and pane
+    /// clients; panes explicitly don't want top-level popups. See
     /// specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
     ///
     /// **The `load_url` call is deferred via `post_task`**, not run inline.
@@ -693,6 +699,31 @@ impl AgentMuxHandler {
             // Nothing useful to navigate to; just cancel the popup.
             return true;
         }
+
+        // External links from the app UI (Help pane's "Report Bugs & Issues",
+        // docs, Discord, …) must open in the SYSTEM browser — never navigate
+        // the current frame. Navigating the app's own window to an external
+        // origin replaces the whole AgentMux UI with that site and tears down
+        // the host bridge: the window comes back bridge-dead on "Can't
+        // reconnect" (the window.api init race), which is exactly the lock-out
+        // this fixes. Browser panes are exempt — for them, following a link IS
+        // the point, so they keep in-pane navigation.
+        // `open_url_in_default_browser` only spawns a child process (rundll32 /
+        // open / xdg-open); it never re-enters CEF or `self.inner`, so calling
+        // it inline here (under the handler lock) cannot deadlock the way an
+        // inline `load_url` would.
+        if !self.is_browser_pane && crate::commands::platform::is_external_http_url(&url) {
+            match crate::commands::platform::open_url_in_default_browser(&url) {
+                Ok(()) => tracing::info!(url = %url, "external link opened in system browser"),
+                Err(e) => tracing::warn!(
+                    url = %url,
+                    error = %e,
+                    "failed to open external link in system browser",
+                ),
+            }
+            return true; // cancel popup; do NOT navigate the app frame
+        }
+
         if let Some(b) = browser {
             let browser_clone = b.clone();
             let mut task = crate::ui_tasks::DeferredLoadUrlTask::new(

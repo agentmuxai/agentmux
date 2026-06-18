@@ -12,19 +12,131 @@
  * so we self-heal.
  *
  * Mirrors the WebGL-context-loss recovery in `bootstrap.ts`: a bounded,
- * `sessionStorage`-guarded auto-reload (so a persistent failure can't storm —
- * the 2026-06-15 incident reloaded 385×), then a recovery card with a
- * one-click Reload. `location.reload()` works here because this is a real
- * `http://localhost` document (not the host's `data:` crash page); the IPC
- * port/token are re-supplied by the host's `on_load_end` re-injection on the
- * fresh load — NOT carried in the URL (cef-init.ts strips them into window
- * globals on first load), so reload and "Reopen window" recover identically.
+ * `sessionStorage`-guarded auto-recover (so a persistent failure can't storm —
+ * the 2026-06-15 incident reloaded 385×), then a recovery card with a single
+ * one-click **Restore**.
  *
- * Spec: docs/specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md
+ * Recovery re-navigates with the IPC creds **in the URL** rather than calling
+ * `location.reload()`. This is the fix for the 2026-06-17 lock-out: on a plain
+ * reload the URL carries no creds (cef-init.ts strips them into window globals
+ * on first load), so bootstrap depends on the host's `on_load_end`
+ * re-injection landing inside `setupCefApi`'s `waitForIpcCreds(2500)` window.
+ * When that injection loses the race the reload fails — and EVERY subsequent
+ * reload fails the same way, stranding the window on "Can't reconnect". By
+ * reading the creds the host already injected (`window.__AGENTMUX_IPC_PORT__` /
+ * `__TOKEN__`) and putting them back in the URL, `setupCefApi` reads them
+ * synchronously — no race — and bootstrap is deterministic. `windowLabel` is
+ * preserved so the restored window rebinds to its SAME workspace.
+ *
+ * If the in-place heal has already been tried (or no creds are present), Restore
+ * escalates: it asks the live host for a brand-new, freshly-bridged window
+ * (`open_new_window`, the launcher's path) and closes this dead one — the
+ * proven manual recovery, automated. Neither path uses `window.api` (the bridge
+ * that failed); both use the lower-level injected creds + `fetch`.
+ *
+ * Specs: docs/specs/SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md,
+ *        docs/specs/SPEC_BRIDGE_INIT_RECOVERY_2026_06_15.md
  */
 
 const RELOAD_KEY = "amux-startup-recover-reloads";
 const MAX_RELOADS = 3;
+// Set once the manual "Restore" has tried the in-place credentialed re-navigate.
+// A second Restore click then escalates to a host-spawned fresh window. Cleared
+// on successful startup (clearStartupReloadCount) so a later, unrelated failure
+// starts again with the cheap in-place heal.
+const RESTORE_TRIED_KEY = "amux-startup-restore-tried";
+
+function readRestoreTried(): boolean {
+    try {
+        return sessionStorage.getItem(RESTORE_TRIED_KEY) === "1";
+    } catch {
+        return false;
+    }
+}
+
+function writeRestoreTried(v: boolean): void {
+    try {
+        if (v) sessionStorage.setItem(RESTORE_TRIED_KEY, "1");
+        else sessionStorage.removeItem(RESTORE_TRIED_KEY);
+    } catch {
+        // sessionStorage unavailable — escalation just won't latch; harmless.
+    }
+}
+
+/**
+ * Build an app URL that carries the IPC port/token in its query string, read
+ * from the globals the host re-injects on every load (`on_load_end`). Loading
+ * THIS url lets `cef-init.ts setupCefApi` read the creds synchronously from the
+ * URL instead of waiting for the post-load re-injection — closing the
+ * `waitForIpcCreds` race that makes a plain `location.reload()` fail to
+ * reconnect. `windowLabel` is preserved so the restored window rebinds to its
+ * SAME workspace. Returns null when the creds aren't present (host never
+ * injected — genuinely down), so callers can fall back.
+ *
+ * The token rides in the URL only until cef-init.ts strips it back into a global
+ * (same handling, and same brief exposure, as the host's own new-window URLs).
+ */
+function buildCredentialedUrl(): string | null {
+    const port = window.__AGENTMUX_IPC_PORT__;
+    const token = window.__AGENTMUX_IPC_TOKEN__;
+    if (!port || !token) return null;
+    try {
+        const label = new URLSearchParams(location.search).get("windowLabel") || "main";
+        const url = new URL(location.origin + location.pathname);
+        url.searchParams.set("ipc_port", String(port));
+        url.searchParams.set("ipc_token", token);
+        url.searchParams.set("windowLabel", label);
+        return url.toString();
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Escalation path: ask the live host to open a brand-new, freshly-bridged window
+ * via the same `open_new_window` command the launcher forwards. Uses the
+ * re-injected IPC creds directly (NOT `window.api`, which is what failed). The
+ * caller closes this dead window afterwards so its workspace is freed for the
+ * user to reselect. Returns true if the host accepted the request.
+ */
+async function spawnFreshWindowViaHost(): Promise<boolean> {
+    const port = window.__AGENTMUX_IPC_PORT__;
+    const token = window.__AGENTMUX_IPC_TOKEN__;
+    if (!port || !token) return false;
+    try {
+        const resp = await fetch(`http://127.0.0.1:${port}/ipc`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ cmd: "open_new_window", args: {} }),
+        });
+        return resp.ok;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * The single "Restore" action. First press heals THIS window in place
+ * (credentialed re-navigate, same workspace, no race). If that was already
+ * tried — or there are no creds to use — escalate to a host-spawned fresh window
+ * and close this dead one. Last resort (host unreachable): a plain reload.
+ */
+async function doRestore(): Promise<void> {
+    const credUrl = buildCredentialedUrl();
+    if (credUrl && !readRestoreTried()) {
+        writeRestoreTried(true);
+        location.assign(credUrl);
+        return;
+    }
+    if (await spawnFreshWindowViaHost()) {
+        window.close();
+        return;
+    }
+    location.reload();
+}
 
 function getReloadCount(): number {
     try {
@@ -50,6 +162,7 @@ function setReloadCount(n: number): void {
  */
 export function clearStartupReloadCount(): void {
     setReloadCount(0);
+    writeRestoreTried(false);
 }
 
 /**
@@ -66,9 +179,16 @@ export function tryAutoRecover(message: string): boolean {
     if (attempt <= MAX_RELOADS) {
         setReloadCount(attempt);
         showReconnecting(attempt, MAX_RELOADS);
-        // Backoff grows per attempt so a still-churning dev tree gets a moment
-        // to settle between reloads.
-        setTimeout(() => location.reload(), 700 * attempt);
+        // Re-navigate with creds in the URL (deterministic bootstrap, no
+        // waitForIpcCreds race) rather than a bare reload that depends on the
+        // racy on_load_end re-injection. Falls back to reload() only when the
+        // host hasn't injected creds yet (genuinely down). Backoff grows per
+        // attempt so a still-churning dev tree gets a moment to settle.
+        const credUrl = buildCredentialedUrl();
+        setTimeout(() => {
+            if (credUrl) location.assign(credUrl);
+            else location.reload();
+        }, 700 * attempt);
         return true;
     }
     // Budget exhausted — STOP auto-reloading. Do NOT reset the counter: keeping
@@ -153,10 +273,11 @@ export function showStartupError(message: string): void {
 
     const body = document.createElement("p");
     body.textContent = exhausted
-        ? "Reloading hasn't reconnected to the AgentMux host. The host process may have " +
-          "stopped or restarted — close this window and reopen it, or restart AgentMux."
+        ? "Reconnecting on its own didn't work. Press Restore — it rebuilds this " +
+          "window's connection to the host and reopens your workspace. If Restore " +
+          "can't reach the host either, the host has stopped; restart AgentMux."
         : "The interface loaded but couldn't reach the AgentMux host process. " +
-          "This is almost always temporary — reloading reconnects it.";
+          "This is almost always temporary — Restore reconnects it.";
     body.style.cssText = "margin:0 0 18px;font-size:14px;line-height:1.5;color:rgba(255,255,255,0.8);";
     card.appendChild(body);
 
@@ -175,35 +296,22 @@ export function showStartupError(message: string): void {
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:10px;margin-bottom:18px;";
 
-    const reload = document.createElement("button");
-    reload.textContent = "⟳ Reload";
-    reload.style.cssText =
+    // One button, one job. Restore heals the window in place by re-navigating
+    // with creds in the URL (no waitForIpcCreds race, same workspace via the
+    // preserved windowLabel); if that was already tried it escalates to a
+    // host-spawned fresh window and closes this dead one. See doRestore().
+    const restore = document.createElement("button");
+    restore.textContent = "⟳ Restore";
+    restore.style.cssText =
         "padding:9px 18px;border-radius:7px;border:none;cursor:pointer;font-size:13px;font-weight:600;" +
         "background:#4c8dff;color:#fff;";
-    reload.onclick = () => {
-        // Do NOT reset the budget here — that re-entered the auto-reconnect loop.
-        // A manual reload is a single attempt: the host re-injects fresh creds on
-        // load and invokeCommand retries the 401, so a recovered host succeeds
-        // (and bootstrap clears the budget); a still-dead host comes straight back
-        // to this card instead of looping the "Reconnecting…" spinner.
-        location.reload();
+    restore.onclick = () => {
+        restore.disabled = true;
+        restore.textContent = "Restoring…";
+        void doRestore();
     };
 
-    const reopen = document.createElement("button");
-    reopen.textContent = "Reopen window";
-    reopen.style.cssText =
-        "padding:9px 18px;border-radius:7px;border:1px solid rgba(255,255,255,0.18);cursor:pointer;" +
-        "font-size:13px;background:transparent;color:#e8e8e8;";
-    reopen.onclick = () => {
-        // Re-navigate to the same URL — a fuller reset than reload() (fresh
-        // document rather than a reload of the current one). Creds are re-supplied
-        // exactly as with reload(): the host's on_load_end re-injection, since the
-        // URL no longer carries ipc_port/ipc_token (cef-init.ts strips them on
-        // first load). Budget is left intact (cleared only on successful startup).
-        location.assign(location.pathname + location.search);
-    };
-
-    row.append(reload, reopen);
+    row.append(restore);
     card.appendChild(row);
 
     const details = document.createElement("details");

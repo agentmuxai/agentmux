@@ -1067,13 +1067,23 @@ fn merge_into_template(
     result
 }
 
-/// Open a URL in the system's default browser.
+/// Open a URL in the system's default browser (IPC command wrapper).
 pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let url = args
         .get("url")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing url".to_string())?;
+    open_url_in_default_browser(url)?;
+    Ok(serde_json::Value::Null)
+}
 
+/// Open a URL in the system's default browser.
+///
+/// Shared by the `open_external` IPC command and by `on_before_popup`'s
+/// external-link routing (`target="_blank"` / `window.open` from the app UI).
+/// Validates the scheme first — defends against command injection and unexpected
+/// protocol handlers.
+pub fn open_url_in_default_browser(url: &str) -> Result<(), String> {
     // Allow safe URL schemes. vscode:// is included so that file-path links
     // with a :line suffix can open the file at the correct line in VS Code.
     let allowed = url.starts_with("http://")
@@ -1114,7 +1124,60 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
             .map_err(|e| format!("Failed to open URL: {}", e))?;
     }
 
-    Ok(serde_json::Value::Null)
+    Ok(())
+}
+
+/// True if `url` is an http(s) URL whose host is NOT this app's own loopback
+/// origin — i.e. a link to the outside world (github.com, docs.agentmux.ai, …).
+///
+/// The app UI is always served from `http://127.0.0.1:<ipc_port>` (or
+/// `http://localhost:<vite_port>` in dev), so any other host is external.
+/// `on_before_popup` uses this to decide whether a `target="_blank"` link
+/// should open in the system browser (external) or navigate in-app (internal /
+/// browser-pane). Non-http schemes return false — they are not ours to route.
+pub fn is_external_http_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    let rest = match lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))
+    {
+        Some(r) => r,
+        None => return false,
+    };
+    // authority = everything before the first '/', '?' or '#'
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // drop any userinfo ("user:pass@host") then any ":port" suffix
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let host = host.split(':').next().unwrap_or(host);
+    !matches!(host, "127.0.0.1" | "localhost" | "0.0.0.0" | "")
+}
+
+#[cfg(test)]
+mod external_url_tests {
+    use super::is_external_http_url;
+
+    #[test]
+    fn external_sites_are_external() {
+        assert!(is_external_http_url("https://github.com/agentmuxai/agentmux/issues/new"));
+        assert!(is_external_http_url("https://docs.agentmux.ai/config"));
+        assert!(is_external_http_url("http://example.com:8080/x?y=1#z"));
+        assert!(is_external_http_url("https://user@evil.com/path"));
+    }
+
+    #[test]
+    fn loopback_app_origin_is_internal() {
+        assert!(!is_external_http_url("http://127.0.0.1:54469/"));
+        assert!(!is_external_http_url("http://localhost:5173/?windowLabel=window-x"));
+        assert!(!is_external_http_url("http://127.0.0.1:1/agentmux/browser/foo"));
+    }
+
+    #[test]
+    fn non_http_schemes_are_not_routed() {
+        assert!(!is_external_http_url("about:blank"));
+        assert!(!is_external_http_url("data:text/html,hi"));
+        assert!(!is_external_http_url("blob:abc"));
+        assert!(!is_external_http_url("vscode://file/x"));
+    }
 }
 
 /// Open the system file manager at the given path.
