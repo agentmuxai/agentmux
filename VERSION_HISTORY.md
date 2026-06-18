@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.46.2 — 2026-06-17
+
+- fix(trust-center): surface already-authorized CLI OAuth under its brand — a Claude CLI login now shows as a connected Anthropic account (and codex→OpenAI, gemini→Google, copilot→GitHub), with its live probe status, instead of being invisible
+- fix(agent-pane): model/effort/permission picked in the control-bar dropdown now applies to a running Claude agent — previously only the /model slash command did (the GUI write was meta-only and silently no-op'd for persistent controllers)
+- fix(agent): seed PTY size at spawn so the agent pane stops hitting 'resize to N cols failed after 3 attempts'
+- fix(agent-pane): persistent controllers accept SIGINT/SIGTERM so Stop/Esc interrupts Claude (stream-json) agents instead of failing with 'does not accept raw input'
+- feat(agent-pane): ArrowUp/ArrowDown recall previously sent messages in the composer (shell-style history)
+- fix(term): enable reverse-wraparound so Backspace crosses soft-wrapped lines
+- fix(ui): pin the arrow cursor on scrollbars (they inherit the host cursor)
+- fix(agent-pane): persistent controller accepts termsize resize as a no-op so the agent pane stops logging spurious "resize to N cols failed" warnings
+- feat(tool-output): tee redirected output to the feed + render tool/task output as a terminal
+- feat(agent): tool-result renderer registry — rich per-tool result UIs (WebSearch cards, record tables) routed by tool name/shape instead of a closed switch
+- feat(agent-api): first-class window naming — WhoAmI/SetWindowName tools, /api/v1/self + /api/v1/window/name endpoints, AGENTMUX_WINDOW_NAME launch seeding
+- feat(agent-api): tab/pane/workspace naming verbs — SetTabName, SetPaneTitle, SetWorkspaceName tools + /api/v1/{tab/name,pane/title,workspace/name} endpoints
+- feat(agent-api): introspection verbs — GetLayout, ListWindows, ListWorkspaces, ListTabs tools + /api/v1/{layout,windows,workspaces,tabs} read endpoints
+- feat(agent-api): layout/navigation verbs — SetActiveTab, NewTab, FocusWindow tools + /api/v1/{tab/activate,tab/new,window/focus} endpoints
+- fix(agent): slash commands no longer lock the pane after use
+- feat(editor): render .md files styled by default with a rendered/source toggle (Ctrl+Shift+V)
+- feat(agent): default new panes to sonnet + high effort instead of opus + xhigh
+- fix(editor): new scratch buffer opens as plain editable text, not a blank rendered markdown pane
+- fix(editor): markdown preview fully hides the source underneath (was a dim bleed-through)
+- feat(editor): empty editor shows a faded brain mark + key shortcuts instead of a path input
+- feat(editor): empty-editor brain mark enlarged into a centered background watermark
+- fix(editor): Ctrl/Cmd+F opens the editor find panel (find/replace, regex, case, whole-word)
+- feat(editor): style the find/replace panel to match the app design system (tokens, themed inputs/buttons/toggles)
+- feat(ui): thin scrollbars everywhere except the agent-pane main scroll and terminal
+
+
 ## 0.46.1 — 2026-06-16
 
 - fix(cef): low-memory pause page Resume button was inert (double-quoted JS string inside a double-quoted onclick attribute) — wire it via a <script> + addEventListener so OOM-paused windows can actually resume
