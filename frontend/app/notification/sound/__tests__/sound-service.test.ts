@@ -180,13 +180,6 @@ describe("sound-service policy", () => {
         expect(playSpy).not.toHaveBeenCalled();
     });
 
-    it("stream-stalled event maps to the stalled sound", () => {
-        if (!captured) throw new Error("listener not installed");
-        captured("blk-1", { type: "stream-stalled", at: 100 });
-        expect(playSpy).toHaveBeenCalledTimes(1);
-        expect((playSpy.mock.calls[0][0] as { id: string }).id).toBe("agent.stream.stalled");
-    });
-
     it("pending-accepted only fires when wasPresent=true", () => {
         if (!captured) throw new Error("listener not installed");
         captured("blk-1", { type: "pending-accepted", id: "m1", wasPresent: false });

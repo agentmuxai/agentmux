@@ -253,9 +253,6 @@ pub struct SettingsType {
     #[serde(rename = "notify:sound:agent.message.rejected", default, skip_serializing_if = "Option::is_none")]
     pub notify_sound_agent_message_rejected: Option<bool>,
 
-    #[serde(rename = "notify:sound:agent.stream.stalled", default, skip_serializing_if = "Option::is_none")]
-    pub notify_sound_agent_stream_stalled: Option<bool>,
-
     // -- Tool-call tones (subliminal per-tool "voice") --
     //
     // Spec: docs/specs/SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md.

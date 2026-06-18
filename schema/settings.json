@@ -207,7 +207,7 @@
         },
         "notify:sound:agent.turn.error": {
           "type": "boolean",
-          "description": "Play a sound when an agent turn ends with an error (errored, submit-timed-out, stream-stalled). Default true."
+          "description": "Play a sound when an agent turn ends with an error (errored, submit-timed-out). Default true."
         },
         "notify:sound:agent.turn.interrupted": {
           "type": "boolean",
@@ -220,10 +220,6 @@
         "notify:sound:agent.message.rejected": {
           "type": "boolean",
           "description": "Play a sound when the backend rejects a queued pending message. Default true."
-        },
-        "notify:sound:agent.stream.stalled": {
-          "type": "boolean",
-          "description": "Play a sound when the agent stream stalls (diagnostic — fires before the bounded watchdog forces an exit). Default true."
         },
         "notify:tooltones:enabled": {
           "type": "boolean",

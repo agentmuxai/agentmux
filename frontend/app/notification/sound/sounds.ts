@@ -25,8 +25,7 @@ export type SoundId =
     | "agent.turn.error"
     | "agent.turn.interrupted"
     | "agent.message.accepted"
-    | "agent.message.rejected"
-    | "agent.stream.stalled";
+    | "agent.message.rejected";
 
 export type SoundCategory = "success" | "info" | "warning" | "error";
 
@@ -85,12 +84,5 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
         category: "warning",
         settingKey: "notify:sound:agent.message.rejected",
         coalesceMs: 150,
-    },
-    "agent.stream.stalled": {
-        id: "agent.stream.stalled",
-        label: "Agent stream stalled",
-        category: "warning",
-        settingKey: "notify:sound:agent.stream.stalled",
-        coalesceMs: 1_000,
     },
 };
