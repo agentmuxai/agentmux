@@ -70,9 +70,6 @@
     flex: 1;
     padding: var(--space-1) 0;
 
-    &::-webkit-scrollbar {
-        width: 14px;
-    }
     &::-webkit-scrollbar-track {
         background: transparent;
     }
