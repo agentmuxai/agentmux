@@ -203,3 +203,28 @@ Requested alongside this spec. **Verdict: working as of `main`.**
 - Full path verified end-to-end: `OpenEditor{floating:true}` → `POST /api/v1/pane/open` → `app_api.rs::open_pane()` floating branch (~L911) → `open_pane_floating()` (~L1011-1186) reuses the `tear_off_block` saga → publishes scoped `openfloatingpane` WPS event → `frontend/app/store/global.ts:307-344` → host `open_floating_pane_window` (`agentmux-cef/src/commands/floating_pane.rs:81-231`) → chromeless `FloatingPaneWorkspace`.
 - **Known limitations (by design, not bugs):** Windows = owned floating panes only (Phase 1, no cross-window redock); macOS/Linux = Phase A frameless windows. If the source window isn't in `state.windows`, the floater silently no-ops (logged) — safe.
 - **Gap:** no automated test — the cross-process CEF path requires a manual smoke (the spec for #1497 calls this out). Recommend adding a smoke step to the verification checklist; full automation needs a CEF build harness.
+
+---
+
+## 10. Amendment — MCP verb consolidation (2026-06-17)
+
+**Author:** Claude (claude-2) · **Status:** Implemented (branch `feat/mcp-consolidate-layout-verbs`) · **For review by:** naki (spec author)
+
+**Motivation.** The agent-pane latency investigation (`agentmux-pane-latency-report.md` §3) flagged that the auto-injected `agentmux` MCP server ships ~2 KB of tool-definition JSON on every turn, dominated by the Phase-2 layout/introspection/naming verbs. After weighing the options (gate-off vs. consolidate vs. trim), the chosen path is **consolidation that preserves every capability** — fold same-shape verbs into one tool each with a discriminator, rather than removing any ability.
+
+**Tension acknowledged.** This trades a little of §3's "one discoverable tool per verb" ergonomics for a smaller per-turn surface. To keep the cost low we consolidate **only** the categories where a discriminator is unambiguous (reads, renames) and **keep individually-named** the verbs where per-tool descriptions and distinct required params matter most (`WhoAmI`, and the navigation verbs whose required args differ).
+
+**What changed (MCP tool surface only — every REST verb in §4 and its `dispatch_service` mapping is unchanged):**
+
+| Before (tools) | After (tool) | Shape |
+|---|---|---|
+| `GetLayout`, `ListWindows`, `ListWorkspaces`, `ListTabs` | **`Layout(query)`** | `query ∈ {layout, windows, workspaces, tabs}` (default `layout`) |
+| `SetWindowName`, `SetTabName`, `SetPaneTitle`, `SetWorkspaceName` | **`SetName(target, name)`** | `target ∈ {window, tab, pane, workspace}` (pane → `/pane/title`, others → `/{…}/name`) |
+| `WhoAmI` | `WhoAmI` *(unchanged)* | the §4.2 foundation self-context call stays a no-arg tool |
+| `SetActiveTab`, `NewTab`, `FocusWindow` | *(unchanged)* | distinct required params; left as discoverable individual verbs |
+
+**Net:** the auto-injected MCP surface drops from **17 → 11** tools (5 core + WhoAmI + Layout + SetName + 3 navigation).
+
+**Implementation:** `agentmux-mcp/src/main.rs` only — consolidated the tool-definition consts, `tools/list`, and the `call_tool` dispatch; added unit tests (`tools/list` parses + count == 11; discriminator enums present). No `agentmux-srv` changes. The layering convention (§4.1, MCP→REST→gateway) is intact; the REST verbs (`/api/v1/{layout,windows,workspaces,tabs,window/name,tab/name,pane/title,workspace/name}`) are untouched and remain the documented surface.
+
+**Follow-up for naki:** if you prefer to keep the Phase-2 verbs individually named for discoverability, this amendment is the place to push back — the REST layer is unaffected either way, so reverting is purely a `main.rs` change.

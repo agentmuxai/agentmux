@@ -79,7 +79,7 @@ const DISCOVER_AGENTS_TOOL: &str = r#"{
 
 const SET_ACTIVE_TAB_TOOL: &str = r#"{
   "name": "SetActiveTab",
-  "description": "Switch the active (foreground) tab to the given tab_id within its workspace. Get tab ids from ListTabs or GetLayout.",
+  "description": "Switch the active (foreground) tab to the given tab_id within its workspace. Get tab ids from Layout(query:\"tabs\") or Layout(query:\"layout\").",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -102,7 +102,7 @@ const NEW_TAB_TOOL: &str = r#"{
 
 const FOCUS_WINDOW_TOOL: &str = r#"{
   "name": "FocusWindow",
-  "description": "Bring an AgentMux window to the foreground. Defaults to your own window. Pass window_id (from ListWindows/GetLayout) to focus a specific one.",
+  "description": "Bring an AgentMux window to the foreground. Defaults to your own window. Pass window_id (from Layout(query:\"windows\") or Layout(query:\"layout\")) to focus a specific one.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -111,96 +111,44 @@ const FOCUS_WINDOW_TOOL: &str = r#"{
   }
 }"#;
 
-const GET_LAYOUT_TOOL: &str = r#"{
-  "name": "GetLayout",
-  "description": "Get the AgentMux UI tree: every window with its workspace, tabs, and panes (block_id, view, title), and which tab is active. Use it to see what's around you before naming or focusing things. Takes no arguments.",
+// Consolidated read/introspection verb — replaces the former GetLayout /
+// ListWindows / ListWorkspaces / ListTabs tools (one tool, `query` selects the
+// view). `WhoAmI` stays its own no-arg tool (the spec's "foundation" self-context
+// call). See SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md §4.6 / §10.
+const LAYOUT_TOOL: &str = r#"{
+  "name": "Layout",
+  "description": "Read the AgentMux UI structure around you. `query` selects what to return: \"layout\" (the full tree — every window with its workspace, tabs, and panes [block_id, view, title], and which tab is active), \"windows\" (window_id, display name, assigned workspace), \"workspaces\" (workspace_id, name, tab count, active tab), or \"tabs\" (tabs in your own workspace: tab_id, name, pane count). Read-only; use before naming or focusing things. For your OWN ids (block/tab/window/workspace), use WhoAmI instead.",
   "inputSchema": {
     "type": "object",
-    "properties": {}
-  }
-}"#;
-
-const LIST_WINDOWS_TOOL: &str = r#"{
-  "name": "ListWindows",
-  "description": "List all AgentMux windows (window_id, display name, assigned workspace). Takes no arguments.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {}
-  }
-}"#;
-
-const LIST_WORKSPACES_TOOL: &str = r#"{
-  "name": "ListWorkspaces",
-  "description": "List all AgentMux workspaces (workspace_id, name, tab count, active tab). Takes no arguments.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {}
-  }
-}"#;
-
-const LIST_TABS_TOOL: &str = r#"{
-  "name": "ListTabs",
-  "description": "List tabs (tab_id, name, pane count) in your own workspace by default. Takes no arguments.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {}
+    "properties": {
+      "query": { "type": "string", "enum": ["layout", "windows", "workspaces", "tabs"], "description": "What to return (default: layout)" }
+    }
   }
 }"#;
 
 const WHOAMI_TOOL: &str = r#"{
   "name": "WhoAmI",
-  "description": "Return your own place in the AgentMux UI: your block (pane), tab, window, and workspace ids plus their names. Use it to discover the targets for naming/layout verbs (e.g. before SetWindowName). Takes no arguments.",
+  "description": "Return your own place in the AgentMux UI: your block (pane), tab, window, and workspace ids plus their names. Use it to discover the targets for naming/layout verbs (e.g. before SetName). Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}
   }
 }"#;
 
-const SET_WINDOW_NAME_TOOL: &str = r#"{
-  "name": "SetWindowName",
-  "description": "Set the name of your AgentMux window as it appears in the OS taskbar / window title (e.g. \"Starter Workspace\" → a label you choose). Defaults to your own window. Useful for making an instance easy to identify. Name is trimmed and clamped to 64 characters.",
+// Consolidated naming verb — replaces the former SetWindowName / SetTabName /
+// SetPaneTitle / SetWorkspaceName tools (one tool, `target` selects which UI
+// element). All default to the caller's own element and are non-destructive.
+// See SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md §4.3 / §10.
+const SET_NAME_TOOL: &str = r#"{
+  "name": "SetName",
+  "description": "Rename one of your own AgentMux UI elements. `target` selects which: \"window\" (the OS taskbar / window-title name; clamped to 64 chars), \"tab\" (the tab-bar label), \"pane\" (this conversation pane's header title), or \"workspace\" (the workspace name — also shown in the window/taskbar title when no explicit window name is set). Defaults to your own element; trimmed; non-window names clamp to 128 chars.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "name": { "type": "string", "description": "The window display name to show in the taskbar / title bar" }
+      "target": { "type": "string", "enum": ["window", "tab", "pane", "workspace"], "description": "Which UI element to rename" },
+      "name": { "type": "string", "description": "The new name/title to display" }
     },
-    "required": ["name"]
-  }
-}"#;
-
-const SET_TAB_NAME_TOOL: &str = r#"{
-  "name": "SetTabName",
-  "description": "Rename your AgentMux tab (the label in the tab bar). Defaults to your own tab. Trimmed; clamped to 128 characters.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "name": { "type": "string", "description": "The tab name to display" }
-    },
-    "required": ["name"]
-  }
-}"#;
-
-const SET_PANE_TITLE_TOOL: &str = r#"{
-  "name": "SetPaneTitle",
-  "description": "Set the title of your own conversation pane (the header label on this agent pane). Trimmed; clamped to 128 characters.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "title": { "type": "string", "description": "The pane title to display" }
-    },
-    "required": ["title"]
-  }
-}"#;
-
-const SET_WORKSPACE_NAME_TOOL: &str = r#"{
-  "name": "SetWorkspaceName",
-  "description": "Rename your AgentMux workspace. The workspace name also appears in the window/taskbar title when no explicit window name is set. Defaults to your own workspace. Trimmed; clamped to 128 characters.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "name": { "type": "string", "description": "The workspace name to display" }
-    },
-    "required": ["name"]
+    "required": ["target", "name"]
   }
 }"#;
 
@@ -297,19 +245,8 @@ async fn main() {
                 let discover_agents: Value =
                     serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
                 let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
-                let set_window_name: Value =
-                    serde_json::from_str(SET_WINDOW_NAME_TOOL).expect("static json");
-                let set_tab_name: Value = serde_json::from_str(SET_TAB_NAME_TOOL).expect("static json");
-                let set_pane_title: Value =
-                    serde_json::from_str(SET_PANE_TITLE_TOOL).expect("static json");
-                let set_workspace_name: Value =
-                    serde_json::from_str(SET_WORKSPACE_NAME_TOOL).expect("static json");
-                let get_layout: Value = serde_json::from_str(GET_LAYOUT_TOOL).expect("static json");
-                let list_windows: Value =
-                    serde_json::from_str(LIST_WINDOWS_TOOL).expect("static json");
-                let list_workspaces: Value =
-                    serde_json::from_str(LIST_WORKSPACES_TOOL).expect("static json");
-                let list_tabs: Value = serde_json::from_str(LIST_TABS_TOOL).expect("static json");
+                let layout: Value = serde_json::from_str(LAYOUT_TOOL).expect("static json");
+                let set_name: Value = serde_json::from_str(SET_NAME_TOOL).expect("static json");
                 let set_active_tab: Value =
                     serde_json::from_str(SET_ACTIVE_TAB_TOOL).expect("static json");
                 let new_tab: Value = serde_json::from_str(NEW_TAB_TOOL).expect("static json");
@@ -318,7 +255,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, set_window_name, set_tab_name, set_pane_title, set_workspace_name, get_layout, list_windows, list_workspaces, list_tabs, set_active_tab, new_tab, focus_window] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window] }
                 })
             }
             "tools/call" => {
@@ -692,53 +629,13 @@ async fn call_tool(
 
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
-        "SetWindowName" => {
-            let new_name = arguments
-                .get("name")
+        "SetName" => {
+            let target = arguments
+                .get("target")
                 .and_then(|v| v.as_str())
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
-
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-            if block_id.is_empty() {
-                anyhow::bail!(
-                    "neither AGENTMUX_AGENT_BUS_ID nor AGENTMUX_BLOCKID is set \
-                     — cannot resolve this agent's window. Is this agent pane opened via AgentMux?"
-                );
-            }
-
-            let url = format!("{}/api/v1/window/name", local_url.trim_end_matches('/'));
-            let resp = client
-                .post(&url)
-                .header("X-AuthKey", auth_key)
-                .json(&json!({ "block_id": block_id, "name": new_name }))
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("set window name failed: HTTP {status} — {text}");
-            }
-
-            let result: Value = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            let applied = result
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or(new_name);
-            Ok(format!("Window name set to \"{applied}\""))
-        }
-        "SetTabName" | "SetWorkspaceName" => {
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: target"))?;
             let new_name = arguments
                 .get("name")
                 .and_then(|v| v.as_str())
@@ -747,67 +644,69 @@ async fn call_tool(
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
             require_agent_env(local_url, auth_key, block_id)?;
 
-            let (path, kind) = if name == "SetTabName" {
-                ("tab/name", "Tab")
-            } else {
-                ("workspace/name", "Workspace")
+            // window/tab/workspace POST {"name": …} to /…/name; pane POSTs
+            // {"title": …} to /pane/title. `label` is the human-facing echo.
+            let (path, field, label) = match target {
+                "window" => ("window/name", "name", "Window name"),
+                "tab" => ("tab/name", "name", "Tab name"),
+                "workspace" => ("workspace/name", "name", "Workspace name"),
+                "pane" => ("pane/title", "title", "Pane title"),
+                other => anyhow::bail!(
+                    "invalid target '{other}' — expected one of: window, tab, pane, workspace"
+                ),
             };
             let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
+            let mut body = json!({ "block_id": block_id });
+            body[field] = json!(new_name);
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&json!({ "block_id": block_id, "name": new_name }))
+                .json(&body)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("set {kind} name failed: HTTP {status} — {text}");
+                anyhow::bail!("{label} change failed: HTTP {status} — {text}");
             }
-            Ok(format!("{kind} name set to \"{new_name}\""))
-        }
-        "SetPaneTitle" => {
-            let new_title = arguments
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
-
-            let url = format!("{}/api/v1/pane/title", local_url.trim_end_matches('/'));
-            let resp = client
-                .post(&url)
-                .header("X-AuthKey", auth_key)
-                .json(&json!({ "block_id": block_id, "title": new_title }))
-                .send()
+            // Surface the server-applied value (e.g. a window name clamped to 64
+            // chars) when the endpoint echoes it back; fall back to the request.
+            // Restores the pre-consolidation SetWindowName behavior generically.
+            let applied = resp
+                .json::<Value>()
                 .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("set pane title failed: HTTP {status} — {text}");
-            }
-            Ok(format!("Pane title set to \"{new_title}\""))
+                .ok()
+                .and_then(|v| v.get(field).and_then(|s| s.as_str()).map(str::to_string))
+                .unwrap_or_else(|| new_name.to_string());
+            Ok(format!("{label} set to \"{applied}\""))
         }
-        "GetLayout" | "ListWindows" | "ListWorkspaces" | "ListTabs" => {
+        "Layout" => {
             if local_url.is_empty() || auth_key.is_empty() {
                 anyhow::bail!(
                     "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
                      Is this agent pane opened via AgentMux?"
                 );
             }
-            let path = match name {
-                "GetLayout" => "layout",
-                "ListWindows" => "windows",
-                "ListWorkspaces" => "workspaces",
-                _ => "tabs",
+            let query = arguments
+                .get("query")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("layout");
+            let path = match query {
+                "layout" => "layout",
+                "windows" => "windows",
+                "workspaces" => "workspaces",
+                "tabs" => "tabs",
+                other => anyhow::bail!(
+                    "invalid query '{other}' — expected one of: layout, windows, workspaces, tabs"
+                ),
             };
             let url = format!("{}/api/v1/{path}", local_url.trim_end_matches('/'));
             let mut reqb = client.get(&url).header("X-AuthKey", auth_key);
-            // ListTabs scopes to the caller's own workspace when we know it.
-            if name == "ListTabs" && !block_id.is_empty() {
+            // The "tabs" query scopes to the caller's own workspace when we know it.
+            if query == "tabs" && !block_id.is_empty() {
                 reqb = reqb.query(&[("block_id", block_id)]);
             }
             let resp = reqb
@@ -817,7 +716,7 @@ async fn call_tool(
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
-                anyhow::bail!("{name} failed: HTTP {status} — {text}");
+                anyhow::bail!("Layout({query}) failed: HTTP {status} — {text}");
             }
             let result: Value = resp
                 .json()
@@ -889,5 +788,62 @@ async fn call_tool(
             Ok("Focused window".to_string())
         }
         _ => anyhow::bail!("unknown tool: {name}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every tool advertised by `tools/list` must be valid JSON with a `name`
+    /// and `inputSchema` — the server `expect("static json")`s these at runtime,
+    /// so a malformed const would panic on the first `tools/list`. Also pins the
+    /// post-consolidation tool count (was 17; now 11). See
+    /// SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md §10.
+    #[test]
+    fn all_tool_defs_are_valid_json_with_names() {
+        let defs = [
+            SHELL_TOOL,
+            SHELL_STOP_TOOL,
+            OPEN_EDITOR_TOOL,
+            SEND_MESSAGE_TOOL,
+            DISCOVER_AGENTS_TOOL,
+            WHOAMI_TOOL,
+            LAYOUT_TOOL,
+            SET_NAME_TOOL,
+            SET_ACTIVE_TAB_TOOL,
+            NEW_TAB_TOOL,
+            FOCUS_WINDOW_TOOL,
+        ];
+        assert_eq!(defs.len(), 11, "tools/list advertises 11 tools after the 17→11 consolidation");
+        for d in defs {
+            let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
+            assert!(
+                v.get("name").and_then(|n| n.as_str()).is_some(),
+                "tool def missing name: {d}"
+            );
+            assert!(v.get("inputSchema").is_some(), "tool def missing inputSchema");
+        }
+    }
+
+    /// The two consolidated verbs must expose their discriminator enums so the
+    /// model can pick the sub-action (replaces the former one-tool-per-verb set).
+    #[test]
+    fn consolidated_tools_expose_their_discriminators() {
+        let layout: Value = serde_json::from_str(LAYOUT_TOOL).unwrap();
+        let query = layout["inputSchema"]["properties"]["query"]["enum"]
+            .as_array()
+            .expect("Layout.query.enum is an array");
+        assert_eq!(query.len(), 4, "Layout.query folds the 4 read verbs");
+
+        let set_name: Value = serde_json::from_str(SET_NAME_TOOL).unwrap();
+        let target = set_name["inputSchema"]["properties"]["target"]["enum"]
+            .as_array()
+            .expect("SetName.target.enum is an array");
+        assert_eq!(target.len(), 4, "SetName.target folds the 4 naming verbs");
+        let required = set_name["inputSchema"]["required"]
+            .as_array()
+            .expect("SetName.required is an array");
+        assert_eq!(required.len(), 2, "SetName requires both target and name");
     }
 }
