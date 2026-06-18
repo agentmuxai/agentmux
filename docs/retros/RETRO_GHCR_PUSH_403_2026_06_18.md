@@ -37,27 +37,11 @@ The workflow correctly declares `permissions: packages: write`, but GitHub silen
 
 The workflow was merged in PR #1347 and the first build triggered on v0.45.0 (2026-06-14) — 4 days before this retro. There were only 3 builds total, all failures. The login step passes with a green checkmark, which masked the real issue during casual inspection of the run summary.
 
-## Fix (requires org admin or repo admin)
+## Fix
 
-**Option A — Preferred: change repo default to `read-and-write`**
+**Options A and B are blocked** — the repo's "Workflow permissions" setting is grayed out, meaning the org has locked the default at the org level. Repo admins cannot override it.
 
-Go to `https://github.com/agentmuxai/agentmux/settings/actions` → Workflow permissions → select **"Read and write permissions"** → Save.
-
-Or via API (requires admin token):
-```
-PATCH repos/agentmuxai/agentmux/actions/permissions/workflow
-{"default_workflow_permissions": "write"}
-```
-
-This allows the workflow's `permissions: packages: write` declaration to take effect. Re-run any recent failed build (`gh run rerun 27759875421`) — no code change needed.
-
-**Option B — Org-level (affects all repos)**
-
-`https://github.com/organizations/agentmuxai/settings/actions` → set org default to `read-and-write`. Then repo-level inherits it. More permissive — use only if all org repos are trusted.
-
-**Option C — Use a PAT instead of GITHUB_TOKEN**
-
-Create a fine-grained PAT with `write:packages` scope, store as a repo secret (e.g. `GHCR_PAT`), and change the login step:
+**Option C — implemented** (`commit 15cad7e3`): The repo already had a PAT with `write:packages` scope stored as secret `A5AF_PACKAGES_TOKEN`. Updated the login step to use it:
 
 ```yaml
 - name: Log in to GitHub Container Registry
@@ -65,10 +49,10 @@ Create a fine-grained PAT with `write:packages` scope, store as a repo secret (e
   with:
     registry: ghcr.io
     username: ${{ github.actor }}
-    password: ${{ secrets.GHCR_PAT }}   # was: secrets.GITHUB_TOKEN
+    password: ${{ secrets.A5AF_PACKAGES_TOKEN }}   # was: secrets.GITHUB_TOKEN
 ```
 
-More surgical but requires manual secret rotation. Option A is simpler.
+No secret creation needed — the PAT was already present. Fix was a one-line workflow change.
 
 ## Verification after fix
 
