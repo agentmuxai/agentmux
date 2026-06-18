@@ -5,7 +5,7 @@
 //
 // Consumed by the pixel-snap primitives in mixins.scss (snap(), v-separator,
 // etc.) so SCSS can express "1 device pixel" as `var(--snap)`. See
-// docs/retros/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md §4.1.
+// docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md §4.1.
 
 let mql: MediaQueryList | null = null;
 let mqlListener: ((e: MediaQueryListEvent) => void) | null = null;
@@ -29,7 +29,7 @@ export function setupDprTracking(): void {
 }
 
 // Runtime parity check for v-separator consumers — see
-// docs/retros/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5.
+// docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.5.
 // SCSS can't enforce parity when the mixin is called with CSS
 // custom properties (var(--tab-separator-width)), so we check the
 // resolved values once at startup and warn in dev if a future

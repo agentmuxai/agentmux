@@ -208,7 +208,7 @@ The five themes share a root: **identity (which window?) and ownership (whose li
 |---|---|
 | Tear-off | `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` |
 | Edge-resize | `docs/specs/SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md` |
-| Header drag | `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` |
+| Header drag | `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` |
 | HWND cache stale | `docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md` |
 | Redock load race | `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md` |
 | Browser-pane state | `docs/specs/browser-pane-state-catalog.md`, `…/browser-pane-reducer-roadmap.md` |

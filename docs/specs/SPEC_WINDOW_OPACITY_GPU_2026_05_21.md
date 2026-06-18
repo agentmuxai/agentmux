@@ -80,7 +80,7 @@ renderer/compositor** — which is why it has to live in the CEF fork.
 4. Controlled test — 0.37.8 relaunched `--disable-gpu` (same build, GPU the
    only variable): transparency worked. Confirmed by the user.
 
-**Linux (prior history):** `docs/retros/cef-transparency-session-2-2026-05-11.md`
+**Linux (prior history):** `docs/retro/cef-transparency-session-2-2026-05-11.md`
 and `…-empirical-…` — after the fork's transparency-cascade patches,
 *"pane interiors still render opaque rgb(34,34,34) … window borders/gaps
 continue to show wallpaper bleed-through."* Root cause located in the
@@ -174,8 +174,8 @@ bug.
 
 - `docs/specs/cef-transparency-architecture.md` — intended A+B design.
 - `docs/research/cef-transparency-research-2026-05-10.md`,
-  `docs/retros/cef-transparency-empirical-2026-05-11.md`,
-  `docs/retros/cef-transparency-session-2-2026-05-11.md` — the Linux attempts
+  `docs/retro/cef-transparency-empirical-2026-05-11.md`,
+  `docs/retro/cef-transparency-session-2-2026-05-11.md` — the Linux attempts
   and the unresolved opaque-raster finding.
 - `docs/analysis/opacity-inconsistency.md`, `specs/SPEC_WINDOW_TRANSPARENCY.md`.
 - `scripts/resolve-cef-runtime.sh` — how the patched `libcef` is bundled.

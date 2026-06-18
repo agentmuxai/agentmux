@@ -476,7 +476,7 @@ tasks:
         platforms: [windows]
         cmds:
             # `download-cef`'s extraction races Windows Defender's real-time scan
-            # (see docs/retros/RETRO_CEF_BUILD_RACE_2026_04_24.md). If the first
+            # (see docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md). If the first
             # build lost the race, cef_windows_x86_64/ is missing libcef_dll/ +
             # include/ + Resources/. Retry once after repair before failing hard.
             - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp; }'
@@ -731,7 +731,7 @@ tasks:
                   # STALE agentmux-bashwrap elsewhere on the system PATH and
                   # silently run a pre-fix binary (exit-130). Mirrors
                   # scripts/package-portable.sh:121. See
-                  # docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
+                  # docs/retro/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
                   mkdir -p "$DEV_DIR/runtime/tools/bin"
                   cp target/release/agentmux-bashwrap.exe "$DEV_DIR/runtime/tools/bin/"
                   # MCP server — the auto-injected .mcp.json uses the bare name
@@ -768,7 +768,7 @@ tasks:
                   # bundled_tools_dir is "$DEV_DIR/tools/bin". Without this,
                   # agents resolve a stale agentmux-bashwrap off the system
                   # PATH (exit-130). See
-                  # docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
+                  # docs/retro/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md.
                   mkdir -p "$DEV_DIR/tools/bin"
                   # Fail loud: build:host:{darwin,linux} build -p agentmux-bashwrap,
                   # so a missing binary here is a real regression, not "optional".

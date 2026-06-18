@@ -362,7 +362,7 @@ fn escape_query_value(s: &str) -> String {
 /// into a second floating window — the "double tear-off" bug). Same
 /// pattern as the main window's `useWindowDrag` hook.
 ///
-/// See `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`.
+/// See `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`.
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn floating_pane_wndproc(
     hwnd: *mut std::ffi::c_void,

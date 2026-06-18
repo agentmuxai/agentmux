@@ -52,7 +52,7 @@ pub enum RuntimeMode {
     /// `dev:branch` env-string parser that pre-dates this field): in
     /// that case path resolution falls back to the old two-level
     /// `dev/<branch>/` layout. See
-    /// `docs/analyses/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`.
+    /// `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`.
     Dev {
         branch: String,
         clone_id: Option<String>,

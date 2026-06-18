@@ -220,7 +220,7 @@ Phase 6 is the productivity power-up for authoring edge cases.
 
 - Live-log streaming spec: `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`
 - Named-agent continuation: `docs/specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md`
-- Live-log retro (motivates this work): `docs/retros/2026-05-11-live-log-streaming-wrapper-failures.md`
+- Live-log retro (motivates this work): `docs/retro/2026-05-11-live-log-streaming-wrapper-failures.md`
 - `useAgentStream`: `frontend/app/view/agent/useAgentStream.ts`
 - Stream parser: `frontend/app/view/agent/stream-parser.ts`
 - Reducer slot store + audit: `frontend/app/store/agent-document/` (PR #764)

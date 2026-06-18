@@ -608,7 +608,7 @@ impl Controller for ShellController {
             //     system PATH. A stale system-PATH `agentmux-bashwrap` (from a
             //     leftover portable) silently shadowed the fixed one and
             //     reintroduced the exit-130 bug — see
-            //     docs/retros/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md. The
+            //     docs/retro/RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md. The
             //     bundled jq/rg winning too is intended: agents get the app's
             //     curated, deterministic tool versions regardless of host.
             //

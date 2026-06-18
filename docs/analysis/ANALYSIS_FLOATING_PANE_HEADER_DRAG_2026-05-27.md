@@ -225,7 +225,7 @@ require threading floating-context awareness through to the shared
   the very top 4 px of the window, below DwmExtendFrameIntoClientArea's
   reach).
 - The VS Code drag-accept cursor problem (separate analysis at
-  `docs/analyses/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`).
+  `docs/analysis/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`).
 - Re-dock (Phase 4 per spec #810): dragging a floater back into the
   source window's tile layout to re-dock. Not yet implemented.
 
