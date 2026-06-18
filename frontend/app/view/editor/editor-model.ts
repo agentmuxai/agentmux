@@ -120,7 +120,7 @@ export class EditorViewModel implements ViewModel {
     // silently rewriting the file as UTF-8.
     private _encodingByTab = new Map<
         string,
-        { encoding: string; bom: string; lineEnding: string }
+        { encoding: string; bom: string; lineEnding: string; hadDecodeErrors: boolean }
     >();
 
     // ── Tree state (per-pane, persisted in block meta) ──────────────────
@@ -496,7 +496,15 @@ export class EditorViewModel implements ViewModel {
             encoding: result.encoding ?? "UTF-8",
             bom: result.bom ?? "none",
             lineEnding: result.line_ending ?? "lf",
+            hadDecodeErrors: result.had_decode_errors ?? false,
         });
+    }
+
+    /** True when the file was decoded with U+FFFD replacements (likely the
+     *  wrong encoding). Saving would re-encode the lossy buffer over the
+     *  original bytes, so callers must refuse the write. */
+    private _decodedWithErrors(tabId: string): boolean {
+        return this._encodingByTab.get(tabId)?.hadDecodeErrors ?? false;
     }
 
     /** Encoding fields to spread onto a WriteEditorFileCommand so the file
@@ -514,6 +522,22 @@ export class EditorViewModel implements ViewModel {
         if (this.readOnlyAtom()) return;
         const tab = this.activeTabAtom();
         if (!tab) return;
+
+        // Refuse to save a file that decoded with replacement characters
+        // (likely the wrong encoding) — re-encoding the lossy buffer would
+        // overwrite the original bytes (silent data loss), and is the symmetric
+        // counterpart to the encode-side lossy-write refusal. Recovery is
+        // Reopen-with-Encoding (Phase 3 of SPEC_EDITOR_FILE_ENCODINGS).
+        if (this._decodedWithErrors(tab.id)) {
+            dispatch(this.blockId, {
+                type: "TabContentLoadFailed",
+                tabId: tab.id,
+                error: "Save blocked: this file didn't decode cleanly (replacement characters present) — likely the wrong encoding. Reopen with the correct encoding before saving to avoid data loss.",
+                source: "system",
+            });
+            return;
+        }
+
         const content = this._contentByTab.get(tab.id) ?? "";
 
         try {

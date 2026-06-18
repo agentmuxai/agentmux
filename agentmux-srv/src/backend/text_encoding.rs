@@ -64,7 +64,7 @@ pub fn decode_file(bytes: &[u8]) -> DecodedFile {
 
     let (cow, had_decode_errors) = enc.decode_without_bom_handling(body);
     let content = cow.into_owned();
-    let line_ending = if content.contains("\r\n") { "crlf" } else { "lf" };
+    let line_ending = detect_line_ending(&content);
 
     DecodedFile {
         content,
@@ -72,6 +72,16 @@ pub fn decode_file(bytes: &[u8]) -> DecodedFile {
         bom,
         line_ending,
         had_decode_errors,
+    }
+}
+
+/// The file's line ending, from the **first** line break (what VS Code does).
+/// Using "any CRLF present" would flag a mostly-LF file as CRLF and convert all
+/// its LF lines on save.
+fn detect_line_ending(s: &str) -> &'static str {
+    match s.find('\n') {
+        Some(i) if i > 0 && s.as_bytes()[i - 1] == b'\r' => "crlf",
+        _ => "lf",
     }
 }
 
@@ -97,7 +107,7 @@ fn decode_utf32(body: &[u8], big_endian: bool, bom: &'static str, label: &'stati
             }
         }
     }
-    let line_ending = if content.contains("\r\n") { "crlf" } else { "lf" };
+    let line_ending = detect_line_ending(&content);
     DecodedFile {
         content,
         encoding: label.to_string(),
@@ -256,6 +266,15 @@ mod tests {
     fn unknown_label_falls_back_to_utf8() {
         let (bytes, _) = encode_file("hi", "definitely-not-an-encoding", "none", "lf");
         assert_eq!(bytes, b"hi");
+    }
+
+    #[test]
+    fn line_ending_uses_first_break_not_any_crlf() {
+        // Mostly-LF with a later CRLF → first break is LF → "lf"
+        // (so we don't normalize all the LF lines to CRLF on save).
+        assert_eq!(decode_file(b"a\nb\r\nc\n").line_ending, "lf");
+        assert_eq!(decode_file(b"a\r\nb\nc").line_ending, "crlf");
+        assert_eq!(decode_file(b"no breaks").line_ending, "lf");
     }
 
     #[test]
