@@ -420,29 +420,6 @@ export type AgentPaneCommand =
      * user already stopped, stream dropped). Spec §8 / issue #728 gap 2.
      */
     | { type: "SubmitTimeoutElapsed"; at: number }
-    /**
-     * Streaming idle-watchdog fired (caller-scheduled setTimeout — see
-     * `schedule-stream-watchdog` event). PR E: bounded
-     * `Streaming → Done.errored("stream-stalled")` force-transition.
-     *
-     * Today an agent process that stops emitting (LLM stuck, network
-     * silent) but holds the connection open leaves the pane pinned in
-     * `Streaming` forever — `lastEventMs` ages but nothing forces an
-     * exit. This command is the deterministic exit: when the dispatcher
-     * sees the deadline elapse without a new event refreshing it, it
-     * fires `StreamStalled`.
-     *
-     * Behaviour:
-     *   - `Streaming` + idle ≥ `STREAMING_IDLE_TIMEOUT_MS` → Done.errored
-     *     with reason "stream-stalled" (emits `stream-stalled` event).
-     *   - `Streaming` + NOT yet stale (early callback / race vs a fresh
-     *     event refreshing `lastEventMs`) → same-ref no-op; dispatcher
-     *     re-arms on the next activity command.
-     *   - Any other phase → same-ref no-op; the stale timer is harmless.
-     *
-     * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §10 (PR E).
-     */
-    | { type: "StreamStalled"; at: number }
 
     // ── Pending message queue (composer side) ─────────────────────
     | {
@@ -603,34 +580,6 @@ export type AgentPaneEvent =
      * PR D — spec §8 / issue #728 gap 2.
      */
     | { type: "submit-timed-out"; at: number }
-    /**
-     * Reducer signal (PR E): a turn just LANDED INSIDE `Streaming` via a
-     * stream-activity command (`StreamSubscribe` promoting from
-     * Submitting, `StreamFlushObserved`, or a bumped tool/token
-     * transition). The dispatch layer is expected to:
-     *   1. cancel any previously-armed stream watchdog (shared cancel
-     *      flag — the JS analogue of `Arc<AtomicBool>`), and
-     *   2. start a fresh `setTimeout` that fires `StreamStalled` when
-     *      `deadlineMs` is reached (or skip if a newer arm has since
-     *      replaced it).
-     *
-     * Idempotent re-arm: emitted on EVERY stream activity that lands
-     * inside Streaming, so the deadline always tracks the latest event.
-     * `deadlineMs` is `lastEventMs + STREAMING_IDLE_TIMEOUT_MS` so the
-     * caller can compute the remaining slice deterministically. Spec §10.
-     */
-    | {
-          type: "schedule-stream-watchdog";
-          deadlineMs: number;
-      }
-    /**
-     * Reducer signal (PR E): the bounded `Streaming → Done.{errored,
-     * reason: "stream-stalled"}` force-transition fired because no
-     * observable stream event refreshed `lastEventMs` within
-     * `STREAMING_IDLE_TIMEOUT_MS`. The view can surface this as
-     * "stream stalled — agent unresponsive" if needed. Spec §10.
-     */
-    | { type: "stream-stalled"; at: number }
     | { type: "pending-queued"; id: string }
     | { type: "pending-accepted"; id: string; wasPresent: boolean }
     | { type: "pending-rejected"; id: string; wasPresent: boolean }
@@ -691,23 +640,3 @@ export const INTERRUPT_TIMEOUT_MS = 5_000;
  * stale fire against a graceful promotion to Streaming.
  */
 export const SUBMIT_TIMEOUT_MS = 30_000;
-
-/**
- * Streaming idle watchdog (PR E). A `Streaming` turn that hasn't seen
- * any observable stream event (subscribe, flush, tool, tokens) refresh
- * `lastEventMs` for this many ms is force-transitioned to
- * `Done.errored("stream-stalled")` on receipt of `StreamStalled`.
- *
- * 60 s is generous compared to the typical sub-second flush cadence on
- * a healthy agent stream but tight enough that a wedged LLM /
- * silenced socket doesn't keep the working animation pinned forever.
- *
- * Intentionally distinct from {@link STUCK_THRESHOLD_MS} (45 s, diagnostic
- * `stream-stuck` audit event only — does NOT force a transition).
- * `STUCK_THRESHOLD_MS` fires first so the UI can surface "stream is
- * idle" before the bounded watchdog gives up. Don't conflate the two.
- *
- * Spec: SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §10. Closes #728
- * gap 3 (bounded streaming, not just diagnostic).
- */
-export const STREAMING_IDLE_TIMEOUT_MS = 60_000;

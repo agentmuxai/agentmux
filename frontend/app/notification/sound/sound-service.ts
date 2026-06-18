@@ -153,9 +153,6 @@ function mapAgentPaneEvent(blockId: string, event: AgentPaneEvent): void {
         case "interrupt-timed-out":
             notify("agent.turn.interrupted", { sourceBlockId: blockId });
             return;
-        case "stream-stalled":
-            notify("agent.stream.stalled", { sourceBlockId: blockId });
-            return;
         case "pending-accepted":
             if (event.wasPresent) {
                 notify("agent.message.accepted", { sourceBlockId: blockId });
