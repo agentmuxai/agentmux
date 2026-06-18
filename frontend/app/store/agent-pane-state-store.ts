@@ -74,6 +74,9 @@ export interface AgentPaneProjections {
      * visible between turns. Clears only on TurnReset (session wipe).
      */
     contextTokens?: (next: number | null) => void;
+    /** Learned context-window size for the current model (null → view uses the
+     *  provider's static fallback). Driven by TokensIn alongside contextTokens. */
+    contextWindow?: (next: number | null) => void;
 }
 
 interface Slot {
@@ -190,6 +193,10 @@ export function dispatch(
         prev.lastContextTokens ?? null,
         slot.state.lastContextTokens ?? null,
         slot.proj.contextTokens);
+    proj("contextWindow",
+        prev.lastContextWindow ?? null,
+        slot.state.lastContextWindow ?? null,
+        slot.proj.contextWindow);
     proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
     proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
