@@ -119,6 +119,81 @@ unsafe fn make_target() -> Id {
     msg(msg(cls as Id, sel(b"alloc\0")), sel(b"init\0"))
 }
 
+// AppState handle for the kAEReopenApplication handler (a bare C function with
+// no captured env — same pattern as MENU_STATE above).
+static REOPEN_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
+
+/// `handleAEReopen:withReplyEvent:` — fires when macOS re-activates the
+/// already-running app (Finder/Dock double-click, `open` without `-n`, or a
+/// LaunchServices reactivation triggered by launching another build with the
+/// same bundle id). We answer kAEReopenApplication by opening a new window —
+/// matching the Windows relaunch-forwards-`open_new_window` behavior. Without a
+/// handler the reopen Apple Event goes unanswered: a plain double-click is a
+/// silent no-op, and a same-bundle-id reactivation makes LaunchServices report
+/// the app "not responding". See SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
+unsafe extern "C" fn ae_reopen(_self: Id, _cmd: Sel, _event: Id, _reply: Id) {
+    match REOPEN_STATE.get() {
+        // open_new_window is non-blocking: it enqueues + posts to the CEF UI
+        // thread, so invoking it from the AppKit main thread is safe.
+        Some(state) => match crate::commands::window::open_new_window(state) {
+            Ok(_) => tracing::info!("ae-reopen: opened a new window"),
+            Err(e) => tracing::warn!(error = %e, "ae-reopen: open_new_window failed"),
+        },
+        None => tracing::warn!("ae-reopen fired before REOPEN_STATE was set"),
+    }
+}
+
+/// Register the kAEReopenApplication handler with NSAppleEventManager. Raw
+/// libobjc, mirrors `make_target`. Must run on the main thread after
+/// `cef::initialize` (NSApplication + the AE manager exist by then).
+/// Re-registering just replaces the handler, so a single call is enough.
+pub fn install_reopen_handler(state: Arc<AppState>) {
+    let _ = REOPEN_STATE.set(state);
+    unsafe {
+        let name = b"AgentMuxReopenTarget\0";
+        let mut cls = class(name);
+        if cls.is_null() {
+            cls = objc_allocateClassPair(class(b"NSObject\0"), name.as_ptr() as *const c_char, 0);
+            // -(void)handleAEReopen:(id)event withReplyEvent:(id)reply  →  "v@:@@"
+            let imp: unsafe extern "C" fn(Id, Sel, Id, Id) = ae_reopen;
+            class_addMethod(
+                cls,
+                sel(b"handleAEReopen:withReplyEvent:\0"),
+                imp as usize,
+                b"v@:@@\0".as_ptr() as *const c_char,
+            );
+            objc_registerClassPair(cls);
+        }
+        // Leaked on purpose: the handler target lives for the process lifetime.
+        let target = msg(msg(cls as Id, sel(b"alloc\0")), sel(b"init\0"));
+
+        let mgr = msg(
+            class(b"NSAppleEventManager\0") as Id,
+            sel(b"sharedAppleEventManager\0"),
+        );
+        if mgr.is_null() {
+            tracing::warn!("ae-reopen: NSAppleEventManager unavailable; handler not installed");
+            return;
+        }
+        // FourCharCodes: kCoreEventClass = 'aevt', kAEReopenApplication = 'rapp'.
+        const K_CORE_EVENT_CLASS: u32 = 0x6165_7674;
+        const K_AE_REOPEN_APPLICATION: u32 = 0x7261_7070;
+        // [mgr setEventHandler:target andSelector:@selector(handleAEReopen:withReplyEvent:)
+        //      forEventClass:kCoreEventClass andEventID:kAEReopenApplication]
+        let set_handler: extern "C" fn(Id, Sel, Id, Sel, u32, u32) =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        set_handler(
+            mgr,
+            sel(b"setEventHandler:andSelector:forEventClass:andEventID:\0"),
+            target,
+            sel(b"handleAEReopen:withReplyEvent:\0"),
+            K_CORE_EVENT_CLASS,
+            K_AE_REOPEN_APPLICATION,
+        );
+        tracing::info!("ae-reopen: installed kAEReopenApplication handler");
+    }
+}
+
 unsafe fn new_menu(title: &str) -> Id {
     let alloc = msg(class(b"NSMenu\0") as Id, sel(b"alloc\0"));
     msg_id(alloc, sel(b"initWithTitle:\0"), nsstr(title))
