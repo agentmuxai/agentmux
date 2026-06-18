@@ -248,6 +248,9 @@ export interface AgentPaneState {
      * provider's static window. See store/agent-pane-state/context-window.ts.
      */
     lastContextWindow: number | null;
+    /** Resolved model id that produced `lastContextWindow` — used to re-seed the
+     *  window when the user switches models mid-session (`/model`). */
+    lastContextModel: string | null;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -257,6 +260,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     turnTokens: null,
     lastContextTokens: null,
     lastContextWindow: null,
+    lastContextModel: null,
     pending: [],
     initPhase: { kind: "InitPending" },
     lastEventMs: null,

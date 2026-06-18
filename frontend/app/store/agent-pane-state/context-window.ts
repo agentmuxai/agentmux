@@ -48,16 +48,21 @@ function nextTierAbove(n: number): number {
 
 /**
  * Resolve the window after observing a prompt of `observed` tokens for `model`.
- * Learn-up-only: never shrinks within a session (model/beta are fixed per
- * session; a new session re-seeds). Returns `undefined` only when we have
- * neither a prior value nor a recognised model (caller uses the provider fallback).
+ * Learn-up-only *while the model is unchanged* (model/beta are fixed within a
+ * model). If the model **changes mid-session** (the `/model` path rebuilds the
+ * controller but preserves the conversation), re-seed from the new model so a
+ * larger learned window (e.g. Opus 1M) doesn't mask a smaller cap (Haiku 200K).
+ * Returns `undefined` only when we have neither a prior value nor a recognised
+ * model (caller uses the provider fallback).
  */
 export function learnContextWindow(
     prev: number | null | undefined,
     observed: number,
     model: string | null | undefined,
+    prevModel?: string | null | undefined,
 ): number | undefined {
-    let w = prev ?? contextWindowForModel(model);
+    const modelChanged = !!model && !!prevModel && model !== prevModel;
+    let w = modelChanged ? contextWindowForModel(model) : (prev ?? contextWindowForModel(model));
     if (w == null) return undefined;
     // A prompt can't exceed the real window: if it did, our assumption is too low.
     if (observed > w) w = nextTierAbove(observed);

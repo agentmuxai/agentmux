@@ -48,6 +48,16 @@ describe("learnContextWindow", () => {
     test("unknown model but a prior window → keeps the prior", () => {
         expect(learnContextWindow(200_000, 50_000, "gpt-5")).toBe(200_000);
     });
+    test("model switch mid-session re-seeds (Opus 1M → Haiku 200K, not learn-up)", () => {
+        // learned 1M on Opus, then /model to Haiku: must drop to 200K, not stay 1M
+        expect(learnContextWindow(1_000_000, 50_000, "claude-haiku-4-5", "claude-opus-4-8")).toBe(200_000);
+    });
+    test("same model (unchanged) keeps the learned high-water", () => {
+        expect(learnContextWindow(1_000_000, 50_000, "claude-sonnet-4-6", "claude-sonnet-4-6")).toBe(1_000_000);
+    });
+    test("model absent on a later turn keeps the prior window", () => {
+        expect(learnContextWindow(1_000_000, 50_000, undefined, "claude-opus-4-8")).toBe(1_000_000);
+    });
 });
 
 describe("compactionThreshold", () => {

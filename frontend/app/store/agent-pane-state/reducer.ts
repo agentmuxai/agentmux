@@ -488,14 +488,19 @@ export function update(
             // (seed-then-high-water-upgrade); null until a recognised model is
             // seen, so the view falls back to the provider's static window.
             const learnedWindow =
-                learnContextWindow(state.lastContextWindow, command.input, command.model) ??
-                state.lastContextWindow;
+                learnContextWindow(
+                    state.lastContextWindow,
+                    command.input,
+                    command.model,
+                    state.lastContextModel,
+                ) ?? state.lastContextWindow;
             const nextState = bumpEvent(
                 {
                     ...state,
                     turnTokens: next,
                     lastContextTokens: command.input,
                     lastContextWindow: learnedWindow ?? null,
+                    lastContextModel: command.model ?? state.lastContextModel,
                 },
                 nowMs,
                 0,
