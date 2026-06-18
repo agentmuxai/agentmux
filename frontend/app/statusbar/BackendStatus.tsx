@@ -4,6 +4,7 @@
 import { atoms, backendDeathInfoAtom, getApi, setBackendStatusAtom, termRendererAtom } from "@/store/global";
 import { setRestartInProgress } from "@/store/backendStatus";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import { getGpuInfo } from "@/util/gpuutil";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
@@ -79,7 +80,7 @@ const BackendStatus = (): JSX.Element => {
     // receive the same ts and compute the same integer, eliminating phase drift.
     onMount(() => {
         const unsub = waveEventSubscribe({
-            eventType: "sysinfo",
+            eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
                 const ts: number | undefined = (event as WaveEvent)?.data?.ts;

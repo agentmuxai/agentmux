@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { CpuCoresPopover } from "./CpuCoresPopover";
@@ -81,7 +82,7 @@ const SystemStats = (): JSX.Element => {
 
     onMount(() => {
         const unsub = waveEventSubscribe({
-            eventType: "sysinfo",
+            eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
                 const vals = (event as WaveEvent)?.data?.values;

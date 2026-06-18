@@ -11,6 +11,7 @@
 
 import { onCleanup, onMount } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import type { LogFn } from "./useAgentControllerStatus";
 
@@ -22,7 +23,7 @@ export interface UseControllerStatusEventsOptions {
 export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions): void {
     onMount(() => {
         const unsubStatus = waveEventSubscribe({
-            eventType: "controllerstatus",
+            eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const status = (event as any)?.data?.shellprocstatus;
@@ -44,7 +45,7 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
         // auth, rate-limit, OOM, context, etc. — plus the stderr tail, instead of
         // just "exited with code N".
         const unsubFailure = waveEventSubscribe({
-            eventType: "agentfailure",
+            eventType: WpsEvent.AgentFailure,
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const f = (event as any)?.data as AgentFailure | undefined;

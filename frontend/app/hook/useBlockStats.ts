@@ -3,6 +3,7 @@
 
 import { createSignal, createEffect, onCleanup } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 
 export interface BlockStats {
     cpu: number; // percentage (0-100+)
@@ -14,7 +15,7 @@ export function useBlockStats(blockId: string): () => BlockStats | null {
 
     createEffect(() => {
         const unsub = waveEventSubscribe({
-            eventType: "blockstats",
+            eventType: WpsEvent.BlockStats,
             scope: `block:${blockId}`,
             handler: (event: any) => {
                 const data = event.data;
