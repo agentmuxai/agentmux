@@ -114,17 +114,27 @@ function parseDiffLines(diff: string): DiffLine[] {
 interface DiffViewerProps {
     params: EditParams;
     result?: EditResult;
+    /** ToolNode.status — gates the params fallback. Only synthesise a diff
+     *  when the edit actually applied. For failed/denied edits the params
+     *  reflect the *intended* change, not what happened, so showing them
+     *  as a diff would mislead. Defaults to "success" when omitted. */
+    status?: string;
 }
 
 export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
     const rawDiff = () => {
         // Prefer the pre-computed diff from result (populated by some providers).
-        // Fall back to computing from params — Claude's translator returns a
-        // plain-text string, so result.diff is absent in the current pipeline.
         if (props.result?.diff) return props.result.diff;
-        const p = props.params;
-        if (p && (p.old_string != null || p.new_string != null)) {
-            return buildDiffFromParams(p.old_string ?? "", p.new_string ?? "");
+        // Fall back to computing from params only for successful edits.
+        // For failed/denied nodes params reflect the *intended* change —
+        // synthesising a diff would show what was supposed to happen, not
+        // what did, misleading the user. (Codex P2 on PR #1561.)
+        const succeeded = (props.status ?? "success") === "success";
+        if (succeeded) {
+            const p = props.params;
+            if (p && (p.old_string != null || p.new_string != null)) {
+                return buildDiffFromParams(p.old_string ?? "", p.new_string ?? "");
+            }
         }
         return undefined;
     };
