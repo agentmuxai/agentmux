@@ -118,12 +118,34 @@ function deriveContract(root: string): Contract {
     expect(unresolved, `unresolved register_handler args: ${unresolved.join(", ")}`).toEqual([]);
 
     // ── Frontend: declared bindings (method → command) in rpc-api.ts.
+    // Each binding is `Method(client: RpcClient, …): Ret { return
+    // client.rpcCall|rpcStream("name", …); }`. Bound the search to each
+    // method's own body — `[its signature, the next signature)` — and
+    // take the first rpcCall/rpcStream inside it. A single lazy
+    // `…*?rpcCall` regex would run past a `rpcStream`-only method into
+    // the next one, mismapping commands and dropping every stream
+    // binding from the contract (a guard that passes while drift slips
+    // through). The per-method window also tolerates braces in return
+    // types. Both rpcCall and rpcStream count as a binding.
     const rpcApiPath = path.join(root, "frontend", "app", "store", "rpc-api.ts");
     const rpcApiSrc = fs.readFileSync(rpcApiPath, "utf8");
+    const sigRe = /(\w+)\s*\(\s*client:\s*RpcClient/g;
+    const sigs: Array<{ name: string; idx: number }> = [];
+    let sm: RegExpExecArray | null;
+    while ((sm = sigRe.exec(rpcApiSrc))) sigs.push({ name: sm[1], idx: sm.index });
+    const bindRe = /rpc(?:Call|Stream)\(\s*"([^"]+)"/;
     const methodToCmd = new Map<string, string>();
-    const methodRe = /(\w+)\s*\(\s*client:\s*RpcClient[\s\S]*?rpcCall\(\s*"([^"]+)"/g;
-    let mm: RegExpExecArray | null;
-    while ((mm = methodRe.exec(rpcApiSrc))) methodToCmd.set(mm[1], mm[2]);
+    const skippedMethods: string[] = [];
+    for (let i = 0; i < sigs.length; i++) {
+        const end = i + 1 < sigs.length ? sigs[i + 1].idx : rpcApiSrc.length;
+        const m = bindRe.exec(rpcApiSrc.slice(sigs[i].idx, end));
+        if (m) methodToCmd.set(sigs[i].name, m[1]);
+        else skippedMethods.push(sigs[i].name);
+    }
+    // Every `(client: RpcClient …)` binding must resolve to a command —
+    // a non-empty list means the extractor went blind to part of the
+    // surface (exactly the regression Codex flagged on the first draft).
+    expect(skippedMethods, `unresolved rpc-api bindings: ${skippedMethods.join(", ")}`).toEqual([]);
     const declared = new Set<string>(methodToCmd.values());
 
     // ── Frontend: live usage — `RpcApi.Method(…)` resolved via the map,
@@ -143,7 +165,7 @@ function deriveContract(root: string): Contract {
             const cmd = methodToCmd.get(m[1]);
             if (cmd !== undefined) liveCommands.add(cmd);
         }
-        const directRe = /rpcCall\(\s*"([^"]+)"/g;
+        const directRe = /rpc(?:Call|Stream)\(\s*"([^"]+)"/g;
         while ((m = directRe.exec(src))) liveCommands.add(m[1]);
     }
 
@@ -203,10 +225,13 @@ const KNOWN_DECLARED_UNREGISTERED = [
     "fileinfo",
     "filejoin",
     "filelist",
+    "fileliststream",
     "filemkdir",
     "filemove",
     "fileread",
+    "filereadstream",
     "filesharecapability",
+    "filestreamtar",
     "filewrite",
     "focuswindow",
     "getrtinfo",
@@ -225,7 +250,11 @@ const KNOWN_DECLARED_UNREGISTERED = [
     "remotefiletouch",
     "remotegetinfo",
     "remoteinstallrcfiles",
+    "remotelistentries",
     "remotemkdir",
+    "remotestreamcpudata",
+    "remotestreamfile",
+    "remotetarstream",
     "remotewritefile",
     "resolveids",
     "sendtelemetry",
@@ -233,6 +262,8 @@ const KNOWN_DECLARED_UNREGISTERED = [
     "setrtinfo",
     "setvar",
     "setview",
+    "streamcpudata",
+    "streamtest",
     "termgetscrollbacklines",
     "test",
     "waitforroute",
@@ -274,6 +305,9 @@ describe("RPC frontend↔backend contract (A1)", () => {
         expect(registered.has("setmeta")).toBe(true);
         expect(declared.has("setmeta")).toBe(true);
         expect(liveCommands.has("setmeta")).toBe(true);
+        // A known `rpcStream` binding must be in the declared surface —
+        // guards the per-method extraction against dropping streams.
+        expect(declared.has("fileliststream")).toBe(true);
     });
 
     it("no NEW live FE call resolves to a missing backend handler", () => {
