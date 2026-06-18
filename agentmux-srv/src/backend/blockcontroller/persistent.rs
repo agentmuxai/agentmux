@@ -21,6 +21,7 @@
 //! 3. process_waiter: wait for exit, update status
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -151,6 +152,14 @@ pub struct PersistentSubprocessController {
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<HealthMonitor>,
+    /// Monotonic counter bumped for every stdout line (including control frames).
+    /// The AskUserQuestion dead-air fallback snapshots this *before* sending the
+    /// answer and re-checks after a short window; any increment means the CLI
+    /// produced output (assistant content OR a follow-up control_request), i.e.
+    /// the turn resumed. Counting *all* frames — not just `record_output`, which
+    /// the reader skips for control frames — avoids a spurious fallback when the
+    /// resumed turn's first activity is a tool-permission round-trip.
+    stdout_seq: Arc<AtomicU64>,
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
@@ -220,6 +229,7 @@ impl PersistentSubprocessController {
             wstore,
             filestore,
             health_monitor,
+            stdout_seq: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -381,6 +391,12 @@ impl PersistentSubprocessController {
                 }
             }
         });
+        // Snapshot stdout activity BEFORE sending the answer, so a fast resume
+        // that emits between the send and the snapshot can't be mistaken for
+        // "no activity" (codex review on #1536).
+        let stdout_seq = Arc::clone(&self.stdout_seq);
+        let before_seq = stdout_seq.load(Ordering::Relaxed);
+
         tx.try_send(control_response.to_string())
             .map_err(|e| format!("control_response send failed: {e}"))?;
 
@@ -391,17 +407,15 @@ impl PersistentSubprocessController {
         // report). If no stdout activity appears shortly after the answer, the
         // turn did not resume, so re-deliver the answer as a normal follow-up
         // user turn — the same resilience the one-shot controllers already use.
-        // Gated on output activity, so it is mutually exclusive with a real
-        // resume and never double-delivers.
+        // Gated on stdout activity (every frame, incl. control frames), so it is
+        // mutually exclusive with a real resume and never double-delivers.
         let inner = Arc::clone(&self.inner);
-        let health = Arc::clone(&self.health_monitor);
         let block_id = self.block_id.clone();
-        let before_output = health.last_output_at();
         let resume_msg = build_answer_resume_message(&answers);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
-            // Any stdout line since the answer means the turn resumed — nothing to do.
-            if health.last_output_at() != before_output {
+            // Any stdout frame since the snapshot means the turn resumed — nothing to do.
+            if stdout_seq.load(Ordering::Relaxed) != before_seq {
                 return;
             }
             let line = serde_json::json!({
@@ -754,6 +768,7 @@ impl PersistentSubprocessController {
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let health_read = Arc::clone(&self.health_monitor);
+        let stdout_seq_read = Arc::clone(&self.stdout_seq);
         let session_id_field = config.session_id_field.clone();
         // Resolve the agent's GLOBAL transcript zone (`agent:<defId>:current`)
         // once, from the block's `agentId` meta, so every `output` line is also
@@ -770,6 +785,11 @@ impl PersistentSubprocessController {
                 if line.trim().is_empty() {
                     continue;
                 }
+                // Bump the activity counter for EVERY non-empty stdout line —
+                // including control frames (which `continue` below before
+                // `record_output`) — so the AskUserQuestion dead-air fallback can
+                // tell whether the turn resumed. See `answer_question`.
+                stdout_seq_read.fetch_add(1, Ordering::Relaxed);
 
                 // Track session metadata (debounced 1 s)
                 stats.record_line(line.len(), &wstore_read);
