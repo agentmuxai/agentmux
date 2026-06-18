@@ -30,7 +30,7 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 | A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | 🔴 **blocked** | — | Same gate as A6 (#1555). |
 | A10 | Consolidate data-dir resolution onto `DataPaths` | ★★★ | Med | Med | 🟢 ready | — | Backend; touches where live data lives — migration care. |
 | A11 | Real `BlockRegistry` + registry-driven `ModalLayer` | ★★★ | Low-Med | Low | ✅ **done** | #1562 | Frontend `block/`, `element/`. |
-| A12 | Dead-code sweep (watchdog family; dead RPC constants) | ★★ | Low-Med | Low | 🟡 **partial** | #1542 | StreamStalled removed; submit/interrupt watchdogs NOT dead (designed but unwired, skip); ~66 RPC consts remain. |
+| A12 | Dead-code sweep (watchdog family; dead RPC constants) | ★★ | Low-Med | Low | ✅ **done** | #1542, #1565 | StreamStalled removed; watchdogs NOT dead (skip); 65 dead COMMAND_* consts removed. |
 | A13 | Spec/doc hygiene (`INDEX.md`, merge dup dirs, archive) | ★★ | Med | Low | ✅ **done** | #1558 | Dirs merged; INDEX added; all path refs updated. |
 | A14 | Shared FE event-name constants (typed `WaveEvent.event`) | ★★ | Low | Low | ✅ **done** | #1556 | Frontend. |
 | A15 | Harden srv error handling (mutex poison, `take().unwrap()`, ACP drops) | ★★★ | Low | Low | ✅ **done** | #1551 | Backend. |
