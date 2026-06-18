@@ -56,7 +56,7 @@ This spec covers:
 | No warning on host selection | `AgentLaunchModal.tsx:750` | Need an amber callout |
 | No runtime badge on the running pane | `agent-view.tsx` | Use a `PaneRow` pin (see §5.2) |
 | No runtime badge on My Agents cards | `AgentCard.tsx` | `agent_type` not currently displayed |
-| Seeded templates are all `"host"` | `scripts/gen-seed.js` | 5 of 7 should become `"container"` |
+| Seeded templates are all `"host"` | `scripts/gen-seed.js` | 6 of 7 should become `"container"` |
 
 ---
 
@@ -252,15 +252,14 @@ that field is already the source of truth for which CLIs can run in a container:
 | Claude Code | claude | true | **container** |
 | Codex CLI | codex | true | **container** |
 | Gemini CLI | gemini | true | **container** |
-| Qwen Code | qwen | false (no image yet) | host (unchanged) |
 | Kimi Code | kimi | true | **container** |
 | Pi | pi | true | **container** |
-| OpenClaw | openclaw | false (needs host ACP) | host (unchanged) |
 | GitHub Copilot | copilot | true | **container** |
+| OpenClaw | openclaw | false (needs host ACP) | host (unchanged) |
 
-5 of 7 flip to container. The 2 that stay host (`qwen`, `openclaw`) are explicitly
-`containerSupported: false` in the catalog — qwen has no container image yet; openclaw
-is an ACP orchestrator that requires host-level access to manage other agents.
+6 of 7 flip to container. The 1 that stays host (`openclaw`) is explicitly
+`containerSupported: false` in the catalog — it is an ACP orchestrator that requires
+host-level access to manage other agents.
 
 The re-seed engine (`agent_seed.rs`) deletes old seeded rows and inserts new ones on
 version bump — bump `schemaVersion` in `gen-seed.js` to trigger the reseed.
@@ -285,7 +284,7 @@ where `is_seeded = 1`.
 1. `types.ts:51` — `runtime: "container"`
 2. `app_api.rs:2528` — `agent_type: "container".to_string()`
 3. `AgentLaunchModal.tsx` — host warning callout + radio subtext
-4. `scripts/gen-seed.js` — update 5 templates to `"container"`, bump schemaVersion
+4. `scripts/gen-seed.js` — update 6 templates to `"container"`, bump schemaVersion
 
 ~80 LOC frontend, ~5 LOC Rust, ~1 LOC seed script.
 
@@ -317,7 +316,7 @@ Not blocking — users can recreate agents to change runtime today.
 | `frontend/app/store/launch-flow-state/types.ts:51` | `runtime: "container"` |
 | `agentmux-srv/src/server/app_api.rs:2528` | `agent_type: "container".to_string()` |
 | `frontend/app/view/agent/components/AgentLaunchModal.tsx` | Host warning + radio subtext |
-| `scripts/gen-seed.js` | Update 5 templates + bump schemaVersion |
+| `scripts/gen-seed.js` | Update 6 templates + bump schemaVersion |
 
 ### Phase 3
 
@@ -353,9 +352,9 @@ and is always visible.
 set. Render via `<i class="fa-solid fa-box" />` pattern used throughout the codebase.
 
 **Q3: How many templates, which ones change?**  
-→ 7 seeded templates (claude, codex, gemini, qwen, kimi, pi, openclaw, copilot).
-5 flip to `"container"` (those with `containerSupported: true` in `cli-catalog.ts`).
-2 stay `"host"`: qwen (no container image yet) and openclaw (needs host-level ACP access).
+→ 7 seeded templates (claude, codex, gemini, kimi, pi, copilot, openclaw).
+6 flip to `"container"` (those with `containerSupported: true` in `cli-catalog.ts`).
+1 stays `"host"`: openclaw (needs host-level ACP access to orchestrate other agents).
 The `containerSupported` flag in `cli-catalog.ts` is the single source of truth — no
 divergence between the catalog and the seed data.
 
