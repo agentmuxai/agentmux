@@ -69,7 +69,8 @@ export const AgentCreateFromTemplateModalPanel = (
     // agent always actually starts; container can never be the silent
     // default on a box without Docker (the bug this fixes).
     const [runtime, setRuntime] = createSignal<"host" | "container">("host");
-    // undefined = still probing; true/false = Docker CLI resolved or not.
+    // undefined = still probing; true/false = Docker daemon answered the
+    // ping (ContainerRuntimeAvailableCommand) or not — NOT a CLI-on-PATH check.
     const [dockerAvailable, setDockerAvailable] = createSignal<boolean | undefined>(undefined);
     // Once the user touches the dropdown we stop auto-defaulting so the
     // Docker-probe result can't yank their choice out from under them.
