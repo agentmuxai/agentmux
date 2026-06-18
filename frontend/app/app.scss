@@ -70,7 +70,20 @@ a.plain-link {
     cursor: var(--cursor-default);
 }
 
+// Scrollbar SIZE policy: thin (half-width) everywhere by default, full-width
+// only on the two primary reading surfaces — the agent conversation
+// (`.agent-document`, overridden below) and the terminal (xterm's own overlay
+// scrollbar, sized independently in view/term/term.scss). Tool-call logs, list
+// panes, modals, etc. all get the thin default.
 *::-webkit-scrollbar {
+    width: 7px;
+    height: 7px;
+}
+
+// Full-width exception: the agent pane's main conversation scroll. More specific
+// than the universal rule above, so it wins on size only (cursor/colour still
+// come from the shared rules).
+.agent-document::-webkit-scrollbar {
     width: 14px;
     height: 14px;
 }
@@ -111,6 +124,9 @@ a.plain-link {
     --os-handle-bg: var(--scrollbar-thumb-color);
     --os-handle-bg-hover: var(--scrollbar-thumb-hover-color);
     --os-handle-bg-active: var(--scrollbar-thumb-active-color);
+    // OverlayScrollbars (markdown blocks, TOC, etc.) are never the main agent or
+    // terminal scroll, so they follow the thin default (library default is 10px).
+    --os-size: 7px;
 }
 
 .os-scrollbar-handle {
