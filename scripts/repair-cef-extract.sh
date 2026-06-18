@@ -4,7 +4,7 @@
 #
 # Repair a partial `cef_windows_x86_64/` extract after download-cef's
 # `fs::rename` chain races Windows Defender. See
-# `docs/retros/RETRO_CEF_BUILD_RACE_2026_04_24.md` for the full root
+# `docs/retro/RETRO_CEF_BUILD_RACE_2026_04_24.md` for the full root
 # cause. This script is idempotent — safe to call when the extract is
 # already complete (it's a no-op then).
 #

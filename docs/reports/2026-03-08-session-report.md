@@ -33,7 +33,7 @@
 
 ### 3. Retro & Specs
 
-- `docs/retros/pr70-opener-scope-regression.md` — root cause analysis of the opener regression
+- `docs/retro/pr70-opener-scope-regression.md` — root cause analysis of the opener regression
 - `docs/specs/sysinfo-scrollbar-investigation.md` — investigation notes from prior session (scrollbar regression)
 
 ## Open PRs

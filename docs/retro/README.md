@@ -1,4 +1,4 @@
-# docs/retros/
+# docs/retro/
 
 Post-incident retrospectives. Written after bugs, regressions, or incidents to capture lessons learned.
 

@@ -9,7 +9,7 @@
 
 **Related:**
 - `docs/specs/SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md` (the canonical pattern this spec extends)
-- `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` (Option B = JS-driven drag; chosen for the floater)
+- `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` (Option B = JS-driven drag; chosen for the floater)
 - `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` (canonical map of tear-off / floater / redock / browser-pane lifecycle)
 - PR #1181 (smooth Windows title-bar drag via host-side native move loop)
 - PR #1177 (edge-resize floaters by dragging edges/corners)
@@ -300,7 +300,7 @@ Out of scope for v1. Will move into a separate spec when v1 (floater drag) ships
 
 - `c63edf18` `feat(window-drag): smooth Windows title-bar drag via host-side native move loop (#1181)` — canonical PR; the pattern this work copies
 - `docs/specs/SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md` — canonical spec for the manual-loop pattern
-- `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` — analysis that picked Option B (JS-driven); we keep Option B's listener pattern but move the move-loop to the host
+- `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` — analysis that picked Option B (JS-driven); we keep Option B's listener pattern but move the move-loop to the host
 - `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` — full system map; §0 themes 1/5, §2.4 redock flow, §4 HWND resolution, §6 coord systems, §9 P1 single resolver
 - `frontend/app/workspace/floating-pane-workspace.tsx` lines 131–443 (current `onMount`) — the renderer block to simplify
 - `agentmux-cef/src/ui_tasks.rs::Win32BeginMoveTask` (lines 248–425) — host-side loop to extend with source_label + hover-emit + cancel-emit

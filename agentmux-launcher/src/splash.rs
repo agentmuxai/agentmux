@@ -30,7 +30,7 @@
 //! per-pixel transparency works correctly (the previous
 //! `SetLayeredWindowAttributes(LWA_ALPHA)` pulsed the whole window
 //! together, which made the background appear to breathe too — see
-//! `docs/retros/2026-05-13-splash-icon-and-pulse-target.md`).
+//! `docs/retro/2026-05-13-splash-icon-and-pulse-target.md`).
 
 #![cfg(target_os = "windows")]
 

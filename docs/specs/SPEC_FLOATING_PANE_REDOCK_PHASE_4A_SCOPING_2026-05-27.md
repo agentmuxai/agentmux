@@ -71,7 +71,7 @@ be re-docked into ours because its HWND isn't in our registry.
   drag (`.tile-layout .placeholder` overlay).
 - Cursor over an external app (VS Code etc.) shows the standard
   no-drop cursor (subject to VS Code's permissive dragover behavior —
-  see [`ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`](../analyses/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md)).
+  see [`ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`](../analysis/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md)).
 
 **Implementation**
 
@@ -171,7 +171,7 @@ Whichever option:
 
 - [`SPEC_FLOATING_PANE_REDOCK_2026-05-27.md`](./SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) — parent spec
 - [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md`](./SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) — Phase 4 acceptance criteria
-- [`ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`](../analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md) — why floater drag is JS-driven today
-- [`ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`](../analyses/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md) — VS Code dragover quirk
+- [`ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`](../analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md) — why floater drag is JS-driven today
+- [`ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`](../analysis/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md) — VS Code dragover quirk
 - `agentmux-srv/src/sagas/tear_off_block.rs:40-177` — saga template for `RedockFloatingPane`
 - `frontend/layout/lib/TileLayout.win32.tsx:661-752` — existing pane-drop targets to extend under Option B

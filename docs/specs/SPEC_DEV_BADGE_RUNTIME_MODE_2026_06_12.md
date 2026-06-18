@@ -8,7 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 - **Date:** 2026-06-12
 - **Status:** Draft / proposed
 - **Area:** `agentmux-common` (`RuntimeMode`), `agentmux-cef` (`get_is_dev`, launcher env), `frontend` status bar, macOS packaging
-- **Related:** the `AGENTMUX_VITE_PORT=5289` port-collision footgun (same root cause class); `docs/analyses/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`
+- **Related:** the `AGENTMUX_VITE_PORT=5289` port-collision footgun (same root cause class); `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md`
 
 ---
 

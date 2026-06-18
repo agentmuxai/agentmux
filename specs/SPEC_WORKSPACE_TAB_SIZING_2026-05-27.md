@@ -392,8 +392,8 @@ Single PR, one commit:
 - `frontend/app/view/editor/editor-tab-strip.tsx` — reference editor tab strip
 - `frontend/app/view/editor/editor-view.scss:247-340` — reference CSS contract
 - `docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md` — separator architecture + sizing history
-- `docs/retros/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md` — why the old width-animation was removed (avoid repeating that mistake)
-- `docs/retros/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md` — sub-pixel + `--zoomfactor` interactions
+- `docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md` — why the old width-animation was removed (avoid repeating that mistake)
+- `docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md` — sub-pixel + `--zoomfactor` interactions
 - VS Code [`workbench.editor.tabSizing` PR #181729](https://github.com/microsoft/vscode/pull/181729)
 - VS Code [issue #15048 — allow shrink-instead-of-min-width](https://github.com/microsoft/vscode/issues/15048)
 - VS Code [issue #183532 — test `fixed` sizing](https://github.com/microsoft/vscode/issues/183532)

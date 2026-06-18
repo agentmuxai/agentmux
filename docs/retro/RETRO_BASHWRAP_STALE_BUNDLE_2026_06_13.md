@@ -101,6 +101,6 @@ After A+B, on a fresh `task dev`: run an agent bash command and confirm `bashwra
 ---
 
 ## Related
-- #1368 (the exit-130 code fix — correct), D#1205 (floating-pane/tear-off thread), `docs/retros/RETRO_BASHWRAP_EXIT130_2026_06_12.md` (the original code-level retro — this one is the *delivery* retro).
+- #1368 (the exit-130 code fix — correct), D#1205 (floating-pane/tear-off thread), `docs/retro/RETRO_BASHWRAP_EXIT130_2026_06_12.md` (the original code-level retro — this one is the *delivery* retro).
 
 *Written 2026-06-13 by AgentX.*

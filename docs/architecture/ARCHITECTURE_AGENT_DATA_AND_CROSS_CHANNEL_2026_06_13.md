@@ -15,7 +15,7 @@
 - `docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` — conversation **transcripts/history** (orthogonal; transcripts are already global).
 - `docs/specs/SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md` — the "continue agent" UX feature spec.
 - `docs/specs/SPEC_DATA_CHANNELS_2026_05_24.md` — the **channel** model (Increment A is live; the schema-migration framework + import wizard in B/C are future work, not shipped).
-- `docs/analyses/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — a real, unimplemented dev-isolation bug (orthogonal).
+- `docs/analysis/ANALYSIS_MULTI_CLONE_TASK_DEV_ISOLATION_2026-05-26.md` — a real, unimplemented dev-isolation bug (orthogonal).
 
 **Superseded specs — kept in place, banner-marked 2026-06-13.** Each carries a `SUPERSEDED → this doc` header. They are *retained* (not deleted) because live code comments and other kept specs cite them as design rationale — but their architecture has been overtaken; read this doc for the current shape:
 - `SPEC_DATA_DIR_UNIFICATION_2026-05-05` — its design shipped as the `RuntimeMode` + `DataPaths` resolver (PR #695); see §2.

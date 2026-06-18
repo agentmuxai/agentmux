@@ -239,7 +239,7 @@ Before picking a fix:
 - [BrowserStack — Resolve sub-pixel rendering issues under
   CSS `zoom`][browserstack]
 - Prior retro:
-  `docs/retros/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`
+  `docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md`
 - Prior spec (current implementation reference):
   `docs/specs/SPEC_TAB_BAR_FIRST_PRINCIPLES_2026_04_25.md`
 

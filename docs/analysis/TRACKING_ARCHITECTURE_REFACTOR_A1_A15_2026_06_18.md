@@ -193,12 +193,13 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Acceptance:** dead symbols gone; A1 baselines shrink accordingly; tsc/cargo green.
 
 ### A13 — Spec/doc hygiene 🟢
-- **Findings:** ~733 markdown files; duplicate dirs `docs/retro/`+`docs/retros/`,
-  `docs/analysis/`+`docs/analyses/`; `specs/` vs `docs/specs/` lifecycle stalled; no index of record;
+- **Findings:** ~733 markdown files; duplicate dirs `docs/retro/`+`docs/retros/` (merged),
+  `docs/analysis/`+`docs/analyses/` (merged); `specs/` vs `docs/specs/` lifecycle stalled; no index of record;
   demonstrable drift (execution plans reference `saga.rs`/`saga_coordinator.rs` that no longer exist).
 - **Approach:** add `docs/specs/INDEX.md` (subsystem → current authoritative spec); merge the duplicate
   dirs; archive superseded per-incident specs.
 - **Acceptance:** one index exists; no duplicate-named dirs; superseded specs archived.
+- **Status:** ✅ dirs merged; `docs/specs/INDEX.md` added; all stale path refs updated.
 
 ### A14 — Shared FE event-name constants 🟢
 - **Entry points:** Rust centralises WPS/wave-event names (`backend/wps.rs:22-54`,

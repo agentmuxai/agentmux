@@ -4,7 +4,7 @@
 **Date:** 2026-05-16
 **Author:** AgentA
 **Supersedes (in part):** [`SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`](./SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) §4.1 (transport)
-**Related retros:** [`2026-05-11-live-log-streaming-wrapper-failures.md`](../retros/2026-05-11-live-log-streaming-wrapper-failures.md)
+**Related retros:** [`2026-05-11-live-log-streaming-wrapper-failures.md`](../retro/2026-05-11-live-log-streaming-wrapper-failures.md)
 **Reference architecture:** Microsoft VS Code agent-mode terminal tool (open source — see §10)
 
 ---
@@ -463,7 +463,7 @@ If the repro works, port the exact pattern into `run_via_pty`. If it doesn't, th
 
 ### AgentMux internal references
 
-- Retro: [`docs/retros/2026-05-11-live-log-streaming-wrapper-failures.md`](../retros/2026-05-11-live-log-streaming-wrapper-failures.md) — full context of the β.A wedge and the pipe rewrite
+- Retro: [`docs/retro/2026-05-11-live-log-streaming-wrapper-failures.md`](../retro/2026-05-11-live-log-streaming-wrapper-failures.md) — full context of the β.A wedge and the pipe rewrite
 - Analysis: [`docs/analysis/TOOL_OUTPUT_STREAMING_2026_05_11.md`](../analysis/TOOL_OUTPUT_STREAMING_2026_05_11.md) — original design exploration
 - Spec (transport, superseded in part): [`docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md`](./SPEC_STREAMING_BASH_RUNNER_2026_05_11.md)
 - Spec (UI, unaffected): [`docs/specs/SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md`](./SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md)

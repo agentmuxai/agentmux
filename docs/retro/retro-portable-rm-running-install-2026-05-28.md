@@ -71,4 +71,4 @@ Verified against the surviving evidence from this incident:
 - `agentmux-cef/src/client/mod.rs:1247` — `on_render_process_terminated`
 - `docs/specs/SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md` — shipped the recovery HTML; never added the crash budget
 - `docs/specs/SPEC_SERVICE_SUPERVISION_AND_RECOVERY_2026_05_20.md` — establishes "bounded recovery" as the prime directive that the current handler violates
-- `docs/analyses/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md` — earlier fix in the same function; left the production fallback intact
+- `docs/analysis/ANALYSIS_DEV_VITE_PORT_HARDCODE_2026-05-26.md` — earlier fix in the same function; left the production fallback intact

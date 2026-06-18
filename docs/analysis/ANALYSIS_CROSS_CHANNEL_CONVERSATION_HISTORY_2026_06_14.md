@@ -44,7 +44,7 @@ stdout → .jsonl persistence + WPS blockfile events"). The FileStore is opened
 > → `channels/<ch>/versions/<v>/data/db/filestore.db`, keyed by `block_id`.
 
 **Crucially, loading is already O(1).** The ultra-long-sessions work (#336–#342,
-`docs/retros/2026-04-12-ultra-long-sessions.md`) made the blockfile a paginated, virtualized
+`docs/retro/2026-04-12-ultra-long-sessions.md`) made the blockfile a paginated, virtualized
 store: `blockfile:read_range` (page the visible window) + `blockfile:line_count` O(1) fast-path
 via `session:line_count` meta (`app_api.rs` read_range/line_count handlers), rendered with
 `content-visibility` virtualization (`AgentDocumentView.tsx:208`). So a 400 KB+ conversation

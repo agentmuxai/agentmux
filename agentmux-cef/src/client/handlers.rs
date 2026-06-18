@@ -110,7 +110,7 @@ wrap_focus_handler! {
 // frontend/app/hook/useWindowDrag.{linux,darwin}.ts and the start_window_drag
 // IPC (Linux → CefWindow::BeginWindowDrag(), CEF source patch in
 // agentmux/7680-... branch; macOS → host-side run_macos_native_drag_loop).
-// Retro: docs/retros/2026-05-02-drag-and-rightclick-coexistence.md.
+// Retro: docs/retro/2026-05-02-drag-and-rightclick-coexistence.md.
 
 wrap_drag_handler! {
     struct AgentMuxDragHandler {

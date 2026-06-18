@@ -31,7 +31,7 @@
  *    `preventDefault` on mousedown blocks the HTML5 dragstart
  *    pragmatic-dnd would otherwise have used, suppressing a "double
  *    tear-off" regression. See
- *    `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`
+ *    `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md`
  *    for why we use this approach rather than OS HTCAPTION.
  *
  * The frontend code path is otherwise identical to the docked case:
@@ -136,7 +136,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     // Without it, dragging a floater's header would tear the block off
     // into ANOTHER floating window — the "double tear-off" bug.
     //
-    // See docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md.
+    // See docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md.
     onMount(() => {
         const INTERACTIVE_SELECTOR =
             "button, a, input, select, textarea, [role='button']";

@@ -304,10 +304,10 @@ as Phase 7 of the original spec.
 
 - `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` §5 (re-dock
   acceptance criteria), §9 (Phase 4 scope).
-- `docs/analyses/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` —
+- `docs/analysis/ANALYSIS_FLOATING_PANE_HEADER_DRAG_2026-05-27.md` —
   why we have JS-driven drag today and the trade-offs vs. pragmatic-dnd
   for the floater header.
-- `docs/analyses/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`
+- `docs/analysis/ANALYSIS_EXTERNAL_APP_ACCEPTS_PANE_DRAG_2026-05-26.md`
   — why external apps still show "accept" cursors during cross-window
   drag; the floating pane re-dock will inherit this limitation
   (cosmetic).

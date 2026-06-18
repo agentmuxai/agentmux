@@ -671,4 +671,4 @@ telemetry lands) external counters.
   https://wayland.app/protocols/xdg-shell#xdg_toplevel:request:move
 - Prior retro on auto-width sub-pixel jitter (motivation for the
   width-snapshot mechanism):
-  `docs/retros/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md`
+  `docs/retro/RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26.md`

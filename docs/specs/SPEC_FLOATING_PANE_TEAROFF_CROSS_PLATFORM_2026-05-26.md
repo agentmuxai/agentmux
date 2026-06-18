@@ -3,7 +3,7 @@
 **Date:** 2026-05-26
 **Status:** Proposed
 **Extends:** `docs/specs/SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md` (Windows-only; §10 explicitly defers cross-platform)
-**Pairs with:** `docs/analyses/ANALYSIS_FLOATING_PANE_TEAROFF_STATE_2026-05-26.md`
+**Pairs with:** `docs/analysis/ANALYSIS_FLOATING_PANE_TEAROFF_STATE_2026-05-26.md`
 
 ---
 

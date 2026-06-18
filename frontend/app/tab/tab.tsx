@@ -227,7 +227,7 @@ function Tab(props: TabProps): JSX.Element {
     // That was the source of the "tabs don't resize when renamed"
     // bug. The new-tab fade is now opacity-only; tabs size to
     // their content via flex layout. See the analysis at
-    // docs/retros/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
+    // docs/retro/RETRO_TAB_GAPS_ARCHITECTURE_ANALYSIS_2026_04_25.md.
 
     const handleMouseDownOnClose = (event: MouseEvent) => {
         event.stopPropagation();
