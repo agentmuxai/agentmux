@@ -17,9 +17,6 @@
     padding: var(--space-2) 0;
     min-width: 0;
 
-    &::-webkit-scrollbar {
-        width: 14px;
-    }
     &::-webkit-scrollbar-thumb {
         background: var(--scrollbar-thumb-color);
         border-radius: 0;
