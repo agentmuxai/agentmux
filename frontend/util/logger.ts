@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getApi } from "@/app/store/global";
+import { getApi } from "@/app/store/app-api";
 
 type LogData = Record<string, any>;
 

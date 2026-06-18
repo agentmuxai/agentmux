@@ -21,8 +21,8 @@ import {
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { setPlatform } from "@/util/platformutil";
-import { deepCompareReturnPrev, fireAndForget, getPrefixedSettings, isBlank } from "@/util/util";
-import { createMemo, createRoot, createSignal } from "solid-js";
+import { fireAndForget, isBlank } from "@/util/util";
+import { createMemo, createSignal } from "solid-js";
 import { reconnectWS } from "./ws";
 import {
     backendStatusAtom,
@@ -39,6 +39,29 @@ import { ClientService, ObjectService, WorkspaceService } from "./services";
 import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
 import * as WOS from "./wos";
 import { getFileSubject, waveEventSubscribe } from "./wps";
+import { getApi } from "./app-api";
+import {
+    fullConfigAtom,
+    setFullConfigAtom,
+    settingsAtom,
+    hasCustomAIPresetsAtom,
+} from "./config-signals";
+import {
+    useBlockCache,
+    cleanupBlockAtomCache,
+    cleanupTabAtomCache,
+    getBlockMetaKeyAtom,
+    useBlockMetaKeyAtom,
+    getTabMetaKeyAtom,
+    useTabMetaKeyAtom,
+    getSettingsKeyAtom,
+    useSettingsKeyAtom,
+    getOverrideConfigAtom,
+    useOverrideConfigAtom,
+    getSettingsPrefixAtom,
+    useBlockAtom,
+    useBlockDataLoaded,
+} from "./block-atom-cache";
 
 // ---------------------------------------------------------------------------
 // Global signals (replace Jotai atoms)
@@ -87,20 +110,7 @@ export const uiContext = createMemo<UIContext>(() => ({
     activetabid: activeTabId(),
 }));
 
-export const [fullConfigAtom, setFullConfigAtom] = createSignal<FullConfigType>(null);
-
-export const settingsAtom = createMemo<SettingsType>(() => fullConfigAtom()?.settings ?? ({} as SettingsType));
-
-export const hasCustomAIPresetsAtom = createMemo<boolean>(() => {
-    const fullConfig = fullConfigAtom();
-    if (!fullConfig?.presets) return false;
-    for (const presetId in fullConfig.presets) {
-        if (presetId.startsWith("ai@") && presetId !== "ai@global" && presetId !== "ai@wave") {
-            return true;
-        }
-    }
-    return false;
-});
+export { fullConfigAtom, setFullConfigAtom, settingsAtom, hasCustomAIPresetsAtom };
 
 export const [isFullScreen, setIsFullScreen] = createSignal(false);
 export const [controlShiftDelayAtom, setControlShiftDelayAtom] = createSignal(false);
@@ -346,260 +356,24 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Block / tab atom caches (used by per-block derived memos)
-// ---------------------------------------------------------------------------
-
-const blockCache = new Map<string, Map<string, any>>();
-
-export function useBlockCache<T>(blockId: string, name: string, makeFn: () => T): T {
-    let blockMap = blockCache.get(blockId);
-    if (blockMap == null) {
-        blockMap = new Map<string, any>();
-        blockCache.set(blockId, blockMap);
-    }
-    let value = blockMap.get(name);
-    if (value == null) {
-        value = makeFn();
-        blockMap.set(name, value);
-    }
-    return value as T;
-}
-
-const blockAtomCache = new Map<string, Map<string, () => any>>();
-const blockAtomDisposers = new Map<string, (() => void)[]>();
-const tabAtomCache = new Map<string, Map<string, () => any>>();
-const tabAtomDisposers = new Map<string, (() => void)[]>();
-
-function getSingleBlockAtomCache(blockId: string): Map<string, () => any> {
-    let bc = blockAtomCache.get(blockId);
-    if (bc == null) {
-        bc = new Map();
-        blockAtomCache.set(blockId, bc);
-    }
-    return bc;
-}
-
-function addBlockAtomDisposer(blockId: string, dispose: () => void) {
-    let disposers = blockAtomDisposers.get(blockId);
-    if (disposers == null) {
-        disposers = [];
-        blockAtomDisposers.set(blockId, disposers);
-    }
-    disposers.push(dispose);
-}
-
-function addTabAtomDisposer(tabId: string, dispose: () => void) {
-    let disposers = tabAtomDisposers.get(tabId);
-    if (disposers == null) {
-        disposers = [];
-        tabAtomDisposers.set(tabId, disposers);
-    }
-    disposers.push(dispose);
-}
-
-export function cleanupBlockAtomCache(blockId: string) {
-    blockAtomCache.delete(blockId);
-    const disposers = blockAtomDisposers.get(blockId);
-    if (disposers) {
-        for (const dispose of disposers) {
-            try { dispose(); } catch (_) {}
-        }
-        blockAtomDisposers.delete(blockId);
-    }
-}
-
-export function cleanupTabAtomCache(tabId: string) {
-    tabAtomCache.delete(tabId);
-    const disposers = tabAtomDisposers.get(tabId);
-    if (disposers) {
-        for (const dispose of disposers) {
-            try { dispose(); } catch (_) {}
-        }
-        tabAtomDisposers.delete(tabId);
-    }
-}
-
-function getSingleConnAtomCache(connName: string): Map<string, () => any> {
-    return getSingleBlockAtomCache(connName);
-}
-
-function getSingleTabAtomCache(tabId: string): Map<string, () => any> {
-    let tc = tabAtomCache.get(tabId);
-    if (tc == null) {
-        tc = new Map();
-        tabAtomCache.set(tabId, tc);
-    }
-    return tc;
-}
-
-export function getBlockMetaKeyAtom<T extends keyof MetaType>(blockId: string, key: T): () => MetaType[T] {
-    const bc = getSingleBlockAtomCache(blockId);
-    const name = "#meta-" + key;
-    let memo = bc.get(name);
-    if (memo == null) {
-        memo = createRoot((dispose) => {
-            addBlockAtomDisposer(blockId, dispose);
-            return createMemo(() => {
-                const blockAccessor = WOS.getWaveObjectAtom(WOS.makeORef("block", blockId));
-                const blockData = blockAccessor();
-                return blockData?.meta?.[key];
-            });
-        });
-        bc.set(name, memo);
-    }
-    return memo as () => MetaType[T];
-}
-
-export function useBlockMetaKeyAtom<T extends keyof MetaType>(blockId: string, key: T): MetaType[T] {
-    return getBlockMetaKeyAtom(blockId, key)();
-}
-
-export function getTabMetaKeyAtom<T extends keyof MetaType>(tabId: string, key: T): () => MetaType[T] {
-    const tc = getSingleTabAtomCache(tabId);
-    const name = "#meta-" + key;
-    let memo = tc.get(name);
-    if (memo == null) {
-        memo = createRoot((dispose) => {
-            addTabAtomDisposer(tabId, dispose);
-            return createMemo(() => {
-                const tabAccessor = WOS.getWaveObjectAtom(WOS.makeORef("tab", tabId));
-                const tabData = tabAccessor();
-                return tabData?.meta?.[key];
-            });
-        });
-        tc.set(name, memo);
-    }
-    return memo as () => MetaType[T];
-}
-
-export function useTabMetaKeyAtom<T extends keyof MetaType>(tabId: string, key: T): MetaType[T] {
-    return getTabMetaKeyAtom(tabId, key)();
-}
-
-// ---------------------------------------------------------------------------
-// Connection config
-// ---------------------------------------------------------------------------
-
-function getConnConfigKeyAtom<T extends keyof ConnKeywords>(connName: string, key: T): () => ConnKeywords[T] {
-    const cc = getSingleConnAtomCache(connName);
-    const name = "#conn-" + key;
-    let memo = cc.get(name);
-    if (memo == null) {
-        memo = createRoot((dispose) => {
-            addBlockAtomDisposer(connName, dispose);
-            return createMemo(() => fullConfigAtom()?.connections?.[connName]?.[key]);
-        });
-        cc.set(name, memo);
-    }
-    return memo as () => ConnKeywords[T];
-}
-
-// ---------------------------------------------------------------------------
-// Settings atoms
-// ---------------------------------------------------------------------------
-
-const settingsAtomCache = new Map<string, () => any>();
-
-export function getSettingsKeyAtom<T extends keyof SettingsType>(key: T): () => SettingsType[T] {
-    let memo = settingsAtomCache.get(key) as () => SettingsType[T];
-    if (memo == null) {
-        memo = createRoot(() => createMemo(() => {
-            const settings = settingsAtom();
-            if (settings == null) return null;
-            return settings[key];
-        }));
-        settingsAtomCache.set(key, memo);
-    }
-    return memo;
-}
-
-export function useSettingsKeyAtom<T extends keyof SettingsType>(key: T): SettingsType[T] {
-    return getSettingsKeyAtom(key)();
-}
-
-export function getOverrideConfigAtom<T extends keyof SettingsType>(blockId: string, key: T): () => SettingsType[T] {
-    const bc = getSingleBlockAtomCache(blockId);
-    const name = "#settingsoverride-" + key;
-    let memo = bc.get(name);
-    if (memo == null) {
-        memo = createRoot((dispose) => {
-            addBlockAtomDisposer(blockId, dispose);
-            return createMemo(() => {
-                const metaKeyMemo = getBlockMetaKeyAtom(blockId, key as any);
-                const metaKeyVal = metaKeyMemo();
-                if (metaKeyVal != null) return metaKeyVal as SettingsType[T];
-
-                const connNameMemo = getBlockMetaKeyAtom(blockId, "connection");
-                const connName = connNameMemo();
-                const connConfigKeyMemo = getConnConfigKeyAtom(connName, key as any);
-                const connConfigKeyVal = connConfigKeyMemo();
-                if (connConfigKeyVal != null) return connConfigKeyVal as SettingsType[T];
-
-                const settingsKeyMemo = getSettingsKeyAtom(key);
-                const settingsVal = settingsKeyMemo();
-                if (settingsVal != null) return settingsVal;
-
-                return null;
-            });
-        });
-        bc.set(name, memo);
-    }
-    return memo as () => SettingsType[T];
-}
-
-export function useOverrideConfigAtom<T extends keyof SettingsType>(blockId: string, key: T): SettingsType[T] {
-    return getOverrideConfigAtom(blockId, key)();
-}
-
-const settingsPrefixCache = new Map<string, () => SettingsType>();
-
-export function getSettingsPrefixAtom(prefix: string): () => SettingsType {
-    let memo = settingsPrefixCache.get(prefix + ":");
-    if (memo == null) {
-        const cacheKey = {};
-        memo = createRoot(() => createMemo(() => {
-            const settings = settingsAtom();
-            const newValue = getPrefixedSettings(settings, prefix);
-            return deepCompareReturnPrev(cacheKey, newValue);
-        }));
-        settingsPrefixCache.set(prefix + ":", memo);
-    }
-    return memo;
-}
-
-// ---------------------------------------------------------------------------
-// Block atom cache (used by block components to store per-block memos)
-// ---------------------------------------------------------------------------
-
-export function useBlockAtom<T>(blockId: string, name: string, makeFn: () => () => T): () => T {
-    const bc = getSingleBlockAtomCache(blockId);
-    let memo = bc.get(name);
-    if (memo == null) {
-        memo = createRoot(makeFn);
-        bc.set(name, memo);
-        console.log("New BlockAtom", blockId, name);
-    }
-    return memo as () => T;
-}
-
-export function useBlockDataLoaded(blockId: string): boolean {
-    const loadedMemo = useBlockAtom<boolean>(blockId, "block-loaded", () => {
-        return WOS.getWaveObjectLoadingAtom(WOS.makeORef("block", blockId));
-    });
-    return loadedMemo();
-}
-
-// ---------------------------------------------------------------------------
-// API
-// ---------------------------------------------------------------------------
-
-export function getApi(): AppApi {
-    if (!window.api) {
-        console.error("[getApi] called before window.api exists. Stack:", new Error().stack);
-    }
-    return window.api;
-}
+// Block / tab atom caches — moved to block-atom-cache.ts; re-exported below for
+// backward-compat (97 files import from this module).
+export {
+    useBlockCache,
+    cleanupBlockAtomCache,
+    cleanupTabAtomCache,
+    getBlockMetaKeyAtom,
+    useBlockMetaKeyAtom,
+    getTabMetaKeyAtom,
+    useTabMetaKeyAtom,
+    getSettingsKeyAtom,
+    useSettingsKeyAtom,
+    getOverrideConfigAtom,
+    useOverrideConfigAtom,
+    getSettingsPrefixAtom,
+    useBlockAtom,
+    useBlockDataLoaded,
+} from "./block-atom-cache";
 
 // ---------------------------------------------------------------------------
 // Block creation / layout actions
@@ -1043,5 +817,5 @@ export async function openLink(uri: string) {
     getApi().openExternal(uri);
 }
 
-// Re-export WOS for call-sites that import it from here
-export { WOS, setPlatform };
+// Re-export WOS, getApi, and setPlatform for call-sites that import them from here
+export { WOS, setPlatform, getApi };
