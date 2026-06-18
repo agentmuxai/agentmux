@@ -40,7 +40,18 @@ fn list_drives() -> Vec<serde_json::Value> {
     drives
 }
 
-#[cfg(not(target_os = "windows"))]
+// macOS: keep the editor scoped to the user's own folder. HOME is added as the
+// sole root by the GetEditorRoots handler, so returning no extra drives means
+// the file tree never exposes `/`, `/Volumes`, or external/network mounts —
+// the app only ever reaches the user's home (and never triggers a TCC prompt
+// for a volume the user didn't explicitly choose).
+#[cfg(target_os = "macos")]
+fn list_drives() -> Vec<serde_json::Value> {
+    Vec::new()
+}
+
+// Linux (and any other non-Windows, non-macOS unix): filesystem root + mounts.
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 fn list_drives() -> Vec<serde_json::Value> {
     let mut drives = vec![serde_json::json!({ "name": "/", "path": "/" })];
     for mount_dir in ["/mnt", "/media", "/Volumes"] {
