@@ -814,10 +814,11 @@ fn main() {
     #[cfg(target_os = "macos")]
     macos_menu::install_menu_bar(app_state.clone());
 
-    // kAEReopenApplication handler — a plain re-launch / Dock click opens a new
-    // window (Windows-parity) instead of a silent no-op, and a same-bundle-id
-    // reactivation no longer leaves LaunchServices reporting "not responding".
-    // After menu install (NSApplication + the AppleEvent manager exist by now).
+    // Reopen handler — a plain re-launch / Finder/Dock double-click of the
+    // running app opens a new window (Windows-parity) instead of just focusing
+    // it. Installs an NSApplication delegate (`applicationShouldHandleReopen:`);
+    // a raw NSAppleEventManager handler was inert because CEF re-registers its
+    // own. After menu install, NSApplication exists.
     // SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
     #[cfg(target_os = "macos")]
     macos_menu::install_reopen_handler(app_state.clone());

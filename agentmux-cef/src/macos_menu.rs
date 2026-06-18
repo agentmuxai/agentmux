@@ -173,16 +173,24 @@ pub fn install_reopen_handler(state: Arc<AppState>) {
         let sel_reopen = sel(b"applicationShouldHandleReopen:hasVisibleWindows:\0");
         let types = b"c@:@c\0".as_ptr() as *const c_char;
 
-        // Add/swizzle the method onto a class: swizzle in place if it already
-        // implements it, otherwise add it.
+        // Add/override the method onto a class WITHOUT mutating an inherited
+        // superclass IMP. `class_getInstanceMethod` also returns *inherited*
+        // methods, so swizzling its result with `method_setImplementation` could
+        // rewrite a superclass's shared IMP. `class_addMethod` is safe: it adds
+        // an override on THIS class only when the selector isn't already
+        // *directly* implemented here (any inherited impl is shadowed, not
+        // mutated), and returns false only when the class implements it directly
+        // — in which case the method is guaranteed to be the class's own and we
+        // replace its IMP. (reagent P2 on PR #1572.)
         let hook_class = |cls: Class, what: &str| {
-            let existing = class_getInstanceMethod(cls, sel_reopen);
-            if !existing.is_null() {
-                method_setImplementation(existing, imp as *const c_void);
-                tracing::info!("reopen-hook: swizzled applicationShouldHandleReopen on {}", what);
+            if class_addMethod(cls, sel_reopen, imp as usize, types) != 0 {
+                tracing::info!("reopen-hook: added applicationShouldHandleReopen override to {}", what);
             } else {
-                class_addMethod(cls, sel_reopen, imp as usize, types);
-                tracing::info!("reopen-hook: added applicationShouldHandleReopen to {}", what);
+                let m = class_getInstanceMethod(cls, sel_reopen);
+                if !m.is_null() {
+                    method_setImplementation(m, imp as *const c_void);
+                    tracing::info!("reopen-hook: swizzled own applicationShouldHandleReopen on {}", what);
+                }
             }
         };
 
