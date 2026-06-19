@@ -15,7 +15,6 @@
 import { type JSX } from "solid-js";
 
 interface AgentMemoryModalPanelProps {
-    agentName: string;
     workingDirectory: string;
     onClose: () => void;
 }
