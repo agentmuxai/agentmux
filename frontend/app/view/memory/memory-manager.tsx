@@ -93,11 +93,15 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                                 classList={{
                                     "is-selected": model.selectedIdAtom() === memory.id,
                                     "is-blank": !!memory.is_blank,
+                                    "is-global": !!memory.is_global,
                                 }}
                                 onClick={() => handleSelect(memory)}
                             >
                                 <div class="memory-view-list-item-name">
                                     {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
+                                    <Show when={memory.is_global}>
+                                        <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                    </Show>
                                 </div>
                                 <Show when={!memory.is_blank}>
                                     <div class="memory-view-list-item-provider">
@@ -138,6 +142,13 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                                         <p class="memory-view-description">{memory().description}</p>
                                     </Show>
                                     <dl class="memory-view-fields">
+                                        <Show when={memory().is_global}>
+                                            <dt>Scope</dt>
+                                            <dd>
+                                                <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                                {" "}— injected into every agent at launch
+                                            </dd>
+                                        </Show>
                                         <dt>Provider</dt>
                                         <dd>{memory().provider || "—"}</dd>
                                         <dt>Model</dt>

@@ -29,6 +29,11 @@ pub struct Memory {
     pub description: String,
     #[serde(default)]
     pub is_blank: bool,
+    /// Global bundles are injected into every agent's CLAUDE.md at launch,
+    /// regardless of per-agent memory selection. Managed in the Trust Center
+    /// (Identity & Memory hamburger modal). Seeded from workspace-wide rule sets.
+    #[serde(default)]
+    pub is_global: bool,
     /// "claude" | "codex" | "gemini" | empty string
     #[serde(default)]
     pub provider: String,
@@ -57,10 +62,29 @@ impl Store {
     pub fn bundle_memory_list(&self) -> Result<Vec<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, is_blank, provider, model, instructions,
+            "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, created_at, updated_at
              FROM db_memory_bundles
-             ORDER BY is_blank ASC, updated_at DESC",
+             ORDER BY is_blank ASC, is_global DESC, updated_at DESC",
+        )?;
+        let iter = stmt.query_map([], map_memory_row)?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Returns only the global bundles (`is_global = 1`), ordered by name.
+    /// Called at agent launch to inject workspace-wide rules into every agent.
+    pub fn bundle_memory_list_global(&self) -> Result<Vec<Memory>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
+                    context_files, mcp_servers, skills, created_at, updated_at
+             FROM db_memory_bundles
+             WHERE is_global = 1
+             ORDER BY name ASC",
         )?;
         let iter = stmt.query_map([], map_memory_row)?;
         let mut out = Vec::new();
@@ -73,7 +97,7 @@ impl Store {
     pub fn bundle_memory_get(&self, id: &str) -> Result<Option<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, description, is_blank, provider, model, instructions,
+            "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, created_at, updated_at
              FROM db_memory_bundles WHERE id = ?1",
         )?;
@@ -89,12 +113,13 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO db_memory_bundles
-                (id, name, description, is_blank, provider, model, instructions,
+                (id, name, description, is_blank, is_global, provider, model, instructions,
                  context_files, mcp_servers, skills, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
+                is_global = excluded.is_global,
                 provider = excluded.provider,
                 model = excluded.model,
                 instructions = excluded.instructions,
@@ -107,6 +132,7 @@ impl Store {
                 memory.name,
                 memory.description,
                 memory.is_blank as i64,
+                memory.is_global as i64,
                 memory.provider,
                 memory.model,
                 memory.instructions,
@@ -139,13 +165,14 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
         name: row.get(1)?,
         description: row.get(2)?,
         is_blank: row.get::<_, i64>(3)? != 0,
-        provider: row.get(4)?,
-        model: row.get(5)?,
-        instructions: row.get(6)?,
-        context_files: row.get(7)?,
-        mcp_servers: row.get(8)?,
-        skills: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        is_global: row.get::<_, i64>(4)? != 0,
+        provider: row.get(5)?,
+        model: row.get(6)?,
+        instructions: row.get(7)?,
+        context_files: row.get(8)?,
+        mcp_servers: row.get(9)?,
+        skills: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }

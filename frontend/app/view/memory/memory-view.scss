@@ -65,11 +65,27 @@
     }
 
     .memory-view-list-item-name {
+        display: flex;
+        align-items: center;
+        gap: 6px;
         font-size: 13px;
         font-weight: 500;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    .memory-view-global-badge {
+        flex: 0 0 auto;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        padding: 1px 5px;
+        border-radius: 3px;
+        background: var(--accent-color);
+        color: var(--accent-text-color, #fff);
+        text-transform: uppercase;
+        opacity: 0.85;
     }
 
     .memory-view-list-item-provider {

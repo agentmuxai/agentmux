@@ -240,6 +240,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             name          TEXT NOT NULL UNIQUE,
             description   TEXT NOT NULL DEFAULT '',
             is_blank      INTEGER NOT NULL DEFAULT 0,
+            is_global     INTEGER NOT NULL DEFAULT 0,
             provider      TEXT NOT NULL DEFAULT '',
             model         TEXT NOT NULL DEFAULT '',
             instructions  TEXT NOT NULL DEFAULT '',
@@ -442,6 +443,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agents ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE db_agents ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_memory_bundles ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

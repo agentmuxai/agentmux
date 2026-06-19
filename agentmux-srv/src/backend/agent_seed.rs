@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
+use super::storage::memory_bundles::Memory;
 use super::storage::store::{AgentDefinition, AgentContent, AgentSkill, Store};
 use super::storage::StoreError;
 
@@ -26,6 +27,24 @@ struct SeedManifest {
     #[allow(dead_code)]
     version: u32,
     agents: Vec<SeedAgent>,
+    #[serde(default)]
+    memories: Vec<SeedMemory>,
+}
+
+/// A memory bundle in the seed manifest.
+#[derive(Debug, Deserialize)]
+struct SeedMemory {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: String,
+    /// When true this bundle is injected into every agent's CLAUDE.md at
+    /// launch (Trust Center global tier). When false it is available in the
+    /// Memory manager but must be selected per-agent.
+    #[serde(default)]
+    is_global: bool,
+    #[serde(default)]
+    instructions: String,
 }
 
 /// An agent definition in the seed manifest.
@@ -221,6 +240,36 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
     Ok(SeedReport { created, skipped })
 }
 
+/// Seed memory bundles from the manifest. Only seeds bundles whose ID does not
+/// already exist; updates descriptions and instructions on existing seeded ones.
+fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<(), StoreError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    for mem_def in &manifest.memories {
+        let memory = Memory {
+            id: mem_def.id.clone(),
+            name: mem_def.name.clone(),
+            description: mem_def.description.clone(),
+            is_blank: false,
+            is_global: mem_def.is_global,
+            provider: String::new(),
+            model: String::new(),
+            instructions: mem_def.instructions.clone(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+        wstore.bundle_memory_upsert(&memory)?;
+    }
+
+    Ok(())
+}
+
 /// Run auto-seed on startup. Seeds if empty, or re-seeds if manifest version changed.
 /// Re-seeding updates existing seeded agents and removes seeded agents not in the manifest.
 pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
@@ -262,6 +311,18 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
             }
         }
         Err(e) => tracing::error!("agent seed: failed to count agents: {e}"),
+    }
+
+    // Seed memory bundles unconditionally — upsert is idempotent and updates
+    // descriptions + instructions when the manifest changes.
+    if !manifest.memories.is_empty() {
+        match seed_memories(wstore, &manifest) {
+            Ok(()) => tracing::info!(
+                "agent seed: seeded {} memory bundles",
+                manifest.memories.len()
+            ),
+            Err(e) => tracing::error!("agent seed: failed to seed memories: {e}"),
+        }
     }
 }
 
