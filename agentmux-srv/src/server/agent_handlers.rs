@@ -3729,6 +3729,7 @@ mod recent_sessions_tests {
             name: "Notes".to_string(),
             description: String::new(),
             is_blank: false,
+            is_global: false,
             provider: String::new(),
             model: String::new(),
             instructions: String::new(),
