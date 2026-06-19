@@ -16,6 +16,8 @@ import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNew
 import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMemoryModal";
 import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/AgentCreateFromTemplateModal";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
+import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
+import { AgentMemoryModalPanel } from "@/app/view/agent/components/AgentMemoryModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
@@ -38,6 +40,10 @@ export function requestLabel(req: ModalLayerRequest): string {
             return `Create new agent from ${req.template.name}`;
         case "browser-auth":
             return req.isProxy ? "Proxy authentication required" : "Authentication required";
+        case "agent-identity":
+            return `Identity — ${req.agent.name}`;
+        case "agent-memory":
+            return `Memory — ${req.agentName}`;
     }
 }
 
@@ -265,6 +271,28 @@ export function renderRequest(
                             req.onSubmit(username, password);
                             api.close();
                         }}
+                    />
+                ),
+            };
+        case "agent-identity":
+            return {
+                label: requestLabel(req),
+                panel: (
+                    <AgentIdentityModalPanel
+                        agent={req.agent}
+                        blockId={req.blockId}
+                        onClose={api.close}
+                    />
+                ),
+            };
+        case "agent-memory":
+            return {
+                label: requestLabel(req),
+                panel: (
+                    <AgentMemoryModalPanel
+                        agentName={req.agentName}
+                        workingDirectory={req.workingDirectory}
+                        onClose={api.close}
                     />
                 ),
             };
