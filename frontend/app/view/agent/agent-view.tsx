@@ -48,6 +48,7 @@ import { useProcessCount } from "./hooks/useProcessCount";
 import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
+import { useBlockActivity } from "./hooks/useBlockActivity";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
@@ -577,6 +578,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Log controllerstatus events as they stream in.
     useControllerStatusEvents({ blockId: model.blockId, log });
+
+    // Subscribe to Claude Code OSC window-title extractions and write them
+    // to term:activity block metadata for the tab label.
+    useBlockActivity({ blockId: model.blockId });
 
     // Subagent event subscriptions. See hooks/useSubagentEvents.ts.
     useSubagentEvents({
