@@ -8,11 +8,14 @@
 .identity-accounts-layout {
     flex: 1;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
 }
 
 .identity-accounts-list {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: var(--space-2);
     min-width: 0;
