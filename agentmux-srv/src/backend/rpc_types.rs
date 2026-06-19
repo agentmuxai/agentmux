@@ -837,12 +837,21 @@ pub struct CommandAgentDefineData {
     pub env: Option<std::collections::HashMap<String, String>>,
     pub if_exists: Option<String>,
     pub create_instance_stub: Option<bool>,
+    /// "host" or "container". Defaults to "host" when absent — the safe
+    /// default that works without Docker. Callers must explicitly pass
+    /// "container" so a missing field never silently starts the wrong runtime.
+    #[serde(default = "default_host_agent_type")]
+    pub agent_type: String,
     /// Docker image for container-type agents. Empty string for host agents.
     #[serde(default)]
     pub container_image: String,
     /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
     #[serde(default = "default_container_volumes")]
     pub container_volumes: String,
+}
+
+fn default_host_agent_type() -> String {
+    "host".to_string()
 }
 
 /// Response from agent.define.

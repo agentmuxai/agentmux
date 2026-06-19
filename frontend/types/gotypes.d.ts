@@ -294,6 +294,12 @@ declare global {
          * settings unhide UI passes `include_hidden: true` to see them.
          */
         user_hidden?: number;
+        /**
+         * Container image to pull when agent_type === "container".
+         * Populated from the seed manifest (cli-catalog.ts `containerImage`).
+         * Empty string for host-only agents.
+         */
+        container_image?: string;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────
