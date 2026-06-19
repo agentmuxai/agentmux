@@ -57,15 +57,26 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
             },
         });
 
-        // Clear on pane unmount only. The topic label intentionally persists
-        // across turns within a single session — it is a session-level label,
-        // not a per-turn status. Claude Code does not emit a title-restore
-        // sequence on exit (GitHub #27197), so we clear here to prevent the
-        // previous session's topic from appearing when the pane is re-used.
+        // Clear on session end (process exit) so a subsequent session in the
+        // same pane starts without a stale topic. term:activity is persisted in
+        // the block store and survives tab-switch remounts, so we must NOT clear
+        // in onCleanup — doing so would blank the label every time the pane
+        // remounts (tab switch), and Claude Code only emits OSC titles once per
+        // session so no new event would restore it.
+        const unsubStatus = waveEventSubscribe({
+            eventType: WpsEvent.ControllerStatus,
+            scope: makeORef("block", opts.blockId),
+            handler: (event) => {
+                if ((event as any)?.data?.shellprocstatus === "done") {
+                    clearActivity(opts.blockId);
+                }
+            },
+        });
+
         onCleanup(() => {
             unsub();
+            unsubStatus();
             clearTimeout(debounceTimer);
-            clearActivity(opts.blockId);
         });
     });
 }

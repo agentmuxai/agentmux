@@ -106,6 +106,7 @@ impl OscExtractor {
                         // Buffer overflow — discard partial sequence and reset
                         self.payload_buf.clear();
                         self.state = State::Idle;
+                        continue;
                     }
                 }
                 State::InOscAfterEsc => {
@@ -181,6 +182,8 @@ impl OscExtractor {
 ///   "Claude Code"             → discard (post-launch before topic, no topic)
 fn normalise_title(s: &str) -> String {
     let stripped = if let Some(rest) = s.strip_prefix("claude - ") {
+        rest
+    } else if let Some(rest) = s.strip_prefix("Claude - ") {
         rest
     } else if let Some(rest) = s.strip_prefix("Claude: ") {
         rest
