@@ -272,8 +272,20 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
             created_at: now,
             updated_at: now,
         };
-        wstore.bundle_memory_upsert(&memory)?;
-        created += 1;
+        // Use warn-and-skip rather than ? so a user bundle whose name
+        // collides with the seeded name (UNIQUE constraint on name) does
+        // not abort the remainder of the seed loop.
+        match wstore.bundle_memory_upsert(&memory) {
+            Ok(()) => { created += 1; }
+            Err(e) => {
+                tracing::warn!(
+                    id = %mem_def.id,
+                    name = %mem_def.name,
+                    error = %e,
+                    "agent seed: skipping memory bundle due to upsert error (name collision?)"
+                );
+            }
+        }
     }
 
     Ok(created)

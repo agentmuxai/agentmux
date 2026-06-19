@@ -153,6 +153,14 @@ impl Store {
                 "cannot delete the blank Memory singleton".to_string(),
             ));
         }
+        // Seeded bundles (IDs prefixed "seed-") are workspace defaults that
+        // re-seed on every startup; blocking deletion is cleaner than a
+        // tombstone table and avoids the re-creation loop.
+        if id.starts_with("seed-") {
+            return Err(StoreError::Other(
+                "cannot delete a seeded Memory bundle; toggle is_global or clear its instructions instead".to_string(),
+            ));
+        }
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute("DELETE FROM db_memory_bundles WHERE id = ?1", params![id])?;
         Ok(rows > 0)
