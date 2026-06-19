@@ -401,6 +401,11 @@ pub const COMMAND_AGENT_SESSION_APPEND_OUTPUT: &str = "agent:session:append_outp
 pub const COMMAND_AGENT_SESSION_ARCHIVE: &str = "agent:session:archive";
 pub const COMMAND_AGENT_SESSION_LIST_ARCHIVES: &str = "agent:session:list_archives";
 
+// ---- Native memory RPCs (Phase 2 — agent:memory:list / read / write) ----
+pub const COMMAND_NATIVE_MEMORY_LIST: &str = "agent:memory:list";
+pub const COMMAND_NATIVE_MEMORY_READ_FILE: &str = "agent:memory:read_file";
+pub const COMMAND_NATIVE_MEMORY_WRITE_FILE: &str = "agent:memory:write_file";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
@@ -2157,6 +2162,51 @@ pub struct AgentArchiveRow {
     /// Total `nodes.length` from the archived snapshot. 0 when
     /// unreadable / missing.
     pub node_count: usize,
+}
+
+// ====================================================================
+// Native memory RPCs — agent:memory:list / read / write
+// ====================================================================
+
+/// Metadata for one `*.md` file in the agent's native memory folder.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeMemoryFileMeta {
+    pub filename: String,
+    /// True only for `MEMORY.md` (the Claude Code index file).
+    pub is_index: bool,
+    /// Parsed from YAML frontmatter `type:` field. Null when absent.
+    pub metadata_type: Option<String>,
+    pub size_bytes: u64,
+    /// Unix timestamp in milliseconds.
+    pub modified_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandNativeMemoryListData {
+    pub agent_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeMemoryListResult {
+    pub files: Vec<NativeMemoryFileMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandNativeMemoryReadFileData {
+    pub agent_id: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeMemoryReadFileResult {
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandNativeMemoryWriteFileData {
+    pub agent_id: String,
+    pub filename: String,
+    pub content: String,
 }
 
 // ====================================================================

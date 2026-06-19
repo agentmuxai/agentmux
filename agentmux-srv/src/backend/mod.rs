@@ -39,6 +39,7 @@ pub mod obj;
 pub mod wconfig;
 pub mod wcore;
 pub mod wps;
+pub mod osc_extractor;
 pub mod tool_store;
 pub mod container;
 pub mod shell_node;
