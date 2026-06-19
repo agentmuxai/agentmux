@@ -52,6 +52,11 @@ pub const EVENT_SHELL_NODE_CREATE: &str = "shell_node_create";
 /// `op: "chunk"` carries `{ shell_id, kind, content, timestamp }`;
 /// `op: "exit"` carries `{ shell_id, exit_code, timestamp }`.
 pub const EVENT_SHELL_CHUNK: &str = "shell_chunk";
+/// Fired by the agent-pane PTY read loop when an OSC 0/2 window-title sequence
+/// from Claude Code is extracted. Carries the normalised conversation-topic string
+/// so the frontend can surface it as a `term:activity` tab label.
+/// Payload: `{ "blockId": "...", "activity": "auth refactor" }`.
+pub const EVENT_BLOCK_ACTIVITY: &str = "block:activity";
 
 // File operation constants
 #[allow(dead_code)]
@@ -498,6 +503,21 @@ pub fn publish_install_progress(broker: &Broker, block_id: &str, message: &str) 
         sender: String::new(),
         persist: 0,
         data: Some(serde_json::json!({ "message": message })),
+    });
+}
+
+/// Publish a Claude Code OSC window-title activity string to the frontend
+/// for a given agent-pane block. Frontend subscribes to `block:activity`
+/// events scoped to `block:{block_id}` and writes the payload to
+/// `term:activity` block metadata, which the tab label reads.
+pub fn publish_block_activity(broker: &Broker, block_id: &str, activity: &str) {
+    let scope = format!("block:{}", block_id);
+    broker.publish(WaveEvent {
+        event: EVENT_BLOCK_ACTIVITY.to_string(),
+        scopes: vec![scope],
+        sender: String::new(),
+        persist: 0,
+        data: Some(serde_json::json!({ "blockId": block_id, "activity": activity })),
     });
 }
 

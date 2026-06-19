@@ -727,6 +727,16 @@ impl PersistentSubprocessController {
             let mut lines = reader.lines();
             let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
 
+            // NOTE: OSC window-title extraction is NOT done here.
+            // PersistentSubprocessController uses piped stdout with stream-json
+            // NDJSON protocol. Claude Code sets window titles via process.title
+            // (SetConsoleTitle on Windows; argv[0] on Unix), which does NOT
+            // produce OSC escape sequences in the piped stdout stream. Inserting
+            // OSC bytes into stream-json stdout would corrupt the JSON protocol.
+            // block:activity events for agent panes are instead published by
+            // the terminalSequence hooks path — see spec §2.5 and the future
+            // SPEC_AGENT_HOOKS_TERMINAL_SEQUENCE spec.
+
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.trim().is_empty() {
                     continue;
