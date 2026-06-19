@@ -77,7 +77,7 @@ export function AccountsManager(): JSX.Element {
                 {/* Connected accounts (manage existing). Shown when there is any
                     stored account OR an AgentMux Cloud session is connected.
                     accounts-manager-list-section is flex:1 so it fills remaining
-                    height below the gallery, letting AccountsTab's height:100% work. */}
+                    height below the gallery. */}
                 <Show when={model.accountsAtom().length > 0 || agentMuxConnected()}>
                     <div class="accounts-manager-list-section">
                         <div class="accounts-connected-heading">Connected accounts</div>
