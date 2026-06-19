@@ -23,8 +23,10 @@ fn scratch_session_token() -> &'static str {
 
 /// Enumerate drives/mounts to surface as editor file-tree roots alongside
 /// $HOME (via the `geteditorroots` RPC). On **macOS** this returns nothing, so
-/// the editor stays scoped to the user's home folder (no `/`, `/Volumes`, or
-/// external mounts); on Linux/Windows it exposes the filesystem root + mounts.
+/// the file-tree's roots are limited to $HOME — `/`, `/Volumes`, and external
+/// mounts aren't offered as starting points (root scoping for the tree, not a
+/// sandbox; see the note at the macOS arm). On Linux/Windows it exposes the
+/// filesystem root + mounts.
 /// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up).
 #[cfg(target_os = "windows")]
 fn list_drives() -> Vec<serde_json::Value> {
@@ -41,11 +43,13 @@ fn list_drives() -> Vec<serde_json::Value> {
     drives
 }
 
-// macOS: keep the editor scoped to the user's own folder. HOME is added as the
-// sole root by the GetEditorRoots handler, so returning no extra drives means
-// the file tree never exposes `/`, `/Volumes`, or external/network mounts —
-// the app only ever reaches the user's home (and never triggers a TCC prompt
-// for a volume the user didn't explicitly choose).
+// macOS: scope the editor file-tree ROOTS to the user's home. HOME is the sole
+// root from GetEditorRoots, so the tree doesn't offer `/`, `/Volumes`, or
+// external mounts as starting points (no nudging the user toward volumes they
+// didn't choose). NOTE: this is root scoping, not a sandbox — listeditordir /
+// readeditorfile still serve any absolute path the frontend sends, and a
+// symlink under HOME can resolve outside it; macOS TCC remains the actual gate
+// for protected locations.
 #[cfg(target_os = "macos")]
 fn list_drives() -> Vec<serde_json::Value> {
     Vec::new()
