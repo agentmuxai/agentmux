@@ -304,11 +304,22 @@ unsafe extern "system" fn floater_cascade_wndproc(
         .ok()
         .and_then(|m| m.get(&(hwnd as usize)).copied())
         .unwrap_or(0);
-    if original != 0 {
+    let result = if original != 0 {
         CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
     } else {
         DefWindowProcW(hwnd, msg, wparam, lparam)
+    };
+
+    // Prune the map AFTER passthrough so the original proc receives WM_DESTROY.
+    // Without this, Windows HWND reuse could make install_main_window_floater_cascade_hook
+    // see already_hooked=true for a new window that happens to get the same HWND value.
+    if msg == WM_DESTROY {
+        if let Ok(mut m) = FLOATER_CASCADE_ORIGINALS.lock() {
+            m.remove(&(hwnd as usize));
+        }
     }
+
+    result
 }
 
 /// Subclass a FullInstance window's WndProc to cascade lifecycle events to all
