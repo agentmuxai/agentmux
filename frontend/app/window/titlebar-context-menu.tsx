@@ -10,7 +10,11 @@ import { createSignal, type JSX } from "solid-js";
 
 function getPinnedKeys(settings: Record<string, any>, widgets: Record<string, any>): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
-    if (pinned !== undefined) return pinned;
+    if (pinned !== undefined) {
+        // Filter out stale keys that no longer exist in the widget map to avoid
+        // writing ghost entries back to the server on each toggle.
+        return pinned.filter((shortName) => widgets[`defwidget@${shortName}`] != null);
+    }
     return Object.entries(widgets)
         .filter(([, w]: any) => w["display:pinned"])
         .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
@@ -59,7 +63,6 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
         items.push({
             label: "New Window",
             click: () => {
-                props.onClose();
                 fireAndForget(async () => getApi().openNewWindow());
             },
         });
@@ -67,7 +70,6 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
         items.push({
             label: "New Tab",
             click: () => {
-                props.onClose();
                 createTab();
             },
         });
@@ -101,7 +103,6 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             label: "Icon Only",
             checked: iconOnly(),
             click: () => {
-                props.onClose();
                 toggleIconOnly();
             },
         });

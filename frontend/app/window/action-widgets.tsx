@@ -316,7 +316,7 @@ const ActionWidgets = (): JSX.Element => {
         {
             label: "New Window",
             click: () => {
-                setItemMenuState(null);
+                // Item menu closes via keepOpen:false → onClose; More must be closed explicitly.
                 closeMore();
                 fireAndForget(async () => getApi().openNewWindow());
             },
@@ -326,14 +326,13 @@ const ActionWidgets = (): JSX.Element => {
             ? {
                 label: "Unpin from bar",
                 click: () => {
-                    setItemMenuState(null);
                     unpinWidget(shortName, settings(), wmap());
+                    // Item menu closes via keepOpen:false → onClose; More stays open.
                 },
             }
             : {
                 label: "Pin to bar",
                 click: () => {
-                    setItemMenuState(null);
                     pinWidget(shortName, settings(), wmap());
                 },
             },
@@ -519,6 +518,7 @@ const ActionWidgets = (): JSX.Element => {
 
     const handleBarContextMenu = (e: MouseEvent) => {
         e.preventDefault();
+        e.stopPropagation(); // prevent bubbling to window-header onContextMenu (opens TitleBarContextMenu)
         ContextMenuModel.showContextMenu(
             [
                 {
