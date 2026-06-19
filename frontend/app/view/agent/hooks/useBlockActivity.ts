@@ -40,7 +40,7 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
     onMount(() => {
         let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-        const unsubActivity = waveEventSubscribe({
+        const unsub = waveEventSubscribe({
             eventType: WpsEvent.BlockActivity,
             scope: makeORef("block", opts.blockId),
             handler: (event) => {
@@ -57,26 +57,13 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
             },
         });
 
-        // Clear the activity label when the agent session ends. The pane stays
-        // mounted across session end/restart (agentId persists), so onCleanup
-        // alone is insufficient — the previous session's topic would remain
-        // visible until the next OSC title arrives. (Spec §3.6; Claude Code
-        // does not emit a title-restore sequence on exit, GitHub #27197.)
-        const unsubStatus = waveEventSubscribe({
-            eventType: WpsEvent.ControllerStatus,
-            scope: makeORef("block", opts.blockId),
-            handler: (event) => {
-                const status = (event as any)?.data?.shellprocstatus as string | undefined;
-                if (status === "done") {
-                    clearTimeout(debounceTimer);
-                    clearActivity(opts.blockId);
-                }
-            },
-        });
-
+        // Clear on pane unmount only. The topic label intentionally persists
+        // across turns within a single session — it is a session-level label,
+        // not a per-turn status. Claude Code does not emit a title-restore
+        // sequence on exit (GitHub #27197), so we clear here to prevent the
+        // previous session's topic from appearing when the pane is re-used.
         onCleanup(() => {
-            unsubActivity();
-            unsubStatus();
+            unsub();
             clearTimeout(debounceTimer);
             clearActivity(opts.blockId);
         });

@@ -727,31 +727,17 @@ impl PersistentSubprocessController {
             let mut lines = reader.lines();
             let mut stats = super::session_stats::SessionStatsAccumulator::new(block_id_read.clone());
 
-            // Extract OSC 0/2 window-title sequences from stdout lines so that
-            // any Claude Code activity strings (e.g. "claude - auth refactor")
-            // reach the frontend as term:activity block metadata. Because the
-            // persistent controller uses piped stdout (not a PTY), `process.title`
-            // doesn't yield PTY-level escape bytes, but Claude Code may still
-            // write OSC sequences inline. The extractor is stateful across lines
-            // so a sequence split at a line boundary is assembled correctly.
-            let mut osc_extractor = crate::backend::osc_extractor::OscExtractor::new();
+            // NOTE: OSC window-title extraction is NOT done here.
+            // PersistentSubprocessController uses piped stdout with stream-json
+            // NDJSON protocol. Claude Code sets window titles via process.title
+            // (SetConsoleTitle on Windows; argv[0] on Unix), which does NOT
+            // produce OSC escape sequences in the piped stdout stream. Inserting
+            // OSC bytes into stream-json stdout would corrupt the JSON protocol.
+            // block:activity events for agent panes are instead published by
+            // the terminalSequence hooks path — see spec §2.5 and the future
+            // SPEC_AGENT_HOOKS_TERMINAL_SEQUENCE spec.
 
             while let Ok(Some(line)) = lines.next_line().await {
-                if line.trim().is_empty() {
-                    continue;
-                }
-
-                // Scan for OSC sequences in the raw line bytes.
-                let (cleaned_bytes, osc_events) = osc_extractor.feed(line.as_bytes());
-                for ev in &osc_events {
-                    if let Some(ref broker) = broker_read {
-                        wps::publish_block_activity(broker, &block_id_read, &ev.payload);
-                    }
-                }
-                // Shadow `line` with the OSC-stripped version for all downstream
-                // processing. If the entire line was an OSC sequence (cleaned is
-                // empty after trimming) skip it — don't publish to blockfile.
-                let line = String::from_utf8_lossy(&cleaned_bytes).trim_end().to_string();
                 if line.trim().is_empty() {
                     continue;
                 }
