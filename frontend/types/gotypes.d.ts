@@ -294,6 +294,12 @@ declare global {
          * settings unhide UI passes `include_hidden: true` to see them.
          */
         user_hidden?: number;
+        /**
+         * Container image to pull when agent_type === "container".
+         * Populated from the seed manifest (cli-catalog.ts `containerImage`).
+         * Empty string for host-only agents.
+         */
+        container_image?: string;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────
@@ -572,6 +578,8 @@ declare global {
         agent_created_at: number;
         /** When this instance was most recently launched (ms epoch). */
         started_at: number;
+        /** "host" or "container" — drives the runtime badge in the My Agents list. */
+        agent_type?: string;
     };
 
     // AgentContent

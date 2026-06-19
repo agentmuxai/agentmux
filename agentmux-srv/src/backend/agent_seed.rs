@@ -56,6 +56,10 @@ struct SeedAgent {
     auto_start: bool,
     #[serde(default)]
     restart_on_crash: bool,
+    /// Container image to pull and run when agent_type == "container".
+    /// Omit for host-only providers. Matches cli-catalog.ts `containerImage`.
+    #[serde(default)]
+    container_image: String,
     #[serde(default)]
     content: SeedContent,
     #[serde(default)]
@@ -169,7 +173,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             // user explicitly hides; new template ids in re-seed are
             // force-reset to 0 below (see `reseed_if_needed`).
             user_hidden: 0,
-            container_image: String::new(),
+            container_image: agent_def.container_image.clone(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
         };
@@ -351,7 +355,7 @@ fn reseed_if_needed(
             // hidden — the `else` branch below honours that by lining
             // up against existing ids only.
             user_hidden: 0,
-            container_image: String::new(),
+            container_image: agent_def.container_image.clone(),
             container_volumes: "[]".to_string(),
             container_name: String::new(),
         };

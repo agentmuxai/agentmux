@@ -21,6 +21,9 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListIdentityBundlesCommand: vi.fn(),
         ListMemoriesCommand: vi.fn(),
+        // Mount-time daemon probe (drives the host/container dropdown).
+        // Default → no reachable runtime → host-only.
+        ContainerRuntimeAvailableCommand: vi.fn(),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -58,6 +61,8 @@ beforeEach(async () => {
     vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([
         { id: "mem-notes", name: "Notes", is_blank: false } as any,
     ]);
+    // Default: Docker daemon not reachable → host-only.
+    vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: false });
 });
 
 afterEach(() => cleanup());
@@ -110,6 +115,52 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         // bundle each.
         expect(args.identityId).toBe("id-work");
         expect(args.memoryId).toBe("mem-notes");
+        // No Docker → runtime defaults to host (never a mode that
+        // can't actually start).
+        expect(args.agentType).toBe("host");
+    });
+
+    it("disables the container option when no Docker runtime is found", async () => {
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={template}
+                onSubmit={vi.fn().mockResolvedValue(undefined)}
+                onCancel={vi.fn()}
+            />
+        ));
+        // Let the mount-time Docker probe settle (rejects in beforeEach).
+        await flush();
+        await flush();
+        const select = screen.getByTestId(
+            "create-from-template-runtime-select",
+        ) as HTMLSelectElement;
+        const containerOpt = Array.from(select.options).find(
+            (o) => o.value === "container",
+        )!;
+        expect(containerOpt.disabled).toBe(true);
+        expect(select.value).toBe("host");
+    });
+
+    it("defaults to container when Docker is available and the template suggests it", async () => {
+        vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
+        const containerTemplate = { ...template, agent_type: "container" } as AgentDefinition;
+        const onSubmit = vi.fn().mockResolvedValue(undefined);
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={containerTemplate}
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+            />
+        ));
+        // Wait for the probe to resolve and the default-pick effect to run.
+        const select = screen.getByTestId(
+            "create-from-template-runtime-select",
+        ) as HTMLSelectElement;
+        await waitFor(() => expect(select.value).toBe("container"));
+        const containerOpt = Array.from(select.options).find(
+            (o) => o.value === "container",
+        )!;
+        expect(containerOpt.disabled).toBe(false);
     });
 
     it("surfaces an error from onSubmit", async () => {

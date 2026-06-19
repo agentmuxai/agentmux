@@ -215,7 +215,7 @@ export function renderRequest(
                         // (spec note on CreateFromTemplateRequest) so
                         // `submitting()` covers both RPC steps and ESC
                         // / backdrop dismiss stay blocked end-to-end.
-                        onSubmit={async ({ name, identityId, memoryId }) => {
+                        onSubmit={async ({ name, identityId, memoryId, agentType }) => {
                             setSubmitting(true);
                             try {
                                 const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
@@ -225,6 +225,10 @@ export function renderRequest(
                                         name,
                                         identity_id: identityId,
                                         memory_id: memoryId,
+                                        // Persist the chosen runtime on the
+                                        // new user-owned definition so later
+                                        // reattach/auto-continue uses it too.
+                                        agent_type: agentType,
                                     },
                                 );
                                 await req.onCreatedAndLaunch(
@@ -232,6 +236,7 @@ export function renderRequest(
                                     resp.identity_id,
                                     resp.memory_id,
                                     name,
+                                    agentType,
                                 );
                                 setSubmitting(false);
                                 api.close();
