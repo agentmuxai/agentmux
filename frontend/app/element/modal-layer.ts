@@ -35,7 +35,9 @@ export type ModalLayerRequest =
     | NewIdentityBundleRequest
     | NewMemoryBundleRequest
     | CreateFromTemplateRequest
-    | BrowserAuthRequest;
+    | BrowserAuthRequest
+    | AgentIdentityRequest
+    | AgentMemoryRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -289,6 +291,33 @@ export interface BrowserAuthRequest {
      *  which calls `AuthCallback.cancel()` so CEF aborts the request
      *  and renders the 401 response body. */
     onCancel: () => void;
+}
+
+/**
+ * Agent pane identity modal — opened by the id-card icon in the agent
+ * pane header. Replaces the cog → Identity tab flow with a pane-scoped
+ * modal. Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
+ */
+export interface AgentIdentityRequest {
+    kind: "agent-identity";
+    /** Agent definition to show/edit accounts for. */
+    agent: AgentDefinition;
+    /** Block id of the pane — used to construct the IdentityViewModel. */
+    blockId: string;
+}
+
+/**
+ * Agent pane memory modal — opened by the brain icon in the agent
+ * pane header. Shows the native memory folder for the agent.
+ * Phase 1: placeholder UI. Phase 3 adds the full file browser + editor.
+ * Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
+ */
+export interface AgentMemoryRequest {
+    kind: "agent-memory";
+    agentId: string;
+    agentName: string;
+    /** Agent's working directory — used to compute the memory folder path. */
+    workingDirectory: string;
 }
 
 // ── Context API ──────────────────────────────────────────────────────────────

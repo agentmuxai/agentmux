@@ -66,7 +66,6 @@ import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
-import { AgentFocusedPanel } from "./components/AgentFocusedPanel";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { SessionDigestBanner } from "./components/SessionDigestBanner";
@@ -75,6 +74,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, getApi, WOS } from "@/app/store/global";
 import { ConfirmModal } from "@/element/modal";
 import { ModalLayer } from "@/element/ModalLayer";
+import { useModalLayer } from "@/element/modal-layer";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { parseAgentAccounts, loadAccounts } from "@/app/view/identity/identity-model";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -131,20 +131,34 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // the agent without remounting the pane.
     const agentName = (): string => block()?.meta?.["agentName"] ?? agentId;
 
-    // Overlay tab signal — lives in the component so SolidJS can track it.
-    // The model's _setOverlayTab callback is wired on mount and cleaned up on unmount.
-    const [showOverlayTab, setShowOverlayTab] = createSignal<import("./agent-model").OverlayTab | null>(null);
-    onMount(() => {
-        model._setOverlayTab = setShowOverlayTab;
-    });
-    onCleanup(() => {
-        model._setOverlayTab = null;
-    });
-
     // Reactive agent-definition list — used to resolve the current AgentDefinition object
-    // so the overlay can pass it to AgentCardSettingsPanel / rename input.
+    // for identity/memory modal requests.
     const agentDefinitions = useAgentDefinitions();
     const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
+
+    // Wire pane-scoped modal callbacks into the model so the title-bar icon
+    // buttons (brain / id-card) can open modals without holding a SolidJS
+    // context in the model. Mirrors the former _setOverlayTab pattern.
+    const modalLayer = useModalLayer();
+    onMount(() => {
+        model._openIdentityModal = () => {
+            const agent = currentAgent();
+            if (!agent) return;
+            modalLayer.open({ kind: "agent-identity", agent, blockId: model.blockId });
+        };
+        model._openMemoryModal = () => {
+            modalLayer.open({
+                kind: "agent-memory",
+                agentId,
+                agentName: agentName(),
+                workingDirectory: currentAgent()?.working_directory ?? "",
+            });
+        };
+    });
+    onCleanup(() => {
+        model._openIdentityModal = null;
+        model._openMemoryModal = null;
+    });
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
 
@@ -998,26 +1012,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onDismiss={digest.dismiss}
                 onRegenerate={() => digest.fetch(true)}
             />
-
-            {/* Title-bar action overlay: ⚙ Agent / 👤 Identity.
-                Gated only on the tab being open — NOT on currentAgent()
-                resolving. The pane's `agentId` is a db_agent_definitions
-                id only for definition-launched panes; provider quick-launch
-                writes a provider id, and the definition list may also be
-                mid-load or have failed to fetch. Requiring currentAgent()
-                here made the gear silently no-op in all those cases. The
-                panel handles an undefined agent (create-mode + the Identity
-                tab's "save first" fallback). */}
-            <Show when={showOverlayTab() != null}>
-                <AgentFocusedPanel
-                    blockId={model.blockId}
-                    nodeModel={model.nodeModel}
-                    agent={currentAgent()}
-                    initialTab={showOverlayTab()!}
-                    onClose={() => setShowOverlayTab(null)}
-                    onTabChange={(tab) => { model._lastOverlayTab = tab; }}
-                />
-            </Show>
 
             {/* Pinned activity dock — long-running shells (and later crons /
                 subagents) stay glanceable at the top while the conversation
