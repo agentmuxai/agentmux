@@ -13,6 +13,7 @@
  */
 
 import { Tooltip } from "@/app/element/tooltip";
+import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -137,6 +138,7 @@ ActionWidget.displayName = "ActionWidget";
 const MoreDropdown = ({
     widgets,
     onClose,
+    onItemContextMenu,
     anchor,
     settings,
     wmap,
@@ -144,6 +146,7 @@ const MoreDropdown = ({
 }: {
     widgets: () => { key: string; widget: WidgetConfigType }[];
     onClose: () => void;
+    onItemContextMenu: (pos: { x: number; y: number }, key: string) => void;
     anchor: () => HTMLElement | null;
     settings: () => Record<string, any>;
     wmap: () => Record<string, WidgetConfigType>;
@@ -198,22 +201,10 @@ const MoreDropdown = ({
     const handleItemContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
         e.stopPropagation();
-        const shortName = key.replace("defwidget@", "");
-        ContextMenuModel.showContextMenu(
-            [
-                { label: "New Window", click: () => {
-                    fireAndForget(async () => {
-                        await getApi().openNewWindow();
-                    });
-                }},
-                { type: "separator" },
-                getPinnedKeys(settings(), wmap()).includes(shortName)
-                    ? { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) }
-                    : { label: "Pin to bar", click: () => pinWidget(shortName, settings(), wmap()) },
-            ],
-            e
-        );
-        onClose();
+        // Delegate to ActionWidgets — the item popover is rendered there so it
+        // can stay open independently of this dropdown. onClose() is NOT called
+        // here; the More dropdown remains visible while the item menu is open.
+        onItemContextMenu({ x: e.clientX, y: e.clientY }, key);
     };
 
     return (
@@ -309,12 +300,54 @@ const ActionWidgets = (): JSX.Element => {
 
     const closeMore = () => setMoreOpen(false);
 
-    // Close on outside click — ignore clicks inside button or dropdown
+    // Item context menu — rendered independently so the More dropdown stays open
+    // while the user interacts with pin/unpin. itemMenuState drives a PopoverMenu
+    // in the JSX below; null means closed.
+    const [itemMenuState, setItemMenuState] = createSignal<{
+        pos: { x: number; y: number };
+        shortName: string;
+    } | null>(null);
+
+    const handleItemContextMenu = (pos: { x: number; y: number }, key: string) => {
+        setItemMenuState({ pos, shortName: key.replace("defwidget@", "") });
+    };
+
+    const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => [
+        {
+            label: "New Window",
+            click: () => {
+                setItemMenuState(null);
+                closeMore();
+                fireAndForget(async () => getApi().openNewWindow());
+            },
+        },
+        { type: "separator" },
+        getPinnedKeys(settings(), wmap()).includes(shortName)
+            ? {
+                label: "Unpin from bar",
+                click: () => {
+                    setItemMenuState(null);
+                    unpinWidget(shortName, settings(), wmap());
+                },
+            }
+            : {
+                label: "Pin to bar",
+                click: () => {
+                    setItemMenuState(null);
+                    pinWidget(shortName, settings(), wmap());
+                },
+            },
+    ];
+
+    // Close on outside click — ignore clicks inside button, dropdown, or any
+    // open popover-menu (e.g. the item context menu rendered by handleItemContextMenu).
     createEffect(() => {
         if (!moreOpen()) return;
         const handler = (e: MouseEvent) => {
             const t = e.target as Node;
             if (moreButtonRef?.contains(t) || moreDropdownRef?.contains(t)) return;
+            const el = t instanceof Element ? t : (t as Node).parentElement;
+            if (el?.closest(".popover-menu")) return;
             setMoreOpen(false);
         };
         document.addEventListener("mousedown", handler, true);
@@ -632,6 +665,7 @@ const ActionWidgets = (): JSX.Element => {
                     <MoreDropdown
                         widgets={() => [...clippedPinnedWidgets(), ...moreWidgets()]}
                         onClose={closeMore}
+                        onItemContextMenu={handleItemContextMenu}
                         anchor={() => moreButtonRef ?? null}
                         settings={settings}
                         wmap={wmap}
@@ -639,6 +673,14 @@ const ActionWidgets = (): JSX.Element => {
                     />
                 </Show>
             </Portal>
+
+            <Show when={itemMenuState() !== null}>
+                <PopoverMenu
+                    pos={itemMenuState()!.pos}
+                    onClose={() => setItemMenuState(null)}
+                    items={buildItemMenuItems(itemMenuState()!.shortName)}
+                />
+            </Show>
         </>
     );
 };
