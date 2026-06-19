@@ -134,12 +134,17 @@ mod handlers;
 pub(crate) mod helpers;
 #[cfg(target_os = "windows")]
 mod wndproc;
+#[cfg(target_os = "windows")]
+pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 
 pub use handlers::AgentMuxClient;
 
 use helpers::{js_string_literal, html_escape, backend_close_window};
 #[cfg(target_os = "windows")]
-use wndproc::{install_top_level_focus_restore_hook, set_window_icon, skip_taskbar};
+use wndproc::{
+    install_top_level_focus_restore_hook,
+    set_window_icon, skip_taskbar,
+};
 
 impl AgentMuxHandler {
     pub fn new(state: Arc<AppState>, ipc_port: u16) -> Arc<Mutex<Self>> {
@@ -518,6 +523,19 @@ impl AgentMuxHandler {
                 // Install on every top-level — both `main` and Subwindow.
                 if is_top_level_window {
                     unsafe { install_top_level_focus_restore_hook(hwnd); }
+                }
+
+                // Floater cascade hook (issue #1560): replaces the Win32
+                // owned-window z-order/minimize/destroy invariant now that
+                // floaters are unowned WS_POPUP windows. Install on all
+                // FullInstance windows (not pool, not subwindow) so that
+                // closing or minimizing any main window cascades to its floaters.
+                #[cfg(target_os = "windows")]
+                if is_top_level_window
+                    && pending_kind == WindowKind::FullInstance
+                    && !label.starts_with("window-pool-")
+                {
+                    unsafe { install_main_window_floater_cascade_hook(hwnd); }
                 }
 
                 // Subwindow? Hide from taskbar. Full instances and browser-pane

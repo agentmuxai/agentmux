@@ -1,0 +1,37 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// PopoverMenu — cursor-positioned popover that stays open on keepOpen item clicks.
+// Item chrome (`.menu`, `.menu-item`, `.menu-divider`, `.menu-item-check`) is
+// inherited from flyoutmenu.scss. Only section-specific styles live here.
+
+.popover-menu {
+    // z-index matches other flyout surfaces
+    z-index: var(--z-flyout-menu);
+
+    // Spacer for non-checkbox action items — keeps labels left-aligned with
+    // checkbox items that have the fa-check icon in the same slot.
+    .menu-item-icon-spacer {
+        width: 14px;
+        margin-right: var(--space-1);
+        flex-shrink: 0;
+    }
+}
+
+.popover-menu-section-header {
+    cursor: pointer;
+    color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.65));
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+
+    .menu-item-icon {
+        opacity: 0.6;
+        font-size: 10px;
+    }
+}
+
+.popover-menu-section-items {
+    // Indent child items under the section header
+    padding-left: var(--space-2);
+}
