@@ -810,6 +810,13 @@ pub fn promote_pool_window(
             );
         }
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
+
+        // Pool windows skip the cascade-hook install in on_after_created
+        // (gated on !label.starts_with("window-pool-")) because they are
+        // hidden off-screen at creation time. Install it here after the
+        // window is visible and promoted so floaters torn from this window
+        // follow its minimize/restore/destroy.
+        crate::client::install_main_window_floater_cascade_hook(raw_hwnd);
     }
 
     // Phase B.7.3.3 — the launcher's typed events drive the
