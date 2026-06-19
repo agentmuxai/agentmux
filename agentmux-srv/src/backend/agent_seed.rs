@@ -240,15 +240,23 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
     Ok(SeedReport { created, skipped })
 }
 
-/// Seed memory bundles from the manifest. Only seeds bundles whose ID does not
-/// already exist; updates descriptions and instructions on existing seeded ones.
-fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<(), StoreError> {
+/// Seed memory bundles from the manifest. Skips any bundle whose ID already
+/// exists — this is a one-time seed, not an upsert on every startup.
+fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
+    let existing = wstore.bundle_memory_list()?;
+    let existing_ids: std::collections::HashSet<String> =
+        existing.iter().map(|m| m.id.clone()).collect();
+
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
 
+    let mut created = 0usize;
     for mem_def in &manifest.memories {
+        if existing_ids.contains(&mem_def.id) {
+            continue;
+        }
         let memory = Memory {
             id: mem_def.id.clone(),
             name: mem_def.name.clone(),
@@ -265,9 +273,10 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<(), Sto
             updated_at: now,
         };
         wstore.bundle_memory_upsert(&memory)?;
+        created += 1;
     }
 
-    Ok(())
+    Ok(created)
 }
 
 /// Run auto-seed on startup. Seeds if empty, or re-seeds if manifest version changed.
@@ -313,14 +322,11 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
         Err(e) => tracing::error!("agent seed: failed to count agents: {e}"),
     }
 
-    // Seed memory bundles unconditionally — upsert is idempotent and updates
-    // descriptions + instructions when the manifest changes.
+    // Seed memory bundles once — skips any bundle whose ID already exists.
     if !manifest.memories.is_empty() {
         match seed_memories(wstore, &manifest) {
-            Ok(()) => tracing::info!(
-                "agent seed: seeded {} memory bundles",
-                manifest.memories.len()
-            ),
+            Ok(0) => {}
+            Ok(n) => tracing::info!("agent seed: seeded {n} memory bundles"),
             Err(e) => tracing::error!("agent seed: failed to seed memories: {e}"),
         }
     }
