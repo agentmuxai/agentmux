@@ -95,15 +95,16 @@ pub(crate) fn unregister_floater_by_hwnd(hwnd: isize) {
     }
 }
 
-/// Floater HWNDs whose parent main window matches `parent_hwnd`. Used by the
-/// cascade hook — only fires on the floaters belonging to the activating /
-/// minimizing / destroying window, not the entire global set.
+/// Floater HWNDs whose parent main window matches `parent_hwnd`, plus any
+/// floaters registered with parent=0 (unresolved source, legacy callers).
+/// Used by the cascade hook — parent=0 floaters are claimed by whichever
+/// window fires the hook first, preventing them from becoming permanent orphans.
 pub(crate) fn floater_hwnds_for_parent(parent_hwnd: isize) -> Vec<isize> {
     ACTIVE_FLOATER_HWNDS
         .lock()
         .map(|m| {
             m.values()
-                .filter(|(_, ph)| *ph == parent_hwnd)
+                .filter(|(_, ph)| *ph == parent_hwnd || *ph == 0)
                 .map(|(fh, _)| *fh)
                 .collect()
         })

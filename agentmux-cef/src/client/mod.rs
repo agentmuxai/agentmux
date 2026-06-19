@@ -134,13 +134,15 @@ mod handlers;
 pub(crate) mod helpers;
 #[cfg(target_os = "windows")]
 mod wndproc;
+#[cfg(target_os = "windows")]
+pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 
 pub use handlers::AgentMuxClient;
 
 use helpers::{js_string_literal, html_escape, backend_close_window};
 #[cfg(target_os = "windows")]
 use wndproc::{
-    install_main_window_floater_cascade_hook, install_top_level_focus_restore_hook,
+    install_top_level_focus_restore_hook,
     set_window_icon, skip_taskbar,
 };
 
