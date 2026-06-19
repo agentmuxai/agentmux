@@ -49,10 +49,6 @@ export const AgentMemoryModalPanel = (props: AgentMemoryModalPanelProps): JSX.El
                 <code class="agent-memory-modal-path" title={props.workingDirectory}>
                     {previewMemoryPath(props.workingDirectory)}
                 </code>
-                <p class="agent-memory-modal-note">
-                    Edits in this panel will write directly to disk and take
-                    effect at the next session start.
-                </p>
             </div>
             <div class="agent-modal-footer">
                 <button
