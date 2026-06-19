@@ -156,11 +156,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             modalLayer.open({ kind: "agent-identity", agent, blockId: model.blockId });
         };
         model._openMemoryModal = () => {
+            // Prefer cmd:cwd (actual launch cwd, set by launchAgentDefinition)
+            // over AgentDefinition.working_directory, which is often empty or a
+            // stale default for template-launched and continuation agents.
+            const block = model.blockAtom();
+            const workingDirectory =
+                (block?.meta?.["cmd:cwd"] as string) ||
+                currentAgent()?.working_directory ||
+                "";
             modalLayer.open({
                 kind: "agent-memory",
                 agentId,
                 agentName: agentName(),
-                workingDirectory: currentAgent()?.working_directory ?? "",
+                workingDirectory,
             });
         };
     });
