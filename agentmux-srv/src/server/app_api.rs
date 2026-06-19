@@ -2525,7 +2525,7 @@ pub(crate) async fn agent_define_core(
         restart_on_crash: 0,
         idle_timeout_minutes: 0,
         created_at: now,
-        agent_type: "container".to_string(),
+        agent_type: cmd.agent_type.clone(),
         agent_bus_id: String::new(),
         is_seeded: 0,
         accounts: String::new(),
