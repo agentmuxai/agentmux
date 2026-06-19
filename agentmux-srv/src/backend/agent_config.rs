@@ -432,14 +432,6 @@ pub fn build_settings_with_hooks(
     }
     settings_obj.insert("hooks".to_string(), Value::Object(hooks_obj));
 
-    // Disable Claude Code's autonomous MEMORY.md writes so they don't
-    // accumulate alongside AgentMux's own memory-bundle system.  The
-    // 11k-token memory preamble is injected by the CLI regardless of this
-    // setting (upstream bug #63903), but at least new writes are suppressed.
-    // A user-supplied setting wins: we use or_insert so an explicit
-    // `"autoMemoryEnabled": true` in their content_map["settings"] is kept.
-    settings_obj.entry("autoMemoryEnabled".to_string()).or_insert(json!(false));
-
     // Claude Code requires the bashwrap exec command (produced by the hook rewrite)
     // to be in permissions.allow — otherwise it raises a permissions error and the
     // agent cannot run any bash commands. Merge with any user-supplied allow list
