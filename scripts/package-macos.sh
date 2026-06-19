@@ -225,6 +225,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+    <!-- Opt-in capability prompts. These usage strings are shown ONLY if/when
+         the user turns the feature on — neither resource is touched at launch:
+         the microphone (a pane-header mic button, Web Speech API) and local
+         network / mDNS (the "LAN discovery" switch in the status bar, default
+         off). So neither prompts until the user enables it. -->
+    <key>NSMicrophoneUsageDescription</key><string>AgentMux uses the microphone only when you turn on voice input from a pane's microphone button, to transcribe what you say into that pane.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>AgentMux uses your local network only when you turn on "LAN discovery" in the status bar, to find other AgentMux instances on your network.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_agentmux._tcp</string>
+    </array>
 </dict>
 </plist>
 PLIST

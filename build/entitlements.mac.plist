@@ -12,14 +12,24 @@
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 
-    <!-- AgentMux requests NO personal-data or device access. The hardened
-         runtime carries only the three CEF/Chromium-runtime entitlements above.
-         Camera, microphone, contacts, calendars, location, and photos
-         entitlements were removed (previously declared "to match iTerm") so the
-         app's footprint is limited to the user's own files — file access to
-         ~/.agentmux and the user's home needs no entitlement at all.
-         Consequence: a website in the browser pane, or a CLI run inside
-         AgentMux, that wants camera/mic/contacts/etc. is denied instead of
-         prompting. Re-add a specific key here if a capability is needed. -->
+    <!-- Microphone: OPT-IN. AgentMux only touches the mic when the user turns on
+         voice input via a pane's microphone button (Web Speech API), so the
+         macOS prompt appears then — never at launch. Paired with
+         NSMicrophoneUsageDescription in the .app Info.plist. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Intentionally NOT requested (removed; were declared "to match iTerm"):
+         camera, contacts, calendars, location, photos. AgentMux's footprint is
+         limited to the user's own files (file access to ~ needs no entitlement)
+         plus the opt-in mic above.
+         LAN discovery (mDNS) uses the macOS *Local Network* permission, driven by
+         NSLocalNetworkUsageDescription + NSBonjourServices in Info.plist — it
+         also prompts only when the user flips the "LAN discovery" switch, since
+         the mDNS daemon isn't started until then. (We do NOT add the managed
+         com.apple.developer.networking.multicast entitlement: it needs Apple
+         authorization for Developer-ID apps and would jeopardize notarization;
+         the app already ships mDNS without it.) Re-add a specific key here only
+         if a capability is genuinely needed. -->
 </dict>
 </plist>
