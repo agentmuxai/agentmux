@@ -48,10 +48,13 @@ export class AgentViewModel implements ViewModel {
     // in the model. Replaced the _setOverlayTab / _lastOverlayTab pattern.
     _openIdentityModal: (() => void) | null = null;
     _openMemoryModal: (() => void) | null = null;
-    // Reactive accessor set by agent-view so endIconButtons can hide the
-    // id-card button for quick-launch panes (where agentId is a provider
-    // key, not a definition UUID, and no AgentDefinition loads).
-    _hasAgentDef: () => boolean = () => false;
+    // SolidJS signal updated by a createEffect in agent-view.tsx so
+    // endIconButtons reactively hides the id-card button for quick-launch
+    // panes (where agentId is a provider key, not a definition UUID, and
+    // no AgentDefinition loads). A plain () => boolean mutation would not
+    // create a reactive dependency — BlockFrame would evaluate
+    // endIconButtons once with () => false and never re-run (codex P1 #1587).
+    _agentDefLoaded: SignalAtom<boolean> = createSignalAtom(false);
 
     // Voice-input target ref. AgentFooter populates this on mount with a
     // textarea-backed handle (and clears it on unmount). The exposed
@@ -151,7 +154,7 @@ export class AgentViewModel implements ViewModel {
                     click: () => { this._openMemoryModal?.(); },
                 },
             ];
-            if (this._hasAgentDef()) {
+            if (this._agentDefLoaded()) {
                 buttons.push({
                     elemtype: "iconbutton",
                     icon: "id-card",

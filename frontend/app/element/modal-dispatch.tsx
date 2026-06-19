@@ -290,7 +290,6 @@ export function renderRequest(
                 label: requestLabel(req),
                 panel: (
                     <AgentMemoryModalPanel
-                        agentName={req.agentName}
                         workingDirectory={req.workingDirectory}
                         onClose={api.close}
                     />
