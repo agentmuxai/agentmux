@@ -91,6 +91,9 @@ fn validate_filename(filename: &str) -> Result<(), String> {
         return Err(format!("filename must not contain path separators: {filename}"));
     }
     let stem = &filename[..filename.len() - 3];
+    if stem.is_empty() {
+        return Err("filename stem must not be empty (.md is not a valid name)".to_string());
+    }
     if !stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err(format!(
             "filename stem must be alphanumeric + '-_', got: {stem}"
@@ -161,8 +164,18 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or(0);
 
-                    // Read first 512 bytes for frontmatter parsing (avoid full read for large files)
-                    let preview_content = std::fs::read_to_string(entry.path()).unwrap_or_default();
+                    // Read first 512 bytes for frontmatter type parsing — large
+                    // memory files don't need to be fully loaded just for the list.
+                    let preview_content = {
+                        use std::io::Read;
+                        std::fs::File::open(entry.path())
+                            .map(|mut f| {
+                                let mut buf = vec![0u8; 512];
+                                let n = f.read(&mut buf).unwrap_or(0);
+                                String::from_utf8_lossy(&buf[..n]).into_owned()
+                            })
+                            .unwrap_or_default()
+                    };
                     let metadata_type = parse_frontmatter_type(&preview_content);
                     let is_index = name == "MEMORY.md";
 
