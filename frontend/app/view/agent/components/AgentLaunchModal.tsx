@@ -387,6 +387,18 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const hasName = () => name().trim().length > 0;
     const containerSupported = () => catalog()?.containerSupported ?? true;
 
+    // If the catalog says this provider can't run in a container, coerce
+    // runtime to "host" regardless of the form default ("container").
+    // The radio is disabled in the UI but that only prevents interaction —
+    // it does not change the value, so without this guard a host-only
+    // provider opened from AgentPicker would submit runtime:"container"
+    // and the backend would fall back to the Claude image.
+    createEffect(() => {
+        if (!containerSupported() && runtime() === "container") {
+            setRuntime("host");
+        }
+    });
+
     // Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
     // The Launch modal OWNS the AuthFlowController (lifted from
     // PreLaunchAuthPanel — see
