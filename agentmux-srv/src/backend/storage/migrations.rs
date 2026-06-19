@@ -39,7 +39,9 @@ use super::error::StoreError;
 ///        to '' / '[]' / '')
 ///   v7 — db_muxbus_credentials: global singleton for MuxBus cloud
 ///        Cognito PKCE tokens (access, refresh, id) + expiry + user email
-pub const OBJECT_SCHEMA_VERSION: i64 = 7;
+///   v8 — db_memory_bundles.is_global: global-tier flag for Trust Center
+///        bundles injected into every agent's CLAUDE.md at launch
+pub const OBJECT_SCHEMA_VERSION: i64 = 8;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.

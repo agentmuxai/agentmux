@@ -98,7 +98,9 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                                 onClick={() => handleSelect(memory)}
                             >
                                 <div class="memory-view-list-item-name">
-                                    {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
+                                    <span class="memory-view-list-item-name-text">
+                                        {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
+                                    </span>
                                     <Show when={memory.is_global}>
                                         <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
                                     </Show>
