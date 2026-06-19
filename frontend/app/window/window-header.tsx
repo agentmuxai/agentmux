@@ -6,7 +6,6 @@ import { WindowDrag } from "@/element/windowdrag";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { atoms } from "@/store/global";
 import { createSignal, type JSX, Show } from "solid-js";
-import { Portal } from "solid-js/web";
 import { TitleBarContextMenu } from "@/app/window/titlebar-context-menu";
 import { SystemStatus } from "@/app/window/system-status";
 import { WindowControlsLeft } from "@/app/window/window-controls.platform";
@@ -31,6 +30,7 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
 
     const handleContextMenu = (e: MouseEvent) => {
         e.preventDefault();
+        e.stopPropagation(); // prevent bubbling to app-level onContextMenu (clipboard/URL menu)
         setMenuPos({ x: e.clientX, y: e.clientY });
         setMenuOpen(true);
     };
@@ -59,14 +59,14 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
                 <HamburgerMenu position="right" />
             </Show>
 
+            {/* PopoverMenu (inside TitleBarContextMenu) already renders into
+                a Portal — no extra Portal wrapper needed here. */}
             <Show when={menuOpen()}>
-                <Portal mount={document.body}>
-                    <TitleBarContextMenu
-                        pos={menuPos()}
-                        fullConfig={fullConfig()}
-                        onClose={() => setMenuOpen(false)}
-                    />
-                </Portal>
+                <TitleBarContextMenu
+                    pos={menuPos()}
+                    fullConfig={fullConfig()}
+                    onClose={() => setMenuOpen(false)}
+                />
             </Show>
         </div>
     );

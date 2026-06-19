@@ -4,9 +4,9 @@
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { atoms, createTab, getApi } from "@/store/global";
+import { createTab, getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
-import { type JSX } from "solid-js";
+import { createSignal, type JSX } from "solid-js";
 
 function getPinnedKeys(settings: Record<string, any>, widgets: Record<string, any>): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
@@ -28,14 +28,21 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
     const widgets  = (): Record<string, any> => props.fullConfig?.widgets  ?? {};
     const iconOnly = (): boolean => settings()["widget:icononly"] ?? false;
 
-    const pinnedKeys = (): Set<string> => new Set(getPinnedKeys(settings(), widgets()));
+    // Optimistic local state for pinned keys. Initialized lazily from server
+    // config on first read. Each toggle updates this immediately so rapid
+    // checkbox clicks chain off the already-updated list rather than
+    // re-reading stale settings() and overwriting each other.
+    const [localPinned, setLocalPinned] = createSignal<string[] | null>(null);
+    const effectivePinned = (): string[] => localPinned() ?? getPinnedKeys(settings(), widgets());
+    const pinnedKeys = (): Set<string> => new Set(effectivePinned());
 
     const toggleWidget = (shortName: string) => {
+        const current = effectivePinned();
+        const next = pinnedKeys().has(shortName)
+            ? current.filter((k) => k !== shortName)
+            : [...current, shortName];
+        setLocalPinned(next); // optimistic — drives UI immediately
         fireAndForget(async () => {
-            const current = getPinnedKeys(settings(), widgets());
-            const next = pinnedKeys().has(shortName)
-                ? current.filter((k) => k !== shortName)
-                : [...current, shortName];
             await RpcApi.SetConfigCommand(TabRpcClient, { "widget:pinned": next } as any);
         });
     };
