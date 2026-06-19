@@ -799,9 +799,14 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         // destination. dwellCurrentConfirmedAt records when this target
                         // was first confirmed so the mouseup fallback uses "180ms since
                         // first confirmation" (prevents desktop-transit false arm).
+                        // Exception: null → target is the initial hover confirmation, not
+                        // a transit. Keeping dwellSlowSince lets onMouseUp's condition-2
+                        // arm fire even when the IPC was sent early and the user releases
+                        // immediately after the ghost appears.
+                        const prevTarget = dwellLastArmedTarget;
                         dwellLastArmedTarget = newTarget;
                         dwellCurrentConfirmedAt = newTarget !== null ? performance.now() : null;
-                        dwellSlowSince = null;
+                        if (prevTarget !== null) dwellSlowSince = null;
                         if (hoverArmed || indicatorShowing) {
                             hoverArmed = false;
                             indicatorShowing = false;
