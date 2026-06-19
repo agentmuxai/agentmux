@@ -1499,6 +1499,7 @@ mod tests {
             name: "Claude-coder".to_string(),
             description: "Pair-programming setup".to_string(),
             is_blank: false,
+            is_global: false,
             provider: "claude".to_string(),
             model: "claude-sonnet-4-6".to_string(),
             instructions: "You are a careful refactorer.".to_string(),

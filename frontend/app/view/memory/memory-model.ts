@@ -36,6 +36,8 @@ export interface MemoryDraft {
     mcp_servers: string;
     /** Edited as comma-separated ids for now. */
     skills: string;
+    /** Preserved from the stored bundle; not surfaced as an editable field yet. */
+    is_global?: boolean;
 }
 
 /** Empty draft for the "+ New Memory" flow.
@@ -84,6 +86,7 @@ export function draftFromMemory(m: Memory): MemoryDraft {
         mcp_servers:
             m.mcp_servers && m.mcp_servers.trim().length > 0 ? m.mcp_servers : "[]",
         skills: m.skills && m.skills.trim().length > 0 ? m.skills : "[]",
+        is_global: m.is_global ?? false,
     };
 }
 
@@ -99,6 +102,9 @@ export function draftToWire(d: MemoryDraft): Memory {
         id: d.id ?? "",
         name: d.name.trim(),
         description: d.description.trim(),
+        // Preserve the global flag so editing a global bundle does not
+        // silently strip it (the upsert ON CONFLICT overwrites is_global).
+        is_global: d.is_global ?? false,
         provider: d.provider,
         model: d.model.trim(),
         instructions: d.instructions,

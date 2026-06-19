@@ -2294,6 +2294,56 @@ fn write_agent_config_files(
         content_map.insert(fc.content_type.clone(), fc.content.clone());
     }
 
+    // Agents that fall back to the shared slug-based workdir (~/.agentmux/agents/<slug>)
+    // have no collision resolution between same-name multi-tab launches. Enabling
+    // autonomous memory writes there risks concurrent MEMORY.md corruption (GitHub
+    // upstream issue #29051 — non-atomic truncate+write). Disable until per-definition
+    // workdir allocation lands proper isolation.
+    // Agents with an explicit working_directory are already isolated and keep writes on.
+    let workdir_is_shared = work_dir.starts_with("~/.agentmux/agents/")
+        || work_dir.contains("/.agentmux/agents/");
+    if workdir_is_shared {
+        let settings_str = content_map
+            .entry("settings".to_string())
+            .or_insert_with(|| "{}".to_string());
+        match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str) {
+            Ok(mut obj) => {
+                obj.entry("autoMemoryEnabled".to_string())
+                    .or_insert(json!(false));
+                *settings_str =
+                    serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
+            }
+            Err(e) => {
+                tracing::warn!(
+                    work_dir = %work_dir,
+                    error = %e,
+                    "write_agent_config_files: settings JSON unparseable; \
+                     autoMemoryEnabled guard skipped — memory writes may be active on shared workdir"
+                );
+            }
+        }
+    }
+
+    // Inject global memory bundles (Trust Center tier 1) into CLAUDE.md.
+    // All agents get these regardless of per-agent memory selection.
+    let global_bundles = wstore.bundle_memory_list_global().unwrap_or_default();
+    if !global_bundles.is_empty() {
+        let mut global_parts: Vec<String> = Vec::new();
+        for bundle in &global_bundles {
+            if !bundle.instructions.is_empty() {
+                global_parts.push(bundle.instructions.clone());
+            }
+        }
+        if !global_parts.is_empty() {
+            content_map
+                .entry("memory".to_string())
+                .and_modify(|existing| {
+                    *existing = format!("{}\n\n---\n\n{}", global_parts.join("\n\n---\n\n"), existing);
+                })
+                .or_insert_with(|| global_parts.join("\n\n---\n\n"));
+        }
+    }
+
     let config_files = crate::backend::agent_config::build_config_files(
         &content_map,
         &skills,
