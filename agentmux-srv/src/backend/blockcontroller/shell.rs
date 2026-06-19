@@ -916,26 +916,61 @@ impl Controller for ShellController {
             // the buffer unboundedly.
             let mut line_buf: Vec<u8> = Vec::new();
 
+            // OSC extractor: only for agent panes. Terminal panes forward
+            // raw bytes to xterm.js which handles OSC natively — stripping
+            // there would suppress the native window-title update. Agent
+            // panes don't use xterm.js; OSC bytes in FileStore corrupt the
+            // document renderer, so we extract and strip them here.
+            let mut osc_extractor: Option<crate::backend::osc_extractor::OscExtractor> =
+                if is_agent_read {
+                    Some(crate::backend::osc_extractor::OscExtractor::new())
+                } else {
+                    None
+                };
+
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         inner_read.lock().unwrap().last_pty_output = Some(Instant::now());
                         if let Some(ref broker) = broker_read {
+                            let raw = &buf[..n];
+
+                            // Extract OSC sequences from agent-pane output.
+                            // `cleaned` has OSC bytes removed; `osc_events` carries
+                            // any normalised Claude Code title strings found in this chunk.
+                            let mut cleaned_storage: Vec<u8> = Vec::new();
+                            let mut osc_events: Vec<crate::backend::osc_extractor::OscEvent> = Vec::new();
+                            if let Some(ref mut ext) = osc_extractor {
+                                let (cleaned, evs) = ext.feed(raw);
+                                cleaned_storage = cleaned;
+                                osc_events = evs;
+                            }
+                            let chunk: &[u8] = if osc_extractor.is_some() {
+                                &cleaned_storage
+                            } else {
+                                raw
+                            };
+
                             handle_append_block_file(
                                 broker,
                                 &block_id_read,
                                 "term",
-                                &buf[..n],
+                                chunk,
                                 None, // PTY output is raw terminal data; no FileStore write-through
                                 None, // not an agent output stream; no global mirror
                             );
+
+                            for ev in &osc_events {
+                                wps::publish_block_activity(broker, &block_id_read, &ev.payload);
+                            }
+
                             if let Some(ref mut t) = translator {
                                 accumulate_and_translate(
                                     broker,
                                     &block_id_read,
                                     &mut line_buf,
-                                    &buf[..n],
+                                    chunk,
                                     t,
                                 );
                             }

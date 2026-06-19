@@ -113,23 +113,34 @@ export class AgentViewModel implements ViewModel {
             return "Agent";
         };
         this.viewText = (): HeaderElem[] => {
-            // Option E: render a "· continued from Xm ago" chip when
-            // the pane mounted on a non-empty agent session zone whose
-            // last write was more than ~30s ago (i.e. NOT the
-            // currently-active pane's own recent save). Threshold
-            // matches the 30s snapshot interval so the chip never
-            // shows for the live pane's own writes.
+            const elems: HeaderElem[] = [];
+
+            // Session-topic label from Claude Code OSC window-title extraction
+            // (written by useBlockActivity via term:activity block metadata).
+            const activity = this.blockAtom()?.meta?.["term:activity"] as string | undefined;
+            if (activity && activity.length > 0) {
+                elems.push({
+                    elemtype: "text",
+                    text: activity,
+                    className: "term-activity",
+                });
+            }
+
+            // "· continued from Xm ago" chip — shown when this pane mounted
+            // on a non-empty agent session zone whose last write was >30s ago.
             const continuedFromMs = this.continuedFromMsAtom();
-            if (!continuedFromMs) return [];
-            const now = Date.now();
-            const delta = Math.max(0, now - continuedFromMs);
-            if (delta < 30_000) return []; // brief gap — same pane / hot reload
-            const ago = formatContinuationAgo(delta);
-            return [{
-                elemtype: "text",
-                text: `· continued ${ago}`,
-                className: "agent-pane-continuation-chip",
-            }];
+            if (continuedFromMs) {
+                const delta = Math.max(0, Date.now() - continuedFromMs);
+                if (delta >= 30_000) {
+                    elems.push({
+                        elemtype: "text",
+                        text: `· continued ${formatContinuationAgo(delta)}`,
+                        className: "agent-pane-continuation-chip",
+                    });
+                }
+            }
+
+            return elems;
         };
         this.noPadding = () => true;
         this.setViewName = async (name: string) => {
