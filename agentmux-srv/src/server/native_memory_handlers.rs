@@ -42,8 +42,9 @@ fn memory_dir_for_cwd(working_directory: &str) -> PathBuf {
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
 
+    // Spec §5.2: hash is computed on the raw working_directory (before sanitization).
     let folder_name = if sanitized.len() > 200 {
-        let hash = djb2_hash(&sanitized);
+        let hash = djb2_hash(working_directory);
         let truncated = &sanitized[..200];
         format!("{truncated}-{}", radix_36(hash))
     } else {
@@ -96,6 +97,11 @@ fn validate_filename(filename: &str) -> Result<(), String> {
     let stem = &filename[..filename.len() - 3];
     if stem.is_empty() {
         return Err("filename stem must not be empty (.md is not a valid name)".to_string());
+    }
+    // Tmp path is ".{filename}.{uuid}.tmp" (+42 chars); cap stem at 200 to stay
+    // well under the 255-byte filesystem limit and avoid ENAMETOOLONG.
+    if stem.len() > 200 {
+        return Err(format!("filename stem too long ({} chars, max 200)", stem.len()));
     }
     if !stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err(format!(
@@ -164,13 +170,16 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 let memory_dir = memory_dir_for_cwd(&agent.working_directory);
 
-                if !memory_dir.exists() {
-                    return Ok(Some(serde_json::to_value(NativeMemoryListResult { files: vec![] }).map_err(|e| e.to_string())?));
-                }
-
                 let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
-                let entries = std::fs::read_dir(&memory_dir)
-                    .map_err(|e| format!("agent:memory:list: read_dir: {e}"))?;
+                // Treat both "dir doesn't exist" and the TOCTOU case where the dir
+                // is deleted between exists() and read_dir() as an empty result.
+                let entries = match std::fs::read_dir(&memory_dir) {
+                    Ok(e) => e,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        return Ok(Some(serde_json::to_value(NativeMemoryListResult { files: vec![] }).map_err(|e| e.to_string())?));
+                    }
+                    Err(e) => return Err(format!("agent:memory:list: read_dir: {e}")),
+                };
 
                 for entry in entries {
                     let entry = entry.map_err(|e| format!("agent:memory:list: read_dir entry: {e}"))?;
@@ -257,7 +266,15 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
 
                 let path = memory_dir_for_cwd(&agent.working_directory).join(&cmd.filename);
-                let content = std::fs::read_to_string(&path)
+                // Cap read at 10 MiB — Claude Code writes memory files with no size
+                // limit; unbounded read_to_string risks OOM in the sidecar.
+                const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
+                let mut content = String::new();
+                std::fs::File::open(&path)
+                    .and_then(|f| {
+                        use std::io::Read;
+                        f.take(MAX_READ_BYTES).read_to_string(&mut content)
+                    })
                     .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?;
 
                 Ok(Some(serde_json::to_value(NativeMemoryReadFileResult { content }).map_err(|e| e.to_string())?))
