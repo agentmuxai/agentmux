@@ -56,14 +56,14 @@ fn memory_dir_for_cwd(working_directory: &str) -> PathBuf {
         .join("memory")
 }
 
-/// Hash matching Claude Code's sessionStoragePortable.ts implementation:
-///   seed = 0, multiplier = 31 via `(h << 5) - h + c` with i32 overflow,
-///   result = Math.abs(hash) (unsigned_abs).
-/// This differs from classic djb2 (seed=5381, multiplier=33).
+/// Hash matching Claude Code's sessionStoragePortable.ts implementation.
+/// JS `charCodeAt()` iterates UTF-16 code units (two surrogates per non-BMP char);
+/// Rust `chars()` iterates Unicode scalar values — they diverge for emoji/non-BMP.
+/// `encode_utf16()` produces the same UTF-16 unit stream as JS, so the hashes match.
 fn djb2_hash(s: &str) -> u32 {
     let mut hash: i32 = 0;
-    for c in s.chars() {
-        hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(c as i32);
+    for unit in s.encode_utf16() {
+        hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(unit as i32);
     }
     hash.unsigned_abs()
 }
@@ -266,16 +266,24 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
 
                 let path = memory_dir_for_cwd(&agent.working_directory).join(&cmd.filename);
-                // Cap read at 10 MiB — Claude Code writes memory files with no size
-                // limit; unbounded read_to_string risks OOM in the sidecar.
+                // Reject symlinks — consistent with list handler's file_type check.
+                let file_type = std::fs::symlink_metadata(&path)
+                    .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?
+                    .file_type();
+                if !file_type.is_file() {
+                    return Err(format!("agent:memory:read_file: {} is not a regular file", cmd.filename));
+                }
+                // Cap at 10 MiB; use read_to_end + from_utf8_lossy so a boundary
+                // mid-UTF-8 sequence doesn't surface as InvalidData.
                 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
-                let mut content = String::new();
+                let mut buf = Vec::new();
                 std::fs::File::open(&path)
                     .and_then(|f| {
                         use std::io::Read;
-                        f.take(MAX_READ_BYTES).read_to_string(&mut content)
+                        f.take(MAX_READ_BYTES).read_to_end(&mut buf)
                     })
                     .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?;
+                let content = String::from_utf8_lossy(&buf).into_owned();
 
                 Ok(Some(serde_json::to_value(NativeMemoryReadFileResult { content }).map_err(|e| e.to_string())?))
             })
@@ -322,8 +330,11 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // other's content (reagent P1 on PR #1588).
                 let tmp = dir.join(format!(".{}.{}.tmp", cmd.filename, uuid::Uuid::new_v4()));
 
-                std::fs::write(&tmp, &cmd.content)
-                    .map_err(|e| format!("agent:memory:write_file: write tmp: {e}"))?;
+                // Clean up tmp on both write failure (partial file) and rename failure.
+                if let Err(e) = std::fs::write(&tmp, &cmd.content) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(format!("agent:memory:write_file: write tmp: {e}"));
+                }
                 if let Err(e) = std::fs::rename(&tmp, &dest) {
                     let _ = std::fs::remove_file(&tmp);
                     return Err(format!("agent:memory:write_file: rename: {e}"));
