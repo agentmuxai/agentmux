@@ -233,7 +233,10 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
 
                 let dest = dir.join(&cmd.filename);
-                let tmp = dir.join(format!(".{}.tmp", cmd.filename));
+                // Per-write UUID suffix prevents concurrent writes to the same
+                // filename from sharing a tmp path and silently corrupting each
+                // other's content (reagent P1 on PR #1588).
+                let tmp = dir.join(format!(".{}.{}.tmp", cmd.filename, uuid::Uuid::new_v4()));
 
                 std::fs::write(&tmp, &cmd.content)
                     .map_err(|e| format!("agent:memory:write_file: write tmp: {e}"))?;
