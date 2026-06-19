@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.46.5 — 2026-06-18
+
+- feat(mcp): Loop + LoopStop tools — recurring prompt injection (Claude /loop analogue)
+- perf(layout): reduce pane reflow settle window from 220ms to 32ms
+- feat(macos): bundle id follows the build channel + wire the unix open_new_window forward (fixes the cross-version "not responding" dialog; `open -n`/CLI relaunch opens a new window). A kAEReopenApplication handler for plain double-click is included but currently inert — Chromium owns the event — with the NSApp-delegate swizzle tracked as a follow-up.
+- fix(agent-pane): remove auxiliary bar gradient sweep, fix progress bar cross-platform rendering
+- fix(ui): rename block to pane in user-facing help pane, context menu, and crash UI
+- fix(toolchain): detect docker/git/node on Windows — where lookup now uses bare command name so .exe tools are found via PATHEXT
+- feat(macos): plain double-click of a running app opens a new window (reopen delegate)
+- feat(common): A2 — extract srv/mcp/bashwrap HTTP DTOs into agentmux-common
+- fix(agent-pane): pick host/container when creating from a template; drop bogus runtime badge on templates
+- fix(layout): pane resize on Linux — drive resize from window pointermove instead of the unstable CEF pointerId
+- fix(agent-failure): surface auth 401 errors delivered as in-band assistant messages
+- chore(macos): scope app access to the user's folder — drop camera/contacts/calendars/location/photos entitlements; keep microphone and LAN discovery as opt-in (prompt only when the user enables them via the pane mic button / status-bar LAN switch, with NSMicrophone/NSLocalNetwork usage strings); scope the editor file tree to the user's home folder
+- fix(agent-seed): propagate container_image from manifest; write to block meta at launch
+- feat(agent-pane): default new agents to container mode; warn on host selection
+- feat(agent-pane): host vs container runtime badges across all agent surfaces
+
+
 ## 0.46.4 — 2026-06-18
 
 - fix(agent): context meter resolves the window per-model and learns it from usage
