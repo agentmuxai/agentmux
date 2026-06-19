@@ -2294,6 +2294,28 @@ fn write_agent_config_files(
         content_map.insert(fc.content_type.clone(), fc.content.clone());
     }
 
+    // Agents that fall back to the shared slug-based workdir (~/.agentmux/agents/<slug>)
+    // have no collision resolution between same-name multi-tab launches. Enabling
+    // autonomous memory writes there risks concurrent MEMORY.md corruption (GitHub
+    // upstream issue #29051 — non-atomic truncate+write). Disable until per-definition
+    // workdir allocation lands proper isolation.
+    // Agents with an explicit working_directory are already isolated and keep writes on.
+    let workdir_is_shared = work_dir.starts_with("~/.agentmux/agents/")
+        || work_dir.contains("/.agentmux/agents/");
+    if workdir_is_shared {
+        let settings_str = content_map
+            .entry("settings".to_string())
+            .or_insert_with(|| "{}".to_string());
+        if let Ok(mut obj) =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str)
+        {
+            obj.entry("autoMemoryEnabled".to_string())
+                .or_insert(json!(false));
+            *settings_str =
+                serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
+        }
+    }
+
     // Inject global memory bundles (Trust Center tier 1) into CLAUDE.md.
     // All agents get these regardless of per-agent memory selection.
     let global_bundles = wstore.bundle_memory_list_global().unwrap_or_default();
