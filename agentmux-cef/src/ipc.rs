@@ -235,12 +235,18 @@ async fn route_command(
         }
         "open_floating_pane_window" => {
             // Floating-pane tear-off — a chromeless window showing just the
-            // torn-off pane. Windows: a subordinate WS_POPUP+WS_EX_TOOLWINDOW
-            // HWND owned by the source window. macOS/Linux (Phase A): a
-            // frameless CEF Views window with ?floatingPaneId= in the URL.
+            // torn-off pane. Windows: unowned WS_POPUP+WS_EX_TOOLWINDOW HWND
+            // with explicit cascade hook. macOS/Linux (Phase A): a frameless
+            // CEF Views window with ?floatingPaneId= in the URL.
             // Specs: SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md +
             // SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md.
             commands::floating_pane::open_floating_pane_window(state, args)
+        }
+        "get_pane_debug_state" => {
+            // Diagnostic snapshot: active floaters, pane-closing gate, pool
+            // queue size, pending window creations. Called by the frontend
+            // before/after every tear-off to surface intermittent failures.
+            Ok(commands::floating_pane::get_pane_debug_state(state))
         }
         "get_instance_number" => Ok(commands::window::get_instance_number(state, args)),
         "register_backend_window" => Ok(commands::window::register_backend_window(state, args)),
