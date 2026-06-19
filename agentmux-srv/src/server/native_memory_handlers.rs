@@ -35,7 +35,7 @@ use super::AppState;
 /// Mirrors Claude Code's `sessionStoragePortable.ts` algorithm:
 /// 1. Replace every non-alphanumeric char with `-`.
 /// 2. If the result is longer than 200 chars, truncate at 200 and append a
-///    base-36 djb2 hash of the *full* sanitized string as a suffix.
+///    base-36 hash of the *raw* working_directory (before sanitization) as a suffix.
 fn memory_dir_for_cwd(working_directory: &str) -> PathBuf {
     let sanitized: String = working_directory
         .chars()

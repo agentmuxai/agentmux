@@ -2192,7 +2192,7 @@ declare global {
         filename: string;
         is_index: boolean;
         metadata_type: string | null;
-        size_bytes: number;
+        size_bytes: number; // u64 on the wire; safe for files up to 2^53 bytes (~8 PB)
         modified_at: number;
     };
 
