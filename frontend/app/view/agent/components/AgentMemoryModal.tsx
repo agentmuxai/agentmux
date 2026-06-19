@@ -20,10 +20,13 @@ interface AgentMemoryModalPanelProps {
 }
 
 /**
- * Approximate the memory folder path using the same sanitize algorithm
- * Claude Code uses (`sessionStoragePortable.ts` — replace every non-
- * alphanumeric char with `-`, truncate at 200 + base36 hash suffix if
- * longer). Spec §5.2.
+ * Build a display-only approximation of the memory folder path.
+ * Claude Code's real sanitize algorithm replaces every non-alphanumeric
+ * char with `-` then, if longer than 200 chars, truncates and appends a
+ * base36 djb2 hash suffix. This function applies only the character
+ * replacement and truncates at 48 chars for display; paths longer than
+ * 48 sanitized chars will differ from the real folder name on disk.
+ * Phase 3 will resolve the path via the backend RPCs instead.
  */
 function previewMemoryPath(workDir: string): string {
     if (!workDir) return "~/.claude/projects/…/memory/";
