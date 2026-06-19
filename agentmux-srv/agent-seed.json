@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "agents": [
     {
       "id": "claude",
@@ -14,7 +14,7 @@
       "agent_bus_id": "claude",
       "content": {
         "env": "AGENT_NAME=claude\nAGENTMUX_AGENT_ID=Claude",
-        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+        "startup": "__SKIP__"
       },
       "skills": [
         {
@@ -38,7 +38,7 @@
       "agent_bus_id": "codex",
       "content": {
         "env": "AGENT_NAME=codex\nAGENTMUX_AGENT_ID=Codex",
-        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+        "startup": "__SKIP__"
       },
       "skills": [
         {
@@ -62,7 +62,7 @@
       "agent_bus_id": "gemini",
       "content": {
         "env": "AGENT_NAME=gemini\nAGENTMUX_AGENT_ID=Gemini",
-        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+        "startup": "__SKIP__"
       },
       "skills": [
         {
@@ -86,7 +86,7 @@
       "agent_bus_id": "kimi",
       "content": {
         "env": "AGENT_NAME=kimi\nAGENTMUX_AGENT_ID=Kimi",
-        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+        "startup": "__SKIP__"
       },
       "skills": [
         {
@@ -110,7 +110,7 @@
       "agent_bus_id": "pi",
       "content": {
         "env": "AGENT_NAME=pi\nAGENTMUX_AGENT_ID=Pi",
-        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+        "startup": "__SKIP__"
       },
       "skills": [
         {
@@ -134,7 +134,7 @@
       "agent_bus_id": "openclaw",
       "content": {
         "env": "AGENT_NAME=openclaw\nAGENTMUX_AGENT_ID=OpenClaw",
-        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+        "startup": "__SKIP__"
       },
       "skills": [
         {
@@ -158,7 +158,7 @@
       "agent_bus_id": "copilot",
       "content": {
         "env": "AGENT_NAME=copilot\nAGENTMUX_AGENT_ID=Copilot",
-        "startup": "## Verification Round\n\nRun each check below. Fix failures before proceeding. Report results in a table.\n\n### 1. Identity\n```bash\ngh auth status\ngit config user.name && git config user.email\n```\nIf `gh auth status` fails, run `gh auth login`.\n\n### 2. Dev Tools\nInstall if missing, then verify:\n```bash\nnpm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || npm install -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health\n```\nVerify key tools:\n```bash\nsecrets --version && deploy --version && reagent --version\n```\n\n### 3. Secrets Access\n```bash\nsecrets health services/infra services/prod\n```\n\n### 4. MCP Servers\nCheck AgentBus connectivity — list available peer agents.\n\n### Report\n\n| Check | Status | Details |\n|-------|--------|--------|\n| GitHub | OK/FAIL | username |\n| Git Identity | OK/FAIL | name, email |\n| Dev Tools | OK/FAIL | count installed |\n| Secrets | OK/FAIL | accessible secrets |\n| MCP AgentBus | OK/FAIL | peer count |\n\nIf all pass: \"Verification complete — ready to work.\"\nIf any FAIL: attempt fix. If unfixable, report and ask."
+        "startup": "__SKIP__"
       },
       "skills": [
         {
@@ -175,9 +175,9 @@
     {
       "id": "seed-workspace-rules",
       "name": "Workspace Rules",
-      "description": "Git workflow, task management, GitHub access tiers, and dev tool rules — injected into all agents",
+      "description": "Git workflow, task management, GitHub access tiers, and safety rules — injected into all agents",
       "is_global": true,
-      "instructions": "## Workspace Rules\n\nThese rules govern how you operate in this multi-agent workspace. They apply\nregardless of which project you are working on.\n\n### Git Workflow\n\n- **Never push directly to main.** Always create a feature branch first.\n- Branch names follow the pattern `<agent-name>/feature-description`.\n- Always create a PR for code changes — no direct pushes.\n- Never reuse a branch after its PR is merged; create a new branch.\n- Resolve merge conflicts rather than force-pushing or discarding changes.\n\n### Task Management\n\n- Use task tracking for any task with 3 or more steps.\n- Mark a task **in_progress** before you start it.\n- Mark a task **completed** immediately when it is done — do not batch.\n\n### GitHub Access\n\n| Tier | Tool | Use when |\n|------|------|---------|\n| 1 | MCP `mcp__github__*` tools | Primary — tokens auto-refresh |\n| 2 | `gh` CLI | MCP unavailable |\n| 3 | Admin PAT via `secrets` | Package publish, admin ops only |\n\n### Dev Tools\n\nVerify tools are available: `secrets --version && deploy --version && reagent --version`\n\nInstall if missing:\n```bash\nnpm install -g @a5af/secrets @a5af/deploy-cli @a5af/reagent-cli @a5af/workspace-health\n```\n\n### Safety\n\n- Kill processes by PID only — never by image name (kills all instances).\n- Never skip pre-commit hooks (`--no-verify`) without explicit user approval.\n- Confirm before destructive operations: force-push, reset --hard, branch -D."
+      "instructions": "## Workspace Rules\n\n### Git Workflow\n\n- **Never push directly to main.** Always create a feature branch first.\n- Branch names: `<agent-name>/feature-description`.\n- Every code change goes through a PR — no direct pushes, no exceptions.\n- Never reuse a branch after its PR is merged; create a new branch.\n- Resolve merge conflicts rather than force-pushing or discarding changes.\n\n### Task Management\n\n- Use task tracking for any task with 3 or more steps.\n- Mark a task **in_progress** before starting it.\n- Mark a task **completed** immediately when done — do not batch.\n\n### GitHub Access\n\n| Tier | Tool | Use when |\n|------|------|---------|\n| 1 | MCP `mcp__github__*` tools | Primary — tokens auto-refresh |\n| 2 | `gh` CLI | MCP unavailable |\n| 3 | Admin PAT via `secrets` | Package publish, admin ops only |\n\n### Safety\n\n- Kill processes by PID only — never by image name (kills all instances).\n- Never skip pre-commit hooks (`--no-verify`) without explicit user approval.\n- Confirm before any destructive operation: force-push, reset --hard, branch -D."
     },
     {
       "id": "seed-agentmux-dev",

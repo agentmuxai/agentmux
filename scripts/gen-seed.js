@@ -162,22 +162,19 @@ const CLI_DEFS = [
 
 const MEMORY_WORKSPACE_RULES = `## Workspace Rules
 
-These rules govern how you operate in this multi-agent workspace. They apply
-regardless of which project you are working on.
-
 ### Git Workflow
 
 - **Never push directly to main.** Always create a feature branch first.
-- Branch names follow the pattern \`<agent-name>/feature-description\`.
-- Always create a PR for code changes — no direct pushes.
+- Branch names: \`<agent-name>/feature-description\`.
+- Every code change goes through a PR — no direct pushes, no exceptions.
 - Never reuse a branch after its PR is merged; create a new branch.
 - Resolve merge conflicts rather than force-pushing or discarding changes.
 
 ### Task Management
 
 - Use task tracking for any task with 3 or more steps.
-- Mark a task **in_progress** before you start it.
-- Mark a task **completed** immediately when it is done — do not batch.
+- Mark a task **in_progress** before starting it.
+- Mark a task **completed** immediately when done — do not batch.
 
 ### GitHub Access
 
@@ -187,20 +184,11 @@ regardless of which project you are working on.
 | 2 | \`gh\` CLI | MCP unavailable |
 | 3 | Admin PAT via \`secrets\` | Package publish, admin ops only |
 
-### Dev Tools
-
-Verify tools are available: \`secrets --version && deploy --version && reagent --version\`
-
-Install if missing:
-\`\`\`bash
-npm install -g @a5af/secrets @a5af/deploy-cli @a5af/reagent-cli @a5af/workspace-health
-\`\`\`
-
 ### Safety
 
 - Kill processes by PID only — never by image name (kills all instances).
 - Never skip pre-commit hooks (\`--no-verify\`) without explicit user approval.
-- Confirm before destructive operations: force-push, reset --hard, branch -D.`;
+- Confirm before any destructive operation: force-push, reset --hard, branch -D.`;
 
 const MEMORY_AGENTMUX_DEV = `## AgentMux Development
 
@@ -251,7 +239,7 @@ const SEED_MEMORIES = [
     {
         id: "seed-workspace-rules",
         name: "Workspace Rules",
-        description: "Git workflow, task management, GitHub access tiers, and dev tool rules — injected into all agents",
+        description: "Git workflow, task management, GitHub access tiers, and safety rules — injected into all agents",
         is_global: true,
         instructions: MEMORY_WORKSPACE_RULES,
     },
@@ -265,7 +253,7 @@ const SEED_MEMORIES = [
 ];
 
 const manifest = {
-    version: 10,
+    version: 11,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
@@ -279,7 +267,9 @@ const manifest = {
         agent_bus_id: d.bus,
         content: {
             env: `AGENT_NAME=${d.id}\nAGENTMUX_AGENT_ID=${d.name}`,
-            startup: STARTUP,
+            // "__SKIP__" suppresses the startup injection. The /startup skill
+            // is the opt-in path for users who want the verification round.
+            startup: "__SKIP__",
         },
         skills: [SKILL],
     })),

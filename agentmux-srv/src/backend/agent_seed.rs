@@ -493,12 +493,14 @@ mod tests {
                     working_directory: String::new(),
                     shell: String::new(),
                     agent_bus_id: String::new(),
+                    container_image: String::new(),
                     auto_start: false,
                     restart_on_crash: false,
                     content: SeedContent::default(),
                     skills: Vec::new(),
                 })
                 .collect(),
+            memories: Vec::new(),
         }
     }
 
