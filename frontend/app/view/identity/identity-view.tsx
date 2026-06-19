@@ -17,6 +17,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
 import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import { brandForProvider, isCliOAuthProvider } from "@/app/view/accounts/provider-brand";
+import { Modal, ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
 
@@ -101,42 +102,53 @@ export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Elemen
     const groups = () => model.accountsByProvider();
 
     return (
-        <div class="identity-accounts-layout">
-            <div class="identity-accounts-list">
-                <Show
-                    when={model.accountsAtom().length > 0}
-                    fallback={
-                        <div class="identity-empty">
-                            <p>No accounts configured.</p>
-                            <button class="identity-empty-add" onClick={() => model.openAddForm()}>
-                                + Add your first account
-                            </button>
-                        </div>
-                    }
-                >
-                    <For each={[...groups().entries()]}>
-                        {([provider, accounts]) => (
-                            <div class="identity-group">
-                                <div class="identity-group-header">{PROVIDER_LABELS[provider]}</div>
-                                <For each={accounts}>
-                                    {(account) => (
-                                        <AccountRow
-                                            account={account}
-                                            selected={model.selectedAccountAtom()?.id === account.id}
-                                            onClick={() => model.setSelectedAccount(account)}
-                                        />
-                                    )}
-                                </For>
+        <>
+            <div class="identity-accounts-layout">
+                <div class="identity-accounts-list">
+                    <Show
+                        when={model.accountsAtom().length > 0}
+                        fallback={
+                            <div class="identity-empty">
+                                <p>No accounts configured.</p>
+                                <button class="identity-empty-add" onClick={() => model.openAddForm()}>
+                                    + Add your first account
+                                </button>
                             </div>
-                        )}
-                    </For>
-                </Show>
+                        }
+                    >
+                        <For each={[...groups().entries()]}>
+                            {([provider, accounts]) => (
+                                <div class="identity-group">
+                                    <div class="identity-group-header">{PROVIDER_LABELS[provider]}</div>
+                                    <For each={accounts}>
+                                        {(account) => (
+                                            <AccountRow
+                                                account={account}
+                                                selected={model.selectedAccountAtom()?.id === account.id}
+                                                onClick={() => model.setSelectedAccount(account)}
+                                            />
+                                        )}
+                                    </For>
+                                </div>
+                            )}
+                        </For>
+                    </Show>
+                </div>
             </div>
 
-            <Show when={model.selectedAccountAtom() !== null}>
-                <AccountDetail model={model} account={model.selectedAccountAtom()!} />
-            </Show>
-        </div>
+            {/* Central detail overlay — keyed so switching accounts remounts the content */}
+            <Modal
+                open={model.selectedAccountAtom() !== null}
+                onClose={() => model.setSelectedAccount(null)}
+                scope="window"
+                size="md"
+                showCloseButton
+            >
+                <Show when={model.selectedAccountAtom()} keyed>
+                    {(account) => <AccountDetail model={model} account={account} />}
+                </Show>
+            </Modal>
+        </>
     );
 }
 
@@ -161,30 +173,27 @@ function AccountRow(props: { account: Account; selected: boolean; onClick: () =>
     );
 }
 
-// ── Account detail panel ─────────────────────────────────────────────────────
+// ── Account detail panel (rendered inside <Modal>) ───────────────────────────
 
 function AccountDetail({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
     return (
-        <div class="identity-detail">
-            <div class="identity-detail-header">
-                <span class={`identity-provider-badge provider-${account.provider}`}>
-                    <ProviderLogo provider={account.provider} size={16} />
-                </span>
-                <div class="identity-detail-title">
-                    <span class="identity-detail-name">{account.name}</span>
-                    <Show when={account.display_name}>
-                        <span class="identity-detail-subname">{account.display_name}</span>
-                    </Show>
+        <>
+            <ModalHeader title={account.name} />
+            <ModalBody>
+                <div class="identity-detail-meta-row">
+                    <span class={`identity-provider-badge provider-${account.provider}`}>
+                        <ProviderLogo provider={account.provider} size={14} />
+                    </span>
+                    <span class="identity-detail-meta-label">
+                        <Show when={account.display_name}>
+                            <span class="identity-detail-subname">{account.display_name}</span>
+                        </Show>
+                    </span>
+                    <span class={`${STATUS_DOT[account.status] ?? STATUS_DOT["unknown"]} detail-status`} title={account.status} />
+                    <span class="identity-detail-status-text" data-status={account.status}>{account.status}</span>
                 </div>
-                <span class={`${STATUS_DOT[account.status] ?? STATUS_DOT["unknown"]} detail-status`} title={account.status}>
-                    {account.status}
-                </span>
-            </div>
 
-            <div class="identity-detail-body">
-                {/* Resolve the label via the brand so CLI-OAuth accounts
-                    (provider "claude"/"codex"/…) don't render a blank Provider
-                    field; surface "via <CLI>" so the origin is clear. */}
+                {/* Resolve the label via the brand so CLI-OAuth accounts surface "via <CLI>". */}
                 <DetailField
                     label="Provider"
                     value={`${PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider}${
@@ -193,7 +202,6 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                 />
                 <DetailField label="Kind" value={KIND_LABELS[account.kind]} />
 
-                {/* Secret reference */}
                 <div class="identity-detail-section">Secret</div>
                 <DetailField label="Backend" value={account.secret_ref.backend} />
                 <Show when={account.secret_ref.env_var}>
@@ -213,7 +221,6 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                     <DetailField label="Key" value={account.context.masked_tail ?? "••••••••"} />
                 </Show>
 
-                {/* Context fields */}
                 <Show when={account.context.github_username}>
                     <div class="identity-detail-section">GitHub</div>
                     <DetailField label="Username" value={account.context.github_username!} />
@@ -241,24 +248,17 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                     <DetailField label="Notes" value={account.context.description!} />
                 </Show>
 
-                {/* Agent assignments are managed via identity bundles — see Identities tab */}
                 <div class="identity-detail-section">Agents</div>
                 <span class="identity-detail-empty">Assigned via Identities tab</span>
 
                 <DetailField label="Created" value={new Date(account.created_at).toLocaleString()} />
-            </div>
-
-            <div class="identity-detail-actions">
-                {/* Reauth: expired non-OAuth accounts only. OAuth reauth goes through
-                    OAuthConnectPanel which needs the existing accountId threaded through
-                    (not yet wired); opening the edit form here would create a duplicate. */}
+            </ModalBody>
+            <ModalFooter>
                 <Show when={account.status === "expired" && account.kind !== "oauth"}>
                     <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
                         Reauth
                     </button>
                 </Show>
-                {/* Validate: keychain only. plaintext_dev routes through handleSubmit →
-                    updateAccount with no verify call, so it cannot clear unknown status. */}
                 <Show when={account.status === "unknown" && account.secret_ref.backend === "keychain"}>
                     <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
                         Validate…
@@ -277,8 +277,8 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                 >
                     Delete
                 </button>
-            </div>
-        </div>
+            </ModalFooter>
+        </>
     );
 }
 

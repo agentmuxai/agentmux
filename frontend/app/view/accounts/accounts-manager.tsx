@@ -67,7 +67,7 @@ export function AccountsManager(): JSX.Element {
                 </button>
             </div>
 
-            <div class="identity-body">
+            <div class="identity-body accounts-manager-body">
                 {/* Brand-tile landing: pick a service → OAuth / Key, or AgentMux. */}
                 <AccountsGallery
                     model={model}
@@ -75,44 +75,48 @@ export function AccountsManager(): JSX.Element {
                     onAgentMux={() => setMuxPanelOpen(true)}
                 />
                 {/* Connected accounts (manage existing). Shown when there is any
-                    stored account OR an AgentMux Cloud session is connected. */}
+                    stored account OR an AgentMux Cloud session is connected.
+                    accounts-manager-list-section is flex:1 so it fills remaining
+                    height below the gallery, letting AccountsTab's height:100% work. */}
                 <Show when={model.accountsAtom().length > 0 || agentMuxConnected()}>
-                    <div class="accounts-connected-heading">Connected accounts</div>
-                    {/* AgentMux Cloud — read-only projected row (singleton
-                        session, not a stored IdentityAccount). Clicking it opens
-                        the connect panel, where Disconnect lives. */}
-                    <Show when={agentMuxConnected()}>
-                        <div class="identity-accounts-list">
-                            <div class="identity-group">
-                                <div class="identity-group-header">AgentMux</div>
-                                <div
-                                    class="identity-account-row"
-                                    onClick={() => setMuxPanelOpen(true)}
-                                    title="Manage AgentMux Cloud connection"
-                                >
-                                    <span class="identity-provider-badge provider-agentmux">
-                                        <ProviderLogo provider="agentmux" size={16} />
-                                    </span>
-                                    <span class="identity-account-name">
-                                        {muxbus.status()?.email || "AgentMux Cloud"}
-                                    </span>
-                                    <div class="identity-row-meta">
-                                        <span class="identity-display-name">
-                                            AgentMux Cloud
-                                            <Show when={!muxbus.status()?.valid}> · token expired</Show>
+                    <div class="accounts-manager-list-section">
+                        <div class="accounts-connected-heading">Connected accounts</div>
+                        {/* AgentMux Cloud — read-only projected row (singleton
+                            session, not a stored IdentityAccount). Clicking it opens
+                            the connect panel, where Disconnect lives. */}
+                        <Show when={agentMuxConnected()}>
+                            <div class="identity-accounts-list">
+                                <div class="identity-group">
+                                    <div class="identity-group-header">AgentMux</div>
+                                    <div
+                                        class="identity-account-row"
+                                        onClick={() => setMuxPanelOpen(true)}
+                                        title="Manage AgentMux Cloud connection"
+                                    >
+                                        <span class="identity-provider-badge provider-agentmux">
+                                            <ProviderLogo provider="agentmux" size={16} />
                                         </span>
+                                        <span class="identity-account-name">
+                                            {muxbus.status()?.email || "AgentMux Cloud"}
+                                        </span>
+                                        <div class="identity-row-meta">
+                                            <span class="identity-display-name">
+                                                AgentMux Cloud
+                                                <Show when={!muxbus.status()?.valid}> · token expired</Show>
+                                            </span>
+                                        </div>
+                                        <span
+                                            class={muxStatusDot()}
+                                            title={muxbus.status()?.valid ? "valid" : "expired"}
+                                        />
                                     </div>
-                                    <span
-                                        class={muxStatusDot()}
-                                        title={muxbus.status()?.valid ? "valid" : "expired"}
-                                    />
                                 </div>
                             </div>
-                        </div>
-                    </Show>
-                    <Show when={model.accountsAtom().length > 0}>
-                        <AccountsTab model={model} />
-                    </Show>
+                        </Show>
+                        <Show when={model.accountsAtom().length > 0}>
+                            <AccountsTab model={model} />
+                        </Show>
+                    </div>
                 </Show>
             </div>
 

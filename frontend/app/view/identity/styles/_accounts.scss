@@ -6,15 +6,15 @@
 // ── Accounts layout (list + detail) ──────────────────────────────────────────
 
 .identity-accounts-layout {
-    display: flex;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
 }
 
 .identity-accounts-list {
     flex: 1;
     overflow-y: auto;
-    padding: var(--space-2) 0;
+    padding: var(--space-2);
     min-width: 0;
 
     &::-webkit-scrollbar-thumb {
@@ -30,7 +30,7 @@
 }
 
 .identity-group-header {
-    padding: var(--space-1) var(--space-3);
+    padding: var(--space-1) 0;
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.08em;
@@ -44,18 +44,26 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    padding: var(--space-1-5) var(--space-3);
+    padding: var(--space-1-5) var(--space-2);
     cursor: pointer;
-    transition: background 0.1s;
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    margin-bottom: var(--space-1);
+    transition: background 0.1s, border-color 0.1s;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
 
     &:hover {
-        background: var(--hover-bg-color);
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
     }
 
     &.selected {
-        background: var(--highlight-bg-color);
-        border-left: 2px solid var(--accent-color);
-        padding-left: 10px;
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
     }
 }
 
