@@ -52,7 +52,7 @@ This spec covers:
 | Gap | Location | Notes |
 |-----|----------|-------|
 | Runtime defaults to `"host"` | `types.ts:51` — `initialForm()` | Should be `"container"` |
-| New user-defined agent defaults to `"host"` | `app_api.rs:2528` | Should be `"container"` |
+| New user-defined agent `agent_type` not caller-supplied | `app_api.rs:2528` | Fixed: `cmd.agent_type` (default `"host"`) via `CommandAgentDefineData` |
 | No warning on host selection | `AgentLaunchModal.tsx:750` | Need an amber callout |
 | No runtime badge on the running pane | `agent-view.tsx` | Use a `PaneRow` pin (see §5.2) |
 | No runtime badge on My Agents cards | `AgentCard.tsx` | `agent_type` not currently displayed |
@@ -197,19 +197,21 @@ The `Opened` command carries `initial?.runtime` from the stored `agent_type`, so
 re-launching an existing host agent still pre-selects host. Only the "new agent"
 creation path is affected by the default change.
 
-#### 5.4.2 New user-defined agent default (`app_api.rs:2528`)
+#### 5.4.2 New user-defined agent `agent_type` (`app_api.rs:2528`)
 
 ```rust
-// Before
+// Before: hardcoded, callers could not override
 agent_type: "host".to_string(),
 
-// After
-agent_type: "container".to_string(),
+// After: caller-supplied, defaults to "host" when absent
+agent_type: cmd.agent_type.clone(), // field added to CommandAgentDefineData
 ```
 
-This is the Rust create path for user-defined agents (not from templates). The DB
-column default is `'standalone'`; this explicit assignment is what sets the effective
-type for all user-created definitions.
+`CommandAgentDefineData` now carries an optional `agent_type` field (default `"host"`
+via `#[serde(default = "default_host_agent_type")]`). Callers that want a container
+agent must pass `agent_type: "container"` explicitly — a missing field never silently
+forces a runtime that requires Docker. The DB column default is `'standalone'`; this
+assignment is what sets the effective type for all user-created definitions.
 
 #### 5.4.3 Host warning callout (`AgentLaunchModal.tsx`)
 
@@ -282,7 +284,7 @@ where `is_seeded = 1`.
 ### Phase 2 — Default to container + host warning
 
 1. `types.ts:51` — `runtime: "container"`
-2. `app_api.rs:2528` — `agent_type: "container".to_string()`
+2. `app_api.rs:2528` — `agent_type: cmd.agent_type.clone()` (caller-supplied, default `"host"`)
 3. `AgentLaunchModal.tsx` — host warning callout + radio subtext
 4. `scripts/gen-seed.js` — update 6 templates to `"container"`, bump schemaVersion
 
@@ -314,7 +316,7 @@ Not blocking — users can recreate agents to change runtime today.
 | File | Change |
 |------|--------|
 | `frontend/app/store/launch-flow-state/types.ts:51` | `runtime: "container"` |
-| `agentmux-srv/src/server/app_api.rs:2528` | `agent_type: "container".to_string()` |
+| `agentmux-srv/src/server/app_api.rs:2528` | `agent_type: cmd.agent_type.clone()` (default `"host"`, caller-supplied) |
 | `frontend/app/view/agent/components/AgentLaunchModal.tsx` | Host warning + radio subtext |
 | `scripts/gen-seed.js` | Update 6 templates + bump schemaVersion |
 
