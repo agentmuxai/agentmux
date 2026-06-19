@@ -355,16 +355,28 @@ pub fn tear_off_pool_promote(
     ) {
         Some(label) => Ok(serde_json::json!(label)),
         None => {
-            // Per spec §0 the cold path is defence-in-depth, not an
-            // expected branch. Surface as an error so the frontend
-            // falls back deliberately and we can monitor `tear_off
-            // .pool_exhausted` events.
-            tracing::warn!(
-                target: "dnd:tearoff:pool",
-                workspace_id = %workspace_id,
-                "[pool] pool exhausted on tear-off — frontend will cold-path"
-            );
-            Err("pool_exhausted".to_string())
+            // On Windows: pool should always have slots — log WARN so we can
+            // monitor unexpected exhaustion. On macOS/Linux: pool is not yet
+            // implemented (Phase 7); cold-path is the expected branch, not a
+            // failure, so log at DEBUG to avoid noisy false-alarm warnings.
+            if cfg!(target_os = "windows") {
+                tracing::warn!(
+                    target: "dnd:tearoff:pool",
+                    workspace_id = %workspace_id,
+                    "[pool] pool exhausted on tear-off — frontend will cold-path"
+                );
+            } else {
+                tracing::debug!(
+                    target: "dnd:tearoff:pool",
+                    workspace_id = %workspace_id,
+                    "[pool] cold-path tear-off (pool not implemented on this platform)"
+                );
+            }
+            if cfg!(target_os = "windows") {
+                Err("pool_exhausted".to_string())
+            } else {
+                Err("pool_not_implemented".to_string())
+            }
         }
     }
 }

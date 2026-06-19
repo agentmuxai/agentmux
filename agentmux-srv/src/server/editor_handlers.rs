@@ -9,6 +9,7 @@ use crate::backend::rpc_types::{
     CommandWriteAgentConfigData,
 };
 use crate::backend::base::expand_home_dir_safe;
+use crate::backend::storage::store::Store;
 
 use super::AppState;
 
@@ -75,13 +76,47 @@ fn list_drives() -> Vec<serde_json::Value> {
     drives
 }
 
+/// Prepend global memory bundle content into the `# Memory` section of a
+/// CLAUDE.md string, mirroring the injection done by `write_agent_config_files`
+/// in the `agent.open` RPC path.  If the file has no `# Memory` section, a new
+/// one is inserted before `# Available Skills` (or at the end of the file).
+fn inject_global_bundles(claude_md: &str, wstore: &Arc<Store>) -> String {
+    let bundles = wstore.bundle_memory_list_global().unwrap_or_default();
+    let parts: Vec<String> = bundles
+        .into_iter()
+        .filter(|b| !b.instructions.is_empty())
+        .map(|b| b.instructions)
+        .collect();
+    if parts.is_empty() {
+        return claude_md.to_string();
+    }
+    let bundle_block = parts.join("\n\n---\n\n");
+
+    // Inject after the `# Memory\n` heading if it exists.
+    if let Some(pos) = claude_md.find("\n# Memory\n") {
+        let insert_at = pos + "\n# Memory\n".len();
+        let (before, after) = claude_md.split_at(insert_at);
+        format!("{}{}\n\n---\n\n{}", before, bundle_block, after)
+    } else {
+        // No memory section — insert one before `# Available Skills` or append.
+        let anchor = "\n# Available Skills\n";
+        if let Some(pos) = claude_md.find(anchor) {
+            let (before, after) = claude_md.split_at(pos);
+            format!("{}\n# Memory\n{}{}", before, bundle_block, after)
+        } else {
+            format!("{}\n# Memory\n{}\n", claude_md, bundle_block)
+        }
+    }
+}
+
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let _ = state; // state not currently needed by these handlers; kept for API consistency
+    let wstore = state.wstore.clone();
 
     // writeagentconfig → write config files atomically to agent working directory
     engine.register_handler(
         COMMAND_WRITE_AGENT_CONFIG,
-        Box::new(|data, _ctx| {
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
             Box::pin(async move {
                 let cmd: CommandWriteAgentConfigData = serde_json::from_value(data)
                     .map_err(|e| format!("writeagentconfig: {e}"))?;
@@ -135,6 +170,14 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // where every component is new).
                     crate::backend::base::verify_no_symlink_escape(&file_path, &canonical_base)
                         .map_err(|e| format!("path traversal denied: {} ({e})", file.path))?;
+                    // Inject global memory bundles into CLAUDE.md so agents
+                    // launched from the picker receive the same workspace rules
+                    // as agents launched via the agent.open RPC.
+                    let content = if file.path == "CLAUDE.md" {
+                        inject_global_bundles(&file.content, &wstore)
+                    } else {
+                        file.content.clone()
+                    };
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {
@@ -142,7 +185,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 .map_err(|e| format!("failed to create dir for {}: {e}", file.path))?;
                         }
                     }
-                    std::fs::write(&file_path, &file.content)
+                    std::fs::write(&file_path, &content)
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                     tracing::debug!(path = %file_path.display(), "wrote config file");
                 }

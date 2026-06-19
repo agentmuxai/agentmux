@@ -15,6 +15,12 @@
 // the old rows are lost. This is intentional: the old layout
 // conflated 6 agents into 3 providers, which no longer matches the
 // "one card per CLI" model the picker now shows.
+//
+// Memory bundles (added 2026-06-18): the manifest also seeds Memory bundles
+// that pre-populate the Trust Center (Identity & Memory hamburger modal).
+// Two tiers:
+//   is_global: true  — injected into every agent's CLAUDE.md at launch
+//   is_global: false — available in the manager but not auto-injected
 
 const STARTUP = `## Verification Round
 
@@ -146,8 +152,108 @@ const CLI_DEFS = [
     },
 ];
 
+// ── Seeded Memory bundles ─────────────────────────────────────────────────────
+//
+// Sourced from a5af/claw workspace patterns (CLAUDE_CONTAINER.md, agent-seed
+// startup knowledge). The "Workspace Rules" bundle is global — injected into
+// every agent's CLAUDE.md so agents always operate within the same baseline
+// git/task/tool rules. The "AgentMux Development" bundle is opt-in — users
+// select it when opening an agent to work on the agentmux codebase.
+
+const MEMORY_WORKSPACE_RULES = `## Workspace Rules
+
+### Git Workflow
+
+- **Never push directly to main.** Always create a feature branch first.
+- Branch names: \`<agent-name>/feature-description\`.
+- Every code change goes through a PR — no direct pushes, no exceptions.
+- Never reuse a branch after its PR is merged; create a new branch.
+- Resolve merge conflicts rather than force-pushing or discarding changes.
+
+### Task Management
+
+- Use task tracking for any task with 3 or more steps.
+- Mark a task **in_progress** before starting it.
+- Mark a task **completed** immediately when done — do not batch.
+
+### GitHub Access
+
+| Tier | Tool | Use when |
+|------|------|---------|
+| 1 | MCP \`mcp__github__*\` tools | Primary — tokens auto-refresh |
+| 2 | \`gh\` CLI | MCP unavailable |
+| 3 | Admin PAT via \`secrets\` | Package publish, admin ops only |
+
+### Safety
+
+- Kill processes by PID only — never by image name (kills all instances).
+- Never skip pre-commit hooks (\`--no-verify\`) without explicit user approval.
+- Confirm before any destructive operation: force-push, reset --hard, branch -D.`;
+
+const MEMORY_AGENTMUX_DEV = `## AgentMux Development
+
+Context for working on the AgentMux codebase. Select this Memory bundle when
+opening an agent to work on agentmux.
+
+### Stack
+
+- **agentmux-cef** — Chromium host, window management, IPC bridge
+- **agentmux-launcher** — Job Object, single-instance pipe, saga coordinator
+- **agentmux-srv** — Async Rust backend (SQLite, agent/block management)
+- **agentmux-common** — Shared types and utilities
+- **Frontend** — SolidJS + SCSS, built with Vite
+
+### Build Commands
+
+| Command | Purpose |
+|---------|---------|
+| \`task dev\` | Development (hot reload) |
+| \`task package\` | Portable ZIP build |
+| \`task build:backend\` | Rebuild Rust sidecar after changes |
+| \`task test\` | Run tests |
+
+After Rust changes: \`task build:backend\`, then restart \`task dev\`.
+
+### Version Management
+
+Feature PRs use changesets — do NOT bump versions manually:
+\`\`\`bash
+task changeset -- patch "fix(scope): short description"
+\`\`\`
+
+### Logs
+
+\`muxlog host\` / \`muxlog srv\` / \`muxlog fe\` — pipe to \`grep\` for filtering.
+
+### Reagent Bot
+
+All PRs are auto-reviewed by reagent (Claude Opus). Address P1 findings before
+merging. P2 findings should also be fixed if feasible.
+
+### Critical Rule
+
+**NEVER kill AgentMux by image name** — use PID only. Multiple instances share
+the same binary name; killing by name kills ALL of them.`;
+
+const SEED_MEMORIES = [
+    {
+        id: "seed-workspace-rules",
+        name: "Workspace Rules",
+        description: "Git workflow, task management, GitHub access tiers, and safety rules — injected into all agents",
+        is_global: true,
+        instructions: MEMORY_WORKSPACE_RULES,
+    },
+    {
+        id: "seed-agentmux-dev",
+        name: "AgentMux Development",
+        description: "Stack, build commands, version management, and workflow for the AgentMux codebase",
+        is_global: false,
+        instructions: MEMORY_AGENTMUX_DEV,
+    },
+];
+
 const manifest = {
-    version: 9,
+    version: 11,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
@@ -161,10 +267,13 @@ const manifest = {
         agent_bus_id: d.bus,
         content: {
             env: `AGENT_NAME=${d.id}\nAGENTMUX_AGENT_ID=${d.name}`,
-            startup: STARTUP,
+            // "__SKIP__" suppresses the startup injection. The /startup skill
+            // is the opt-in path for users who want the verification round.
+            startup: "__SKIP__",
         },
         skills: [SKILL],
     })),
+    memories: SEED_MEMORIES,
 };
 
 // Write the manifest to `agentmux-srv/agent-seed.json` directly
