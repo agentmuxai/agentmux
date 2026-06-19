@@ -208,7 +208,7 @@ async function handleCrossWindowDragEnd(
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
         } else if (!targetWindow) {
-            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, grabOffsetSnapshot);
+            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, grabOffsetSnapshot, sourceWindow);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
             try { await api.releaseDragCapture(); } catch {}
         } else {
@@ -236,6 +236,7 @@ async function performTearOff(
     screenX: number,
     screenY: number,
     grabOffsetSnapshot: ReturnType<typeof getTabGrabOffset> = null,
+    sourceWindowLabel: string | null = null,
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
@@ -272,9 +273,9 @@ async function performTearOff(
             });
             return;
         }
-        // Diagnostic snapshot before the IPC so intermittent failures can
-        // be correlated with pane-closing state or pool exhaustion.
-        invokeCommand("get_pane_debug_state", {}).then((snap) => {
+        // Diagnostic snapshot — awaited so it captures state before the IPC
+        // starts (a fire-and-forget races the IPC and may read post-start state).
+        await invokeCommand("get_pane_debug_state", {}).then((snap) => {
             Logger.info("dnd:cross", "tear-off pre-flight state", {
                 blockId: payload.blockId,
                 ...snap,
@@ -297,7 +298,7 @@ async function performTearOff(
                 y: screenY,
                 width: floaterWidth,
                 height: floaterHeight,
-                source_window_label: windowLabelRef,
+                source_window_label: sourceWindowLabel,
             });
             Logger.info("dnd:cross", "floating pane spawned", {
                 blockId: payload.blockId,
@@ -321,7 +322,7 @@ async function performTearOff(
                         y: screenY,
                         width: floaterWidth,
                         height: floaterHeight,
-                        source_window_label: windowLabelRef,
+                        source_window_label: sourceWindowLabel,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {
