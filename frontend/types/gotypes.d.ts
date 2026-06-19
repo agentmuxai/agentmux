@@ -2187,6 +2187,25 @@ declare global {
         node_count: number;
     };
 
+    // wshrpc.NativeMemoryFileMeta — one *.md file in the agent's native memory folder.
+    type NativeMemoryFileMeta = {
+        filename: string;
+        is_index: boolean;
+        metadata_type: string | null;
+        size_bytes: number;
+        modified_at: number;
+    };
+
+    // wshrpc.NativeMemoryListResult
+    type NativeMemoryListResult = {
+        files: NativeMemoryFileMeta[];
+    };
+
+    // wshrpc.NativeMemoryReadFileResult
+    type NativeMemoryReadFileResult = {
+        content: string;
+    };
+
     // wshrpc.CommandSessionDigestData
     type CommandSessionDigestData = {
         block_id: string;

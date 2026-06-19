@@ -1530,6 +1530,21 @@ class RpcApiType {
         return client.rpcCall("agent:session:list_archives", data, opts);
     }
 
+    // command "agent:memory:list" [call] — list *.md files in the agent's native memory folder.
+    NativeMemoryListCommand(client: RpcClient, data: { agent_id: string }, opts?: RpcOpts): Promise<NativeMemoryListResult> {
+        return client.rpcCall("agent:memory:list", data, opts);
+    }
+
+    // command "agent:memory:read_file" [call] — read one file by filename.
+    NativeMemoryReadFileCommand(client: RpcClient, data: { agent_id: string; filename: string }, opts?: RpcOpts): Promise<NativeMemoryReadFileResult> {
+        return client.rpcCall("agent:memory:read_file", data, opts);
+    }
+
+    // command "agent:memory:write_file" [call] — write/create one file atomically.
+    NativeMemoryWriteFileCommand(client: RpcClient, data: { agent_id: string; filename: string; content: string }, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("agent:memory:write_file", data, opts);
+    }
+
     // command "session:digest" [call]
     SessionDigestCommand(client: RpcClient, data: CommandSessionDigestData, opts?: RpcOpts): Promise<SessionDigestResult> {
         return client.rpcCall("session:digest", data, opts);
