@@ -372,7 +372,11 @@ pub fn tear_off_pool_promote(
                     "[pool] cold-path tear-off (pool not implemented on this platform)"
                 );
             }
-            Err("pool_exhausted".to_string())
+            if cfg!(target_os = "windows") {
+                Err("pool_exhausted".to_string())
+            } else {
+                Err("pool_not_implemented".to_string())
+            }
         }
     }
 }
