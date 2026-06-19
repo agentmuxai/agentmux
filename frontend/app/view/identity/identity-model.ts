@@ -298,7 +298,7 @@ export function primeAccountCache(): void {
 export class IdentityViewModel implements ViewModel {
     viewType = "identity";
     blockId: string;
-    nodeModel: BlockNodeModel;
+    nodeModel: BlockNodeModel | null;
 
     viewIcon: Accessor<string> = () => "id-card";
     viewName: Accessor<string> = () => "Identity";
@@ -348,7 +348,7 @@ export class IdentityViewModel implements ViewModel {
      *  invoked in dispose() so direct callers don't leak a listener. */
     private _unsubAccounts: (() => void) | null = null;
 
-    constructor(blockId: string, nodeModel: BlockNodeModel) {
+    constructor(blockId: string, nodeModel: BlockNodeModel | null) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
         // Initial paint from cache (may be empty on first launch).

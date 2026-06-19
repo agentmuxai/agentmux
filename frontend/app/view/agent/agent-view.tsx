@@ -140,6 +140,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // buttons (brain / id-card) can open modals without holding a SolidJS
     // context in the model. Mirrors the former _setOverlayTab pattern.
     const modalLayer = useModalLayer();
+    // Expose currentAgent reactivity to the model so endIconButtons can
+    // hide the id-card for quick-launch panes where no definition loads.
+    model._hasAgentDef = () => currentAgent() != null;
     onMount(() => {
         model._openIdentityModal = () => {
             const agent = currentAgent();
@@ -158,6 +161,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     onCleanup(() => {
         model._openIdentityModal = null;
         model._openMemoryModal = null;
+        model._hasAgentDef = () => false;
     });
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
