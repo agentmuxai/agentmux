@@ -56,7 +56,7 @@ This spec covers:
 | No warning on host selection | `AgentLaunchModal.tsx:750` | Need an amber callout |
 | No runtime badge on the running pane | `agent-view.tsx` | Use a `PaneRow` pin (see §5.2) |
 | No runtime badge on My Agents cards | `AgentCard.tsx` | `agent_type` not currently displayed |
-| Seeded templates are all `"host"` | `scripts/gen-seed.js` | 6 of 7 should become `"container"` |
+| Seeded templates are all `"host"` | `scripts/gen-seed.js` | 1 of 7 flips to `"container"` (Claude only — the only built image) |
 
 ---
 
@@ -249,19 +249,21 @@ a `<span class="agent-launch-modal-radio-sub">` under each existing radio label.
 Change `agent_type` on templates based on `containerSupported` in `cli-catalog.ts` —
 that field is already the source of truth for which CLIs can run in a container:
 
-| Template | Provider | containerSupported | New agent_type |
-|----------|----------|--------------------|----------------|
+| Template | Provider | containerSupported | agent_type |
+|----------|----------|--------------------|------------|
 | Claude Code | claude | true | **container** |
-| Codex CLI | codex | true | **container** |
-| Gemini CLI | gemini | true | **container** |
-| Kimi Code | kimi | true | **container** |
-| Pi | pi | true | **container** |
-| GitHub Copilot | copilot | true | **container** |
-| OpenClaw | openclaw | false (needs host ACP) | host (unchanged) |
+| Codex CLI | codex | false (no image yet) | host |
+| Gemini CLI | gemini | false (no image yet) | host |
+| Kimi Code | kimi | false (no image yet) | host |
+| Pi | pi | false (no image yet) | host |
+| GitHub Copilot | copilot | false (no image yet) | host |
+| OpenClaw | openclaw | false (needs host ACP) | host |
 
-6 of 7 flip to container. The 1 that stays host (`openclaw`) is explicitly
-`containerSupported: false` in the catalog — it is an ACP orchestrator that requires
-host-level access to manage other agents.
+1 of 7 is container. Only `claude` has a built+published image
+(`ghcr.io/agentmuxai/agent-claude:latest`, built by `docker/Dockerfile.agent-agentmux`
+and `.github/workflows/container-image.yml`). The remaining 5 providers will flip to
+`containerSupported: true` incrementally as their images ship — at that point update
+`cli-catalog.ts`, `gen-seed.js`, and bump the manifest version.
 
 The re-seed engine (`agent_seed.rs`) deletes old seeded rows and inserts new ones on
 version bump — bump `schemaVersion` in `gen-seed.js` to trigger the reseed.
