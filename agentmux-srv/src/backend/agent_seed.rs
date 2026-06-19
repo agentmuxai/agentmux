@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
+use super::storage::memory_bundles::Memory;
 use super::storage::store::{AgentDefinition, AgentContent, AgentSkill, Store};
 use super::storage::StoreError;
 
@@ -26,6 +27,24 @@ struct SeedManifest {
     #[allow(dead_code)]
     version: u32,
     agents: Vec<SeedAgent>,
+    #[serde(default)]
+    memories: Vec<SeedMemory>,
+}
+
+/// A memory bundle in the seed manifest.
+#[derive(Debug, Deserialize)]
+struct SeedMemory {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: String,
+    /// When true this bundle is injected into every agent's CLAUDE.md at
+    /// launch (Trust Center global tier). When false it is available in the
+    /// Memory manager but must be selected per-agent.
+    #[serde(default)]
+    is_global: bool,
+    #[serde(default)]
+    instructions: String,
 }
 
 /// An agent definition in the seed manifest.
@@ -221,6 +240,57 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
     Ok(SeedReport { created, skipped })
 }
 
+/// Seed memory bundles from the manifest. Skips any bundle whose ID already
+/// exists — this is a one-time seed, not an upsert on every startup.
+fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
+    let existing = wstore.bundle_memory_list()?;
+    let existing_ids: std::collections::HashSet<String> =
+        existing.iter().map(|m| m.id.clone()).collect();
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    let mut created = 0usize;
+    for mem_def in &manifest.memories {
+        if existing_ids.contains(&mem_def.id) {
+            continue;
+        }
+        let memory = Memory {
+            id: mem_def.id.clone(),
+            name: mem_def.name.clone(),
+            description: mem_def.description.clone(),
+            is_blank: false,
+            is_global: mem_def.is_global,
+            provider: String::new(),
+            model: String::new(),
+            instructions: mem_def.instructions.clone(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            created_at: now,
+            updated_at: now,
+        };
+        // Use warn-and-skip rather than ? so a user bundle whose name
+        // collides with the seeded name (UNIQUE constraint on name) does
+        // not abort the remainder of the seed loop.
+        match wstore.bundle_memory_upsert(&memory) {
+            Ok(()) => { created += 1; }
+            Err(e) => {
+                tracing::warn!(
+                    id = %mem_def.id,
+                    name = %mem_def.name,
+                    error = %e,
+                    "agent seed: skipping memory bundle due to upsert error (name collision?)"
+                );
+            }
+        }
+    }
+
+    Ok(created)
+}
+
 /// Run auto-seed on startup. Seeds if empty, or re-seeds if manifest version changed.
 /// Re-seeding updates existing seeded agents and removes seeded agents not in the manifest.
 pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
@@ -262,6 +332,15 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
             }
         }
         Err(e) => tracing::error!("agent seed: failed to count agents: {e}"),
+    }
+
+    // Seed memory bundles once — skips any bundle whose ID already exists.
+    if !manifest.memories.is_empty() {
+        match seed_memories(wstore, &manifest) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("agent seed: seeded {n} memory bundles"),
+            Err(e) => tracing::error!("agent seed: failed to seed memories: {e}"),
+        }
     }
 }
 
@@ -426,12 +505,14 @@ mod tests {
                     working_directory: String::new(),
                     shell: String::new(),
                     agent_bus_id: String::new(),
+                    container_image: String::new(),
                     auto_start: false,
                     restart_on_crash: false,
                     content: SeedContent::default(),
                     skills: Vec::new(),
                 })
                 .collect(),
+            memories: Vec::new(),
         }
     }
 

@@ -368,6 +368,10 @@ declare global {
         name: string;
         description?: string;
         is_blank?: boolean;
+        /** When true this bundle is automatically injected into every agent's
+         *  CLAUDE.md at launch (Trust Center global tier). Managed in the
+         *  Identity & Memory hamburger modal. */
+        is_global?: boolean;
         provider?: string;            // "claude" | "codex" | "gemini" | ""
         model?: string;
         instructions?: string;
