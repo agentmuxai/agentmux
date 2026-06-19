@@ -2306,13 +2306,21 @@ fn write_agent_config_files(
         let settings_str = content_map
             .entry("settings".to_string())
             .or_insert_with(|| "{}".to_string());
-        if let Ok(mut obj) =
-            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str)
-        {
-            obj.entry("autoMemoryEnabled".to_string())
-                .or_insert(json!(false));
-            *settings_str =
-                serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
+        match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(settings_str) {
+            Ok(mut obj) => {
+                obj.entry("autoMemoryEnabled".to_string())
+                    .or_insert(json!(false));
+                *settings_str =
+                    serde_json::to_string(&obj).unwrap_or_else(|_| "{}".to_string());
+            }
+            Err(e) => {
+                tracing::warn!(
+                    work_dir = %work_dir,
+                    error = %e,
+                    "write_agent_config_files: settings JSON unparseable; \
+                     autoMemoryEnabled guard skipped — memory writes may be active on shared workdir"
+                );
+            }
         }
     }
 
