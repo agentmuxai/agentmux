@@ -355,8 +355,12 @@ set. Render via `<i class="fa-solid fa-box" />` pattern used throughout the code
 → 7 seeded templates (claude, codex, gemini, kimi, pi, copilot, openclaw).
 6 flip to `"container"` (those with `containerSupported: true` in `cli-catalog.ts`).
 1 stays `"host"`: openclaw (needs host-level ACP access to orchestrate other agents).
-The `containerSupported` flag in `cli-catalog.ts` is the single source of truth — no
-divergence between the catalog and the seed data.
+The `containerSupported` flag in `cli-catalog.ts` is the authoritative source for the
+UI (modal guard, runtime dropdown). `scripts/gen-seed.js` maintains a parallel
+`CLI_DEFS` table that must be kept in sync with the catalog — the `containerImage`
+field in particular is duplicated by design (the seed script cannot import TypeScript).
+The catalog has a `qwen` entry (`containerSupported: false`) not yet in the seed;
+that entry will be added to `gen-seed.js` when the qwen container image ships.
 
 **Q4: agent_type migration for existing rows?**  
 → No migration needed. Existing user agents keep their current `agent_type`; the
