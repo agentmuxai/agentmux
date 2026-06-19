@@ -14,8 +14,6 @@ import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 
-export type OverlayTab = "agent" | "identity";
-
 /**
  * Compact relative-time label for the title-bar continuation chip.
  *
@@ -45,12 +43,18 @@ export class AgentViewModel implements ViewModel {
     endIconButtons: () => IconButtonDecl[];
     nodejsError: string | null = null;
 
-    // Callback wired by AgentPresentationView on mount so the title-bar
-    // buttons can open the focused overlay without holding a SolidJS signal
-    // in the model (signals must live inside the component tree).
-    _setOverlayTab: ((tab: OverlayTab | null) => void) | null = null;
-    // Last-used overlay tab — gear re-opens to whichever tab was active last.
-    _lastOverlayTab: OverlayTab = "agent";
+    // Callbacks wired by AgentPresentationView on mount so the title-bar
+    // buttons can open pane-scoped modals without holding a SolidJS context
+    // in the model. Replaced the _setOverlayTab / _lastOverlayTab pattern.
+    _openIdentityModal: (() => void) | null = null;
+    _openMemoryModal: (() => void) | null = null;
+    // SolidJS signal updated by a createEffect in agent-view.tsx so
+    // endIconButtons reactively hides the id-card button for quick-launch
+    // panes (where agentId is a provider key, not a definition UUID, and
+    // no AgentDefinition loads). A plain () => boolean mutation would not
+    // create a reactive dependency — BlockFrame would evaluate
+    // endIconButtons once with () => false and never re-run (codex P1 #1587).
+    _agentDefLoaded: SignalAtom<boolean> = createSignalAtom(false);
 
     // Voice-input target ref. AgentFooter populates this on mount with a
     // textarea-backed handle (and clears it on unmount). The exposed
@@ -134,20 +138,31 @@ export class AgentViewModel implements ViewModel {
             await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { agentName: name.trim() } });
         };
 
-        // Pane-frame header buttons: when an agent is loaded show ⚙ .
+        // Pane-frame header buttons: when an agent is loaded show brain + id-card.
         // Hidden when no agent is loaded (picker screen).
-        // Gear opens agent/identity panel; defaults to agent, remembers last tab.
+        // id-card is further gated on _hasAgentDef() — quick-launch panes
+        // (where agentId is a provider key, not a definition UUID) don't have
+        // a loadable AgentDefinition so identity assignment is not available.
         this.endIconButtons = () => {
             const agentId = this.blockAtom()?.meta?.["agentId"];
             if (!agentId) return [];
-            return [
+            const buttons: IconButtonDecl[] = [
                 {
                     elemtype: "iconbutton",
-                    icon: "gear",
-                    title: "Agent settings",
-                    click: () => { this._setOverlayTab?.(this._lastOverlayTab); },
+                    icon: "brain",
+                    title: "Agent memory",
+                    click: () => { this._openMemoryModal?.(); },
                 },
             ];
+            if (this._agentDefLoaded()) {
+                buttons.push({
+                    elemtype: "iconbutton",
+                    icon: "id-card",
+                    title: "Agent identity",
+                    click: () => { this._openIdentityModal?.(); },
+                });
+            }
+            return buttons;
         };
     }
 
