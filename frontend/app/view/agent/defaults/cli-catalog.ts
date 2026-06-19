@@ -58,7 +58,7 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
             "Anthropic's coding agent. Strong at reasoning through long sessions and explaining its thinking as it works. Good when you want it to read widely across a codebase before changing anything. Best if you already use Claude.",
         hostSupported: true,
         containerSupported: true,
-        containerImage: "agentmux/claude:latest",
+        containerImage: "ghcr.io/agentmuxai/agent-claude:latest",
     },
     {
         provider: "codex",
@@ -70,8 +70,8 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         popoverMarkdown:
             "OpenAI's coding agent. Fast and focused — good at small, well-defined tasks and quick refactors. Can work on several files in parallel. Uses your OpenAI account.",
         hostSupported: true,
-        containerSupported: true,
-        containerImage: "agentmux/codex:latest",
+        // No container image built yet — host-only until agentmux/codex ships.
+        containerSupported: false,
     },
     {
         provider: "gemini",
@@ -83,8 +83,8 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         popoverMarkdown:
             "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Uses your Google account.",
         hostSupported: true,
-        containerSupported: true,
-        containerImage: "agentmux/gemini:latest",
+        // No container image built yet — host-only until agentmux/gemini ships.
+        containerSupported: false,
     },
     {
         provider: "qwen",
@@ -110,8 +110,8 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         popoverMarkdown:
             "An open-source coding agent from Moonshot with a huge memory — it can hold a lot of project history in mind at once. Good when you need it to remember a long conversation or read many files without losing track.",
         hostSupported: true,
-        containerSupported: true,
-        containerImage: "agentmux/kimi:latest",
+        // No container image built yet — host-only until agentmux/kimi ships.
+        containerSupported: false,
     },
     {
         provider: "pi",
@@ -123,8 +123,8 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         popoverMarkdown:
             "A flexible agent that can run on your choice of model — Claude, OpenAI, Google, and more. Pick this if you want to try different models against the same task, or if you have API keys from several providers and want to switch easily.",
         hostSupported: true,
-        containerSupported: true,
-        containerImage: "agentmux/pi:latest",
+        // No container image built yet — host-only until agentmux/pi ships.
+        containerSupported: false,
     },
     {
         provider: "openclaw",
@@ -148,8 +148,8 @@ export const CLI_CATALOG: CliCatalogEntry[] = [
         popoverMarkdown:
             "GitHub's coding agent. Integrates closely with GitHub repos and pull requests. Has a switch between Interactive, Plan, and Autopilot so you can choose how much freedom it gets. Best if you mostly work on GitHub and have a Copilot subscription.",
         hostSupported: true,
-        containerSupported: true,
-        containerImage: "agentmux/copilot:latest",
+        // No container image built yet — host-only until agentmux/copilot ships.
+        containerSupported: false,
     },
 ];
 

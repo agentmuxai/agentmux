@@ -82,7 +82,7 @@ const CLI_DEFS = [
         description: "Anthropic's coding agent",
         bus: "claude",
         containerSupported: true,
-        containerImage: "agentmux/claude:latest",
+        containerImage: "ghcr.io/agentmuxai/agent-claude:latest",
     },
     {
         id: "codex",
@@ -91,8 +91,8 @@ const CLI_DEFS = [
         icon: "\u2726",                  // ✦
         description: "OpenAI's coding agent",
         bus: "codex",
-        containerSupported: true,
-        containerImage: "agentmux/codex:latest",
+        // No container image built yet — host-only until agentmux/codex ships.
+        containerSupported: false,
     },
     {
         id: "gemini",
@@ -101,8 +101,8 @@ const CLI_DEFS = [
         icon: "\u26A1",                  // ⚡
         description: "Google's coding agent",
         bus: "gemini",
-        containerSupported: true,
-        containerImage: "agentmux/gemini:latest",
+        // No container image built yet — host-only until agentmux/gemini ships.
+        containerSupported: false,
     },
     {
         id: "kimi",
@@ -111,8 +111,8 @@ const CLI_DEFS = [
         icon: "\u25C8",                  // ◈
         description: "Moonshot's 262k-context agent",
         bus: "kimi",
-        containerSupported: true,
-        containerImage: "agentmux/kimi:latest",
+        // No container image built yet — host-only until agentmux/kimi ships.
+        containerSupported: false,
     },
     {
         id: "pi",
@@ -121,8 +121,8 @@ const CLI_DEFS = [
         icon: "\u03C0",                  // π
         description: "Plandex's multi-provider agent",
         bus: "pi",
-        containerSupported: true,
-        containerImage: "agentmux/pi:latest",
+        // No container image built yet — host-only until agentmux/pi ships.
+        containerSupported: false,
     },
     {
         id: "openclaw",
@@ -141,13 +141,13 @@ const CLI_DEFS = [
         icon: "\u26F6",                  // ⛶
         description: "Microsoft's coding agent",
         bus: "copilot",
-        containerSupported: true,
-        containerImage: "agentmux/copilot:latest",
+        // No container image built yet — host-only until agentmux/copilot ships.
+        containerSupported: false,
     },
 ];
 
 const manifest = {
-    version: 8,
+    version: 9,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
