@@ -580,10 +580,27 @@ class RpcApiType {
             name: string;
             identity_id?: string;
             memory_id?: string;
+            /** Runtime to persist on the cloned definition ("host" |
+             *  "container"). Omitted → backend keeps the template's. */
+            agent_type?: string;
         },
         opts?: RpcOpts,
     ): Promise<{ definition_id: string; identity_id: string; memory_id: string }> {
         return client.rpcCall("agentdefcreatefromtemplate", data, opts);
+    }
+
+    // command "containerruntimeavailable" [call]
+    //
+    // True only when the Docker daemon answers a live ping — NOT merely
+    // that the `docker` CLI is on PATH (which `resolvecli` checks). Used
+    // by the create-from-template modal to gate/default the container
+    // runtime so a daemon-down box doesn't get steered into a container
+    // agent that can't start.
+    ContainerRuntimeAvailableCommand(
+        client: RpcClient,
+        opts?: RpcOpts,
+    ): Promise<{ available: boolean }> {
+        return client.rpcCall("containerruntimeavailable", {}, opts);
     }
 
     // command "createagent" [call]

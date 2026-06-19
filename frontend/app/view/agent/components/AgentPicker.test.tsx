@@ -314,11 +314,16 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
 
         const req = modalLayerOpen.mock.calls[0][0];
+        // Pass an explicit runtime (5th arg) — the modal always supplies
+        // it; exercise the threading so the stub + override carry the
+        // user's pick rather than silently falling back (reagent P2 on
+        // #1576).
         await req.onCreatedAndLaunch(
             "new-def-id",
             "id-work",
             "mem-notes",
             "Mary",
+            "container",
         );
         expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [stubAgent, overrides] = model.launchAgentDefinition.mock.calls[0];
@@ -326,6 +331,11 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(stubAgent.name).toBe("Mary");
         expect(stubAgent.is_seeded).toBe(0);
         expect(stubAgent.parent_id).toBe("tpl-claude");
+        // The chosen runtime is threaded onto both the stub definition
+        // and the launch override (not read from the template's type).
+        expect(stubAgent.agent_type).toBe("container");
+        expect(overrides.agentType).toBe("container");
+        expect(overrides.environment).toBe("docker");
         expect(overrides.identityId).toBe("id-work");
         expect(overrides.memoryId).toBe("mem-notes");
         expect(overrides.instanceName).toBe("Mary");

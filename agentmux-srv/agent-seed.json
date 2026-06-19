@@ -1,12 +1,13 @@
 {
-  "version": 6,
+  "version": 9,
   "agents": [
     {
       "id": "claude",
       "name": "Claude",
       "icon": "✖",
       "provider": "claude",
-      "agent_type": "host",
+      "agent_type": "container",
+      "container_image": "ghcr.io/agentmuxai/agent-claude:latest",
       "description": "Anthropic's coding agent",
       "working_directory": "",
       "shell": "pwsh",
@@ -127,7 +128,7 @@
       "icon": "◎",
       "provider": "openclaw",
       "agent_type": "host",
-      "description": "Open-source personal AI assistant (model-agnostic, local-first)",
+      "description": "ACP orchestration platform",
       "working_directory": "",
       "shell": "pwsh",
       "agent_bus_id": "openclaw",

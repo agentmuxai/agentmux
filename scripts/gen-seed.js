@@ -81,6 +81,8 @@ const CLI_DEFS = [
         icon: "\u2716",                  // ✖
         description: "Anthropic's coding agent",
         bus: "claude",
+        containerSupported: true,
+        containerImage: "ghcr.io/agentmuxai/agent-claude:latest",
     },
     {
         id: "codex",
@@ -89,6 +91,8 @@ const CLI_DEFS = [
         icon: "\u2726",                  // ✦
         description: "OpenAI's coding agent",
         bus: "codex",
+        // No container image built yet — host-only until agentmux/codex ships.
+        containerSupported: false,
     },
     {
         id: "gemini",
@@ -97,6 +101,8 @@ const CLI_DEFS = [
         icon: "\u26A1",                  // ⚡
         description: "Google's coding agent",
         bus: "gemini",
+        // No container image built yet — host-only until agentmux/gemini ships.
+        containerSupported: false,
     },
     {
         id: "kimi",
@@ -105,6 +111,8 @@ const CLI_DEFS = [
         icon: "\u25C8",                  // ◈
         description: "Moonshot's 262k-context agent",
         bus: "kimi",
+        // No container image built yet — host-only until agentmux/kimi ships.
+        containerSupported: false,
     },
     {
         id: "pi",
@@ -113,6 +121,8 @@ const CLI_DEFS = [
         icon: "\u03C0",                  // π
         description: "Plandex's multi-provider agent",
         bus: "pi",
+        // No container image built yet — host-only until agentmux/pi ships.
+        containerSupported: false,
     },
     {
         id: "openclaw",
@@ -121,6 +131,8 @@ const CLI_DEFS = [
         icon: "\u25CE",                  // ◎
         description: "ACP orchestration platform",
         bus: "openclaw",
+        // Needs host access to orchestrate other agents.
+        containerSupported: false,
     },
     {
         id: "copilot",
@@ -129,17 +141,20 @@ const CLI_DEFS = [
         icon: "\u26F6",                  // ⛶
         description: "Microsoft's coding agent",
         bus: "copilot",
+        // No container image built yet — host-only until agentmux/copilot ships.
+        containerSupported: false,
     },
 ];
 
 const manifest = {
-    version: 6,
+    version: 9,
     agents: CLI_DEFS.map((d) => ({
         id: d.id,
         name: d.name,
         icon: d.icon,
         provider: d.provider,
-        agent_type: "host",
+        agent_type: d.containerSupported ? "container" : "host",
+        ...(d.containerImage ? { container_image: d.containerImage } : {}),
         description: d.description,
         working_directory: "",
         shell: "pwsh",

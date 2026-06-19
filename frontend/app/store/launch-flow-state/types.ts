@@ -48,7 +48,7 @@ export interface LaunchForm {
 
 export const initialForm = (): LaunchForm => ({
     name: "",
-    runtime: "host",
+    runtime: "container",
     image: "",
     identityId: "",
     memoryId: "",

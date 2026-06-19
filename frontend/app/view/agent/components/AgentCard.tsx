@@ -123,6 +123,11 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>
             </span>
+            {/* No runtime badge here. A template is runtime-agnostic —
+                the host/container choice is made when you instantiate it
+                (in the create-from-template modal), not a property of the
+                template itself. The badge belongs on a launched session
+                (MyAgentsList), where the runtime is concrete. */}
             <Show when={props.installed === false}>
                 <span class="agent-card-install-ribbon" aria-hidden="true">
                     Click to install

@@ -309,6 +309,15 @@ pub const COMMAND_FORK_AGENT_DEFINITION_SUGGEST: &str = "forkagentdefinitionsugg
 /// launch. Rejects non-template ids + duplicate user-agent names.
 pub const COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE: &str = "agentdefcreatefromtemplate";
 
+/// Returns whether a usable container runtime is reachable RIGHT NOW —
+/// i.e. the Docker daemon answers a `ping`, not merely that the `docker`
+/// CLI is on PATH. Used by the create-from-template modal to decide
+/// whether to offer/default the container runtime; a binary-only check
+/// would false-positive when Docker is installed but the daemon is
+/// stopped, steering the user into a container agent that can't start.
+/// Response: `{ "available": bool }`.
+pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable";
+
 /// Two-tier picker (Phase 2 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
 /// Q2 Decision Y). Set the `user_hidden` flag on a seeded template so
 /// it disappears from the default `+ New from template` list. Idempotent;
@@ -828,12 +837,21 @@ pub struct CommandAgentDefineData {
     pub env: Option<std::collections::HashMap<String, String>>,
     pub if_exists: Option<String>,
     pub create_instance_stub: Option<bool>,
+    /// "host" or "container". Defaults to "host" when absent — the safe
+    /// default that works without Docker. Callers must explicitly pass
+    /// "container" so a missing field never silently starts the wrong runtime.
+    #[serde(default = "default_host_agent_type")]
+    pub agent_type: String,
     /// Docker image for container-type agents. Empty string for host agents.
     #[serde(default)]
     pub container_image: String,
     /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
     #[serde(default = "default_container_volumes")]
     pub container_volumes: String,
+}
+
+fn default_host_agent_type() -> String {
+    "host".to_string()
 }
 
 /// Response from agent.define.
@@ -1425,6 +1443,13 @@ pub struct CommandAgentDefCreateFromTemplateData {
     /// Same semantics as `identity_id` above.
     #[serde(default)]
     pub memory_id: String,
+    /// Runtime to persist on the cloned definition: "host" or
+    /// "container". Empty/absent → keep the template's `agent_type`.
+    /// Runtime is chosen at instantiation time, not a property of the
+    /// template, so the clone records the user's pick rather than
+    /// inheriting the (now container-defaulted) template value.
+    #[serde(default)]
+    pub agent_type: String,
 }
 
 /// Response for `agentdefcreatefromtemplate`. The frontend uses
@@ -2000,6 +2025,9 @@ pub struct RecentSessionRow {
     /// When this instance was last launched (ms since epoch).
     /// Shown as "Last Launch" in the My Agents card.
     pub started_at: i64,
+    /// "host" or "container" — drives the runtime badge in the My Agents list.
+    #[serde(default)]
+    pub agent_type: String,
 }
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is

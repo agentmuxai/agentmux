@@ -1133,6 +1133,22 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 `StreamSubscribe` arm clears the phase to Idle. Spec
                 docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md
                 §6.4. */}
+            {/* Runtime pin row — accent + title differentiate host vs container.
+                agentMode defaults to "host" at launch time (agent-model.ts), so
+                this row is always shown for agents launched after that default
+                was introduced. The Show guard keeps legacy blocks (no agentMode
+                key at all) from rendering a stale "host" row. */}
+            <Show when={block()?.meta?.["agentMode"] === "host" || block()?.meta?.["agentMode"] === "container"}>
+                <PaneRow
+                    sigil={block()?.meta?.["agentMode"] === "container" ? "□" : "⚙"}
+                    title={
+                        block()?.meta?.["agentMode"] === "container"
+                            ? "Container — isolated Docker sandbox"
+                            : "Host — full system access"
+                    }
+                    accent={block()?.meta?.["agentMode"] === "container" ? "done" : "idle"}
+                />
+            </Show>
             {/* Failure-recovery row — per-error-class actions + auto-retry,
                 rendered through the shared PaneRow accessory primitive.
                 SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16. */}
