@@ -105,8 +105,11 @@ fn validate_filename(filename: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Extract the `type:` field from YAML frontmatter if present.
-/// Accepts the `---\n...\n---` block at the start of the file.
+/// Extract `metadata.type` from YAML frontmatter.
+/// Claude Code memory files nest the type under `metadata:`:
+///   metadata:
+///     type: user
+/// A top-level `type:` key is NOT the correct field.
 fn parse_frontmatter_type(content: &str) -> Option<String> {
     let content = content.trim_start();
     if !content.starts_with("---") {
@@ -115,11 +118,23 @@ fn parse_frontmatter_type(content: &str) -> Option<String> {
     let rest = content.strip_prefix("---")?.trim_start_matches('\n');
     let end = rest.find("\n---")?;
     let frontmatter = &rest[..end];
+    let mut in_metadata = false;
     for line in frontmatter.lines() {
-        if let Some(val) = line.strip_prefix("type:") {
-            let val = val.trim().trim_matches('"').trim_matches('\'');
-            if !val.is_empty() {
-                return Some(val.to_string());
+        let trimmed = line.trim_end();
+        if trimmed == "metadata:" {
+            in_metadata = true;
+            continue;
+        }
+        if in_metadata {
+            // A non-indented, non-empty line exits the metadata block.
+            if !line.starts_with(' ') && !line.starts_with('\t') && !trimmed.is_empty() {
+                break;
+            }
+            if let Some(val) = line.trim_start().strip_prefix("type:") {
+                let val = val.trim().trim_matches('"').trim_matches('\'');
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
             }
         }
     }
@@ -163,9 +178,20 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     if !name.ends_with(".md") {
                         continue;
                     }
-                    let meta = entry
-                        .metadata()
-                        .map_err(|e| format!("agent:memory:list: metadata {name}: {e}"))?;
+                    // Reject symlinks — entry.file_type() does NOT follow symlinks.
+                    let file_type = entry
+                        .file_type()
+                        .map_err(|e| format!("agent:memory:list: file_type {name}: {e}"))?;
+                    if !file_type.is_file() {
+                        continue;
+                    }
+                    // The file may be deleted after read_dir but before metadata —
+                    // skip the entry on NotFound rather than aborting the whole listing.
+                    let meta = match entry.metadata() {
+                        Ok(m) => m,
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(e) => return Err(format!("agent:memory:list: metadata {name}: {e}")),
+                    };
                     let size_bytes = meta.len();
                     let modified_at = meta
                         .modified()
@@ -174,15 +200,16 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or(0);
 
-                    // Read first 512 bytes for frontmatter type parsing — large
-                    // memory files don't need to be fully loaded just for the list.
+                    // Read up to 512 bytes for frontmatter type parsing.
+                    // Take + read_to_end loops internally to fill the buffer —
+                    // a single read() call may return fewer bytes on the first try.
                     let preview_content = {
                         use std::io::Read;
                         std::fs::File::open(entry.path())
-                            .map(|mut f| {
-                                let mut buf = vec![0u8; 512];
-                                let n = f.read(&mut buf).unwrap_or(0);
-                                String::from_utf8_lossy(&buf[..n]).into_owned()
+                            .map(|f| {
+                                let mut buf = Vec::with_capacity(512);
+                                f.take(512).read_to_end(&mut buf).ok();
+                                String::from_utf8_lossy(&buf).into_owned()
                             })
                             .unwrap_or_default()
                     };
@@ -249,6 +276,15 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:write_file: {e}"))?;
+
+                const MAX_CONTENT_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+                if cmd.content.len() > MAX_CONTENT_BYTES {
+                    return Err(format!(
+                        "agent:memory:write_file: content too large ({} bytes, max {})",
+                        cmd.content.len(),
+                        MAX_CONTENT_BYTES,
+                    ));
+                }
 
                 let agent = wstore
                     .agent_def_get(&cmd.agent_id)
