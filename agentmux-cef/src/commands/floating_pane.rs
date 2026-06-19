@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::state::AppState;
+use crate::state::{AppState, WindowKind};
 
 #[derive(Debug, Deserialize)]
 pub struct OpenFloatingPaneArgs {
@@ -157,13 +157,48 @@ pub fn open_floating_pane_window(
 
     #[cfg(target_os = "windows")]
     {
-        // Resolve source window → parent HWND so the cascade hook can restrict
-        // min/restore/destroy to only the floaters belonging to that window.
-        let parent_main_hwnd: isize = parsed
-            .source_window_label
-            .as_deref()
-            .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
-            .unwrap_or(0);
+        // Resolve source window → parent HWND so the cascade hook restricts
+        // min/restore/destroy to only this window's floaters.
+        // Primary lookup: label → HWND directly.
+        // Fallback: first FullInstance window in window_meta (covers old
+        // frontend clients that predate source_window_label, and the rare
+        // race where the label isn't in window_hwnds yet).
+        let parent_main_hwnd: isize = {
+            let direct = parsed
+                .source_window_label
+                .as_deref()
+                .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                .unwrap_or(0);
+            if direct != 0 {
+                direct
+            } else {
+                let fallback_label: Option<String> = state
+                    .window_meta
+                    .lock()
+                    .values()
+                    .find(|m| m.kind == WindowKind::FullInstance)
+                    .map(|m| m.label.clone());
+                let fallback = fallback_label
+                    .as_deref()
+                    .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                    .unwrap_or(0);
+                if fallback == 0 {
+                    tracing::warn!(
+                        source_label = ?parsed.source_window_label,
+                        "[floating-pane] could not resolve parent main HWND; \
+                         floater will not cascade on minimize/destroy (orphan risk)",
+                    );
+                } else {
+                    tracing::debug!(
+                        source_label = ?parsed.source_window_label,
+                        fallback,
+                        "[floating-pane] source_window_label unresolved; \
+                         using FullInstance fallback HWND for cascade binding",
+                    );
+                }
+                fallback
+            }
+        };
         crate::floating_pane::post_create_floating_window(state, &parsed, &window_label, parent_main_hwnd);
         Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }
