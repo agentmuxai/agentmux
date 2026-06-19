@@ -1,18 +1,16 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { TabBar } from "@/app/tab/tabbar";
 import { WindowDrag } from "@/element/windowdrag";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { atoms } from "@/store/global";
-import { type JSX } from "solid-js";
-import { createTabBarMenu } from "@/app/menu/base-menus";
+import { createSignal, type JSX, Show } from "solid-js";
+import { TitleBarContextMenu } from "@/app/window/titlebar-context-menu";
 import { SystemStatus } from "@/app/window/system-status";
 import { WindowControlsLeft } from "@/app/window/window-controls.platform";
 import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { isMacOS } from "@/util/platformutil";
-import { Show } from "solid-js";
 import "./window-header.platform.scss";
 
 
@@ -27,11 +25,14 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
     const fullConfig = atoms.fullConfigAtom;
     const { dragProps } = useWindowDrag();
 
-    // Handle window header context menu
+    const [menuOpen, setMenuOpen] = createSignal(false);
+    const [menuPos,  setMenuPos]  = createSignal({ x: 0, y: 0 });
+
     const handleContextMenu = (e: MouseEvent) => {
         e.preventDefault();
-        const menu = createTabBarMenu(fullConfig());
-        ContextMenuModel.showContextMenu(menu.build(), e);
+        e.stopPropagation(); // prevent bubbling to app-level onContextMenu (clipboard/URL menu)
+        setMenuPos({ x: e.clientX, y: e.clientY });
+        setMenuOpen(true);
     };
 
     return (
@@ -56,6 +57,16 @@ const WindowHeader = (props: WindowHeaderProps): JSX.Element => {
                 Windows/Linux it stays in the tab strip (see TabBar). */}
             <Show when={isMacOS()}>
                 <HamburgerMenu position="right" />
+            </Show>
+
+            {/* PopoverMenu (inside TitleBarContextMenu) already renders into
+                a Portal — no extra Portal wrapper needed here. */}
+            <Show when={menuOpen()}>
+                <TitleBarContextMenu
+                    pos={menuPos()}
+                    fullConfig={fullConfig()}
+                    onClose={() => setMenuOpen(false)}
+                />
             </Show>
         </div>
     );
