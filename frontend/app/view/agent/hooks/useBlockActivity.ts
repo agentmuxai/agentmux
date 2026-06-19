@@ -28,11 +28,19 @@ export interface UseBlockActivityOptions {
     blockId: string;
 }
 
+function clearActivity(blockId: string): void {
+    fireAndForget(() =>
+        ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
+            "term:activity": null,
+        } as any)
+    );
+}
+
 export function useBlockActivity(opts: UseBlockActivityOptions): void {
     onMount(() => {
         let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-        const unsub = waveEventSubscribe({
+        const unsubActivity = waveEventSubscribe({
             eventType: WpsEvent.BlockActivity,
             scope: makeORef("block", opts.blockId),
             handler: (event) => {
@@ -49,18 +57,28 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
             },
         });
 
+        // Clear the activity label when the agent session ends. The pane stays
+        // mounted across session end/restart (agentId persists), so onCleanup
+        // alone is insufficient — the previous session's topic would remain
+        // visible until the next OSC title arrives. (Spec §3.6; Claude Code
+        // does not emit a title-restore sequence on exit, GitHub #27197.)
+        const unsubStatus = waveEventSubscribe({
+            eventType: WpsEvent.ControllerStatus,
+            scope: makeORef("block", opts.blockId),
+            handler: (event) => {
+                const status = (event as any)?.data?.shellprocstatus as string | undefined;
+                if (status === "done") {
+                    clearTimeout(debounceTimer);
+                    clearActivity(opts.blockId);
+                }
+            },
+        });
+
         onCleanup(() => {
-            unsub();
+            unsubActivity();
+            unsubStatus();
             clearTimeout(debounceTimer);
-            // Clear stale activity label on unmount (session ended or pane closed).
-            // Claude Code does not emit a clear-on-exit sequence (GitHub #27197),
-            // so we clear here to prevent the previous session's topic from appearing
-            // when the pane is re-used.
-            fireAndForget(() =>
-                ObjectService.UpdateObjectMeta(makeORef("block", opts.blockId), {
-                    "term:activity": null,
-                } as any)
-            );
+            clearActivity(opts.blockId);
         });
     });
 }

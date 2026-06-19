@@ -303,7 +303,7 @@ mod tests {
     fn non_utf8_replaced() {
         let mut ext = OscExtractor::new();
         // "claude - " prefix + invalid UTF-8 byte 0xFF
-        let mut payload: Vec<u8> = b"\x1b]0;claude - topic\xff\x07".to_vec();
+        let payload: Vec<u8> = b"\x1b]0;claude - topic\xff\x07".to_vec();
         let (_, evs) = ext.feed(&payload);
         // Should produce an event (not panic); payload contains replacement char
         assert_eq!(evs.len(), 1);
