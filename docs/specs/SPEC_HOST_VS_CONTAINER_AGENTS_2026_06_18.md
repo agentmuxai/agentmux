@@ -288,7 +288,7 @@ where `is_seeded = 1`.
 1. `types.ts:51` — `runtime: "container"`
 2. `app_api.rs:2528` — `agent_type: cmd.agent_type.clone()` (caller-supplied, default `"host"`)
 3. `AgentLaunchModal.tsx` — host warning callout + radio subtext
-4. `scripts/gen-seed.js` — update 6 templates to `"container"`, bump schemaVersion
+4. `scripts/gen-seed.js` — update 1 template (claude) to `"container"`, bump schemaVersion
 
 ~80 LOC frontend, ~5 LOC Rust, ~1 LOC seed script.
 
@@ -320,7 +320,7 @@ Not blocking — users can recreate agents to change runtime today.
 | `frontend/app/store/launch-flow-state/types.ts:51` | `runtime: "container"` |
 | `agentmux-srv/src/server/app_api.rs:2528` | `agent_type: cmd.agent_type.clone()` (default `"host"`, caller-supplied) |
 | `frontend/app/view/agent/components/AgentLaunchModal.tsx` | Host warning + radio subtext |
-| `scripts/gen-seed.js` | Update 6 templates + bump schemaVersion |
+| `scripts/gen-seed.js` | Update 1 template (claude → container) + bump schemaVersion to 9 |
 
 ### Phase 3
 
@@ -357,8 +357,10 @@ set. Render via `<i class="fa-solid fa-box" />` pattern used throughout the code
 
 **Q3: How many templates, which ones change?**  
 → 7 seeded templates (claude, codex, gemini, kimi, pi, copilot, openclaw).
-6 flip to `"container"` (those with `containerSupported: true` in `cli-catalog.ts`).
-1 stays `"host"`: openclaw (needs host-level ACP access to orchestrate other agents).
+1 flips to `"container"`: claude (the only provider with a built+published image:
+`ghcr.io/agentmuxai/agent-claude:latest`).
+6 stay `"host"`: openclaw (needs host ACP access) and codex/gemini/kimi/pi/copilot
+(no container images built yet; will flip to container when images ship).
 The `containerSupported` flag in `cli-catalog.ts` is the authoritative source for the
 UI (modal guard, runtime dropdown). `scripts/gen-seed.js` maintains a parallel
 `CLI_DEFS` table that must be kept in sync with the catalog — the `containerImage`
