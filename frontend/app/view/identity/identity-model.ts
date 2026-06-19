@@ -472,6 +472,7 @@ export class IdentityViewModel implements ViewModel {
     };
 
     openEditForm = (account: Account): void => {
+        this.setSelectedAccount(null); // close detail modal before opening form
         this.setEditingAccount(account);
         this.setAddPreset(null);
         this.setFormError(null);
