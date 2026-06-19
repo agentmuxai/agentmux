@@ -48,6 +48,10 @@ export class AgentViewModel implements ViewModel {
     // in the model. Replaced the _setOverlayTab / _lastOverlayTab pattern.
     _openIdentityModal: (() => void) | null = null;
     _openMemoryModal: (() => void) | null = null;
+    // Reactive accessor set by agent-view so endIconButtons can hide the
+    // id-card button for quick-launch panes (where agentId is a provider
+    // key, not a definition UUID, and no AgentDefinition loads).
+    _hasAgentDef: () => boolean = () => false;
 
     // Voice-input target ref. AgentFooter populates this on mount with a
     // textarea-backed handle (and clears it on unmount). The exposed
@@ -133,23 +137,29 @@ export class AgentViewModel implements ViewModel {
 
         // Pane-frame header buttons: when an agent is loaded show brain + id-card.
         // Hidden when no agent is loaded (picker screen).
+        // id-card is further gated on _hasAgentDef() — quick-launch panes
+        // (where agentId is a provider key, not a definition UUID) don't have
+        // a loadable AgentDefinition so identity assignment is not available.
         this.endIconButtons = () => {
             const agentId = this.blockAtom()?.meta?.["agentId"];
             if (!agentId) return [];
-            return [
+            const buttons: IconButtonDecl[] = [
                 {
                     elemtype: "iconbutton",
                     icon: "brain",
                     title: "Agent memory",
                     click: () => { this._openMemoryModal?.(); },
                 },
-                {
+            ];
+            if (this._hasAgentDef()) {
+                buttons.push({
                     elemtype: "iconbutton",
                     icon: "id-card",
                     title: "Agent identity",
                     click: () => { this._openIdentityModal?.(); },
-                },
-            ];
+                });
+            }
+            return buttons;
         };
     }
 
