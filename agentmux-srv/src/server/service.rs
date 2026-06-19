@@ -425,17 +425,20 @@ async fn handle_object_service(state: &AppState, call: &WebCallType) -> WebRetur
         // also handles the controller-kill cascade (matches the old
         // ordering: controller down → reducer dispatch → SQLite).
         "DeleteBlock" => {
-            let tab_id = match call
-                .uicontext
-                .as_ref()
-                .map(|ctx| ctx.active_tab_id.clone())
-            {
-                Some(id) if !id.is_empty() => id,
-                _ => return WebReturnType::error("missing uicontext.activetabid"),
-            };
             let block_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
+            };
+            // Look up the block's owning tab from server state rather than using
+            // uicontext.active_tab_id. Floating pane windows have their own tab
+            // context that differs from the block's owning tab, so using the
+            // uicontext tab always fails for floating-pane closes.
+            let tab_id = {
+                let s = state.srv_state.lock().await;
+                match s.blocks.get(&block_id) {
+                    Some(rec) => rec.tab_id.clone(),
+                    None => return WebReturnType::error(format!("DeleteBlock: block not found: {}", block_id)),
+                }
             };
             if let Err(reason) = crate::sagas::delete_block::run(state, tab_id, block_id).await {
                 return WebReturnType::error(reason);
