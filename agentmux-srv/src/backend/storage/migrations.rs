@@ -39,7 +39,9 @@ use super::error::StoreError;
 ///        to '' / '[]' / '')
 ///   v7 — db_muxbus_credentials: global singleton for MuxBus cloud
 ///        Cognito PKCE tokens (access, refresh, id) + expiry + user email
-pub const OBJECT_SCHEMA_VERSION: i64 = 7;
+///   v8 — db_memory_bundles.is_global: global-tier flag for Trust Center
+///        bundles injected into every agent's CLAUDE.md at launch
+pub const OBJECT_SCHEMA_VERSION: i64 = 8;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -240,6 +242,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             name          TEXT NOT NULL UNIQUE,
             description   TEXT NOT NULL DEFAULT '',
             is_blank      INTEGER NOT NULL DEFAULT 0,
+            is_global     INTEGER NOT NULL DEFAULT 0,
             provider      TEXT NOT NULL DEFAULT '',
             model         TEXT NOT NULL DEFAULT '',
             instructions  TEXT NOT NULL DEFAULT '',
@@ -442,6 +445,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agents ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE db_agents ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_memory_bundles ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
