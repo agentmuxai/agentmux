@@ -68,6 +68,7 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
             scope: makeORef("block", opts.blockId),
             handler: (event) => {
                 if ((event as any)?.data?.shellprocstatus === "done") {
+                    clearTimeout(debounceTimer);
                     clearActivity(opts.blockId);
                 }
             },
