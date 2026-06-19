@@ -46,9 +46,10 @@
 // would see "delete succeeded" while nothing happened. The saga
 // surfaces a clear "block not found" error instead. We check the
 // reducer state (not SQLite) because `Command::DeleteBlock` carries
-// `tab_id` from the RPC's `uicontext.activetabid` and we want to
-// validate against the reducer's view of (tab → blocks) — that's
-// what the dispatch will mutate.
+// `tab_id` looked up from the block's owning record in srv state
+// (service.rs: `s.blocks[block_id].tab_id`) and we want to validate
+// against the reducer's view of (tab → blocks) — that's what the
+// dispatch will mutate.
 
 use agentmux_common::ipc::Command;
 use serde_json::{json, Value};

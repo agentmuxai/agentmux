@@ -774,8 +774,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 dwellLastMoveSampleX = e.screenX;
                 dwellLastMoveSampleY = e.screenY;
                 if (dwellSlowSince === null) dwellSlowSince = now;
-                if (now - dwellSlowSince < REDOCK_DWELL_MS) return;
-                // Cursor has been slow for REDOCK_DWELL_MS — throttle IPC calls.
+                // Fire the hover IPC HOVER_THROTTLE_MS before the arm threshold so
+                // the round-trip completes and the ghost is visible before onMouseUp
+                // can fire — otherwise the user sees no ghost but the block docks.
+                if (now - dwellSlowSince < REDOCK_DWELL_MS - HOVER_THROTTLE_MS) return;
+                // Cursor has been slow for REDOCK_DWELL_MS - HOVER_THROTTLE_MS — throttle IPC calls.
                 if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
                 lastHoverAt = now;
                 const scale = posScale();
@@ -796,9 +799,14 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         // destination. dwellCurrentConfirmedAt records when this target
                         // was first confirmed so the mouseup fallback uses "180ms since
                         // first confirmation" (prevents desktop-transit false arm).
+                        // Exception: null → target is the initial hover confirmation, not
+                        // a transit. Keeping dwellSlowSince lets onMouseUp's condition-2
+                        // arm fire even when the IPC was sent early and the user releases
+                        // immediately after the ghost appears.
+                        const prevTarget = dwellLastArmedTarget;
                         dwellLastArmedTarget = newTarget;
                         dwellCurrentConfirmedAt = newTarget !== null ? performance.now() : null;
-                        dwellSlowSince = null;
+                        if (prevTarget !== null) dwellSlowSince = null;
                         if (hoverArmed || indicatorShowing) {
                             hoverArmed = false;
                             indicatorShowing = false;
