@@ -55,13 +55,16 @@ fn memory_dir_for_cwd(working_directory: &str) -> PathBuf {
         .join("memory")
 }
 
-/// djb2 hash (same as Claude Code's implementation).
+/// Hash matching Claude Code's sessionStoragePortable.ts implementation:
+///   seed = 0, multiplier = 31 via `(h << 5) - h + c` with i32 overflow,
+///   result = Math.abs(hash) (unsigned_abs).
+/// This differs from classic djb2 (seed=5381, multiplier=33).
 fn djb2_hash(s: &str) -> u32 {
-    let mut hash: u32 = 5381;
-    for b in s.bytes() {
-        hash = hash.wrapping_shl(5).wrapping_add(hash).wrapping_add(b as u32);
+    let mut hash: i32 = 0;
+    for c in s.chars() {
+        hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(c as i32);
     }
-    hash
+    hash.unsigned_abs()
 }
 
 /// Convert a u32 to a base-36 string (lowercase, same as Number.toString(36) in JS).
@@ -138,6 +141,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:list: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:list: agent {} not found", cmd.agent_id))?;
 
+                // No working directory → no memory path (avoid mapping to the shared
+                // ~/.claude/projects/memory/ directory — reagent P1 on PR #1588).
+                if agent.working_directory.is_empty() {
+                    return Ok(Some(serde_json::to_value(NativeMemoryListResult { files: vec![] }).map_err(|e| e.to_string())?));
+                }
+
                 let memory_dir = memory_dir_for_cwd(&agent.working_directory);
 
                 if !memory_dir.exists() {
@@ -148,7 +157,8 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 let entries = std::fs::read_dir(&memory_dir)
                     .map_err(|e| format!("agent:memory:list: read_dir: {e}"))?;
 
-                for entry in entries.flatten() {
+                for entry in entries {
+                    let entry = entry.map_err(|e| format!("agent:memory:list: read_dir entry: {e}"))?;
                     let name = entry.file_name().to_string_lossy().into_owned();
                     if !name.ends_with(".md") {
                         continue;
@@ -215,6 +225,10 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:read_file: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:read_file: agent {} not found", cmd.agent_id))?;
 
+                if agent.working_directory.is_empty() {
+                    return Err(format!("agent:memory:read_file: agent {} has no configured working directory", cmd.agent_id));
+                }
+
                 let path = memory_dir_for_cwd(&agent.working_directory).join(&cmd.filename);
                 let content = std::fs::read_to_string(&path)
                     .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?;
@@ -241,6 +255,10 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:write_file: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:write_file: agent {} not found", cmd.agent_id))?;
 
+                if agent.working_directory.is_empty() {
+                    return Err(format!("agent:memory:write_file: agent {} has no configured working directory", cmd.agent_id));
+                }
+
                 let dir = memory_dir_for_cwd(&agent.working_directory);
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
@@ -253,8 +271,10 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 std::fs::write(&tmp, &cmd.content)
                     .map_err(|e| format!("agent:memory:write_file: write tmp: {e}"))?;
-                std::fs::rename(&tmp, &dest)
-                    .map_err(|e| format!("agent:memory:write_file: rename: {e}"))?;
+                if let Err(e) = std::fs::rename(&tmp, &dest) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(format!("agent:memory:write_file: rename: {e}"));
+                }
 
                 tracing::info!(
                     agent_id = %cmd.agent_id,
