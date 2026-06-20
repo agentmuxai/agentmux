@@ -75,11 +75,15 @@ extractor `service.rs` uses), `Json<Value>` response. Auth-gated like the other
   libclang / C++ build in the sidecar). The renderer sends **16 kHz mono WAV**
   for this engine (whisper-cli reads WAV natively, no ffmpeg), captured via
   Web-Audio PCM (`AudioContext({sampleRate:16000})` + `ScriptProcessor`). Both
-  the CLI binary and GGML model are **user-provided paths** in v1
-  (`voice:whisperCliPath` / `voice:whisperModelPath`, or `AGENTMUX_WHISPER_CLI`
-  / `AGENTMUX_WHISPER_MODEL`); missing config → 501. Bundled binary +
-  on-demand model download is the **PR-3** follow-up. Fully offline — audio
-  never leaves the machine. ~0 MB ship.
+  the CLI binary is user-provided (`voice:whisperCliPath` /
+  `AGENTMUX_WHISPER_CLI`); the **GGML model auto-downloads on first use**
+  (PR-3 — default `base.en`, configurable via `voice:whisperModel`, to
+  `<config>/whisper-models/`, serialized by a global lock with a 600s cap and
+  temp→rename so partial downloads never look valid). An explicit
+  `voice:whisperModelPath` overrides and skips the download. Missing binary →
+  501. **Bundled CLI binary** (so it's fully zero-config) remains a follow-up —
+  per-platform binary fetch is fragile. Fully offline — audio never leaves the
+  machine. ~0 MB ship.
 
 ### 3.2 Backend selection + key (server-side)
 Resolved once at request time from, in order:

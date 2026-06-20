@@ -235,6 +235,10 @@ pub struct SettingsType {
     // AGENTMUX_WHISPER_CLI / AGENTMUX_WHISPER_MODEL.
     #[serde(rename = "voice:whisperCliPath", default, skip_serializing_if = "Option::is_none")]
     pub voice_whisper_cli_path: Option<String>,
+    // GGML model name to auto-download on first use (default "base.en"). The
+    // explicit-path override below skips the download.
+    #[serde(rename = "voice:whisperModel", default, skip_serializing_if = "Option::is_none")]
+    pub voice_whisper_model: Option<String>,
     #[serde(rename = "voice:whisperModelPath", default, skip_serializing_if = "Option::is_none")]
     pub voice_whisper_model_path: Option<String>,
 
