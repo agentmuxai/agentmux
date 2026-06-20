@@ -848,6 +848,9 @@ impl PersistentSubprocessController {
                     if let Some(ref agent_id) = agent_id_wait {
                         let data_dir = crate::backend::base::get_wave_data_dir();
                         crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                            sub.remove_agent(agent_id);
+                        }
                     }
 
                     // Clear active pid — clean exit, no recovery needed.
@@ -907,6 +910,9 @@ impl PersistentSubprocessController {
                     if let Some(ref agent_id) = agent_id_wait {
                         let data_dir = crate::backend::base::get_wave_data_dir();
                         crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                            sub.remove_agent(agent_id);
+                        }
                     }
 
                     // Clear active pid — user-initiated stop, no recovery needed.

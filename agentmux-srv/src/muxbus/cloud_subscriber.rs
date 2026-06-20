@@ -110,15 +110,24 @@ impl CloudSubscriber {
     }
 
     /// Notify the WS loop that a new agent is registered locally.
+    /// Normalizes to lowercase and skips the WS send if already subscribed,
+    /// so calling this on every COMMAND_AGENT_INPUT turn is safe.
     pub fn add_agent(&self, agent_id: &str) {
-        self.agents.lock().unwrap().insert(agent_id.to_string());
-        let _ = self.ctrl_tx.send(CtrlMsg::AddAgent(agent_id.to_string()));
+        let key = agent_id.to_lowercase();
+        let mut agents = self.agents.lock().unwrap();
+        if agents.contains(&key) {
+            return;
+        }
+        agents.insert(key.clone());
+        drop(agents);
+        let _ = self.ctrl_tx.send(CtrlMsg::AddAgent(key));
     }
 
     /// Notify the WS loop that an agent has been unregistered.
     pub fn remove_agent(&self, agent_id: &str) {
-        self.agents.lock().unwrap().remove(agent_id);
-        let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(agent_id.to_string()));
+        let key = agent_id.to_lowercase();
+        self.agents.lock().unwrap().remove(&key);
+        let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
     }
 
     /// Called after muxbus.login completes — trigger a fresh WS connection
