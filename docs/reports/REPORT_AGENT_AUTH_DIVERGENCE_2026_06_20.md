@@ -217,3 +217,64 @@ intended design.
 **Net:** designed isolated-from-global → later directed shared-per-provider
 (instance-independent) → but also quietly coupled to the global `~/.claude` along
 the way. That last coupling is what produces the Nark-vs-Poal split in §2.
+
+---
+
+## 10. Does memory also leak to `~/.claude`? (and custom memory paths)
+
+Follow-up question: we isolated the *credential*, but Claude Code writes more than
+credentials under `CLAUDE_CONFIG_DIR`. Where does **memory** go?
+
+**Answer: memory follows `CLAUDE_CONFIG_DIR` exactly like credentials do** —
+because `CLAUDE_CONFIG_DIR` relocates the *whole* Claude home, not just
+`.credentials.json`. Verified on disk: `~/.agentmux/shared/providers/claude/`
+already contains a full Claude home:
+
+```
+.claude.json   .credentials.json   projects/   sessions/   backups/   …
+```
+
+`projects/` is exactly where auto-memory lives. So once an agent's
+`CLAUDE_CONFIG_DIR` is the AgentMux dir (which the §4 fix guarantees), every
+memory surface lands in the AgentMux dir:
+
+| Memory surface | Default location | Under isolation |
+|---|---|---|
+| **Auto memory** (Claude writes) | `~/.claude/projects/<repo>/memory/MEMORY.md` | `<CLAUDE_CONFIG_DIR>/projects/<repo>/memory/` → AgentMux dir ✓ |
+| **User `CLAUDE.md`** | `~/.claude/CLAUDE.md` | `<CLAUDE_CONFIG_DIR>/CLAUDE.md` → AgentMux dir ✓ |
+| **Project `CLAUDE.md`** | `./CLAUDE.md` (working dir) | the agent's workdir `~/.agentmux/agents/…` ✓ |
+| **Managed-policy `CLAUDE.md`** | `C:\Program Files\ClaudeCode\CLAUDE.md` etc. | **not** relocated — but it's read-only **org** policy, not user state |
+
+So **the same `CLAUDE_CONFIG_DIR` fix that isolates credentials isolates memory,
+transcripts, sessions and settings** — it's one directory. No separate work is
+needed for correctness. (Caveat: agents still pointed at `~/.claude` *today*
+write memory there now; the §4.2 sweep that repoints them fixes memory and
+credentials together — same dir.)
+
+### Can memory be set to a custom path?
+
+Yes — and independently of `CLAUDE_CONFIG_DIR`:
+
+- **Auto memory:** `autoMemoryDirectory` in `settings.json` (absolute or
+  `~/`-prefixed; honored at any settings scope) points auto-memory anywhere —
+  e.g. a per-agent dir, or one shared per-provider, separate from the auth dir.
+- **User `CLAUDE.md`:** moves with `CLAUDE_CONFIG_DIR`; arbitrary files can also
+  be pulled in via `@path` imports (e.g. `@~/.claude/my-instructions.md`).
+- **Project `CLAUDE.md`:** `./CLAUDE.md` or `./.claude/CLAUDE.md`, fixed relative
+  to the working dir.
+
+### Not to be confused with AgentMux's own memory
+
+AgentMux's native **"Memory" / brain / Presets** (the `db_memory_bundles` store,
+the agent-pane brain, and the global-brain `CLAUDE.md` injection) is a **separate**
+system living in AgentMux's own DB — it never touches `~/.claude` at all. This
+section is strictly about Claude Code's CLI-level memory.
+
+**Spec follow-ups (`SPEC_PROVIDER_ISOLATION` INV-M / §5b):** (1) an invariant that
+no agent writes memory/transcripts/settings to `~/.claude`, with a test that the
+AgentMux dir grows `projects/` while `~/.claude/projects/` is untouched across a
+turn; (2) optionally pin `autoMemoryDirectory` in the agent's isolated
+`settings.json` so memory location is set deliberately rather than implied.
+
+**Sources:** [Claude Code — Memory docs](https://code.claude.com/docs/en/memory) ·
+on-disk inspection of `~/.agentmux/shared/providers/claude/`.
