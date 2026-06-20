@@ -3368,10 +3368,12 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     &block.meta, "agentName", "",
                 );
                 if !agent_name.is_empty() {
-                    let _ = crate::backend::reactive::handler::get_global_handler()
+                    let registered = crate::backend::reactive::handler::get_global_handler()
                         .register_agent(&agent_name, &cmd.blockid, None);
-                    if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                        sub.add_agent(&agent_name);
+                    if registered.is_ok() {
+                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                            sub.add_agent(&agent_name);
+                        }
                     }
                 }
 
