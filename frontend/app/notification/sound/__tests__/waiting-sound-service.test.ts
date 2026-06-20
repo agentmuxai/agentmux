@@ -99,11 +99,14 @@ describe("waiting-sound-service: startWaiting gating", () => {
         expect(__getWaitingTones().has("blk-1")).toBe(false);
     });
 
-    it("focus suppression: does not start when pane is focused + window active", () => {
+    it("focus suppression: registers player but does not start when pane is focused + window active", () => {
         focusState.focusedBlockId = "blk-1";
         focusState.windowFocused = true;
         fireWaitingForInput("blk-1");
-        expect(__getWaitingTones().has("blk-1")).toBe(false);
+        // Player is registered so focus-leave effect can resume it (spec §8).
+        const wp = __getWaitingTones().get("blk-1");
+        expect(wp).toBeDefined();
+        expect(wp?.__isRunning()).toBe(false);
     });
 
     it("focus suppression: starts when window is blurred even if pane focused", () => {

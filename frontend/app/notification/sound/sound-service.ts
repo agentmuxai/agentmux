@@ -111,6 +111,20 @@ export function installSoundService(): () => void {
             const v = typeof vol === "number" ? vol : 0.25;
             for (const wp of waitingTones.values()) wp.setVolume(v);
         });
+        // Spec §8: kill all active waiting tones when the master switch or
+        // the per-event toggle is turned off mid-loop. Created BEFORE the
+        // focus-resume effect so it runs first in the same reactive batch —
+        // this prevents a disabled tone from being re-started by the resume
+        // path when settings change at the same moment focus leaves the pane.
+        createEffect(() => {
+            const masterEnabled = getSettingsKeyAtom("notify:sounds:enabled")();
+            const perEventEnabled = getSettingsKeyAtom("notify:sound:agent.waiting.for.input")();
+            if (masterEnabled === false || perEventEnabled === false) {
+                for (const blockId of [...waitingTones.keys()]) {
+                    stopWaiting(blockId);
+                }
+            }
+        });
         // Spec §8: reactively suspend the waiting tone when the source pane
         // gains focus, and resume it when focus moves elsewhere.
         // "Suspend" = fade out but keep the player in waitingTones so it can
@@ -222,14 +236,10 @@ function startWaiting(blockId: string): void {
     if (replayMode) return;
     if (getSettingsKeyAtom("notify:sounds:enabled")() === false) return;
     if (getSettingsKeyAtom("notify:sound:agent.waiting.for.input")() === false) return;
-    const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
-    const suppressWhenFocused = suppressRaw !== false; // default true
-    if (
-        suppressWhenFocused &&
-        focusManager.blockFocusAtom() === blockId &&
-        windowFocusedSignal?.()
-    ) return;
 
+    // Always create and register the player, even if the pane is currently
+    // focused. This lets the reactive focus-resume effect restart the tone
+    // when focus moves away — spec §8 "resume on unfocus."
     let wp = waitingTones.get(blockId);
     if (!wp) {
         wp = new WaitingTonePlayer();
@@ -239,17 +249,30 @@ function startWaiting(blockId: string): void {
         waitingTones.set(blockId, wp);
     }
 
-    const vol =
-        (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? 0.25;
-    wp.start(vol);
-
-    // 5-minute safety cutoff
+    // 5-minute safety cutoff (arm regardless of focus state).
     const existing = waitingTimeouts.get(blockId);
     if (existing !== undefined) clearTimeout(existing);
     waitingTimeouts.set(
         blockId,
         setTimeout(() => stopWaiting(blockId), WAITING_AUTO_STOP_MS),
     );
+
+    const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
+    const suppressWhenFocused = suppressRaw !== false;
+    if (
+        suppressWhenFocused &&
+        focusManager.blockFocusAtom() === blockId &&
+        windowFocusedSignal?.()
+    ) {
+        // Pane is currently focused — mark as suspended so the reactive
+        // focus-leave effect can restart the tone when focus moves away.
+        suspendedByFocus.add(blockId);
+        return;
+    }
+
+    const vol =
+        (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? 0.25;
+    wp.start(vol);
 }
 
 function stopWaiting(blockId: string): void {
