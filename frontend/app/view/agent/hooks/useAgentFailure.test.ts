@@ -15,7 +15,10 @@
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const hub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
+const hub = vi.hoisted(() => ({
+    handlers: new Map<string, (e: unknown) => void>(),
+    persistedFailure: null as AgentFailure | null,
+}));
 
 vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
@@ -24,6 +27,9 @@ vi.mock("@/app/store/wps", () => ({
     }),
 }));
 vi.mock("@/app/store/wos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
+vi.mock("@/app/store/global", () => ({
+    getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
+}));
 
 import { useAgentFailure, type UseAgentFailureResult } from "./useAgentFailure";
 
@@ -52,9 +58,46 @@ const hasRetryCountdown = (ui: UseAgentFailureResult) =>
 const mkUI = (onRetry: () => void): UseAgentFailureResult =>
     useAgentFailure({ blockId: "b", onRetry, onLoginAgain() {}, onTrustCenter() {}, onNewSession() {} });
 
+describe("useAgentFailure P1.2 — persisted meta seed on mount", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        vi.useFakeTimers();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it("seeds failure row from block meta agent:last_failure on mount", async () => {
+        const authFailure: AgentFailure = {
+            code: "auth",
+            title: "Not authenticated",
+            detail: "401 Invalid authentication credentials",
+            retryable: false,
+        };
+        hub.persistedFailure = authFailure;
+        await createRoot(async (dispose) => {
+            const ui = mkUI(vi.fn());
+            await Promise.resolve(); // flush onMount
+            expect(ui.row()).not.toBeNull();
+            expect(ui.row()!.title).toBe("Not authenticated");
+            dispose();
+        });
+    });
+
+    it("shows no failure row when agent:last_failure meta is null", async () => {
+        hub.persistedFailure = null;
+        await createRoot(async (dispose) => {
+            const ui = mkUI(vi.fn());
+            await Promise.resolve();
+            expect(ui.row()).toBeNull();
+            dispose();
+        });
+    });
+});
+
 describe("useAgentFailure auto-retry budget (§6)", () => {
     beforeEach(() => {
         hub.handlers.clear();
+        hub.persistedFailure = null;
         vi.useFakeTimers();
     });
     afterEach(() => vi.useRealTimers());
