@@ -266,7 +266,10 @@ async fn ensure_local_model(
         return Ok(path);
     }
 
-    // Serialize concurrent first-use downloads of the same model.
+    // Single global lock: serializes ALL first-use model downloads (not
+    // per-model), so one model's download blocks any other model's first-use
+    // for up to the 600s cap. Acceptable — first-use downloads are rare and
+    // models are typically not switched mid-session.
     static DL_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     let _guard = DL_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
     if path.exists() {
