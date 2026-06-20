@@ -4,7 +4,7 @@
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import clsx from "clsx";
-import { createEffect, createMemo, For, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { SysinfoViewModel } from "./sysinfo-model";
@@ -68,9 +68,25 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     );
 }
 
+// Chart rebuild interval. The chart shows 5-min history so a 2s lag is
+// imperceptible, but the full 1Hz SVG rebuild (font hinting + Temporal
+// API for every axis tick) caused ~13% sustained GPU process CPU.
+const CHART_UPDATE_INTERVAL_MS = 2000;
+
 function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const { model } = props;
-    const plotData = createMemo(() => model.dataAtom());
+
+    // Throttle chart data to avoid rebuilding the SVG on every sysinfo
+    // event (default 1Hz). At 1Hz, full SVG recreation forced font
+    // hinting + Temporal date formatting for every x-axis label each
+    // second, causing ~13% sustained GPU process CPU. This throttle
+    // reduces repaints to ~0.5Hz while the status-bar stats still
+    // update at the full sysinfo rate (cheap text DOM updates).
+    const [plotData, setPlotData] = createSignal(model.dataAtom());
+    onMount(() => {
+        const id = setInterval(() => setPlotData(model.dataAtom()), CHART_UPDATE_INTERVAL_MS);
+        onCleanup(() => clearInterval(id));
+    });
     const yvals = createMemo(() => model.metrics());
     const plotMeta = createMemo(() => model.plotMetaAtom());
     const targetLen = createMemo(() => model.numPoints() + 1);
