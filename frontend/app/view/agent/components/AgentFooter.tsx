@@ -6,7 +6,7 @@
  */
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
@@ -232,6 +232,22 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         const p = autocompletePrefix();
         if (p === null || !props.getCompletions) return [];
         return props.getCompletions(p);
+    });
+
+    // Composer ghost text. While voice is listening AND this pane owns the
+    // session, switch to "Speak to <agent>…" so it's obvious transcription is
+    // live and routed here (the mic button also shows a red recording ring).
+    // Otherwise the normal "Send message to <agent>…" prompt. Reactive: reads
+    // the voice singleton's SignalAtoms so it flips the instant the mic toggles
+    // or retargets to another pane.
+    const voice = getVoiceSession();
+    const placeholder = createMemo(() => {
+        const vm = props.viewModel;
+        const listeningHere =
+            !!vm && voice.isListening() && voice.currentTargetId() === vm.blockId;
+        return listeningHere
+            ? `Speak to ${props.agentName}...`
+            : `Send message to ${props.agentName}...`;
     });
 
     // IME composition state — true between compositionstart and compositionend.
@@ -536,7 +552,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 <textarea
                     ref={textareaRef}
                     class="agent-input"
-                    placeholder={`Send message to ${props.agentName}...`}
+                    placeholder={placeholder()}
                     onKeyDown={handleKeyDown}
                     onInput={handleInput}
                     onCompositionStart={() => {
