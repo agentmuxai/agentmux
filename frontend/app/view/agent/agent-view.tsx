@@ -756,14 +756,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
         // P2 — real re-auth. An auth failure is a *CLI-provider* login lapse
         // (e.g. claude's subscription OAuth expired), not a Trust Center
-        // service account. `startLaunchFlow` is the canonical path that
-        // re-runs that login (surfacing the OAuth URL via the auth panel) and
-        // relaunches the agent; the relaunched process then reports
-        // `controllerstatus: running`, which clears this failure row. This is
-        // the same flow the legacy AgentRetryBar's button drives.
+        // service account. We must FORCE the login rather than re-run the gated
+        // launch flow: a 401 means the token is bad, but `CheckCliAuth` still
+        // reports it present (expired-but-present false positive), so the gated
+        // flow would trust the check, skip login, and do nothing — the exact bug
+        // this fixes. `relogin()` bypasses the check and always opens the OAuth
+        // (SPEC_REAUTH_FROM_AUTH_ERROR §11). The running persistent agent
+        // re-reads its credential per request, so the next message uses the new
+        // token and clears this failure row.
         onLoginAgain: () => {
-            log("auth", "Login Again — re-running the provider login flow");
-            void status.startLaunchFlow();
+            log("auth", "Login Again — forcing a fresh provider login");
+            void status.relogin();
         },
     });
 
@@ -1051,8 +1054,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
                 onAgentErrorLogin={() => {
-                    log("auth", "Login Again (inline error node) — re-running the provider login flow");
-                    void status.startLaunchFlow();
+                    log("auth", "Login Again (inline error node) — forcing a fresh provider login");
+                    void status.relogin();
                 }}
                 onLoadOlder={history.loadOlder}
                 loadingOlder={history.loadingOlder}
