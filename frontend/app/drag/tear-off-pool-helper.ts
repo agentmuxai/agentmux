@@ -1,5 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Mother-window resize on pane tear-off
+// (SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md)
 
 /**
  * Shared tear-off helper: try the warm pool first, fall back to the
@@ -23,6 +26,14 @@ import type { getApi } from "@/store/global";
 import { Logger } from "@/util/logger";
 
 type Api = ReturnType<typeof getApi>;
+
+// Minimum CSS pixel width the mother window must retain after a pane tear-off
+// resize. Below this the remaining layout would be too narrow to be useful.
+export const MIN_MOTHER_WIDTH = 400;
+
+// Tolerance in CSS px for deciding whether a pane's edge aligns with the
+// layout container's edge (sub-pixel rounding, scrollbar gutters, etc.).
+const FULL_HEIGHT_EPSILON_PX = 2;
 
 // Default floater size when the source pane element can't be measured
 // (e.g. it already unmounted). Used by every platform's pane tear-off.
@@ -58,6 +69,53 @@ export function measureSourcePaneSize(blockId: string): { width: number; height:
         width: Math.max(MIN_FLOATER_WIDTH, Math.round(rect.width)),
         height: Math.max(MIN_FLOATER_HEIGHT, Math.round(rect.height)),
     };
+}
+
+/**
+ * Compute the CSS/DIP pixel width the mother window should shrink to after
+ * tearing off the pane identified by `blockId`.
+ *
+ * Returns a width in CSS pixels when ALL of the following hold:
+ *   1. The pane element is found in the DOM (must be called BEFORE TearOffBlock).
+ *   2. The pane spans the full height of its layout container (top-to-bottom
+ *      column — a clean vertical split).
+ *   3. The remaining width would be ≥ MIN_MOTHER_WIDTH (400 CSS px).
+ *
+ * Returns `undefined` when:
+ *   - The pane element is missing (unmounted early).
+ *   - The pane is in a horizontal split (shares height with siblings) — no resize.
+ *   - The remaining width would be too narrow.
+ *
+ * The value is passed as `mother_resize_to_width` in `open_floating_pane_window`.
+ * The host converts it to physical pixels on Windows (using the source window's
+ * monitor DPI) and applies it via `SetWindowPos` / CEF `set_bounds`.
+ *
+ * MUST be called BEFORE `TearOffBlock` — that mutation removes the pane from
+ * the layout tree and unmounts its DOM element.
+ */
+export function measureMotherResize(blockId: string): number | undefined {
+    const paneEl = document.querySelector(`[data-blockid="${blockId}"]`) as HTMLElement | null;
+    if (!paneEl) return undefined;
+
+    // Resolve the layout display container — the immediate parent grid div.
+    // TileLayout renders: <div class="tile-layout"><div class="display-container">…
+    // The pane node's DOM element is a descendant of display-container.
+    const containerEl = paneEl.closest(".display-container") as HTMLElement | null;
+    if (!containerEl) return undefined;
+
+    const paneRect = paneEl.getBoundingClientRect();
+    const containerRect = containerEl.getBoundingClientRect();
+
+    // Full-height check: pane must reach from container top to container bottom.
+    const spansFullHeight =
+        paneRect.top - containerRect.top <= FULL_HEIGHT_EPSILON_PX &&
+        containerRect.bottom - paneRect.bottom <= FULL_HEIGHT_EPSILON_PX;
+
+    if (!spansFullHeight) return undefined;
+
+    // Single-pane layout guard: nothing left after resize.
+    const newWidth = Math.round(containerRect.width - paneRect.width);
+    return newWidth >= MIN_MOTHER_WIDTH ? newWidth : undefined;
 }
 
 /**
