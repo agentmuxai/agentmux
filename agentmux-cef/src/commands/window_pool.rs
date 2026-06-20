@@ -996,9 +996,9 @@ fn cleanup_failed_promote_orphan_cross_platform(state: &Arc<AppState>, label: &s
 ///
 /// macOS / Linux: emits `pool:new-window` (no workspaceId).
 /// Windows: delegates to `promote_pool_window` with `workspace_id=""`. The
-/// frontend's `awaitPoolPromote` receives `pool:promote { workspaceId: "" }`,
-/// skips the workspaceId URL injection (empty string is falsy), and
-/// `initHostNewWindow` falls through to the fresh-workspace path. Position is
+/// frontend's `awaitPoolPromote` receives `pool:promote { workspaceId: "" }` and
+/// sets `?workspaceId=` (empty string) in the URL; `initHostNewWindow` reads the
+/// param as falsy and falls through to the fresh-workspace path. Position is
 /// passed as the tab anchor so it feeds directly to `SetWindowPos` without the
 /// cursor-centering offset math. Width/height pass as `None` so the function
 /// uses the hardcoded `POOL_WIDTH/POOL_HEIGHT` defaults (1200×800) — this
