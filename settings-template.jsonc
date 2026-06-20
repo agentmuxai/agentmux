@@ -77,13 +77,18 @@
     // "notify:tooltones:scope":                 "all",  // "all" or "focused"
 
     // -- Voice input (speech-to-text) --
-    // "voice:enabled":     true,        // show the per-pane mic button (default true)
-    // "voice:engine":      "whisper",   // "whisper" (capture→server STT, default) or
-    //                                   // "webspeech" (browser API — does NOT work in
-    //                                   // packaged CEF builds; dev/Chromium only)
-    // "voice:groqApiKey":  "gsk_...",   // Groq key for the hosted Whisper backend.
-    //                                   // Read server-side only (never sent to the UI).
-    //                                   // Or set the AGENTMUX_GROQ_API_KEY env var.
+    // "voice:enabled":          true,       // show the per-pane mic button (default true)
+    // "voice:engine":           "groq",     // "groq" (hosted Whisper, default),
+    //                                       // "whisper-local" (offline whisper.cpp), or
+    //                                       // "webspeech" (browser API — does NOT work in
+    //                                       // packaged CEF builds; dev/Chromium only)
+    // -- groq engine: hosted, sends webm. Key read server-side only (never sent to UI).
+    // "voice:groqApiKey":       "gsk_...",  // or set AGENTMUX_GROQ_API_KEY
+    // -- whisper-local engine: offline, sends 16kHz WAV to a local whisper.cpp CLI.
+    //    Both paths user-provided (auto-download is a follow-up). Env overrides:
+    //    AGENTMUX_WHISPER_CLI / AGENTMUX_WHISPER_MODEL.
+    // "voice:whisperCliPath":   "C:/tools/whisper-cli.exe",
+    // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",
 
     // -- Other --
     // "widget:icononly":           false,

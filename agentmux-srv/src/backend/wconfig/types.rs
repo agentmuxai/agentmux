@@ -230,6 +230,14 @@ pub struct SettingsType {
     #[serde(rename = "voice:groqApiKey", default, skip_serializing_if = "Option::is_none")]
     pub voice_groq_api_key: Option<String>,
 
+    // Local whisper.cpp backend (voice:engine = "whisper-local"). Both are
+    // user-provided paths in v1 (auto-download is a follow-up). Env overrides:
+    // AGENTMUX_WHISPER_CLI / AGENTMUX_WHISPER_MODEL.
+    #[serde(rename = "voice:whisperCliPath", default, skip_serializing_if = "Option::is_none")]
+    pub voice_whisper_cli_path: Option<String>,
+    #[serde(rename = "voice:whisperModelPath", default, skip_serializing_if = "Option::is_none")]
+    pub voice_whisper_model_path: Option<String>,
+
     // -- Notification sounds --
     //
     // Spec: docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §5.1.
