@@ -34,6 +34,9 @@ interface AgentDocumentViewProps {
     /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
     authProviderId?: string;
     onSubagentClick?: (node: SubagentLinkNode) => void;
+    /** Re-run the provider login flow — forwarded to the list so an inline
+     *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
+    onAgentErrorLogin?: () => void;
     /** Called when the user scrolls near the top — load the previous page of history. */
     onLoadOlder?: () => Promise<void>;
     /** Whether an older-history load is currently in progress. */
@@ -161,6 +164,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             viewState={viewState}
             documentState={documentState}
             onSubagentClick={props.onSubagentClick}
+            onAgentErrorLogin={props.onAgentErrorLogin}
             onLoadOlder={props.onLoadOlder}
             loadingOlder={props.loadingOlder}
             highlightNodeId={props.highlightNodeId}
