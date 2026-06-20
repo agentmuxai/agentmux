@@ -225,6 +225,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+    <!-- Launcher is a UIElement: it shows the splash, then CEF takes over as the
+         sole Foreground app (Dock tile, menu bar). Without this, macOS 26 Tahoe
+         ignores the runtime setActivationPolicy(.accessory) call in splash_mac.rs
+         and the launcher retains its own Dock slot alongside CEF's, producing two
+         icons. LSUIElement=true prevents the OS from ever registering the launcher
+         as Foreground, eliminating the duplicate. See BUG_MACOS26_DUAL_DOCK_ICON. -->
+    <key>LSUIElement</key><true/>
     <!-- Opt-in capability prompts. These usage strings are shown ONLY if/when
          the user turns the feature on — neither resource is touched at launch:
          the microphone (a pane-header mic button, Web Speech API) and local
