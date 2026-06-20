@@ -458,3 +458,44 @@ describe("user_message startup-injection detection", () => {
         expect(STARTUP_HEADING_RE.test(payload!)).toBe(true);
     });
 });
+
+// ── error_result → AgentErrorNode (P1.3) ────────────────────────────────────
+
+describe("error_result event", () => {
+    test("error_result produces an agent_error node with code and message", () => {
+        const p = new ClaudeCodeStreamParser();
+        const node = p.parseStreamEvent({ type: "error_result", code: 401, message: "Unauthorized" });
+        expect(node).not.toBeNull();
+        expect(node!.type).toBe("agent_error");
+        expect((node as any).code).toBe(401);
+        expect((node as any).message).toBe("Unauthorized");
+    });
+
+    test("error_result with code 0 (non-HTTP error) produces agent_error node", () => {
+        const p = new ClaudeCodeStreamParser();
+        const node = p.parseStreamEvent({ type: "error_result", code: 0, message: "Network connection lost" });
+        expect(node!.type).toBe("agent_error");
+        expect((node as any).code).toBe(0);
+        expect((node as any).message).toBe("Network connection lost");
+    });
+
+    test("agent_error node id is unique across consecutive error_result events", () => {
+        const p = new ClaudeCodeStreamParser();
+        const n1 = p.parseStreamEvent({ type: "error_result", code: 401, message: "err" });
+        const n2 = p.parseStreamEvent({ type: "error_result", code: 429, message: "err" });
+        expect(n1!.id).not.toBe(n2!.id);
+    });
+
+    test("error_result resets currentTextNode accumulation", () => {
+        const p = new ClaudeCodeStreamParser();
+        const text = p.parseStreamEvent({ type: "text", content: "hello" });
+        expect(text).not.toBeNull();
+        // error_result must break the text accumulation (same as other non-text events)
+        const errNode = p.parseStreamEvent({ type: "error_result", code: 500, message: "oops" });
+        // A new text event after the error should start a fresh node (different id)
+        const text2 = p.parseStreamEvent({ type: "text", content: "world" });
+        expect(text2).not.toBeNull();
+        expect(text!.id).not.toBe(text2!.id);
+        expect(errNode!.type).toBe("agent_error");
+    });
+});

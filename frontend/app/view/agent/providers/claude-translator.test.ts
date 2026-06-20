@@ -294,6 +294,20 @@ describe("ClaudeTranslator", () => {
             expect((events[0] as any).message).toBe("API error 429");
         });
 
+        it("emits error_result with code 0 when is_error:true but no api_error_status (network/CLI error)", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                result: "Network connection lost",
+            });
+            expect(events).toHaveLength(2);
+            expect(events[0].type).toBe("error_result");
+            expect((events[0] as any).code).toBe(0);
+            expect((events[0] as any).message).toBe("Network connection lost");
+            expect(events[1].type).toBe("session_end");
+        });
+
         it("does NOT emit error_result when is_error is false", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({
