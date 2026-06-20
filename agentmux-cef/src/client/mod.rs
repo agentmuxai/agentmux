@@ -563,7 +563,7 @@ impl AgentMuxHandler {
         // pool windows (they're not user-visible until promoted; the
         // pool->user transition gets its own report in a follow-up).
         // No-op if launcher IPC isn't connected (`task dev` mode).
-        if is_top_level_window && !label.starts_with("window-pool-") {
+        if is_top_level_window && !label.starts_with("window-pool-") && !label.starts_with("floating-pool-") {
             // Phase B.5 (window_meta step d) — kind/parent come
             // from the pending entry we popped at the top of this
             // fn, not a window_meta lookup.

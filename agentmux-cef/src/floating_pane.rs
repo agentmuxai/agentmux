@@ -419,9 +419,11 @@ wrap_task! {
                         error = %e,
                         "[pane-pool] create_popup failed (Windows)"
                     );
-                    // Reducer cleanup + refill via on_pane_pool_window_destroyed,
-                    // then dequeue the pending-creation entry.
-                    crate::commands::window_pool::on_pane_pool_window_destroyed(
+                    // Clean up reducer state without triggering a refill spawn.
+                    // HWND was not cached yet (create_popup failed before that step).
+                    // on_pane_pool_window_destroyed must NOT be used here — it triggers
+                    // spawn_pane_pool_window which would re-enter this failure → loop.
+                    crate::commands::window_pool::cleanup_failed_pane_pool_creation(
                         &self.state, &self.label,
                     );
                     dequeue();
@@ -481,14 +483,17 @@ wrap_task! {
                     label = %self.label,
                     "[pane-pool] browser_host_create_browser returned 0 (Windows)"
                 );
-                // Destroy the outer HWND (no browser to close it for us),
-                // clean up reducer + HWND cache, dequeue pending creation.
+                // Destroy the outer HWND (no browser to close it for us).
                 unsafe {
                     use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
                     DestroyWindow(outer_hwnd as *mut std::ffi::c_void);
                 }
-                // on_pane_pool_window_destroyed removes from HWND cache + handles reducer.
-                crate::commands::window_pool::on_pane_pool_window_destroyed(
+                // Remove from window_hwnds (inserted above before browser creation).
+                self.state.window_hwnds.lock().remove(&self.label);
+                // Clean up reducer + HWND cache without triggering a refill spawn.
+                // on_pane_pool_window_destroyed must NOT be used here — it triggers
+                // spawn_pane_pool_window which would re-enter this failure → loop.
+                crate::commands::window_pool::cleanup_failed_pane_pool_creation(
                     &self.state, &self.label,
                 );
                 dequeue();

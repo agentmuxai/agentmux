@@ -82,8 +82,26 @@ pub(crate) fn cache_pane_pool_hwnd(label: &str, hwnd: usize) {
 
 /// Pop (and remove) the outer HWND for a pane pool label (promote or destroy path).
 #[cfg(target_os = "windows")]
-fn take_pane_pool_hwnd(label: &str) -> Option<usize> {
+pub(crate) fn take_pane_pool_hwnd(label: &str) -> Option<usize> {
     pane_pool_hwnd_cache().lock().unwrap().remove(label)
+}
+
+/// Clean up after a pane pool window that failed during creation (before it
+/// ever became a usable pool slot). Unlike `on_pane_pool_window_destroyed`,
+/// this does NOT trigger a refill spawn — creation failures are likely
+/// persistent (Win32 error, driver issue) and re-spawning immediately would
+/// cause an infinite respawn loop: create → fail → cleanup → spawn → fail.
+/// The pool stays empty and the cold path handles the next tear-off request.
+#[cfg(target_os = "windows")]
+pub(crate) fn cleanup_failed_pane_pool_creation(state: &Arc<AppState>, label: &str) {
+    take_pane_pool_hwnd(label);
+    state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowDestroyedBeforePromote {
+            label: label.to_string(),
+        },
+    );
+    // Deliberately skip spawn_pane_pool_window — creation failure may be
+    // persistent; caller should dequeue PendingWindowCreation separately.
 }
 
 /// Target pool size. See module-level comment for rationale.

@@ -1063,14 +1063,17 @@ impl AppState {
     /// pool drift while the warm pool is idle and ready.
     pub fn host_counts_snapshot(&self) -> (u32, u32) {
         let st = self.host_state.lock();
+        // `host_counts_snapshot` feeds the launcher's event-sourced pool mirror.
+        // Pane pool emits NO launcher events (report_pool_window_added/removed/promoted),
+        // so including pane_pool.* here would cause permanent DriftDetected{Pool}.
+        // Only the tab pool (window-pool-*) participates in launcher mirror accounting.
+        // See user_visibility_snapshot for the app-exit gate (which correctly includes pane pool).
         let pool_inventory: std::collections::HashSet<&str> = st
             .pool
             .unpromoted
             .iter()
             .map(String::as_str)
             .chain(st.pool.queue.iter().map(String::as_str))
-            .chain(st.pane_pool.unpromoted.iter().map(String::as_str))
-            .chain(st.pane_pool.queue.iter().map(String::as_str))
             .collect();
         let pool = pool_inventory.len() as u32;
         let windows = st
