@@ -534,6 +534,7 @@ impl AgentMuxHandler {
                 if is_top_level_window
                     && pending_kind == WindowKind::FullInstance
                     && !label.starts_with("window-pool-")
+                    && !label.starts_with("floating-pool-")
                 {
                     unsafe { install_main_window_floater_cascade_hook(hwnd); }
                 }
@@ -563,7 +564,7 @@ impl AgentMuxHandler {
         // pool windows (they're not user-visible until promoted; the
         // pool->user transition gets its own report in a follow-up).
         // No-op if launcher IPC isn't connected (`task dev` mode).
-        if is_top_level_window && !label.starts_with("window-pool-") {
+        if is_top_level_window && !label.starts_with("window-pool-") && !label.starts_with("floating-pool-") {
             // Phase B.5 (window_meta step d) — kind/parent come
             // from the pending entry we popped at the top of this
             // fn, not a window_meta lookup.
@@ -662,8 +663,11 @@ impl AgentMuxHandler {
         //   so emit_event_to_window doesn't race the listener install.
         if label == "main" {
             crate::commands::window_pool::init_pool(&self.state);
+            crate::commands::window_pool::init_pane_pool(&self.state);
         } else if label.starts_with("window-pool-") {
             crate::commands::window_pool::register_pool_window(&self.state, &label);
+        } else if label.starts_with("floating-pool-") {
+            crate::commands::window_pool::register_pane_pool_window(&self.state, &label);
         }
     }
 
@@ -865,6 +869,8 @@ impl AgentMuxHandler {
             // the pool would never refill.
             if lbl.starts_with("window-pool-") {
                 crate::commands::window_pool::on_pool_window_destroyed(&self.state, lbl);
+            } else if lbl.starts_with("floating-pool-") {
+                crate::commands::window_pool::on_pane_pool_window_destroyed(&self.state, lbl);
             }
             // Phase B.4 — mirror the close to the launcher. Skip
             // browser-pane child HWNDs (never reported as open).
@@ -1330,7 +1336,7 @@ impl AgentMuxHandler {
         let browser_label = browser_cloned.as_mut().and_then(|b| self.window_label_for(b));
         let is_pool_window = browser_label
             .as_deref()
-            .map_or(false, |l| l.starts_with("window-pool-"));
+            .map_or(false, |l| l.starts_with("window-pool-") || l.starts_with("floating-pool-"));
 
         if !is_pool_window {
             if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {

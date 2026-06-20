@@ -307,6 +307,18 @@ pub fn pool_window_ready(
     Ok(serde_json::Value::Null)
 }
 
+pub fn pane_pool_window_ready(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let label = args
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing label".to_string())?;
+    super::window_pool::mark_pane_pool_window_renderer_ready(state, label);
+    Ok(serde_json::Value::Null)
+}
+
 /// Phase 6 — promote a pre-warmed pool window for tear-off.
 /// Returns the promoted window's label, or an error string if the
 /// pool was empty (caller should fall back to open_window_at_position).

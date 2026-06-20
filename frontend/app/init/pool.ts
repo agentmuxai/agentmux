@@ -14,10 +14,16 @@
 //
 // Spec: docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.5
 
-/** True when the current renderer was spawned as a pool window. */
+/** True when the current renderer was spawned as a tab/new-window pool window. */
 export function isPoolMode(): boolean {
     if (typeof window === "undefined") return false;
     return new URLSearchParams(window.location.search).get("pool") === "1";
+}
+
+/** True when the current renderer was spawned as a pane pool window. */
+export function isPanePoolMode(): boolean {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("pane-pool") === "1";
 }
 
 /**
@@ -77,6 +83,56 @@ export async function awaitPoolPromote(): Promise<void> {
         } catch (e) {
             cleanup();
             reject(new Error(`pool_window_ready signal failed: ${e}`));
+        }
+    });
+}
+
+/**
+ * Wait for the host's `pool:pane-promote` event.
+ *
+ * Injects `floatingPaneId` and `workspaceId` into the URL and removes
+ * `pane-pool=1`, then resolves. `initHostNewWindow` reattaches the workspace
+ * (workspaceId present) and the wave renderer mounts `FloatingPaneWorkspace`
+ * because `floatingPaneId` is in the URL — same code path as the cold-start
+ * floating pane URL `?floatingPaneId=X&workspaceId=Y`.
+ *
+ * Race contract: both listeners are installed before `pane_pool_window_ready`
+ * signals the host, so the promote event cannot arrive before we are ready.
+ */
+export async function awaitPanePoolPromote(): Promise<void> {
+    const { listenEvent } = await import("@/app/platform/ipc");
+    const { invokeCommand } = await import("@/app/platform/ipc");
+    const { getApi } = await import("@/store/global");
+
+    return new Promise<void>(async (resolve, reject) => {
+        let unsub: (() => void) | undefined;
+        const cleanup = () => { unsub?.(); };
+
+        unsub = await listenEvent<{ paneId: string; workspaceId: string }>(
+            "pool:pane-promote",
+            (payload) => {
+                cleanup();
+                const url = new URL(window.location.href);
+                url.searchParams.set("floatingPaneId", payload.paneId);
+                // Match cold-path contract: omit workspaceId when empty so
+                // initHostNewWindow's `if (tearOffWsId)` guard is not triggered
+                // with a blank value. In practice workspaceId is always present
+                // for a pane tear-off, but guard defensively.
+                if (payload.workspaceId) {
+                    url.searchParams.set("workspaceId", payload.workspaceId);
+                }
+                url.searchParams.delete("pane-pool");
+                window.history.replaceState({}, "", url.toString());
+                resolve();
+            },
+        );
+
+        try {
+            const label = await getApi().getWindowLabel();
+            await invokeCommand("pane_pool_window_ready", { label });
+        } catch (e) {
+            cleanup();
+            reject(new Error(`pane_pool_window_ready signal failed: ${e}`));
         }
     });
 }

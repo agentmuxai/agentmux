@@ -322,6 +322,7 @@ async fn route_command(
         "open_window_at_position" => commands::drag::open_window_at_position(state, args),
         "tear_off_pool_promote" => commands::drag::tear_off_pool_promote(state, args),
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
+        "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers
             // for up to 2s waiting for the destination window's HWND to
@@ -358,6 +359,9 @@ async fn route_command(
         "get_cli_path" => commands::providers::get_cli_path(state, args),
         "check_nodejs_available" => commands::providers::check_nodejs_available().await,
         "ensure_auth_dir" => commands::platform::ensure_auth_dir(state, args),
+        "seed_provider_auth_from_global" => {
+            commands::providers::seed_provider_auth_from_global(state, args)
+        }
         "run_cli_login" => commands::platform::run_cli_login(state.clone(), args).await,
         "cancel_cli_login" => commands::platform::cancel_cli_login(state),
         "ensure_settings_file" => commands::platform::ensure_settings_file(state),

@@ -34,9 +34,9 @@ use cef::Browser;
 
 use crate::state::{
     BrowserHandle, BrowserKind, CompletedCreation, CreationPhase, DragSession, EffectKind,
-    InFlightCreation, BrowserPaneEntry, BrowserPaneLifecycle, PaneWindowState, PendingWindowCreation,
-    PoolState, QuitReason, QuitState, TopLevelCreationOutcome, TopLevelCreationRequest,
-    TopLevelCreationState, TopLevelSource, WindowPlacement,
+    InFlightCreation, BrowserPaneEntry, BrowserPaneLifecycle, PanePoolState, PaneWindowState,
+    PendingWindowCreation, PoolState, QuitReason, QuitState, TopLevelCreationOutcome,
+    TopLevelCreationRequest, TopLevelCreationState, TopLevelSource, WindowPlacement,
 };
 
 /// Capacity of `TopLevelCreationState.history` ring buffer. Configurable
@@ -104,6 +104,10 @@ pub struct HostState {
     /// `window_pool` / `unpromoted_pool_labels` fields on AppState.
     pub pool: PoolState,
 
+    /// Pane pool state — pre-warmed frameless floating-pane windows
+    /// (`floating-pool-{uuid}`). Mirrors `pool` but for the pane pool.
+    pub pane_pool: PanePoolState,
+
     /// H.5 — quit lifecycle. Replaces the deleted
     /// `AppState.is_quitting: AtomicBool`.
     pub quit_state: QuitState,
@@ -168,6 +172,7 @@ impl Default for HostState {
             browsers: HashMap::new(),
             active_drag: None,
             pool: PoolState::default(),
+            pane_pool: PanePoolState::default(),
             quit_state: QuitState::default(),
             top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
@@ -346,6 +351,19 @@ pub enum HostCommand {
     /// Drain all pool windows on shutdown. Idempotent.
     PoolDrainAll,
 
+    // ── Pane pool (floating-pool-{uuid}, frameless=true) ────────────────
+    /// Pane pool window spawn started. Adds label to pane_pool.unpromoted
+    /// and sets respawn_in_flight=true (single-flight semaphore).
+    PanePoolWindowSpawnStart { label: String },
+    /// Frontend signalled pane pool window renderer ready. Move from
+    /// unpromoted to queue; clear respawn_in_flight.
+    PanePoolWindowReady { label: String },
+    /// Pane pool window destroyed before promote (renderer crash, OS close).
+    PanePoolWindowDestroyedBeforePromote { label: String },
+    /// Atomic pop+promote front of pane pool queue.
+    /// Returns promoted label via `DispatchOutput::promoted_pane_pool_label`.
+    PopAndPromoteFrontPanePoolWindow,
+
     // ── H.5 — quit lifecycle ────────────────────────────────────────────
 
     /// Transition Running → Draining. Suppresses pool refills, awaits
@@ -498,6 +516,19 @@ impl std::fmt::Debug for HostCommand {
                 .finish(),
             HostCommand::PopAndPromoteFrontPoolWindow => f.write_str("PopAndPromoteFrontPoolWindow"),
             HostCommand::PoolDrainAll => f.write_str("PoolDrainAll"),
+            HostCommand::PanePoolWindowSpawnStart { label } => f
+                .debug_struct("PanePoolWindowSpawnStart")
+                .field("label", label)
+                .finish(),
+            HostCommand::PanePoolWindowReady { label } => f
+                .debug_struct("PanePoolWindowReady")
+                .field("label", label)
+                .finish(),
+            HostCommand::PanePoolWindowDestroyedBeforePromote { label } => f
+                .debug_struct("PanePoolWindowDestroyedBeforePromote")
+                .field("label", label)
+                .finish(),
+            HostCommand::PopAndPromoteFrontPanePoolWindow => f.write_str("PopAndPromoteFrontPanePoolWindow"),
             HostCommand::BeginDrain { reason } => f
                 .debug_struct("BeginDrain")
                 .field("reason", reason)
@@ -814,6 +845,11 @@ pub struct DispatchOutput {
     pub pool_size_after: Option<usize>,
     pub pool_destroyed_was_unpromoted: bool,
     pub promoted_pool_label: Option<String>,
+    // Pane pool fields (parallel to tab pool above)
+    pub pane_pool_spawn_proceeding: bool,
+    pub pane_pool_size_after: Option<usize>,
+    pub pane_pool_destroyed_was_unpromoted: bool,
+    pub promoted_pane_pool_label: Option<String>,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -849,6 +885,7 @@ impl std::fmt::Debug for DispatchOutput {
 /// function takes only `&mut HostState` and produces no I/O.
 mod browsers;
 mod drag;
+mod pane_pool;
 mod pane_window;
 mod panes;
 mod pool;
@@ -904,6 +941,13 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::PromotePoolWindow { label } => pool::handle_promote_pool_window(state, label),
         HostCommand::PopAndPromoteFrontPoolWindow => pool::handle_pop_and_promote_front_pool_window(state),
         HostCommand::PoolDrainAll => pool::handle_pool_drain_all(state),
+        // Pane pool
+        HostCommand::PanePoolWindowSpawnStart { label } => pane_pool::handle_pane_pool_spawn_start(state, label),
+        HostCommand::PanePoolWindowReady { label } => pane_pool::handle_pane_pool_ready(state, label),
+        HostCommand::PanePoolWindowDestroyedBeforePromote { label } => {
+            pane_pool::handle_pane_pool_destroyed_before_promote(state, label)
+        }
+        HostCommand::PopAndPromoteFrontPanePoolWindow => pane_pool::handle_pop_and_promote_front_pane_pool_window(state),
         // H.5 quit
         HostCommand::BeginDrain { reason } => quit::handle_begin_drain(state, reason),
         HostCommand::ConfirmDrained => quit::handle_confirm_drained(state),

@@ -37,10 +37,10 @@ export type PaneRegionName =
  *  last so it stacks above the column. */
 export const PANE_REGION_ORDER: readonly PaneRegionName[] = [
     "top-fixed",
-    "dock",
     "stream",
     "alert",
     "queue",
+    "dock",
     "status",
     "input",
     "forks",
