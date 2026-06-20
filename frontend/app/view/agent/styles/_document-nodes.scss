@@ -1238,13 +1238,37 @@
     flex-direction: column;
     gap: var(--space-1);
     margin: var(--space-1) 0 0 0;
-    max-height: 400px;
+    max-height: 480px;
     overflow-y: auto;
+
+    .agent-search-header {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        font-size: 11px;
+        opacity: 0.6;
+        padding: 0 2px var(--space-0-5);
+    }
+
+    .agent-search-count {
+        font-weight: 500;
+    }
+
+    .agent-search-separator {
+        opacity: 0.5;
+    }
+
+    .agent-search-query {
+        font-style: italic;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 
     .agent-search-card {
         display: flex;
         flex-direction: column;
-        gap: 1px;
+        gap: 2px;
         padding: var(--space-1) var(--space-1-5);
         border: 1px solid var(--border-color);
         border-radius: 0;
@@ -1256,21 +1280,52 @@
         }
     }
 
-    .agent-search-card-title {
-        color: var(--accent-color);
-        font-size: 12px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+    .agent-search-card-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-1);
+        margin-bottom: 1px;
     }
 
-    .agent-search-card-url {
+    .agent-search-card-source {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+    }
+
+    .agent-search-card-favicon {
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        border-radius: 2px;
+        opacity: 0.85;
+    }
+
+    .agent-search-card-domain {
         color: var(--success-color);
         font-size: 10px;
         opacity: 0.85;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .agent-search-card-index {
+        font-size: 10px;
+        opacity: 0.4;
+        flex-shrink: 0;
+        font-family: var(--fixed-font, monospace);
+    }
+
+    .agent-search-card-title {
+        color: var(--accent-color);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        line-height: 1.3;
     }
 
     .agent-search-card-snippet {
@@ -1282,6 +1337,39 @@
         -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
+    }
+
+    .agent-search-card-date {
+        font-size: 10px;
+        opacity: 0.45;
+        margin-top: 1px;
+    }
+}
+
+// Write tool file-path row with byte count badge (ToolOverlayLog renderWrite).
+.agent-tool-write {
+    .agent-tool-file-path-row {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: var(--space-1);
+        margin-bottom: var(--space-0-5);
+    }
+
+    .agent-tool-write-bytes {
+        font-size: 10px;
+        opacity: 0.5;
+        flex-shrink: 0;
+        font-family: var(--fixed-font, monospace);
+    }
+
+    .agent-tool-write-content {
+        margin-top: var(--space-0-5);
+    }
+
+    .agent-tool-write-info {
+        font-size: 11px;
+        opacity: 0.6;
     }
 }
 

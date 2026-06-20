@@ -284,13 +284,35 @@ function renderRead(node: ToolNode): JSX.Element {
     );
 }
 
+function formatBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function renderWrite(node: ToolNode): JSX.Element {
+    const filePath = (node.params as any).file_path ?? "";
+    const content: string | undefined = (node.params as any).content;
+    const bytes: number | undefined = (node.result as any)?.bytesWritten;
+    const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
     return (
         <div class="agent-tool-write">
-            <div class="agent-tool-file-path">{(node.params as any).file_path}</div>
-            <div class="agent-tool-write-info">
-                {node.result && `Wrote ${(node.result as any).bytesWritten || 0} bytes`}
+            <div class="agent-tool-file-path-row">
+                <span class="agent-tool-file-path">{filePath}</span>
+                <Show when={bytes != null}>
+                    <span class="agent-tool-write-bytes">{formatBytes(bytes!)}</span>
+                </Show>
             </div>
+            <Show when={capped} fallback={<div class="agent-tool-write-info">No content written.</div>}>
+                <HighlightedCode
+                    code={capped!.text}
+                    lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
+                    class="agent-tool-write-content"
+                />
+                <Show when={capped!.hiddenLines > 0}>
+                    <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
+                </Show>
+            </Show>
         </div>
     );
 }

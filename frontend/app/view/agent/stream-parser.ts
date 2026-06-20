@@ -513,6 +513,9 @@ export class ClaudeCodeStreamParser {
                 return params.pattern || "";
             case "Agent":
                 return params.description || params.prompt || "";
+            case "web_search":
+            case "WebSearch":
+                return params.query || "";
             default:
                 return "";
         }
