@@ -9,10 +9,12 @@
  */
 
 import {
+    AgentErrorNode,
     AgentMessageEvent,
     AGENT_MESSAGE_ICONS,
     DIRECTION_ICONS,
     DocumentNode,
+    ErrorResultEvent,
     STATUS_ICONS,
     StreamEvent,
     TextEvent,
@@ -238,6 +240,11 @@ export class ClaudeCodeStreamParser {
                 this.currentThinkingNode = null;
                 return this.userMessageToNode(event as UserMessageEvent);
 
+            case "error_result":
+                this.currentTextNode = null;
+                this.currentThinkingNode = null;
+                return this.errorResultToNode(event as ErrorResultEvent);
+
             default:
                 console.warn("Unknown event type:", (event as any).type);
                 return null;
@@ -451,6 +458,16 @@ export class ClaudeCodeStreamParser {
             message: event.message,
             timestamp: event.timestamp || Date.now(),
             isStartup,
+        };
+    }
+
+    /** Inline API error node — surfaced when the CLI result frame carries is_error:true. */
+    private errorResultToNode(event: ErrorResultEvent): AgentErrorNode {
+        return {
+            type: "agent_error",
+            id: this.nextIdOf("error"),
+            code: event.code,
+            message: event.message,
         };
     }
 
