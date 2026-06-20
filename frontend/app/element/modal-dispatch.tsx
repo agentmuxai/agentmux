@@ -20,7 +20,6 @@ import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdenti
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
-import "@/app/view/agent/components/AgentMemoryModal.scss";
 import "@/app/view/agent/components/AgentIdentityModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
 
