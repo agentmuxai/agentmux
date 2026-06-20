@@ -1401,6 +1401,8 @@ declare global {
         "conn:*"?: boolean;
         "network:lan_discovery"?: boolean;
         "voice:enabled"?: boolean;
+        "voice:engine"?: string;
+        "voice:groqApiKey"?: string;
         "notify:*"?: boolean;
         "notify:sounds:enabled"?: boolean;
         "notify:sounds:volume"?: number;

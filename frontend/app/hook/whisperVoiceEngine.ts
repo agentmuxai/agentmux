@@ -83,6 +83,16 @@ export function createWhisperVoiceSession(): VoiceSession {
     let silenceStart = 0;
     let segmentStart = 0;
 
+    // Serialize transcription so utterances are applied in spoken order.
+    // Capture keeps running concurrently (recorder restarts immediately); only
+    // the network call + appendFinal are chained — Groq latency varies, so
+    // POSTing concurrently could resolve out of order and scramble the composer
+    // text during continuous speech (reagent P1 #1623).
+    let postChain: Promise<void> = Promise.resolve();
+    const enqueuePost = (blob: Blob) => {
+        postChain = postChain.then(() => postSegment(blob)).catch(() => {});
+    };
+
     type BlobChunk = Blob;
 
     const fail = (code: string) => {
@@ -150,8 +160,10 @@ export function createWhisperVoiceSession(): VoiceSession {
             const blob = new Blob(chunks, { type: mime });
             chunks = [];
             // Only transcribe clips that contained speech and weren't blips.
+            // Enqueued (not awaited) so the next recorder starts immediately,
+            // but applied strictly in order — see enqueuePost above.
             if (sawSpeech && dur >= MIN_SEGMENT_MS) {
-                void postSegment(blob);
+                enqueuePost(blob);
             }
             // Restart for the next utterance while still listening.
             if (isListening()) startRecorder();
