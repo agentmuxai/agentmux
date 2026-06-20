@@ -196,7 +196,34 @@ fn main() {
     // Tracing is initialized after the subprocess check below — browser process
     // gets dual file+stderr output; subprocesses exit before tracing is needed.
 
+    // Escape hatch — read once here so both macOS subprocess sandbox init
+    // (below) and the browser-process Settings construction share the same value.
+    let force_no_sandbox = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+
+    // macOS: initialize Seatbelt sandbox context BEFORE the CEF framework is
+    // loaded. This is the order required by CEF (cefsimple/process_helper_mac.cc):
+    //   1. cef_sandbox_initialize     ← here, before dlopen
+    //   2. LoadInHelper / _library    ← CEF framework loaded within the sandbox
+    //   3. CefExecuteProcess
+    // Subprocess mode is detected from raw argv (--type=…) because cef::Args
+    // cannot be parsed until after the framework is loaded. Browser process
+    // skips this entirely — the host process is unsandboxed by design.
+    #[cfg(all(target_os = "macos", feature = "sandbox"))]
+    let _macos_sandbox = if std::env::args().any(|a| a.starts_with("--type="))
+        && !force_no_sandbox
+    {
+        let raw = cef::args::Args::new();
+        let mut s = cef::sandbox::Sandbox::new();
+        s.initialize(raw.as_main_args());
+        Some(s)
+    } else {
+        None
+    };
+
     // macOS: load the CEF framework library explicitly.
+    // For subprocesses this load happens within the Seatbelt policy established above.
     #[cfg(target_os = "macos")]
     let _library = {
         let exe = std::env::current_exe().unwrap();
@@ -229,28 +256,6 @@ fn main() {
     // for child processes. If --type is present, this is a subprocess.
     let type_switch = CefString::from("type");
     let is_browser_process = cmd_line.has_switch(Some(&type_switch)) != 1;
-
-    // Runtime escape hatch — AGENTMUX_UNSAFE_NOSANDBOX=1 disables the renderer
-    // sandbox regardless of build features. Intended for known-incompatible
-    // environments (nested VM, Docker without user namespaces, macOS SIP issues).
-    // Tracing isn't up yet; the browser-process path below re-reads this to emit
-    // a warn! once the subscriber is initialized.
-    let force_no_sandbox = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
-        .map(|v| v.trim() == "1")
-        .unwrap_or(false);
-
-    // macOS: initialize Seatbelt sandbox context for renderer/GPU/utility subprocesses
-    // before CefExecuteProcess. The Sandbox holds the opaque context pointer; Drop
-    // calls cef_sandbox_destroy, so keep it alive until process exit.
-    // The browser process does not need (or want) this context — only subprocesses.
-    #[cfg(all(target_os = "macos", feature = "sandbox"))]
-    let _macos_sandbox = if !is_browser_process && !force_no_sandbox {
-        let mut s = cef::sandbox::Sandbox::new();
-        s.initialize(args.as_main_args());
-        Some(s)
-    } else {
-        None
-    };
 
     // Execute subprocess if applicable (exits here for non-browser processes).
     let ret = execute_process(
