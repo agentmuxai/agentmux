@@ -27,5 +27,5 @@ pub use error::StoreError;
 #[allow(unused_imports)]
 pub use history::AgentHistory;
 pub use identities::{AgentIdentityLink, Identity, IdentityAccount, IdentityBinding, SecretRef};
-pub use memory_bundles::Memory;
+pub use memory_bundles::{format_global_brain_block, Memory};
 pub use skills::AgentSkill;

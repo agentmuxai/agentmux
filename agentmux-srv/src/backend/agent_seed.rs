@@ -253,7 +253,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
         .as_millis() as i64;
 
     let mut created = 0usize;
-    for mem_def in &manifest.memories {
+    for (idx, mem_def) in manifest.memories.iter().enumerate() {
         if existing_ids.contains(&mem_def.id) {
             continue;
         }
@@ -269,6 +269,9 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
             context_files: "[]".to_string(),
             mcp_servers: "[]".to_string(),
             skills: "[]".to_string(),
+            // Seed initial global-brain order by manifest position so seeded
+            // sections start in a deterministic order; users reorder later.
+            sort_order: idx as i64,
             created_at: now,
             updated_at: now,
         };
