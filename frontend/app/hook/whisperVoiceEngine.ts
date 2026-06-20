@@ -90,10 +90,17 @@ export function createWhisperVoiceSession(): VoiceSession {
     const currentTargetId = createSignalAtom<string | null>(null);
     const lastError = createSignalAtom<string | null>(null);
 
+    // Capture mode is fixed for the session: whisper-local → WAV, else webm.
+    const isLocal = getSettingsKeyAtom("voice:engine")() === "whisper-local";
+
+    // Both modes need getUserMedia + AudioContext; the webm (groq) path also
+    // needs MediaRecorder. Gate on exactly what the chosen mode uses so a
+    // runtime missing a primitive degrades gracefully instead of throwing.
     const available =
         typeof navigator !== "undefined" &&
         !!navigator.mediaDevices?.getUserMedia &&
-        typeof AudioContext !== "undefined";
+        typeof AudioContext !== "undefined" &&
+        (isLocal || typeof MediaRecorder !== "undefined");
 
     if (!available) {
         return {
@@ -105,9 +112,6 @@ export function createWhisperVoiceSession(): VoiceSession {
             registerPane: () => {},
         };
     }
-
-    // Capture mode is fixed for the session: whisper-local → WAV, else webm.
-    const isLocal = getSettingsKeyAtom("voice:engine")() === "whisper-local";
 
     let activeHandle: PaneVoiceHandle | null = null;
     let stream: MediaStream | null = null;
@@ -313,26 +317,33 @@ export function createWhisperVoiceSession(): VoiceSession {
         lastError._set(null);
         isListening._set(true);
 
-        if (isLocal) {
-            mime = "audio/wav";
-            // Force 16 kHz so captured PCM is whisper-ready (no resampling).
-            audioCtx = new AudioContext({ sampleRate: WAV_SAMPLE_RATE });
-            const src = audioCtx.createMediaStreamSource(stream);
-            processor = audioCtx.createScriptProcessor(4096, 1, 1);
-            processor.onaudioprocess = onAudioProcess;
-            src.connect(processor);
-            processor.connect(audioCtx.destination); // required for onaudioprocess to fire
-            pcm = [];
-            resetSegment();
-        } else {
-            mime = pickMime();
-            audioCtx = new AudioContext();
-            const src = audioCtx.createMediaStreamSource(stream);
-            analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 2048;
-            src.connect(analyser);
-            startRecorder();
-            levelTimer = window.setInterval(pollLevel, LEVEL_POLL_MS);
+        // Building the audio graph can throw — e.g. a runtime that rejects the
+        // forced 16 kHz AudioContext rate. Catch it so the mic stream is closed
+        // and isListening doesn't get stuck true (fail → stopCapture).
+        try {
+            if (isLocal) {
+                mime = "audio/wav";
+                // Force 16 kHz so captured PCM is whisper-ready (no resampling).
+                audioCtx = new AudioContext({ sampleRate: WAV_SAMPLE_RATE });
+                const src = audioCtx.createMediaStreamSource(stream);
+                processor = audioCtx.createScriptProcessor(4096, 1, 1);
+                processor.onaudioprocess = onAudioProcess;
+                src.connect(processor);
+                processor.connect(audioCtx.destination); // required for onaudioprocess to fire
+                pcm = [];
+                resetSegment();
+            } else {
+                mime = pickMime();
+                audioCtx = new AudioContext();
+                const src = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+                src.connect(analyser);
+                startRecorder();
+                levelTimer = window.setInterval(pollLevel, LEVEL_POLL_MS);
+            }
+        } catch {
+            fail("service-not-allowed");
         }
     };
 

@@ -253,13 +253,16 @@ async fn transcribe_local_whisper(
         return Err(NotConfigured(format!("whisper model not found at {model}")));
     }
 
-    // Write the WAV body to a unique temp file. Use a monotonic-ish unique name
-    // (nanos + a counter) — the sidecar handles many requests.
+    // Write the WAV body to a unique temp file. Timestamp alone can collide
+    // under concurrent requests (coarse Windows SystemTime granularity), so add
+    // a process-global atomic counter to guarantee uniqueness.
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let wav_path = std::env::temp_dir().join(format!("agentmux-voice-{ts}.wav"));
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let wav_path = std::env::temp_dir().join(format!("agentmux-voice-{ts}-{seq}.wav"));
     std::fs::write(&wav_path, &audio).map_err(|e| Upstream(format!("temp write: {e}")))?;
 
     // whisper-cli: -nt no timestamps, -np no progress prints → transcript on
