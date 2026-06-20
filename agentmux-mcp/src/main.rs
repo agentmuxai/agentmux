@@ -12,17 +12,15 @@
 //! conversation as a `ShellNode` row without blocking the agent.
 //!
 //! Env vars (inherited from agentmux-srv's agent env injection):
-//!   AGENTMUX_LOCAL_URL   — sidecar HTTP base URL
-//!   AGENTMUX_AUTH_KEY    — X-AuthKey header secret
-//!   AGENTMUX_AGENT_BUS_ID — block UUID for event scoping (preferred)
-//!   AGENTMUX_BLOCKID      — block UUID, used as the fallback source for the
-//!                           bus id. websocket.rs reliably injects this onto the
-//!                           agent process env (it holds exactly the block UUID
-//!                           the MCP server needs), and the MCP subprocess —
-//!                           spawned by the agent CLI — inherits it. The
-//!                           production `.mcp.json` path never injects
-//!                           AGENTMUX_AGENT_BUS_ID, so this fallback is what
-//!                           makes the Shell tool functional.
+//!   AGENTMUX_LOCAL_URL    — sidecar HTTP base URL
+//!   AGENTMUX_AUTH_KEY     — X-AuthKey header secret
+//!   AGENTMUX_BLOCKID      — block UUID for shell event scoping (preferred).
+//!                           Injected by agent_handlers.rs into every persistent
+//!                           subprocess env; inherited by this MCP subprocess.
+//!   AGENTMUX_AGENT_BUS_ID — MuxBus routing identifier (fallback only).
+//!                           Often set to the agent type string (e.g. "claude")
+//!                           in .mcp.json, NOT the block UUID — do not use it
+//!                           as the shell scope unless AGENTMUX_BLOCKID is absent.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
