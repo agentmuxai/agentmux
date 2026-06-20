@@ -83,9 +83,6 @@ function SearchResultCards(props: { node: ToolNode; items: SearchResultItem[] })
                     <span class="agent-search-query">"{query()}"</span>
                 </Show>
             </div>
-            <Show when={visible().length === 0}>
-                <div class="agent-search-empty">No results found.</div>
-            </Show>
             <For each={visible()}>
                 {(it) => <SearchCard item={it} />}
             </For>
