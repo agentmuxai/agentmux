@@ -189,6 +189,20 @@ pub(crate) fn persist_last_failure(
     let Some(ref store) = wstore else {
         return;
     };
+    // On a clean exit (failure=None), only write null (which merge_meta uses to
+    // delete the key) if the key actually exists — otherwise every successful
+    // turn would trigger a redundant DB write + waveobj:update broadcast.
+    if failure.is_none() {
+        let key_exists = store
+            .must_get::<crate::backend::obj::Block>(block_id)
+            .ok()
+            .and_then(|b| b.meta.get(META_LAST_FAILURE).cloned())
+            .map(|v| !v.is_null())
+            .unwrap_or(false);
+        if !key_exists {
+            return;
+        }
+    }
     let oref_str = format!("block:{}", block_id);
     let mut meta_update = crate::backend::obj::MetaMapType::new();
     let val = match failure {
