@@ -11,7 +11,7 @@
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
-import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
@@ -140,7 +140,7 @@ async function handleCrossWindowDragEnd(
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
         } else if (!targetWindow) {
-            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y);
+            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, sourceWindow);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
         } else {
             await api.cancelCrossDrag(dragId);
@@ -163,7 +163,8 @@ async function performTearOff(
     sourceWsId: string,
     sourceTabId: string,
     screenX: number,
-    screenY: number
+    screenY: number,
+    sourceWindowLabel: string | null = null,
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
@@ -192,6 +193,16 @@ async function performTearOff(
         const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
             payload.blockId,
         );
+        // Compute mother window resize: if the pane spans the full height of
+        // the layout container (top-to-bottom column), the mother shrinks by
+        // the pane's width so remaining panes keep their sizes unchanged.
+        // Skip when a pane is magnified — layout container dimensions are
+        // misleading in that mode (spec §9).
+        // SPEC: SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
+        const layoutModelForResize = getLayoutModelForStaticTab();
+        const motherResizeToWidth = layoutModelForResize?.treeState?.magnifiedNodeId
+            ? undefined
+            : measureMotherResize(payload.blockId);
 
         const newWsId = await WorkspaceService.TearOffBlock(
             payload.blockId,
@@ -220,6 +231,8 @@ async function performTearOff(
                 y: screenY,
                 width: floaterWidth,
                 height: floaterHeight,
+                source_window_label: sourceWindowLabel,
+                mother_resize_to_width: motherResizeToWidth,
             });
             Logger.info("dnd:cross", "floating pane spawned (linux)", {
                 blockId: payload.blockId,
@@ -228,6 +241,8 @@ async function performTearOff(
                 screenY,
                 width: floaterWidth,
                 height: floaterHeight,
+                sourceWindowLabel,
+                motherResizeToWidth,
             });
         } catch (err) {
             const msg = String(err);
@@ -241,6 +256,8 @@ async function performTearOff(
                         y: screenY,
                         width: floaterWidth,
                         height: floaterHeight,
+                        source_window_label: sourceWindowLabel,
+                        mother_resize_to_width: motherResizeToWidth,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {
