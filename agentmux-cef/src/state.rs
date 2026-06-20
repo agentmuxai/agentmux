@@ -1077,9 +1077,10 @@ impl AppState {
             .collect();
         let pool = pool_inventory.len() as u32;
         // Also exclude floating-pool-* (pane pool windows) from the windows count.
-        // On Windows (this branch) they are excluded from report_window_opened at
-        // client/mod.rs:566, so the launcher mirror does not count them either.
-        // Without this filter, host_windows > launcher_windows → DriftDetected{Windows}.
+        // They are excluded from report_window_opened (client/mod.rs) on ALL
+        // platforms, so the launcher mirror never counts them. This filter keeps
+        // host_counts_snapshot in sync; without it host_windows > launcher_windows
+        // → DriftDetected{Windows}.
         let windows = st
             .browsers
             .keys()
