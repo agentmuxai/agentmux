@@ -446,6 +446,34 @@ pub async fn run_cli_login(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // §4 instrumentation (SPEC_HOST_CLI_LOGIN_CAPTURE): snapshot the
+    // auth-precedence env keys the child will see. A stray ANTHROPIC_API_KEY
+    // (precedence #3) overrides subscription OAuth (#6) and, if it belongs to a
+    // disabled/expired org, yields the "loggedIn but 401" symptom we're chasing.
+    // "override" = passed explicitly in auth_env; "inherited" = present in the
+    // host process env the child inherits; "absent" = neither. NAMES/STATES
+    // ONLY — values are never logged.
+    {
+        let source = |k: &str| -> &'static str {
+            if auth_env.contains_key(k) {
+                "override"
+            } else if std::env::var(k).is_ok() {
+                "inherited"
+            } else {
+                "absent"
+            }
+        };
+        tracing::info!(
+            target: "login_pty",
+            cli = %cli_path,
+            requires_tty,
+            anthropic_api_key = source("ANTHROPIC_API_KEY"),
+            anthropic_auth_token = source("ANTHROPIC_AUTH_TOKEN"),
+            claude_code_oauth_token = source("CLAUDE_CODE_OAUTH_TOKEN"),
+            "run_cli_login: auth-env precedence snapshot"
+        );
+    }
+
     // Supersede any in-progress login so we never accumulate orphaned
     // `auth login` children (one per attempt — the confirmed leak). cancel_cli_login
     // kills both transports (pipe oneshot + PTY kill-by-PID) and is idempotent —
@@ -690,12 +718,11 @@ async fn run_cli_login_pty(
         use std::io::BufRead;
         let mut reader = std::io::BufReader::new(reader);
         // Wrap the oneshot in an Option so we send the URL exactly once and then
-        // keep reading. Before the URL: scan for it. After: keep draining and LOG
-        // every line — the CLI's `Paste code here >` prompt and, crucially, its
-        // response to the code delivered via set_provider_auth (success vs. an
-        // "invalid code" / error). Without this the host discarded that output,
-        // so a failed login was a black box. Draining also keeps the CLI from
-        // blocking on a full PTY output buffer.
+        // keep reading. We LOG every line from the first byte AND scan for an
+        // OAuth URL until one is found — the CLI's `Paste code here >` prompt
+        // and, crucially, its response to the code delivered via
+        // set_provider_auth (success vs. an "invalid code" / error). Draining
+        // also keeps the CLI from blocking on a full PTY output buffer.
         let mut url_tx = Some(url_tx);
         let mut line = String::new();
         loop {
@@ -703,16 +730,23 @@ async fn run_cli_login_pty(
             match reader.read_line(&mut line) {
                 Ok(0) => break, // EOF
                 Ok(_) => {
+                    // Log EVERY PTY line from the first byte (§4 of
+                    // SPEC_HOST_CLI_LOGIN_CAPTURE). Before this, lines were only
+                    // logged AFTER a URL was captured, so a login that never
+                    // printed a URL (Claude Code v2.1.x — the URL is clipboard-
+                    // on-`c`, not a stdout line) was a black box: we couldn't
+                    // tell capture-miss from no-browser from a silent exit.
+                    let t = line.trim_end();
+                    if !t.trim().is_empty() {
+                        tracing::info!(target: "login_pty", "[login-pty] {}", t);
+                    }
+                    // Still capture an OAuth URL for providers that DO print one
+                    // (Codex/Gemini/OpenClaw); a no-op for Claude v2.1.x.
                     if let Some(tx) = url_tx.take() {
                         if let Some(u) = extract_url(&line) {
                             let _ = tx.send(Some(u));
                         } else {
                             url_tx = Some(tx); // not the URL line yet
-                        }
-                    } else {
-                        let t = line.trim_end();
-                        if !t.trim().is_empty() {
-                            tracing::info!(target: "login_pty", "[login-pty] {}", t);
                         }
                     }
                 }
