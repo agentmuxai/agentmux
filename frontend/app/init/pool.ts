@@ -114,7 +114,13 @@ export async function awaitPanePoolPromote(): Promise<void> {
                 cleanup();
                 const url = new URL(window.location.href);
                 url.searchParams.set("floatingPaneId", payload.paneId);
-                url.searchParams.set("workspaceId", payload.workspaceId);
+                // Match cold-path contract: omit workspaceId when empty so
+                // initHostNewWindow's `if (tearOffWsId)` guard is not triggered
+                // with a blank value. In practice workspaceId is always present
+                // for a pane tear-off, but guard defensively.
+                if (payload.workspaceId) {
+                    url.searchParams.set("workspaceId", payload.workspaceId);
+                }
                 url.searchParams.delete("pane-pool");
                 window.history.replaceState({}, "", url.toString());
                 resolve();

@@ -1069,6 +1069,8 @@ impl AppState {
             .iter()
             .map(String::as_str)
             .chain(st.pool.queue.iter().map(String::as_str))
+            .chain(st.pane_pool.unpromoted.iter().map(String::as_str))
+            .chain(st.pane_pool.queue.iter().map(String::as_str))
             .collect();
         let pool = pool_inventory.len() as u32;
         let windows = st
@@ -1079,17 +1081,16 @@ impl AppState {
         (windows, pool)
     }
 
-    /// Snapshot of unpromoted pool labels. Used by orphan
-    /// reconciliation and the pool-count report after spawning a
-    /// new pool slot. Caller can `.contains()` against the set or
-    /// iterate.
+    /// Snapshot of unpromoted pool labels — both tab pool (`window-pool-*`)
+    /// and pane pool (`floating-pool-*`). Used by orphan reconciliation and
+    /// the pool-count report after spawning a new pool slot.
     pub fn unpromoted_pool_labels_snapshot(&self) -> std::collections::HashSet<String> {
-        self.host_state
-            .lock()
-            .pool
+        let st = self.host_state.lock();
+        st.pool
             .unpromoted
             .iter()
             .cloned()
+            .chain(st.pane_pool.unpromoted.iter().cloned())
             .collect()
     }
 
@@ -1121,9 +1122,11 @@ impl AppState {
     /// user window. Atomic snapshot eliminates the gap.
     ///
     /// Returns:
-    /// - `pool_inventory`: labels in `pool.unpromoted` ∪ `pool.queue`
-    ///   (host-internal, no user UI yet — exclude from user-visible
-    ///   filters and from launcher-event dispatch).
+    /// - `pool_inventory`: labels in `pool.unpromoted` ∪ `pool.queue` ∪
+    ///   `pane_pool.unpromoted` ∪ `pane_pool.queue` — all host-internal
+    ///   pool windows (both tab pool `window-pool-*` and pane pool
+    ///   `floating-pool-*`) that have no user UI yet; exclude from
+    ///   user-visible filters and from launcher-event dispatch.
     /// - `browsers`: every label → Browser pair currently registered
     ///   (cheap clone — `Browser` is a CEF refcounted wrapper).
     pub fn user_visibility_snapshot(&self) -> (
@@ -1137,6 +1140,8 @@ impl AppState {
             .iter()
             .cloned()
             .chain(st.pool.queue.iter().cloned())
+            .chain(st.pane_pool.unpromoted.iter().cloned())
+            .chain(st.pane_pool.queue.iter().cloned())
             .collect();
         let browsers: Vec<(String, Browser)> = st
             .browsers
