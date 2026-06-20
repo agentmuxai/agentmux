@@ -1,12 +1,15 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Memory pane — first-class management of Memory bundles.
+// Presets pane — first-class management of presets (memory bundles).
+// User-facing name is "Presets"; the type/table stay `Memory` /
+// `db_memory_bundles` (SPEC_MEMORY_IDENTITY_ARCH §4.1).
 //
-// A Memory bundle is the agent's personality + capability stack:
-// provider/CLI choice, model, system instructions, context files, MCP
-// servers, skills. Bundles are reusable across many agent instances —
-// pick one in the launch modal alongside an Identity bundle.
+// A preset is the agent's provider-agnostic capability stack:
+// system instructions, context files, MCP servers, skills. Provider/model
+// are NOT part of a preset — they belong to the agent (§4.1a). Presets are
+// reusable across many agent instances — pick one in the launch modal
+// alongside an Identity bundle.
 //
 // This module is the ViewModel for `view: "memory"` panes. It owns the
 // list of memories, the currently-selected one, and the in-flight edit
@@ -27,8 +30,9 @@ export interface MemoryDraft {
     id?: string;
     name: string;
     description: string;
-    provider: string;          // "" | "claude" | "codex" | "gemini"
-    model: string;
+    // provider/model intentionally absent: a preset is provider-agnostic.
+    // The CLI provider + model belong to the agent (AgentDefinition.provider
+    // + provider_flags), not the preset. See SPEC_MEMORY_IDENTITY_ARCH §4.1a.
     instructions: string;
     /** Edited as `[{ path, content }]`; serialized to JSON on save. */
     context_files: Array<{ path: string; content: string }>;
@@ -40,7 +44,7 @@ export interface MemoryDraft {
     is_global?: boolean;
 }
 
-/** Empty draft for the "+ New Memory" flow.
+/** Empty draft for the "+ New Preset" flow.
  *
  *  All JSON-array fields default to `"[]"` (not `""`). The backend's
  *  `db_memory_bundles.skills` column is JSON-encoded; a literal `""` would
@@ -51,8 +55,6 @@ export function emptyDraft(): MemoryDraft {
         id: undefined,
         name: "",
         description: "",
-        provider: "",
-        model: "",
         instructions: "",
         context_files: [],
         mcp_servers: "[]",
@@ -75,8 +77,6 @@ export function draftFromMemory(m: Memory): MemoryDraft {
         id: m.id,
         name: m.name,
         description: m.description ?? "",
-        provider: m.provider ?? "",
-        model: m.model ?? "",
         instructions: m.instructions ?? "",
         context_files,
         // Both JSON-array fields use the same empty-string-aware
@@ -105,8 +105,10 @@ export function draftToWire(d: MemoryDraft): Memory {
         // Preserve the global flag so editing a global bundle does not
         // silently strip it (the upsert ON CONFLICT overwrites is_global).
         is_global: d.is_global ?? false,
-        provider: d.provider,
-        model: d.model.trim(),
+        // provider/model are deprecated on presets (provider-agnostic, §4.1a).
+        // Write empty so the ON CONFLICT update clears any stale legacy value.
+        provider: "",
+        model: "",
         instructions: d.instructions,
         context_files: JSON.stringify(d.context_files),
         mcp_servers: d.mcp_servers || "[]",
@@ -123,9 +125,10 @@ export class MemoryViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel | null;
 
-    viewIcon: Accessor<string> = () => "brain";
+    // "sliders" (not "brain") — the brain icon is reserved for native memory.
+    viewIcon: Accessor<string> = () => "sliders";
     viewName: Accessor<string>;
-    viewText: Accessor<string | HeaderElem[]> = () => "Memory";
+    viewText: Accessor<string | HeaderElem[]> = () => "Presets";
     noPadding: Accessor<boolean> = () => false;
 
     get viewComponent(): ViewComponent {
@@ -172,7 +175,7 @@ export class MemoryViewModel implements ViewModel {
             : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
-            return (block?.meta?.["frame:title"] as string) ?? "Memory";
+            return (block?.meta?.["frame:title"] as string) ?? "Presets";
         });
         this.selectedAtom = createMemo(() => {
             const id = this.selectedIdAtom();
@@ -191,7 +194,7 @@ export class MemoryViewModel implements ViewModel {
             this.setMemories(list);
             this.setError(null);
         } catch (e) {
-            this.setError(`Failed to load memories: ${(e as Error).message ?? e}`);
+            this.setError(`Failed to load presets: ${(e as Error).message ?? e}`);
         }
     }
 
@@ -212,7 +215,7 @@ export class MemoryViewModel implements ViewModel {
      *  banner showing alongside the new edit form). Reagent P2 (#747). */
     startEdit(memory: Memory): void {
         if (memory.is_blank) {
-            this.setError("The blank Memory is system-managed and cannot be edited.");
+            this.setError("The blank preset is system-managed and cannot be edited.");
             return;
         }
         this.setError(null);
@@ -234,7 +237,7 @@ export class MemoryViewModel implements ViewModel {
         const draft = this.draftAtom();
         if (!draft) return;
         if (!draft.name.trim()) {
-            this.setError("Memory name is required.");
+            this.setError("Preset name is required.");
             return;
         }
         this.setSaving(true);
@@ -247,7 +250,7 @@ export class MemoryViewModel implements ViewModel {
             // OBJECT IDENTITY (=== draft) rather than `!== null`. The
             // user can replace the draft mid-flight by:
             //   - clicking another list item   → cancelDraft → null
-            //   - clicking "+ New Memory"      → startNew → fresh draft
+            //   - clicking "+ New Preset"      → startNew → fresh draft
             //   - clicking the Edit button     → startEdit → other draft
             // All three cases must skip the post-save navigation. Only
             // identity-equal-to-our-snapshot means the user is still
@@ -272,7 +275,7 @@ export class MemoryViewModel implements ViewModel {
     async deleteMemory(id: string): Promise<void> {
         const target = this.memoriesAtom().find((m) => m.id === id);
         if (target?.is_blank) {
-            this.setError("The blank Memory is system-managed and cannot be deleted.");
+            this.setError("The blank preset is system-managed and cannot be deleted.");
             return;
         }
         this.setError(null);

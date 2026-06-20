@@ -32,21 +32,24 @@ import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import "./bundle-summary.scss";
 
 interface BundleSummaryPanelProps {
-    /** "Identity" | "Memory" — drives the heading + copy. */
-    kind: "Identity" | "Memory";
+    /** "Identity" | "Preset" — drives the heading + copy. */
+    kind: "Identity" | "Preset";
 }
 
 export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element => {
-    const lowerPlural = props.kind === "Identity" ? "identities" : "memories";
+    // Identity items are still called "bundles"; presets are not (they are
+    // provider-agnostic config presets). Compute the display strings per kind.
+    const title = props.kind === "Identity" ? "Identity bundles" : "Presets";
+    const lowerPlural = props.kind === "Identity" ? "identities" : "presets";
 
     return (
         <div class="bundle-summary">
             <div class="bundle-summary-inner">
-                <h2 class="bundle-summary-title">{props.kind} bundles</h2>
+                <h2 class="bundle-summary-title">{title}</h2>
                 <p class="bundle-summary-body">
-                    {props.kind} bundles are app-wide data, shared across every
-                    agent and window. They are now created, edited, and deleted
-                    in one place — the <strong>Identity &amp; Memory</strong>{" "}
+                    {title} are app-wide data, shared across every agent and
+                    window. They are now created, edited, and deleted in one
+                    place — the <strong>Identity &amp; Memory</strong>{" "}
                     manager, opened from the hamburger menu.
                 </p>
                 <p class="bundle-summary-body bundle-summary-hint">

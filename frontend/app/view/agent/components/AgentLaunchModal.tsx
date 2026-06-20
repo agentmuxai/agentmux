@@ -808,9 +808,9 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         <legend class="agent-launch-modal-label">Profile</legend>
                         <span class="agent-launch-modal-hint">
                             A Profile groups the agent's <strong>Identity</strong> (credentials
-                            for Claude, Codex, GitHub, AWS, …) with its <strong>Memory</strong>
-                            (notes, instructions, project context). Both are required —
-                            pick existing bundles or create new ones below.
+                            for Claude, Codex, GitHub, AWS, …) with its <strong>Preset</strong>
+                            (instructions, context, MCP servers, skills). Both are required —
+                            pick existing ones or create new ones below.
                         </span>
 
                         <div class="agent-launch-modal-bundle-row">
@@ -889,7 +889,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                          */}
 
                         <div class="agent-launch-modal-bundle-row">
-                            <span class="agent-launch-modal-bundle-row-label">Memory</span>
+                            <span class="agent-launch-modal-bundle-row-label">Preset</span>
                             <Show
                                 when={hasUserMemories()}
                                 fallback={
@@ -908,7 +908,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                                 : "Coming soon"
                                         }
                                     >
-                                        + New memory bundle...
+                                        + New preset...
                                     </button>
                                 }
                             >
@@ -917,10 +917,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     value={memoryId()}
                                     onChange={(e) => setMemoryId(e.currentTarget.value)}
                                     disabled={submitting() || continueLocksMemory()}
-                                    aria-label="Memory bundle"
+                                    aria-label="Preset"
                                 >
                                     <Show when={!memoryId()}>
-                                        <option value="" disabled>— Pick a memory —</option>
+                                        <option value="" disabled>— Pick a preset —</option>
                                     </Show>
                                     <For each={(memories() ?? []).filter((m) => !m.is_blank)}>
                                         {(memory) => (
@@ -939,10 +939,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     }
                                     title={
                                         props.onRequestNewMemory
-                                            ? "New memory bundle..."
+                                            ? "New preset..."
                                             : "Coming soon"
                                     }
-                                    aria-label="New memory bundle"
+                                    aria-label="New preset"
                                 >
                                     +
                                 </button>

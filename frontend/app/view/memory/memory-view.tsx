@@ -25,5 +25,5 @@ interface MemoryViewProps {
 }
 
 export const MemoryView = (_props: MemoryViewProps): JSX.Element => {
-    return <BundleSummaryPanel kind="Memory" />;
+    return <BundleSummaryPanel kind="Preset" />;
 };
