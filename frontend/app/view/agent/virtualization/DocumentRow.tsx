@@ -234,6 +234,20 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     </Show>
                 </div>
             </Show>
+            <Show when={props.node() && props.node().type === "agent_error"}>
+                <div class="agent-error-block">
+                    <span class="agent-error-code">
+                        {(() => {
+                            const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
+                            // code=0 is a sentinel for non-HTTP errors (network/CLI); don't show "HTTP 0"
+                            return n.code > 0 ? `HTTP ${n.code}` : "Error";
+                        })()}
+                    </span>
+                    <span class="agent-error-message">
+                        {(props.node() as Extract<DocumentNode, { type: "agent_error" }>).message}
+                    </span>
+                </div>
+            </Show>
         </>
     );
 }
