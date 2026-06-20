@@ -104,7 +104,8 @@ libc = "0.2"
 # Session-aware Linux startup splash (SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20).
 # X11 backend: a software-drawn override-redirect splash window (pixmap blit,
 # no GPU). Pure-Rust RustConnection over libxcb; present on every X11 stack.
-x11rb = "0.13"
+# `randr` → primary-monitor centering.
+x11rb = { version = "0.13", features = ["randr"] }
 # Wayland backend: a software-drawn (wl_shm) xdg_toplevel splash for native-
 # Wayland sessions (the default since #1611). No GPU/EGL. wayland-client is used
 # via sctk's reexport so the protocol versions can't skew.
