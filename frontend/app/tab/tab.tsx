@@ -94,8 +94,8 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
                     <button class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
                         ✏️ Rename
                     </button>
-                    <button class="tab-context-btn tab-context-btn-close" onClick={() => { props.onCloseTab(); props.onClose(); }}>
-                        ✕ Close
+                    <button class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
+                        ✕ Close menu
                     </button>
                 </div>
             </div>
@@ -292,8 +292,8 @@ function Tab(props: TabProps): JSX.Element {
                             from microsoft/vscode-codicons (close.svg) —
                             the same glyph VS Code uses for tab-close. */}
                         <svg
-                            width="14"
-                            height="14"
+                            width="16"
+                            height="16"
                             viewBox="0 0 16 16"
                             fill="currentColor"
                             xmlns="http://www.w3.org/2000/svg"

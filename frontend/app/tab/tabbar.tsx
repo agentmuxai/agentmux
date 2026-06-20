@@ -2,16 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi, setActiveTab } from "@/store/global";
+import { settingsAtom } from "@/store/config-signals";
 import { fireAndForget } from "@/util/util";
 import { isMacOS } from "@/util/platformutil";
 import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
+import { RpcApi } from "@/store/rpc-api";
+import { TabRpcClient } from "@/store/rpc-util";
 import { makeORef, getObjectValue } from "../store/wos";
+import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/element/modal";
+import { Button } from "@/element/button";
 import { deleteLayoutModelForTab } from "@/layout/index";
 import { DroppableTab } from "./droppable-tab";
 import {
@@ -46,6 +51,36 @@ interface TabBarProps {
 // Spec: SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md §4.2.
 const TEAR_PAST_PX = 5;
 
+function TabCloseConfirmModal(props: {
+    tabId: string;
+    onConfirm: (skipFuture: boolean) => void;
+    onCancel: () => void;
+}): JSX.Element {
+    const [skipFuture, setSkipFuture] = createSignal(false);
+    const tabName = () => getObjectValue<Tab>(makeORef("tab", props.tabId))?.name ?? "this tab";
+
+    return (
+        <Modal scope="window" open={true} onClose={props.onCancel} size="sm">
+            <ModalHeader title={`Close "${tabName()}"?`} />
+            <ModalBody>
+                <p style={{ margin: "0 0 12px 0" }}>This tab and all its panes will be closed.</p>
+                <label style={{ display: "flex", "align-items": "center", gap: "8px", cursor: "pointer", "font-size": "13px" }}>
+                    <input
+                        type="checkbox"
+                        checked={skipFuture()}
+                        onChange={(e) => setSkipFuture(e.currentTarget.checked)}
+                    />
+                    Don't ask again
+                </label>
+            </ModalBody>
+            <ModalFooter>
+                <Button className="ghost grey" onClick={props.onCancel}>Cancel</Button>
+                <Button className="solid red" onClick={() => props.onConfirm(skipFuture())}>Close tab</Button>
+            </ModalFooter>
+        </Modal>
+    );
+}
+
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
     let tabBarScrollRef!: HTMLDivElement;
@@ -79,6 +114,17 @@ function TabBar(props: TabBarProps): JSX.Element {
             await WorkspaceService.CloseTab(props.workspace.oid, tabId);
             deleteLayoutModelForTab(tabId);
         });
+    };
+
+    const [pendingCloseTabId, setPendingCloseTabId] = createSignal<string | null>(null);
+
+    const requestClose = (tabId: string) => {
+        if (tabIds().length <= 1) return;
+        if ((settingsAtom() as any)["tab:skipcloseconfirm"]) {
+            handleClose(tabId);
+        } else {
+            setPendingCloseTabId(tabId);
+        }
     };
 
     const { dragProps } = useWindowDrag();
@@ -643,7 +689,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 tabIndex={i()}
                                 tabIds={tabIds()}
                                 onSelect={() => handleSelect(tabId)}
-                                onClose={() => handleClose(tabId)}
+                                onClose={() => requestClose(tabId)}
                             />
                         </>
                     )}
@@ -657,6 +703,20 @@ function TabBar(props: TabBarProps): JSX.Element {
                     of the scroll container looked draggable but wasn't. */}
                 <div class="tab-bar-fill" data-drag-region="true" />
             </div>
+            <Show when={pendingCloseTabId() !== null}>
+                <TabCloseConfirmModal
+                    tabId={pendingCloseTabId()!}
+                    onConfirm={(skipFuture) => {
+                        const tabId = pendingCloseTabId()!;
+                        setPendingCloseTabId(null);
+                        if (skipFuture) {
+                            fireAndForget(() => RpcApi.SetConfigCommand(TabRpcClient, { "tab:skipcloseconfirm": true } as any));
+                        }
+                        handleClose(tabId);
+                    }}
+                    onCancel={() => setPendingCloseTabId(null)}
+                />
+            </Show>
         </div>
     );
 }
