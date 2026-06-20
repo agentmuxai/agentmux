@@ -40,6 +40,9 @@ const player = new SoundPlayer();
 const toolTones = new ToolTonesPlayer();
 const waitingTones = new Map<string, WaitingTonePlayer>(); // blockId → player
 const waitingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+// blockIds whose tone is temporarily faded out because the pane is focused.
+// The player stays in waitingTones so it can be restarted when focus leaves.
+const suspendedByFocus = new Set<string>();
 const lastFiredAt = new Map<SoundId, number>();
 
 const WAITING_AUTO_STOP_MS = 5 * 60 * 1000;
@@ -108,15 +111,31 @@ export function installSoundService(): () => void {
             const v = typeof vol === "number" ? vol : 0.25;
             for (const wp of waitingTones.values()) wp.setVolume(v);
         });
-        // Spec §8: if the user focuses the waiting pane while the tone is
-        // looping, fade it out reactively (not just at tone-start time).
+        // Spec §8: reactively suspend the waiting tone when the source pane
+        // gains focus, and resume it when focus moves elsewhere.
+        // "Suspend" = fade out but keep the player in waitingTones so it can
+        // be restarted from the top when focus leaves.
         createEffect(() => {
             const focusedId = focusManager.blockFocusAtom();
             const winFocused = windowFocused();
             const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
             const shouldSuppress = suppressRaw !== false;
-            if (shouldSuppress && winFocused && focusedId) {
-                stopWaiting(focusedId);
+            const vol = (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? 0.25;
+
+            const toSuspend: string[] = [];
+            const toResume: string[] = [];
+            for (const blockId of waitingTones.keys()) {
+                const suppressed = shouldSuppress && winFocused && focusedId === blockId;
+                if (suppressed && !suspendedByFocus.has(blockId)) toSuspend.push(blockId);
+                else if (!suppressed && suspendedByFocus.has(blockId)) toResume.push(blockId);
+            }
+            for (const blockId of toSuspend) {
+                void waitingTones.get(blockId)!.stop();
+                suspendedByFocus.add(blockId);
+            }
+            for (const blockId of toResume) {
+                suspendedByFocus.delete(blockId);
+                waitingTones.get(blockId)?.start(vol);
             }
         });
         return dispose;
@@ -239,6 +258,7 @@ function stopWaiting(blockId: string): void {
         clearTimeout(t);
         waitingTimeouts.delete(blockId);
     }
+    suspendedByFocus.delete(blockId);
     const wp = waitingTones.get(blockId);
     if (wp) {
         void wp.stop();
@@ -313,6 +333,7 @@ export function __resetSoundService(): void {
     for (const t of waitingTimeouts.values()) clearTimeout(t);
     waitingTimeouts.clear();
     waitingTones.clear();
+    suspendedByFocus.clear();
 }
 
 export function __getWaitingTones(): Map<string, WaitingTonePlayer> {
