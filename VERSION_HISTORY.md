@@ -1,5 +1,42 @@
 # AgentMux Version History
 
+## 0.46.6 — 2026-06-20
+
+- fix(win32): bind floater cascade to source window; fix z-order and multi-window regression
+- agent pane tab label now shows Claude Code session topic from OSC window-title sequences
+- feat(trust-center): accounts tab — hard-corner card styling, central modal detail overlay, fix stale panel on account switch
+- fix(dnd): suppress misleading pool-exhaustion WARN on non-Windows tearoff
+- fix(dnd): fire redock hover IPC before arm threshold to prevent ghost race
+- fix(blocks): DeleteBlock uses block's owning tab instead of floating window's active tab
+- feat(memory): global memory bundles seeded from workspace patterns
+- fix(memory): re-enable autoMemoryEnabled so agents can write native memory
+- feat(ui): reusable PopoverMenu — title-bar right-click rework and More dropdown item menu fix
+- feat(agent-pane): replace cog overlay with brain+id-card icons; identity modal + memory modal Phase 1
+- feat(native-memory): add agent:memory:list/read_file/write_file backend RPCs and frontend bindings (Phase 2)
+- feat(agent): persist agent failure state in block meta (P1.1/P1.2)
+- feat(agent): inline API error node in transcript (P1.3)
+- feat(agent): inline Login Again CTA on 401/403 error nodes (reauth P2.3)
+- feat(agent): open OAuth re-auth in an in-app browser pane with URL backup (reauth P2.1)
+- feat(voice): red recording indicator + 'Speak to <agent>' composer ghost text
+- feat(pool): enable pre-warmed tear-off window pool for macOS and Linux (Phase 7)
+- feat(agent): native memory browser in the agent pane brain modal
+- feat(mcp): SetName target_id — rename any window/tab/workspace/pane by explicit id
+- feat(swarm): redesign Swarm as a live two-level agent/subagent tree
+- feat(agent): style the Identity and Memory modal panels
+- fix(sysinfo): throttle chart SVG rebuild from 1Hz to 0.5Hz to fix sustained GPU CPU
+- feat(agent-pane): websearch rich result cards + Write tool content view
+- feat(cef): media-permission handler so voice input getUserMedia is granted
+- feat(voice): actionable mic-permission UX (blocked indicator + classified guidance)
+- fix(agent): force re-login on Login Again instead of trusting the auth-status check (reauth P2.5)
+- fix(auth): instrument host CLI login — log every PTY line from byte 0 + auth-env precedence snapshot (host-login-capture §4)
+- feat(pool): new-window pool on macOS/Linux; fix stale pool_not_implemented error in drag.rs
+- feat(trust-center): global brain tab — ordered workspace sections injected into every agent's CLAUDE.md
+- fix(auth): "Use existing login" — seed an agent from a valid global Claude credential instead of a fresh OAuth (host-login-capture §5.5)
+- feat(pool): Windows new-window pool — reuse promote_pool_window with physical-pixel anchor
+- fix(linux): prefer native Wayland ozone on CEF 148 instead of forcing XWayland
+- fix(agent): move activity dock below conversation, above composer
+
+
 ## 0.46.5 — 2026-06-18
 
 - feat(mcp): Loop + LoopStop tools — recurring prompt injection (Claude /loop analogue)
