@@ -1338,4 +1338,25 @@
         color: var(--secondary-text-color);
         overflow-wrap: anywhere;
     }
+
+    // Inline re-auth CTA — only rendered for recoverable auth errors (401/403).
+    // Pushed to the right edge of the row. SPEC_REAUTH_FROM_AUTH_ERROR §7.
+    .agent-error-login-btn {
+        flex-shrink: 0;
+        margin-left: auto;
+        align-self: center;
+        padding: 2px var(--space-1-5);
+        border: 1px solid var(--error-color);
+        border-radius: 3px;
+        background: transparent;
+        color: var(--error-color);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+
+        &:hover {
+            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        }
+    }
 }
