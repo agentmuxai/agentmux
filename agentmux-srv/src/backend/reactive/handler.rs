@@ -506,6 +506,16 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().unregister_block(block_id);
     }
 
+    /// Return the logical agent_id currently mapped to this block, if any.
+    pub fn agent_id_for_block(&self, block_id: &str) -> Option<String> {
+        self.inner
+            .lock()
+            .unwrap()
+            .block_to_agent
+            .get(block_id)
+            .cloned()
+    }
+
     #[allow(dead_code)]
     pub fn update_last_seen(&self, agent_id: &str) {
         self.inner.lock().unwrap().update_last_seen(agent_id);
