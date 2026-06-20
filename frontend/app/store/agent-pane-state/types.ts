@@ -509,7 +509,14 @@ export type AgentPaneCommand =
      * the strip's chevron badge updates. When the panel is already
      * open, no-op (the user sees the new entry directly).
      */
-    | { type: "LogEntryArrived" };
+    | { type: "LogEntryArrived" }
+    /**
+     * User started typing in the composer while the pane was in the
+     * waiting-for-input state. Clears `lastTurnHadQuestion` so the
+     * store can emit `waiting-ended` with reason `"typing"`.
+     * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §6.6.
+     */
+    | { type: "WaitingTypingStarted" };
 
 export type AgentPaneEvent =
     | { type: "init-ready" }

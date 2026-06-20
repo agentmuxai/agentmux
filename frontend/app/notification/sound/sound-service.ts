@@ -219,7 +219,11 @@ function stopWaiting(blockId: string): void {
         clearTimeout(t);
         waitingTimeouts.delete(blockId);
     }
-    waitingTones.get(blockId)?.stop();
+    const wp = waitingTones.get(blockId);
+    if (wp) {
+        void wp.stop();
+        waitingTones.delete(blockId);
+    }
 }
 
 /**

@@ -1285,7 +1285,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 <AgentFooter
                     agentName={agentName()}
                     onSendMessage={handleSendMessage}
-                    onTyping={() => scrollToBottomFn?.()}
+                    onTyping={() => {
+                        scrollToBottomFn?.();
+                        // Stop the waiting-ambient tone on first keystroke.
+                        dispatchPaneIfRegistered(model.blockId, {
+                            type: "WaitingTypingStarted",
+                        });
+                    }}
                     onStopAgent={commands.stopAgent}
                     onRecallLatestQueued={commands.recallLatestHeld}
                     getCompletions={commands.completions}

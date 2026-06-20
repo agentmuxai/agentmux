@@ -149,6 +149,21 @@ export function registerPane(
  * `unregisterPane` from `agent-pane-registration.ts`.
  */
 export function unregisterPane(blockId: string): void {
+    // If the pane was in a waiting-for-input state, notify listeners so the
+    // sound service can stop the looping tone before the slot is gone.
+    const slot = slots.get(blockId);
+    if (
+        slot &&
+        slot.state.turnPhase.kind === "Done" &&
+        slot.state.turnPhase.outcome === "completed" &&
+        slot.state.lastTurnHadQuestion
+    ) {
+        const ev: AgentPaneEvent = { type: "waiting-ended", reason: "closed" };
+        eventSink(blockId, ev);
+        for (const l of extraListeners) {
+            try { l(blockId, ev); } catch { /* isolate */ }
+        }
+    }
     slots.delete(blockId);
 }
 
@@ -230,7 +245,7 @@ export function dispatch(
         extraEvents.push({ type: "waiting-for-input" });
     }
 
-    // Leaving waiting state: pane was waiting and a new turn started (submitted).
+    // Leaving waiting state: user submitted a new message.
     if (
         prevPhase.kind === "Done" &&
         prevPhase.outcome === "completed" &&
@@ -238,6 +253,15 @@ export function dispatch(
         nextPhase.kind === "Submitting"
     ) {
         extraEvents.push({ type: "waiting-ended", reason: "submitted" });
+    }
+
+    // Leaving waiting state: user started typing (WaitingTypingStarted clears the flag).
+    if (
+        prev.lastTurnHadQuestion &&
+        !slot.state.lastTurnHadQuestion &&
+        nextPhase.kind !== "Submitting"
+    ) {
+        extraEvents.push({ type: "waiting-ended", reason: "typing" });
     }
 
     const allEvents = [...result.events, ...extraEvents];
