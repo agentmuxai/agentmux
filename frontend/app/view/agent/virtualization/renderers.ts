@@ -14,6 +14,7 @@
 
 import type { Component } from "solid-js";
 import type {
+    AgentErrorNode,
     AgentMessageNode,
     DocumentNode,
     DocumentState,
@@ -179,6 +180,7 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     user_message: false,
     subagent_link: false,
     shell: false,
+    agent_error: false, // fixed-content inline error — not a streaming node
 };
 
 // ── Registry factory ────────────────────────────────────────────────────────
@@ -191,6 +193,9 @@ export interface RendererComponents {
     UserMessage: Component<{ node: UserMessageNode; state: DocumentState }>;
     SubagentLink: Component<{ node: SubagentLinkNode; state: DocumentState }>;
     Shell: Component<{ node: ShellNode; state: DocumentState }>;
+    /** agent_error nodes are rendered inline in DocumentRow — this slot is a
+     *  registry placeholder so NodeRendererRegistry stays exhaustive. */
+    AgentError: Component<{ node: AgentErrorNode; state: DocumentState }>;
 }
 
 /**
@@ -235,6 +240,11 @@ export function buildRendererRegistry(components: RendererComponents): NodeRende
             estimatedSize: estimateShell,
             isStreamingCapable: STREAMING_CAPABLE.shell,
         },
+        agent_error: {
+            component: components.AgentError,
+            estimatedSize: (_node: AgentErrorNode) => 64,
+            isStreamingCapable: STREAMING_CAPABLE.agent_error,
+        },
     };
 }
 
@@ -252,6 +262,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "user_message": return estimateUserMessage(node, state);
         case "subagent_link": return estimateSubagentLink(node);
         case "shell": return estimateShell(node, state);
+        case "agent_error": return 64; // compact fixed-height error node
     }
 }
 
@@ -289,6 +300,7 @@ export function estimateNodeForState(
                     : estimateTextHeight(node.content);
             case "subagent_link": return SUBAGENT_LINK_PX;
             case "shell":         return SHELL_COLLAPSED_PX;
+            case "agent_error":   return 64;
         }
     }
     // expanded
@@ -300,5 +312,6 @@ export function estimateNodeForState(
         case "markdown":      return estimateTextHeight(node.content);
         case "subagent_link": return SUBAGENT_LINK_PX;
         case "shell":         return SHELL_EXPANDED_PX;
+        case "agent_error":   return 64;
     }
 }

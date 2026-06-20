@@ -59,6 +59,20 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Case 5a: Top-level "result" event — session complete with stats
         if (rawEvent.type === "result") {
+            const events: StreamEvent[] = [];
+            // Surface errors as an inline transcript node so the user sees the
+            // failure reason in context. Covers both HTTP API errors (401/429/…
+            // with api_error_status) and CLI-level/network errors (is_error:true
+            // but no numeric api_error_status). Spec: SPEC_AGENT_ERROR_FRAMEWORK §P1.3
+            if (rawEvent.is_error === true) {
+                const code = typeof rawEvent.api_error_status === "number"
+                    ? rawEvent.api_error_status
+                    : 0; // 0 = non-HTTP error (network / CLI crash)
+                const message = typeof rawEvent.result === "string"
+                    ? rawEvent.result
+                    : code > 0 ? `API error ${code}` : "Agent encountered an error";
+                events.push({ type: "error_result", code, message });
+            }
             const stats: SessionStats = {};
             if (typeof rawEvent.cost_usd === "number") stats.cost_usd = rawEvent.cost_usd;
             if (typeof rawEvent.duration_ms === "number") stats.duration_ms = rawEvent.duration_ms;
@@ -75,7 +89,8 @@ export class ClaudeTranslator implements OutputTranslator {
                 if (input > 0) stats.input_tokens = input;
                 if (output > 0) stats.output_tokens = output;
             }
-            return [{ type: "session_end", stats }];
+            events.push({ type: "session_end", stats });
+            return events;
         }
 
         // Case 5: Raw Anthropic API event (content_block_delta, etc.)

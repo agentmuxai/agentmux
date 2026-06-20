@@ -1309,3 +1309,33 @@
         overflow-wrap: anywhere;
     }
 }
+
+// Inline API error node (P1.3 — agent_error DocumentNode)
+// Rendered when the CLI's result frame carries is_error:true (e.g. 401 auth,
+// 429 rate-limit). Not interactive; the FailureRow banner (above) handles retry.
+.agent-error-block {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1-5);
+    padding: var(--space-1) var(--space-1-5);
+    margin: var(--space-1) 0;
+    border-left: 2px solid var(--error-color);
+    background: color-mix(in srgb, var(--error-color) 8%, transparent);
+    border-radius: 0 2px 2px 0;
+    font-size: 12px;
+    line-height: 1.4;
+
+    .agent-error-code {
+        color: var(--error-color);
+        font-family: var(--fixed-font, monospace);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .agent-error-message {
+        color: var(--secondary-text-color);
+        overflow-wrap: anywhere;
+    }
+}
