@@ -260,3 +260,52 @@ one small PR.
 | Q2 | If the user completes auth in the system browser (fallback path), does poll detect it? | Yes — poll calls `CheckCliAuthCommand` which reads credentials on disk; it doesn't care which browser set them. |
 | Q3 | The OAuth pane splits the current tab — does it crowd the agent pane? | Acceptable: the split keeps both visible so the user can paste the code back. The pane can be closed/redocked normally after login. A future refinement could open it as an ephemeral/magnified pane that auto-closes on success. |
 | Q4 | Should the pane auto-close on auth success? | Not in this PR — the launch-flow doesn't track the created blockId. Tracked as a follow-up; closing it is a normal pane action meanwhile. |
+
+---
+
+## 11. The "Login Again does nothing" bug — force-login (P2.5)
+
+**Symptom (dogfood, v0.46.6):** agent 401s, user clicks **Login Again**, nothing
+happens. No browser opens, no error, no change.
+
+**Root cause (confirmed from live logs).** The click ran `startLaunchFlow()`,
+whose Phase 2 calls `CheckCliAuth`:
+
+```
+ResolveCli claude            ✓
+CheckCliAuth claude.cmd       ✓  → authenticated:true   ← FALSE POSITIVE
+needsLogin = false           → login skipped (no browser)
+ControllerResync force=false → no-op on the running persistent controller
+```
+
+`claude auth status` only confirms a credential is **present**, not **valid**.
+An expired/revoked token still reports `authenticated:true`, so the gated launch
+flow trusts it, skips login entirely, and the non-forced resync no-ops. The
+ground truth that auth is broken is the **401 itself** (which P1.3 already
+surfaces) — not the status check.
+
+**Fix.** The explicit "Login Again" actions must **force** a login, bypassing
+the status check, because the 401 already told us the token is bad:
+
+- New `forceProviderLogin()` (`flows/force-login.ts`): runs `runCliLogin`
+  unconditionally → `openOAuthBrowserPane` (§6′) → `setAuthUrl`. **Never** calls
+  `CheckCliAuth`.
+- It deliberately **omits the `CheckCliAuth` success-poll** the gated flow runs:
+  with a present-but-expired token that poll would "succeed" on the first tick
+  and reap the in-flight login CLI before the user finishes. Instead the running
+  persistent agent re-reads its credential per request, so the next message uses
+  the fresh token and clears the failure row.
+- `useAgentControllerStatus.relogin()` reads the CLI path + auth env from block
+  meta (`cmd` / `cmd:env`, written at launch) and calls the helper.
+- Both "Login Again" entry points (failure banner `onLoginAgain`, inline error
+  node `onAgentErrorLogin`) now call `relogin()` instead of `startLaunchFlow()`.
+- `/login` is refactored onto the same helper (DRY; also gains the in-app pane).
+
+`startLaunchFlow()` keeps trusting `CheckCliAuth` for **first launch**, where the
+check is reliable (genuinely no credential → it correctly returns false).
+
+**Immediate workaround (pre-fix):** typing `/login` in the agent already bypassed
+the gate (it called `runCliLogin` directly), so it was the manual unblock.
+
+**Follow-up:** force-restart / health-revalidate after login so even providers
+that cache the token in-process pick it up without a manual message resend.

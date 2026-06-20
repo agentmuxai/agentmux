@@ -14,7 +14,7 @@
  * is the exception. See spec §4.4 dispatcher note.
  */
 
-import { getApi } from "@/app/store/global";
+import { forceProviderLogin } from "../../flows/force-login";
 import type { SlashCommand, SlashResult } from "../types";
 
 export const loginCommand: SlashCommand = {
@@ -38,14 +38,16 @@ export const loginCommand: SlashCommand = {
                     if (typeof v === "string") authEnv[k] = v;
                 }
             }
-            const url = await getApi().runCliLogin(cliPath, prov.authLoginCommand, authEnv, prov.requiresLoginTty ?? false);
-            if (url) {
-                ctx.setAuthUrl(url);
-                ctx.log("auth", "OAuth URL captured — browser should open automatically");
-                ctx.log("auth", "if it didn't, copy the URL from the box above");
-            } else {
-                ctx.log("auth", "a browser window should have opened — complete login there");
-            }
+            // Shared with the failure-banner / inline-error "Login Again" action
+            // (useAgentControllerStatus.relogin) — opens the OAuth in an in-app
+            // browser pane and surfaces the URL box. See force-login.ts.
+            await forceProviderLogin({
+                provider: prov,
+                cliPath,
+                authEnv,
+                setAuthUrl: ctx.setAuthUrl,
+                log: ctx.log,
+            });
             ctx.log("auth", "run /cost to verify authentication once logged in");
             return { kind: "ok" };
         } catch (err: any) {
