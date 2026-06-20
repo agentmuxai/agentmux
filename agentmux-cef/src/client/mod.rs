@@ -560,13 +560,11 @@ impl AgentMuxHandler {
         }
 
         // Phase B.4 — report top-level windows to the launcher's
-        // read-only state mirror. Skips browser-pane child HWNDs and
-        // tab pool windows (`window-pool-*`); pane pool windows
-        // (`floating-pool-*`) ARE reported here as regular windows so
-        // that the launcher's windows-dimension count matches
-        // host_counts_snapshot (which also counts them as windows —
-        // see state.rs::host_counts_snapshot and the pane pool
-        // design rationale in SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM).
+        // read-only state mirror. Skips browser-pane child HWNDs,
+        // tab pool windows (`window-pool-*`), and pane pool windows
+        // (`floating-pool-*`). Pane pool windows are excluded here AND
+        // in `host_counts_snapshot` (state.rs) so the launcher mirror's
+        // windows count stays in sync with the host count on all platforms.
         // No-op if launcher IPC isn't connected (`task dev` mode).
         if is_top_level_window && !label.starts_with("window-pool-") && !label.starts_with("floating-pool-") {
             // Phase B.5 (window_meta step d) — kind/parent come
