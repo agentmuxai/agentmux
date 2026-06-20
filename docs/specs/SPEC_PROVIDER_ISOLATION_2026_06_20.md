@@ -26,6 +26,7 @@ For every provider `P` and every agent:
 - **INV-A (auth):** the agent's live credential dir (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …) is an **AgentMux-owned** path under `~/.agentmux/…`. It is **never** the user's `~/.<P>` dir. Tokens are read and **refreshed in the AgentMux dir only**.
 - **INV-X (executable):** the agent runs an **AgentMux-installed, version-pinned** CLI under `~/.agentmux/…`. It **never** resolves or runs the user's PATH/global CLI.
 - **INV-R (read-only import):** the user's `~/.<P>` may be **read** exactly once, on explicit/opt-in import, and **copied** into the AgentMux dir. It is never written, never pointed-at as the live dir, never the run target.
+- **INV-M (memory & state):** an agent's **auto-memory** (`projects/<repo>/memory/`), **user `CLAUDE.md`**, **transcripts/sessions**, and **settings** follow `CLAUDE_CONFIG_DIR` — they live in the AgentMux dir, **never** `~/.<P>`. This holds *automatically* once INV-A is satisfied (it is the same dir — `CLAUDE_CONFIG_DIR` relocates the whole Claude home, not just credentials), but is stated so it can't silently regress. (Org-managed policy `CLAUDE.md` at a system path is read-only org config, not user state — out of scope.)
 
 A reviewer seeing any code that sets a `*_CONFIG_DIR`/`*_HOME` to `~/.<P>`, or runs a CLI resolved via `where`/`which`, must reject it.
 
@@ -91,6 +92,27 @@ Reframe the 🌐 path as the *manual* form of 4.1's import (read `~/.claude` →
 - **Pin the version:** replace `CLAUDE_VERSION = "latest"` with a concrete pinned version per provider.
 
 (Out of scope for this PR; tracked here so the executable axis isn't lost.)
+
+## 5b. Memory & state (config half — already covered by INV-A, with one optional knob)
+
+`CLAUDE_CONFIG_DIR` relocates the **entire** Claude home, so memory/transcripts/
+settings ride along with the auth dir for free (INV-M). Confirmed on disk: the
+AgentMux provider dir already contains `.claude.json`, `projects/`, `sessions/`,
+`backups/` — not just `.credentials.json`. So **the auth-half fix isolates memory
+too**; nothing extra is required for correctness.
+
+- **Auto-memory** → `<CLAUDE_CONFIG_DIR>/projects/<repo>/memory/MEMORY.md`.
+- **User `CLAUDE.md`** → `<CLAUDE_CONFIG_DIR>/CLAUDE.md`.
+- **Project `CLAUDE.md`** → the agent's working dir (`~/.agentmux/agents/…`).
+
+**Optional knob — pin memory explicitly.** Claude Code honours
+`autoMemoryDirectory` in `settings.json` (absolute or `~/`-prefixed, any settings
+scope) to put auto-memory at a chosen path *independent of* `CLAUDE_CONFIG_DIR`.
+If we ever want memory shared per-provider or kept per-agent separately from the
+auth dir, set `autoMemoryDirectory` in the agent's isolated `settings.json` rather
+than relying on the implicit `projects/<repo>/memory/` location. (Not required;
+a deliberate-control lever for the config half.) Full analysis:
+`docs/reports/REPORT_AGENT_AUTH_DIVERGENCE_2026_06_20.md` §10.
 
 ## 6. Behaviour matrix (post-auth-half)
 
