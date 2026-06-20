@@ -60,17 +60,18 @@ export class ClaudeTranslator implements OutputTranslator {
         // Case 5a: Top-level "result" event — session complete with stats
         if (rawEvent.type === "result") {
             const events: StreamEvent[] = [];
-            // Surface API errors (auth 401, rate-limit 429, etc.) as an inline
-            // transcript node so the user sees the failure reason in context.
-            // Spec: SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md §P1.3
-            if (rawEvent.is_error === true && typeof rawEvent.api_error_status === "number") {
-                events.push({
-                    type: "error_result",
-                    code: rawEvent.api_error_status,
-                    message: typeof rawEvent.result === "string"
-                        ? rawEvent.result
-                        : `API error ${rawEvent.api_error_status}`,
-                });
+            // Surface errors as an inline transcript node so the user sees the
+            // failure reason in context. Covers both HTTP API errors (401/429/…
+            // with api_error_status) and CLI-level/network errors (is_error:true
+            // but no numeric api_error_status). Spec: SPEC_AGENT_ERROR_FRAMEWORK §P1.3
+            if (rawEvent.is_error === true) {
+                const code = typeof rawEvent.api_error_status === "number"
+                    ? rawEvent.api_error_status
+                    : 0; // 0 = non-HTTP error (network / CLI crash)
+                const message = typeof rawEvent.result === "string"
+                    ? rawEvent.result
+                    : code > 0 ? `API error ${code}` : "Agent encountered an error";
+                events.push({ type: "error_result", code, message });
             }
             const stats: SessionStats = {};
             if (typeof rawEvent.cost_usd === "number") stats.cost_usd = rawEvent.cost_usd;
