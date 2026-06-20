@@ -86,7 +86,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                 >
                     <div class="swarm-tree">
                         <For each={tree()}>
-                            {(node) => <AgentRow model={model} node={node} />}
+                            {(node) => <AgentRow node={node} />}
                         </For>
                     </div>
                 </Show>
@@ -97,7 +97,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
 // ── Agent root row ───────────────────────────────────────────────────────
 
-function AgentRow({ model, node }: { model: SwarmViewModel; node: AgentTreeNode }): JSX.Element {
+function AgentRow({ node }: { node: AgentTreeNode }): JSX.Element {
     const handleOpen = () => {
         refocusNode(node.blockId);
     };
@@ -128,7 +128,7 @@ function AgentRow({ model, node }: { model: SwarmViewModel; node: AgentTreeNode 
                     }
                 >
                     <For each={node.subagents}>
-                        {(sub) => <SubagentRow model={model} sub={sub} />}
+                        {(sub) => <SubagentRow sub={sub} />}
                     </For>
                 </Show>
             </div>
@@ -138,7 +138,7 @@ function AgentRow({ model, node }: { model: SwarmViewModel; node: AgentTreeNode 
 
 // ── Subagent child row ───────────────────────────────────────────────────
 
-function SubagentRow({ model, sub }: { model: SwarmViewModel; sub: ActiveSubagent }): JSX.Element {
+function SubagentRow({ sub }: { sub: ActiveSubagent }): JSX.Element {
     const handleOpen = () => {
         if (isSubagentPaneOpen(sub.agent_id)) return;
         void openSubagentPane({
