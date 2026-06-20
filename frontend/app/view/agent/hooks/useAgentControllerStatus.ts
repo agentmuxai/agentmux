@@ -37,6 +37,7 @@ import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { getApi, getBlockMetaKeyAtom } from "@/app/store/global";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { forceProviderLogin } from "../flows/force-login";
+import { seedGlobalLogin } from "../flows/seed-global-login";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -74,6 +75,14 @@ export interface UseAgentControllerStatus {
      * SPEC_REAUTH_FROM_AUTH_ERROR §11.
      */
     relogin: () => Promise<void>;
+    /**
+     * "Use my existing login" — seed this agent's isolated auth dir from the
+     * user's already-valid GLOBAL Claude login instead of a fresh OAuth, the
+     * reliable recovery for Claude Code v2.1.x's un-scrapeable login TUI
+     * (SPEC_HOST_CLI_LOGIN_CAPTURE §5.5). Like relogin, no restart is needed —
+     * the running agent re-reads its credential per request.
+     */
+    useGlobalLogin: () => Promise<void>;
     cancelLogin: () => void;
 }
 
@@ -187,6 +196,28 @@ export function useAgentControllerStatus(
         }
     };
 
+    // "Use my existing login" — seed the isolated dir from the global Claude
+    // login instead of a fresh OAuth (SPEC_HOST_CLI_LOGIN_CAPTURE §5.5). Guarded
+    // against double-fire like relogin; the running agent re-reads its
+    // credential per request, so a successful seed needs no restart.
+    let seedInFlight = false;
+    const useGlobalLogin = async () => {
+        if (seedInFlight) return;
+        const prov = opts.provider();
+        if (!prov) {
+            opts.log("auth", "use existing login: no active provider", "warn");
+            return;
+        }
+        seedInFlight = true;
+        try {
+            await seedGlobalLogin(prov.id, opts.log);
+        } catch (err: any) {
+            opts.log("auth", `use existing login failed: ${err?.message ?? String(err)}`, "error");
+        } finally {
+            seedInFlight = false;
+        }
+    };
+
     const cancelLogin = () => {
         loginCancelled = true;
         getApi().cancelCliLogin().catch(() => {});
@@ -217,6 +248,7 @@ export function useAgentControllerStatus(
         loginWaiting,
         startLaunchFlow,
         relogin,
+        useGlobalLogin,
         cancelLogin,
     };
 }

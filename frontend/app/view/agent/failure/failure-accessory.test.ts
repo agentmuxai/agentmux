@@ -21,11 +21,12 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, trustCenter: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, trustCenter: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
         loginAgain: vi.fn(() => void _calls.loginAgain++),
+        useExistingLogin: vi.fn(() => void _calls.useExistingLogin++),
         trustCenter: vi.fn(() => void _calls.trustCenter++),
         newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
@@ -72,6 +73,13 @@ describe("failureToRow", () => {
         expect(login?.primary).toBe(true);
         login?.onClick();
         expect(on._calls.loginAgain).toBe(1);
+
+        // Seed-from-global recovery sits alongside Login Again (not primary).
+        const useExisting = action(row, "Use existing login");
+        expect(useExisting).toBeTruthy();
+        expect(useExisting?.primary).toBeFalsy();
+        useExisting?.onClick();
+        expect(on._calls.useExistingLogin).toBe(1);
 
         const trust = action(row, "Trust Center → Accounts");
         expect(trust).toBeTruthy();

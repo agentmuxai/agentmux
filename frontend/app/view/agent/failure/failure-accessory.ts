@@ -23,6 +23,8 @@ export interface FailureActions {
     retry: () => void;
     /** Re-authenticate this agent's provider account (auth failures). */
     loginAgain: () => void;
+    /** Seed from the user's existing valid global Claude login (no fresh OAuth). */
+    useExistingLogin: () => void;
     /** Open Trust Center → Accounts. */
     trustCenter: () => void;
     /** Start a fresh agent session — recovery for a context-window overflow,
@@ -99,6 +101,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
         case "auth":
             actions.push(
                 { glyph: "🔑", label: "Login Again", title: "Re-authenticate this agent", primary: true, onClick: on.loginAgain },
+                { glyph: "🌐", label: "Use existing login", title: "Copy your existing valid global Claude login into this agent (no re-OAuth)", onClick: on.useExistingLogin },
                 trustCenter,
             );
             break;

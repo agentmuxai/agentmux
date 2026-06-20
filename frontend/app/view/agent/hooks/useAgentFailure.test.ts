@@ -56,7 +56,7 @@ const hasRetryCountdown = (ui: UseAgentFailureResult) =>
     (ui.row()?.actions ?? []).some((a) => a.label === "Retry now (5s)");
 
 const mkUI = (onRetry: () => void): UseAgentFailureResult =>
-    useAgentFailure({ blockId: "b", onRetry, onLoginAgain() {}, onTrustCenter() {}, onNewSession() {} });
+    useAgentFailure({ blockId: "b", onRetry, onLoginAgain() {}, onUseExistingLogin() {}, onTrustCenter() {}, onNewSession() {} });
 
 describe("useAgentFailure P1.2 — persisted meta seed on mount", () => {
     beforeEach(() => {

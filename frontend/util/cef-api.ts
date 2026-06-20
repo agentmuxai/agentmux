@@ -609,6 +609,12 @@ export function buildCefApi(): AppApi {
         cancelCliLogin: async () => {
             await invokeCommand("cancel_cli_login");
         },
+        seedProviderAuthFromGlobal: async (providerId: string) => {
+            return await invokeCommand<{ seeded: boolean; status: string; expiresAt?: number | null }>(
+                "seed_provider_auth_from_global",
+                { providerId },
+            );
+        },
 
         listen: async (event: string, callback: (event: any) => void) => {
             const unlisten = await listenEvent(event, callback);
