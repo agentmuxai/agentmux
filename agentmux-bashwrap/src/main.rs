@@ -1,5 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+// Suppress console windows on Windows — bashwrap communicates via pipes and
+// HTTP, never via a console. Without this attribute every Bash tool call
+// produces a blank transparent window (Windows auto-creates one for any
+// CUI-subsystem process unless CREATE_NO_WINDOW is passed by the spawner,
+// which Claude Code's hook mechanism does not do).
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 //! agentmux-bashwrap — streaming bash wrapper for AgentMux agents.
 //!
