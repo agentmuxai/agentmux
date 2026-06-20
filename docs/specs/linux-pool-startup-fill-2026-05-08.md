@@ -1,6 +1,6 @@
 # Linux/macOS: wire startup-time window-pool fill
 
-**Status:** BLOCKED — see "Blockers" below. Investigation 2026-05-08; reclassified 2026-05-10 after PR #788 round-2 codex review.
+**Status:** RESOLVED — both blockers fixed by Phase 7 (PR #1595, merged 2026-06-20). Tab tear-off pool now active on macOS and Linux. See `docs/specs/SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md` for the implementation and `docs/specs/SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md` for remaining work (pane pool, new-window pool).
 **Author:** runtime investigation 2026-05-08.
 **Owner:** TBD.
 **Affects:** Linux + macOS AppImage / .app builds.

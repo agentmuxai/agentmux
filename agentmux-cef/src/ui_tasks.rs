@@ -907,6 +907,89 @@ pub fn post_promote_pool_window(
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Promote pool window for new-window (Cmd+N / File → New Window) ────────
+//
+// Identical mechanical flow to PromotePoolWindowTask (set_bounds + show) but
+// emits `pool:new-window` instead of `pool:promote`, carrying no workspaceId.
+// The frontend's awaitPoolPromote handles both events; on `pool:new-window` it
+// omits workspaceId from the URL so initHostNewWindow creates a fresh workspace
+// rather than reattaching an existing one.
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct PromotePoolWindowForNewWindowTask {
+        state: Arc<AppState>,
+        label: String,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let Some(window) = get_window_on_ui(&self.state, &self.label) else {
+                tracing::warn!(
+                    target: "pool:new-window",
+                    label = %self.label,
+                    "[pool:new-window] window not found on UI thread — pool window may have closed"
+                );
+                return;
+            };
+
+            window.set_bounds(Some(&cef::Rect {
+                x: self.x,
+                y: self.y,
+                width: self.width,
+                height: self.height,
+            }));
+            window.show();
+
+            tracing::info!(
+                target: "pool:new-window",
+                label = %self.label,
+                x = self.x,
+                y = self.y,
+                width = self.width,
+                height = self.height,
+                "[pool:new-window] window repositioned + shown via set_bounds + show"
+            );
+
+            crate::events::emit_event_to_window(
+                &self.state,
+                &self.label,
+                "pool:new-window",
+                &serde_json::json!({}),
+            );
+
+            tracing::info!(
+                target: "pool:new-window",
+                label = %self.label,
+                "[pool:new-window] pool:new-window emitted — renderer will create fresh workspace"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn post_promote_pool_window_for_new_window(
+    state: &Arc<AppState>,
+    label: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    let mut task = PromotePoolWindowForNewWindowTask::new(
+        state.clone(),
+        label.to_string(),
+        x,
+        y,
+        width,
+        height,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Get window absolute position (DIP) — blocking UI-thread read ──────────
 //
 // CEF Views `window.bounds()` must run on the UI thread, but

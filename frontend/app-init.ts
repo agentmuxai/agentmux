@@ -552,18 +552,16 @@ export async function initApp() {
     if (hostApp) {
         getApi().sendLog("Starting host app initialization");
         try {
-            // Tear-off Phase 6 — pool-mode short-circuit. If the URL
-            // carries `?pool=1`, this renderer was spawned by the
-            // host's pre-warmed window pool. Skip the standard
-            // workspace init and wait for `pool:promote` to arrive.
-            // On promote, the same initHostNewWindow flow runs against
-            // the workspace ID the promote event delivers (pushed into
-            // the URL by awaitPoolPromote).
+            // Pool-mode short-circuit. `?pool=1` means this renderer was
+            // pre-spawned by the host's window pool. Defer workspace init and
+            // wait for either `pool:promote` (tear-off, injects workspaceId) or
+            // `pool:new-window` (Cmd+N, no workspaceId → fresh workspace).
+            // initHostNewWindow branches on workspaceId presence automatically.
             const { isPoolMode, awaitPoolPromote } = await import("@/app/init/pool");
             if (isPoolMode()) {
-                getApi().sendLog("[initApp] pool mode — deferring init until promote");
+                getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
                 await awaitPoolPromote();
-                getApi().sendLog("[initApp] pool:promote received — bootstrapping workspace");
+                getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
                 await initHostNewWindow();
             } else {
                 // Check if this is a new window or the main window

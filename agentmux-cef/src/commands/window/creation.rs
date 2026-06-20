@@ -235,6 +235,33 @@ sessions and agent state are in <code>~/.agentmux/</code> and are unaffected.</p
 /// entry, independent lifecycle. See
 /// `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md`.
 pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    // H.7 invariant — also enforced inside open_window_with_kind (cold path).
+    if state.any_browser_pane_closing() {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[wfr:gate] open_new_window refused — pane is mid-close (H.7 invariant)"
+        );
+        return Err("a pane is currently closing; retry shortly".to_string());
+    }
+
+    // Pool-first path — instant show with no renderer-spawn latency (~3s saved).
+    // On macOS/Linux, promotes a pre-warmed pool window via CEF Views set_bounds+show
+    // and emits pool:new-window so the renderer creates a fresh workspace.
+    // On Windows, returns None (TODO: dedicated Win32 physical-pixel path).
+    let (pos_x, pos_y) = get_offset_position();
+    let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
+    if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
+        state, pos_x, pos_y, win_w, win_h,
+    ) {
+        tracing::info!(
+            target: "pool:new-window",
+            label = %label,
+            "[pool:new-window] served from pool — skipping cold-path window creation"
+        );
+        return Ok(serde_json::json!(label));
+    }
+
+    // Cold path — spin up a fresh CEF window (~2.5–3.5 s).
     open_window_with_kind(state, crate::state::WindowKind::FullInstance, None)
 }
 

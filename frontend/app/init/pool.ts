@@ -21,53 +21,61 @@ export function isPoolMode(): boolean {
 }
 
 /**
- * Wait for the host's `pool:promote` event. Resolves with the
- * workspace ID that should be bootstrapped.
+ * Wait for the host to assign this pool window — either:
+ *   - `pool:promote`  (tab tear-off): injects workspaceId into URL so
+ *     initHostNewWindow reattaches an existing workspace.
+ *   - `pool:new-window` (Cmd+N / File → New Window): removes pool=1 but
+ *     leaves workspaceId absent so initHostNewWindow creates a fresh workspace.
  *
- * Critical: install the listener BEFORE signalling
- * `pool_window_ready` to the host. The host only adds this label
- * to its pool queue after the signal — so any promote that fires
- * before then is impossible by construction. Without this gate
- * the host's emit_event_to_window would race our listenEvent
- * install and the promote would silently drop.
+ * Critical: install both listeners BEFORE signalling `pool_window_ready`.
+ * The host only enqueues this label after the signal, so by construction no
+ * event can fire before both listeners are live — the race window is closed.
  *
- * No client-side timeout: pool windows can legitimately sit idle
- * for hours or days between app start and the user's first
- * tear-off. A local timeout would make initApp treat the wait as
- * a host-init failure and block any later promote from
- * bootstrapping cleanly. Lifetime is governed host-side; the
- * renderer just waits.
+ * No client-side timeout: pool windows can sit idle for hours between
+ * app start and the user's first action. A timeout would block later promotes
+ * from ever bootstrapping. Lifetime is governed host-side.
  */
-export async function awaitPoolPromote(): Promise<string> {
+export async function awaitPoolPromote(): Promise<void> {
     const { listenEvent } = await import("@/app/platform/ipc");
     const { invokeCommand } = await import("@/app/platform/ipc");
     const { getApi } = await import("@/store/global");
 
-    return new Promise<string>(async (resolve, reject) => {
-        const unsub = await listenEvent<{ workspaceId: string }>(
+    return new Promise<void>(async (resolve, reject) => {
+        let unsub1: (() => void) | undefined;
+        let unsub2: (() => void) | undefined;
+        const cleanup = () => { unsub1?.(); unsub2?.(); };
+
+        // tear-off promote: push workspaceId so initHostNewWindow reattaches.
+        unsub1 = await listenEvent<{ workspaceId: string }>(
             "pool:promote",
             (payload) => {
-                unsub();
-                // Push the workspaceId into the URL so initHostNewWindow's
-                // existing `URLSearchParams.get("workspaceId")` lookup
-                // picks it up without any further plumbing.
+                cleanup();
                 const url = new URL(window.location.href);
                 url.searchParams.set("workspaceId", payload.workspaceId);
-                // pool=1 is no longer accurate — flip it off so future
-                // re-init paths (HMR, etc.) take the normal route.
                 url.searchParams.delete("pool");
                 window.history.replaceState({}, "", url.toString());
-                resolve(payload.workspaceId);
+                resolve();
             },
         );
 
-        // Listener installed — now safe to signal the host that this
-        // pool slot can receive promote events.
+        // new-window promote: no workspaceId → initHostNewWindow creates fresh workspace.
+        unsub2 = await listenEvent<Record<string, never>>(
+            "pool:new-window",
+            () => {
+                cleanup();
+                const url = new URL(window.location.href);
+                url.searchParams.delete("pool");
+                window.history.replaceState({}, "", url.toString());
+                resolve();
+            },
+        );
+
+        // Both listeners installed — safe to signal the host.
         try {
             const label = await getApi().getWindowLabel();
             await invokeCommand("pool_window_ready", { label });
         } catch (e) {
-            unsub();
+            cleanup();
             reject(new Error(`pool_window_ready signal failed: ${e}`));
         }
     });
