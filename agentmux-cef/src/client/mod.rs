@@ -1320,20 +1320,22 @@ impl AgentMuxHandler {
         // All windows (main + secondary) now use CEF Views.
         let mut browser_cloned = browser.cloned();
 
-        // Pool windows are held off-screen at (-32000, -32000) until promoted.
-        // Calling show() + set_focus(1) on a hidden pool window would steal
-        // key focus on macOS/Linux — unlike Windows, neither platform has an
-        // OS-level foreground-lock that blocks background focus grabs.
+        // Determine whether this is a pool window so we can skip set_focus.
+        // Pool windows are shown off-screen at (-32000,-32000) — show() is
+        // still required to map the window so set_bounds() works at promote
+        // time. Only set_focus(1) must be suppressed: on macOS/Linux there is
+        // no OS foreground-lock, so focusing an off-screen pool window would
+        // steal key focus from the main window at startup and on each refill.
         let browser_label = browser_cloned.as_mut().and_then(|b| self.window_label_for(b));
         let is_pool_window = browser_label
             .as_deref()
             .map_or(false, |l| l.starts_with("window-pool-"));
 
-        if !is_pool_window {
-            if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
-                if let Some(window) = bv.window() {
-                    if window.is_visible() == 0 {
-                        window.show();
+        if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
+            if let Some(window) = bv.window() {
+                if window.is_visible() == 0 {
+                    window.show();
+                    if !is_pool_window {
                         if let Some(ref mut b) = browser_cloned {
                             if let Some(host) = b.host() {
                                 host.set_focus(1);
