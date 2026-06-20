@@ -1716,8 +1716,9 @@ pub fn post_resize_mother_window(state: &Arc<AppState>, label: &str, new_w_dip: 
 /// Resize the mother window to `new_w_dip` on Windows via Win32 `SetWindowPos`.
 /// `new_w_dip` is in CSS/DIP pixels; this function converts to physical pixels
 /// using the source window's monitor DPI before calling `SetWindowPos`.
-/// Must be called with the source window's HWND (already resolved in
-/// `open_floating_pane_window` as `parent_main_hwnd`).
+/// `hwnd` is resolved directly from `source_window_label` in
+/// `open_floating_pane_window` (not the cascade-hook fallback `parent_main_hwnd`)
+/// so the resize always targets the actual source window.
 #[cfg(target_os = "windows")]
 wrap_task! {
     pub struct ResizeMotherWindowWin32Task {

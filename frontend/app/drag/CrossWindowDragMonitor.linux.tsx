@@ -140,7 +140,7 @@ async function handleCrossWindowDragEnd(
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
         } else if (!targetWindow) {
-            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y);
+            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, sourceWindow);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
         } else {
             await api.cancelCrossDrag(dragId);
@@ -163,7 +163,8 @@ async function performTearOff(
     sourceWsId: string,
     sourceTabId: string,
     screenX: number,
-    screenY: number
+    screenY: number,
+    sourceWindowLabel: string | null = null,
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
@@ -230,6 +231,7 @@ async function performTearOff(
                 y: screenY,
                 width: floaterWidth,
                 height: floaterHeight,
+                source_window_label: sourceWindowLabel,
                 mother_resize_to_width: motherResizeToWidth,
             });
             Logger.info("dnd:cross", "floating pane spawned (linux)", {
@@ -239,6 +241,7 @@ async function performTearOff(
                 screenY,
                 width: floaterWidth,
                 height: floaterHeight,
+                sourceWindowLabel,
                 motherResizeToWidth,
             });
         } catch (err) {
@@ -253,6 +256,7 @@ async function performTearOff(
                         y: screenY,
                         width: floaterWidth,
                         height: floaterHeight,
+                        source_window_label: sourceWindowLabel,
                         mother_resize_to_width: motherResizeToWidth,
                     });
                 } catch (e2) {
