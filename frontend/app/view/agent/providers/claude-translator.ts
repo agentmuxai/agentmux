@@ -294,15 +294,21 @@ export class ClaudeTranslator implements OutputTranslator {
             if (block.type === "tool_result") {
                 const isError = block.is_error === true;
                 const toolId = block.tool_use_id || `tool_${Date.now()}`;
-                const fallback = typeof block.content === "string"
+                // Only apply the structured sibling result when block.content is a string
+                // (the bash stdout path). If block.content is already an array/object
+                // (e.g. web_search_result blocks), use it directly — applying the
+                // terminal-shaped { stdout, stderr } sibling would discard the real data.
+                const blockContentIsString = typeof block.content === "string";
+                const fallback = blockContentIsString
                     ? { content: block.content }
                     : block.content;
+                const useStructured = canApplyStructured && blockContentIsString;
                 results.push({
                     type: "tool_result",
                     tool: block.tool_name || this.toolNameById.get(toolId) || "Unknown",
                     id: toolId,
                     status: isError ? "failed" : "success",
-                    result: canApplyStructured ? structuredResult : fallback,
+                    result: useStructured ? structuredResult : fallback,
                 });
             }
         }
