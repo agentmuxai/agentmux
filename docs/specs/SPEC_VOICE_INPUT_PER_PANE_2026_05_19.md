@@ -184,11 +184,67 @@ This avoids the original PR's "last-focused" ambiguity: the user always sees whi
 - Settings toggle: `voice:enabled` (default true) to fully hide the buttons globally
 - Long-press / right-click: language picker (defer if not requested)
 
-### Phase 4 (deferred) — server-side STT
+### Phase 4 — server-side STT + mic-permission flow (REVISED 2026-06-20)
 
-- Replace `webkitSpeechRecognition` with an Anthropic/OpenAI/Whisper server-side path
-- Same `getVoiceSession()` API, just a different implementation under the hood
-- Better accuracy + works in non-Chromium browsers, at the cost of latency + API key + cost
+> **Critical revision.** Live testing on CEF revealed the Web Speech API is
+> **non-viable in AgentMux's runtime**, so Phase 4 is no longer a "nice to have"
+> — it's the only path that can actually transcribe. Full diagnosis +
+> external sources: working report `agentmux-voice-permissions-report.md`;
+> tracking issue #1591.
+
+**Why Web Speech API can't work here (three stacked blockers, all code-confirmed):**
+
+1. **No CEF media-permission handler** → Chromium denies the mic by default
+   under the Alloy runtime (AgentMux uses `RuntimeStyle::ALLOY` for all
+   non-devtools windows, `app.rs`) → `getUserMedia`/Web Speech `not-allowed`.
+2. **The Web Speech service is closed-source and bound to genuine Chrome
+   builds** → `webkitSpeechRecognition` returns `service-not-allowed` **even
+   with `GOOGLE_API_KEY` + client id/secret + Cloud Speech enabled**. Broken in
+   embedded Chromium (CEF/Electron) for years; CEF maintainers don't support it.
+3. **`disable-background-networking` + `disable-component-update`**
+   (`app.rs:722-723`) → also forecloses the network speech path and the
+   on-device SODA model.
+
+Fixing permissions alone only moves the error `not-allowed` → `service-not-allowed`.
+**The engine must be capture-and-send.**
+
+#### 4a. CEF mic-permission handler (foundation — landed)
+
+`agentmux-cef/src/client/handlers.rs`: a `wrap_permission_handler!` block
+implementing `on_request_media_access_permission`, registered via the
+`permission_handler()` getter on the **main app client only** (browser panes
+load untrusted web content → never auto-granted; they return `None` → default
+deny). Grants the audio-capture bits the page requested (`DEVICE_AUDIO_CAPTURE |
+DESKTOP_AUDIO_CAPTURE`), implicitly denying camera/desktop-video. This unblocks
+`getUserMedia({audio:true})` — the shared prerequisite for the Whisper capture
+below. (`cargo check -p agentmux-cef` clean.)
+
+#### 4b. OS-permission UX (frontend)
+
+The CEF grant is layer A; the **OS** mic permission (Windows Privacy / macOS
+TCC, see #1580) is layer B. Replace the single "Voice input unavailable" toast
+with a stateful flow that classifies the `getUserMedia` failure:
+`NotAllowedError` → actionable panel + deep-link to OS mic settings + a
+"blocked" mic-button state; `NotFoundError` → "no microphone detected";
+`SecurityError`/other → generic. Distinct messages, not one toast.
+
+#### 4c. Whisper capture+send engine
+
+Behind the existing `getVoiceSession()` singleton, swap the engine: capture with
+`MediaRecorder` (webm/opus) + VAD chunking → `agentmux-srv` STT backend (local
+whisper.cpp default for privacy/offline; **Groq** hosted option — ~9× cheaper
+than OpenAI, fast enough that chunk latency is negligible). No streaming →
+`setInterim` degrades to a "…transcribing" spinner. Keys stay server-side.
+
+#### 4d. Gate the dead Web Speech engine
+
+In CEF builds, the Web Speech engine must not present a working-looking mic that
+can't transcribe — gate it behind `getVoiceSession()` so only a real engine
+(whisper) drives the button.
+
+> **Anthropic note:** the Claude API has **no** audio/transcription modality
+> (text/image/PDF only), so there is no "Anthropic STT path." Claude's only role
+> is an optional post-transcription cleanup pass (agent pane only, opt-in).
 
 ---
 
