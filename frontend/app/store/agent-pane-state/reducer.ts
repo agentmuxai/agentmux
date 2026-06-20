@@ -388,12 +388,14 @@ export function update(
             const finishedAt = phase.kind === "Done"
                 ? phase.finishedAt
                 : nowMs;
+            // When outcome is completed and text is supplied, run the heuristic.
+            // When text is absent (tool-only or empty final block), conservatively
+            // treat it as no question — do NOT carry the prior value forward.
+            // Non-completed outcomes always clear the flag.
             const lastTurnHadQuestion =
                 outcome === "completed" && command.lastAssistantText != null
                     ? endsWithQuestion(command.lastAssistantText)
-                    : outcome === "completed"
-                        ? state.lastTurnHadQuestion
-                        : false;
+                    : false;
             return {
                 state: {
                     ...state,
@@ -790,6 +792,18 @@ export function update(
                 events: [],
             };
         }
+        case "WaitingTypingStarted": {
+            // No-op if not in the waiting state (idempotent, safe to fire
+            // on every keystroke since the store uses dispatchIfRegistered).
+            if (!state.lastTurnHadQuestion) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, lastTurnHadQuestion: false },
+                events: [],
+            };
+        }
+
         case "LogEntryArrived": {
             // No-op when the panel is open (user already sees the
             // entry). Increments the unread counter when closed so
