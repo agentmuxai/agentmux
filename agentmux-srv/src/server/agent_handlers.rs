@@ -3063,9 +3063,6 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     session_id: None,
                 };
                 subprocess_ctrl.spawn_turn(config)?;
-                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                    sub.add_agent(&cmd.blockid);
-                }
                 Ok(None)
             })
         }),
@@ -3358,6 +3355,18 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     return Err("controller is not a SubprocessController or PersistentSubprocessController".to_string());
                 }
 
+                // Register with cloud subscriber + reactive handler so cloud-injected
+                // messages (e.g. GitHub PR review notifications) reach this agent.
+                // Both calls are idempotent: add_agent skips the WS message if already
+                // subscribed; register_agent replaces any stale mapping from a prior session.
+                // Using block_id as the agent_id so it matches the target_agent embedded
+                // in PR bodies via <!-- agentmux:agent_id=<blockid> -->.
+                let _ = crate::backend::reactive::handler::get_global_handler()
+                    .register_agent(&cmd.blockid, &cmd.blockid, None);
+                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                    sub.add_agent(&cmd.blockid);
+                }
+
                 Ok(None)
             })
         }),
@@ -3377,6 +3386,8 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
                             sub.remove_agent(&cmd.blockid);
                         }
+                        crate::backend::reactive::handler::get_global_handler()
+                            .unregister_block(&cmd.blockid);
                         Ok(None)
                     }
                     None => Ok(None),
