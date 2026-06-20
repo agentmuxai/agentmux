@@ -99,5 +99,9 @@ export function currentExpansion(
             // by default (spec §11). Only a pin opens it.
             if (state.pinnedNodes.has(node.id)) return { open: true, via: "pin" };
             return CLOSED;
+
+        case "agent_error":
+            // Error nodes are fixed-height and never user-collapsible.
+            return OPEN_DEFAULT;
     }
 }
