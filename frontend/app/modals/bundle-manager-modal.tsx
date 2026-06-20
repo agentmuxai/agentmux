@@ -101,7 +101,7 @@ export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
         { id: "accounts", label: "Accounts", icon: "key" },
         { id: "identities", label: "Identities", icon: "id-card" },
         { id: "brain", label: "Brain", icon: "brain" },
-        { id: "memories", label: "Memories", icon: "layer-group" },
+        { id: "memories", label: "Presets", icon: "sliders" },
     ];
 
     return (

@@ -60,10 +60,10 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
     const handleCancel = () => model.cancelDraft();
 
     const handleDelete = (id: string) => {
-        // Confirm via the most boring possible dialog. Memory bundles can
-        // be referenced by running instances; deletion is an explicit user
+        // Confirm via the most boring possible dialog. Presets can be
+        // referenced by running instances; deletion is an explicit user
         // intent we don't want to fast-path.
-        const ok = window.confirm("Delete this Memory bundle? Running instances continue with their snapshot, but new launches won't see it.");
+        const ok = window.confirm("Delete this preset? Running instances continue with their snapshot, but new launches won't see it.");
         if (!ok) return;
         void model.deleteMemory(id);
     };
@@ -82,7 +82,7 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
             <div class="memory-view-rail">
                 <div class="memory-view-rail-header">
                     <button class="memory-view-new-btn" onClick={handleNew}>
-                        + New Memory
+                        + New Preset
                     </button>
                 </div>
                 <ul class="memory-view-list">
@@ -105,9 +105,12 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                                         <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
                                     </Show>
                                 </div>
-                                <Show when={!memory.is_blank}>
+                                {/* Subtitle shows the description now that presets
+                                    are provider-agnostic (§4.1a). Class name kept
+                                    to avoid CSS churn. */}
+                                <Show when={!memory.is_blank && memory.description}>
                                     <div class="memory-view-list-item-provider">
-                                        {memory.provider || "no provider"}
+                                        {memory.description}
                                     </div>
                                 </Show>
                             </li>
@@ -128,11 +131,12 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                             when={model.selectedAtom()}
                             fallback={
                                 <div class="memory-view-empty">
-                                    <p>Select a Memory bundle from the list, or create a new one.</p>
+                                    <p>Select a preset from the list, or create a new one.</p>
                                     <p class="memory-view-empty-hint">
-                                        A Memory holds an agent's CLI choice, model, system instructions,
-                                        context files, MCP servers, and skills. Pick one at launch time
-                                        alongside an Identity to compose an agent instance.
+                                        A preset holds an agent's system instructions, context
+                                        files, MCP servers, and skills. It is provider-agnostic —
+                                        the CLI and model belong to the agent. Pick one at launch
+                                        time alongside an Identity to compose an agent instance.
                                     </p>
                                 </div>
                             }
@@ -151,10 +155,6 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                                                 {" "}— injected into every agent at launch
                                             </dd>
                                         </Show>
-                                        <dt>Provider</dt>
-                                        <dd>{memory().provider || "—"}</dd>
-                                        <dt>Model</dt>
-                                        <dd>{memory().model || "—"}</dd>
                                         <dt>Instructions</dt>
                                         <dd class="memory-view-instructions-readonly">
                                             <pre>{memory().instructions || "(none)"}</pre>
@@ -190,7 +190,7 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                             }}
                         >
                             <h2 class="memory-view-form-title">
-                                {draft().id ? "Edit Memory" : "New Memory"}
+                                {draft().id ? "Edit Preset" : "New Preset"}
                             </h2>
 
                             <label class="memory-view-field">
@@ -218,33 +218,9 @@ export const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element =>
                                 />
                             </label>
 
-                            <label class="memory-view-field">
-                                <span class="memory-view-field-label">Provider</span>
-                                <select
-                                    class="memory-view-input"
-                                    value={draft().provider}
-                                    onChange={(e) =>
-                                        updateDraft("provider", e.currentTarget.value)
-                                    }
-                                >
-                                    <option value="">(none — vanilla shell)</option>
-                                    <option value="claude">Claude Code</option>
-                                    <option value="codex">Codex CLI</option>
-                                    <option value="gemini">Gemini CLI</option>
-                                    <option value="qwen">Qwen Code</option>
-                                </select>
-                            </label>
-
-                            <label class="memory-view-field">
-                                <span class="memory-view-field-label">Model</span>
-                                <input
-                                    class="memory-view-input"
-                                    type="text"
-                                    value={draft().model}
-                                    onInput={(e) => updateDraft("model", e.currentTarget.value)}
-                                    placeholder="e.g. claude-sonnet-4-6"
-                                />
-                            </label>
+                            {/* Provider + model intentionally omitted: presets are
+                                provider-agnostic; the CLI + model belong to the
+                                agent. See SPEC_MEMORY_IDENTITY_ARCH §4.1a. */}
 
                             <label class="memory-view-field">
                                 <span class="memory-view-field-label">Instructions</span>
