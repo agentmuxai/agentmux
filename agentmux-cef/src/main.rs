@@ -230,6 +230,28 @@ fn main() {
     let type_switch = CefString::from("type");
     let is_browser_process = cmd_line.has_switch(Some(&type_switch)) != 1;
 
+    // Runtime escape hatch — AGENTMUX_UNSAFE_NOSANDBOX=1 disables the renderer
+    // sandbox regardless of build features. Intended for known-incompatible
+    // environments (nested VM, Docker without user namespaces, macOS SIP issues).
+    // Tracing isn't up yet; the browser-process path below re-reads this to emit
+    // a warn! once the subscriber is initialized.
+    let force_no_sandbox = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+
+    // macOS: initialize Seatbelt sandbox context for renderer/GPU/utility subprocesses
+    // before CefExecuteProcess. The Sandbox holds the opaque context pointer; Drop
+    // calls cef_sandbox_destroy, so keep it alive until process exit.
+    // The browser process does not need (or want) this context — only subprocesses.
+    #[cfg(all(target_os = "macos", feature = "sandbox"))]
+    let _macos_sandbox = if !is_browser_process && !force_no_sandbox {
+        let mut s = cef::sandbox::Sandbox::new();
+        s.initialize(args.as_main_args());
+        Some(s)
+    } else {
+        None
+    };
+
     // Execute subprocess if applicable (exits here for non-browser processes).
     let ret = execute_process(
         Some(args.as_main_args()),
@@ -661,8 +683,26 @@ fn main() {
     let cef_log_path = log_dir.join("cef-debug.log");
     let cef_log_file = CefString::from(cef_log_path.to_str().unwrap_or(""));
 
+    if force_no_sandbox {
+        tracing::warn!(
+            "AGENTMUX_UNSAFE_NOSANDBOX=1: renderer sandbox disabled. \
+             Only use in environments where namespace/Seatbelt sandbox is known-incompatible."
+        );
+    }
+
+    // Sandbox active on macOS (Seatbelt via libcef_sandbox.dylib) and Linux
+    // (kernel namespace isolation) when built with `--features sandbox` (the default).
+    // Windows sandbox is Phase 3 (DLL wrapper + bootstrap.exe). See issue #1374.
+    let no_sandbox: i32 = if cfg!(any(not(feature = "sandbox"), target_os = "windows"))
+        || force_no_sandbox
+    {
+        1
+    } else {
+        0
+    };
+
     let settings = Settings {
-        no_sandbox: 1,
+        no_sandbox,
         // ARGB: alpha=0 → SK_AlphaTRANSPARENT → triggers the transparency
         // cascade in the patched libcef.so (see cef commits b921ffe18 +
         // 68e0dc668). The CSS layer's rgba(_,_,_,<1) body bg then composites
