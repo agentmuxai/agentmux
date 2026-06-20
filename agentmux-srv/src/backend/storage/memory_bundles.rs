@@ -57,7 +57,13 @@ pub struct Memory {
     /// on conflict, so editing a bundle via the regular form keeps its place.
     #[serde(default)]
     pub sort_order: i64,
+    // created_at / updated_at are server-owned: the upsert handler stamps
+    // created_at = now when 0 and always overwrites updated_at with now. They
+    // default on input so partial upserts (e.g. a "new section" that only
+    // sends id/name/instructions) deserialize cleanly. (reagent P0 on #1608)
+    #[serde(default)]
     pub created_at: i64,
+    #[serde(default)]
     pub updated_at: i64,
 }
 
