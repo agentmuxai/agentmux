@@ -31,12 +31,17 @@ import { notify, subscribeSoundEvents, type SoundEvent } from "./sound-events";
 import { SOUNDS, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
 import { ToolTonesPlayer } from "./tool-tones-player";
+import { WaitingTonePlayer } from "./waiting-tone-player";
 
 let installed = false;
 let replayMode = false;
 const player = new SoundPlayer();
 const toolTones = new ToolTonesPlayer();
+const waitingTones = new Map<string, WaitingTonePlayer>(); // blockId → player
+const waitingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const lastFiredAt = new Map<SoundId, number>();
+
+const WAITING_AUTO_STOP_MS = 5 * 60 * 1000;
 
 /**
  * Toggle replay mode. While true, the bus still receives events but
@@ -74,8 +79,12 @@ export function installSoundService(): () => void {
         await player.prime();
         const ctx = player.getAudioContext();
         const master = player.getMasterGain();
-        if (ctx && master && !toolTones.isAttached()) {
-            toolTones.attach(ctx, master);
+        if (ctx && master) {
+            if (!toolTones.isAttached()) toolTones.attach(ctx, master);
+            // Attach any waiting players that were created before prime.
+            for (const wp of waitingTones.values()) {
+                if (!wp.isAttached()) wp.attach(ctx, master);
+            }
         }
     };
     document.addEventListener("pointerdown", primeOnce, onceOpts);
@@ -91,6 +100,11 @@ export function installSoundService(): () => void {
         createEffect(() => {
             const vol = getSettingsKeyAtom("notify:tooltones:volume")();
             toolTones.setVolume(typeof vol === "number" ? vol : 0.15);
+        });
+        createEffect(() => {
+            const vol = getSettingsKeyAtom("notify:sounds:waiting:volume")();
+            const v = typeof vol === "number" ? vol : 0.25;
+            for (const wp of waitingTones.values()) wp.setVolume(v);
         });
         return dispose;
     });
@@ -163,7 +177,49 @@ function mapAgentPaneEvent(blockId: string, event: AgentPaneEvent): void {
                 notify("agent.message.rejected", { sourceBlockId: blockId });
             }
             return;
+        case "waiting-for-input":
+            startWaiting(blockId);
+            return;
+        case "waiting-ended":
+            stopWaiting(blockId);
+            return;
     }
+}
+
+function startWaiting(blockId: string): void {
+    if (replayMode) return;
+    if (getSettingsKeyAtom("notify:sounds:enabled")() === false) return;
+    if (getSettingsKeyAtom("notify:sound:agent.waiting.for.input")() === false) return;
+
+    let wp = waitingTones.get(blockId);
+    if (!wp) {
+        wp = new WaitingTonePlayer();
+        const ctx = player.getAudioContext();
+        const master = player.getMasterGain();
+        if (ctx && master) wp.attach(ctx, master);
+        waitingTones.set(blockId, wp);
+    }
+
+    const vol =
+        (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? 0.25;
+    wp.start(vol);
+
+    // 5-minute safety cutoff
+    const existing = waitingTimeouts.get(blockId);
+    if (existing !== undefined) clearTimeout(existing);
+    waitingTimeouts.set(
+        blockId,
+        setTimeout(() => stopWaiting(blockId), WAITING_AUTO_STOP_MS),
+    );
+}
+
+function stopWaiting(blockId: string): void {
+    const t = waitingTimeouts.get(blockId);
+    if (t !== undefined) {
+        clearTimeout(t);
+        waitingTimeouts.delete(blockId);
+    }
+    waitingTones.get(blockId)?.stop();
 }
 
 /**
@@ -229,6 +285,13 @@ export function __resetSoundService(): void {
     replayMode = false;
     lastFiredAt.clear();
     toolTones.__resetCoalesce();
+    for (const t of waitingTimeouts.values()) clearTimeout(t);
+    waitingTimeouts.clear();
+    waitingTones.clear();
+}
+
+export function __getWaitingTones(): Map<string, WaitingTonePlayer> {
+    return waitingTones;
 }
 
 export function __getSoundPlayer(): SoundPlayer {
