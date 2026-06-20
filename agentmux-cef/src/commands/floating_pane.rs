@@ -71,6 +71,18 @@ pub struct OpenFloatingPaneArgs {
     /// Optional for back-compat; callers should always provide it.
     #[serde(default)]
     pub source_window_label: Option<String>,
+    /// If present, resize the mother window to this width (in CSS/DIP px)
+    /// after the floating pane is created. Set only when the torn-off pane
+    /// spans the full height of the layout container (a top-to-bottom column),
+    /// so the mother shrinks by exactly the pane's column width and remaining
+    /// panes keep their absolute sizes. Absent for partial-height panes.
+    ///
+    /// The host converts this DIP value to physical pixels on Windows using
+    /// the source window's monitor DPI (`GetDpiForMonitor(MonitorFromPoint)`).
+    /// On macOS/Linux it is passed directly to CEF `set_bounds`.
+    /// See `SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md`.
+    #[serde(default)]
+    pub mother_resize_to_width: Option<i32>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -220,6 +232,15 @@ pub fn open_floating_pane_window(
         }
 
         crate::floating_pane::post_create_floating_window(state, &parsed, &window_label, parent_main_hwnd);
+
+        // Mother-window resize: if the pane spanned the full column height,
+        // shrink the source window so remaining panes keep their pixel sizes.
+        if let Some(new_w_dip) = parsed.mother_resize_to_width {
+            if parent_main_hwnd != 0 {
+                crate::ui_tasks::post_resize_mother_window_win32(state, parent_main_hwnd, new_w_dip);
+            }
+        }
+
         Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }
 
@@ -311,6 +332,14 @@ pub fn open_floating_pane_window(
             parsed.height,
             true, // frameless — secondary windows use the custom title bar
         );
+
+        // Mother-window resize: if the pane spanned the full column height,
+        // shrink the source window so remaining panes keep their pixel sizes.
+        if let (Some(new_w_dip), Some(src_label)) =
+            (parsed.mother_resize_to_width, parsed.source_window_label.as_deref())
+        {
+            crate::ui_tasks::post_resize_mother_window(state, src_label, new_w_dip);
+        }
 
         Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }

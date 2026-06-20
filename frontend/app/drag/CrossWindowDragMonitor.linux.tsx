@@ -11,7 +11,7 @@
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
-import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { invokeCommand } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
@@ -192,6 +192,11 @@ async function performTearOff(
         const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
             payload.blockId,
         );
+        // Compute mother window resize: if the pane spans the full height of
+        // the layout container (top-to-bottom column), the mother shrinks by
+        // the pane's width so remaining panes keep their sizes unchanged.
+        // SPEC: SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
+        const motherResizeToWidth = measureMotherResize(payload.blockId);
 
         const newWsId = await WorkspaceService.TearOffBlock(
             payload.blockId,
@@ -220,6 +225,7 @@ async function performTearOff(
                 y: screenY,
                 width: floaterWidth,
                 height: floaterHeight,
+                mother_resize_to_width: motherResizeToWidth,
             });
             Logger.info("dnd:cross", "floating pane spawned (linux)", {
                 blockId: payload.blockId,
@@ -228,6 +234,7 @@ async function performTearOff(
                 screenY,
                 width: floaterWidth,
                 height: floaterHeight,
+                motherResizeToWidth,
             });
         } catch (err) {
             const msg = String(err);
@@ -241,6 +248,7 @@ async function performTearOff(
                         y: screenY,
                         width: floaterWidth,
                         height: floaterHeight,
+                        mother_resize_to_width: motherResizeToWidth,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {

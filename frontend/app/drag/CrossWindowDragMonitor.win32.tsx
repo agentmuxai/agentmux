@@ -25,7 +25,7 @@ import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
 import { Logger } from "@/util/logger";
-import { openTearOffWindow, measureSourcePaneSize } from "./tear-off-pool-helper";
+import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
 import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
@@ -260,6 +260,13 @@ async function performTearOff(
         const { width: floaterWidth, height: floaterHeight } = measureSourcePaneSize(
             payload.blockId,
         );
+        // Compute the mother window's new width if the pane spans the full
+        // height of the layout container (top-to-bottom column). If so, the
+        // mother shrinks by exactly the pane's column width so remaining panes
+        // keep their sizes unchanged. Absent when the pane is in a horizontal
+        // split or the remaining width would be < MIN_MOTHER_WIDTH.
+        // SPEC: SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
+        const motherResizeToWidth = measureMotherResize(payload.blockId);
 
         const newWsId = await WorkspaceService.TearOffBlock(
             payload.blockId,
@@ -299,12 +306,14 @@ async function performTearOff(
                 width: floaterWidth,
                 height: floaterHeight,
                 source_window_label: sourceWindowLabel,
+                mother_resize_to_width: motherResizeToWidth,
             });
             Logger.info("dnd:cross", "floating pane spawned", {
                 blockId: payload.blockId,
                 newWsId,
                 screenX,
                 screenY,
+                motherResizeToWidth,
             });
         } catch (e) {
             const msg = String(e);
@@ -323,6 +332,7 @@ async function performTearOff(
                         width: floaterWidth,
                         height: floaterHeight,
                         source_window_label: sourceWindowLabel,
+                        mother_resize_to_width: motherResizeToWidth,
                     });
                 } catch (e2) {
                     Logger.error("dnd:cross", "open_floating_pane_window failed after retry", {

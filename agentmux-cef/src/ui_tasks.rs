@@ -1661,3 +1661,115 @@ unsafe fn find_main_render_widget(
     EnumChildWindows(root, Some(cb), &mut finder as *mut _ as isize);
     if finder.found.is_null() { None } else { Some(finder.found) }
 }
+
+// ── Mother-window resize after pane tear-off ──────────────────────────────
+//
+// When a full-height pane is torn off (top-to-bottom column), the mother
+// window shrinks by the pane's column width so remaining panes keep their
+// absolute pixel sizes.
+//
+// Spec: docs/specs/SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
+
+/// Resize the mother window to `new_w_dip` on macOS/Linux via CEF Views
+/// `set_bounds`. Width is in CSS/DIP pixels (same coordinate space as the
+/// floater args); height is read from the current bounds and preserved.
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct ResizeMotherWindowTask {
+        state: Arc<AppState>,
+        label: String,
+        new_w_dip: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let Some(window) = get_window_on_ui(&self.state, &self.label) else {
+                tracing::warn!(
+                    label = %self.label,
+                    "[tear-off] ResizeMotherWindowTask: source window not found (already closed?)"
+                );
+                return;
+            };
+            let old = window.bounds();
+            window.set_bounds(Some(&cef::Rect {
+                x: old.x,
+                y: old.y,
+                width: self.new_w_dip,
+                height: old.height,
+            }));
+            tracing::info!(
+                label = %self.label,
+                old_w = old.width,
+                new_w = self.new_w_dip,
+                "[tear-off] mother window resized after pane tear-off"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn post_resize_mother_window(state: &Arc<AppState>, label: &str, new_w_dip: i32) {
+    let mut task = ResizeMotherWindowTask::new(state.clone(), label.to_string(), new_w_dip);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// Resize the mother window to `new_w_dip` on Windows via Win32 `SetWindowPos`.
+/// `new_w_dip` is in CSS/DIP pixels; this function converts to physical pixels
+/// using the source window's monitor DPI before calling `SetWindowPos`.
+/// Must be called with the source window's HWND (already resolved in
+/// `open_floating_pane_window` as `parent_main_hwnd`).
+#[cfg(target_os = "windows")]
+wrap_task! {
+    pub struct ResizeMotherWindowWin32Task {
+        state: Arc<AppState>,
+        hwnd: isize,
+        new_w_dip: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            use windows_sys::Win32::Foundation::POINT;
+            use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTONEAREST};
+            use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GetWindowRect, SetWindowPos, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOZORDER,
+            };
+
+            unsafe {
+                let hwnd = self.hwnd as windows_sys::Win32::Foundation::HWND;
+                let mut wr = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
+                GetWindowRect(hwnd, &mut wr);
+                let current_h = wr.bottom - wr.top;
+                let pt = POINT { x: wr.left, y: wr.top };
+                let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+                let mut dpi_x: u32 = 0;
+                let mut dpi_y: u32 = 0;
+                let hr = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
+                let dpi_scale = if hr != 0 || dpi_x == 0 { 1.0f32 } else { dpi_x as f32 / 96.0 };
+                let new_w_px = (self.new_w_dip as f32 * dpi_scale).round() as i32;
+                let ok = SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    0, 0,
+                    new_w_px,
+                    current_h,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+                tracing::info!(
+                    hwnd = self.hwnd,
+                    new_w_dip = self.new_w_dip,
+                    new_w_px,
+                    dpi_scale,
+                    ok = (ok != 0),
+                    "[tear-off] mother window resized after pane tear-off (Win32)"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn post_resize_mother_window_win32(state: &Arc<AppState>, hwnd: isize, new_w_dip: i32) {
+    let mut task = ResizeMotherWindowWin32Task::new(state.clone(), hwnd, new_w_dip);
+    post_task(ThreadId::UI, Some(&mut task));
+}
