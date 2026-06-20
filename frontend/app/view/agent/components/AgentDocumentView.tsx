@@ -238,10 +238,19 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
 
             <div class="agent-auth-url-label">1 · Authorize in your browser</div>
             <div class="agent-auth-hint">
-                A browser window should have opened. If it didn't, open this link:
+                A browser pane should have opened. If it didn't, open this link:
             </div>
             <div class="agent-auth-url-row">
                 <span class="agent-auth-url-text">{props.url}</span>
+                <button
+                    class="agent-auth-url-copy"
+                    title="Open this URL in an in-app browser pane"
+                    onClick={() => {
+                        void import("../flows/open-oauth-pane").then(m => m.openOAuthBrowserPane(props.url));
+                    }}
+                >
+                    Open
+                </button>
                 <button
                     class="agent-auth-url-copy"
                     onClick={() => { import("@/util/clipboard").then(c => c.writeText(props.url)); }}

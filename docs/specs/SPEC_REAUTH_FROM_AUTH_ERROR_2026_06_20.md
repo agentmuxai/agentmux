@@ -1,8 +1,17 @@
 # SPEC: Re-authentication from Agent Auth Failure
 **Date:** 2026-06-20  
 **Author:** AgentA  
-**Status:** Draft  
+**Status:** In progress (P2.3 merged #1592; P2.1 in PR)  
 **Depends on:** SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §P1.1–P1.3 (merged #1589/#1590)
+
+> **Revision 2026-06-20 — "ReauthBrowserModal" replaced by an in-app browser
+> pane.** The original draft (§6) proposed embedding a CEF browser inside a
+> modal overlay. A codebase study found this is **architecturally impossible**:
+> a browser pane is a real native HWND child window positioned in physical
+> pixels synced to the page layout, and cannot be CSS-positioned inside a modal.
+> The idiomatic in-app "browser window" is a **browser pane** created via
+> `createBlock({ meta: { view: "browser", url } })`. §6 below is superseded by
+> **§6′ (In-app browser pane)**; the rest of the spec stands.
 
 ---
 
@@ -69,9 +78,9 @@ onLoginAgain
     ┌─ Claude provider ─────────────────────────────────────────────┐
     │ 1. spawn: claude auth login (same as before)                  │
     │ 2. extract auth_url from stdout                               │
-    │ 3. open ReauthBrowserModal (CEF browser pane, see §6)         │
-    │    - loads auth_url in embedded browser                       │
-    │    - shows URL as copyable fallback below viewport            │
+    │ 3. openOAuthBrowserPane(auth_url)  ← in-app pane, see §6′      │
+    │    - createBlock browser pane beside the agent                │
+    │    - AuthUrlBox above composer shows URL as backup            │
     │ 4. poll CheckCliAuthCommand every 2 s                         │
     │ 5. on success:                                                │
     │    - close modal                                              │
@@ -96,7 +105,47 @@ Key differences from baseline:
 
 ---
 
-## 6. ReauthBrowserModal
+## 6′. In-app browser pane (supersedes §6)
+
+On re-auth, after `runCliLogin()` captures `auth_url`, open it in an **in-app
+browser pane** instead of the system browser:
+
+```
+openOAuthBrowserPane(url):
+  try    createBlock({ meta: { view: "browser", url } })   → "pane"
+  catch  getApi().openExternal(url)                        → "external"
+  catch  (nothing opened)                                  → "failed"
+```
+
+- `createBlock` splits the **current tab** (magnified = false) so the browser
+  pane appears beside the agent pane — the agent's **AuthUrlBox** (URL text +
+  copy + paste-the-code input) stays visible, which the user needs for
+  providers that return a code to paste rather than redirecting.
+- `openExternal` (system browser) is the **fallback** if the pane can't be
+  created (no layout model, RPC error). Never throws — login UX degrades, never
+  crashes the launch flow.
+- The polling / success / timeout machinery in `launch-flow.ts` is unchanged;
+  only the "how the URL opens" step changes.
+- This improves **all** CLI logins (first launch + re-auth) since both share
+  `launch-flow.ts` — no re-auth-only gating needed.
+
+**AuthUrlBox** gains an **"Open"** button (alongside Copy) that re-opens the URL
+in an in-app pane on demand — the explicit "browser window" affordance if the
+auto-open was missed. The URL text + paste-code input remain the backup.
+
+Why not the alternatives (from the codebase study):
+- **Embedded-in-modal** — impossible; CEF pane needs a native HWND, can't be
+  CSS-positioned in a modal overlay.
+- **`openNewWindow()`** — opens a whole AgentMux workspace window (no URL param);
+  overkill and confusing for OAuth.
+- **`openExternal()` only** — leaves the app; kept only as the fallback.
+
+---
+
+## 6. ReauthBrowserModal — SUPERSEDED (see §6′)
+
+> **Not implemented.** Kept for historical context. A modal-embedded CEF browser
+> is architecturally impossible in this codebase; §6′ is the shipped design.
 
 A modal dialog with an embedded CEF browser viewport. Reuses the existing browser-pane infrastructure.
 
@@ -168,8 +217,8 @@ This gives the user two entry points to re-auth — the persistent failure banne
 Each provider definition (`frontend/app/view/agent/providers/`) already has `authLoginCommand` and `requiresLoginTty`. No new fields needed — the existing `runCliLogin()` RPC returns `auth_url: Option<String>`, which drives the branching:
 
 ```
-auth_url present → ReauthBrowserModal
-auth_url absent  → openExternal fallback (existing path)
+auth_url present → openOAuthBrowserPane (in-app pane, system-browser fallback)
+auth_url absent  → existing "run login manually" warning path
 ```
 
 No backend changes required for this spec.
@@ -178,27 +227,28 @@ No backend changes required for this spec.
 
 ## 9. Implementation Plan
 
-### P2.1 — ReauthBrowserModal component
-- New file: `frontend/app/view/agent/components/ReauthBrowserModal.tsx`
-- Wraps the existing CEF browser widget in a modal (reuse `ModalLayer`)
-- Props: `{ providerName: string; authUrl: string; onClose: () => void; onSuccess: () => void }`
-- Browser viewport via `<BrowserPane>` or equivalent CEF embedded renderer
-- URL fallback bar + status line
+### P2.1 — In-app browser pane on re-auth ✅ (this PR)
+- New file: `frontend/app/view/agent/flows/open-oauth-pane.ts` — `openOAuthBrowserPane(url)`
+  returns `"pane" | "external" | "failed"` (createBlock → openExternal → nothing).
+- `launch-flow.ts`: replace the `openExternal(loginUrl)` call with `openOAuthBrowserPane(loginUrl)`;
+  log which path opened. No `isReauthContext` gate needed — improving all logins is desired.
+- `AgentDocumentView.tsx` AuthUrlBox: add an **"Open"** button that re-opens the URL in a pane.
+- Tests: `open-oauth-pane.test.ts` — pane success, external fallback, failed (no throw).
 
-### P2.2 — Launch-flow auth branch update
-- `launch-flow.ts`: after `auth_url` is captured, if present open `ReauthBrowserModal` instead of `openExternal()`
-- The existing polling loop and success/timeout handling remain; they call modal `onSuccess` / allow `onClose`
-- Gate on a `isReauthContext: boolean` param so the first-launch flow (pre-launch OAuth modal) is unchanged
+### P2.2 — (folded into P2.1)
+The original P2.1/P2.2 split assumed a modal component + a flow branch. With the
+pane approach there's no component to build — the flow change and the helper are
+one small PR.
 
-### P2.3 — Inline error node CTA
-- `DocumentRow.tsx`: for `agent_error` nodes with code 401/403, render a `[Login Again →]` button
-- The button calls the `onLoginAgain` prop threaded from `AgentPresentationView`
-- Thread `onLoginAgain` down through `DocumentRowProps` (add optional prop)
+### P2.3 — Inline error node CTA ✅ (merged #1592)
+- `DocumentRow.tsx`: for `agent_error` nodes with code 401/403, render a `[Login Again →]` button.
+- Threaded `onAgentErrorLogin` from `agent-view.tsx` → `AgentDocumentView` → `AgentDocumentVirtualList` → `DocumentRow`.
+- Tests in `DocumentRow.test.tsx`.
 
-### P2.4 — Tests
-- `ReauthBrowserModal` unit test: renders URL fallback bar, calls `onSuccess` on signal, calls `onClose` on ✕
-- `launch-flow` test: with `isReauthContext: true` and a mock `auth_url`, verify modal opens (not `openExternal`)
-- `DocumentRow` test: code 401 renders CTA button; code 200 does not
+### P2.4 — Tests ✅ (with each slice)
+- `DocumentRow.test.tsx` (P2.3), `open-oauth-pane.test.ts` (P2.1).
+- A full `launch-flow` integration test for the open-branch is deferred — the helper is unit-tested
+  and the branch is a one-line swap.
 
 ---
 
@@ -206,7 +256,7 @@ No backend changes required for this spec.
 
 | # | Question | Default |
 |---|---|---|
-| Q1 | Should the CEF browser in the modal share cookie store with the main window, or use an isolated profile? | Isolated — same policy as BrowserPane. |
-| Q2 | If the user completes auth in the system browser (old path from "Open in browser"), does poll detect it? | Yes — poll calls `CheckCliAuthCommand` which reads credentials on disk; it doesn't care which browser set them. |
-| Q3 | Modal width/height: 480×580 enough for Claude's consent page? | Needs a smoke test against actual claude.ai/oauth page. Adjust in P2.1. |
-| Q4 | Should auth modal be dismissible by clicking outside? | No — accidental dismissal during OAuth redirect would lose the flow. Only [✕] and success close it. |
+| Q1 | Does the in-app browser pane share the cookie store with the main window? | Yes — browser panes use the shared CEF profile, so a prior claude.ai login carries over (smoother consent). |
+| Q2 | If the user completes auth in the system browser (fallback path), does poll detect it? | Yes — poll calls `CheckCliAuthCommand` which reads credentials on disk; it doesn't care which browser set them. |
+| Q3 | The OAuth pane splits the current tab — does it crowd the agent pane? | Acceptable: the split keeps both visible so the user can paste the code back. The pane can be closed/redocked normally after login. A future refinement could open it as an ephemeral/magnified pane that auto-closes on success. |
+| Q4 | Should the pane auto-close on auth success? | Not in this PR — the launch-flow doesn't track the created blockId. Tracked as a follow-up; closing it is a normal pane action meanwhile. |
