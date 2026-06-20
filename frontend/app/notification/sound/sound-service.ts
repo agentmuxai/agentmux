@@ -35,6 +35,7 @@ import { WaitingTonePlayer } from "./waiting-tone-player";
 
 let installed = false;
 let replayMode = false;
+let windowFocusedSignal: (() => boolean) | null = null;
 const player = new SoundPlayer();
 const toolTones = new ToolTonesPlayer();
 const waitingTones = new Map<string, WaitingTonePlayer>(); // blockId → player
@@ -68,6 +69,7 @@ export function installSoundService(): () => void {
     installed = true;
 
     const windowFocused = makeWindowFocusSignal();
+    windowFocusedSignal = windowFocused;
 
     // Prime AudioContext on the first user gesture, exactly once.
     // After priming, hook the tool-tones chain into the same context +
@@ -190,6 +192,13 @@ function startWaiting(blockId: string): void {
     if (replayMode) return;
     if (getSettingsKeyAtom("notify:sounds:enabled")() === false) return;
     if (getSettingsKeyAtom("notify:sound:agent.waiting.for.input")() === false) return;
+    const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
+    const suppressWhenFocused = suppressRaw !== false; // default true
+    if (
+        suppressWhenFocused &&
+        focusManager.blockFocusAtom() === blockId &&
+        windowFocusedSignal?.()
+    ) return;
 
     let wp = waitingTones.get(blockId);
     if (!wp) {
@@ -287,6 +296,7 @@ function shouldPlay(ev: SoundEvent, windowFocused: () => boolean): boolean {
 export function __resetSoundService(): void {
     installed = false;
     replayMode = false;
+    windowFocusedSignal = null;
     lastFiredAt.clear();
     toolTones.__resetCoalesce();
     for (const t of waitingTimeouts.values()) clearTimeout(t);
