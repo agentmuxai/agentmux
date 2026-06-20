@@ -11,8 +11,11 @@ name = "agentmux-cef"
 path = "src/main.rs"
 
 [features]
-default = []
-# Enable sandbox mode (requires bootstrap.exe on Windows)
+# Sandbox ON by default for macOS (Seatbelt/libcef_sandbox.dylib) and Linux
+# (kernel namespace isolation). Windows sandbox is Phase 3 (DLL wrapper +
+# bootstrap.exe, issue #1374) and remains unconditionally disabled at runtime
+# via the cfg!(target_os = "windows") guard even when this feature is active.
+default = ["sandbox"]
 sandbox = ["cef/sandbox"]
 # Opt-in for dev_authfile unit tests that touch the filesystem and Win32 ACL APIs
 test-authfile = []
@@ -25,7 +28,6 @@ test-authfile = []
 patched-libcef = []
 
 [package.metadata.cef.bundle]
-# No helper needed without sandbox
 resources_path = "resources"
 
 [dependencies]
