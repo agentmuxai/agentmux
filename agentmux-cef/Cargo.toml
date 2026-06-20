@@ -10,6 +10,11 @@ rust-version = "1.77"
 name = "agentmux-cef"
 path = "src/main.rs"
 
+[lib]
+name = "agentmux_cef"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
 [features]
 # Sandbox ON by default for macOS (Seatbelt/libcef_sandbox.dylib) and Linux
 # (kernel namespace isolation). Windows sandbox is Phase 3 (DLL wrapper +
