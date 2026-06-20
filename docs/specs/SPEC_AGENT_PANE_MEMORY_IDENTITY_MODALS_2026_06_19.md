@@ -311,15 +311,20 @@ class AgentNativeMemoryModel {
 - Register in `app_api.rs`
 - Type generation
 
-### Phase 3 — Memory modal UI
-- `AgentNativeMemoryModel`
-- `AgentNativeMemoryModal.tsx` (full browser + editor)
-- Wire memory icon → memory modal
+### Phase 3 — Memory modal UI ✅ DONE
+- `agent-native-memory-model.ts` — `AgentNativeMemoryModel` (list / select / read / edit / save / create)
+- `AgentNativeMemoryModal.tsx` — two-column browser + editor; replaces the Phase 1 placeholder
+- `AgentNativeMemoryModal.scss` — styles
+- `modal-dispatch.tsx` — `agent-memory` case now renders `AgentNativeMemoryModal` (passes `agentId` + `agentName`)
+- Old `AgentMemoryModal.tsx` placeholder deleted
+- Empty-state "Create MEMORY.md" flow included (moved up from Phase 4)
+- Frontend-side filename validation mirrors backend `validate_filename`
 
 ### Phase 4 — Polish
-- YAML frontmatter parsing for file type labels
 - Resizable split pane in memory modal
-- Empty-state "Create MEMORY.md" flow
+- Relative "modified" timestamps + size in the file list
+- Backend RPC to return the resolved memory dir path (replace the frontend
+  `previewMemoryPath` approximation, which diverges from disk past 200 chars)
 - `autoMemoryEnabled` re-evaluation (§10)
 
 ---

@@ -17,7 +17,7 @@ import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMe
 import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/AgentCreateFromTemplateModal";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
-import { AgentMemoryModalPanel } from "@/app/view/agent/components/AgentMemoryModal";
+import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
@@ -289,7 +289,9 @@ export function renderRequest(
             return {
                 label: requestLabel(req),
                 panel: (
-                    <AgentMemoryModalPanel
+                    <AgentNativeMemoryModal
+                        agentId={req.agentId}
+                        agentName={req.agentName}
                         workingDirectory={req.workingDirectory}
                         onClose={api.close}
                     />
