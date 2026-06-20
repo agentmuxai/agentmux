@@ -85,10 +85,12 @@
     // -- groq engine: hosted, sends webm. Key read server-side only (never sent to UI).
     // "voice:groqApiKey":       "gsk_...",  // or set AGENTMUX_GROQ_API_KEY
     // -- whisper-local engine: offline, sends 16kHz WAV to a local whisper.cpp CLI.
-    //    Both paths user-provided (auto-download is a follow-up). Env overrides:
-    //    AGENTMUX_WHISPER_CLI / AGENTMUX_WHISPER_MODEL.
+    //    Provide the whisper-cli binary path; the GGML model auto-downloads on
+    //    first use (default "base.en", ~142MB) to <config>/whisper-models/.
+    //    Env override for the binary: AGENTMUX_WHISPER_CLI.
     // "voice:whisperCliPath":   "C:/tools/whisper-cli.exe",
-    // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",
+    // "voice:whisperModel":     "base.en",   // tiny.en | base.en | small.en | …
+    // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",  // explicit override; skips auto-download
 
     // -- Other --
     // "widget:icononly":           false,
