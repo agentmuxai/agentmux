@@ -37,6 +37,8 @@ mod saga;
 mod splash;
 #[cfg(target_os = "macos")]
 mod splash_mac;
+#[cfg(target_os = "linux")]
+mod splash_linux;
 mod srv_spawner;
 mod state;
 mod wrr;
@@ -108,6 +110,15 @@ fn main() {
 
     #[cfg(not(target_os = "macos"))]
     {
+        // Linux: paint the splash before any heavy work (mirrors the macOS path,
+        // but on its own thread since neither X11 nor Wayland needs the main
+        // thread). spawn() sets AGENTMUX_SPLASH_READY_FILE so the host — spawned
+        // later inside launcher_main — inherits it and signals first paint.
+        // Windows keeps spawning its splash inside launcher_main (event-name
+        // model). See splash_linux/.
+        #[cfg(target_os = "linux")]
+        splash_linux::spawn();
+
         tokio::runtime::Runtime::new()
             .expect("failed to build Tokio runtime")
             .block_on(launcher_main());

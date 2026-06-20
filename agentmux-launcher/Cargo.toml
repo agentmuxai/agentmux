@@ -100,12 +100,28 @@ windows-sys = { version = "0.59", features = [
 # libc surface we need; tokio's process_group handles the spawn side.
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Session-aware Linux startup splash (SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20).
+# X11 backend: a software-drawn override-redirect splash window (pixmap blit,
+# no GPU). Pure-Rust RustConnection over libxcb; present on every X11 stack.
+x11rb = "0.13"
+# Wayland backend: a software-drawn (wl_shm) xdg_toplevel splash for native-
+# Wayland sessions (the default since #1611). No GPU/EGL. wayland-client is used
+# via sctk's reexport so the protocol versions can't skew.
+smithay-client-toolkit = "0.19"
+
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
 # Decode the splash brain logo at compile time. The PNG (RGBA, transparent
 # background) lives at `resources/brain.png`; build.rs decodes it to raw
 # BGRA bytes that splash.rs `include_bytes!`-s — no runtime PNG decoder
 # in the launcher binary.
+png = "0.17"
+
+[target.'cfg(target_os = "linux")'.build-dependencies]
+# Same compile-time brain.png decode as Windows, but emitting straight RGBA8
+# (brain_rgba.bin) for the Linux X11/Wayland splash backends. Keeps a PNG
+# decoder out of the launcher runtime binary.
 png = "0.17"
 
 [dev-dependencies]
