@@ -192,7 +192,17 @@ pub(crate) fn persist_last_failure(
     let oref_str = format!("block:{}", block_id);
     let mut meta_update = crate::backend::obj::MetaMapType::new();
     let val = match failure {
-        Some(f) => serde_json::to_value(f).unwrap_or(serde_json::Value::Null),
+        Some(f) => match serde_json::to_value(f) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id,
+                    error = %e,
+                    "failed to serialize AgentFailure for agent:last_failure — skipping meta write",
+                );
+                return;
+            }
+        },
         None => serde_json::Value::Null, // null → merge_meta removes the key
     };
     meta_update.insert(META_LAST_FAILURE.to_string(), val);
