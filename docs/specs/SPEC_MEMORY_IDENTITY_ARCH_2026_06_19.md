@@ -106,15 +106,49 @@ The native memory backend RPCs are complete. The UI is a placeholder. Users can'
 
 ### 4.1 Core principle: rename to separate the concepts
 
-| Current name | Proposed name | Why |
-|---|---|---|
-| Memory bundle (`db_memory_bundles`) | **Bundle** | It's a config preset, not memory. "Bundle" is already used in `BundleManagerModal`. |
-| Memory tab (Trust Center) | **Bundles tab** | Consistent with the rename |
-| Memory pane (`view: "memory"`) | **Bundles pane** | Same |
-| `MemoryViewModel` | `BundleViewModel` | Same |
-| Brain icon (Trust Center sidebar, `viewIcon`) | Remove or change to grid/preset icon | Reserve the brain icon for native memory only |
+The user-facing name is **Presets** (decided 2026-06-20). "Bundle" was the
+original proposal but is ambiguous in the live taxonomy — Identities are also
+"bundles" (`IdentityBundle`), and the rail already names tabs by their domain
+("Identities", not "Identity Bundles"). "Presets" is a distinct domain noun for
+"reusable agent config." The internal type stays `Memory` / `db_memory_bundles`
+(backend names unchanged); only user-facing strings change.
 
-**Result:** "brain" = one thing only: Claude's autonomous native memory. "Bundle" = config preset. No ambiguity.
+| Surface | New user-facing name | Notes |
+|---|---|---|
+| Memory tab (Trust Center rail) | **Presets** | rail: Accounts · Identities · Brain · Presets |
+| Per-item label | **Preset** | "+ New Preset", "Edit Preset" |
+| Memory pane (`view: "memory"`) | **Presets** summary | `viewType = "memory"` string stays (persisted block key) |
+| `viewIcon` (was `brain`) | `sliders` / `cubes` | reserve the brain icon for native memory only |
+
+**Internal symbols stay** (`MemoryViewModel`, `MemoryDraft`, `memory-*.tsx`,
+`memory-view-*` CSS, `db_memory_bundles`, `bundle_memory_*`, `listmemories`).
+Renaming the persisted `view: "memory"` key or the RPC/table names is pure churn
+with a migration/compat cost and no user benefit; the backend already keeps the
+`Memory` type name, so the frontend class staying `MemoryViewModel` is consistent.
+
+**Result:** "brain" = one thing only (Claude's autonomous native memory);
+"Presets" = provider-agnostic config. No ambiguity.
+
+### 4.1a Presets are provider-agnostic (decided 2026-06-20)
+
+A preset is the agent's reusable, **provider-agnostic** capability pack:
+instructions + context files + MCP servers + skills. It does NOT carry a
+provider or model.
+
+- **Provider + model belong to the agent.** `AgentDefinition.provider` is the
+  CLI (claude/codex/gemini); the model rides in `AgentDefinition.provider_flags`
+  as `--model <x>`. The agent is the single source of truth for what runs.
+- The `Memory` bundle's `provider` and `model` fields are **vestigial** — stored
+  and editable today, but never read at launch (only `instructions`, context,
+  MCP, and skills are consumed). They are a duplicate of provider that does
+  nothing.
+
+**Action (cosmetic + cleanup, low risk — the fields are vestigial):**
+- Remove the **Provider** and **Model** fields from the Presets editor
+  (`memory-manager.tsx`) and from `MemoryDraft` / the wire.
+- Leave the `db_memory_bundles.provider` / `.model` columns in place,
+  deprecated (written empty) — no migration, no launch path touched.
+- A preset can then be paired with an agent of any provider.
 
 ### 4.2 Resolve or commit to Identity Bundles
 
@@ -240,19 +274,30 @@ The backend is done. The UI gap is the only thing preventing the brain icon from
 
 Empty state: "No memory files yet. Claude creates this folder when it first saves a fact. [+ Create MEMORY.md]"
 
-### Priority 2 — Rename Memory → Bundles
+### Priority 2 — Rename Memory → Presets + strip provider/model
 
-**Scope:** cosmetic rename, no schema migration needed.
+**Scope:** user-facing rename + removal of two vestigial fields. No schema
+migration. See §4.1 and §4.1a for the decisions.
 
-Files affected:
-- `frontend/app/view/memory/memory-model.ts` → keep filename, rename exports: `MemoryViewModel` → `BundleViewModel`, `MemoryDraft` → `BundleDraft`
-- `frontend/app/view/memory/memory-manager.tsx` → rename component references
-- `frontend/app/view/memory/memory-view.scss` → rename CSS classes from `memory-view-*` to `bundle-view-*`
-- Trust Center tab label: "Memory" → "Bundles"
-- `viewIcon` in MemoryViewModel: change from `"brain"` to `"cubes"` (or `"layer-group"`) so brain = only native memory
-- `CLAUDE.md` "Not widgets" table: update "Memory" row
+User-facing rename (strings only — internal symbols stay, see §4.1):
+- Trust Center rail label: "Memories" → **"Presets"**
+- `memory-manager.tsx` strings: "+ New Memory" → "+ New Preset", "Edit Memory" /
+  "New Memory" → "Edit Preset" / "New Preset", "Select a Memory bundle…" →
+  "Select a preset…", confirm/empty/error copy → "preset"
+- `memory-model.ts`: `viewText` / `viewName` "Memory" → "Presets";
+  `viewIcon` `"brain"` → `"sliders"` (reserve brain for native memory)
+- `memory-view.tsx` + `bundle-summary.tsx`: standalone pane label "Memory" →
+  "Presets" (extend `BundleSummaryPanel` kind to render "Presets")
+- `CLAUDE.md` "Not widgets" table: update the "Memory" row
 
-Backend: no changes needed — the table and RPC names can stay (`db_memory_bundles`, `listmemories`, etc.) since they're internal; only the UI-visible names change.
+Provider-agnostic cleanup (§4.1a):
+- Remove the **Provider** and **Model** form fields + the `provider` / `model`
+  keys from `MemoryDraft` and `draftToWire`
+- Leave `db_memory_bundles.provider` / `.model` columns deprecated (written
+  empty); the launch path never read them, so nothing breaks
+
+Backend: no changes needed — the table and RPC names stay (`db_memory_bundles`,
+`listmemories`, etc.); only UI strings and the two form fields change.
 
 ### Priority 3 — Migrate identity assignment to v6 junction table
 

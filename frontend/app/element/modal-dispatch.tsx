@@ -32,7 +32,7 @@ export function requestLabel(req: ModalLayerRequest): string {
         case "new-identity":
             return "New Identity";
         case "new-memory":
-            return "New Memory";
+            return "New Preset";
         case "agent-prereqs":
             return `Install required tools for ${req.agent.name}`;
         case "install-agent":

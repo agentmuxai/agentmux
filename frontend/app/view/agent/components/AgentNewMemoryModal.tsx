@@ -89,9 +89,9 @@ export const AgentNewMemoryModalPanel = (
     return (
         <>
             <header class="modal-panel-header">
-                <h2 class="modal-panel-title">New Memory</h2>
+                <h2 class="modal-panel-title">New Preset</h2>
                 <p class="modal-panel-description">
-                    A Memory holds text the agent reads at launch — notes,
+                    A preset holds text the agent reads at launch — notes,
                     project context, style guides, instructions.
                 </p>
             </header>
@@ -116,7 +116,7 @@ export const AgentNewMemoryModalPanel = (
                     <input
                         type="text"
                         class="agent-new-bundle-modal-input"
-                        placeholder="What's this Memory for?"
+                        placeholder="What's this preset for?"
                         value={description()}
                         onInput={(e) => setDescription(e.currentTarget.value)}
                         onKeyDown={onKeyDown}
@@ -134,7 +134,7 @@ export const AgentNewMemoryModalPanel = (
                                 onChange={() => setSeedMode("empty")}
                                 disabled={submitting()}
                             />
-                            <span>Start empty — add files later from the Memory pane</span>
+                            <span>Start empty — add files later from the Presets pane</span>
                         </label>
                         <label class="agent-new-bundle-modal-radio">
                             <input
