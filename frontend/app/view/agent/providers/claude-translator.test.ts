@@ -265,6 +265,46 @@ describe("ClaudeTranslator", () => {
                 (t.translate({ type: "result", usage: { input_tokens: 0, output_tokens: 0 } })[0] as any).stats,
             ).toEqual({});
         });
+
+        it("emits error_result then session_end when is_error:true + api_error_status", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                api_error_status: 401,
+                result: "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                cost_usd: 0,
+            });
+            expect(events).toHaveLength(2);
+            expect(events[0].type).toBe("error_result");
+            expect((events[0] as any).code).toBe(401);
+            expect((events[0] as any).message).toContain("401");
+            expect(events[1].type).toBe("session_end");
+        });
+
+        it("uses fallback message when result field is not a string", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: true,
+                api_error_status: 429,
+            });
+            expect(events[0].type).toBe("error_result");
+            expect((events[0] as any).code).toBe(429);
+            expect((events[0] as any).message).toBe("API error 429");
+        });
+
+        it("does NOT emit error_result when is_error is false", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({
+                type: "result",
+                is_error: false,
+                api_error_status: 0,
+                cost_usd: 0.01,
+            });
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("session_end");
+        });
     });
 
     // ── Edge cases ──────────────────────────────────────────────────────────
