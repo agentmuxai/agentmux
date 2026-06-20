@@ -42,8 +42,6 @@ export class WaitingTonePlayer {
     private gainValue = 0.25;
     private running = false;
     private scheduleHandle: ReturnType<typeof setTimeout> | null = null;
-    /** Wall-clock time (ms) when the current loop cycle started. Used for scheduling. */
-    private cycleStartMs = 0;
 
     /**
      * Wire the chain into the given AudioContext and master GainNode.
