@@ -37,7 +37,7 @@
 //! account upsert / bind / publish errors are logged and skipped, the
 //! srv keeps coming up.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -74,6 +74,9 @@ pub struct MigrationStats {
     pub providers_skipped_no_ambient: usize,
     /// Number of providers we successfully bound into the Default bundle.
     pub providers_seeded: usize,
+    /// Number of existing Default accounts repointed off the user's ambient
+    /// `~/.<provider>` dir to the AgentMux-owned dir (isolation sweep, §4.2).
+    pub providers_repointed: usize,
     /// Whether the Default bundle was created (vs. reused) this run.
     pub default_bundle_created: bool,
     /// Count of `db_agent_instances` rows whose `identity_id` was
@@ -215,23 +218,32 @@ pub fn run_default_bundle_migration(
             }
         }
 
-        // Probe the ambient creds so the seeded binding lands with an
-        // accurate status (valid / expired / needs_reauth) rather than
-        // the resolver having to discover it on the next spawn.
-        // `probe_oauth_status` reads `<dir>/.credentials.json` itself,
-        // so we pass the ambient_dir, not the creds_file.
-        let ambient_dir_str = ambient_dir.to_string_lossy().to_string();
-        let probed_status = probe_oauth_status(provider_id, &ambient_dir_str, now_ms)
+        // SPEC_PROVIDER_ISOLATION (INV-A/INV-R): the live auth dir must be
+        // AgentMux-owned, never the user's ambient `~/.<provider>`. Import the
+        // ambient credential into the AgentMux dir ONCE (read-only copy,
+        // sentinel-gated), then point the account at the AgentMux dir so the
+        // CLI reads + refreshes THERE — `~/.<provider>` is never written and
+        // never the live target. (Reverses the #983 pointer-to-ambient.)
+        let dest_dir = provider_auth_dir(&home, &provider_cfg.auth_dir_name);
+        let dest_str = dest_dir.to_string_lossy().to_string();
+        if let Err(e) = import_ambient_once(&creds_file, &dest_dir) {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                error = %e,
+                "oauth-bundles migration: failed to import ambient creds into the AgentMux dir — skipping provider"
+            );
+            continue;
+        }
+
+        // Probe the AgentMux dir (the dir the agent will actually run in), so
+        // the seeded binding lands with an accurate status.
+        let probed_status = probe_oauth_status(provider_id, &dest_str, now_ms)
             .map(|s| s.as_str())
             .unwrap_or(oauth_status::UNKNOWN);
 
-        // Mirror `persist_oauth_binding_or_synthetic` (PR C):
-        // reuse the account_id if a binding already exists, mint a
-        // fresh uuid otherwise. (In practice we already filtered out
-        // covered providers above, so this is always the mint path —
-        // but the lookup costs nothing and keeps the shape identical
-        // to PR C, which makes the two paths interchangeable for any
-        // future refactor.)
+        // Mirror `persist_oauth_binding_or_synthetic` (PR C): reuse the
+        // account_id if a binding already exists, mint a fresh uuid otherwise.
         let account_id = wstore
             .bundle_identity_bindings(DEFAULT_BUNDLE_ID)
             .ok()
@@ -247,15 +259,8 @@ pub fn run_default_bundle_migration(
             provider: provider_id.to_string(),
             kind: "oauth".to_string(),
             display_name: String::new(),
-            secret_ref: SecretRef::OAuthConfigDir {
-                // Point at the ambient dir (`~/.claude/`, `~/.codex/`,
-                // `~/.openclaw/`) — NOT a per-bundle copy. Per spec §5
-                // the SecretRef is a pointer; we don't move tokens.
-                // The CLI keeps reading + refreshing in place, the
-                // resolver injects the dir at spawn time, end-to-end
-                // identical to a manually-configured bundle.
-                dir: ambient_dir_str.clone(),
-            },
+            // INV-A: AgentMux-owned dir, NOT the user's `~/.<provider>`.
+            secret_ref: SecretRef::OAuthConfigDir { dir: dest_str.clone() },
             context: serde_json::json!({}),
             status: probed_status.to_string(),
             created_at: now_ms,
@@ -287,9 +292,9 @@ pub fn run_default_bundle_migration(
             target: "identity",
             provider_id,
             account_id,
-            dir = %ambient_dir.display(),
+            dir = %dest_str,
             status = probed_status,
-            "oauth-bundles migration: bound ambient credentials into Default bundle"
+            "oauth-bundles migration: imported ambient credentials into the AgentMux dir + bound into Default bundle"
         );
 
         // Best-effort broker publish so any open UI refreshes. None in
@@ -318,6 +323,13 @@ pub fn run_default_bundle_migration(
             );
         }
     }
+
+    // Isolation sweep (SPEC_PROVIDER_ISOLATION §4.2): repoint any pre-existing
+    // Default account still pointing at the user's ambient `~/.<provider>`
+    // (seeded by the old #983 pointer-to-ambient behaviour) to the
+    // AgentMux-owned dir, so existing agents stop reading/refreshing in the
+    // user's personal login. Idempotent + sentinel-gated.
+    sweep_default_accounts_off_ambient(wstore, broker, &home, now_ms, &mut stats);
 
     // Back-fill the empty / "blank" identity_id rows on
     // db_agent_instances → Default bundle id. Per spec §5 step 4.
@@ -365,6 +377,125 @@ pub fn run_default_bundle_migration(
         "oauth-bundles migration: complete"
     );
     stats
+}
+
+/// `<home>/.agentmux/shared/providers/<auth_dir_name>` — the AgentMux-owned
+/// live auth dir (SPEC_PROVIDER_ISOLATION INV-A). Rooted on the migration's
+/// resolved `home` (not a globally-resolved `DataPaths`) so tests using
+/// `home_dir_override` stay hermetic. Mirrors `DataPaths::provider_auth_dir`.
+fn provider_auth_dir(home: &Path, auth_dir_name: &str) -> PathBuf {
+    home.join(".agentmux")
+        .join("shared")
+        .join("providers")
+        .join(auth_dir_name)
+}
+
+/// Import the user's ambient credential into the AgentMux dir ONCE — a
+/// read-only **copy** of `~/.<provider>/.credentials.json` (never a move,
+/// never a write-back to the user's dir). Sentinel-gated
+/// (`<dest>/.agentmux-cred-seeded`) so a later logout in the AgentMux dir
+/// sticks and we never silently re-import. Returns `Ok(true)` when a copy
+/// happened this call. (SPEC_PROVIDER_ISOLATION INV-R.)
+fn import_ambient_once(ambient_creds: &Path, dest_dir: &Path) -> std::io::Result<bool> {
+    let sentinel = dest_dir.join(".agentmux-cred-seeded");
+    if sentinel.exists() {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(dest_dir)?;
+    let mut copied = false;
+    if ambient_creds.exists() {
+        std::fs::copy(ambient_creds, dest_dir.join(".credentials.json"))?;
+        copied = true;
+    }
+    // Mark the AgentMux dir as "taken over" even if there was nothing to copy,
+    // so a later fresh login here isn't clobbered by a future ambient import.
+    std::fs::write(&sentinel, b"")?;
+    Ok(copied)
+}
+
+/// Repoint any Default-bundle account still pointing at the user's ambient
+/// `~/.<provider>` dir to the AgentMux-owned dir (SPEC_PROVIDER_ISOLATION
+/// INV-A / §4.2). Fixes installs seeded by the old #983 pointer-to-ambient
+/// behaviour so existing agents stop reading/refreshing in the user's personal
+/// login. Idempotent: accounts already pointing at the AgentMux dir (or a
+/// custom dir) are untouched; the credential is imported once (sentinel-gated).
+fn sweep_default_accounts_off_ambient(
+    wstore: &Arc<Store>,
+    broker: Option<&Arc<Broker>>,
+    home: &Path,
+    now_ms: i64,
+    stats: &mut MigrationStats,
+) {
+    let bindings = match wstore.bundle_identity_bindings(DEFAULT_BUNDLE_ID) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    for b in bindings {
+        let provider_cfg = match get_provider(&b.provider) {
+            Some(p) => p,
+            None => continue,
+        };
+        let ambient_dir = home.join(format!(".{}", provider_cfg.auth_dir_name));
+        let ambient_str = ambient_dir.to_string_lossy().to_string();
+        let dest_dir = provider_auth_dir(home, &provider_cfg.auth_dir_name);
+        let dest_str = dest_dir.to_string_lossy().to_string();
+
+        let mut acct = match wstore.identity_get(&b.account_id) {
+            Ok(Some(a)) => a,
+            _ => continue,
+        };
+        let points_at_ambient = matches!(
+            &acct.secret_ref,
+            SecretRef::OAuthConfigDir { dir } if *dir == ambient_str
+        );
+        if !points_at_ambient {
+            continue; // already AgentMux-owned (or a custom dir) — leave it
+        }
+
+        if let Err(e) = import_ambient_once(&ambient_dir.join(".credentials.json"), &dest_dir) {
+            tracing::warn!(
+                target: "identity",
+                provider = %b.provider,
+                error = %e,
+                "isolation sweep: import failed — leaving account pointed at ambient"
+            );
+            continue;
+        }
+        acct.secret_ref = SecretRef::OAuthConfigDir {
+            dir: dest_str.clone(),
+        };
+        acct.status = probe_oauth_status(&b.provider, &dest_str, now_ms)
+            .map(|s| s.as_str())
+            .unwrap_or(oauth_status::UNKNOWN)
+            .to_string();
+        acct.updated_at = now_ms;
+        if let Err(e) = wstore.identity_upsert(&acct) {
+            tracing::warn!(
+                target: "identity",
+                provider = %b.provider,
+                error = %e,
+                "isolation sweep: identity_upsert failed"
+            );
+            continue;
+        }
+        stats.providers_repointed += 1;
+        tracing::info!(
+            target: "identity",
+            provider = %b.provider,
+            from = %ambient_str,
+            to = %dest_str,
+            "isolation sweep: repointed Default account off the user's ambient dir to the AgentMux dir"
+        );
+        if let Some(br) = broker {
+            br.publish(WaveEvent {
+                event: format!("identitybundlebindings:changed:{DEFAULT_BUNDLE_ID}"),
+                scopes: vec![],
+                sender: String::new(),
+                persist: 0,
+                data: None,
+            });
+        }
+    }
 }
 
 /// Collect the set of providers that are bound in ANY identity bundle
@@ -520,19 +651,100 @@ mod tests {
         let claude_binding = &bindings[0];
         assert_eq!(claude_binding.provider, "claude");
 
-        // Account row exists with OAuthConfigDir pointing at the
-        // ambient dir.
+        // SPEC_PROVIDER_ISOLATION INV-A: the account points at the AgentMux
+        // dir, NOT the user's ambient `~/.claude` (T-A1).
         let account = store.identity_get(&claude_binding.account_id).unwrap().unwrap();
         assert_eq!(account.provider, "claude");
         assert_eq!(account.kind, "oauth");
         assert_eq!(account.status, oauth_status::VALID);
+        let agentmux_dir = tmp
+            .path()
+            .join(".agentmux")
+            .join("shared")
+            .join("providers")
+            .join("claude");
         match account.secret_ref {
             SecretRef::OAuthConfigDir { dir } => {
-                let expected = tmp.path().join(".claude").to_string_lossy().to_string();
-                assert_eq!(dir, expected);
+                assert_eq!(dir, agentmux_dir.to_string_lossy());
             }
             other => panic!("expected OAuthConfigDir, got {:?}", other),
         }
+
+        // INV-R: the credential was COPIED into the AgentMux dir (with the
+        // import sentinel), and the user's ambient `~/.claude` is untouched.
+        let dest_creds = agentmux_dir.join(".credentials.json");
+        assert!(dest_creds.exists(), "credential should be copied into the AgentMux dir");
+        assert!(
+            agentmux_dir.join(".agentmux-cred-seeded").exists(),
+            "import sentinel should be written"
+        );
+        let ambient_creds = tmp.path().join(".claude").join(".credentials.json");
+        assert!(ambient_creds.exists(), "ambient ~/.claude creds must remain (read-only import)");
+        assert_eq!(
+            std::fs::read(&ambient_creds).unwrap(),
+            std::fs::read(&dest_creds).unwrap(),
+            "copy must be byte-identical to the ambient source"
+        );
+    }
+
+    #[test]
+    fn sweep_repoints_existing_ambient_account_to_agentmux_dir() {
+        // Simulate the old #983 state: a Default 'claude' account pointing AT
+        // the user's ambient `~/.claude`. The migration's isolation sweep
+        // (§4.2) must repoint it to the AgentMux dir (copy once) without a
+        // manual re-login — the fix for already-bound agents (Nark/Poal).
+        let store = make_store();
+        let tmp = tempfile::tempdir().unwrap();
+        plant_ambient_claude_creds(tmp.path());
+        let ambient_dir = tmp.path().join(".claude");
+
+        // Pre-seed an old-style account + binding pointing AT the ambient dir.
+        let legacy = IdentityAccount {
+            id: "acct-legacy".to_string(),
+            name: "claude-oauth".to_string(),
+            provider: "claude".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::OAuthConfigDir {
+                dir: ambient_dir.to_string_lossy().to_string(),
+            },
+            context: serde_json::json!({}),
+            status: oauth_status::VALID.to_string(),
+            created_at: 1,
+            updated_at: 1,
+        };
+        store.identity_upsert(&legacy).unwrap();
+        ensure_default_bundle(&store, 1).unwrap();
+        store
+            .bundle_identity_bind(DEFAULT_BUNDLE_ID, "claude", "acct-legacy")
+            .unwrap();
+
+        let stats = run_default_bundle_migration(&store, None, Some(tmp.path().to_path_buf()));
+        // claude is already bound → the loop skips it; the sweep repoints it.
+        assert_eq!(stats.providers_seeded, 0);
+        assert_eq!(stats.providers_repointed, 1);
+
+        let updated = store.identity_get("acct-legacy").unwrap().unwrap();
+        let agentmux_dir = tmp
+            .path()
+            .join(".agentmux")
+            .join("shared")
+            .join("providers")
+            .join("claude");
+        match updated.secret_ref {
+            SecretRef::OAuthConfigDir { dir } => {
+                assert_eq!(dir, agentmux_dir.to_string_lossy());
+            }
+            other => panic!("expected OAuthConfigDir, got {:?}", other),
+        }
+        assert!(
+            agentmux_dir.join(".credentials.json").exists(),
+            "creds copied into the AgentMux dir on sweep"
+        );
+
+        // Idempotent: a second run finds it already AgentMux-owned → no repoint.
+        let s2 = run_default_bundle_migration(&store, None, Some(tmp.path().to_path_buf()));
+        assert_eq!(s2.providers_repointed, 0);
     }
 
     #[test]

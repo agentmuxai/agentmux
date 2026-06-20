@@ -452,16 +452,34 @@ pub fn seed_provider_auth_from_global(
         }
     }
 
-    // ISOLATED destination — the same path `ensure_auth_dir` builds.
+    // ISOLATED destination (SPEC_PROVIDER_ISOLATION §4.5). Prefer the agent's
+    // RESOLVED config dir (passed as `config_dir` from its `cmd:env`), so a
+    // per-identity/bundle agent is seeded into the dir it actually reads — but
+    // ONLY when that dir is under the AgentMux home (`~/.agentmux`). A stale
+    // frozen dir pointing at the user's own `~/.claude` is REJECTED → fall back
+    // to the shared default, so the seed can NEVER write into the user's
+    // personal env (INV-R). Default agents resolve to the shared dir, which
+    // matches their post-migration binding.
     let home = state
         .user_home_dir
         .lock()
         .clone()
         .ok_or_else(|| "User home dir not initialized yet".to_string())?;
-    let dest_dir = std::path::PathBuf::from(home)
-        .join("shared")
-        .join("providers")
-        .join(provider);
+    let home_path = std::path::PathBuf::from(&home);
+    let shared_default = home_path.join("shared").join("providers").join(provider);
+    let requested = args
+        .get("config_dir")
+        .or_else(|| args.get("configDir"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(std::path::PathBuf::from);
+    let dest_dir = match requested {
+        // Accept the agent's resolved dir only if it's inside `~/.agentmux`
+        // (covers `shared/providers/*` and `shared/identities/*` bundle dirs).
+        Some(d) if d.starts_with(&home_path) => d,
+        // Anything else (incl. the user's `~/.claude`) → shared default.
+        _ => shared_default,
+    };
     std::fs::create_dir_all(&dest_dir)
         .map_err(|e| format!("Failed to create isolated auth dir: {e}"))?;
     let dest_cred = dest_dir.join(".credentials.json");

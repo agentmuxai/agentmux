@@ -24,9 +24,17 @@
 import { getApi } from "@/app/store/global";
 import type { LogFn } from "../types";
 
-export async function seedGlobalLogin(providerId: string, log: LogFn): Promise<boolean> {
+export async function seedGlobalLogin(
+    providerId: string,
+    log: LogFn,
+    configDir?: string,
+): Promise<boolean> {
     log("auth", "Use existing login — copying your global Claude login into this agent…");
-    const res = await getApi().seedProviderAuthFromGlobal(providerId);
+    // `configDir` is the agent's resolved auth dir (from cmd:env). The host
+    // seeds into it only if it's under ~/.agentmux; a stale ~/.claude is
+    // rejected there and falls back to the shared dir — the seed never writes
+    // the user's own login (SPEC_PROVIDER_ISOLATION §4.5 / INV-R).
+    const res = await getApi().seedProviderAuthFromGlobal(providerId, configDir);
     if (res?.seeded) {
         log("auth", "copied your existing login — just send your message again");
         return true;
