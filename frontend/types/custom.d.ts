@@ -183,7 +183,7 @@ declare global {
         ensureAuthDir: (providerId: string) => Promise<string>;
         runCliLogin: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>, requiresTty?: boolean) => Promise<string | null>;
         cancelCliLogin: () => Promise<void>;
-        seedProviderAuthFromGlobal: (providerId: string) => Promise<{ seeded: boolean; status: string; expiresAt?: number | null }>;
+        seedProviderAuthFromGlobal: (providerId: string, configDir?: string) => Promise<{ seeded: boolean; status: string; expiresAt?: number | null }>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
         startCrossDrag: (
             dragType: "pane" | "tab",

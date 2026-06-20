@@ -609,10 +609,10 @@ export function buildCefApi(): AppApi {
         cancelCliLogin: async () => {
             await invokeCommand("cancel_cli_login");
         },
-        seedProviderAuthFromGlobal: async (providerId: string) => {
+        seedProviderAuthFromGlobal: async (providerId: string, configDir?: string) => {
             return await invokeCommand<{ seeded: boolean; status: string; expiresAt?: number | null }>(
                 "seed_provider_auth_from_global",
-                { providerId },
+                { providerId, configDir: configDir ?? null },
             );
         },
 
