@@ -301,7 +301,8 @@ match.url includes "://"    →  use as-is
 otherwise (bare domain)     →  "https://" + match.url
 ```
 
-`localhost:3000` → `https://localhost:3000`  
+`localhost:3000` → `http://localhost:3000` (loopback uses http)  
+`127.0.0.1:8080` → `http://127.0.0.1:8080` (loopback uses http)  
 `github.com/foo` → `https://github.com/foo`  
 `http://example.com` → `http://example.com` (unchanged)
 
