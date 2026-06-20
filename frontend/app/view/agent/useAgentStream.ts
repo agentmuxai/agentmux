@@ -16,7 +16,7 @@ import { batch, createEffect, onCleanup, onMount } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser, STARTUP_HEADING_RE } from "./stream-parser";
-import type { DocumentNode, SessionStats, ShellNode, ToolLogChunk, UserMessageNode } from "./types";
+import type { ContextCompactedNode, DocumentNode, SessionStats, ShellNode, ToolLogChunk, UserMessageNode } from "./types";
 import { recordTurn } from "@/store/token-usage";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 import {
@@ -704,7 +704,26 @@ export function useAgentStream({
                             // "claude-opus-4-8") — used to seed the context-window
                             // meter per model (Opus/Sonnet 1M, Haiku 200K).
                             const modelId = inner.message?.model as string | undefined;
-                            model.dispatchPane({ type: "TokensIn", input: inputTok, model: modelId });
+                            const paneEvents = model.dispatchPane({ type: "TokensIn", input: inputTok, model: modelId });
+                            // Detect context compaction from the reducer's event output.
+                            // The reducer emits "context-compacted" when input tokens
+                            // drop ≥50% from a >10k baseline — the signature of compaction.
+                            for (const ev of paneEvents ?? []) {
+                                if (ev.type === "context-compacted") {
+                                    const compactNode: ContextCompactedNode = {
+                                        type: "context_compacted",
+                                        id: `context-compacted-${Date.now()}`,
+                                        tokensBefore: ev.tokensBefore,
+                                        tokensAfter: ev.tokensAfter,
+                                        timestamp: Date.now(),
+                                    };
+                                    if (!nodeIdSet.has(compactNode.id)) {
+                                        nodeIdSet.add(compactNode.id);
+                                        pendingNew.push(compactNode);
+                                        scheduleFlush();
+                                    }
+                                }
+                            }
                         }
                     } else if (inner?.type === "message_delta") {
                         const outputTok = inner.usage?.output_tokens as number | undefined;

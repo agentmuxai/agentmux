@@ -478,6 +478,18 @@ export function update(
             const events: AgentPaneEvent[] = [
                 { type: "tokens-updated", input: command.input, output: null },
             ];
+            // Detect context compaction: token count drops ≥50% from a
+            // non-trivial baseline. Compaction typically drops 80–95%;
+            // normal turn-to-turn growth is monotonically increasing.
+            // AgentMux /clear is frontend-only and does not affect tokens.
+            const prev = state.lastContextTokens;
+            if (prev != null && prev > 10_000 && command.input < prev * 0.5) {
+                events.push({
+                    type: "context-compacted",
+                    tokensBefore: prev,
+                    tokensAfter: command.input,
+                });
+            }
             return { state: nextState, events };
         }
 
