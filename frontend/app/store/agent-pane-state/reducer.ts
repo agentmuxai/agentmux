@@ -388,12 +388,19 @@ export function update(
             const finishedAt = phase.kind === "Done"
                 ? phase.finishedAt
                 : nowMs;
+            const lastTurnHadQuestion =
+                outcome === "completed" && command.lastAssistantText != null
+                    ? endsWithQuestion(command.lastAssistantText)
+                    : outcome === "completed"
+                        ? state.lastTurnHadQuestion
+                        : false;
             return {
                 state: {
                     ...state,
                     sessionStats: merged,
                     currentTool: null,
                     turnTokens: null,
+                    lastTurnHadQuestion,
                     turnPhase: {
                         kind: "Done",
                         outcome,
@@ -419,6 +426,7 @@ export function update(
                     currentTool: null,
                     turnTokens: null,
                     lastContextTokens: 0,
+                    lastTurnHadQuestion: false,
                     // TurnReset is a wholesale clear → Idle. The
                     // working/stopping cascade lives entirely on
                     // turnPhase since PR G.
@@ -859,6 +867,17 @@ function bumpEvent(
  * usage (hence `||`, not `??`). Codex emits usage only on the stats
  * branch (no live tokens), so it's unaffected.
  */
+/**
+ * Returns true if the assistant's last message text ended with a question.
+ * Trims trailing whitespace and common closing punctuation (`"`, `'`, `)`)
+ * before checking the final character.
+ * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §4 (heuristic C).
+ */
+function endsWithQuestion(text: string): boolean {
+    const trimmed = text.trimEnd().replace(/["')]+$/, "").trimEnd();
+    return trimmed.endsWith("?");
+}
+
 function mergeStats(
     stats: AgentPaneState["sessionStats"],
     tokens: AgentPaneState["turnTokens"],

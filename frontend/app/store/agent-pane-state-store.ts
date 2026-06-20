@@ -212,7 +212,36 @@ export function dispatch(
         );
     }
 
-    for (const ev of result.events) {
+    // Synthetic waiting-for-input / waiting-ended events injected after
+    // the reducer result events — not emitted by the pure reducer because
+    // they span two state snapshots (prev vs next).
+    const extraEvents: AgentPaneEvent[] = [];
+    const prevPhase = prev.turnPhase;
+    const nextPhase = slot.state.turnPhase;
+
+    // Entering waiting state: turn just completed with a question, no pending.
+    if (
+        nextPhase.kind === "Done" &&
+        nextPhase.outcome === "completed" &&
+        slot.state.lastTurnHadQuestion &&
+        slot.state.pending.length === 0 &&
+        !(prevPhase.kind === "Done" && prevPhase.outcome === "completed" && prev.lastTurnHadQuestion)
+    ) {
+        extraEvents.push({ type: "waiting-for-input" });
+    }
+
+    // Leaving waiting state: pane was waiting and a new turn started (submitted).
+    if (
+        prevPhase.kind === "Done" &&
+        prevPhase.outcome === "completed" &&
+        prev.lastTurnHadQuestion &&
+        nextPhase.kind === "Submitting"
+    ) {
+        extraEvents.push({ type: "waiting-ended", reason: "submitted" });
+    }
+
+    const allEvents = [...result.events, ...extraEvents];
+    for (const ev of allEvents) {
         eventSink(blockId, ev);
         for (const l of extraListeners) {
             try {
@@ -229,11 +258,11 @@ export function dispatch(
         slice: "agent-pane-state",
         key: blockId,
         command,
-        events: result.events,
+        events: allEvents,
         source,
         at: Date.now(),
     });
-    return result.events;
+    return allEvents;
 }
 
 /**

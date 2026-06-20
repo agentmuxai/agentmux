@@ -1406,6 +1406,8 @@ declare global {
         "notify:sound:agent.turn.interrupted"?: boolean;
         "notify:sound:agent.message.accepted"?: boolean;
         "notify:sound:agent.message.rejected"?: boolean;
+        "notify:sound:agent.waiting.for.input"?: boolean;
+        "notify:sounds:waiting:volume"?: number;
         "notify:tooltones:enabled"?: boolean;
         "notify:tooltones:volume"?: number;
         "notify:tooltones:scope"?: "all" | "focused";
