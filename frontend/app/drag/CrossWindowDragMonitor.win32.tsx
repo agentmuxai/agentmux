@@ -265,8 +265,13 @@ async function performTearOff(
         // mother shrinks by exactly the pane's column width so remaining panes
         // keep their sizes unchanged. Absent when the pane is in a horizontal
         // split or the remaining width would be < MIN_MOTHER_WIDTH.
+        // Skip when a pane is magnified — the layout container dimensions are
+        // misleading in that mode (spec §9).
         // SPEC: SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md
-        const motherResizeToWidth = measureMotherResize(payload.blockId);
+        const layoutModelForResize = getLayoutModelForStaticTab();
+        const motherResizeToWidth = layoutModelForResize?.treeState?.magnifiedNodeId
+            ? undefined
+            : measureMotherResize(payload.blockId);
 
         const newWsId = await WorkspaceService.TearOffBlock(
             payload.blockId,

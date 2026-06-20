@@ -234,10 +234,19 @@ pub fn open_floating_pane_window(
         crate::floating_pane::post_create_floating_window(state, &parsed, &window_label, parent_main_hwnd);
 
         // Mother-window resize: if the pane spanned the full column height,
-        // shrink the source window so remaining panes keep their pixel sizes.
+        // shrink the SOURCE window so remaining panes keep their pixel sizes.
+        // Gate on a direct label→HWND resolution (NOT parent_main_hwnd, which
+        // may be a FullInstance fallback for an unrelated window when
+        // source_window_label failed to resolve). Consistent with the non-Windows
+        // path which also gates on source_window_label resolving.
         if let Some(new_w_dip) = parsed.mother_resize_to_width {
-            if parent_main_hwnd != 0 {
-                crate::ui_tasks::post_resize_mother_window_win32(state, parent_main_hwnd, new_w_dip);
+            if let Some(src_hwnd) = parsed
+                .source_window_label
+                .as_deref()
+                .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                .filter(|&h| h != 0)
+            {
+                crate::ui_tasks::post_resize_mother_window_win32(state, src_hwnd, new_w_dip);
             }
         }
 
