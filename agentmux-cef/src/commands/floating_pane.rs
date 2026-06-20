@@ -226,6 +226,18 @@ pub fn open_floating_pane_window(
             parsed.height,
             parent_main_hwnd,
         ) {
+            // Pool fast path — apply mother resize before returning (same gate
+            // as the cold path below: direct label resolution only).
+            if let Some(new_w_dip) = parsed.mother_resize_to_width {
+                if let Some(src_hwnd) = parsed
+                    .source_window_label
+                    .as_deref()
+                    .and_then(|lbl| state.window_hwnds.lock().get(lbl).copied())
+                    .filter(|&h| h != 0)
+                {
+                    crate::ui_tasks::post_resize_mother_window_win32(state, src_hwnd, new_w_dip);
+                }
+            }
             return Ok(serde_json::to_value(OpenFloatingPaneResponse {
                 window_label: pool_label,
             }).unwrap_or_default());
@@ -267,6 +279,13 @@ pub fn open_floating_pane_window(
             parsed.height,
             0, // parent_hwnd: unused on non-Windows
         ) {
+            // Pool fast path — apply mother resize before returning (same gate
+            // as the cold path below: both fields must be Some).
+            if let (Some(new_w_dip), Some(src_label)) =
+                (parsed.mother_resize_to_width, parsed.source_window_label.as_deref())
+            {
+                crate::ui_tasks::post_resize_mother_window(state, src_label, new_w_dip);
+            }
             return Ok(serde_json::to_value(OpenFloatingPaneResponse {
                 window_label: pool_label,
             }).unwrap_or_default());
