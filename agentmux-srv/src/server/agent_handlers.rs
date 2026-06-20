@@ -3355,6 +3355,28 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     return Err("controller is not a SubprocessController or PersistentSubprocessController".to_string());
                 }
 
+                // Register with cloud subscriber + reactive handler so cloud-injected
+                // messages (e.g. GitHub PR review notifications) reach this agent.
+                // Uses agentName (the logical display name, e.g. "smike") as the key —
+                // matching the namespace used by reactive.rs:233 (`req.agent_id`) and the
+                // delivery path (`agent_to_block` keyed by lowercased logical agent_id).
+                // PR bodies embed $AGENTMUX_AGENT_ID (same value) so the cloud injection
+                // key and the poll key are always consistent.
+                // Both calls are idempotent: add_agent skips the WS send if already
+                // subscribed; register_agent replaces any stale mapping from a prior session.
+                let agent_name = crate::backend::obj::meta_get_string(
+                    &block.meta, "agentName", "",
+                );
+                if !agent_name.is_empty() {
+                    let registered = crate::backend::reactive::handler::get_global_handler()
+                        .register_agent(&agent_name, &cmd.blockid, None);
+                    if registered.is_ok() {
+                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                            sub.add_agent(&agent_name);
+                        }
+                    }
+                }
+
                 Ok(None)
             })
         }),
@@ -3371,6 +3393,18 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 match blockcontroller::get_controller(&cmd.blockid) {
                     Some(ctrl) => {
                         ctrl.stop(!cmd.force, blockcontroller::STATUS_DONE)?;
+                        // Deregister: unregister_block cleans up both agent_to_block and
+                        // block_to_agent maps; remove_agent then removes the cloud poll entry
+                        // using the logical agent_id recovered from block_to_agent.
+                        let handler = crate::backend::reactive::handler::get_global_handler();
+                        let agent_name = handler.agent_id_for_block(&cmd.blockid);
+                        handler.unregister_block(&cmd.blockid);
+                        if let (Some(sub), Some(name)) = (
+                            crate::muxbus::cloud_subscriber::get_global_subscriber(),
+                            agent_name,
+                        ) {
+                            sub.remove_agent(&name);
+                        }
                         Ok(None)
                     }
                     None => Ok(None),

@@ -1052,10 +1052,13 @@ impl Controller for ShellController {
             // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
             crate::backend::reactive::get_global_handler().unregister_block(&block_id_wait);
 
-            // Also remove from cross-instance file registry.
+            // Also remove from cross-instance file registry and cloud subscriber.
             if let Some(ref agent_id) = agent_id_wait {
                 let data_dir = crate::backend::base::get_wave_data_dir();
                 crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                    sub.remove_agent(agent_id);
+                }
             }
 
             // Update inner state
