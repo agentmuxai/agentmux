@@ -8,6 +8,7 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { WOS } from "@/app/store/global";
 import { callBackendService } from "@/store/wos";
+import { BlockService } from "@/app/store/services";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -134,18 +135,30 @@ export class SwarmViewModel implements ViewModel {
         }
     };
 
-    // Subscribe to controllerstatus events for each tracked block.
+    // Subscribe to controllerstatus events for each tracked block and
+    // seed the initial status from GetControllerStatus (not assumed "idle").
     // Tears down old per-block subs first so we don't leak on block-list refresh.
     private subscribeToBlockStatuses(blockIds: string[]): void {
         for (const unsub of this.blockUnsubs) unsub();
         this.blockUnsubs = [];
 
-        const statuses = new Map<string, "running" | "idle">(
-            blockIds.map((id) => [id, "idle"])
-        );
-        this.setAgentStatuses(new Map(statuses));
+        // Seed all to "idle" immediately so the tree renders; real statuses
+        // are patched in as each GetControllerStatus call resolves.
+        this.setAgentStatuses(new Map(blockIds.map((id) => [id, "idle" as const])));
 
         for (const blockId of blockIds) {
+            // Fetch current status — don't assume idle for already-running agents.
+            void BlockService.GetControllerStatus(blockId)
+                .then((rts) => {
+                    const status = rts?.shellprocstatus === "running" ? "running" : "idle";
+                    this.setAgentStatuses((prev) => {
+                        const m = new Map(prev);
+                        m.set(blockId, status);
+                        return m;
+                    });
+                })
+                .catch(() => {/* keep idle default */});
+
             const scope = WOS.makeORef("block", blockId);
             const unsub = waveEventSubscribe({
                 eventType: WpsEvent.ControllerStatus,
