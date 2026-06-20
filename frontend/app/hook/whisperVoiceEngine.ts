@@ -194,7 +194,11 @@ export function createWhisperVoiceSession(): VoiceSession {
             if (silenceStart === 0) silenceStart = now;
             else if (now - silenceStart >= SILENCE_MS) return true;
         }
-        return now - segmentStart >= MAX_SEGMENT_MS && sawSpeech;
+        // Hard cap fires regardless of sawSpeech so the WAV-mode PCM buffer
+        // can't grow unbounded under sustained sub-threshold input — a
+        // speechless cut just discards + resets (postSegment/cut are gated on
+        // sawSpeech). webm mode is bounded by MediaRecorder internally.
+        return now - segmentStart >= MAX_SEGMENT_MS;
     };
 
     const resetSegment = () => {

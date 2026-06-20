@@ -272,11 +272,27 @@ async fn transcribe_local_whisper(
     if let Some(l) = lang {
         cmd.arg("-l").arg(l);
     }
+    // Bound the run: a wedged CLI (corrupt model, pathological input) must not
+    // block the HTTP handler forever. kill_on_drop ensures the timed-out child
+    // is reaped when the timeout future drops it.
+    cmd.kill_on_drop(true);
+    const WHISPER_TIMEOUT_SECS: u64 = 120;
 
-    let output = cmd.output().await;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(WHISPER_TIMEOUT_SECS),
+        cmd.output(),
+    )
+    .await;
     let _ = std::fs::remove_file(&wav_path); // best-effort cleanup
 
-    let output = output.map_err(|e| Upstream(format!("spawn whisper-cli: {e}")))?;
+    let output = match output {
+        Err(_) => {
+            return Err(Upstream(format!(
+                "whisper-cli timed out after {WHISPER_TIMEOUT_SECS}s"
+            )))
+        }
+        Ok(r) => r.map_err(|e| Upstream(format!("spawn whisper-cli: {e}")))?,
+    };
     if !output.status.success() {
         let err: String = String::from_utf8_lossy(&output.stderr).chars().take(300).collect();
         return Err(Upstream(format!(
