@@ -18,6 +18,14 @@
             animation: mic-pulse 1.4s ease-in-out infinite;
         }
     }
+
+    // Blocked: a fatal error is outstanding (permission denied, no device, or
+    // the recognition service is unavailable). Muted, no pulse — signals the
+    // mic can't be used until the user resolves it (see the button tooltip).
+    &.mic-blocked .wave-iconbutton {
+        color: var(--error-color, var(--color-error, #e5484d));
+        opacity: 0.65;
+    }
 }
 
 @keyframes mic-pulse {
