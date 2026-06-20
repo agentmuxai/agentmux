@@ -534,6 +534,7 @@ impl AgentMuxHandler {
                 if is_top_level_window
                     && pending_kind == WindowKind::FullInstance
                     && !label.starts_with("window-pool-")
+                    && !label.starts_with("floating-pool-")
                 {
                     unsafe { install_main_window_floater_cascade_hook(hwnd); }
                 }
