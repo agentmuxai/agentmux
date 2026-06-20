@@ -56,14 +56,62 @@ fn pool_hwnd_cache() -> &'static Mutex<HashMap<String, usize>> {
     POOL_HWND_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// HWND cache for pane pool windows. Separate from `POOL_HWND_CACHE` because
+/// pane pool windows are WS_POPUP + WS_EX_TOOLWINDOW (unowned, no taskbar entry)
+/// and their outer HWND must be cached before the CEF child browser is created
+/// (same reason as `POOL_HWND_CACHE` — `window_handle()` goes null after load).
+#[cfg(target_os = "windows")]
+static PANE_POOL_HWND_CACHE: std::sync::OnceLock<Mutex<HashMap<String, usize>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+fn pane_pool_hwnd_cache() -> &'static Mutex<HashMap<String, usize>> {
+    PANE_POOL_HWND_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Store the outer WS_POPUP HWND for a pane pool window. Called from
+/// `floating_pane::CreatePanePoolWindowWin32Task` after `CreateWindowExW`
+/// and before `browser_host_create_browser` fires.
+#[cfg(target_os = "windows")]
+pub(crate) fn cache_pane_pool_hwnd(label: &str, hwnd: usize) {
+    pane_pool_hwnd_cache()
+        .lock()
+        .unwrap()
+        .insert(label.to_string(), hwnd);
+}
+
+/// Pop (and remove) the outer HWND for a pane pool label (promote or destroy path).
+#[cfg(target_os = "windows")]
+pub(crate) fn take_pane_pool_hwnd(label: &str) -> Option<usize> {
+    pane_pool_hwnd_cache().lock().unwrap().remove(label)
+}
+
+/// Clean up after a pane pool window that failed during creation (before it
+/// ever became a usable pool slot). Unlike `on_pane_pool_window_destroyed`,
+/// this does NOT trigger a refill spawn — creation failures are likely
+/// persistent (Win32 error, driver issue) and re-spawning immediately would
+/// cause an infinite respawn loop: create → fail → cleanup → spawn → fail.
+/// The pool stays empty and the cold path handles the next tear-off request.
+#[cfg(target_os = "windows")]
+pub(crate) fn cleanup_failed_pane_pool_creation(state: &Arc<AppState>, label: &str) {
+    take_pane_pool_hwnd(label);
+    state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowDestroyedBeforePromote {
+            label: label.to_string(),
+        },
+    );
+    // Deliberately skip spawn_pane_pool_window — creation failure may be
+    // persistent; caller should dequeue PendingWindowCreation separately.
+}
+
 /// Target pool size. See module-level comment for rationale.
 pub const POOL_TARGET_SIZE: usize = 2;
 
 /// Pool windows are spawned at this off-screen position so they
 /// don't appear on the user's desktop while pre-painting. On
 /// promote they're moved to the cursor and shown.
-const POOL_OFFSCREEN_X: i32 = -32000;
-const POOL_OFFSCREEN_Y: i32 = -32000;
+pub(crate) const POOL_OFFSCREEN_X: i32 = -32000;
+pub(crate) const POOL_OFFSCREEN_Y: i32 = -32000;
 const POOL_WIDTH: i32 = 1200;
 const POOL_HEIGHT: i32 = 800;
 /// Pixels above the cursor where the title bar sits — matches
@@ -1063,6 +1111,329 @@ pub fn promote_pool_window_for_new_window(
             state, &label, pos_x, pos_y, width, height,
         );
         spawn_pool_window(state);
+
+        Some(label)
+    }
+}
+
+// ── Pane pool (floating-pool-{uuid}, frameless=true) ─────────────────────
+
+/// Target size for the pane pool. One pre-warmed window covers the common
+/// burst; two would add ~75 MB RSS with minimal additional benefit.
+pub const PANE_POOL_TARGET_SIZE: usize = 1;
+pub(crate) const PANE_POOL_WIDTH: i32 = 900;
+pub(crate) const PANE_POOL_HEIGHT: i32 = 600;
+
+/// Spawn a single pre-warmed frameless pane window. Follows the same
+/// single-flight + refill chain pattern as `spawn_pool_window`.
+pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
+    if state.is_quitting() {
+        return;
+    }
+    if state.any_browser_pane_closing() {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[pane-pool] spawn_pane_pool_window deferred — pane is mid-close (H.7 invariant)"
+        );
+        return;
+    }
+    if state.pane_pool_queue_size() >= PANE_POOL_TARGET_SIZE {
+        tracing::debug!(
+            target: "pool:pane",
+            current = %state.pane_pool_queue_size(),
+            target = %PANE_POOL_TARGET_SIZE,
+            "[pane-pool] spawn skipped — pool at target size"
+        );
+        return;
+    }
+
+    let window_id = uuid::Uuid::new_v4();
+    let label = format!("floating-pool-{}", window_id.simple());
+
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowSpawnStart { label: label.clone() },
+    );
+    if !dispatch.pane_pool_spawn_proceeding {
+        return;
+    }
+
+    let ipc_port = *state.ipc_port.lock();
+    let ipc_token = &state.ipc_token;
+    let url = match super::window::resolve_frontend_base_url(ipc_port) {
+        Ok(base_url) => {
+            let sep = if base_url.contains('?') { "&" } else { "?" };
+            format!(
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pane-pool=1",
+                base_url, sep, ipc_port, ipc_token, label
+            )
+        }
+        Err(e) => {
+            tracing::error!(error = %e, label = %label, "[pane-pool] frontend assets unavailable");
+            super::window::assets_missing_data_url(&e)
+        }
+    };
+
+    state.host_dispatch(
+        crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+            entry: crate::state::PendingWindowCreation {
+                label: label.clone(),
+                kind: WindowKind::FullInstance,
+                parent_instance_id: None,
+            },
+        },
+    );
+
+    tracing::info!(target: "pool:pane", label = %label, "[pane-pool] spawning pane pool window");
+
+    // On Windows: create a WS_POPUP + WS_EX_TOOLWINDOW window (same type as the
+    // cold-path `post_create_floating_window`) so promote can reuse the same Win32
+    // HWND without re-creating the window at tear-off time.
+    // On non-Windows: use CEF Views frameless window.
+    #[cfg(target_os = "windows")]
+    {
+        crate::floating_pane::post_create_pane_pool_window_win32(state, &label, &url);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        crate::ui_tasks::post_create_window(
+            state,
+            &url,
+            &label,
+            POOL_OFFSCREEN_X,
+            POOL_OFFSCREEN_Y,
+            PANE_POOL_WIDTH,
+            PANE_POOL_HEIGHT,
+            true,
+        );
+    }
+}
+
+/// Called once at startup (when main window registers) to seed the pane pool.
+pub fn init_pane_pool(state: &Arc<AppState>) {
+    if state.pane_pool_queue_size() >= PANE_POOL_TARGET_SIZE {
+        return;
+    }
+    spawn_pane_pool_window(state);
+}
+
+/// Called from `on_after_created` for `floating-pool-*` labels.
+/// Logs the registration; queue insertion waits for the frontend's
+/// `pane_pool_window_ready` IPC so we don't race the listener install.
+pub fn register_pane_pool_window(_state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("floating-pool-") {
+        return;
+    }
+    tracing::debug!(
+        target: "pool:pane",
+        label = %label,
+        "[pane-pool] browser registered, awaiting renderer-ready signal"
+    );
+}
+
+/// Called by the `pane_pool_window_ready` IPC command when the frontend
+/// has installed its `pool:pane-promote` listener and is ready to receive.
+pub fn mark_pane_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("floating-pool-") {
+        return;
+    }
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowReady { label: label.to_string() },
+    );
+    let pool_size = dispatch.pane_pool_size_after.unwrap_or(0);
+    tracing::info!(
+        target: "pool:pane",
+        label = %label,
+        pool_size,
+        "[pane-pool] renderer ready, enqueued"
+    );
+    if pool_size < PANE_POOL_TARGET_SIZE {
+        spawn_pane_pool_window(state);
+    }
+}
+
+/// Called from `on_before_close` for `floating-pool-*` labels.
+pub fn on_pane_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("floating-pool-") {
+        return;
+    }
+    // Drop the cached outer HWND so the map can't grow unbounded. Idempotent —
+    // fine if the entry is already absent (double-destroy or failure path).
+    #[cfg(target_os = "windows")]
+    {
+        pane_pool_hwnd_cache().lock().unwrap().remove(label);
+    }
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowDestroyedBeforePromote {
+            label: label.to_string(),
+        },
+    );
+    let needs_refill = dispatch
+        .pane_pool_size_after
+        .map(|n| n < PANE_POOL_TARGET_SIZE)
+        .unwrap_or(false);
+    tracing::warn!(
+        target: "pool:pane",
+        label = %label,
+        "[pane-pool] pool window destroyed before promote"
+    );
+    if needs_refill {
+        spawn_pane_pool_window(state);
+    }
+}
+
+/// Orphan cleanup for failed pane pool promotes.
+fn cleanup_failed_pane_promote_orphan(state: &Arc<AppState>, label: &str) {
+    state.host_dispatch(
+        crate::reducer::HostCommand::UnregisterBrowser {
+            label: label.to_string(),
+        },
+    );
+    state.window_meta.lock().remove(label);
+    spawn_pane_pool_window(state);
+    tracing::warn!(
+        target: "pool:pane",
+        label = %label,
+        "[pane-pool] orphan cleaned up — refilled"
+    );
+}
+
+/// Pop a pane pool window and show it as a floating pane at the drop target.
+///
+/// `parent_hwnd`: the FullInstance HWND that triggered the tear-off (for cascade
+/// hook binding on Windows). Pass 0 on non-Windows — it is unused there.
+///
+/// macOS / Linux: CEF Views `set_bounds` + `show` + `pool:pane-promote`.
+/// Windows: Win32 `SetWindowPos` + `ShowWindow` on the outer WS_POPUP HWND
+/// cached by `CreatePanePoolWindowWin32Task`, then `pool:pane-promote` event.
+pub fn promote_pane_pool_window(
+    state: &Arc<AppState>,
+    pane_id: &str,
+    workspace_id: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    parent_hwnd: isize,
+) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            IsWindow, SetWindowPos, ShowWindow, HWND_TOP, SW_SHOWNORMAL,
+        };
+
+        let dispatch = state.host_dispatch(
+            crate::reducer::HostCommand::PopAndPromoteFrontPanePoolWindow,
+        );
+        let label = dispatch.promoted_pane_pool_label?;
+
+        tracing::info!(
+            target: "pool:pane",
+            label = %label,
+            pane_id = %pane_id,
+            workspace_id = %workspace_id,
+            x, y, width, height,
+            "[pane-pool] promoting pane pool window (Windows)"
+        );
+
+        let outer_hwnd = match take_pane_pool_hwnd(&label) {
+            Some(h) => h,
+            None => {
+                tracing::error!(
+                    target: "pool:pane",
+                    label = %label,
+                    "[pane-pool] no cached HWND for promoted label — orphan cleanup"
+                );
+                cleanup_failed_pane_promote_orphan(state, &label);
+                return None;
+            }
+        };
+
+        // Verify the HWND is still alive before touching it.
+        let alive = unsafe { IsWindow(outer_hwnd as HWND) } != 0;
+        if !alive {
+            tracing::error!(
+                target: "pool:pane",
+                label = %label,
+                hwnd = format!("0x{:x}", outer_hwnd),
+                "[pane-pool] cached HWND is no longer a live OS window — orphan cleanup"
+            );
+            cleanup_failed_pane_promote_orphan(state, &label);
+            return None;
+        }
+
+        // `width` and `height` arrive pre-DPI-converted (physical pixels) from
+        // `open_floating_pane_window`'s Windows block. `x` and `y` are in the
+        // same coordinate space as `CreateWindowExW` (physical screen coords).
+        unsafe {
+            let ok = SetWindowPos(outer_hwnd as HWND, HWND_TOP, x, y, width, height, 0);
+            if ok == 0 {
+                let err = windows_sys::Win32::Foundation::GetLastError();
+                tracing::error!(
+                    target: "pool:pane",
+                    label = %label,
+                    last_err = %err,
+                    "[pane-pool] SetWindowPos failed"
+                );
+            }
+            let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
+        }
+
+        // Bind this floater to the source window's cascade hook. Deferred from
+        // spawn time because the parent HWND is only known at tear-off.
+        crate::floating_pane::register_floater_hwnd(
+            label.clone(),
+            outer_hwnd as isize,
+            parent_hwnd,
+        );
+
+        // Tell the renderer to bootstrap pane + workspace.
+        crate::events::emit_event_to_window(
+            state,
+            &label,
+            "pool:pane-promote",
+            &serde_json::json!({
+                "paneId": pane_id,
+                "workspaceId": workspace_id,
+            }),
+        );
+
+        spawn_pane_pool_window(state);
+
+        return Some(label);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = parent_hwnd; // unused on non-Windows
+        let dispatch = state.host_dispatch(
+            crate::reducer::HostCommand::PopAndPromoteFrontPanePoolWindow,
+        );
+        let label = dispatch.promoted_pane_pool_label?;
+
+        tracing::info!(
+            target: "pool:pane",
+            label = %label,
+            pane_id = %pane_id,
+            workspace_id = %workspace_id,
+            x, y, width, height,
+            "[pane-pool] promoting pane pool window"
+        );
+
+        if state.get_browser(&label).is_none() {
+            tracing::warn!(
+                target: "pool:pane",
+                label = %label,
+                "[pane-pool] browser not in state — orphan cleanup"
+            );
+            cleanup_failed_pane_promote_orphan(state, &label);
+            return None;
+        }
+
+        crate::ui_tasks::post_promote_pane_pool_window(
+            state, &label, pane_id, workspace_id, x, y, width, height,
+        );
+        spawn_pane_pool_window(state);
 
         Some(label)
     }

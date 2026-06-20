@@ -557,11 +557,18 @@ export async function initApp() {
             // wait for either `pool:promote` (tear-off, injects workspaceId) or
             // `pool:new-window` (Cmd+N, no workspaceId → fresh workspace).
             // initHostNewWindow branches on workspaceId presence automatically.
-            const { isPoolMode, awaitPoolPromote } = await import("@/app/init/pool");
+            const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote } = await import("@/app/init/pool");
             if (isPoolMode()) {
                 getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
                 await awaitPoolPromote();
                 getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
+                await initHostNewWindow();
+            } else if (isPanePoolMode()) {
+                // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
+                // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.
+                getApi().sendLog("[initApp] pane-pool mode — deferring init until pool:pane-promote");
+                await awaitPanePoolPromote();
+                getApi().sendLog("[initApp] pool:pane-promote received — bootstrapping floating pane");
                 await initHostNewWindow();
             } else {
                 // Check if this is a new window or the main window
