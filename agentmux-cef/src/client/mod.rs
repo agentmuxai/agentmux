@@ -560,9 +560,11 @@ impl AgentMuxHandler {
         }
 
         // Phase B.4 — report top-level windows to the launcher's
-        // read-only state mirror. Skips browser-pane child HWNDs and
-        // pool windows (they're not user-visible until promoted; the
-        // pool->user transition gets its own report in a follow-up).
+        // read-only state mirror. Skips browser-pane child HWNDs,
+        // tab pool windows (`window-pool-*`), and pane pool windows
+        // (`floating-pool-*`). Pane pool windows are excluded here AND
+        // in `host_counts_snapshot` (state.rs) so the launcher mirror's
+        // windows count stays in sync with the host count on all platforms.
         // No-op if launcher IPC isn't connected (`task dev` mode).
         if is_top_level_window && !label.starts_with("window-pool-") && !label.starts_with("floating-pool-") {
             // Phase B.5 (window_meta step d) — kind/parent come
@@ -1089,16 +1091,25 @@ impl AgentMuxHandler {
             tracing::warn!(target: "wrr", "[wrr] quit_state=Draining (drain mode)");
 
             // Phase H.2.b — reducer-aware iteration with fallback + drift logging.
+            // Collect ALL background-only browsers: tab pool (window-pool-*)
+            // AND pane pool (floating-pool-*). Both live in browser_list
+            // (created via CreateWindowTask which clones the main top-level
+            // client). Omitting pane pool windows here means browser_list
+            // never empties on macOS/Linux (init_pane_pool spawns one at
+            // startup), so Stage 2's is_empty() gate never fires and the
+            // host hangs on every quit.
             let pool_browsers: Vec<cef::Browser> = self
                 .state
                 .list_browsers()
                 .into_iter()
-                .filter(|(label, _)| label.starts_with("window-pool-"))
+                .filter(|(label, _)| {
+                    label.starts_with("window-pool-") || label.starts_with("floating-pool-")
+                })
                 .map(|(_, b)| b)
                 .collect();
             tracing::warn!(
                 target: "wrr",
-                "[wrr] stage 1: user_count==0; closing {} pool browser(s)",
+                "[wrr] stage 1: user_count==0; closing {} pool browser(s) (tab+pane)",
                 pool_browsers.len()
             );
 
