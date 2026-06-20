@@ -789,20 +789,48 @@ function installWindowTitleEffect(windowId: string): void {
 function installVoiceInputErrorListener(): void {
     window.addEventListener("voice-input-error", (e: Event) => {
         const detail = (e as CustomEvent<string>).detail;
+
+        // Platform-specific path to the OS microphone privacy setting, so the
+        // "blocked" guidance is actionable rather than generic.
+        const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent);
+        const micSettingsPath = isMac
+            ? "System Settings ▸ Privacy & Security ▸ Microphone"
+            : "Settings ▸ Privacy & security ▸ Microphone";
+
+        // Classify the recognition error into an actionable message. Distinct
+        // causes need distinct guidance — a single "unavailable" toast left the
+        // user with no idea whether to fix permissions, plug in a mic, or wait
+        // for a feature. See SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §Phase 4.
+        let title = "Voice input unavailable";
         let message: string | null = null;
-        if (detail === "not-allowed") {
-            message = "Microphone permission denied. Enable it in browser settings to use voice input.";
-        } else if (detail === "service-not-allowed") {
-            message = "Voice service unavailable. Check browser settings.";
+        switch (detail) {
+            case "not-allowed":
+                title = "Microphone access blocked";
+                message =
+                    `Enable microphone access for AgentMux in ${micSettingsPath}, ` +
+                    `then click the mic again.`;
+                break;
+            case "audio-capture":
+                title = "No microphone detected";
+                message = "Connect a microphone and click the mic again.";
+                break;
+            case "service-not-allowed":
+                title = "Voice transcription unavailable";
+                message =
+                    "Speech recognition isn't available in this build yet. " +
+                    "Server-side transcription is in progress.";
+                break;
+            default:
+                return; // non-fatal / unknown — no toast
         }
-        if (message == null) return;
+
         pushNotification({
             icon: "fa-microphone-slash",
-            title: "Voice input unavailable",
+            title,
             message,
             timestamp: new Date().toISOString(),
             type: "error",
-            expiration: Date.now() + 10000,
+            expiration: Date.now() + 12000,
         });
     });
 }
