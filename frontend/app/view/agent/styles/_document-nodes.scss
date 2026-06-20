@@ -1309,3 +1309,54 @@
         overflow-wrap: anywhere;
     }
 }
+
+// Inline API error node (P1.3 — agent_error DocumentNode)
+// Rendered when the CLI's result frame carries is_error:true (e.g. 401 auth,
+// 429 rate-limit). Not interactive; the FailureRow banner (above) handles retry.
+.agent-error-block {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1-5);
+    padding: var(--space-1) var(--space-1-5);
+    margin: var(--space-1) 0;
+    border-left: 2px solid var(--error-color);
+    background: color-mix(in srgb, var(--error-color) 8%, transparent);
+    border-radius: 0 2px 2px 0;
+    font-size: 12px;
+    line-height: 1.4;
+
+    .agent-error-code {
+        color: var(--error-color);
+        font-family: var(--fixed-font, monospace);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .agent-error-message {
+        color: var(--secondary-text-color);
+        overflow-wrap: anywhere;
+    }
+
+    // Inline re-auth CTA — only rendered for recoverable auth errors (401/403).
+    // Pushed to the right edge of the row. SPEC_REAUTH_FROM_AUTH_ERROR §7.
+    .agent-error-login-btn {
+        flex-shrink: 0;
+        margin-left: auto;
+        align-self: center;
+        padding: 2px var(--space-1-5);
+        border: 1px solid var(--error-color);
+        border-radius: 3px;
+        background: transparent;
+        color: var(--error-color);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+
+        &:hover {
+            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        }
+    }
+}

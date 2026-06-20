@@ -39,6 +39,11 @@ export interface DocumentRowProps {
     /** Hold a tool expanded after it completes live on screen (ToolBlock calls
      *  this on the active→inactive transition). */
     onHoldToolOpen?: (id: string) => void;
+    /** Re-run the provider login flow. Threaded down so an `agent_error` node
+     *  carrying an auth status (401/403) can offer an inline "Login Again" CTA
+     *  — the same action as the failure banner. See
+     *  SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20 §7. */
+    onAgentErrorLogin?: () => void;
     /** Style applied to the wrapper element. Virtualized parent
      *  passes absolute positioning + translateY; streaming parent
      *  passes nothing (normal flow). */
@@ -128,6 +133,7 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 onTogglePin={props.onTogglePin}
                 onHoldToolOpen={props.onHoldToolOpen}
                 onSubagentClick={props.onSubagentClick}
+                onAgentErrorLogin={props.onAgentErrorLogin}
             />
         </div>
     );
@@ -142,6 +148,8 @@ interface DocumentNodeBodyProps {
     onTogglePin: (id: string) => void;
     onHoldToolOpen?: (id: string) => void;
     onSubagentClick?: (node: SubagentLinkNode) => void;
+    /** Re-run the provider login flow — drives the inline auth-error CTA. */
+    onAgentErrorLogin?: () => void;
 }
 
 /**
@@ -231,6 +239,36 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     </Show>
                     <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 3}>
                         <h3>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h3>
+                    </Show>
+                </div>
+            </Show>
+            <Show when={props.node() && props.node().type === "agent_error"}>
+                <div class="agent-error-block">
+                    <span class="agent-error-code">
+                        {(() => {
+                            const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
+                            // code=0 is a sentinel for non-HTTP errors (network/CLI); don't show "HTTP 0"
+                            return n.code > 0 ? `HTTP ${n.code}` : "Error";
+                        })()}
+                    </span>
+                    <span class="agent-error-message">
+                        {(props.node() as Extract<DocumentNode, { type: "agent_error" }>).message}
+                    </span>
+                    {/* Auth errors (401 Unauthorized / 403 Forbidden) are recoverable
+                        by re-running the provider login — surface an inline CTA that
+                        drives the same flow as the failure banner. Other codes have no
+                        in-place fix, so no button. SPEC_REAUTH_FROM_AUTH_ERROR §7. */}
+                    <Show when={
+                        props.onAgentErrorLogin
+                        && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)
+                    }>
+                        <button
+                            type="button"
+                            class="agent-error-login-btn"
+                            onClick={() => props.onAgentErrorLogin?.()}
+                        >
+                            Login Again →
+                        </button>
                     </Show>
                 </div>
             </Show>

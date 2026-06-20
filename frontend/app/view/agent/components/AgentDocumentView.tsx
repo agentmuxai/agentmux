@@ -34,6 +34,9 @@ interface AgentDocumentViewProps {
     /** Provider ID for the active auth flow — used when submitting a pasted auth code. */
     authProviderId?: string;
     onSubagentClick?: (node: SubagentLinkNode) => void;
+    /** Re-run the provider login flow — forwarded to the list so an inline
+     *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
+    onAgentErrorLogin?: () => void;
     /** Called when the user scrolls near the top — load the previous page of history. */
     onLoadOlder?: () => Promise<void>;
     /** Whether an older-history load is currently in progress. */
@@ -161,6 +164,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             viewState={viewState}
             documentState={documentState}
             onSubagentClick={props.onSubagentClick}
+            onAgentErrorLogin={props.onAgentErrorLogin}
             onLoadOlder={props.onLoadOlder}
             loadingOlder={props.loadingOlder}
             highlightNodeId={props.highlightNodeId}
@@ -234,10 +238,19 @@ function AuthUrlBox(props: AuthUrlBoxProps): JSX.Element {
 
             <div class="agent-auth-url-label">1 · Authorize in your browser</div>
             <div class="agent-auth-hint">
-                A browser window should have opened. If it didn't, open this link:
+                A browser pane should have opened. If it didn't, open this link:
             </div>
             <div class="agent-auth-url-row">
                 <span class="agent-auth-url-text">{props.url}</span>
+                <button
+                    class="agent-auth-url-copy"
+                    title="Open this URL in an in-app browser pane"
+                    onClick={() => {
+                        void import("../flows/open-oauth-pane").then(m => m.openOAuthBrowserPane(props.url));
+                    }}
+                >
+                    Open
+                </button>
                 <button
                     class="agent-auth-url-copy"
                     onClick={() => { import("@/util/clipboard").then(c => c.writeText(props.url)); }}

@@ -38,6 +38,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
 import { getApi, staticTabId } from "@/app/store/global";
+import { openOAuthBrowserPane } from "./open-oauth-pane";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -206,12 +207,17 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             if (loginUrl) {
                 setAuthUrl(loginUrl);
                 log("auth", "opening browser...");
-                try {
-                    getApi().openExternal(loginUrl);
-                    log("auth", "browser opened — complete login there");
-                } catch (err: any) {
-                    log("auth", `browser did not open: ${err?.message ?? String(err)}`, "warn");
-                    log("auth", "copy the URL from the box above and open it manually", "warn");
+                // Open the OAuth URL in an in-app browser pane (the "browser
+                // window" half of SPEC_REAUTH_FROM_AUTH_ERROR); falls back to the
+                // system browser if the pane can't be created. The auth-url box
+                // above the composer is the URL backup either way.
+                const opened = await openOAuthBrowserPane(loginUrl);
+                if (opened === "pane") {
+                    log("auth", "opened login in an in-app browser pane — complete login there");
+                } else if (opened === "external") {
+                    log("auth", "opened login in your system browser — complete login there");
+                } else {
+                    log("auth", "could not open a browser; copy the URL from the box above and open it manually", "warn");
                 }
             } else {
                 log("auth", "attempting to open browser for login...");
