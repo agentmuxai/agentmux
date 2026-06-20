@@ -105,4 +105,45 @@ fn main() {
         let dims_path = std::path::Path::new(&out_dir).join("brain_dims.rs");
         std::fs::write(&dims_path, dims_rs).expect("write brain_dims.rs");
     }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Decode the brain logo PNG (RGBA, transparent background) to raw
+        // *straight* (non-pre-multiplied) RGBA8 bytes for the Linux splash
+        // backends (X11 pixmap + Wayland wl_shm). The backends alpha-blend the
+        // brain over the solid backdrop themselves each frame, so they need the
+        // un-pre-multiplied source. Decoding at compile time keeps a PNG decoder
+        // out of the launcher runtime binary (mirrors the Windows arm above).
+        let png_path = std::path::Path::new("resources/brain.png");
+        println!("cargo:rerun-if-changed={}", png_path.display());
+        let f = std::fs::File::open(png_path).expect("resources/brain.png not found");
+        let decoder = png::Decoder::new(f);
+        let mut reader = decoder.read_info().expect("png header");
+        let info = reader.info().clone();
+        assert_eq!(
+            info.color_type,
+            png::ColorType::Rgba,
+            "splash brain.png must be RGBA (transparent background)"
+        );
+        assert_eq!(
+            info.bit_depth,
+            png::BitDepth::Eight,
+            "splash brain.png must be 8-bit"
+        );
+        let mut buf = vec![0u8; reader.output_buffer_size()];
+        reader.next_frame(&mut buf).expect("png decode");
+
+        let out_dir = std::env::var("OUT_DIR").unwrap();
+        let rgba_path = std::path::Path::new(&out_dir).join("brain_rgba.bin");
+        std::fs::write(&rgba_path, &buf).expect("write brain_rgba.bin");
+
+        // Same brain_dims.rs the X11/Wayland backends `include!`, in lockstep
+        // with the actual PNG size.
+        let dims_rs = format!(
+            "pub const BRAIN_W: i32 = {};\npub const BRAIN_H: i32 = {};\n",
+            info.width, info.height
+        );
+        let dims_path = std::path::Path::new(&out_dir).join("brain_dims.rs");
+        std::fs::write(&dims_path, dims_rs).expect("write brain_dims.rs");
+    }
 }
