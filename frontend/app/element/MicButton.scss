@@ -2,8 +2,10 @@
     display: flex;
     align-items: center;
 
+    // Active = recording. Red is the universal "live mic" convention, so the
+    // indicator deliberately diverges from the accent color used elsewhere.
     &.mic-active .wave-iconbutton {
-        color: var(--color-primary, var(--accent-color));
+        color: var(--error-color, var(--color-error, #e5484d));
         position: relative;
 
         &::after {
@@ -11,7 +13,7 @@
             position: absolute;
             inset: -3px;
             border-radius: 50%;
-            border: 1.5px solid var(--color-primary, var(--accent-color));
+            border: 1.5px solid var(--error-color, var(--color-error, #e5484d));
             opacity: 0.6;
             animation: mic-pulse 1.4s ease-in-out infinite;
         }
