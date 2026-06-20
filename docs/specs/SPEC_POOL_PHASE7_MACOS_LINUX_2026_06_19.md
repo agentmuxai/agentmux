@@ -1,7 +1,7 @@
 # Phase 7 — Pre-warmed Window Pool for macOS and Linux
 
 **Date:** 2026-06-19  
-**Status:** Implementing  
+**Status:** SHIPPED — merged as #1595 on 2026-06-20  
 **Author:** agent investigation + consolidation  
 **Supersedes / consolidates:**
 - `docs/specs/SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md` — pool routing for CrossWindowDragMonitor (pane branch now done via #1182/linux PR; tab branch pool-attempts already in `tear-off-pool-helper.ts`)

@@ -987,3 +987,66 @@ fn cleanup_failed_promote_orphan_cross_platform(state: &Arc<AppState>, label: &s
         "[pool] orphan browser already gone — cleaned host state directly + refilled (non-Windows)"
     );
 }
+
+/// Pop a pool window for a new top-level window (Cmd+N, File → New Window).
+///
+/// Reuses the tab tear-off pool. No workspace_id — the frontend creates a fresh
+/// workspace via `pool:new-window` (see `frontend/app/init/pool.ts`). The absence
+/// of a `workspaceId` URL param causes `initHostNewWindow` to take the "create
+/// fresh workspace" branch rather than the "reattach existing workspace" branch.
+///
+/// macOS / Linux: full implementation — CEF Views `set_bounds` + `show` at the
+/// cascade-offset position, then `pool:new-window`.
+/// Windows: always returns `None` (cold-path fallback). `get_offset_position` on
+/// Windows returns PHYSICAL pixels (from `GetWindowRect`), while `promote_pool_window`'s
+/// DPI conversion assumes DIP/CSS inputs from the frontend. A dedicated Win32 path
+/// is tracked in `SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md` §4.
+pub fn promote_pool_window_for_new_window(
+    state: &Arc<AppState>,
+    pos_x: i32,
+    pos_y: i32,
+    width: i32,
+    height: i32,
+) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        // TODO(pool-new-window-win32): implement with a dedicated Win32 path.
+        let _ = (state, pos_x, pos_y, width, height);
+        return None;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let dispatch = state.host_dispatch(
+            crate::reducer::HostCommand::PopAndPromoteFrontPoolWindow,
+        );
+        let label = dispatch.promoted_pool_label?;
+
+        tracing::info!(
+            target: "pool:new-window",
+            label = %label,
+            pos_x,
+            pos_y,
+            width,
+            height,
+            "[pool:new-window] promoting pool window for new window"
+        );
+
+        if state.get_browser(&label).is_none() {
+            tracing::warn!(
+                target: "pool:new-window",
+                label = %label,
+                "[pool:new-window] browser not in state — orphan cleanup"
+            );
+            cleanup_failed_promote_orphan_cross_platform(state, &label);
+            return None;
+        }
+
+        crate::ui_tasks::post_promote_pool_window_for_new_window(
+            state, &label, pos_x, pos_y, width, height,
+        );
+        spawn_pool_window(state);
+
+        Some(label)
+    }
+}
