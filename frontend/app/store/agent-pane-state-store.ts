@@ -256,10 +256,12 @@ export function dispatch(
     }
 
     // Leaving waiting state: user started typing (WaitingTypingStarted clears the flag).
+    // Guard to Done→Done ensures TurnReset (Done→Idle) isn't mislabeled as "typing".
     if (
         prev.lastTurnHadQuestion &&
         !slot.state.lastTurnHadQuestion &&
-        nextPhase.kind !== "Submitting"
+        prevPhase.kind === "Done" &&
+        nextPhase.kind === "Done"
     ) {
         extraEvents.push({ type: "waiting-ended", reason: "typing" });
     }

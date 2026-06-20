@@ -392,8 +392,11 @@ export function update(
             // When text is absent (tool-only or empty final block), conservatively
             // treat it as no question — do NOT carry the prior value forward.
             // Non-completed outcomes always clear the flag.
-            const lastTurnHadQuestion =
-                outcome === "completed" && command.lastAssistantText != null
+            // First-done-wins: a late/duplicate TurnEnd (phase already Done)
+            // must not overwrite the flag — the initial TurnEnd was authoritative.
+            const lastTurnHadQuestion = phase.kind === "Done"
+                ? state.lastTurnHadQuestion
+                : outcome === "completed" && command.lastAssistantText != null
                     ? endsWithQuestion(command.lastAssistantText)
                     : false;
             return {

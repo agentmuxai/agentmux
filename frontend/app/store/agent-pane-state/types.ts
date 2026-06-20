@@ -642,7 +642,7 @@ export type AgentPaneEvent =
      * Emitted when the waiting state ends — user submitted or started
      * typing, pane closed, or the 5-minute safety cutoff fired.
      */
-    | { type: "waiting-ended"; reason: "submitted" | "typing" | "timeout" | "closed" };
+    | { type: "waiting-ended"; reason: "submitted" | "typing" | "closed" };
 
 export interface ReducerResult {
     state: AgentPaneState;
