@@ -214,7 +214,6 @@ const LOOP_STOP_TOOL: &str = r#"{
 async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
     let auth_key = std::env::var("AGENTMUX_AUTH_KEY").unwrap_or_default();
-    // The "bus id" is the agent's block UUID, used to scope shell events to the
     // AGENTMUX_BLOCKID is the canonical block UUID injected by agent_handlers.rs
     // into the persistent subprocess env. It is what the frontend subscribes to
     // for shell_node_create events (`block:<uuid>`), so it MUST be used here.
