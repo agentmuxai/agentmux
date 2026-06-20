@@ -157,12 +157,13 @@ const WHOAMI_TOOL: &str = r#"{
 // See SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md §4.3 / §10.
 const SET_NAME_TOOL: &str = r#"{
   "name": "SetName",
-  "description": "Rename one of your own AgentMux UI elements. `target` selects which: \"window\" (the OS taskbar / window-title name; clamped to 64 chars), \"tab\" (the tab-bar label), \"pane\" (this conversation pane's header title), or \"workspace\" (the workspace name — also shown in the window/taskbar title when no explicit window name is set). Defaults to your own element; trimmed; non-window names clamp to 128 chars.",
+  "description": "Rename an AgentMux UI element. `target` selects which: \"window\" (the OS taskbar / window-title name; clamped to 64 chars), \"tab\" (the tab-bar label), \"pane\" (a conversation pane's header title), or \"workspace\" (the workspace name). Defaults to your own element; pass `target_id` (from Layout/WhoAmI) to rename any specific element by id. Names are trimmed; non-window names clamp to 128 chars.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "target": { "type": "string", "enum": ["window", "tab", "pane", "workspace"], "description": "Which UI element to rename" },
-      "name": { "type": "string", "description": "The new name/title to display" }
+      "target":    { "type": "string", "enum": ["window", "tab", "pane", "workspace"], "description": "Which UI element to rename" },
+      "name":      { "type": "string", "description": "The new name/title to display" },
+      "target_id": { "type": "string", "description": "Explicit id of the element to rename (window_id / tab_id / workspace_id / block_id depending on target). Omit to default to your own." }
     },
     "required": ["target", "name"]
   }
@@ -689,30 +690,51 @@ async fn call_tool(
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
-            require_agent_env(local_url, auth_key, block_id)?;
+            let target_id = arguments
+                .get("target_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            // block_id is only needed for own-context resolution; when
+            // target_id is explicit we can reach any element without it.
+            if target_id.is_none() && block_id.is_empty() {
+                anyhow::bail!(
+                    "neither AGENTMUX_AGENT_BUS_ID nor AGENTMUX_BLOCKID is set \
+                     — pass target_id to name a specific element, or open this \
+                     agent in an AgentMux pane to default to your own."
+                );
+            }
 
             // window/tab/workspace POST {"name": …} to /…/name; pane POSTs
             // {"title": …} to /pane/title. `label` and `resp_field` are the
             // human-facing echo and the response key used to surface the
             // server-applied value (e.g. a window name clamped to 64 chars).
+            let own_block = if block_id.is_empty() { None } else { Some(block_id.to_string()) };
             let (path, label, resp_field, body) = match target {
                 "window" => ("window/name", "Window name", "name", serde_json::to_value(WindowNameRequest {
-                    block_id: Some(block_id.to_string()),
+                    block_id: own_block,
                     name: new_name.to_string(),
-                    window_id: None,
+                    window_id: target_id,
                 })?),
                 "tab" => ("tab/name", "Tab name", "name", serde_json::to_value(TabNameRequest {
-                    block_id: Some(block_id.to_string()),
-                    tab_id: None,
+                    block_id: own_block,
+                    tab_id: target_id,
                     name: new_name.to_string(),
                 })?),
                 "workspace" => ("workspace/name", "Workspace name", "name", serde_json::to_value(WorkspaceNameRequest {
-                    block_id: Some(block_id.to_string()),
-                    workspace_id: None,
+                    block_id: own_block,
+                    workspace_id: target_id,
                     name: new_name.to_string(),
                 })?),
                 "pane" => ("pane/title", "Pane title", "title", serde_json::to_value(PaneTitleRequest {
-                    block_id: Some(block_id.to_string()),
+                    block_id: target_id.or(own_block),
                     title: new_name.to_string(),
                 })?),
                 other => anyhow::bail!(
