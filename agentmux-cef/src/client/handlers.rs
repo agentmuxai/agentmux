@@ -59,6 +59,17 @@ wrap_client! {
                 None
             }
         }
+
+        fn permission_handler(&self) -> Option<PermissionHandler> {
+            // Microphone (getUserMedia) access for voice input. ONLY the main app
+            // client gets a handler — browser panes load arbitrary web content, so
+            // auto-granting them media access would hand the mic to any site with no
+            // prompt. For panes we return None → CEF's default Alloy handling (deny).
+            if self.is_browser_pane {
+                return None;
+            }
+            Some(AgentMuxPermissionHandler::new())
+        }
     }
 }
 
@@ -423,6 +434,74 @@ wrap_request_handler! {
             inner.on_auth_credentials(
                 browser, origin_url, is_proxy, host, port, realm, scheme, callback,
             )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PermissionHandler — microphone (getUserMedia) access for voice input
+// ---------------------------------------------------------------------------
+//
+// AgentMux runs the Alloy runtime for all non-devtools windows (app.rs:
+// RuntimeStyle::ALLOY). Under Alloy, CEF's DEFAULT handling of a media-access
+// request is to DENY — so without this handler every getUserMedia({audio:true})
+// (the Web Speech API today, and the MediaRecorder capture for server-side STT
+// in #1591) is rejected with NotAllowedError, surfacing as the "Voice input
+// unavailable" toast.
+//
+// We grant only the AUDIO-capture bits the page requested and implicitly deny
+// everything else (camera, desktop capture). Per the CEF contract, for a
+// getUserMedia request `allowed_permissions` must match `required_permissions`:
+// granting only the audio subset means a combined audio+video request is denied
+// as a whole (we never want camera), while an audio-only request — AgentMux's
+// only case — is granted exactly. Only ever installed on the main app client
+// (see `permission_handler` getter above); browser panes never reach here.
+//
+// OS-level permission (Windows Privacy / macOS TCC) is a SEPARATE layer handled
+// in the frontend via getUserMedia error classification + a settings deep-link.
+// See SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §Phase 4 and #1591.
+
+// cef_media_access_permission_types_t bitmask values (ABI-stable in CEF).
+const CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE: u32 = 1 << 0;
+const CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE: u32 = 1 << 2;
+
+wrap_permission_handler! {
+    struct AgentMuxPermissionHandler;
+
+    impl PermissionHandler {
+        fn on_request_media_access_permission(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut MediaAccessCallback>,
+        ) -> ::std::os::raw::c_int {
+            let audio_bits = CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE
+                | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE;
+            let allowed = requested_permissions & audio_bits;
+            let origin = requesting_origin.map(|s| s.to_string()).unwrap_or_default();
+            match callback {
+                Some(cb) => {
+                    tracing::info!(
+                        target: "voice",
+                        %origin,
+                        requested = requested_permissions,
+                        allowed,
+                        "granting audio media-access permission"
+                    );
+                    cb.cont(allowed);
+                    1 // handled
+                }
+                None => {
+                    tracing::warn!(
+                        target: "voice",
+                        %origin,
+                        "media-access request had no callback — deferring to default"
+                    );
+                    0 // not handled — CEF default (deny under Alloy)
+                }
+            }
         }
     }
 }
