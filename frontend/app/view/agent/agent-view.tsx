@@ -1287,10 +1287,21 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onSendMessage={handleSendMessage}
                     onTyping={() => {
                         scrollToBottomFn?.();
-                        // Stop the waiting-ambient tone on first keystroke.
-                        dispatchPaneIfRegistered(model.blockId, {
-                            type: "WaitingTypingStarted",
-                        });
+                        // Guard: only dispatch while a waiting tone is active.
+                        // WaitingTypingStarted is gated on lastTurnHadQuestion in
+                        // the reducer, but dispatching on every RAF-debounced frame
+                        // would still flood recordDispatch with no-op records.
+                        const s = paneSnapshot(model.blockId);
+                        if (
+                            s != null &&
+                            s.lastTurnHadQuestion &&
+                            s.turnPhase.kind === "Done" &&
+                            s.turnPhase.outcome === "completed"
+                        ) {
+                            dispatchPaneIfRegistered(model.blockId, {
+                                type: "WaitingTypingStarted",
+                            });
+                        }
                     }}
                     onStopAgent={commands.stopAgent}
                     onRecallLatestQueued={commands.recallLatestHeld}
