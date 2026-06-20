@@ -218,6 +218,18 @@ pub struct SettingsType {
     #[serde(rename = "voice:enabled", default, skip_serializing_if = "Option::is_none")]
     pub voice_enabled: Option<bool>,
 
+    // Speech-to-text engine: "whisper" (capture audio → server STT, the default
+    // and only engine that works in CEF) or "webspeech" (browser API — dev /
+    // real-Chromium only). Absent ⇒ whisper.
+    // Spec: docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md.
+    #[serde(rename = "voice:engine", default, skip_serializing_if = "Option::is_none")]
+    pub voice_engine: Option<String>,
+
+    // Groq API key for the hosted Whisper backend. Read server-side only; never
+    // sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence.
+    #[serde(rename = "voice:groqApiKey", default, skip_serializing_if = "Option::is_none")]
+    pub voice_groq_api_key: Option<String>,
+
     // -- Notification sounds --
     //
     // Spec: docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §5.1.

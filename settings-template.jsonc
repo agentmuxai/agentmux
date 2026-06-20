@@ -76,6 +76,15 @@
     // "notify:tooltones:volume":                0.15,
     // "notify:tooltones:scope":                 "all",  // "all" or "focused"
 
+    // -- Voice input (speech-to-text) --
+    // "voice:enabled":     true,        // show the per-pane mic button (default true)
+    // "voice:engine":      "whisper",   // "whisper" (capture→server STT, default) or
+    //                                   // "webspeech" (browser API — does NOT work in
+    //                                   // packaged CEF builds; dev/Chromium only)
+    // "voice:groqApiKey":  "gsk_...",   // Groq key for the hosted Whisper backend.
+    //                                   // Read server-side only (never sent to the UI).
+    //                                   // Or set the AGENTMUX_GROQ_API_KEY env var.
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,

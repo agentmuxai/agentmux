@@ -14,6 +14,7 @@ mod reactive;
 pub(crate) mod service;
 mod shell_handlers;
 mod tool_handlers;
+mod voice;
 pub(crate) mod wave_obj_bridge;
 mod websocket;
 mod drone_handlers;
@@ -256,6 +257,11 @@ pub fn build_router(state: AppState) -> Router {
         // shares the exact pane.open logic with the WebSocket RPC handler
         // (app_api::open_pane). See ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR_2026_05_30.
         .route("/api/v1/pane/open", post(handle_pane_open))
+        // Voice speech-to-text: the renderer POSTs mic audio (one
+        // silence-bounded utterance per request); we forward to a Whisper
+        // backend and return the transcript. Key stays server-side.
+        // See SPEC_VOICE_STT_ENGINE_2026_06_20.md and #1591.
+        .route("/api/v1/voice/transcribe", post(voice::handle_voice_transcribe))
         // First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md).
         // `GET /api/v1/self?block_id=` resolves the caller's place in the tree;
         // `POST /api/v1/window/name` sets the window display name (taskbar title).

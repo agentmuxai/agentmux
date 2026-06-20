@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignalAtom, type SignalAtom } from "@/util/util";
+import { getSettingsKeyAtom } from "@/app/store/global";
+import { createWhisperVoiceSession } from "./whisperVoiceEngine";
 
 export interface PaneVoiceHandle {
     appendFinal: (text: string) => void;
@@ -26,7 +28,7 @@ export interface VoiceSession {
 
 const RESTART_DELAY_MS = 100;
 
-function createVoiceSession(): VoiceSession {
+function createWebSpeechVoiceSession(): VoiceSession {
     const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     const isListening = createSignalAtom(false);
     const currentTargetId = createSignalAtom<string | null>(null);
@@ -146,6 +148,19 @@ function createVoiceSession(): VoiceSession {
 let _session: VoiceSession | null = null;
 
 export function getVoiceSession(): VoiceSession {
-    if (!_session) _session = createVoiceSession();
+    if (_session) return _session;
+    // Engine selection (SPEC_VOICE_STT_ENGINE_2026_06_20.md §5): the Web Speech
+    // recognizer can't transcribe in CEF (closed-source Google service), so it's
+    // used ONLY when explicitly opted into via `voice:engine: "webspeech"` AND
+    // the API exists (dev / real-Chromium). Otherwise the Whisper
+    // capture-and-send engine, which is the default everywhere.
+    const engine = getSettingsKeyAtom("voice:engine")();
+    const hasWebSpeech =
+        typeof window !== "undefined" &&
+        !!((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
+    _session =
+        engine === "webspeech" && hasWebSpeech
+            ? createWebSpeechVoiceSession()
+            : createWhisperVoiceSession();
     return _session;
 }
