@@ -217,18 +217,23 @@ async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
     let auth_key = std::env::var("AGENTMUX_AUTH_KEY").unwrap_or_default();
     // The "bus id" is the agent's block UUID, used to scope shell events to the
-    // conversation pane. AGENTMUX_AGENT_BUS_ID is the preferred source, but the
-    // production .mcp.json path never injects it (build_mcp_config is called with
-    // an empty bus id and build_config_files_with_bus has no call site). Fall
-    // back to AGENTMUX_BLOCKID, which holds the same block UUID and is reliably
-    // set on the agent process env (websocket.rs) and inherited by this MCP
-    // subprocess. Without this fallback the Shell tool always bailed.
+    // AGENTMUX_BLOCKID is the canonical block UUID injected by agent_handlers.rs
+    // into the persistent subprocess env. It is what the frontend subscribes to
+    // for shell_node_create events (`block:<uuid>`), so it MUST be used here.
+    //
+    // AGENTMUX_AGENT_BUS_ID is the MuxBus routing identifier — a different
+    // concept. In existing .mcp.json files it is often set to "claude" (the
+    // agent type, not the block UUID), which was accidentally being used as the
+    // shell scope and caused shell_node_create to publish under `block:claude`
+    // instead of the real pane UUID — making the ActivityDock never receive
+    // shell events. Prefer AGENTMUX_BLOCKID; fall back to AGENTMUX_AGENT_BUS_ID
+    // only for older deployments that pre-date AGENTMUX_BLOCKID injection.
     let block_id = {
-        let bus = std::env::var("AGENTMUX_AGENT_BUS_ID").unwrap_or_default();
-        if bus.is_empty() {
-            std::env::var("AGENTMUX_BLOCKID").unwrap_or_default()
+        let blockid = std::env::var("AGENTMUX_BLOCKID").unwrap_or_default();
+        if blockid.is_empty() {
+            std::env::var("AGENTMUX_AGENT_BUS_ID").unwrap_or_default()
         } else {
-            bus
+            blockid
         }
     };
 
