@@ -108,6 +108,17 @@ export function installSoundService(): () => void {
             const v = typeof vol === "number" ? vol : 0.25;
             for (const wp of waitingTones.values()) wp.setVolume(v);
         });
+        // Spec §8: if the user focuses the waiting pane while the tone is
+        // looping, fade it out reactively (not just at tone-start time).
+        createEffect(() => {
+            const focusedId = focusManager.blockFocusAtom();
+            const winFocused = windowFocused();
+            const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
+            const shouldSuppress = suppressRaw !== false;
+            if (shouldSuppress && winFocused && focusedId) {
+                stopWaiting(focusedId);
+            }
+        });
         return dispose;
     });
 
