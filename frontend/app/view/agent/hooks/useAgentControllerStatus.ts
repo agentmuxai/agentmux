@@ -34,8 +34,9 @@
  */
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
-import { getApi } from "@/app/store/global";
+import { getApi, getBlockMetaKeyAtom } from "@/app/store/global";
 import { runLaunchFlow } from "../flows/launch-flow";
+import { forceProviderLogin } from "../flows/force-login";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
@@ -64,6 +65,15 @@ export interface UseAgentControllerStatus {
     isLoading: Accessor<boolean>;
     loginWaiting: Accessor<boolean>;
     startLaunchFlow: () => Promise<void>;
+    /**
+     * Force a provider re-login, bypassing the auth-status check. Wired to the
+     * failure-banner / inline-error "Login Again" actions: a 401 means the token
+     * is bad even though `CheckCliAuth` still reports it present, so re-running
+     * the gated launch flow would trust the lying check and skip the very login
+     * the user needs. This always opens the OAuth. See
+     * SPEC_REAUTH_FROM_AUTH_ERROR §11.
+     */
+    relogin: () => Promise<void>;
     cancelLogin: () => void;
 }
 
@@ -137,6 +147,46 @@ export function useAgentControllerStatus(
         }
     };
 
+    // Guard against double-firing while a re-login's runCliLogin RPC is in
+    // flight (the user double-clicks "Login Again"). Separate from flowRunning
+    // — relogin must work even when the gated flow believes it already finished.
+    let reloginInFlight = false;
+    const relogin = async () => {
+        if (reloginInFlight) return;
+        const prov = opts.provider();
+        if (!prov) {
+            opts.log("auth", "re-login: no active provider", "warn");
+            return;
+        }
+        // The CLI path + auth env are written to block meta at launch; reuse
+        // them instead of re-resolving (the agent is already running, so the
+        // CLI is installed). If `cmd` is missing the agent never launched —
+        // fall back to the full launch flow.
+        const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
+        if (!cliPath) {
+            opts.log("auth", "re-login: CLI not resolved yet — running the full launch flow instead", "warn");
+            void startLaunchFlow();
+            return;
+        }
+        const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
+        const authEnv: Record<string, string> = {};
+        if (envMeta && typeof envMeta === "object") {
+            for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
+                if (typeof v === "string") authEnv[k] = v;
+            }
+        }
+        reloginInFlight = true;
+        setLoginWaiting(true);
+        try {
+            await forceProviderLogin({ provider: prov, cliPath, authEnv, setAuthUrl, log: opts.log });
+        } catch (err: any) {
+            opts.log("auth", `re-login failed: ${err?.message ?? String(err)}`, "error");
+        } finally {
+            reloginInFlight = false;
+            setLoginWaiting(false);
+        }
+    };
+
     const cancelLogin = () => {
         loginCancelled = true;
         getApi().cancelCliLogin().catch(() => {});
@@ -166,6 +216,7 @@ export function useAgentControllerStatus(
         isLoading,
         loginWaiting,
         startLaunchFlow,
+        relogin,
         cancelLogin,
     };
 }
