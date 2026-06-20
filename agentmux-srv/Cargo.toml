@@ -35,7 +35,7 @@ portable-pty = "0.9"
 sysinfo = "0.34"
 parking_lot = "0.12"
 notify = "7"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
 # OS-native secret storage (macOS Keychain / Windows Credential Manager /
 # Linux Secret Service) for Trust Center API keys. See
 # specs/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
