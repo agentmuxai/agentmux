@@ -33,6 +33,8 @@ export interface UseAgentFailureOptions {
     onRetry: () => void;
     /** Re-authenticate this agent's provider account (P2). */
     onLoginAgain: () => void;
+    /** Seed this agent from the user's existing global Claude login (§5.5). */
+    onUseExistingLogin: () => void;
     /** Open Trust Center → Accounts. */
     onTrustCenter: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
@@ -185,6 +187,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             {
                 retry: doRetry,
                 loginAgain: opts.onLoginAgain,
+                useExistingLogin: opts.onUseExistingLogin,
                 trustCenter: opts.onTrustCenter,
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),

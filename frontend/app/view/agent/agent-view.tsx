@@ -768,6 +768,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             log("auth", "Login Again — forcing a fresh provider login");
             void status.relogin();
         },
+        // Seed-from-global recovery: copy the user's existing valid global
+        // Claude login into this agent instead of a fresh OAuth — the reliable
+        // path for Claude Code v2.1.x's un-scrapeable login TUI (§5.5). The
+        // agent re-reads its credential per request, so the next message clears
+        // this failure row with no restart.
+        onUseExistingLogin: () => {
+            log("auth", "Use existing login — seeding from your global Claude login");
+            void status.useGlobalLogin();
+        },
     });
 
     // Deliver queued-while-busy ("send now") messages at the next tool-call
