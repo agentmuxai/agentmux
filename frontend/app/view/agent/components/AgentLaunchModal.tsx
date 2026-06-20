@@ -875,16 +875,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         </div>
 
                         {/*
-                         * Memory dropdown — companion to Identity.
+                         * Preset dropdown — companion to Identity.
                          * The wire selection rides through to the
                          * backend via `memoryId` on LaunchOverrides;
                          * the spawn-time content-injection layer
-                         * (provider override, instructions, context
-                         * files, MCP servers, skills) ships in PR-F.4
-                         * and will start consuming the selection.
-                         * Until then, picking a non-blank Memory is
-                         * visible UX scaffolding that records the
-                         * user's intent without changing runtime
+                         * (instructions, context files, MCP servers,
+                         * skills — presets are provider-agnostic) ships
+                         * in PR-F.4 and will start consuming the
+                         * selection. Until then, picking a non-blank
+                         * preset is visible UX scaffolding that records
+                         * the user's intent without changing runtime
                          * behavior.
                          */}
 
