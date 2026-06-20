@@ -52,7 +52,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode | AgentErrorNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode | AgentErrorNode | ContextCompactedNode;
 
 /**
  * Raw markdown text block
@@ -354,6 +354,15 @@ export interface AgentErrorNode {
     id: string;
     code: number;   // HTTP status code (e.g. 401, 429)
     message: string; // Full error text from the CLI result event
+}
+
+/** Transcript boundary marker inserted when Claude compacts its context. */
+export interface ContextCompactedNode {
+    type: "context_compacted";
+    id: string;
+    tokensBefore: number;
+    tokensAfter: number;
+    timestamp: number;
 }
 
 /**
