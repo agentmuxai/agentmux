@@ -1220,6 +1220,8 @@ declare global {
         "agent:resume_flag"?: string;
         "agent:session_id_field"?: string;
         "agent:sessionid"?: string;
+        /** Last classified agent failure; set on error exit, cleared on clean exit. */
+        "agent:last_failure"?: AgentFailure;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;
