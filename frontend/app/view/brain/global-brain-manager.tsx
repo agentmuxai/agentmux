@@ -1,0 +1,203 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// GlobalBrainManager — the Trust Center "Brain" tab. Presents the
+// workspace-wide global brain (is_global Memory bundles) as an ordered list
+// of editable sections that compose into every agent's CLAUDE.md at launch.
+//
+// Context-free: owns its own GlobalBrainViewModel and drives off the
+// bundle_* RPCs. Spec: SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
+
+import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { GlobalBrainViewModel, NEW_SECTION_ID } from "./global-brain-model";
+import "./global-brain.scss";
+
+/** Inline editor card shared by the "new section" and "edit section" flows. */
+function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): JSX.Element {
+    const { model } = props;
+    return (
+        <div class="global-brain-editor">
+            <label class="global-brain-field">
+                <span class="global-brain-field-label">Name</span>
+                <input
+                    class="global-brain-input"
+                    type="text"
+                    value={model.draftNameAtom()}
+                    onInput={(e) => model.setDraftName(e.currentTarget.value)}
+                    placeholder="e.g. Coding Standards"
+                />
+            </label>
+            <label class="global-brain-field">
+                <span class="global-brain-field-label">Content</span>
+                <textarea
+                    class="global-brain-textarea"
+                    rows={8}
+                    value={model.draftInstructionsAtom()}
+                    onInput={(e) => model.setDraftInstructions(e.currentTarget.value)}
+                    placeholder="Markdown injected into every agent's CLAUDE.md under a # [Workspace] heading."
+                    spellcheck={false}
+                />
+            </label>
+            <div class="global-brain-editor-actions">
+                <button
+                    class="global-brain-btn"
+                    disabled={model.savingAtom()}
+                    onClick={() => model.cancelEdit()}
+                >
+                    Cancel
+                </button>
+                <button
+                    class="global-brain-btn global-brain-btn-primary"
+                    disabled={model.savingAtom() || !model.draftNameAtom().trim()}
+                    onClick={() => void model.saveEdit()}
+                >
+                    {model.savingAtom() ? "Saving…" : props.isNew ? "Add section" : "Save"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
+export const GlobalBrainManager = (): JSX.Element => {
+    const model = new GlobalBrainViewModel();
+    onCleanup(() => model.dispose());
+
+    const [promoteValue, setPromoteValue] = createSignal("");
+
+    const handlePromote = (id: string) => {
+        if (!id) return;
+        void model.promote(id);
+        setPromoteValue("");
+    };
+
+    return (
+        <div class="global-brain">
+            <p class="global-brain-intro">
+                Every agent inherits these sections at launch. They compose into the
+                agent's <code>CLAUDE.md</code> in order, each under a{" "}
+                <code># [Workspace]</code> heading.
+            </p>
+
+            <div class="global-brain-restart-note">
+                Changes take effect when agents restart. Running agents keep the version
+                from their last launch.
+            </div>
+
+            <Show when={model.errorAtom()}>
+                <div class="global-brain-error">{model.errorAtom()}</div>
+            </Show>
+
+            <div class="global-brain-sections">
+                <Show when={model.editingIdAtom() === NEW_SECTION_ID}>
+                    <div class="global-brain-section is-editing">
+                        <SectionEditor model={model} isNew={true} />
+                    </div>
+                </Show>
+
+                <For each={model.sectionsAtom()}>
+                    {(section, i) => (
+                        <div
+                            class="global-brain-section"
+                            classList={{ "is-editing": model.editingIdAtom() === section.id }}
+                        >
+                            <Show
+                                when={model.editingIdAtom() === section.id}
+                                fallback={
+                                    <div class="global-brain-section-row">
+                                        <div class="global-brain-section-main">
+                                            <span class="global-brain-section-name">
+                                                {section.name}
+                                            </span>
+                                            <Show when={section.description}>
+                                                <span class="global-brain-section-desc">
+                                                    {section.description}
+                                                </span>
+                                            </Show>
+                                        </div>
+                                        <div class="global-brain-section-actions">
+                                            <button
+                                                class="global-brain-icon-btn"
+                                                title="Move up"
+                                                disabled={i() === 0}
+                                                onClick={() => void model.move(section.id, -1)}
+                                            >
+                                                ↑
+                                            </button>
+                                            <button
+                                                class="global-brain-icon-btn"
+                                                title="Move down"
+                                                disabled={i() === model.sectionsAtom().length - 1}
+                                                onClick={() => void model.move(section.id, 1)}
+                                            >
+                                                ↓
+                                            </button>
+                                            <button
+                                                class="global-brain-btn"
+                                                onClick={() => model.startEdit(section)}
+                                            >
+                                                Edit
+                                            </button>
+                                            <button
+                                                class="global-brain-btn global-brain-btn-danger"
+                                                title="Remove from the global brain (keeps the bundle)"
+                                                onClick={() => void model.remove(section.id)}
+                                            >
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            >
+                                <SectionEditor model={model} isNew={false} />
+                            </Show>
+                        </div>
+                    )}
+                </For>
+
+                <Show when={model.sectionsAtom().length === 0 && model.editingIdAtom() === null}>
+                    <div class="global-brain-empty">
+                        No global sections yet. Add one to give every agent shared context.
+                    </div>
+                </Show>
+            </div>
+
+            <div class="global-brain-add-bar">
+                <button
+                    class="global-brain-btn global-brain-btn-primary"
+                    disabled={model.editingIdAtom() === NEW_SECTION_ID}
+                    onClick={() => model.startNew()}
+                >
+                    + New section
+                </button>
+                <Show when={model.candidatesAtom().length > 0}>
+                    <select
+                        class="global-brain-promote-select"
+                        value={promoteValue()}
+                        onChange={(e) => handlePromote(e.currentTarget.value)}
+                    >
+                        <option value="">Promote existing bundle…</option>
+                        <For each={model.candidatesAtom()}>
+                            {(c) => <option value={c.id}>{c.name}</option>}
+                        </For>
+                    </select>
+                </Show>
+            </div>
+
+            <div class="global-brain-preview">
+                <button
+                    class="global-brain-preview-toggle"
+                    onClick={() => model.setShowPreview(!model.showPreviewAtom())}
+                >
+                    {model.showPreviewAtom() ? "▾" : "▸"} Combined CLAUDE.md preview
+                </button>
+                <Show when={model.showPreviewAtom()}>
+                    <pre class="global-brain-preview-content">
+                        {model.previewAtom() || "(no content — sections have no instructions yet)"}
+                    </pre>
+                </Show>
+            </div>
+        </div>
+    );
+};
+
+GlobalBrainManager.displayName = "GlobalBrainManager";

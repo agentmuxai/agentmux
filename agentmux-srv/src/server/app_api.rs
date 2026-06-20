@@ -2324,24 +2324,20 @@ fn write_agent_config_files(
         }
     }
 
-    // Inject global memory bundles (Trust Center tier 1) into CLAUDE.md.
-    // All agents get these regardless of per-agent memory selection.
+    // Inject global memory bundles (Trust Center global brain) into CLAUDE.md.
+    // All agents get these regardless of per-agent memory selection. Each
+    // section carries a `# [Workspace] <name>` heading (see
+    // format_global_brain_block) so the rules are attributable to the
+    // workspace and ordered per the Brain tab's sort_order.
     let global_bundles = wstore.bundle_memory_list_global().unwrap_or_default();
-    if !global_bundles.is_empty() {
-        let mut global_parts: Vec<String> = Vec::new();
-        for bundle in &global_bundles {
-            if !bundle.instructions.is_empty() {
-                global_parts.push(bundle.instructions.clone());
-            }
-        }
-        if !global_parts.is_empty() {
-            content_map
-                .entry("memory".to_string())
-                .and_modify(|existing| {
-                    *existing = format!("{}\n\n---\n\n{}", global_parts.join("\n\n---\n\n"), existing);
-                })
-                .or_insert_with(|| global_parts.join("\n\n---\n\n"));
-        }
+    let global_block = crate::backend::storage::format_global_brain_block(&global_bundles);
+    if !global_block.is_empty() {
+        content_map
+            .entry("memory".to_string())
+            .and_modify(|existing| {
+                *existing = format!("{global_block}\n\n---\n\n{existing}");
+            })
+            .or_insert(global_block);
     }
 
     let config_files = crate::backend::agent_config::build_config_files(

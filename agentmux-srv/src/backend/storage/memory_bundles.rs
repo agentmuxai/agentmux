@@ -50,6 +50,13 @@ pub struct Memory {
     /// JSON-encoded array of skill IDs.
     #[serde(default = "default_json_array_string")]
     pub skills: String,
+    /// Explicit ordering within the Trust Center global brain. Lower sorts
+    /// first; this is the order sections inject into CLAUDE.md at launch.
+    /// Only meaningful for `is_global` bundles; 0 for the rest. Owned by the
+    /// `reorderglobalbrain` RPC — `bundle_memory_upsert` never overwrites it
+    /// on conflict, so editing a bundle via the regular form keeps its place.
+    #[serde(default)]
+    pub sort_order: i64,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -58,12 +65,27 @@ fn default_json_array_string() -> String {
     "[]".to_string()
 }
 
+/// Format global brain bundles into the block injected into an agent's
+/// CLAUDE.md. Each non-empty section gets a `# [Workspace] <name>` heading so
+/// Claude can tell injected workspace rules apart from the agent's own config;
+/// sections are separated by a `---` rule. Bundles arrive already ordered by
+/// `bundle_memory_list_global` (sort_order). Returns an empty string when no
+/// section has instructions.
+pub fn format_global_brain_block(bundles: &[Memory]) -> String {
+    bundles
+        .iter()
+        .filter(|b| !b.instructions.trim().is_empty())
+        .map(|b| format!("# [Workspace] {}\n\n{}", b.name, b.instructions))
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
+
 impl Store {
     pub fn bundle_memory_list(&self) -> Result<Vec<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, created_at, updated_at
+                    context_files, mcp_servers, skills, sort_order, created_at, updated_at
              FROM db_memory_bundles
              ORDER BY is_blank ASC, is_global DESC, updated_at DESC",
         )?;
@@ -75,16 +97,18 @@ impl Store {
         Ok(out)
     }
 
-    /// Returns only the global bundles (`is_global = 1`), ordered by name.
-    /// Called at agent launch to inject workspace-wide rules into every agent.
+    /// Returns only the global bundles (`is_global = 1`), in explicit
+    /// `sort_order` (then name as a stable tiebreak). Called at agent launch
+    /// to inject workspace-wide rules into every agent in the order the user
+    /// arranged them in the Trust Center Brain tab.
     pub fn bundle_memory_list_global(&self) -> Result<Vec<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, created_at, updated_at
+                    context_files, mcp_servers, skills, sort_order, created_at, updated_at
              FROM db_memory_bundles
              WHERE is_global = 1
-             ORDER BY name ASC",
+             ORDER BY sort_order ASC, name ASC",
         )?;
         let iter = stmt.query_map([], map_memory_row)?;
         let mut out = Vec::new();
@@ -98,7 +122,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, created_at, updated_at
+                    context_files, mcp_servers, skills, sort_order, created_at, updated_at
              FROM db_memory_bundles WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], map_memory_row);
@@ -112,10 +136,14 @@ impl Store {
     pub fn bundle_memory_upsert(&self, memory: &Memory) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
+            // sort_order is deliberately NOT in the ON CONFLICT update set:
+            // it is owned by `bundle_memory_reorder`, so editing a bundle
+            // through the regular Memory form never disturbs its position in
+            // the global brain.
             "INSERT INTO db_memory_bundles
                 (id, name, description, is_blank, is_global, provider, model, instructions,
-                 context_files, mcp_servers, skills, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -139,6 +167,7 @@ impl Store {
                 memory.context_files,
                 memory.mcp_servers,
                 memory.skills,
+                memory.sort_order,
                 memory.created_at,
                 memory.updated_at,
             ],
@@ -165,6 +194,27 @@ impl Store {
         let rows = conn.execute("DELETE FROM db_memory_bundles WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
+
+    /// Assign `sort_order` to the given bundle ids in the order supplied
+    /// (position 0, 1, 2, …). Drives the Trust Center global brain ordering,
+    /// which in turn controls CLAUDE.md injection order. Ids not present in
+    /// the table are skipped silently (a concurrently-deleted section is not
+    /// an error). Runs in a single transaction so a partial reorder never
+    /// lands. Returns the number of rows updated.
+    pub fn bundle_memory_reorder(&self, ordered_ids: &[String]) -> Result<usize, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let mut updated = 0usize;
+        {
+            let mut stmt =
+                tx.prepare("UPDATE db_memory_bundles SET sort_order = ?1 WHERE id = ?2")?;
+            for (idx, id) in ordered_ids.iter().enumerate() {
+                updated += stmt.execute(params![idx as i64, id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(updated)
+    }
 }
 
 fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
@@ -180,7 +230,8 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
         context_files: row.get(8)?,
         mcp_servers: row.get(9)?,
         skills: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        sort_order: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
