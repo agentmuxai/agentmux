@@ -1,15 +1,6 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Swarm widget — root layout + per-section partials.
-// Split spec: see docs/specs/SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24.md.
-
-@use "styles/header";
-@use "styles/subagent-card";
-@use "styles/empty-states";
-@use "styles/flip";
-@use "styles/detail";
-
 .swarm-view {
     display: flex;
     flex-direction: column;
@@ -18,6 +9,211 @@
     background: var(--main-bg-color);
     color: var(--main-text-color);
     font-family: var(--termfontfamily, "JetBrains Mono", "Fira Code", "Consolas", monospace);
-    font-size: var(--termfontsize, 15px);
+    font-size: 13px;
     overflow: hidden;
+}
+
+// ── Loading / empty root ─────────────────────────────────────────────────
+
+.swarm-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--secondary-text-color);
+    font-size: 12px;
+}
+
+.swarm-empty-root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 6px;
+    padding: 24px;
+    text-align: center;
+
+    .swarm-empty-icon {
+        font-size: 28px;
+        opacity: 0.3;
+    }
+    .swarm-empty-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--main-text-color);
+    }
+    .swarm-empty-desc {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        max-width: 200px;
+        line-height: 1.5;
+    }
+}
+
+// ── Tree container ───────────────────────────────────────────────────────
+
+.swarm-tree {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 6px 0 12px;
+}
+
+// ── Agent group (root + its children) ───────────────────────────────────
+
+.swarm-agent-group {
+    display: flex;
+    flex-direction: column;
+
+    & + & {
+        margin-top: 4px;
+        border-top: 1px solid var(--border-color);
+        padding-top: 4px;
+    }
+}
+
+// ── Agent root row ───────────────────────────────────────────────────────
+
+.swarm-agent-row {
+    display: flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 6px 0 10px;
+    gap: 5px;
+    cursor: pointer;
+    border-radius: 4px;
+    user-select: none;
+
+    &:hover {
+        background: var(--highlight-bg);
+
+        .swarm-open-btn { opacity: 1; }
+    }
+
+    .swarm-agent-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+        opacity: 0.6;
+    }
+
+    .swarm-agent-label {
+        flex: 1;
+        font-size: 13px;
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--main-text-color);
+    }
+}
+
+// ── Children area ────────────────────────────────────────────────────────
+
+.swarm-children {
+    display: flex;
+    flex-direction: column;
+}
+
+// ── Subagent child row ───────────────────────────────────────────────────
+
+.swarm-subagent-row {
+    display: flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 6px 0 30px;
+    gap: 5px;
+    cursor: pointer;
+    border-radius: 4px;
+    user-select: none;
+
+    &:hover {
+        background: var(--highlight-bg);
+
+        .swarm-open-btn { opacity: 1; }
+    }
+
+    &--completed {
+        opacity: 0.55;
+    }
+
+    .swarm-subagent-slug {
+        flex: 1;
+        font-size: 12px;
+        font-family: var(--monospace-font, monospace);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--main-text-color);
+    }
+}
+
+// ── "no subagents yet" placeholder ──────────────────────────────────────
+
+.swarm-no-subagents {
+    padding: 0 6px 0 30px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    opacity: 0.5;
+    font-style: italic;
+}
+
+// ── Status chip ──────────────────────────────────────────────────────────
+
+.swarm-status-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.swarm-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &--running {
+        background: var(--warning-color, #f5a623);
+        animation: swarm-pulse 1.5s ease-in-out infinite;
+    }
+    &--done {
+        background: var(--success-color, #4caf50);
+    }
+    &--idle {
+        background: var(--secondary-text-color);
+        opacity: 0.5;
+    }
+}
+
+@keyframes swarm-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+}
+
+// ── Open button ──────────────────────────────────────────────────────────
+
+.swarm-open-btn {
+    opacity: 0;
+    transition: opacity 100ms;
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    border: 1px solid var(--border-color);
+    color: var(--secondary-text-color);
+    background: transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-family: inherit;
+
+    &:hover {
+        background: var(--highlight-bg);
+        color: var(--main-text-color);
+    }
 }
