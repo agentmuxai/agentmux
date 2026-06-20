@@ -1,0 +1,13 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The inner AgentIdentityPanel content is fully styled by _identity-panel.scss.
+// This file only handles the modal body wrapper and the shared footer/button
+// which live in AgentMemoryModal.scss (both imported via modal-dispatch.tsx).
+
+.agent-identity-modal-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 440px;
+    max-width: 560px;
+}
