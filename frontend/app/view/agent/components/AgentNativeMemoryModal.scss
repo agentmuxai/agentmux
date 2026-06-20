@@ -1,0 +1,279 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Styles for AgentNativeMemoryModal — the agent pane brain modal.
+// Canonical modal chrome (backdrop, panel, ESC) lives in
+// frontend/app/element/modal.scss; this file styles the body only.
+// The hosting <Modal> is size="fit", so the root sets explicit
+// dimensions to give the two-column browser a bounded box.
+
+.agent-memory-modal {
+    display: flex;
+    flex-direction: column;
+    width: 780px;
+    max-width: 90vw;
+    height: 520px;
+    max-height: 80vh;
+    min-width: 0;
+}
+
+// ── Header ─────────────────────────────────────────────────────────────────
+
+.agent-memory-modal-header {
+    flex-shrink: 0;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.agent-memory-modal-title {
+    font-size: var(--text-md, 14px);
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.agent-memory-modal-path {
+    display: block;
+    margin-top: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agent-memory-modal-path-note {
+    margin-top: 2px;
+    font-size: var(--text-xs);
+    color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
+}
+
+// ── Error banner ───────────────────────────────────────────────────────────
+
+.agent-memory-modal-error {
+    flex-shrink: 0;
+    margin-top: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color) 30%, transparent);
+    border-radius: 0;
+    color: var(--error-color);
+    font-size: var(--text-sm);
+}
+
+// ── Body: two columns ──────────────────────────────────────────────────────
+
+.agent-memory-modal-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    margin-top: var(--space-2);
+    border: 1px solid var(--border-color);
+}
+
+.agent-memory-modal-list {
+    flex-shrink: 0;
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+}
+
+.agent-memory-modal-list-empty {
+    padding: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    font-style: italic;
+}
+
+.agent-memory-modal-list-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    width: 100%;
+    padding: var(--space-1-5) var(--space-2);
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+
+    &.is-selected {
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+    }
+}
+
+.agent-memory-modal-list-item-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.agent-memory-modal-list-item-badge,
+.agent-memory-modal-list-item-type {
+    flex-shrink: 0;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 1px 5px;
+    border-radius: 0;
+    color: var(--secondary-text-color);
+    background: var(--panel-bg-color);
+}
+
+.agent-memory-modal-list-item-badge {
+    color: var(--accent-color);
+    background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+}
+
+.agent-memory-modal-new-btn {
+    margin-top: auto;
+    padding: var(--space-1-5) var(--space-2);
+    border: none;
+    border-top: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--accent-color);
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+// ── Detail / editor ────────────────────────────────────────────────────────
+
+.agent-memory-modal-detail {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.agent-memory-modal-view,
+.agent-memory-modal-edit {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.agent-memory-modal-content {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: var(--space-2);
+    overflow: auto;
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-sm);
+    color: var(--main-text-color);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
+.agent-memory-modal-textarea {
+    flex: 1;
+    min-height: 0;
+    margin: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-sm);
+    resize: none;
+    outline: none;
+
+    &:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 1px var(--accent-color);
+    }
+}
+
+.agent-memory-modal-detail-actions {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border-top: 1px solid var(--border-color);
+}
+
+// ── Empty states ───────────────────────────────────────────────────────────
+
+.agent-memory-modal-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    text-align: center;
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+}
+
+.agent-memory-modal-empty-heading {
+    margin: 0;
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.agent-memory-modal-empty-desc {
+    margin: 0;
+    max-width: 360px;
+    line-height: 1.5;
+}
+
+// ── Footer ─────────────────────────────────────────────────────────────────
+
+.agent-memory-modal-footer {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--space-2);
+}
+
+// ── Buttons ────────────────────────────────────────────────────────────────
+
+.agent-memory-modal-btn {
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-sm);
+    border-radius: 0;
+    border: 1px solid var(--border-color);
+    background: transparent;
+    color: var(--main-text-color);
+    cursor: pointer;
+    transition: opacity 0.1s;
+
+    &:hover:not(:disabled) {
+        background: var(--hover-bg-color);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    &.agent-memory-modal-btn-primary {
+        background: var(--accent-color);
+        color: var(--button-text-color);
+        border-color: var(--accent-color);
+
+        &:hover:not(:disabled) {
+            background: var(--accent-color);
+            opacity: 0.85;
+        }
+    }
+}

@@ -2,12 +2,41 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The inner AgentIdentityPanel content is fully styled by _identity-panel.scss.
-// This file only handles the modal body wrapper and the shared footer/button
-// which live in AgentMemoryModal.scss (both imported via modal-dispatch.tsx).
+// This file handles the modal body wrapper plus the .agent-modal-footer /
+// .agent-modal-done-btn this panel uses (moved here from the deleted
+// AgentMemoryModal.scss placeholder when the native memory browser shipped).
 
 .agent-identity-modal-body {
     display: flex;
     flex-direction: column;
     min-width: 440px;
     max-width: 560px;
+}
+
+.agent-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space-3) var(--space-5);
+    border-top: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+}
+
+.agent-modal-done-btn {
+    padding: var(--space-1-5) var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--button-text-color);
+    background: var(--accent-color);
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
 }
