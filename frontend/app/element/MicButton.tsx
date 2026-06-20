@@ -24,6 +24,25 @@ export function MicButton(props: MicButtonProps): JSX.Element {
     // Active iff this pane owns the current voice session.
     const isActiveHere = () => voice.isListening() && voice.currentTargetId() === props.blockId;
 
+    // Blocked iff a fatal error is outstanding and nothing is currently
+    // listening — surfaces a muted "slash" mic so the user sees voice is
+    // unavailable (mic permission denied, no device, or the recognition
+    // service is unavailable) rather than a silently dead button. Cleared on
+    // the next successful start (useVoiceInput resets lastError).
+    const isBlocked = () => !voice.isListening() && voice.lastError() != null;
+    const blockedTitle = () => {
+        switch (voice.lastError()) {
+            case "not-allowed":
+                return "Microphone blocked — enable mic access in your OS privacy settings, then click again";
+            case "audio-capture":
+                return "No microphone detected";
+            case "service-not-allowed":
+                return "Voice transcription unavailable in this build";
+            default:
+                return "Voice input unavailable";
+        }
+    };
+
     const handleClick = () => {
         // Snapshot pre-click state — registerPane below will overwrite
         // currentTargetId, so we need to know whether THIS pane already
@@ -52,12 +71,17 @@ export function MicButton(props: MicButtonProps): JSX.Element {
 
     return (
         <Show when={voice.isAvailable() && voiceEnabled() !== false}>
-            <div class="mic-button-wrap" classList={{ "mic-active": isActiveHere() }}>
+            <div
+                class="mic-button-wrap"
+                classList={{ "mic-active": isActiveHere(), "mic-blocked": isBlocked() }}
+            >
                 <ToggleIconButton
                     decl={{
                         elemtype: "toggleiconbutton",
-                        icon: "regular@microphone",
-                        title: props.paneTitle ?? "Voice input (Ctrl+Shift+V)",
+                        icon: isBlocked() ? "regular@microphone-slash" : "regular@microphone",
+                        title: isBlocked()
+                            ? blockedTitle()
+                            : (props.paneTitle ?? "Voice input (Ctrl+Shift+V)"),
                         active: activeAtom,
                     }}
                 />

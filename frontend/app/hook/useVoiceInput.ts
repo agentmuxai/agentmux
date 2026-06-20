@@ -14,6 +14,11 @@ export interface VoiceSession {
      *  pane is targeted). Each pane's mic button reads this to determine
      *  whether *it* owns the active session — multi-pane safe. */
     currentTargetId: SignalAtom<string | null>;
+    /** Last fatal recognition error code (e.g. "not-allowed",
+     *  "audio-capture", "service-not-allowed"), or null when none / cleared.
+     *  Mic buttons read this to render a "blocked" affordance; cleared when a
+     *  session starts successfully. */
+    lastError: SignalAtom<string | null>;
     isAvailable: () => boolean;
     toggleListening: () => void;
     registerPane: (blockId: string, handle: PaneVoiceHandle) => void;
@@ -25,11 +30,13 @@ function createVoiceSession(): VoiceSession {
     const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
     const isListening = createSignalAtom(false);
     const currentTargetId = createSignalAtom<string | null>(null);
+    const lastError = createSignalAtom<string | null>(null);
 
     if (!SR) {
         return {
             isListening,
             currentTargetId,
+            lastError,
             isAvailable: () => false,
             toggleListening: () => {},
             registerPane: () => {},
@@ -73,8 +80,16 @@ function createVoiceSession(): VoiceSession {
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        // Fatal errors that should stop the session and surface guidance:
+        //   not-allowed         — mic permission denied (OS or CEF layer)
+        //   service-not-allowed — recognition service unavailable (the Web
+        //                         Speech backend doesn't work in CEF; #1591)
+        //   audio-capture       — no microphone device present
+        const FATAL = ["not-allowed", "service-not-allowed", "audio-capture"];
+        if (FATAL.includes(event.error)) {
             isListening._set(false);
+            currentTargetId._set(null);
+            lastError._set(event.error);
             window.dispatchEvent(new CustomEvent("voice-input-error", { detail: event.error }));
         }
         // "no-speech" and "aborted" are non-fatal; onend auto-restarts.
@@ -106,6 +121,9 @@ function createVoiceSession(): VoiceSession {
             try {
                 recognition.start();
                 isListening._set(true);
+                // A fresh start clears any prior blocked/error state so the
+                // mic button drops its "blocked" affordance on retry.
+                lastError._set(null);
             } catch {
                 // Race with onend auto-restart — ignore.
             }
@@ -115,6 +133,7 @@ function createVoiceSession(): VoiceSession {
     return {
         isListening,
         currentTargetId,
+        lastError,
         isAvailable: () => true,
         toggleListening,
         registerPane: (blockId, handle) => {
