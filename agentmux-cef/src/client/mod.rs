@@ -1319,13 +1319,28 @@ impl AgentMuxHandler {
         // Show window via CEF Views API after content paints.
         // All windows (main + secondary) now use CEF Views.
         let mut browser_cloned = browser.cloned();
-        if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
-            if let Some(window) = bv.window() {
-                if window.is_visible() == 0 {
-                    window.show();
-                    if let Some(ref mut b) = browser_cloned {
-                        if let Some(host) = b.host() {
-                            host.set_focus(1);
+
+        // Pool windows are kept hidden until promote_pool_window fires
+        // PromotePoolWindowTask, which positions the window with set_bounds()
+        // and then calls window.show(). On macOS/Linux, CEF Views Window::Show()
+        // activates the widget (no foreground-lock equivalent), so showing an
+        // off-screen pool window here — even at (-32000,-32000) — would steal
+        // key focus. Instead, pool windows skip the show/focus block entirely
+        // and are shown for the first time at the promote-target position.
+        let browser_label = browser_cloned.as_mut().and_then(|b| self.window_label_for(b));
+        let is_pool_window = browser_label
+            .as_deref()
+            .map_or(false, |l| l.starts_with("window-pool-"));
+
+        if !is_pool_window {
+            if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
+                if let Some(window) = bv.window() {
+                    if window.is_visible() == 0 {
+                        window.show();
+                        if let Some(ref mut b) = browser_cloned {
+                            if let Some(host) = b.host() {
+                                host.set_focus(1);
+                            }
                         }
                     }
                 }

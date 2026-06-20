@@ -809,6 +809,104 @@ pub fn post_set_window_position(state: &Arc<AppState>, label: &str, x: i32, y: i
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Pool window promote (macOS / Linux) — Phase 7 ─────────────────────────
+//
+// Moves a pre-warmed pool window from its off-screen holding position
+// (-32000, -32000) to the tear-off destination and emits `pool:promote` so
+// the renderer attaches the new workspace. Windows uses its own promote path
+// (promote_pool_window cfg(windows)) with Win32 HWND + SetWindowPos + taskbar
+// show. Non-Windows uses CEF Views Window::set_bounds() which is the
+// cross-platform equivalent and runs correctly on the UI thread on macOS and
+// Linux.
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct PromotePoolWindowTask {
+        state: Arc<AppState>,
+        label: String,
+        workspace_id: String,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let Some(window) = get_window_on_ui(&self.state, &self.label) else {
+                tracing::warn!(
+                    target: "dnd:tearoff:pool",
+                    label = %self.label,
+                    "[pool:promote] window not found on UI thread — pool window may have closed"
+                );
+                return;
+            };
+
+            // Pool windows were kept hidden (on_load_end skips show() for
+            // window-pool-* labels to avoid focus steal on macOS/Linux). Set
+            // the target bounds first so the window appears at the correct
+            // position, then show(). The user just performed a drag-to-tear-off
+            // so activation is expected and desired here.
+            window.set_bounds(Some(&cef::Rect {
+                x: self.x,
+                y: self.y,
+                width: self.width,
+                height: self.height,
+            }));
+            window.show();
+
+            tracing::info!(
+                target: "dnd:tearoff:pool",
+                label = %self.label,
+                x = self.x,
+                y = self.y,
+                width = self.width,
+                height = self.height,
+                "[pool:promote] window repositioned + shown via set_bounds + show"
+            );
+
+            // Signal the renderer to attach the workspace. The frontend's
+            // awaitPoolPromote() listener was installed at pool-spawn time;
+            // mark_pool_window_renderer_ready gates queue insertion on it, so
+            // the listener is guaranteed to be ready before this event fires.
+            crate::events::emit_event_to_window(
+                &self.state,
+                &self.label,
+                "pool:promote",
+                &serde_json::json!({ "workspaceId": self.workspace_id }),
+            );
+
+            tracing::info!(
+                target: "dnd:tearoff:pool",
+                label = %self.label,
+                workspace_id = %self.workspace_id,
+                "[pool:promote] pool:promote event emitted — renderer will attach workspace"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn post_promote_pool_window(
+    state: &Arc<AppState>,
+    label: &str,
+    workspace_id: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    let mut task = PromotePoolWindowTask::new(
+        state.clone(),
+        label.to_string(),
+        workspace_id.to_string(),
+        x,
+        y,
+        width,
+        height,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Get window absolute position (DIP) — blocking UI-thread read ──────────
 //
 // CEF Views `window.bounds()` must run on the UI thread, but
