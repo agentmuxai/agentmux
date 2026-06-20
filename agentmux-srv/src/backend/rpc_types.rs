@@ -274,6 +274,9 @@ pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";
 pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
 pub const COMMAND_DELETE_MEMORY: &str = "deletememory";
+/// v9 — set the global-brain section order. `ids` is the full ordered list
+/// of global bundle ids; each row's `sort_order` becomes its index.
+pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";
@@ -1868,6 +1871,13 @@ pub struct CommandGetMemoryData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandDeleteMemoryData {
     pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandReorderGlobalBrainData {
+    /// Full ordered list of global bundle ids. Each id's `sort_order`
+    /// becomes its position in this list.
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

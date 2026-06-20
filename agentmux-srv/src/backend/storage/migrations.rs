@@ -41,7 +41,10 @@ use super::error::StoreError;
 ///        Cognito PKCE tokens (access, refresh, id) + expiry + user email
 ///   v8 — db_memory_bundles.is_global: global-tier flag for Trust Center
 ///        bundles injected into every agent's CLAUDE.md at launch
-pub const OBJECT_SCHEMA_VERSION: i64 = 8;
+///   v9 — db_memory_bundles.sort_order: explicit ordering for the Trust
+///        Center global brain (controls CLAUDE.md injection order). Existing
+///        rows default to 0; the Brain tab assigns positions via reorder.
+pub const OBJECT_SCHEMA_VERSION: i64 = 9;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -249,6 +252,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             context_files TEXT NOT NULL DEFAULT '[]',
             mcp_servers   TEXT NOT NULL DEFAULT '[]',
             skills        TEXT NOT NULL DEFAULT '[]',
+            sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
         );
@@ -446,6 +450,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agents ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE db_agents ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_memory_bundles ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_memory_bundles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

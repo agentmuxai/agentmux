@@ -76,11 +76,11 @@ use crate::backend::rpc_types::{
     COMMAND_BIND_IDENTITY_ACCOUNT, COMMAND_UNBIND_IDENTITY_ACCOUNT,
     COMMAND_LIST_IDENTITY_BINDINGS,
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
-    COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY,
+    COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     CommandGetIdentityBundleData, CommandDeleteIdentityBundleData,
     CommandBindIdentityAccountData, CommandUnbindIdentityAccountData,
     CommandListIdentityBindingsData,
-    CommandGetMemoryData, CommandDeleteMemoryData,
+    CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
 use crate::backend::storage::store::{
@@ -2972,6 +2972,31 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_REORDER_GLOBAL_BRAIN,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandReorderGlobalBrainData = serde_json::from_value(data)
+                    .map_err(|e| format!("reorderglobalbrain: {e}"))?;
+                let updated = wstore
+                    .bundle_memory_reorder(&cmd.ids)
+                    .map_err(|e| format!("reorderglobalbrain: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "memories:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                Ok(Some(json!({ "updated": updated })))
+            })
+        }),
+    );
 }
 
 pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -3736,6 +3761,7 @@ mod recent_sessions_tests {
             context_files: "[]".to_string(),
             mcp_servers: "[]".to_string(),
             skills: "[]".to_string(),
+            sort_order: 0,
             created_at: 0,
             updated_at: 0,
         };

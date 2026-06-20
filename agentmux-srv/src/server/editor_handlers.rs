@@ -82,15 +82,10 @@ fn list_drives() -> Vec<serde_json::Value> {
 /// one is inserted before `# Available Skills` (or at the end of the file).
 fn inject_global_bundles(claude_md: &str, wstore: &Arc<Store>) -> String {
     let bundles = wstore.bundle_memory_list_global().unwrap_or_default();
-    let parts: Vec<String> = bundles
-        .into_iter()
-        .filter(|b| !b.instructions.is_empty())
-        .map(|b| b.instructions)
-        .collect();
-    if parts.is_empty() {
+    let bundle_block = crate::backend::storage::format_global_brain_block(&bundles);
+    if bundle_block.is_empty() {
         return claude_md.to_string();
     }
-    let bundle_block = parts.join("\n\n---\n\n");
 
     // Inject after the `# Memory\n` heading if it exists.
     if let Some(pos) = claude_md.find("\n# Memory\n") {

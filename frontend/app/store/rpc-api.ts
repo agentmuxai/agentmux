@@ -917,6 +917,16 @@ class RpcApiType {
         return client.rpcCall("deletememory", data, opts);
     }
 
+    // command "reorderglobalbrain" [call] — set global-brain section order.
+    // `ids` is the full ordered list of global bundle ids.
+    ReorderGlobalBrainCommand(
+        client: RpcClient,
+        data: { ids: string[] },
+        opts?: RpcOpts,
+    ): Promise<{ updated: number }> {
+        return client.rpcCall("reorderglobalbrain", data, opts);
+    }
+
     // ── Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
 
     // command "auth.start"

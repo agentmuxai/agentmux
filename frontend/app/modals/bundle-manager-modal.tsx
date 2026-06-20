@@ -49,6 +49,7 @@ import {
 import { IdentityManager } from "@/app/view/identity/identity-manager";
 import { MemoryManager } from "@/app/view/memory/memory-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
+import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
 import "./bundle-manager-modal.scss";
 
 /**
@@ -58,7 +59,7 @@ import "./bundle-manager-modal.scss";
 export const SINGLETON_KIND_BUNDLE_MANAGER: SingletonKind = "bundle-manager";
 
 /** Which section the left rail currently shows. */
-type BundleSection = "accounts" | "identities" | "memories";
+type BundleSection = "accounts" | "identities" | "brain" | "memories";
 
 /**
  * Resolve a window *label* to its human display name ("Window N", the
@@ -93,10 +94,14 @@ export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
 
     const handleClose = () => props.close();
 
+    // "Brain" (global brain — the brain icon) is distinct from "Memories"
+    // (the full bundle library, now layer-group) so the brain icon means one
+    // thing only. See SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
     const rail: { id: BundleSection; label: string; icon: string }[] = [
         { id: "accounts", label: "Accounts", icon: "key" },
         { id: "identities", label: "Identities", icon: "id-card" },
-        { id: "memories", label: "Memories", icon: "brain" },
+        { id: "brain", label: "Brain", icon: "brain" },
+        { id: "memories", label: "Memories", icon: "layer-group" },
     ];
 
     return (
@@ -144,6 +149,12 @@ export const BundleManagerModal = (props: ModalCloseProps): JSX.Element => {
                         classList={{ "is-hidden": section() !== "identities" }}
                     >
                         <IdentityManager />
+                    </div>
+                    <div
+                        class="bundle-manager-pane"
+                        classList={{ "is-hidden": section() !== "brain" }}
+                    >
+                        <GlobalBrainManager />
                     </div>
                     <div
                         class="bundle-manager-pane"

@@ -381,6 +381,10 @@ declare global {
         mcp_servers?: string;
         /** JSON-encoded array of skill IDs. */
         skills?: string;
+        /** Explicit ordering within the Trust Center global brain (controls
+         *  CLAUDE.md injection order). Only meaningful for is_global bundles;
+         *  0 otherwise. Owned by the reorderglobalbrain RPC. */
+        sort_order?: number;
         created_at: number;
         updated_at: number;
     };

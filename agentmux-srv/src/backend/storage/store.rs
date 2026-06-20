@@ -1506,6 +1506,7 @@ mod tests {
             context_files: "[]".to_string(),
             mcp_servers: "[]".to_string(),
             skills: "[]".to_string(),
+            sort_order: 0,
             created_at: 100,
             updated_at: 100,
         };
@@ -1526,6 +1527,63 @@ mod tests {
         // Delete the user memory.
         assert!(store.bundle_memory_delete("mem-coder").unwrap());
         assert_eq!(store.bundle_memory_list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_global_brain_order_and_format() {
+        let store = make_store();
+
+        let mk = |id: &str, name: &str, order: i64| Memory {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: format!("rules for {name}"),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: order,
+            created_at: 0,
+            updated_at: 0,
+        };
+        // Insert out of order: B at 0, A at 1.
+        store.bundle_memory_upsert(&mk("g-a", "Alpha", 1)).unwrap();
+        store.bundle_memory_upsert(&mk("g-b", "Beta", 0)).unwrap();
+
+        // list_global orders by sort_order: Beta (0) then Alpha (1).
+        let g = store.bundle_memory_list_global().unwrap();
+        assert_eq!(
+            g.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["g-b", "g-a"]
+        );
+
+        // Reorder to [Alpha, Beta].
+        let updated = store
+            .bundle_memory_reorder(&["g-a".to_string(), "g-b".to_string()])
+            .unwrap();
+        assert_eq!(updated, 2);
+        let g = store.bundle_memory_list_global().unwrap();
+        assert_eq!(
+            g.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["g-a", "g-b"]
+        );
+
+        // Editing a bundle via upsert must NOT disturb its sort_order.
+        let mut edited = g[0].clone();
+        edited.instructions = "edited".to_string();
+        edited.sort_order = 999; // upsert ON CONFLICT ignores this
+        store.bundle_memory_upsert(&edited).unwrap();
+        let g = store.bundle_memory_list_global().unwrap();
+        assert_eq!(g[0].id, "g-a", "edit must keep position");
+        assert_eq!(g[0].sort_order, 0, "sort_order owned by reorder, not upsert");
+
+        // The injection block carries [Workspace] headings in order.
+        let block = super::super::format_global_brain_block(&g);
+        let expected = "# [Workspace] Alpha\n\nedited\n\n---\n\n# [Workspace] Beta\n\nrules for Beta";
+        assert_eq!(block, expected);
     }
 
     // ---- Registry parallel-write mirror (PR A) ----
