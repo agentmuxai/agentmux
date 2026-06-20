@@ -577,6 +577,7 @@ export type AgentPaneEvent =
     | { type: "tool-started"; name: string }
     | { type: "tool-ended" }
     | { type: "tokens-updated"; input: number | null; output: number | null }
+    | { type: "context-compacted"; tokensBefore: number; tokensAfter: number }
     | { type: "stop-requested"; at: number }
     | { type: "stop-failed" }
     /**

@@ -103,5 +103,9 @@ export function currentExpansion(
         case "agent_error":
             // Error nodes are fixed-height and never user-collapsible.
             return OPEN_DEFAULT;
+
+        case "context_compacted":
+            // Fixed-height divider — never collapsible.
+            return OPEN_DEFAULT;
     }
 }
