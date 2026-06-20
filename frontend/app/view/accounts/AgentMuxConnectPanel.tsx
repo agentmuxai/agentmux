@@ -30,7 +30,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
 const MUXBUS_COGNITO_DOMAIN =
     (import.meta.env.VITE_MUXBUS_COGNITO_DOMAIN as string | undefined) ??
-    "https://muxbus-auth-prod.auth.us-east-1.amazoncognito.com";
+    "https://muxbus-auth.auth.us-east-1.amazoncognito.com";
 const MUXBUS_CLIENT_ID =
     (import.meta.env.VITE_MUXBUS_CLIENT_ID as string | undefined) ?? "";
 
