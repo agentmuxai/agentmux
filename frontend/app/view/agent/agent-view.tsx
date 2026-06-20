@@ -1050,6 +1050,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 authUrl={status.authUrl}
                 authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
+                onAgentErrorLogin={() => {
+                    log("auth", "Login Again (inline error node) — re-running the provider login flow");
+                    void status.startLaunchFlow();
+                }}
                 onLoadOlder={history.loadOlder}
                 loadingOlder={history.loadingOlder}
                 scrollCommand={scroll.command}

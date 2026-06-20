@@ -77,6 +77,9 @@ export interface AgentDocumentVirtualListProps {
     /** Release a held tool once its row has scrolled off the top (latched
      *  collapse). Invoked by the scroll-off scan in `handleScroll`. */
     onReleaseToolOpen?: (id: string) => void;
+    /** Re-run the provider login flow — forwarded to each row so an inline
+     *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
+    onAgentErrorLogin?: () => void;
     /**
      * Live per-pane zoom factor (the same value applied as CSS `zoom` on
      * `.agent-view` in agent-view.tsx). Normalizes the SINGLE zoomed read —
@@ -728,6 +731,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         onToggleCollapse={props.onToggleCollapse}
                                         onTogglePin={props.onTogglePin}
                                         onHoldToolOpen={props.onHoldToolOpen}
+                                        onAgentErrorLogin={props.onAgentErrorLogin}
                                         ref={(el) => { rowEl = el; observeRow(el, row().nodeId); }}
                                         style={{
                                             position: "absolute",
@@ -789,6 +793,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     onToggleCollapse={props.onToggleCollapse}
                                     onTogglePin={props.onTogglePin}
                                     onHoldToolOpen={props.onHoldToolOpen}
+                                    onAgentErrorLogin={props.onAgentErrorLogin}
                                 />
                             )}
                         </Key>
