@@ -596,44 +596,37 @@ wrap_app! {
                 );
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
-                // ── Linux: default to XWayland (X11 ozone) ─────────────────
-                // Native-Wayland Ozone in CEF 146/Chromium 146 has broken
-                // Mutter↔Chromium GPU buffer negotiation
-                // (`WaylandZwpLinuxDmabuf::OnTrancheFlags Not implemented`
-                // at startup), which causes the cc::Scheduler to reply
-                // `LayerTreeHostImpl::DidNotProduceFrame` to ~89 % of
-                // Mutter's `BeginFrame` requests. With BeginMainFrame
-                // production stuck near sysinfo's ~1 Hz invalidation
-                // cadence, the renderer's `requestAnimationFrame`
-                // callbacks (including predictive local echo's render
-                // path, #1223) fire only when sysinfo dirties the status
-                // bar — typing visibly hangs and pumps out on key release.
+                // ── Linux: prefer native Wayland when the session offers it ──
+                // History: CEF 146/Chromium 146 had broken native-Wayland Ozone
+                // (`WaylandZwpLinuxDmabuf::OnTrancheFlags Not implemented` →
+                // cc::Scheduler `DidNotProduceFrame` on ~89% of Mutter's
+                // `BeginFrame` → rAF stalls past 600 ms, typing visibly hangs),
+                // so we pinned `--ozone-platform=x11` (XWayland) as a workaround.
                 //
-                // Measured locally via CDP `Profiler.start`
-                // (capture-trace.cjs was removed in the scripts cleanup):
-                //
-                //   |                 | Wayland | XWayland |
-                //   | --------------- | ------- | -------- |
-                //   | rAF firing rate | 2.5 Hz  | 6.4 Hz   |
-                //   | rAF gap p95     | 1182 ms | 224 ms   |
-                //   | rAF gap max     | 8280 ms | 1024 ms  |
-                //
-                // XWayland is on the well-trodden X11 present path —
-                // 5–8× fewer stalls on the wire-format Linux Chromium has
-                // shipped reliably for years. Future CEF 148 + a forward-
-                // ported Wayland-aware libcef.so may make native Wayland
-                // viable; keep XWayland as the default until then. Opt
-                // out via `AGENTMUX_OZONE_PLATFORM=wayland` for native-
-                // Wayland regression testing.
+                // CEF 148 fixed it. Verified on GNOME/Mutter (CEF 148): native-
+                // Wayland init is clean — no `Not implemented` callbacks, no
+                // `DidNotProduceFrame`/GPU fallback, and typing is smooth. So we
+                // no longer force XWayland. When the session exposes
+                // WAYLAND_DISPLAY we select native Wayland; otherwise we append
+                // nothing and let Chromium use its X11 default. An explicit
+                // `AGENTMUX_OZONE_PLATFORM=<wayland|x11>` still pins a specific
+                // backend (regression testing / per-machine override).
                 #[cfg(target_os = "linux")]
                 {
-                    let ozone_choice = std::env::var("AGENTMUX_OZONE_PLATFORM")
+                    let forced = std::env::var("AGENTMUX_OZONE_PLATFORM")
                         .ok()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| "x11".to_string());
-                    let oz_key = CefString::from("ozone-platform");
-                    let oz_val = CefString::from(ozone_choice.as_str());
-                    cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
+                        .filter(|s| !s.is_empty());
+                    let ozone = forced.or_else(|| {
+                        let on_wayland = std::env::var("WAYLAND_DISPLAY")
+                            .map(|s| !s.is_empty())
+                            .unwrap_or(false);
+                        on_wayland.then(|| "wayland".to_string())
+                    });
+                    if let Some(platform) = ozone {
+                        let oz_key = CefString::from("ozone-platform");
+                        let oz_val = CefString::from(platform.as_str());
+                        cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
+                    }
                 }
 
                 // ── ANGLE backend precedence (capability-probed) ─────────────
