@@ -142,9 +142,12 @@ export class SwarmViewModel implements ViewModel {
         for (const unsub of this.blockUnsubs) unsub();
         this.blockUnsubs = [];
 
-        // Seed all to "idle" immediately so the tree renders; real statuses
-        // are patched in as each GetControllerStatus call resolves.
-        this.setAgentStatuses(new Map(blockIds.map((id) => [id, "idle" as const])));
+        // Preserve prior status for existing blocks; only default new blocks to
+        // "idle". This prevents a running→idle→running flicker when process
+        // events cause loadTrackedBlocks to re-run while an agent is working.
+        this.setAgentStatuses((prev) =>
+            new Map(blockIds.map((id) => [id, prev.get(id) ?? ("idle" as const)]))
+        );
 
         for (const blockId of blockIds) {
             // Fetch current status — don't assume idle for already-running agents.
