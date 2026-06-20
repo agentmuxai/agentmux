@@ -1404,6 +1404,7 @@ declare global {
         "voice:engine"?: string;
         "voice:groqApiKey"?: string;
         "voice:whisperCliPath"?: string;
+        "voice:whisperModel"?: string;
         "voice:whisperModelPath"?: string;
         "notify:*"?: boolean;
         "notify:sounds:enabled"?: boolean;

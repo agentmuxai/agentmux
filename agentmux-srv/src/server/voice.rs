@@ -219,11 +219,99 @@ async fn transcribe_groq(
 /// and run the CLI. Fully offline; nothing leaves the machine.
 ///
 /// Config (env-first):
-///   * binary — `AGENTMUX_WHISPER_CLI`  / settings `voice:whisperCliPath`
-///   * model  — `AGENTMUX_WHISPER_MODEL` / settings `voice:whisperModelPath`
+///   * binary — `AGENTMUX_WHISPER_CLI` / settings `voice:whisperCliPath`
+///              (user-provided; auto-bundling is a follow-up — per-platform
+///              binary fetch is fragile)
+///   * model  — auto-downloaded on first use (default `base.en`, configurable
+///              via `voice:whisperModel`); override with an explicit
+///              `voice:whisperModelPath` / `AGENTMUX_WHISPER_MODEL`.
 ///
-/// On-demand model/binary download is a follow-up (#1591); for now both paths
-/// are user-provided. Missing config → NotConfigured (501).
+/// Missing binary → NotConfigured (501).
+/// Default GGML model name when none is configured. base.en (~142 MB) is a good
+/// accuracy/size balance for English; configurable via `voice:whisperModel`.
+const DEFAULT_WHISPER_MODEL: &str = "base.en";
+/// Cap the one-time model download so a stuck transfer can't wedge a request.
+const MODEL_DOWNLOAD_TIMEOUT_SECS: u64 = 600;
+
+/// Resolve the GGML model path, downloading an auto-managed model on first use.
+///
+///   * Explicit `voice:whisperModelPath` / `AGENTMUX_WHISPER_MODEL` → used as-is
+///     (no download; error if missing).
+///   * Otherwise → `<config>/whisper-models/ggml-<name>.bin`, where `name` comes
+///     from `voice:whisperModel` (default `base.en`), fetched once from the
+///     whisper.cpp model repo. A global lock serializes concurrent first-uses.
+async fn ensure_local_model(
+    settings: &Option<serde_json::Value>,
+) -> Result<std::path::PathBuf, SttError> {
+    if let Some(p) = resolve_path(settings, "AGENTMUX_WHISPER_MODEL", "voice:whisperModelPath") {
+        let pb = std::path::PathBuf::from(&p);
+        return if pb.exists() {
+            Ok(pb)
+        } else {
+            Err(NotConfigured(format!("whisper model not found at {p}")))
+        };
+    }
+
+    let name = std::env::var("AGENTMUX_WHISPER_MODEL_NAME")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| settings_str(settings, "voice:whisperModel"))
+        .unwrap_or_else(|| DEFAULT_WHISPER_MODEL.to_string());
+    // Sanitize: model names are simple tokens — reject anything that could be a
+    // path or URL component (defends the format!-built path and URL below).
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_')) {
+        return Err(NotConfigured(format!("invalid voice:whisperModel name: {name}")));
+    }
+
+    let dir = crate::backend::base::get_wave_config_dir().join("whisper-models");
+    let path = dir.join(format!("ggml-{name}.bin"));
+    if path.exists() {
+        return Ok(path);
+    }
+
+    // Serialize concurrent first-use downloads of the same model.
+    static DL_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _guard = DL_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+    if path.exists() {
+        return Ok(path); // another request finished the download while we waited
+    }
+
+    std::fs::create_dir_all(&dir).map_err(|e| Upstream(format!("create models dir: {e}")))?;
+    let url =
+        format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{name}.bin");
+    tracing::info!(target: "voice", "downloading whisper model '{name}' from {url}");
+
+    let bytes = tokio::time::timeout(
+        std::time::Duration::from_secs(MODEL_DOWNLOAD_TIMEOUT_SECS),
+        async {
+            let resp = reqwest::Client::new()
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| Upstream(format!("model download request: {e}")))?;
+            if !resp.status().is_success() {
+                return Err(Upstream(format!(
+                    "model download {} for '{name}'",
+                    resp.status().as_u16()
+                )));
+            }
+            resp.bytes()
+                .await
+                .map_err(|e| Upstream(format!("model download body: {e}")))
+        },
+    )
+    .await
+    .map_err(|_| Upstream(format!("model download timed out after {MODEL_DOWNLOAD_TIMEOUT_SECS}s")))??;
+
+    // Write to a temp file then rename so a partial download never looks valid.
+    let tmp = dir.join(format!("ggml-{name}.bin.part"));
+    std::fs::write(&tmp, &bytes).map_err(|e| Upstream(format!("model write: {e}")))?;
+    std::fs::rename(&tmp, &path).map_err(|e| Upstream(format!("model finalize: {e}")))?;
+    tracing::info!(target: "voice", "whisper model '{name}' ready ({} bytes)", bytes.len());
+    Ok(path)
+}
+
 async fn transcribe_local_whisper(
     audio: Bytes,
     lang: Option<&str>,
@@ -238,20 +326,12 @@ async fn transcribe_local_whisper(
             )
         },
     )?;
-    let model = resolve_path(settings, "AGENTMUX_WHISPER_MODEL", "voice:whisperModelPath")
-        .ok_or_else(|| {
-            NotConfigured(
-                "local whisper not configured — set voice:whisperModelPath (path to a GGML model) \
-                 in settings.json or AGENTMUX_WHISPER_MODEL"
-                    .to_string(),
-            )
-        })?;
     if !std::path::Path::new(&cli).exists() {
         return Err(NotConfigured(format!("whisper-cli not found at {cli}")));
     }
-    if !std::path::Path::new(&model).exists() {
-        return Err(NotConfigured(format!("whisper model not found at {model}")));
-    }
+    // Resolve the model: an explicit path wins, otherwise an auto-managed model
+    // is downloaded once to the config dir (zero-config for the model file).
+    let model = ensure_local_model(settings).await?;
 
     // Write the WAV body to a unique temp file. Timestamp alone can collide
     // under concurrent requests (coarse Windows SystemTime granularity), so add
