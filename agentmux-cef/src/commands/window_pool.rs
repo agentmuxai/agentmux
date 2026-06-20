@@ -991,16 +991,21 @@ fn cleanup_failed_promote_orphan_cross_platform(state: &Arc<AppState>, label: &s
 /// Pop a pool window for a new top-level window (Cmd+N, File → New Window).
 ///
 /// Reuses the tab tear-off pool. No workspace_id — the frontend creates a fresh
-/// workspace via `pool:new-window` (see `frontend/app/init/pool.ts`). The absence
-/// of a `workspaceId` URL param causes `initHostNewWindow` to take the "create
-/// fresh workspace" branch rather than the "reattach existing workspace" branch.
+/// workspace via the absence of `?workspaceId=` in the URL, which causes
+/// `initHostNewWindow` to take the "create fresh workspace" branch.
 ///
-/// macOS / Linux: full implementation — CEF Views `set_bounds` + `show` at the
-/// cascade-offset position, then `pool:new-window`.
-/// Windows: always returns `None` (cold-path fallback). `get_offset_position` on
-/// Windows returns PHYSICAL pixels (from `GetWindowRect`), while `promote_pool_window`'s
-/// DPI conversion assumes DIP/CSS inputs from the frontend. A dedicated Win32 path
-/// is tracked in `SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md` §4.
+/// macOS / Linux: emits `pool:new-window` (no workspaceId).
+/// Windows: delegates to `promote_pool_window` with `workspace_id=""`. The
+/// frontend's `awaitPoolPromote` receives `pool:promote { workspaceId: "" }`,
+/// skips the workspaceId URL injection (empty string is falsy), and
+/// `initHostNewWindow` falls through to the fresh-workspace path. Position is
+/// passed as the tab anchor so it feeds directly to `SetWindowPos` without the
+/// cursor-centering offset math. Width/height pass as `None` so the function
+/// uses the hardcoded `POOL_WIDTH/POOL_HEIGHT` defaults (1200×800) — this
+/// avoids double-applying the DIP→physical DPI conversion: `get_offset_position`
+/// and `get_secondary_window_size` on Windows already return physical pixels
+/// (from `GetWindowRect`/`GetMonitorInfoW`), but `promote_pool_window` only
+/// runs `to_physical()` when `width.is_some()`. Passing `None` skips it.
 pub fn promote_pool_window_for_new_window(
     state: &Arc<AppState>,
     pos_x: i32,
@@ -1010,9 +1015,21 @@ pub fn promote_pool_window_for_new_window(
 ) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
-        // TODO(pool-new-window-win32): implement with a dedicated Win32 path.
-        let _ = (state, pos_x, pos_y, width, height);
-        return None;
+        // Width/height intentionally passed as None (use POOL_WIDTH/POOL_HEIGHT defaults)
+        // to avoid double-DPI-converting the already-physical pixels from GetWindowRect.
+        // pos_x/pos_y passed as the tab anchor so SetWindowPos places the window there
+        // directly without the cursor-centering arithmetic.
+        let _ = (width, height); // used only on non-Windows path
+        return promote_pool_window(
+            state,
+            "",           // empty workspace_id → frontend creates fresh workspace
+            pos_x,
+            pos_y,
+            None,         // width: skip DPI conversion, use POOL_WIDTH default
+            None,         // height: skip DPI conversion, use POOL_HEIGHT default
+            Some(pos_x),  // tab_anchor_x: physical px placed directly in SetWindowPos
+            Some(pos_y),  // tab_anchor_y
+        );
     }
 
     #[cfg(not(target_os = "windows"))]
