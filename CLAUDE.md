@@ -246,7 +246,14 @@ git commit -m "feat: description"
 git push -u origin feature-name
 
 # Create PR via GitHub
-gh pr create --title "Feature" --body "Description"
+# IMPORTANT: Always include the agentmux agent ID comment in the PR body.
+# This enables MuxBus to route GitHub review notifications back to this agent.
+gh pr create --title "Feature" --body "$(cat <<'EOF'
+Description of the change.
+
+<!-- agentmux:agent_id=smike-06122 -->
+EOF
+)"
 ```
 
 ---
