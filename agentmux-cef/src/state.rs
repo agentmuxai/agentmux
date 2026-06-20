@@ -1074,8 +1074,6 @@ impl AppState {
             .iter()
             .map(String::as_str)
             .chain(st.pool.queue.iter().map(String::as_str))
-            .chain(st.pane_pool.unpromoted.iter().map(String::as_str))
-            .chain(st.pane_pool.queue.iter().map(String::as_str))
             .collect();
         let pool = pool_inventory.len() as u32;
         // Also exclude floating-pool-* (pane pool windows) from the windows count.
