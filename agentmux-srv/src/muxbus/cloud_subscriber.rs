@@ -110,15 +110,19 @@ impl CloudSubscriber {
     }
 
     /// Notify the WS loop that a new agent is registered locally.
+    /// Normalizes to lowercase so remove_agent (which receives the lowercased
+    /// key from agent_id_for_block) can always find the entry.
     pub fn add_agent(&self, agent_id: &str) {
-        self.agents.lock().unwrap().insert(agent_id.to_string());
-        let _ = self.ctrl_tx.send(CtrlMsg::AddAgent(agent_id.to_string()));
+        let key = agent_id.to_lowercase();
+        self.agents.lock().unwrap().insert(key.clone());
+        let _ = self.ctrl_tx.send(CtrlMsg::AddAgent(key));
     }
 
     /// Notify the WS loop that an agent has been unregistered.
     pub fn remove_agent(&self, agent_id: &str) {
-        self.agents.lock().unwrap().remove(agent_id);
-        let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(agent_id.to_string()));
+        let key = agent_id.to_lowercase();
+        self.agents.lock().unwrap().remove(&key);
+        let _ = self.ctrl_tx.send(CtrlMsg::RemoveAgent(key));
     }
 
     /// Called after muxbus.login completes — trigger a fresh WS connection
