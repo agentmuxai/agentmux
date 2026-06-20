@@ -3063,6 +3063,9 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     session_id: None,
                 };
                 subprocess_ctrl.spawn_turn(config)?;
+                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                    sub.add_agent(&cmd.blockid);
+                }
                 Ok(None)
             })
         }),
@@ -3371,6 +3374,9 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 match blockcontroller::get_controller(&cmd.blockid) {
                     Some(ctrl) => {
                         ctrl.stop(!cmd.force, blockcontroller::STATUS_DONE)?;
+                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                            sub.remove_agent(&cmd.blockid);
+                        }
                         Ok(None)
                     }
                     None => Ok(None),
