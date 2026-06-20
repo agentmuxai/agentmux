@@ -965,25 +965,13 @@ pub fn promote_pool_window(
     Some(label)
 }
 
-/// Orphan cleanup for non-Windows promote failures. Mirrors the graceful /
-/// direct branches of the Windows cleanup_failed_promote_orphan but without
-/// Win32 FFI.
+/// Orphan cleanup for non-Windows promote failures.
+///
+/// Called only when `state.get_browser(label).is_none()` (the browser has
+/// already left state before we could promote it), so there is no graceful
+/// `close_browser` path — `on_before_close` will not fire. Do its job inline.
 #[cfg(not(target_os = "windows"))]
 fn cleanup_failed_promote_orphan_cross_platform(state: &Arc<AppState>, label: &str) {
-    use cef::{ImplBrowser, ImplBrowserHost};
-    let mut browser_clone = state.get_browser(label);
-    if let Some(ref mut browser) = browser_clone {
-        if let Some(host) = browser.host() {
-            host.close_browser(1);
-            tracing::info!(
-                target: "dnd:tearoff:pool",
-                label = %label,
-                "[pool] orphan close_browser issued (non-Windows)"
-            );
-            return;
-        }
-    }
-    // Browser / host already gone — do on_before_close's job inline.
     state.host_dispatch(
         crate::reducer::HostCommand::UnregisterBrowser {
             label: label.to_string(),
