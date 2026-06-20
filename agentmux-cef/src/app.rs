@@ -627,6 +627,23 @@ wrap_app! {
                         let oz_val = CefString::from(platform.as_str());
                         cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
                     }
+
+                    // Linux sandbox: use kernel namespace isolation instead of the setuid
+                    // chrome-sandbox binary. On kernels ≥3.8 without user-namespace
+                    // restrictions (standard distro default), Chromium's namespace
+                    // sandbox is equivalent to the SUID path in practice.
+                    // If the environment doesn't support user namespaces (older kernel,
+                    // Docker with --security-opt=no-new-privileges, nested VM), set
+                    // AGENTMUX_UNSAFE_NOSANDBOX=1 to fall back to no_sandbox=1.
+                    #[cfg(feature = "sandbox")]
+                    {
+                        let suppress = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
+                            .map(|v| v.trim() == "1")
+                            .unwrap_or(false);
+                        if !suppress {
+                            cmd.append_switch(Some(&CefString::from("disable-setuid-sandbox")));
+                        }
+                    }
                 }
 
                 // ── ANGLE backend precedence (capability-probed) ─────────────

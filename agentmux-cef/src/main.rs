@@ -196,7 +196,34 @@ fn main() {
     // Tracing is initialized after the subprocess check below — browser process
     // gets dual file+stderr output; subprocesses exit before tracing is needed.
 
+    // Escape hatch — read once here so both macOS subprocess sandbox init
+    // (below) and the browser-process Settings construction share the same value.
+    let force_no_sandbox = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+
+    // macOS: initialize Seatbelt sandbox context BEFORE the CEF framework is
+    // loaded. This is the order required by CEF (cefsimple/process_helper_mac.cc):
+    //   1. cef_sandbox_initialize     ← here, before dlopen
+    //   2. LoadInHelper / _library    ← CEF framework loaded within the sandbox
+    //   3. CefExecuteProcess
+    // Subprocess mode is detected from raw argv (--type=…) because cef::Args
+    // cannot be parsed until after the framework is loaded. Browser process
+    // skips this entirely — the host process is unsandboxed by design.
+    #[cfg(all(target_os = "macos", feature = "sandbox"))]
+    let _macos_sandbox = if std::env::args().any(|a| a.starts_with("--type="))
+        && !force_no_sandbox
+    {
+        let raw = cef::args::Args::new();
+        let mut s = cef::sandbox::Sandbox::new();
+        s.initialize(raw.as_main_args());
+        Some(s)
+    } else {
+        None
+    };
+
     // macOS: load the CEF framework library explicitly.
+    // For subprocesses this load happens within the Seatbelt policy established above.
     #[cfg(target_os = "macos")]
     let _library = {
         let exe = std::env::current_exe().unwrap();
@@ -661,8 +688,26 @@ fn main() {
     let cef_log_path = log_dir.join("cef-debug.log");
     let cef_log_file = CefString::from(cef_log_path.to_str().unwrap_or(""));
 
+    if force_no_sandbox {
+        tracing::warn!(
+            "AGENTMUX_UNSAFE_NOSANDBOX=1: renderer sandbox disabled. \
+             Only use in environments where namespace/Seatbelt sandbox is known-incompatible."
+        );
+    }
+
+    // Sandbox active on macOS (Seatbelt via libcef_sandbox.dylib) and Linux
+    // (kernel namespace isolation) when built with `--features sandbox` (the default).
+    // Windows sandbox is Phase 3 (DLL wrapper + bootstrap.exe). See issue #1374.
+    let no_sandbox: i32 = if cfg!(any(not(feature = "sandbox"), target_os = "windows"))
+        || force_no_sandbox
+    {
+        1
+    } else {
+        0
+    };
+
     let settings = Settings {
-        no_sandbox: 1,
+        no_sandbox,
         // ARGB: alpha=0 → SK_AlphaTRANSPARENT → triggers the transparency
         // cascade in the patched libcef.so (see cef commits b921ffe18 +
         // 68e0dc668). The CSS layer's rgba(_,_,_,<1) body bg then composites
