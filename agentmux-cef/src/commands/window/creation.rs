@@ -245,9 +245,9 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     }
 
     // Pool-first path — instant show with no renderer-spawn latency (~3s saved).
-    // On macOS/Linux, promotes a pre-warmed pool window via CEF Views set_bounds+show
-    // and emits pool:new-window so the renderer creates a fresh workspace.
-    // On Windows, returns None (TODO: dedicated Win32 physical-pixel path).
+    // On macOS/Linux, emits pool:new-window (no workspaceId → fresh workspace).
+    // On Windows, delegates to promote_pool_window with workspace_id="" and physical-pixel
+    // anchor (bypassing DIP→physical DPI double-conversion; see promote_pool_window_for_new_window).
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
     if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
