@@ -1,0 +1,70 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * forceProviderLogin — run a provider OAuth login UNCONDITIONALLY, bypassing
+ * the `CheckCliAuth` status check.
+ *
+ * Why bypass the check: `claude auth status` (and equivalents) only confirm a
+ * credential is PRESENT, not that it's still VALID. An expired/revoked token
+ * still reports "authenticated", so the agent 401s on every real API call while
+ * the status check insists everything is fine (the false-positive that made
+ * "Login Again" do nothing — SPEC_REAUTH_FROM_AUTH_ERROR §11). When the user
+ * explicitly asks to re-login (the failure banner / inline-error "Login Again",
+ * or the `/login` command) we KNOW the token is bad, so we must force a fresh
+ * OAuth instead of trusting the check.
+ *
+ * Opens the OAuth in an in-app browser pane (with the system browser as a
+ * fallback) and surfaces the URL via `setAuthUrl` so the auth box appears above
+ * the composer with the URL + paste-the-code input. The running persistent
+ * agent re-reads its credential per request, so it picks up the fresh token on
+ * the next message — no controller restart required.
+ *
+ * Deliberately does NOT run the `CheckCliAuth` success-poll the gated launch
+ * flow uses: with a present-but-expired token the poll would "succeed" on the
+ * first tick and reap the in-flight login CLI before the user finishes.
+ */
+
+import { getApi } from "@/app/store/global";
+import { openOAuthBrowserPane } from "./open-oauth-pane";
+import type { ProviderDefinition } from "../providers";
+import type { LogFn } from "../types";
+
+export interface ForceLoginParams {
+    provider: Pick<ProviderDefinition, "authLoginCommand" | "requiresLoginTty">;
+    /** Resolved CLI path (from block meta `cmd`, set at launch). */
+    cliPath: string;
+    /** Auth env (e.g. CLAUDE_CONFIG_DIR) — from block meta `cmd:env`. */
+    authEnv: Record<string, string>;
+    setAuthUrl: (url: string | null) => void;
+    log: LogFn;
+}
+
+export async function forceProviderLogin(p: ForceLoginParams): Promise<void> {
+    const { provider, cliPath, authEnv, setAuthUrl, log } = p;
+    log("auth", "re-login: forcing a fresh OAuth (bypassing the auth-status check)…");
+
+    const url = await getApi().runCliLogin(
+        cliPath,
+        provider.authLoginCommand,
+        authEnv,
+        provider.requiresLoginTty ?? false,
+    );
+
+    if (url) {
+        setAuthUrl(url);
+        const opened = await openOAuthBrowserPane(url);
+        if (opened === "pane") {
+            log("auth", "opened login in an in-app browser pane — complete login there");
+        } else if (opened === "external") {
+            log("auth", "opened login in your system browser — complete login there");
+        } else {
+            log("auth", "could not open a browser; copy the URL from the box above and open it manually", "warn");
+        }
+        log("auth", "after you finish, just send your message again — the agent will use the new token");
+    } else {
+        // No URL captured (some providers don't print one); the CLI may have
+        // opened its own browser. Leave the user to complete it manually.
+        log("auth", "a browser window should have opened — complete login there", "warn");
+    }
+}
