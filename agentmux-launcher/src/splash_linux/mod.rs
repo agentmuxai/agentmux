@@ -22,7 +22,7 @@
 mod wayland;
 mod x11;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // ── Shared look (matches splash_mac.rs / splash.rs) ─────────────────────────
 /// Opaque dark backdrop RGB(26, 26, 31) = #1A1A1F.
@@ -39,6 +39,10 @@ const PULSE_MIN: f32 = 0.73;
 const PULSE_MAX: f32 = 1.0;
 /// Self-dismiss if the host never signals first paint (crash before frame).
 pub(crate) const DISMISS_TIMEOUT: Duration = Duration::from_secs(10);
+/// Rounded-corner radius for the backdrop (px). Matches splash_mac.rs.
+pub(crate) const CORNER_RADIUS_PX: f32 = 16.0;
+/// Opacity fade-out duration on dismiss. Matches splash_mac.rs.
+pub(crate) const FADE_OUT: Duration = Duration::from_millis(160);
 
 /// Brain logo as straight (non-pre-multiplied) RGBA8, emitted by build.rs.
 pub(crate) static BRAIN_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/brain_rgba.bin"));
@@ -95,40 +99,80 @@ pub(crate) fn pulse_alpha(t: f32) -> f32 {
     PULSE_MIN + s * (PULSE_MAX - PULSE_MIN)
 }
 
-/// Composite one frame into a 4-byte-per-pixel buffer: fill the dark backdrop,
-/// then alpha-blend the brain (centered) at `alpha` strength. Pixel byte order
-/// is given by `bgr`: `true` writes B,G,R,X (X11 depth-24 / Wayland ARGB on LE),
-/// `false` writes R,G,B,X. Shared by both backends.
-pub(crate) fn render_frame(buf: &mut [u8], w: i32, h: i32, alpha: f32, bgr: bool) {
-    let (c0, c2) = if bgr { (BG_B, BG_R) } else { (BG_R, BG_B) };
-    for px in buf.chunks_exact_mut(4) {
-        px[0] = c0;
-        px[1] = BG_G;
-        px[2] = c2;
-        px[3] = 0xFF;
+/// Global fade-out opacity in 0..=1. Returns 1.0 until `fade_start` is set, then
+/// ramps linearly to 0.0 over `FADE_OUT`. Shared by both backends.
+pub(crate) fn fade_alpha(fade_start: Option<Instant>, now: Instant) -> f32 {
+    match fade_start {
+        None => 1.0,
+        Some(s) => (1.0 - now.duration_since(s).as_secs_f32() / FADE_OUT.as_secs_f32())
+            .clamp(0.0, 1.0),
     }
+}
+
+/// Rounded-rect coverage (0..=1) at pixel (x, y) for a `w`×`h` rect with corner
+/// `radius` (0 = square), anti-aliased over a 1-px band on the corner arcs.
+fn corner_coverage(x: i32, y: i32, w: i32, h: i32, radius: f32) -> f32 {
+    if radius <= 0.0 {
+        return 1.0;
+    }
+    let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+    // Clamp to the corner-arc center; in the straight edges/interior this yields
+    // dist 0 → full coverage. Only the four corner boxes produce a nonzero dist.
+    let cx = fx.clamp(radius, w as f32 - radius);
+    let cy = fy.clamp(radius, h as f32 - radius);
+    let dist = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
+    if dist <= radius - 0.5 {
+        1.0
+    } else if dist >= radius + 0.5 {
+        0.0
+    } else {
+        radius + 0.5 - dist
+    }
+}
+
+/// Composite one frame, **pre-multiplied**, into a 4-byte-per-pixel buffer: the
+/// dark backdrop with the centered brain blended at `brain_alpha`, masked to a
+/// `radius`-rounded rect, all scaled by the global `window_alpha` (fade-out).
+/// Pre-multiplied output is what both X Render compositors and `wl_shm`
+/// ARGB8888 expect. `bgr` selects byte order: `true` → B,G,R,A (X11 ARGB /
+/// Wayland ARGB8888 on LE), `false` → R,G,B,A. Shared by both backends.
+///
+/// `radius=0` + `window_alpha=1` yields a fully-opaque square (the X11
+/// no-compositor fallback path).
+pub(crate) fn render_frame(
+    buf: &mut [u8],
+    w: i32,
+    h: i32,
+    brain_alpha: f32,
+    window_alpha: f32,
+    radius: f32,
+    bgr: bool,
+) {
     let ox = (w - BRAIN_W) / 2;
     let oy = (h - BRAIN_H) / 2;
-    for by in 0..BRAIN_H {
-        let dy = oy + by;
-        if dy < 0 || dy >= h {
-            continue;
-        }
-        for bx in 0..BRAIN_W {
-            let dx = ox + bx;
-            if dx < 0 || dx >= w {
-                continue;
+    for y in 0..h {
+        for x in 0..w {
+            // Backdrop, in RGB.
+            let mut rr = BG_R as f32;
+            let mut gg = BG_G as f32;
+            let mut bb = BG_B as f32;
+            // Brain over backdrop (straight alpha).
+            let (bx, by) = (x - ox, y - oy);
+            if bx >= 0 && bx < BRAIN_W && by >= 0 && by < BRAIN_H {
+                let si = ((by * BRAIN_W + bx) * 4) as usize;
+                let ba = (BRAIN_RGBA[si + 3] as f32 / 255.0) * brain_alpha;
+                rr = rr * (1.0 - ba) + BRAIN_RGBA[si] as f32 * ba;
+                gg = gg * (1.0 - ba) + BRAIN_RGBA[si + 1] as f32 * ba;
+                bb = bb * (1.0 - ba) + BRAIN_RGBA[si + 2] as f32 * ba;
             }
-            let si = ((by * BRAIN_W + bx) * 4) as usize;
-            let sr = BRAIN_RGBA[si] as f32;
-            let sg = BRAIN_RGBA[si + 1] as f32;
-            let sb = BRAIN_RGBA[si + 2] as f32;
-            let a = (BRAIN_RGBA[si + 3] as f32 / 255.0) * alpha;
-            let di = ((dy * w + dx) * 4) as usize;
-            let (b0, b2) = if bgr { (sb, sr) } else { (sr, sb) };
-            buf[di] = (buf[di] as f32 * (1.0 - a) + b0 * a) as u8;
-            buf[di + 1] = (buf[di + 1] as f32 * (1.0 - a) + sg * a) as u8;
-            buf[di + 2] = (buf[di + 2] as f32 * (1.0 - a) + b2 * a) as u8;
+            // Coverage (rounded corners) × global fade → pre-multiplied alpha.
+            let a = corner_coverage(x, y, w, h, radius) * window_alpha;
+            let di = ((y * w + x) * 4) as usize;
+            let (o0, o2) = if bgr { (bb, rr) } else { (rr, bb) };
+            buf[di] = (o0 * a) as u8;
+            buf[di + 1] = (gg * a) as u8;
+            buf[di + 2] = (o2 * a) as u8;
+            buf[di + 3] = (a * 255.0) as u8;
         }
     }
 }
