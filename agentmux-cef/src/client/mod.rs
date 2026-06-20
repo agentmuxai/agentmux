@@ -1093,16 +1093,25 @@ impl AgentMuxHandler {
             tracing::warn!(target: "wrr", "[wrr] quit_state=Draining (drain mode)");
 
             // Phase H.2.b — reducer-aware iteration with fallback + drift logging.
+            // Collect ALL background-only browsers: tab pool (window-pool-*)
+            // AND pane pool (floating-pool-*). Both live in browser_list
+            // (created via CreateWindowTask which clones the main top-level
+            // client). Omitting pane pool windows here means browser_list
+            // never empties on macOS/Linux (init_pane_pool spawns one at
+            // startup), so Stage 2's is_empty() gate never fires and the
+            // host hangs on every quit.
             let pool_browsers: Vec<cef::Browser> = self
                 .state
                 .list_browsers()
                 .into_iter()
-                .filter(|(label, _)| label.starts_with("window-pool-"))
+                .filter(|(label, _)| {
+                    label.starts_with("window-pool-") || label.starts_with("floating-pool-")
+                })
                 .map(|(_, b)| b)
                 .collect();
             tracing::warn!(
                 target: "wrr",
-                "[wrr] stage 1: user_count==0; closing {} pool browser(s)",
+                "[wrr] stage 1: user_count==0; closing {} pool browser(s) (tab+pane)",
                 pool_browsers.len()
             );
 
