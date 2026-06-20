@@ -67,6 +67,9 @@
     // "notify:sound:agent.turn.interrupted":    true,
     // "notify:sound:agent.message.accepted":    true,
     // "notify:sound:agent.message.rejected":    true,
+    // Play a soft looping tone while an agent is waiting for your reply.
+    // "notify:sound:agent.waiting.for.input":   true,
+    // "notify:sounds:waiting:volume":           0.25,  // 0–1, scaled by notify:sounds:volume
 
     // -- Tool-call tones (subliminal per-tool "voice") --
     // "notify:tooltones:enabled":               true,

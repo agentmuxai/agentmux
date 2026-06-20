@@ -149,6 +149,21 @@ export function registerPane(
  * `unregisterPane` from `agent-pane-registration.ts`.
  */
 export function unregisterPane(blockId: string): void {
+    // If the pane was in a waiting-for-input state, notify listeners so the
+    // sound service can stop the looping tone before the slot is gone.
+    const slot = slots.get(blockId);
+    if (
+        slot &&
+        slot.state.turnPhase.kind === "Done" &&
+        slot.state.turnPhase.outcome === "completed" &&
+        slot.state.lastTurnHadQuestion
+    ) {
+        const ev: AgentPaneEvent = { type: "waiting-ended", reason: "closed" };
+        eventSink(blockId, ev);
+        for (const l of extraListeners) {
+            try { l(blockId, ev); } catch { /* isolate */ }
+        }
+    }
     slots.delete(blockId);
 }
 
@@ -212,7 +227,47 @@ export function dispatch(
         );
     }
 
-    for (const ev of result.events) {
+    // Synthetic waiting-for-input / waiting-ended events injected after
+    // the reducer result events — not emitted by the pure reducer because
+    // they span two state snapshots (prev vs next).
+    const extraEvents: AgentPaneEvent[] = [];
+    const prevPhase = prev.turnPhase;
+    const nextPhase = slot.state.turnPhase;
+
+    // Entering waiting state: turn just completed with a question, no pending.
+    if (
+        nextPhase.kind === "Done" &&
+        nextPhase.outcome === "completed" &&
+        slot.state.lastTurnHadQuestion &&
+        slot.state.pending.length === 0 &&
+        !(prevPhase.kind === "Done" && prevPhase.outcome === "completed" && prev.lastTurnHadQuestion)
+    ) {
+        extraEvents.push({ type: "waiting-for-input" });
+    }
+
+    // Leaving waiting state: user submitted a new message.
+    if (
+        prevPhase.kind === "Done" &&
+        prevPhase.outcome === "completed" &&
+        prev.lastTurnHadQuestion &&
+        nextPhase.kind === "Submitting"
+    ) {
+        extraEvents.push({ type: "waiting-ended", reason: "submitted" });
+    }
+
+    // Leaving waiting state: user started typing (WaitingTypingStarted clears the flag).
+    // Guard to Done→Done ensures TurnReset (Done→Idle) isn't mislabeled as "typing".
+    if (
+        prev.lastTurnHadQuestion &&
+        !slot.state.lastTurnHadQuestion &&
+        prevPhase.kind === "Done" &&
+        nextPhase.kind === "Done"
+    ) {
+        extraEvents.push({ type: "waiting-ended", reason: "typing" });
+    }
+
+    const allEvents = [...result.events, ...extraEvents];
+    for (const ev of allEvents) {
         eventSink(blockId, ev);
         for (const l of extraListeners) {
             try {
@@ -229,11 +284,11 @@ export function dispatch(
         slice: "agent-pane-state",
         key: blockId,
         command,
-        events: result.events,
+        events: allEvents,
         source,
         at: Date.now(),
     });
-    return result.events;
+    return allEvents;
 }
 
 /**

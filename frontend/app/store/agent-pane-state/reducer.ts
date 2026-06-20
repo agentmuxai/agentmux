@@ -388,12 +388,24 @@ export function update(
             const finishedAt = phase.kind === "Done"
                 ? phase.finishedAt
                 : nowMs;
+            // When outcome is completed and text is supplied, run the heuristic.
+            // When text is absent (tool-only or empty final block), conservatively
+            // treat it as no question — do NOT carry the prior value forward.
+            // Non-completed outcomes always clear the flag.
+            // First-done-wins: a late/duplicate TurnEnd (phase already Done)
+            // must not overwrite the flag — the initial TurnEnd was authoritative.
+            const lastTurnHadQuestion = phase.kind === "Done"
+                ? state.lastTurnHadQuestion
+                : outcome === "completed" && command.lastAssistantText != null
+                    ? endsWithQuestion(command.lastAssistantText)
+                    : false;
             return {
                 state: {
                     ...state,
                     sessionStats: merged,
                     currentTool: null,
                     turnTokens: null,
+                    lastTurnHadQuestion,
                     turnPhase: {
                         kind: "Done",
                         outcome,
@@ -419,6 +431,7 @@ export function update(
                     currentTool: null,
                     turnTokens: null,
                     lastContextTokens: 0,
+                    lastTurnHadQuestion: false,
                     // TurnReset is a wholesale clear → Idle. The
                     // working/stopping cascade lives entirely on
                     // turnPhase since PR G.
@@ -782,6 +795,18 @@ export function update(
                 events: [],
             };
         }
+        case "WaitingTypingStarted": {
+            // No-op if not in the waiting state (idempotent, safe to fire
+            // on every keystroke since the store uses dispatchIfRegistered).
+            if (!state.lastTurnHadQuestion) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, lastTurnHadQuestion: false },
+                events: [],
+            };
+        }
+
         case "LogEntryArrived": {
             // No-op when the panel is open (user already sees the
             // entry). Increments the unread counter when closed so
@@ -859,6 +884,17 @@ function bumpEvent(
  * usage (hence `||`, not `??`). Codex emits usage only on the stats
  * branch (no live tokens), so it's unaffected.
  */
+/**
+ * Returns true if the assistant's last message text ended with a question.
+ * Trims trailing whitespace and common closing punctuation (`"`, `'`, `)`)
+ * before checking the final character.
+ * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §4 (heuristic C).
+ */
+function endsWithQuestion(text: string): boolean {
+    const trimmed = text.trimEnd().replace(/["')]+$/, "").trimEnd();
+    return trimmed.endsWith("?");
+}
+
 function mergeStats(
     stats: AgentPaneState["sessionStats"],
     tokens: AgentPaneState["turnTokens"],
