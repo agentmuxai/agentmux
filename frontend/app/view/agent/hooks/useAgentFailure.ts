@@ -22,6 +22,7 @@ import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
+import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 
 const AUTO_RETRY_BACKOFF_S = [5, 10] as const; // then manual-only
@@ -108,6 +109,14 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     };
 
     onMount(() => {
+        // P1.2 — Seed from persisted block meta so the recovery banner survives
+        // tab switches and page reloads. Read once on mount; the WPS event
+        // subscription below handles live updates for the current session.
+        // (SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20 §4 P1.2)
+        const persistedAtom = getBlockMetaKeyAtom(opts.blockId, "agent:last_failure");
+        const pf = persistedAtom();
+        if (pf) setFailure(pf);
+
         const unsubFailure = waveEventSubscribe({
             eventType: WpsEvent.AgentFailure,
             scope: WOS.makeORef("block", opts.blockId),

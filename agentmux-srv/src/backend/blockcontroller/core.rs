@@ -20,6 +20,13 @@ use crate::backend::storage::store::Store;
 /// `--resume` value so the CLI picks up the prior conversation.
 pub(crate) const META_SESSION_ID: &str = "agent:sessionid";
 
+/// Block metadata key for the last classified agent failure.
+/// Written on every non-zero / in-band-error exit; cleared on clean success.
+/// The frontend reads this on pane mount so the recovery banner survives
+/// tab switches and page reloads without requiring the WPS event to be
+/// received in real time.
+pub(crate) const META_LAST_FAILURE: &str = "agent:last_failure";
+
 /// Expand the working directory, create it if missing, set it on `cmd`, and
 /// apply all env-var overrides from `env_vars`.
 ///
@@ -156,6 +163,88 @@ pub(crate) fn persist_session_id(
                 )
                 .ok();
                 event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                    eventtype: "waveobj:update".to_string(),
+                    oref: oref_str,
+                    data: update_data,
+                });
+            }
+        }
+    }
+}
+
+/// Persist or clear the last agent failure in block metadata.
+///
+/// Pass `Some(failure)` on a failed exit to write `agent:last_failure` into the
+/// block's meta so the pane can recover the recovery banner on any future load
+/// without needing the ephemeral WPS event. Pass `None` on a clean exit to
+/// remove the key (setting it to JSON null triggers `merge_meta`'s delete path).
+/// Broadcasts a `waveobj:update` so active frontend subscribers see the change
+/// immediately via the block atom, not just on next full load.
+pub(crate) fn persist_last_failure(
+    block_id: &str,
+    failure: Option<&crate::agents::failure::AgentFailure>,
+    wstore: &Option<Arc<Store>>,
+    event_bus: &Option<Arc<EventBus>>,
+) {
+    let Some(ref store) = wstore else {
+        return;
+    };
+    // On a clean exit (failure=None), only write null (which merge_meta uses to
+    // delete the key) if the key actually exists — otherwise every successful
+    // turn would trigger a redundant DB write + waveobj:update broadcast.
+    if failure.is_none() {
+        let key_exists = store
+            .must_get::<crate::backend::obj::Block>(block_id)
+            .ok()
+            .and_then(|b| b.meta.get(META_LAST_FAILURE).cloned())
+            .map(|v| !v.is_null())
+            .unwrap_or(false);
+        if !key_exists {
+            return;
+        }
+    }
+    let oref_str = format!("block:{}", block_id);
+    let mut meta_update = crate::backend::obj::MetaMapType::new();
+    let val = match failure {
+        Some(f) => match serde_json::to_value(f) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    block_id = %block_id,
+                    error = %e,
+                    "failed to serialize AgentFailure for agent:last_failure — skipping meta write",
+                );
+                return;
+            }
+        },
+        None => serde_json::Value::Null, // null → merge_meta removes the key
+    };
+    meta_update.insert(META_LAST_FAILURE.to_string(), val);
+    match crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+        Err(e) => {
+            tracing::warn!(
+                block_id = %block_id,
+                error = %e,
+                "failed to persist agent:last_failure",
+            );
+        }
+        Ok(_) => {
+            let Some(ref bus) = event_bus else {
+                return;
+            };
+            if let Ok(updated_block) =
+                store.must_get::<crate::backend::obj::Block>(block_id)
+            {
+                let update_data = serde_json::to_value(
+                    &crate::backend::obj::WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: "block".into(),
+                        oid: block_id.to_string(),
+                        obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+                    },
+                )
+                .ok();
+                bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: oref_str,
                     data: update_data,

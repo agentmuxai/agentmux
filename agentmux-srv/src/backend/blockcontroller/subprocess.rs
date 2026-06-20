@@ -683,6 +683,8 @@ impl SubprocessController {
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
         let last_inband_error_wait = Arc::clone(&last_inband_error);
+        let wstore_wait = self.wstore.clone();
+        let event_bus_wait = self.event_bus.clone();
         tokio::spawn(async move {
             // Classified failure cause, surfaced to the pane after the readers drain.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
@@ -840,16 +842,28 @@ impl SubprocessController {
                 super::publish_controller_status(broker, &status);
             }
 
+            // Persist or clear agent:last_failure in block meta so the recovery
+            // banner survives tab switches and page reloads (P1.1 of
+            // SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20). Done before the WPS
+            // publish so the durable state is written first; the event is then
+            // a low-latency push to any active subscriber.
+            core::persist_last_failure(
+                &block_id_wait,
+                run_failure.as_ref(),
+                &wstore_wait,
+                &event_bus_wait,
+            );
+
             // Surface the classified failure cause to the pane (Phase 2 of
-            // SPEC_AGENT_FAILURE_DIAGNOSTICS). A dedicated `agentfailure` event so
-            // the pane shows the real reason — auth, rate-limit, OOM, etc. — and
-            // the stderr tail, instead of just an opaque exit code.
+            // SPEC_AGENT_FAILURE_DIAGNOSTICS). persist:1 so reconnecting
+            // subscribers also receive the last failure without needing a
+            // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(broker)) = (run_failure.as_ref(), broker_wait.as_ref()) {
                 broker.publish(wps::WaveEvent {
                     event: wps::EVENT_AGENT_FAILURE.to_string(),
                     scopes: vec![format!("block:{}", block_id_wait)],
                     sender: String::new(),
-                    persist: 0,
+                    persist: 1,
                     data: serde_json::to_value(failure).ok(),
                 });
             }
