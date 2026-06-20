@@ -95,22 +95,19 @@ wrap_window_delegate! {
 
                 // Startup pool fill — Windows uses the launcher saga path
                 // (saga_dispatch.rs::LiveActionRunner is cfg(windows) only).
+                // Non-Windows has no separate launcher, so the host seeds the
+                // pool here instead. Phase 7 (SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md)
+                // implemented promote_pool_window for non-Windows and confirmed
+                // that CEF Views set_bounds() correctly repositions from the
+                // off-screen holding position (-32000,-32000) to the tear-off
+                // destination. Wayland sessions run under XWayland (X11
+                // backend forced), so the off-screen coords are invisible there
+                // too. Both former blockers are resolved.
                 //
-                // Non-Windows: DISABLED entirely. Two separate blockers, both
-                // documented in docs/specs/linux-pool-startup-fill-2026-05-08.md:
-                //   1. promote_pool_window in commands/window_pool.rs has a
-                //      `cfg(not(target_os = "windows"))` impl that always
-                //      returns None — tear-off can't consume a pool window
-                //      on macOS or Linux, so any pre-warmed windows are
-                //      strictly wasted RAM. Codex P2 on PR #788 caught this
-                //      for the macOS path that an earlier revision enabled.
-                //   2. (Linux/Wayland only) POOL_OFFSCREEN_X = -32000 is a
-                //      Win32/X11 hack that the Wayland compositor ignores —
-                //      pool windows would appear on-screen as blank windows.
-                //
-                // Either blocker alone makes startup pool fill the wrong
-                // call here. When the platform pool implementation lands
-                // (Phase 7), this is the right place to re-enable.
+                // NOTE: init_pool() is called from on_after_created("main") in
+                // client/mod.rs:664 on ALL platforms — this block (on_window_created)
+                // only runs the CEF Views window registration for non-Windows.
+                // No duplicate pool init call needed here.
             }
 
             // Chrome-style windows (DevTools popups) are shown immediately.

@@ -470,29 +470,21 @@ pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
 /// `POOL_TARGET_SIZE` windows. Called once per app run from
 /// `on_after_created` for the "main" label.
 ///
-/// Windows-only: promote_pool_window is a no-op on non-Windows
-/// platforms (Phase 7 will add equivalents). Spawning hidden pool
-/// windows that can never be consumed would just waste renderer
-/// processes, so we skip the whole init off-Win32.
+/// Phase 7: now cross-platform. Pool windows are spawned off-screen at
+/// (-32000, -32000) DIP — invisible on macOS Cocoa (accepts any coordinate)
+/// and X11 (large-negative coords are in the virtual screen but off all
+/// monitors). Windows uses the same off-screen trick but with physical pixels.
 pub fn init_pool(state: &Arc<AppState>) {
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = state;
+    // PR #5 H.4 — read pool size via reducer-aware helper.
+    let current = state.pool_queue_size();
+    if current >= POOL_TARGET_SIZE {
         return;
     }
-    #[cfg(target_os = "windows")]
-    {
-        // PR #5 H.4 — read pool size via reducer-aware helper.
-        let current = state.pool_queue_size();
-        if current >= POOL_TARGET_SIZE {
-            return;
-        }
-        // First spawn — the rest are kicked off chain-style by
-        // register_pool_window when each new pool window registers.
-        // This sequencing keeps spawns serialised (one CEF window at
-        // a time) and avoids spawn pressure spikes at startup.
-        spawn_pool_window(state);
-    }
+    // First spawn — the rest are kicked off chain-style by
+    // mark_pool_window_renderer_ready when each pool window's renderer
+    // reports ready. This sequencing keeps spawns serialised (one CEF
+    // window at a time) and avoids spawn pressure spikes at startup.
+    spawn_pool_window(state);
 }
 
 /// Promote a pool window for tear-off. Pops a label, sends a
@@ -910,18 +902,88 @@ fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
     );
 }
 
+/// Phase 7 — macOS / Linux pool promotion via CEF Views set_bounds().
+///
+/// Pops a pool window, repositions it from its off-screen holding position
+/// to the tear-off destination using CEF Views Window::set_bounds() (DIP
+/// coordinates; no Win32 DPI scaling needed), and emits pool:promote so the
+/// renderer attaches the new workspace. Falls back gracefully (returns None)
+/// if the pool is empty or the window was destroyed before promotion.
 #[cfg(not(target_os = "windows"))]
 pub fn promote_pool_window(
-    _state: &Arc<AppState>,
-    _workspace_id: &str,
-    _screen_x: i32,
-    _screen_y: i32,
-    _width: Option<i32>,
-    _height: Option<i32>,
-    _tab_anchor_x: Option<i32>,
-    _tab_anchor_y: Option<i32>,
+    state: &Arc<AppState>,
+    workspace_id: &str,
+    screen_x: i32,
+    screen_y: i32,
+    width: Option<i32>,
+    height: Option<i32>,
+    tab_anchor_x: Option<i32>,
+    tab_anchor_y: Option<i32>,
 ) -> Option<String> {
-    // Non-Windows: pool isn't built yet (Phase 7). Caller falls
-    // back to the cold path.
-    None
+    // Atomic pop from the pool queue via reducer. Returns None if empty
+    // — caller falls back to cold path.
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PopAndPromoteFrontPoolWindow,
+    );
+    let label = dispatch.promoted_pool_label?;
+
+    tracing::info!(
+        target: "dnd:tearoff:pool",
+        label = %label,
+        workspace_id = %workspace_id,
+        screen_x,
+        screen_y,
+        "[pool] promoting pool window (non-Windows)"
+    );
+
+    // Validate browser is still alive. On non-Windows we don't cache a
+    // native window handle; CEF state presence is the liveness check.
+    if state.get_browser(&label).is_none() {
+        tracing::warn!(
+            target: "dnd:tearoff:pool",
+            label = %label,
+            "[pool] promoted browser not found in state — orphan cleanup"
+        );
+        cleanup_failed_promote_orphan_cross_platform(state, &label);
+        return None;
+    }
+
+    // Compute window position. Tab anchor (outer top-left of new window so
+    // the cursor lands on the dragged tab) takes priority; otherwise place
+    // the window at the cursor.
+    let x = tab_anchor_x.unwrap_or(screen_x);
+    let y = tab_anchor_y.unwrap_or(screen_y);
+    let w = width.unwrap_or(POOL_WIDTH);
+    let h = height.unwrap_or(POOL_HEIGHT);
+
+    // Reposition + emit pool:promote on the CEF UI thread.
+    crate::ui_tasks::post_promote_pool_window(state, &label, workspace_id, x, y, w, h);
+
+    // Refill the pool asynchronously.
+    spawn_pool_window(state);
+
+    Some(label)
+}
+
+/// Orphan cleanup for non-Windows promote failures.
+///
+/// Called only when `state.get_browser(label).is_none()` (the browser has
+/// already left state before we could promote it), so there is no graceful
+/// `close_browser` path — `on_before_close` will not fire. Do its job inline.
+#[cfg(not(target_os = "windows"))]
+fn cleanup_failed_promote_orphan_cross_platform(state: &Arc<AppState>, label: &str) {
+    state.host_dispatch(
+        crate::reducer::HostCommand::UnregisterBrowser {
+            label: label.to_string(),
+        },
+    );
+    state.window_meta.lock().remove(label);
+    crate::launcher_ipc::report_window_closed(label.to_string());
+    spawn_pool_window(state);
+    crate::launcher_ipc::compute_and_report_host_counts(state);
+    tracing::warn!(
+        target: "dnd:tearoff:pool",
+        label = %label,
+        "[pool] orphan browser already gone — cleaned host state directly + refilled (non-Windows)"
+    );
 }
