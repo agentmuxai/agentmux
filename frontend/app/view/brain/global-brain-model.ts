@@ -106,7 +106,8 @@ export class GlobalBrainViewModel {
         this.setDraftInstructions(section.instructions ?? "");
     }
 
-    /** Open a blank "new section" editor at the top of the list. */
+    /** Open a blank "new section" editor at the end of the list — where
+     *  saveEdit appends the saved section, so the draft sits where it lands. */
     startNew(): void {
         this.setError(null);
         this.setEditingId(NEW_SECTION_ID);

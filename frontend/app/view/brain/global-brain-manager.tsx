@@ -88,12 +88,6 @@ export const GlobalBrainManager = (): JSX.Element => {
             </Show>
 
             <div class="global-brain-sections">
-                <Show when={model.editingIdAtom() === NEW_SECTION_ID}>
-                    <div class="global-brain-section is-editing">
-                        <SectionEditor model={model} isNew={true} />
-                    </div>
-                </Show>
-
                 <For each={model.sectionsAtom()}>
                     {(section, i) => (
                         <div
@@ -153,6 +147,14 @@ export const GlobalBrainManager = (): JSX.Element => {
                         </div>
                     )}
                 </For>
+
+                {/* New-section draft renders at the END — saveEdit appends it
+                    to the order, so its draft position matches where it lands. */}
+                <Show when={model.editingIdAtom() === NEW_SECTION_ID}>
+                    <div class="global-brain-section is-editing">
+                        <SectionEditor model={model} isNew={true} />
+                    </div>
+                </Show>
 
                 <Show when={model.sectionsAtom().length === 0 && model.editingIdAtom() === null}>
                     <div class="global-brain-empty">
