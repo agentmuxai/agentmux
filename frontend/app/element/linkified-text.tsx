@@ -14,10 +14,14 @@ function isSafeHref(url: string): boolean {
     return SAFE_SCHEMES.test(url) || url.startsWith("//");
 }
 
+// Local addresses use http://, not https://
+const LOCAL_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
+
 function normalizeHref(url: string): string {
     if (url.startsWith("//")) return "https:" + url;
     if (url.includes("://")) return url;
-    return "https://" + url;
+    const scheme = LOCAL_HOST_RE.test(url.split("/")[0]) ? "http" : "https";
+    return `${scheme}://${url}`;
 }
 
 type Segment = { text: string; href?: string };

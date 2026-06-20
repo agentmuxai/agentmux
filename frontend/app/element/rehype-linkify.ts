@@ -14,10 +14,14 @@ linkify.set({ fuzzyLink: true, fuzzyEmail: false });
 // Don't linkify text inside these elements — already an anchor, or code/pre
 const SKIP_ANCESTORS = new Set(["a", "code", "pre", "script", "style"]);
 
+// Local addresses use http://, not https://
+const LOCAL_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
+
 function normalizeHref(url: string): string {
     if (url.startsWith("//")) return "https:" + url;
     if (url.includes("://")) return url;
-    return "https://" + url;
+    const scheme = LOCAL_HOST_RE.test(url.split("/")[0]) ? "http" : "https";
+    return `${scheme}://${url}`;
 }
 
 export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
