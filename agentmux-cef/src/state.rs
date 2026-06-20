@@ -270,6 +270,16 @@ pub struct PoolState {
     pub respawn_in_flight: bool,
 }
 
+/// Pre-warmed pane (floating) window pool state.
+/// Mirrors `PoolState` but for `floating-pool-{uuid}` frameless windows.
+#[derive(Default, Clone, Debug)]
+#[allow(dead_code)]
+pub struct PanePoolState {
+    pub queue: std::collections::VecDeque<String>,
+    pub unpromoted: std::collections::HashSet<String>,
+    pub respawn_in_flight: bool,
+}
+
 // ── Quit state (H.5) ─────────────────────────────────────────────────────
 
 /// Host process quit lifecycle. Replaces `is_quitting: AtomicBool` at
@@ -1094,6 +1104,10 @@ impl AppState {
     /// whether to bootstrap more pool windows.
     pub fn pool_queue_size(&self) -> usize {
         self.host_state.lock().pool.queue.len()
+    }
+
+    pub fn pane_pool_queue_size(&self) -> usize {
+        self.host_state.lock().pane_pool.queue.len()
     }
 
     /// Atomic snapshot for user-visibility filtering: pool inventory

@@ -205,6 +205,22 @@ pub fn open_floating_pane_window(
 
     #[cfg(not(target_os = "windows"))]
     {
+        // Pane pool fast path — promote a pre-warmed frameless pool window
+        // instead of spawning a cold CEF window (~3s → ~30ms).
+        if let Some(pool_label) = crate::commands::window_pool::promote_pane_pool_window(
+            state,
+            &parsed.pane_id,
+            parsed.workspace_id.as_deref().unwrap_or(""),
+            parsed.x,
+            parsed.y,
+            parsed.width,
+            parsed.height,
+        ) {
+            return Ok(serde_json::to_value(OpenFloatingPaneResponse {
+                window_label: pool_label,
+            }).unwrap_or_default());
+        }
+
         // Phase A (SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md): create a
         // frameless top-level window via the SAME CEF Views path the regular
         // tear-off uses (`open_window_at_position` →

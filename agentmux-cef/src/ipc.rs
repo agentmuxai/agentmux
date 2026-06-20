@@ -322,6 +322,7 @@ async fn route_command(
         "open_window_at_position" => commands::drag::open_window_at_position(state, args),
         "tear_off_pool_promote" => commands::drag::tear_off_pool_promote(state, args),
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
+        "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers
             // for up to 2s waiting for the destination window's HWND to

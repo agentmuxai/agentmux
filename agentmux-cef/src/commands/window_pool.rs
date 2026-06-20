@@ -1050,3 +1050,226 @@ pub fn promote_pool_window_for_new_window(
         Some(label)
     }
 }
+
+// ── Pane pool (floating-pool-{uuid}, frameless=true) ─────────────────────
+
+/// Target size for the pane pool. One pre-warmed window covers the common
+/// burst; two would add ~75 MB RSS with minimal additional benefit.
+pub const PANE_POOL_TARGET_SIZE: usize = 1;
+const PANE_POOL_WIDTH: i32 = 900;
+const PANE_POOL_HEIGHT: i32 = 600;
+
+/// Spawn a single pre-warmed frameless pane window. Follows the same
+/// single-flight + refill chain pattern as `spawn_pool_window`.
+pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
+    if state.is_quitting() {
+        return;
+    }
+    if state.any_browser_pane_closing() {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[pane-pool] spawn_pane_pool_window deferred — pane is mid-close (H.7 invariant)"
+        );
+        return;
+    }
+    if state.pane_pool_queue_size() >= PANE_POOL_TARGET_SIZE {
+        tracing::debug!(
+            target: "pool:pane",
+            current = %state.pane_pool_queue_size(),
+            target = %PANE_POOL_TARGET_SIZE,
+            "[pane-pool] spawn skipped — pool at target size"
+        );
+        return;
+    }
+
+    let window_id = uuid::Uuid::new_v4();
+    let label = format!("floating-pool-{}", window_id.simple());
+
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowSpawnStart { label: label.clone() },
+    );
+    if !dispatch.pane_pool_spawn_proceeding {
+        return;
+    }
+
+    let ipc_port = *state.ipc_port.lock();
+    let ipc_token = &state.ipc_token;
+    let url = match super::window::resolve_frontend_base_url(ipc_port) {
+        Ok(base_url) => {
+            let sep = if base_url.contains('?') { "&" } else { "?" };
+            format!(
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pane-pool=1",
+                base_url, sep, ipc_port, ipc_token, label
+            )
+        }
+        Err(e) => {
+            tracing::error!(error = %e, label = %label, "[pane-pool] frontend assets unavailable");
+            super::window::assets_missing_data_url(&e)
+        }
+    };
+
+    state.host_dispatch(
+        crate::reducer::HostCommand::EnqueuePendingWindowCreation {
+            entry: crate::state::PendingWindowCreation {
+                label: label.clone(),
+                kind: WindowKind::FullInstance,
+                parent_instance_id: None,
+            },
+        },
+    );
+
+    tracing::info!(target: "pool:pane", label = %label, "[pane-pool] spawning pane pool window");
+
+    // frameless=true — pane windows require this at creation time.
+    crate::ui_tasks::post_create_window(
+        state,
+        &url,
+        &label,
+        POOL_OFFSCREEN_X,
+        POOL_OFFSCREEN_Y,
+        PANE_POOL_WIDTH,
+        PANE_POOL_HEIGHT,
+        true,
+    );
+}
+
+/// Called once at startup (when main window registers) to seed the pane pool.
+pub fn init_pane_pool(state: &Arc<AppState>) {
+    if state.pane_pool_queue_size() >= PANE_POOL_TARGET_SIZE {
+        return;
+    }
+    spawn_pane_pool_window(state);
+}
+
+/// Called from `on_after_created` for `floating-pool-*` labels.
+/// Logs the registration; queue insertion waits for the frontend's
+/// `pane_pool_window_ready` IPC so we don't race the listener install.
+pub fn register_pane_pool_window(_state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("floating-pool-") {
+        return;
+    }
+    tracing::debug!(
+        target: "pool:pane",
+        label = %label,
+        "[pane-pool] browser registered, awaiting renderer-ready signal"
+    );
+}
+
+/// Called by the `pane_pool_window_ready` IPC command when the frontend
+/// has installed its `pool:pane-promote` listener and is ready to receive.
+pub fn mark_pane_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("floating-pool-") {
+        return;
+    }
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowReady { label: label.to_string() },
+    );
+    let pool_size = dispatch.pane_pool_size_after.unwrap_or(0);
+    tracing::info!(
+        target: "pool:pane",
+        label = %label,
+        pool_size,
+        "[pane-pool] renderer ready, enqueued"
+    );
+    if pool_size < PANE_POOL_TARGET_SIZE {
+        spawn_pane_pool_window(state);
+    }
+}
+
+/// Called from `on_before_close` for `floating-pool-*` labels.
+pub fn on_pane_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
+    if !label.starts_with("floating-pool-") {
+        return;
+    }
+    let dispatch = state.host_dispatch(
+        crate::reducer::HostCommand::PanePoolWindowDestroyedBeforePromote {
+            label: label.to_string(),
+        },
+    );
+    let needs_refill = dispatch
+        .pane_pool_size_after
+        .map(|n| n < PANE_POOL_TARGET_SIZE)
+        .unwrap_or(false);
+    tracing::warn!(
+        target: "pool:pane",
+        label = %label,
+        "[pane-pool] pool window destroyed before promote"
+    );
+    if needs_refill {
+        spawn_pane_pool_window(state);
+    }
+}
+
+/// Orphan cleanup for failed pane pool promotes (non-Windows).
+#[cfg(not(target_os = "windows"))]
+fn cleanup_failed_pane_promote_orphan(state: &Arc<AppState>, label: &str) {
+    state.host_dispatch(
+        crate::reducer::HostCommand::UnregisterBrowser {
+            label: label.to_string(),
+        },
+    );
+    state.window_meta.lock().remove(label);
+    spawn_pane_pool_window(state);
+    tracing::warn!(
+        target: "pool:pane",
+        label = %label,
+        "[pane-pool] orphan cleaned up — refilled"
+    );
+}
+
+/// Pop a pane pool window and show it as a floating pane at the drop target.
+///
+/// macOS / Linux: CEF Views `set_bounds` + `show` + `pool:pane-promote`.
+/// Windows: always returns `None` (cold-path fallback). The Win32 floating
+/// pane creation path (`post_create_floating_window`) is separate from the
+/// CEF Views path used by pane pool windows; a dedicated Win32 promote path
+/// is tracked in `SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md` §3.5.
+pub fn promote_pane_pool_window(
+    state: &Arc<AppState>,
+    pane_id: &str,
+    workspace_id: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (state, pane_id, workspace_id, x, y, width, height);
+        return None;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let dispatch = state.host_dispatch(
+            crate::reducer::HostCommand::PopAndPromoteFrontPanePoolWindow,
+        );
+        let label = dispatch.promoted_pane_pool_label?;
+
+        tracing::info!(
+            target: "pool:pane",
+            label = %label,
+            pane_id = %pane_id,
+            workspace_id = %workspace_id,
+            x, y, width, height,
+            "[pane-pool] promoting pane pool window"
+        );
+
+        if state.get_browser(&label).is_none() {
+            tracing::warn!(
+                target: "pool:pane",
+                label = %label,
+                "[pane-pool] browser not in state — orphan cleanup"
+            );
+            cleanup_failed_pane_promote_orphan(state, &label);
+            return None;
+        }
+
+        crate::ui_tasks::post_promote_pane_pool_window(
+            state, &label, pane_id, workspace_id, x, y, width, height,
+        );
+        spawn_pane_pool_window(state);
+
+        Some(label)
+    }
+}

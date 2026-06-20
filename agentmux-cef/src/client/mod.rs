@@ -662,8 +662,11 @@ impl AgentMuxHandler {
         //   so emit_event_to_window doesn't race the listener install.
         if label == "main" {
             crate::commands::window_pool::init_pool(&self.state);
+            crate::commands::window_pool::init_pane_pool(&self.state);
         } else if label.starts_with("window-pool-") {
             crate::commands::window_pool::register_pool_window(&self.state, &label);
+        } else if label.starts_with("floating-pool-") {
+            crate::commands::window_pool::register_pane_pool_window(&self.state, &label);
         }
     }
 
@@ -865,6 +868,8 @@ impl AgentMuxHandler {
             // the pool would never refill.
             if lbl.starts_with("window-pool-") {
                 crate::commands::window_pool::on_pool_window_destroyed(&self.state, lbl);
+            } else if lbl.starts_with("floating-pool-") {
+                crate::commands::window_pool::on_pane_pool_window_destroyed(&self.state, lbl);
             }
             // Phase B.4 — mirror the close to the launcher. Skip
             // browser-pane child HWNDs (never reported as open).
@@ -1330,7 +1335,7 @@ impl AgentMuxHandler {
         let browser_label = browser_cloned.as_mut().and_then(|b| self.window_label_for(b));
         let is_pool_window = browser_label
             .as_deref()
-            .map_or(false, |l| l.starts_with("window-pool-"));
+            .map_or(false, |l| l.starts_with("window-pool-") || l.starts_with("floating-pool-"));
 
         if !is_pool_window {
             if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
