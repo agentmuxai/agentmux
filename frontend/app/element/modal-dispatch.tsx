@@ -20,6 +20,8 @@ import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdenti
 import { AgentMemoryModalPanel } from "@/app/view/agent/components/AgentMemoryModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
+import "@/app/view/agent/components/AgentMemoryModal.scss";
+import "@/app/view/agent/components/AgentIdentityModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
 
 import type { ModalLayerApi, ModalLayerRequest } from "./modal-layer";
