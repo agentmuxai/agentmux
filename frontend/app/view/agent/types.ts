@@ -52,7 +52,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode | AgentErrorNode;
 
 /**
  * Raw markdown text block
@@ -345,6 +345,18 @@ export interface ShellNode {
 }
 
 /**
+ * Inline API error node rendered in the transcript when a session ends with
+ * is_error:true (e.g. 401 auth failure, 429 rate-limit). Not collapsible.
+ * Spec: SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md §P1.3
+ */
+export interface AgentErrorNode {
+    type: "agent_error";
+    id: string;
+    code: number;   // HTTP status code (e.g. 401, 429)
+    message: string; // Full error text from the CLI result event
+}
+
+/**
  * Stats from a completed agent session (from the Claude CLI `result` event).
  */
 export interface SessionStats {
@@ -381,7 +393,15 @@ export type StreamEvent =
     | AgentMessageEvent
     | UserMessageEvent
     | SessionEndEvent
+    | ErrorResultEvent
     | PermissionRequestEvent;
+
+/** API error from a `type:"result"` line with is_error:true + api_error_status. */
+export interface ErrorResultEvent {
+    type: "error_result";
+    code: number;   // api_error_status (HTTP code: 401, 429, 500, …)
+    message: string; // rawEvent.result text
+}
 
 export interface TextEvent {
     type: "text";

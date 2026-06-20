@@ -59,6 +59,19 @@ export class ClaudeTranslator implements OutputTranslator {
 
         // Case 5a: Top-level "result" event — session complete with stats
         if (rawEvent.type === "result") {
+            const events: StreamEvent[] = [];
+            // Surface API errors (auth 401, rate-limit 429, etc.) as an inline
+            // transcript node so the user sees the failure reason in context.
+            // Spec: SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md §P1.3
+            if (rawEvent.is_error === true && typeof rawEvent.api_error_status === "number") {
+                events.push({
+                    type: "error_result",
+                    code: rawEvent.api_error_status,
+                    message: typeof rawEvent.result === "string"
+                        ? rawEvent.result
+                        : `API error ${rawEvent.api_error_status}`,
+                });
+            }
             const stats: SessionStats = {};
             if (typeof rawEvent.cost_usd === "number") stats.cost_usd = rawEvent.cost_usd;
             if (typeof rawEvent.duration_ms === "number") stats.duration_ms = rawEvent.duration_ms;
@@ -75,7 +88,8 @@ export class ClaudeTranslator implements OutputTranslator {
                 if (input > 0) stats.input_tokens = input;
                 if (output > 0) stats.output_tokens = output;
             }
-            return [{ type: "session_end", stats }];
+            events.push({ type: "session_end", stats });
+            return events;
         }
 
         // Case 5: Raw Anthropic API event (content_block_delta, etc.)
