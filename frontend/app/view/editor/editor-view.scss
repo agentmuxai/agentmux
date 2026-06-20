@@ -257,10 +257,20 @@
     overflow-x: hidden;
 }
 
-.editor-tab {
+// Tooltip wrapper (shared Tooltip component) — carries the flex sizing the tab
+// used to own, so wrapping the tab for a hover tooltip doesn't change layout.
+.editor-tab-tip {
     flex: 1 1 140px;
     min-width: 80px;
     max-width: 200px;
+    display: flex;
+    align-items: stretch;
+}
+
+.editor-tab {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
     display: flex;
     align-items: center;
     gap: var(--space-1);
@@ -583,8 +593,9 @@
     padding: calc(16px * var(--editor-zoom, 1)) calc(24px * var(--editor-zoom, 1));
 
     .markdown {
-        max-width: 860px;
-        margin: 0 auto;
+        // Fill the pane width — was a fixed 860px centered reading column,
+        // which looked cramped in a wide editor. The container already
+        // supplies padding + scroll.
         font-size: calc(var(--markdown-font-size, 14px) * var(--editor-zoom, 1));
     }
 }
