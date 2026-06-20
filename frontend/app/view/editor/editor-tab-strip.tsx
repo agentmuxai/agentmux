@@ -7,6 +7,7 @@
 // (tabs compress to min-width when crowded); chip lands in Phase 2.
 
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { Tooltip } from "@/app/element/tooltip";
 import type { EditorViewModel } from "./editor-model";
 import type { EditorTab } from "@/app/store/editor-pane-state-store";
 
@@ -94,37 +95,51 @@ function Tab(props: TabProps): JSX.Element {
         props.model.closeTab(props.tab.id);
     };
 
+    // Full path on hover. Uses the shared Tooltip (Portal-based) rather than a
+    // native `title` — the strip + tab both have `overflow:hidden`, which would
+    // clip a CSS tooltip, and native `title` is slow/inconsistent in CEF. The
+    // Tooltip's wrapper div carries the flex sizing (.editor-tab-tip); the tab
+    // keeps its own mousedown/click/dblclick handlers.
     return (
-        <div
-            class="editor-tab"
-            classList={{
-                "editor-tab--active": props.active,
-                "editor-tab--dirty": props.tab.dirty,
-                "editor-tab--preview": props.tab.isPreview,
-                "editor-tab--saveas": isSaveAsMode(),
-            }}
-            title={props.tab.isPreview ? `${props.tab.filePath} (preview — double-click to pin)` : props.tab.filePath}
-            onMouseDown={onMouseDown}
-            onClick={onClick}
-            onDblClick={onDblClick}
+        <Tooltip
+            placement="bottom"
+            divClassName="editor-tab-tip"
+            content={
+                props.tab.isPreview
+                    ? `${props.tab.filePath} (preview — double-click to pin)`
+                    : props.tab.filePath
+            }
         >
-            <Show when={isSaveAsMode()} fallback={<span class="editor-tab-label">{basename()}</span>}>
-                <SaveAsInput
-                    onConfirm={props.onSaveAsConfirm ?? (() => undefined)}
-                    onCancel={props.onSaveAsCancel ?? (() => undefined)}
-                />
-            </Show>
-            <button
-                class="editor-tab-close"
-                onClick={onCloseClick}
-                title={props.tab.dirty ? "Close (unsaved changes)" : "Close"}
-                aria-label="Close tab"
+            <div
+                class="editor-tab"
+                classList={{
+                    "editor-tab--active": props.active,
+                    "editor-tab--dirty": props.tab.dirty,
+                    "editor-tab--preview": props.tab.isPreview,
+                    "editor-tab--saveas": isSaveAsMode(),
+                }}
+                onMouseDown={onMouseDown}
+                onClick={onClick}
+                onDblClick={onDblClick}
             >
-                {/* The × always renders for dirty tabs (since closing prompts
-                    the user in a follow-up commit); hover-shown otherwise. */}
-                ×
-            </button>
-        </div>
+                <Show when={isSaveAsMode()} fallback={<span class="editor-tab-label">{basename()}</span>}>
+                    <SaveAsInput
+                        onConfirm={props.onSaveAsConfirm ?? (() => undefined)}
+                        onCancel={props.onSaveAsCancel ?? (() => undefined)}
+                    />
+                </Show>
+                <button
+                    class="editor-tab-close"
+                    onClick={onCloseClick}
+                    title={props.tab.dirty ? "Close (unsaved changes)" : "Close"}
+                    aria-label="Close tab"
+                >
+                    {/* The × always renders for dirty tabs (since closing prompts
+                        the user in a follow-up commit); hover-shown otherwise. */}
+                    ×
+                </button>
+            </div>
+        </Tooltip>
     );
 }
 
