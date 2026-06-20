@@ -166,6 +166,15 @@ impl ShellNodeRunner {
         // command with `< NUL` starts vite instantly (agentx/fix-shell-dev-server).
         // (When ShellInput lands — Phase 3b — this becomes a piped stdin.)
         child_cmd.stdin(std::process::Stdio::null());
+        // Windows: suppress the console window that Windows auto-creates for
+        // CUI-subsystem processes (cmd.exe). stdout/stderr are piped so no
+        // output is lost — the window was decorative noise only.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            child_cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         // Backstop: reap the wrapper shell if this runner task is ever dropped.
         child_cmd.kill_on_drop(true);
         // Unix: own process group so kill_tree can signal the whole group
