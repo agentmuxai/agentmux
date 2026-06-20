@@ -841,16 +841,18 @@ wrap_task! {
                 return;
             };
 
-            // Move from off-screen to tear-off destination. CEF Views
-            // Window::set_bounds() operates in DIP coords on all platforms.
-            // macOS Cocoa and X11 both accept large-negative → on-screen
-            // repositioning without an intermediate show step.
+            // Pool windows were kept hidden (on_load_end skips show() for
+            // window-pool-* labels to avoid focus steal on macOS/Linux). Set
+            // the target bounds first so the window appears at the correct
+            // position, then show(). The user just performed a drag-to-tear-off
+            // so activation is expected and desired here.
             window.set_bounds(Some(&cef::Rect {
                 x: self.x,
                 y: self.y,
                 width: self.width,
                 height: self.height,
             }));
+            window.show();
 
             tracing::info!(
                 target: "dnd:tearoff:pool",
@@ -859,7 +861,7 @@ wrap_task! {
                 y = self.y,
                 width = self.width,
                 height = self.height,
-                "[pool:promote] window repositioned via set_bounds"
+                "[pool:promote] window repositioned + shown via set_bounds + show"
             );
 
             // Signal the renderer to attach the workspace. The frontend's
