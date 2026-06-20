@@ -248,14 +248,17 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .keys()
         .cloned()
         .collect();
-    let pool_queue: HashSet<String> = state
-        .host_state
-        .lock()
-        .pool
-        .queue
-        .iter()
-        .cloned()
-        .collect();
+    let pool_queue: HashSet<String> = {
+        let st = state.host_state.lock();
+        st.pool
+            .queue
+            .iter()
+            .cloned()
+            .chain(st.pane_pool.queue.iter().cloned())
+            .collect()
+    };
+    // unpromoted_pool_labels_snapshot covers both tab pool (window-pool-*) and
+    // pane pool (floating-pool-*) unpromoted sets.
     let unpromoted_pool: HashSet<String> = state.unpromoted_pool_labels_snapshot();
 
     // Probe HWND status for every non-pane top-level browser. Panes

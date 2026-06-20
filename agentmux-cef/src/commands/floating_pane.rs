@@ -199,12 +199,49 @@ pub fn open_floating_pane_window(
                 fallback
             }
         };
+        // Pane pool fast path (Windows): promote a pre-warmed WS_POPUP pane pool
+        // window. `width` and `height` are already DPI-converted to physical
+        // pixels by the block above. `parent_main_hwnd` is passed so the cascade
+        // hook is registered at promote time (deferred from spawn because the
+        // parent was unknown when the pool window was pre-warmed).
+        if let Some(pool_label) = crate::commands::window_pool::promote_pane_pool_window(
+            state,
+            &parsed.pane_id,
+            parsed.workspace_id.as_deref().unwrap_or(""),
+            parsed.x,
+            parsed.y,
+            parsed.width,
+            parsed.height,
+            parent_main_hwnd,
+        ) {
+            return Ok(serde_json::to_value(OpenFloatingPaneResponse {
+                window_label: pool_label,
+            }).unwrap_or_default());
+        }
+
         crate::floating_pane::post_create_floating_window(state, &parsed, &window_label, parent_main_hwnd);
         Ok(serde_json::to_value(OpenFloatingPaneResponse { window_label }).unwrap_or_default())
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+        // Pane pool fast path — promote a pre-warmed frameless pool window
+        // instead of spawning a cold CEF window (~3s → ~30ms).
+        if let Some(pool_label) = crate::commands::window_pool::promote_pane_pool_window(
+            state,
+            &parsed.pane_id,
+            parsed.workspace_id.as_deref().unwrap_or(""),
+            parsed.x,
+            parsed.y,
+            parsed.width,
+            parsed.height,
+            0, // parent_hwnd: unused on non-Windows
+        ) {
+            return Ok(serde_json::to_value(OpenFloatingPaneResponse {
+                window_label: pool_label,
+            }).unwrap_or_default());
+        }
+
         // Phase A (SPEC_MACOS_FLOATING_PANE_TEAROFF_2026_05_29.md): create a
         // frameless top-level window via the SAME CEF Views path the regular
         // tear-off uses (`open_window_at_position` →

@@ -270,6 +270,16 @@ pub struct PoolState {
     pub respawn_in_flight: bool,
 }
 
+/// Pre-warmed pane (floating) window pool state.
+/// Mirrors `PoolState` but for `floating-pool-{uuid}` frameless windows.
+#[derive(Default, Clone, Debug)]
+#[allow(dead_code)]
+pub struct PanePoolState {
+    pub queue: std::collections::VecDeque<String>,
+    pub unpromoted: std::collections::HashSet<String>,
+    pub respawn_in_flight: bool,
+}
+
 // ── Quit state (H.5) ─────────────────────────────────────────────────────
 
 /// Host process quit lifecycle. Replaces `is_quitting: AtomicBool` at
@@ -1053,6 +1063,11 @@ impl AppState {
     /// pool drift while the warm pool is idle and ready.
     pub fn host_counts_snapshot(&self) -> (u32, u32) {
         let st = self.host_state.lock();
+        // `host_counts_snapshot` feeds the launcher's event-sourced pool mirror.
+        // Pane pool emits NO launcher events (report_pool_window_added/removed/promoted),
+        // so including pane_pool.* here would cause permanent DriftDetected{Pool}.
+        // Only the tab pool (window-pool-*) participates in launcher mirror accounting.
+        // See user_visibility_snapshot for the app-exit gate (which correctly includes pane pool).
         let pool_inventory: std::collections::HashSet<&str> = st
             .pool
             .unpromoted
@@ -1061,25 +1076,32 @@ impl AppState {
             .chain(st.pool.queue.iter().map(String::as_str))
             .collect();
         let pool = pool_inventory.len() as u32;
+        // Also exclude floating-pool-* (pane pool windows) from the windows count.
+        // On Windows (this branch) they are excluded from report_window_opened at
+        // client/mod.rs:566, so the launcher mirror does not count them either.
+        // Without this filter, host_windows > launcher_windows → DriftDetected{Windows}.
         let windows = st
             .browsers
             .keys()
-            .filter(|k| !k.starts_with("browser-pane-") && !pool_inventory.contains(k.as_str()))
+            .filter(|k| {
+                !k.starts_with("browser-pane-")
+                    && !k.starts_with("floating-pool-")
+                    && !pool_inventory.contains(k.as_str())
+            })
             .count() as u32;
         (windows, pool)
     }
 
-    /// Snapshot of unpromoted pool labels. Used by orphan
-    /// reconciliation and the pool-count report after spawning a
-    /// new pool slot. Caller can `.contains()` against the set or
-    /// iterate.
+    /// Snapshot of unpromoted pool labels — both tab pool (`window-pool-*`)
+    /// and pane pool (`floating-pool-*`). Used by orphan reconciliation and
+    /// the pool-count report after spawning a new pool slot.
     pub fn unpromoted_pool_labels_snapshot(&self) -> std::collections::HashSet<String> {
-        self.host_state
-            .lock()
-            .pool
+        let st = self.host_state.lock();
+        st.pool
             .unpromoted
             .iter()
             .cloned()
+            .chain(st.pane_pool.unpromoted.iter().cloned())
             .collect()
     }
 
@@ -1096,6 +1118,10 @@ impl AppState {
         self.host_state.lock().pool.queue.len()
     }
 
+    pub fn pane_pool_queue_size(&self) -> usize {
+        self.host_state.lock().pane_pool.queue.len()
+    }
+
     /// Atomic snapshot for user-visibility filtering: pool inventory
     /// (`pool.unpromoted` ∪ `pool.queue`) AND the browser registry,
     /// taken under ONE `host_state` lock acquisition.
@@ -1107,9 +1133,11 @@ impl AppState {
     /// user window. Atomic snapshot eliminates the gap.
     ///
     /// Returns:
-    /// - `pool_inventory`: labels in `pool.unpromoted` ∪ `pool.queue`
-    ///   (host-internal, no user UI yet — exclude from user-visible
-    ///   filters and from launcher-event dispatch).
+    /// - `pool_inventory`: labels in `pool.unpromoted` ∪ `pool.queue` ∪
+    ///   `pane_pool.unpromoted` ∪ `pane_pool.queue` — all host-internal
+    ///   pool windows (both tab pool `window-pool-*` and pane pool
+    ///   `floating-pool-*`) that have no user UI yet; exclude from
+    ///   user-visible filters and from launcher-event dispatch.
     /// - `browsers`: every label → Browser pair currently registered
     ///   (cheap clone — `Browser` is a CEF refcounted wrapper).
     pub fn user_visibility_snapshot(&self) -> (
@@ -1123,6 +1151,8 @@ impl AppState {
             .iter()
             .cloned()
             .chain(st.pool.queue.iter().cloned())
+            .chain(st.pane_pool.unpromoted.iter().cloned())
+            .chain(st.pane_pool.queue.iter().cloned())
             .collect();
         let browsers: Vec<(String, Browser)> = st
             .browsers

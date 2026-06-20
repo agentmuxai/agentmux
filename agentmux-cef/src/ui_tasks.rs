@@ -990,6 +990,98 @@ pub fn post_promote_pool_window_for_new_window(
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Promote pane pool window (macOS / Linux) ──────────────────────────────
+//
+// Repositions a floating-pool-{uuid} frameless window from its off-screen
+// holding position to the drop-target bounds and emits pool:pane-promote so
+// the renderer mounts FloatingPaneWorkspace with the given paneId+workspaceId.
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct PromotePanePoolWindowTask {
+        state: Arc<AppState>,
+        label: String,
+        pane_id: String,
+        workspace_id: String,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let Some(window) = get_window_on_ui(&self.state, &self.label) else {
+                tracing::warn!(
+                    target: "pool:pane",
+                    label = %self.label,
+                    "[pane-pool] window not found on UI thread — pool window may have closed"
+                );
+                return;
+            };
+
+            window.set_bounds(Some(&cef::Rect {
+                x: self.x,
+                y: self.y,
+                width: self.width,
+                height: self.height,
+            }));
+            window.show();
+
+            tracing::info!(
+                target: "pool:pane",
+                label = %self.label,
+                x = self.x,
+                y = self.y,
+                width = self.width,
+                height = self.height,
+                "[pane-pool] window repositioned + shown"
+            );
+
+            crate::events::emit_event_to_window(
+                &self.state,
+                &self.label,
+                "pool:pane-promote",
+                &serde_json::json!({
+                    "paneId": self.pane_id,
+                    "workspaceId": self.workspace_id,
+                }),
+            );
+
+            tracing::info!(
+                target: "pool:pane",
+                label = %self.label,
+                pane_id = %self.pane_id,
+                workspace_id = %self.workspace_id,
+                "[pane-pool] pool:pane-promote emitted — renderer will mount FloatingPaneWorkspace"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn post_promote_pane_pool_window(
+    state: &Arc<AppState>,
+    label: &str,
+    pane_id: &str,
+    workspace_id: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    let mut task = PromotePanePoolWindowTask::new(
+        state.clone(),
+        label.to_string(),
+        pane_id.to_string(),
+        workspace_id.to_string(),
+        x,
+        y,
+        width,
+        height,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Get window absolute position (DIP) — blocking UI-thread read ──────────
 //
 // CEF Views `window.bounds()` must run on the UI thread, but

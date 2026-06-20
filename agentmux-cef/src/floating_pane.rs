@@ -380,6 +380,148 @@ pub fn post_create_floating_window(
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+/// Pre-warmed pane pool window task (Windows). Creates a WS_POPUP +
+/// WS_EX_TOOLWINDOW window at the off-screen pool position and embeds a
+/// CEF child browser. The outer HWND is cached in `PANE_POOL_HWND_CACHE`
+/// before `browser_host_create_browser` fires so `promote_pane_pool_window`
+/// has a reliable handle even after CEF nulls `window_handle()` post-load.
+///
+/// Differs from `CreateFloatingWindowTask`:
+///   1. No `register_floater_hwnd` — parent HWND unknown at spawn; deferred to promote.
+///   2. Offscreen position + pane pool dimensions; window is hidden after create_popup.
+///   3. URL carries `?pane-pool=1`; frontend defers init until `pool:pane-promote`.
+wrap_task! {
+    pub(crate) struct CreatePanePoolWindowWin32Task {
+        state: Arc<AppState>,
+        label: String,
+        url: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let dequeue = || {
+                self.state.host_dispatch(
+                    crate::reducer::HostCommand::DequeuePendingWindowCreation,
+                );
+            };
+
+            let outer_hwnd = match create_popup(
+                &self.label,
+                crate::commands::window_pool::POOL_OFFSCREEN_X,
+                crate::commands::window_pool::POOL_OFFSCREEN_Y,
+                crate::commands::window_pool::PANE_POOL_WIDTH,
+                crate::commands::window_pool::PANE_POOL_HEIGHT,
+            ) {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::error!(
+                        label = %self.label,
+                        error = %e,
+                        "[pane-pool] create_popup failed (Windows)"
+                    );
+                    // Clean up reducer state without triggering a refill spawn.
+                    // HWND was not cached yet (create_popup failed before that step).
+                    // on_pane_pool_window_destroyed must NOT be used here — it triggers
+                    // spawn_pane_pool_window which would re-enter this failure → loop.
+                    crate::commands::window_pool::cleanup_failed_pane_pool_creation(
+                        &self.state, &self.label,
+                    );
+                    dequeue();
+                    return;
+                }
+            };
+
+            // create_popup ends with SW_SHOWNOACTIVATE — hide immediately so the
+            // offscreen WS_POPUP doesn't appear in Alt+Tab while pre-warming.
+            unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                let _ = ShowWindow(outer_hwnd as *mut std::ffi::c_void, SW_HIDE);
+            }
+
+            // Cache the outer HWND before browser creation. CEF's window_handle()
+            // returns null after page load (same issue as tab pool, diagnosed
+            // 2026-05-06); the cache is the only reliable source at promote time.
+            crate::commands::window_pool::cache_pane_pool_hwnd(&self.label, outer_hwnd as usize);
+
+            // Register in window_hwnds so promote_pane_pool_window can reach
+            // the outer HWND via state.window_hwnds if needed.
+            self.state
+                .window_hwnds
+                .lock()
+                .insert(self.label.clone(), outer_hwnd as isize);
+
+            // Embed CEF browser as WS_CHILD of the outer WS_POPUP.
+            let rect = Rect {
+                x: 0,
+                y: 0,
+                width: crate::commands::window_pool::PANE_POOL_WIDTH,
+                height: crate::commands::window_pool::PANE_POOL_HEIGHT,
+            };
+            let handler = crate::client::AgentMuxHandler::new_with_browser_pane(
+                self.state.clone(),
+                0,
+                true,
+            );
+            let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
+            let url_cef = CefString::from(self.url.as_str());
+            let settings = BrowserSettings::default();
+            let parent_hwnd = sys::HWND(outer_hwnd as *mut _);
+            let mut window_info = WindowInfo::default().set_as_child(parent_hwnd, &rect);
+            window_info.runtime_style = RuntimeStyle::ALLOY;
+
+            let result = browser_host_create_browser(
+                Some(&window_info),
+                client.as_mut(),
+                Some(&url_cef),
+                Some(&settings),
+                None,
+                None,
+            );
+
+            if result == 0 {
+                tracing::error!(
+                    label = %self.label,
+                    "[pane-pool] browser_host_create_browser returned 0 (Windows)"
+                );
+                // Destroy the outer HWND (no browser to close it for us).
+                unsafe {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
+                    DestroyWindow(outer_hwnd as *mut std::ffi::c_void);
+                }
+                // Remove from window_hwnds (inserted above before browser creation).
+                self.state.window_hwnds.lock().remove(&self.label);
+                // Clean up reducer + HWND cache without triggering a refill spawn.
+                // on_pane_pool_window_destroyed must NOT be used here — it triggers
+                // spawn_pane_pool_window which would re-enter this failure → loop.
+                crate::commands::window_pool::cleanup_failed_pane_pool_creation(
+                    &self.state, &self.label,
+                );
+                dequeue();
+            }
+        }
+    }
+}
+
+/// Post `CreatePanePoolWindowWin32Task` to the CEF UI thread.
+///
+/// Called by `spawn_pane_pool_window` on Windows instead of
+/// `ui_tasks::post_create_window` so the pool window is a WS_POPUP +
+/// WS_EX_TOOLWINDOW — the same window type as `post_create_floating_window`.
+/// This ensures `promote_pane_pool_window` can reuse the same HWND without
+/// re-creating the window at tear-off time.
+pub(crate) fn post_create_pane_pool_window_win32(
+    state: &Arc<AppState>,
+    label: &str,
+    url: &str,
+) {
+    let mut task = CreatePanePoolWindowWin32Task::new(
+        state.clone(),
+        label.to_string(),
+        url.to_string(),
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 /// Minimal query-string escaping for the pane id. Encodes the small
 /// set of characters that would break query-string parsing. Avoids
 /// pulling in a `url`/`urlencoding` dependency for a single-call site.
