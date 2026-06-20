@@ -25,7 +25,8 @@ export type SoundId =
     | "agent.turn.error"
     | "agent.turn.interrupted"
     | "agent.message.accepted"
-    | "agent.message.rejected";
+    | "agent.message.rejected"
+    | "agent.waiting.for.input";
 
 export type SoundCategory = "success" | "info" | "warning" | "error";
 
@@ -84,5 +85,13 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
         category: "warning",
         settingKey: "notify:sound:agent.message.rejected",
         coalesceMs: 150,
+    },
+    "agent.waiting.for.input": {
+        id: "agent.waiting.for.input",
+        label: "Agent waiting for your reply",
+        category: "info",
+        settingKey: "notify:sound:agent.waiting.for.input",
+        // No coalesceMs — the waiting player is looping, not one-shot;
+        // the service manages start/stop directly, not via the bus.
     },
 };

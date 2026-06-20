@@ -251,6 +251,13 @@ export interface AgentPaneState {
     /** Resolved model id that produced `lastContextWindow` — used to re-seed the
      *  window when the user switches models mid-session (`/model`). */
     lastContextModel: string | null;
+    /**
+     * True iff the most recently completed turn ended with the agent asking
+     * a question (heuristic: last text block's trimmed content ends with `?`).
+     * Drives the waiting-ambient-sound trigger.
+     * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §4.
+     */
+    lastTurnHadQuestion: boolean;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -267,6 +274,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     turnPhase: { kind: "Idle" },
     detailsOpen: false,
     composerUnreadCount: 0,
+    lastTurnHadQuestion: false,
 });
 
 /**
@@ -390,7 +398,19 @@ export type AgentPaneCommand =
      * turnTokens, and transitions the phase to Done (interrupting →
      * Done.stopped, otherwise Done.completed).
      */
-    | { type: "TurnEnd"; stats: SessionStats | null }
+    | {
+          type: "TurnEnd";
+          stats: SessionStats | null;
+          /**
+           * The trimmed text of the last assistant message block, if the
+           * caller can supply it cheaply. Used to set `lastTurnHadQuestion`
+           * via the trailing-`?` heuristic. Optional — absence conservatively
+           * clears `lastTurnHadQuestion` (treated as no question) so a
+           * tool-only or empty final block never re-triggers the waiting tone.
+           * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §4.
+           */
+          lastAssistantText?: string;
+      }
     /**
      * Truncate path: the doc was reset (or whatever caused the local
      * stream-restart). Clears all per-turn state but does NOT touch
@@ -490,7 +510,14 @@ export type AgentPaneCommand =
      * the strip's chevron badge updates. When the panel is already
      * open, no-op (the user sees the new entry directly).
      */
-    | { type: "LogEntryArrived" };
+    | { type: "LogEntryArrived" }
+    /**
+     * User started typing in the composer while the pane was in the
+     * waiting-for-input state. Clears `lastTurnHadQuestion` so the
+     * store can emit `waiting-ended` with reason `"typing"`.
+     * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §6.6.
+     */
+    | { type: "WaitingTypingStarted" };
 
 export type AgentPaneEvent =
     | { type: "init-ready" }
@@ -603,7 +630,19 @@ export type AgentPaneEvent =
           queuedAt: number;
           ageMs: number;
           wasPresent: boolean;
-      };
+      }
+    /**
+     * Emitted when the pane enters the waiting-for-input state: turn
+     * completed with a question, composer empty. The sound service
+     * starts the looping ambient tone on this event.
+     * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §6.3.
+     */
+    | { type: "waiting-for-input" }
+    /**
+     * Emitted when the waiting state ends — user submitted or started
+     * typing, pane closed, or the 5-minute safety cutoff fired.
+     */
+    | { type: "waiting-ended"; reason: "submitted" | "typing" | "closed" };
 
 export interface ReducerResult {
     state: AgentPaneState;
