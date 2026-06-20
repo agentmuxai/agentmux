@@ -252,11 +252,7 @@ async fn ensure_local_model(
         };
     }
 
-    let name = std::env::var("AGENTMUX_WHISPER_MODEL_NAME")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| settings_str(settings, "voice:whisperModel"))
+    let name = settings_str(settings, "voice:whisperModel")
         .unwrap_or_else(|| DEFAULT_WHISPER_MODEL.to_string());
     // Sanitize: model names are simple tokens — reject anything that could be a
     // path or URL component (defends the format!-built path and URL below).
