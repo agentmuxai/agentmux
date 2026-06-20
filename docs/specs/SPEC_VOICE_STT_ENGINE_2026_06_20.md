@@ -70,8 +70,16 @@ extractor `service.rs` uses), `Json<Value>` response. Auth-gated like the other
   `whisper-large-v3-turbo`. ~$0.0007/min, ~216× real-time. `reqwest` is already
   a dependency.
 - **`OpenAiBackend`** (later) — same OpenAI-compatible shape, `gpt-4o-transcribe`.
-- **`LocalWhisperBackend`** (PR 2) — `whisper-rs` (whisper.cpp) with a model
-  fetched on-demand to the config dir. Default for privacy/offline. ~0 MB ship.
+- **`LocalWhisperBackend`** (PR 2, shipped) — offline whisper.cpp via a local
+  **`whisper-cli` subprocess** (not in-process whisper-rs — avoids a bindgen /
+  libclang / C++ build in the sidecar). The renderer sends **16 kHz mono WAV**
+  for this engine (whisper-cli reads WAV natively, no ffmpeg), captured via
+  Web-Audio PCM (`AudioContext({sampleRate:16000})` + `ScriptProcessor`). Both
+  the CLI binary and GGML model are **user-provided paths** in v1
+  (`voice:whisperCliPath` / `voice:whisperModelPath`, or `AGENTMUX_WHISPER_CLI`
+  / `AGENTMUX_WHISPER_MODEL`); missing config → 501. Bundled binary +
+  on-demand model download is the **PR-3** follow-up. Fully offline — audio
+  never leaves the machine. ~0 MB ship.
 
 ### 3.2 Backend selection + key (server-side)
 Resolved once at request time from, in order:

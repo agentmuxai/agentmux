@@ -5,14 +5,20 @@
  * Whisper capture-and-send voice engine.
  *
  * The Web Speech API can't transcribe in CEF (closed-source Google service,
- * Chrome-build-bound), so this engine captures mic audio with getUserMedia +
- * MediaRecorder, cuts it into silence-bounded utterances (a small Web-Audio
- * VAD), and POSTs each clip to `agentmux-srv` (`/api/v1/voice/transcribe`),
- * which calls Whisper and returns text. The API key stays server-side.
+ * Chrome-build-bound), so this engine captures mic audio, cuts it into
+ * silence-bounded utterances (a small Web-Audio VAD), and POSTs each clip to
+ * `agentmux-srv` (`/api/v1/voice/transcribe`), which calls Whisper and returns
+ * text. The API key / model path stays server-side.
+ *
+ * Two capture modes, chosen by the `voice:engine` setting so each backend gets
+ * audio it can decode without a server-side decoder:
+ *   - **groq** (default): MediaRecorder → webm/opus (Groq decodes server-side).
+ *   - **whisper-local**: Web-Audio PCM → 16 kHz mono WAV (whisper.cpp's
+ *     `whisper-cli` reads WAV natively; no ffmpeg needed).
  *
  * Implements the same `VoiceSession` shape as the Web Speech engine so
- * `getVoiceSession()` can pick between them with the rest of the per-pane
- * plumbing (MicButton, red indicator, "Speak to <agent>" ghost text) unchanged.
+ * `getVoiceSession()` swaps engines with the rest of the per-pane plumbing
+ * (MicButton, red indicator, "Speak to <agent>" ghost text) unchanged.
  *
  * Spec: docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md · tracking #1591.
  */
@@ -20,17 +26,19 @@
 import { createSignalAtom } from "@/util/util";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { getApi } from "@/app/store/app-api";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import type { PaneVoiceHandle, VoiceSession } from "./useVoiceInput";
 
 // VAD tuning. RMS below SILENCE_RMS for >= SILENCE_MS after speech ends an
 // utterance; a hard cap keeps any single clip small (Whisper isn't streaming,
-// so shorter clips = lower latency). LEVEL_POLL_MS samples the analyser — a
-// periodic read is inherent to Web-Audio level metering, not a workaround.
+// so shorter clips = lower latency). LEVEL_POLL_MS samples the analyser in webm
+// mode — a periodic read is inherent to Web-Audio level metering, not a hack.
 const SILENCE_RMS = 0.012;
 const SILENCE_MS = 800;
 const MAX_SEGMENT_MS = 12_000;
 const MIN_SEGMENT_MS = 350; // drop blips with no real speech
 const LEVEL_POLL_MS = 100;
+const WAV_SAMPLE_RATE = 16_000; // whisper.cpp requires 16 kHz mono
 
 /** Pick the best MediaRecorder mime the runtime supports (opus preferred). */
 function pickMime(): string {
@@ -48,15 +56,51 @@ function pickMime(): string {
     return "audio/webm";
 }
 
+/** Encode mono Float32 PCM as a 16-bit WAV blob at the given sample rate. */
+function encodeWav(samples: Float32Array, sampleRate: number): Blob {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    const writeStr = (off: number, s: string) => {
+        for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+    };
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true); // PCM fmt chunk size
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true); // byte rate (mono, 16-bit)
+    view.setUint16(32, 2, true); // block align
+    view.setUint16(34, 16, true); // bits per sample
+    writeStr(36, "data");
+    view.setUint32(40, samples.length * 2, true);
+    let off = 44;
+    for (let i = 0; i < samples.length; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+        off += 2;
+    }
+    return new Blob([view], { type: "audio/wav" });
+}
+
 export function createWhisperVoiceSession(): VoiceSession {
     const isListening = createSignalAtom(false);
     const currentTargetId = createSignalAtom<string | null>(null);
     const lastError = createSignalAtom<string | null>(null);
 
+    // Capture mode is fixed for the session: whisper-local → WAV, else webm.
+    const isLocal = getSettingsKeyAtom("voice:engine")() === "whisper-local";
+
+    // Both modes need getUserMedia + AudioContext; the webm (groq) path also
+    // needs MediaRecorder. Gate on exactly what the chosen mode uses so a
+    // runtime missing a primitive degrades gracefully instead of throwing.
     const available =
         typeof navigator !== "undefined" &&
         !!navigator.mediaDevices?.getUserMedia &&
-        typeof MediaRecorder !== "undefined";
+        typeof AudioContext !== "undefined" &&
+        (isLocal || typeof MediaRecorder !== "undefined");
 
     if (!available) {
         return {
@@ -71,29 +115,32 @@ export function createWhisperVoiceSession(): VoiceSession {
 
     let activeHandle: PaneVoiceHandle | null = null;
     let stream: MediaStream | null = null;
-    let recorder: MediaRecorder | null = null;
     let audioCtx: AudioContext | null = null;
-    let analyser: AnalyserNode | null = null;
-    let levelTimer: number | null = null;
-    let chunks: BlobChunk[] = [];
     let mime = "audio/webm";
 
-    // VAD state
+    // webm mode
+    let recorder: MediaRecorder | null = null;
+    let analyser: AnalyserNode | null = null;
+    let levelTimer: number | null = null;
+    let chunks: Blob[] = [];
+
+    // wav mode
+    let processor: ScriptProcessorNode | null = null;
+    let pcm: Float32Array[] = [];
+
+    // shared VAD state
     let sawSpeech = false;
     let silenceStart = 0;
     let segmentStart = 0;
 
     // Serialize transcription so utterances are applied in spoken order.
-    // Capture keeps running concurrently (recorder restarts immediately); only
-    // the network call + appendFinal are chained — Groq latency varies, so
-    // POSTing concurrently could resolve out of order and scramble the composer
-    // text during continuous speech (reagent P1 #1623).
+    // Capture keeps running concurrently; only the network call + appendFinal
+    // are chained — Groq/whisper latency varies, so POSTing concurrently could
+    // resolve out of order and scramble the composer text (reagent P1 #1623).
     let postChain: Promise<void> = Promise.resolve();
     const enqueuePost = (blob: Blob) => {
         postChain = postChain.then(() => postSegment(blob)).catch(() => {});
     };
-
-    type BlobChunk = Blob;
 
     const fail = (code: string) => {
         lastError._set(code);
@@ -122,7 +169,6 @@ export function createWhisperVoiceSession(): VoiceSession {
                 return;
             }
             if (!resp.ok) {
-                // Transient upstream error — surface once, keep the session alive.
                 lastError._set("service-not-allowed");
                 window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
                 return;
@@ -132,25 +178,41 @@ export function createWhisperVoiceSession(): VoiceSession {
             if (text) handle.appendFinal(text);
         } catch {
             handle.setInterim("");
-            // Network/host error — surface as service-unavailable.
             lastError._set("service-not-allowed");
             window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
         }
     };
 
-    /** Stop the current recorder; its onstop posts the accumulated clip. */
-    const cutSegment = () => {
-        if (recorder && recorder.state !== "inactive") {
-            recorder.stop(); // → onstop builds blob + posts + restarts (if listening)
+    // VAD applied to a fresh RMS reading; returns true when the utterance should
+    // be cut. Shared by both modes.
+    const vadShouldCut = (rms: number): boolean => {
+        const now = Date.now();
+        if (rms >= SILENCE_RMS) {
+            sawSpeech = true;
+            silenceStart = 0;
+        } else if (sawSpeech) {
+            if (silenceStart === 0) silenceStart = now;
+            else if (now - silenceStart >= SILENCE_MS) return true;
         }
+        // Hard cap fires regardless of sawSpeech so the WAV-mode PCM buffer
+        // can't grow unbounded under sustained sub-threshold input — a
+        // speechless cut just discards + resets (postSegment/cut are gated on
+        // sawSpeech). webm mode is bounded by MediaRecorder internally.
+        return now - segmentStart >= MAX_SEGMENT_MS;
     };
+
+    const resetSegment = () => {
+        sawSpeech = false;
+        silenceStart = 0;
+        segmentStart = Date.now();
+    };
+
+    // ── webm mode (MediaRecorder + AnalyserNode VAD) ─────────────────────────
 
     const startRecorder = () => {
         if (!stream) return;
         chunks = [];
-        sawSpeech = false;
-        silenceStart = 0;
-        segmentStart = Date.now();
+        resetSegment();
         recorder = new MediaRecorder(stream, { mimeType: mime });
         recorder.ondataavailable = (e) => {
             if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -159,13 +221,7 @@ export function createWhisperVoiceSession(): VoiceSession {
             const dur = Date.now() - segmentStart;
             const blob = new Blob(chunks, { type: mime });
             chunks = [];
-            // Only transcribe clips that contained speech and weren't blips.
-            // Enqueued (not awaited) so the next recorder starts immediately,
-            // but applied strictly in order — see enqueuePost above.
-            if (sawSpeech && dur >= MIN_SEGMENT_MS) {
-                enqueuePost(blob);
-            }
-            // Restart for the next utterance while still listening.
+            if (sawSpeech && dur >= MIN_SEGMENT_MS) enqueuePost(blob);
             if (isListening()) startRecorder();
         };
         recorder.start();
@@ -180,24 +236,40 @@ export function createWhisperVoiceSession(): VoiceSession {
             const v = (buf[i] - 128) / 128;
             sum += v * v;
         }
-        const rms = Math.sqrt(sum / buf.length);
-
-        const now = Date.now();
-        if (rms >= SILENCE_RMS) {
-            sawSpeech = true;
-            silenceStart = 0;
-        } else if (sawSpeech) {
-            if (silenceStart === 0) silenceStart = now;
-            else if (now - silenceStart >= SILENCE_MS) {
-                cutSegment(); // utterance boundary
-                return;
-            }
-        }
-        // Hard cap so a long monologue still gets transcribed in chunks.
-        if (now - segmentStart >= MAX_SEGMENT_MS && sawSpeech) {
-            cutSegment();
+        if (vadShouldCut(Math.sqrt(sum / buf.length))) {
+            if (recorder && recorder.state !== "inactive") recorder.stop();
         }
     };
+
+    // ── wav mode (ScriptProcessor PCM @ 16 kHz) ──────────────────────────────
+
+    const cutWavSegment = () => {
+        const dur = Date.now() - segmentStart;
+        const total = pcm.reduce((n, c) => n + c.length, 0);
+        const merged = new Float32Array(total);
+        let off = 0;
+        for (const c of pcm) {
+            merged.set(c, off);
+            off += c.length;
+        }
+        pcm = [];
+        if (sawSpeech && dur >= MIN_SEGMENT_MS && merged.length > 0) {
+            enqueuePost(encodeWav(merged, WAV_SAMPLE_RATE));
+        }
+        resetSegment();
+    };
+
+    const onAudioProcess = (e: AudioProcessingEvent) => {
+        const input = e.inputBuffer.getChannelData(0);
+        // Copy (the buffer is reused by the engine).
+        pcm.push(new Float32Array(input));
+        let sum = 0;
+        for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+        if (vadShouldCut(Math.sqrt(sum / input.length))) cutWavSegment();
+        // Leave outputBuffer silent (don't write it) → no mic echo to speakers.
+    };
+
+    // ── lifecycle ────────────────────────────────────────────────────────────
 
     const stopCapture = async () => {
         isListening._set(false);
@@ -208,18 +280,27 @@ export function createWhisperVoiceSession(): VoiceSession {
         }
         if (recorder && recorder.state !== "inactive") {
             try {
-                recorder.onstop = null as any; // don't restart on a deliberate stop
+                recorder.onstop = null as any; // don't restart on deliberate stop
                 recorder.stop();
             } catch {
                 /* ignore */
             }
         }
         recorder = null;
+        if (processor) {
+            try {
+                processor.onaudioprocess = null as any;
+                processor.disconnect();
+            } catch {
+                /* ignore */
+            }
+            processor = null;
+        }
+        analyser = null;
         if (audioCtx) {
             try { await audioCtx.close(); } catch { /* ignore */ }
             audioCtx = null;
         }
-        analyser = null;
         if (stream) {
             stream.getTracks().forEach((t) => t.stop());
             stream = null;
@@ -232,35 +313,47 @@ export function createWhisperVoiceSession(): VoiceSession {
             stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e: any) {
             const name = e?.name || "";
-            if (name === "NotAllowedError" || name === "SecurityError") {
-                fail("not-allowed");
-            } else if (name === "NotFoundError" || name === "OverconstrainedError") {
-                fail("audio-capture");
-            } else {
-                fail("service-not-allowed");
-            }
+            if (name === "NotAllowedError" || name === "SecurityError") fail("not-allowed");
+            else if (name === "NotFoundError" || name === "OverconstrainedError") fail("audio-capture");
+            else fail("service-not-allowed");
             return;
         }
-        mime = pickMime();
         lastError._set(null);
         isListening._set(true);
 
-        audioCtx = new AudioContext();
-        const src = audioCtx.createMediaStreamSource(stream);
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 2048;
-        src.connect(analyser);
-
-        startRecorder();
-        levelTimer = window.setInterval(pollLevel, LEVEL_POLL_MS);
+        // Building the audio graph can throw — e.g. a runtime that rejects the
+        // forced 16 kHz AudioContext rate. Catch it so the mic stream is closed
+        // and isListening doesn't get stuck true (fail → stopCapture).
+        try {
+            if (isLocal) {
+                mime = "audio/wav";
+                // Force 16 kHz so captured PCM is whisper-ready (no resampling).
+                audioCtx = new AudioContext({ sampleRate: WAV_SAMPLE_RATE });
+                const src = audioCtx.createMediaStreamSource(stream);
+                processor = audioCtx.createScriptProcessor(4096, 1, 1);
+                processor.onaudioprocess = onAudioProcess;
+                src.connect(processor);
+                processor.connect(audioCtx.destination); // required for onaudioprocess to fire
+                pcm = [];
+                resetSegment();
+            } else {
+                mime = pickMime();
+                audioCtx = new AudioContext();
+                const src = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 2048;
+                src.connect(analyser);
+                startRecorder();
+                levelTimer = window.setInterval(pollLevel, LEVEL_POLL_MS);
+            }
+        } catch {
+            fail("service-not-allowed");
+        }
     };
 
     const toggleListening = () => {
-        if (isListening()) {
-            void stopCapture();
-        } else {
-            void startCapture();
-        }
+        if (isListening()) void stopCapture();
+        else void startCapture();
     };
 
     return {
