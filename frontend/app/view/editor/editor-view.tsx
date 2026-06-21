@@ -849,7 +849,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                                         ? { height: `${model.previewHeightAtom()}px` }
                                         : undefined
                                 }
-                                id="editor-preview-panel"
+                                id={`editor-preview-panel-${model.blockId}`}
                             >
                                 <div class="editor-preview-header">
                                     <span class="editor-preview-header-label">Preview</span>
@@ -857,7 +857,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                                         type="button"
                                         class="editor-preview-chevron"
                                         aria-expanded={model.previewOpenAtom()}
-                                        aria-controls="editor-preview-panel"
+                                        aria-controls={`editor-preview-panel-${model.blockId}`}
                                         aria-label={
                                             model.previewOpenAtom()
                                                 ? "Collapse preview"
