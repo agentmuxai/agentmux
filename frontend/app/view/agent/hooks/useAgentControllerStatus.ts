@@ -210,7 +210,16 @@ export function useAgentControllerStatus(
         }
         seedInFlight = true;
         try {
-            await seedGlobalLogin(prov.id, opts.log);
+            // Seed into the agent's RESOLVED auth dir (from cmd:env), not a
+            // guessed one; the host guards it to ~/.agentmux so the seed never
+            // writes the user's ~/.claude (SPEC_PROVIDER_ISOLATION §4.5).
+            const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
+            let configDir: string | undefined;
+            if (prov.authConfigDirEnvVar && envMeta && typeof envMeta === "object") {
+                const v = (envMeta as Record<string, unknown>)[prov.authConfigDirEnvVar];
+                if (typeof v === "string") configDir = v;
+            }
+            await seedGlobalLogin(prov.id, opts.log, configDir);
         } catch (err: any) {
             opts.log("auth", `use existing login failed: ${err?.message ?? String(err)}`, "error");
         } finally {

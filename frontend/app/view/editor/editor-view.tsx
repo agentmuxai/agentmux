@@ -74,7 +74,14 @@ async function loadLanguage(lang: string): Promise<Extension | null> {
 
 export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>): JSX.Element {
     const model = props.model;
-    let containerRef: HTMLDivElement | undefined;
+    // Reactive ref: the markdown preview seeds `liveDoc` from the tab-change
+    // effect, which guards on the container being mounted. On first open the
+    // container mounts only AFTER content finishes loading (the body <Show>
+    // gates on !loadingAtom), so a plain `let` ref left the effect early-
+    // returning before the container existed → blank preview until a manual
+    // Source/Preview toggle. A signal makes the effect re-run when the
+    // container mounts, seeding the preview reliably.
+    const [containerRef, setContainerRef] = createSignal<HTMLDivElement>();
     let rootRef: HTMLDivElement | undefined;
     let cmView: EditorView | null = null;
 
@@ -318,7 +325,8 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
     // Build or rebuild CodeMirror when the active tab changes
     const setupEditor = async (content: string, language: string, readOnly: boolean) => {
-        if (!containerRef) return;
+        const container = containerRef();
+        if (!container) return;
 
         // Destroy previous instance
         if (cmView) {
@@ -393,7 +401,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 doc: content,
                 extensions,
             }),
-            parent: containerRef,
+            parent: container,
         });
         setLiveDoc(content); // seed preview from the freshly-built doc
     };
@@ -447,7 +455,10 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     createEffect(() => {
         const activeId = model.activeIdAtom(); // reactive: tab change
         const loading = model.loadingAtom(); // reactive: wait for content
-        if (!activeId || loading || !containerRef) return;
+        // containerRef() is reactive: when the body <Show> mounts the container
+        // after content loads, this effect re-runs and proceeds (fixes the
+        // first-open blank-preview race).
+        if (!activeId || loading || !containerRef()) return;
 
         untrack(() => {
             const path = model.filePathAtom();
@@ -831,7 +842,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                     fallback={<EmptyEditor />}
                 >
                     <div class="editor-body-wrap">
-                        <div class="editor-codemirror" ref={containerRef} />
+                        <div class="editor-codemirror" ref={setContainerRef} />
                         {/* Styled markdown preview, overlaid over CodeMirror for
                             .md tabs in rendered mode. CM stays mounted beneath so
                             toggling back keeps cursor/scroll/undo. */}

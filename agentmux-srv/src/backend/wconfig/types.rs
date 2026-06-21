@@ -218,6 +218,30 @@ pub struct SettingsType {
     #[serde(rename = "voice:enabled", default, skip_serializing_if = "Option::is_none")]
     pub voice_enabled: Option<bool>,
 
+    // Speech-to-text engine: "whisper" (capture audio → server STT, the default
+    // and only engine that works in CEF) or "webspeech" (browser API — dev /
+    // real-Chromium only). Absent ⇒ whisper.
+    // Spec: docs/specs/SPEC_VOICE_STT_ENGINE_2026_06_20.md.
+    #[serde(rename = "voice:engine", default, skip_serializing_if = "Option::is_none")]
+    pub voice_engine: Option<String>,
+
+    // Groq API key for the hosted Whisper backend. Read server-side only; never
+    // sent to the renderer. The AGENTMUX_GROQ_API_KEY env var takes precedence.
+    #[serde(rename = "voice:groqApiKey", default, skip_serializing_if = "Option::is_none")]
+    pub voice_groq_api_key: Option<String>,
+
+    // Local whisper.cpp backend (voice:engine = "whisper-local"). Both are
+    // user-provided paths in v1 (auto-download is a follow-up). Env overrides:
+    // AGENTMUX_WHISPER_CLI / AGENTMUX_WHISPER_MODEL.
+    #[serde(rename = "voice:whisperCliPath", default, skip_serializing_if = "Option::is_none")]
+    pub voice_whisper_cli_path: Option<String>,
+    // GGML model name to auto-download on first use (default "base.en"). The
+    // explicit-path override below skips the download.
+    #[serde(rename = "voice:whisperModel", default, skip_serializing_if = "Option::is_none")]
+    pub voice_whisper_model: Option<String>,
+    #[serde(rename = "voice:whisperModelPath", default, skip_serializing_if = "Option::is_none")]
+    pub voice_whisper_model_path: Option<String>,
+
     // -- Notification sounds --
     //
     // Spec: docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md §5.1.

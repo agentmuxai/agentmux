@@ -37,7 +37,10 @@ use smithay_client_toolkit::reexports::client::{
     Connection, QueueHandle,
 };
 
-use super::{min_hold, pulse_alpha, render_frame, BRAIN_H, BRAIN_W, DISMISS_TIMEOUT, PADDING};
+use super::{
+    fade_alpha, min_hold, pulse_alpha, render_frame, BRAIN_H, BRAIN_W, CORNER_RADIUS_PX,
+    DISMISS_TIMEOUT, PADDING,
+};
 
 pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
     let conn = Connection::connect_to_env()?;
@@ -73,6 +76,7 @@ pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
         start: Instant::now(),
         min_hold: min_hold(),
         ready_file: ready_file.to_path_buf(),
+        fade_start: None,
         exit: false,
     };
 
@@ -93,6 +97,7 @@ struct SplashState {
     start: Instant,
     min_hold: Duration,
     ready_file: PathBuf,
+    fade_start: Option<Instant>,
     exit: bool,
 }
 
@@ -106,7 +111,14 @@ impl SplashState {
     /// the dismiss condition is met. Driven by the compositor's frame callbacks
     /// (which also pace the ~60 fps pulse).
     fn draw(&mut self, qh: &QueueHandle<Self>) {
-        if self.should_dismiss() {
+        let now = Instant::now();
+        // Begin the fade-out the first time the dismiss condition holds; tear
+        // down once it completes.
+        if self.fade_start.is_none() && self.should_dismiss() {
+            self.fade_start = Some(now);
+        }
+        let window_alpha = fade_alpha(self.fade_start, now);
+        if self.fade_start.is_some() && window_alpha <= 0.0 {
             self.exit = true;
             return;
         }
@@ -124,9 +136,17 @@ impl SplashState {
             }
         };
 
-        let alpha = pulse_alpha(self.start.elapsed().as_secs_f32());
-        // wl_shm ARGB8888 is native-endian 0xAARRGGBB → bytes B,G,R,A on LE.
-        render_frame(canvas, w, h, alpha, /* bgr = */ true);
+        let brain_alpha = pulse_alpha(self.start.elapsed().as_secs_f32());
+        // wl_shm ARGB8888 is native-endian 0xAARRGGBB → pre-multiplied B,G,R,A on LE.
+        render_frame(
+            canvas,
+            w,
+            h,
+            brain_alpha,
+            window_alpha,
+            CORNER_RADIUS_PX,
+            /* bgr = */ true,
+        );
 
         let surface = self.window.wl_surface();
         surface.damage_buffer(0, 0, w, h);
