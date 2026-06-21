@@ -65,7 +65,12 @@ wrap_task! {
                         height: self.height,
                     }));
                     window.show();
-                    // Nudge the browser compositor to present a fresh frame.
+                    // Belt-and-suspenders compositor nudge. NOTE: CefBrowserHost
+                    // ::WasResized is only load-bearing in windowless/OSR mode; in
+                    // CEF windowed mode (our case) it is effectively a no-op. The
+                    // ACTUAL fix is the CEF Views window.show() above (the genuine
+                    // hidden->visible transition). Kept as a cheap hint in case the
+                    // host ever runs OSR; do not rely on it. (plan doc §6.)
                     if let Some(host) =
                         self.state.get_browser(&self.label).and_then(|b| b.host())
                     {

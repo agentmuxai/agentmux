@@ -547,6 +547,12 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     {
         pool_hwnd_cache().lock().unwrap().remove(label);
     }
+    // Likewise drop the cached CEF Views Window. Only `take_pool_window_view`
+    // (on promote) otherwise removes entries, so a pool window that dies
+    // *before* promote would leak its cached `cef::Window` for the process
+    // lifetime. Idempotent — `take_*` already removed it if this is a
+    // post-promote close. (reagent P2 PR #1654.)
+    let _ = take_pool_window_view(label);
     // PR #5 H.4 — atomic remove-from-{unpromoted,queue} + clear
     // respawn semaphore via reducer. The dispatch returns:
     //   - `pool_destroyed_was_unpromoted`: distinguishes pre-promote
@@ -948,10 +954,11 @@ pub fn promote_pool_window(
     // cef#3638): position the window at its final ON-SCREEN rect while it is still
     // HIDDEN, then perform the FIRST show THERE.
     //
-    // Pool windows are created hidden (set_taskbar_hidden(true) -> SW_HIDE at
-    // spawn; CEF Views show skipped). The previous order showed the window first —
-    // via set_taskbar_hidden(false)'s internal SW_SHOWNA — at the OFF-SCREEN pool
-    // position, and THEN moved it on-screen. On Windows that binds the browser
+    // Pool windows are spawned visible-but-OFF-SCREEN, then immediately
+    // SW_HIDE'd (set_taskbar_hidden(true)) in init_pool_window_hwnd, so by
+    // promote time the raw HWND is hidden. The previous order re-showed it
+    // first — via set_taskbar_hidden(false)'s internal SW_SHOWNA — at the
+    // OFF-SCREEN pool position, and THEN moved it on-screen. On Windows that binds the browser
     // compositor's visibility/surface state to the off-screen show, and the
     // subsequent move+resize never re-syncs it, so the promoted window paints
     // BLANK despite a valid DOM. Showing for the first time at the final on-screen
