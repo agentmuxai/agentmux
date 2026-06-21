@@ -212,6 +212,8 @@ function EndIcons(props: {
     /** View key from `blockData.meta.view`, used to render a context-aware
      *  tooltip on the per-pane mic button (e.g. "Speak into this terminal"). */
     blockView?: string;
+    isMinimized: () => boolean;
+    toggleMinimize: () => void;
 }): JSX.Element {
     // createMemo so blockAtom reads inside endIconButtons() are tracked and
     // the button array re-evaluates when the agent loads/unloads.
@@ -241,6 +243,7 @@ function EndIcons(props: {
                 <For each={endIconButtons()}>
                     {(button) => <IconButton decl={button} />}
                 </For>
+                <div class="block-frame-btn-separator" aria-hidden="true" />
             </Show>
             <Show when={props.viewModel?.voiceHandle}>
                 <MicButton
@@ -255,6 +258,15 @@ function EndIcons(props: {
                     }
                 />
             </Show>
+            <IconButton
+                decl={{
+                    elemtype: "iconbutton",
+                    icon: "window-minimize",
+                    title: props.isMinimized() ? "Restore pane" : "Minimize pane",
+                    click: props.toggleMinimize,
+                }}
+                className="block-frame-minimize"
+            />
             <Show when={ephemeral()} fallback={
                 <Show when={floatingLabel()} fallback={
                     <OptMagnifyButton
@@ -463,7 +475,14 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
             </Show>
             <div class="block-frame-textelems-wrapper">{headerTextElems}</div>
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
-                <EndIcons viewModel={props.viewModel} nodeModel={props.nodeModel} onContextMenu={onContextMenu} blockView={blockData()?.meta?.view} />
+                <EndIcons
+                    viewModel={props.viewModel}
+                    nodeModel={props.nodeModel}
+                    onContextMenu={onContextMenu}
+                    blockView={blockData()?.meta?.view}
+                    isMinimized={isMinimized}
+                    toggleMinimize={toggleMinimize}
+                />
             </div>
         </div>
     );
@@ -697,6 +716,14 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
     let connBtnRef: { current: HTMLDivElement | null } = { current: null };
     const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
+    const isMinimized = () => !!blockData()?.meta?.["layout:minimized"];
+    const toggleMinimize = () => {
+        const next = !isMinimized();
+        RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: WOS.makeORef("block", nodeModel.blockId),
+            meta: { "layout:minimized": next || null },
+        }).catch(console.error);
+    };
 
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.
@@ -797,10 +824,10 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             class={clsx("block", "block-frame-default", "block-" + nodeModel.blockId, {
                 "block-focused": isFocused() || props.preview,
                 "block-preview": props.preview,
-
                 "has-agent-color": !!blockAgentColor(),
                 ephemeral: isEphemeral(),
                 magnified: isMagnified(),
+                minimized: isMinimized(),
             })}
             data-blockid={nodeModel.blockId}
             onClick={props.blockModel?.onClick}
