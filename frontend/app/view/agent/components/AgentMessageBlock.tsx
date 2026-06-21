@@ -8,6 +8,7 @@
 import clsx from "clsx";
 import { Show, type JSX } from "solid-js";
 import type { AgentMessageNode } from "../types";
+import { LinkifiedText } from "@/app/element/linkified-text";
 
 interface AgentMessageBlockProps {
     node: AgentMessageNode;
@@ -44,7 +45,9 @@ export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element =>
                         <span class="agent-message-to">To: {props.node.to}</span>
                         <span class="agent-message-method">Method: {props.node.method}</span>
                     </div>
-                    <pre class="agent-message-body">{props.node.message}</pre>
+                    <pre class="agent-message-body">
+                        <LinkifiedText text={props.node.message} />
+                    </pre>
                 </div>
             </Show>
         </div>

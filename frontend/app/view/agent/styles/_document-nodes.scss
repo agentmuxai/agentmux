@@ -723,6 +723,22 @@
         }
     }
 
+    // Linkified URLs in plain-text and markdown blocks
+    .agent-message-body,
+    .agent-user-message-content pre,
+    .agent-tool-log-line {
+        a.linkified-url {
+            color: var(--link-color, #60a5fa);
+            text-decoration: underline;
+            text-decoration-color: color-mix(in srgb, var(--link-color, #60a5fa) 40%, transparent);
+            cursor: pointer;
+
+            &:hover {
+                text-decoration-color: var(--link-color, #60a5fa);
+            }
+        }
+    }
+
     // === Subagent Link ===
     .agent-subagent-link {
         display: flex;

@@ -15,6 +15,7 @@ import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { LinkifiedText } from "@/app/element/linkified-text";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode, ToolLogChunk } from "../types";
@@ -158,7 +159,7 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                         <For each={visibleChunks()}>
                             {(chunk) => (
                                 <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                                    {capChars(chunk.content)}
+                                    <LinkifiedText text={capChars(chunk.content)} />
                                 </pre>
                             )}
                         </For>
