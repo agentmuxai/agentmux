@@ -81,7 +81,7 @@
         border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
         background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
         border-radius: 0;
-        cursor: pointer;
+        cursor: default;
         text-align: left;
         color: var(--main-text-color);
         font-family: inherit;
@@ -244,7 +244,7 @@
         font-family: inherit;
         border-radius: 0;
         border: 1px solid transparent;
-        cursor: pointer;
+        cursor: default;
         transition: background 0.12s, border-color 0.12s, opacity 0.12s;
         white-space: nowrap;
 

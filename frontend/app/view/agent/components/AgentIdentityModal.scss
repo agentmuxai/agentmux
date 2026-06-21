@@ -29,7 +29,7 @@
     background: var(--accent-color);
     border: none;
     border-radius: 0;
-    cursor: pointer;
+    cursor: default;
 
     &:hover:not(:disabled) {
         background: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));

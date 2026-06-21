@@ -103,7 +103,7 @@
     border-radius: 0;
     padding: var(--space-0-5) var(--space-1);
     max-width: 140px;
-    cursor: pointer;
+    cursor: default;
 
     &:focus {
         outline: 1px solid var(--accent-color);
@@ -124,7 +124,7 @@
     border-radius: 0;
     color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
     padding: var(--space-0-5) 5px;
-    cursor: pointer;
+    cursor: default;
     white-space: nowrap;
 
     &:hover:not(:disabled) {

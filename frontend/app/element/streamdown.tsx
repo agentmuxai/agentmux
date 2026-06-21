@@ -219,7 +219,7 @@ function Collapsible(props: { title?: JSX.Element; children?: JSX.Element; defau
     return (
         <div class="my-3">
             <button
-                class="flex items-center gap-2 cursor-pointer bg-transparent border-0 p-0 font-medium text-secondary hover:text-primary"
+                class="flex items-center gap-2 bg-transparent border-0 p-0 font-medium text-secondary hover:text-primary"
                 onClick={() => setIsOpen(!isOpen())}
             >
                 <span class="text-[0.65rem] text-primary transition-transform duration-200 inline-block w-3">

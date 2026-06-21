@@ -82,7 +82,7 @@
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm, 0);
-    cursor: pointer;
+    cursor: default;
     transition: background 80ms ease, border-color 80ms ease;
 
     &:hover {
@@ -158,7 +158,7 @@
     border-radius: var(--radius-sm, 0);
     background: transparent;
     color: var(--main-text-color);
-    cursor: pointer;
+    cursor: default;
     font-size: var(--text-sm, 12px);
     transition: background 80ms ease, opacity 80ms ease;
 
@@ -193,7 +193,7 @@
     border: 1px solid var(--accent-color);
     border-radius: var(--radius-md, 0);
     color: var(--main-text-color);
-    cursor: pointer;
+    cursor: default;
     font-size: var(--text-sm, 12px);
 }
 

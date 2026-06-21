@@ -238,7 +238,7 @@
         font-family: inherit;
         font-size: 10px;
         font-weight: 500;
-        cursor: pointer;
+        cursor: default;
         transition: background 80ms ease, border-color 80ms ease;
 
         &:hover {
@@ -296,7 +296,7 @@
         align-items: center;
         gap: var(--space-1);
         padding: 3px var(--space-1-5);
-        cursor: pointer;
+        cursor: default;
         user-select: none;
         color: var(--secondary-text-color);
 
@@ -352,7 +352,7 @@
         padding: var(--space-0-5) var(--space-1);
         font-size: 11px;
         font-family: inherit;
-        cursor: pointer;
+        cursor: default;
         outline: none;
 
         &:hover {

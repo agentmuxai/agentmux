@@ -153,7 +153,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
-    cursor: pointer;
+    cursor: default;
     padding: var(--space-0-5) 0;
     font-size: 12px;
     user-select: none;
@@ -228,7 +228,7 @@
     background: var(--panel-bg-color);
     color: var(--main-text-color);
     font-size: 11px;
-    cursor: pointer;
+    cursor: default;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     z-index: 10;
 

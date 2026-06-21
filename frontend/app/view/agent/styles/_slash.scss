@@ -38,7 +38,7 @@
         align-items: baseline;
         gap: var(--space-2);
         padding: var(--space-1) 10px;
-        cursor: pointer;
+        cursor: default;
         line-height: 1.4;
         color: var(--main-text-color);
 
@@ -103,7 +103,7 @@
         align-items: baseline;
         gap: 10px;
         padding: var(--space-1) 10px;
-        cursor: pointer;
+        cursor: default;
         line-height: 1.4;
         color: var(--main-text-color);
 
@@ -172,7 +172,7 @@
         background: none;
         border: 1px solid transparent;
         border-radius: 0;
-        cursor: pointer;
+        cursor: default;
         color: var(--secondary-text-color);
         font-size: 16px;
         line-height: 1;
@@ -216,7 +216,7 @@
         align-items: baseline;
         gap: var(--space-2);
         padding: 3px 10px;
-        cursor: pointer;
+        cursor: default;
         line-height: 1.4;
         color: var(--main-text-color);
 

@@ -38,7 +38,7 @@
             color: var(--secondary-text-color);
             font: inherit;
             text-align: left;
-            cursor: pointer;
+            cursor: default;
             transition: background 80ms ease;
 
             &:hover {
@@ -237,7 +237,7 @@
         color: #fff; /* stylelint-disable-line color-no-hex */
         border: none;
         border-radius: 0;
-        cursor: pointer;
+        cursor: default;
         opacity: 0;
         transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);

@@ -312,7 +312,7 @@ function SuggestionControlInner(props: SuggestionControlInnerProps): JSX.Element
                             {(suggestion, index) => (
                                 <div
                                     class={clsx(
-                                        "flex items-center gap-3 px-4 py-2 cursor-pointer",
+                                        "flex items-center gap-3 px-4 py-2",
                                         index() === selectedIndex() ? "bg-accentbg" : "hover:bg-hoverbg",
                                         "text-gray-100"
                                     )}

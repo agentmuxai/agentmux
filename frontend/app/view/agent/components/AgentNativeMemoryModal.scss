@@ -98,7 +98,7 @@
     color: var(--main-text-color);
     font-size: var(--text-sm);
     text-align: left;
-    cursor: pointer;
+    cursor: default;
 
     &:hover {
         background: var(--hover-bg-color);
@@ -143,7 +143,7 @@
     color: var(--accent-color);
     font-size: var(--text-sm);
     text-align: left;
-    cursor: pointer;
+    cursor: default;
 
     &:hover {
         background: var(--hover-bg-color);
@@ -254,7 +254,7 @@
     border: 1px solid var(--border-color);
     background: transparent;
     color: var(--main-text-color);
-    cursor: pointer;
+    cursor: default;
     transition: opacity 0.1s;
 
     &:hover:not(:disabled) {

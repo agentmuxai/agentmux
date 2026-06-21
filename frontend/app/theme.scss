@@ -305,7 +305,8 @@
     // give the arrow, it gives the host's `text`/`pointer`. The `.u-cursor-*`
     // utilities + the `scripts/check-scrollbar-cursor.sh` grep gate keep this
     // honest. See `docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`.
-    --cursor-interactive: pointer;     // buttons, links, clickable rows
+    --cursor-interactive: default;     // interactive controls (buttons, menus, tabs) — arrow, not hand
+    --cursor-link:        pointer;     // hyperlinks and filesystem-path openers ONLY
     --cursor-default:     default;     // arrow — surfaces, scroll thumbs, chrome
     --cursor-text:        text;        // editable text
     --cursor-disabled:    not-allowed; // disabled controls

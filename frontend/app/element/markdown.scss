@@ -241,7 +241,7 @@
             }
 
             .toc-item {
-                cursor: pointer;
+                cursor: default;
                 --indent-factor: 1;
                 // The offset in the padding will ensure that when the text in the item wraps, it indents slightly.
                 // The indent factor is set in the React code and denotes the depth of the item in the TOC tree.

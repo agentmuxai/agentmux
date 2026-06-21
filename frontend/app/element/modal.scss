@@ -177,7 +177,7 @@
     color: var(--secondary-text-color);
     font-size: var(--text-md);
     line-height: 1;
-    cursor: pointer;
+    cursor: default;
     transition: all var(--motion-fast);
 
     &:hover {
@@ -241,7 +241,7 @@
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
     color: var(--main-text-color);
-    cursor: pointer;
+    cursor: default;
     transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 
     &:hover:not(:disabled) {

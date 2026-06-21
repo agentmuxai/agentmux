@@ -28,7 +28,7 @@
         border-radius: 0;
         color: inherit;
         font-family: inherit;
-        cursor: pointer;
+        cursor: default;
         transition: background 90ms ease, border-color 90ms ease;
 
         &:hover {
@@ -148,7 +148,7 @@
         background: transparent;
         border: none;
         color: var(--secondary-text-color);
-        cursor: pointer;
+        cursor: default;
         font-size: 13px;
         padding: 2px 4px;
 
@@ -176,7 +176,7 @@
         color: inherit;
         font-family: inherit;
         text-align: left;
-        cursor: pointer;
+        cursor: default;
         transition: background 90ms ease, border-color 90ms ease;
 
         &:hover {

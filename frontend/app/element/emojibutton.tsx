@@ -32,7 +32,7 @@ export const EmojiButton = (props: {
             <button
                 onClick={props.onClick}
                 class={cn(
-                    "px-2 py-1 rounded border cursor-pointer transition-colors",
+                    "px-2 py-1 rounded border transition-colors",
                     props.isClicked
                         ? "bg-accent/20 border-accent text-accent"
                         : "bg-transparent border-border/50 text-foreground/70 hover:border-border",

@@ -64,7 +64,7 @@
 
     .agent-picker-hidden-templates-header {
         all: unset;
-        cursor: pointer;
+        cursor: default;
         font-size: var(--text-sm, 0.875rem);
         font-weight: 600;
         color: color-mix(in srgb, var(--main-text-color) 60%, transparent);
@@ -122,7 +122,7 @@
 
     .agent-picker-hidden-template-unhide-btn {
         all: unset;
-        cursor: pointer;
+        cursor: default;
         padding: 4px 10px;
         border-radius: 0;
         font-size: var(--text-xs, 0.75rem);
@@ -152,7 +152,7 @@
         border: 1px solid var(--border-color);
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
         border-radius: 0;
-        cursor: pointer;
+        cursor: default;
         transition: all 0.15s;
         color: var(--main-text-color);
         text-align: left;
@@ -246,7 +246,7 @@
             background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
             border: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
             border-radius: 0;
-            cursor: pointer;
+            cursor: default;
             opacity: 0;
             transition: opacity 0.12s ease-out, background 0.12s, color 0.12s, border-color 0.12s;
             pointer-events: none;
@@ -371,7 +371,7 @@
             border-radius: 0;
             color: var(--main-text-color);
             font-size: 11px;
-            cursor: pointer;
+            cursor: default;
             flex-shrink: 0;
 
             &:hover {
@@ -441,7 +441,7 @@
             color: var(--secondary-text-color);
             border-radius: 0;
             font-size: 12px;
-            cursor: pointer;
+            cursor: default;
             transition: all 0.1s;
 
             &:hover:not(.active) {
@@ -464,7 +464,7 @@
             background: transparent;
             color: var(--secondary-text-color);
             font-size: 14px;
-            cursor: pointer;
+            cursor: default;
             border-radius: 0;
 
             &:hover {

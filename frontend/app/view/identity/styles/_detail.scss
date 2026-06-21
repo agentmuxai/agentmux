@@ -92,7 +92,7 @@
     font-size: 12px;
     border-radius: 0;
     border: 1px solid transparent;
-    cursor: pointer;
+    cursor: default;
     transition: opacity 0.1s;
 
     &:hover { opacity: 0.85; }

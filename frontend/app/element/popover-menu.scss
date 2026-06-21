@@ -19,7 +19,7 @@
 }
 
 .popover-menu-section-header {
-    cursor: pointer;
+    cursor: default;
     color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.65));
     font-size: 11px;
     text-transform: uppercase;

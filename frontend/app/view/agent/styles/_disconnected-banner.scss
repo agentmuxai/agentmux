@@ -51,7 +51,7 @@
     .agent-disconnected-banner-action {
         background: none;
         border: 1px solid color-mix(in srgb, var(--error-color) 50%, transparent);
-        cursor: pointer;
+        cursor: default;
         padding: var(--space-0-5) var(--space-1-5);
         color: var(--error-color);
         font-size: 11px;

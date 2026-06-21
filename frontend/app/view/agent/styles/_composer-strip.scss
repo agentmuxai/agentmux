@@ -22,7 +22,7 @@
     background: color-mix(in srgb, var(--main-bg-color) 96%, var(--main-text-color));
     border-top: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
-    cursor: pointer;
+    cursor: default;
     user-select: none;
     transition: background 0.08s;
 
@@ -116,7 +116,7 @@
     background: color-mix(in srgb, var(--accent-color) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
     border-radius: 0;
-    cursor: pointer;
+    cursor: default;
 
     &:hover {
         background: color-mix(in srgb, var(--accent-color) 20%, transparent);
@@ -148,7 +148,7 @@
     font-size: 12px;
     line-height: 1;
     color: var(--secondary-text-color);
-    cursor: pointer;
+    cursor: default;
     transition: color 0.08s;
 
     .agent-composer-strip:hover & {

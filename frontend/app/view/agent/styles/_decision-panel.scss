@@ -45,7 +45,7 @@
     color: var(--warning-color);
     font-family: inherit;
     font-size: 11px;
-    cursor: pointer;
+    cursor: default;
     text-align: left;
     transition: background 80ms ease, border-color 80ms ease;
     flex-shrink: 0;
@@ -190,7 +190,7 @@
     gap: var(--space-1-5);
     padding: var(--space-0-5) var(--space-1);
     border-radius: 0;
-    cursor: pointer;
+    cursor: default;
     transition: background 80ms ease;
 
     &:hover {
@@ -265,7 +265,7 @@
     font-size: 12px;
     font-weight: 500;
     border-radius: 0;
-    cursor: pointer;
+    cursor: default;
     border: 1px solid transparent;
     transition: background 80ms ease, border-color 80ms ease;
 
