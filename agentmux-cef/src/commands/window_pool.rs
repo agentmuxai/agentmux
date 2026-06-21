@@ -48,6 +48,14 @@ use crate::state::{AppState, WindowKind, WindowMeta};
 /// `Send + Sync` without `unsafe`; callers cast back to `HWND` /
 /// `*mut c_void` at use site.
 #[cfg(target_os = "windows")]
+static POOL_HWND_CACHE: std::sync::OnceLock<Mutex<HashMap<String, usize>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+fn pool_hwnd_cache() -> &'static Mutex<HashMap<String, usize>> {
+    POOL_HWND_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Global cache of pool windows' CEF Views `Window`, captured at
 /// `on_window_created` (UI thread) and consumed by a promote UI task. The
 /// macOS/Linux `state.windows` registry is cfg-gated OFF on Windows, and
@@ -87,14 +95,6 @@ pub fn cache_pool_window_view(label: &str, window: &cef::Window) {
 #[cfg(target_os = "windows")]
 pub fn take_pool_window_view(label: &str) -> Option<cef::Window> {
     pool_window_views().lock().unwrap().remove(label)
-}
-
-static POOL_HWND_CACHE: std::sync::OnceLock<Mutex<HashMap<String, usize>>> =
-    std::sync::OnceLock::new();
-
-#[cfg(target_os = "windows")]
-fn pool_hwnd_cache() -> &'static Mutex<HashMap<String, usize>> {
-    POOL_HWND_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// HWND cache for pane pool windows. Separate from `POOL_HWND_CACHE` because
