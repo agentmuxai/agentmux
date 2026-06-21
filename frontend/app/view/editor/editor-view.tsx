@@ -108,9 +108,9 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
     // block meta, same path used by terminal/agent/swarm). Capture phase so
     // we intercept before CodeMirror's bubble-phase wheel; preventDefault
-    // suppresses CEF's native Ctrl+Scroll page zoom. The view's CSS var
-    // `--editor-zoom` (bound below) drives both the CodeMirror font-size
-    // and the file-tree font-size, so both resize in lockstep.
+    // suppresses CEF's native Ctrl+Scroll page zoom. The resulting zoom
+    // factor is applied as a CSS `zoom` property on .editor-view (see below),
+    // scaling the entire subtree uniformly.
     onMount(() => {
         if (!rootRef) return;
         const handleCtrlWheel = (ev: WheelEvent) => {
