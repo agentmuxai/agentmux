@@ -409,6 +409,32 @@ pub fn get_monitor_work_area(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
     }
 }
 
+/// Like [`get_monitor_work_area`] but returns the work area in **physical**
+/// pixels (no DIP division). Win32 `SetWindowPos`/`GetWindowRect` operate in
+/// physical pixels, so clamping a physical-pixel window rect must use physical
+/// work-area bounds — using the DIP variant over-constrains placement on HiDPI
+/// (reagent P1 on PR #1652). Returns `(left, top, width, height)`.
+#[cfg(target_os = "windows")]
+pub fn get_monitor_work_area_physical(px: i32, py: i32) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    };
+    unsafe {
+        let point = windows_sys::Win32::Foundation::POINT { x: px, y: py };
+        let hmonitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
+        if hmonitor.is_null() {
+            return None;
+        }
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetMonitorInfoW(hmonitor, &mut info) == 0 {
+            return None;
+        }
+        let rc = info.rcWork;
+        Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
     // TODO: Use NSScreen.main.visibleFrame for proper work area (minus Dock/menu bar).
