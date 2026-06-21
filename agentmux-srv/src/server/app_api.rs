@@ -395,7 +395,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //    missing and overwrites whatever's there. Same-
                 //    name same-hour launches will share a workdir;
                 //    proper allocation is tracked as a follow-up.
-                write_agent_config_files(&wstore, &agent, &agent_slug, &work_dir)?;
+                write_agent_config_files(&wstore, &agent, routing_id, &work_dir)?;
 
                 // 9. Register controller (resync)
                 let block_for_resync = wstore.must_get::<Block>(&block_id)
