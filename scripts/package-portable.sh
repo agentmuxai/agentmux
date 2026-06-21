@@ -35,6 +35,21 @@ for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-s
     fi
 done
 
+# Phase 3 sandbox preflight (issue #1374). A sandbox build (the default
+# `--features sandbox`) produces CEF's `bootstrap.exe` plus the cdylib
+# `agentmux_cef.dll`; the host entry point is bootstrap (renamed), which loads
+# the DLL and passes a real `sandbox_info` to `CefExecuteProcess`.
+# NOTE: the cdylib is emitted unconditionally (crate-type = ["cdylib","rlib"]),
+# so its presence does NOT indicate a sandbox build. `bootstrap.exe` is only
+# produced by cef-dll-sys when the `cef/sandbox` feature is active — use it
+# as the sandbox discriminator throughout this script.
+# If bootstrap.exe is present but the DLL is missing, packaging is broken.
+if [ -f target/release/bootstrap.exe ] && [ ! -f target/release/agentmux_cef.dll ]; then
+    echo "ERROR: bootstrap.exe (sandbox build) found but target/release/agentmux_cef.dll is missing —" >&2
+    echo "       cannot stage the Phase-3 host. Re-run 'task build:host' (sandbox feature) and retry." >&2
+    exit 1
+fi
+
 # Refuse to wipe a portable that's currently running. Without this guard,
 # `rm -rf "$PORTABLE"` will silently delete the on-disk files of a live
 # install — NTFS lets you unlink mapped exe/dll files, so the process
@@ -109,8 +124,20 @@ It is safe to back up. Do not delete it while AgentMux is running.
   data/cef/      — browser cache (safe to delete when app is closed)
 DATAEOF
 
-# Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions
-cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
+# Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions.
+# Phase 3 sandbox (#1374): bootstrap.exe presence means sandbox feature was ON.
+# bootstrap.exe becomes the host entry point (renamed); it loads the cdylib and
+# passes real sandbox_info. Versioned names keep exe↔dll basenames matched so
+# bootstrap resolves the right DLL. Without bootstrap.exe (--no-default-features)
+# the raw bin runs the no_sandbox path directly.
+if [ -f target/release/bootstrap.exe ]; then
+    cp target/release/bootstrap.exe    "$PORTABLE/runtime/agentmux-$VERSION.exe"
+    cp target/release/agentmux_cef.dll "$PORTABLE/runtime/agentmux-$VERSION.dll"
+else
+    echo "WARNING: no target/release/bootstrap.exe — packaging a NON-SANDBOX host (raw bin)." >&2
+    echo "         Build with the default 'sandbox' feature for a sandboxed Windows portable." >&2
+    cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
+fi
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
 # Streaming bash wrapper — invoked by Claude's Bash subprocess via the
@@ -213,8 +240,15 @@ bundle_tool \
     "d0f534024c42afd6cb4d38907c25cd2b249b79bbe6cc1dbee8e3e37c2b6e25a1" \
     "ripgrep-14.1.1-x86_64-pc-windows-msvc/rg.exe"
 
-# Verify versions match
-CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.exe" | head -1)
+# Verify versions match. In a sandbox build the host exe is CEF's bootstrap.exe
+# (no agentmux version baked in) — the agentmux version lives in the cdylib DLL
+# (env!("CARGO_PKG_VERSION")) — so verify the DLL when it was staged, else the
+# raw bin. (reagent P1 #1633.)
+if [ -f "$PORTABLE/runtime/agentmux-$VERSION.dll" ]; then
+    CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.dll" | head -1)
+else
+    CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.exe" | head -1)
+fi
 SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-srv-$VERSION-windows.x64.exe" | head -1)
 if [ "$CEF_VER" != "$VERSION" ] || [ "$SRV_VER" != "$VERSION" ]; then
     echo "ERROR: Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION" >&2

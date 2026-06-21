@@ -10,11 +10,17 @@ rust-version = "1.77"
 name = "agentmux-cef"
 path = "src/main.rs"
 
+[lib]
+name = "agentmux_cef"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
 [features]
-# Sandbox ON by default for macOS (Seatbelt/libcef_sandbox.dylib) and Linux
-# (kernel namespace isolation). Windows sandbox is Phase 3 (DLL wrapper +
-# bootstrap.exe, issue #1374) and remains unconditionally disabled at runtime
-# via the cfg!(target_os = "windows") guard even when this feature is active.
+# Sandbox ON by default on all platforms:
+#   macOS  — Seatbelt via libcef_sandbox.dylib (Phases 1+2)
+#   Linux  — kernel namespace isolation (Phases 1+2)
+#   Windows — bootstrap.exe DLL wrapper pattern (Phase 3, issue #1374)
+# Disable at runtime with AGENTMUX_UNSAFE_NOSANDBOX=1.
 default = ["sandbox"]
 sandbox = ["cef/sandbox"]
 # Opt-in for dev_authfile unit tests that touch the filesystem and Win32 ACL APIs
