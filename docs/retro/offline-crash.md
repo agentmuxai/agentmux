@@ -43,7 +43,7 @@ An idle watchdog that killed the backend when WebSocket client count hit 0 for 3
 
 `diag(backend): enrich backend-terminated event with pid, uptime, exit-code (v0.32.74)`
 
-The [`BACKEND_RESILIENCE_SPEC`](../specs/backend-resilience.md) was created and the diagnostics phase was shipped:
+A backend resilience spec was created (since removed with Tauri cleanup) and the diagnostics phase was shipped:
 - `Terminated` handler upgraded from `warn!` → `error!` (flushes immediately)
 - Payload enriched with `pid`, `uptime_secs`
 - `BackendDeathInfo` atom in frontend
@@ -115,10 +115,10 @@ The enriched `backend-terminated` event showed the exit code. It looked informat
 
 - **Permanent "Offline" with no recovery** — user must restart the app
 - **No crash dump collection** — 0xC0000409 crashes are completely opaque
-- **`restart_backend` command** — specced in [`BACKEND_RESILIENCE_SPEC`](../specs/backend-resilience.md), not implemented
+- **`restart_backend` command** — planned in backend resilience spec, not implemented
 - **`reconnectRpcClient`** — not implemented
 - **Heartbeat-based crash recovery** — specced in `specs/backend-lifecycle.md`, not implemented
 - **`backendStatusAtom` init** — still `"running"`, should be `"connecting"`
 - **Version link** — still active when offline (spec said to suppress it)
 
-All of these are tracked in [`BACKEND_RESILIENCE_SPEC`](../specs/backend-resilience.md) (Phase 2 items) and [`OFFLINE_CRASH_ANALYSIS`](../analysis/offline-crash.md).
+All of these are tracked as Phase 2 items in [`OFFLINE_CRASH_ANALYSIS`](../analysis/offline-crash.md).
