@@ -1560,6 +1560,11 @@ class RpcApiType {
         return client.rpcCall("session:digest", data, opts);
     }
 
+    // command "session:activity_summary" [call] — per-turn live mini-summary via Haiku
+    AgentActivitySummaryCommand(client: RpcClient, data: CommandActivitySummaryData, opts?: RpcOpts): Promise<ActivitySummaryResult> {
+        return client.rpcCall("session:activity_summary", data, opts);
+    }
+
     // command "session:archive" [call]
     SessionArchiveCommand(client: RpcClient, data: CommandSessionArchiveData, opts?: RpcOpts): Promise<SessionArchiveResult> {
         return client.rpcCall("session:archive", data, opts);

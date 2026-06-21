@@ -42,6 +42,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_blockfile_read_state(engine, state);
     register_blockfile_write_state(engine, state);
     register_session_digest(engine, state);
+    register_session_activity_summary(engine, state);
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
     register_session_export_handler(engine, state);
@@ -2028,6 +2029,206 @@ fn register_session_digest(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+// ---------------------------------------------------------------------------
+// session:activity_summary — per-turn live mini-summary via Haiku
+// ---------------------------------------------------------------------------
+
+fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let filestore = state.filestore.clone();
+    let broker = state.broker.clone();
+
+    engine.register_handler(
+        COMMAND_SESSION_ACTIVITY_SUMMARY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let filestore = filestore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandActivitySummaryData = serde_json::from_value(data)
+                    .map_err(|e| format!("session:activity_summary: {e}"))?;
+
+                let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
+
+                let block: Block = wstore
+                    .get(&cmd.block_id)
+                    .map_err(|e| format!("session:activity_summary: {e}"))?
+                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+
+                // Read last 30 lines from FileStore, falling back to WPS ring buffer.
+                let all_lines: Vec<String> = {
+                    let filestore_lines = match filestore.stat(&cmd.block_id, "output") {
+                        Ok(Some(ref wf)) if wf.size > 0 => {
+                            match filestore.read_file(&cmd.block_id, "output") {
+                                Ok(Some(bytes)) => {
+                                    let text = String::from_utf8_lossy(&bytes);
+                                    Some(text.lines()
+                                        .filter(|l| !l.trim().is_empty())
+                                        .map(|l| l.to_string())
+                                        .collect::<Vec<_>>())
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(lines) = filestore_lines {
+                        lines
+                    } else {
+                        let scope = format!("block:{}", cmd.block_id);
+                        let events = broker.read_event_history(
+                            crate::backend::wps::EVENT_BLOCK_FILE,
+                            &scope,
+                            usize::MAX,
+                        );
+                        let mut lines: Vec<String> = Vec::new();
+                        for event in events {
+                            let Some(ref ed) = event.data else { continue };
+                            if ed.get("filename").and_then(|v| v.as_str()).unwrap_or("") != "output" { continue; }
+                            if let Some(d64) = ed.get("data64").and_then(|v| v.as_str()) {
+                                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(d64) {
+                                    let text = String::from_utf8_lossy(&bytes);
+                                    for line in text.lines() {
+                                        if !line.trim().is_empty() {
+                                            lines.push(line.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        lines
+                    }
+                };
+
+                let n = all_lines.len();
+                let start = n.saturating_sub(30);
+                let window: Vec<&str> = all_lines[start..].iter().map(|s| s.as_str()).collect();
+
+                if window.is_empty() {
+                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
+                        summary: String::new(),
+                    }).unwrap()));
+                }
+
+                let extracted = extract_digest_text(&window);
+                if extracted.is_empty() {
+                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
+                        summary: String::new(),
+                    }).unwrap()));
+                }
+
+                let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+                if cli_path.is_empty() {
+                    tracing::debug!(block_id = %cmd.block_id, "session:activity_summary: no CLI path in meta");
+                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
+                        summary: String::new(),
+                    }).unwrap()));
+                }
+
+                let prompt = format!(
+                    "Summarize in {word_target} words or fewer what is currently being worked on. \
+                     Use a short terse phrase with no quotes or punctuation.\n\n\
+                     Recent activity:\n\n{extracted}"
+                );
+
+                let summary = invoke_cli_for_activity(&cli_path, &prompt, &block.meta).await
+                    .unwrap_or_else(|e| {
+                        tracing::debug!(block_id = %cmd.block_id, error = %e, "session:activity_summary: CLI failed");
+                        String::new()
+                    });
+
+                if !summary.is_empty() {
+                    let mut meta_update = obj::MetaMapType::new();
+                    meta_update.insert("term:activity".to_string(), json!(summary.clone()));
+                    if let Err(e) = crate::server::service::update_object_meta(
+                        &wstore,
+                        &format!("block:{}", cmd.block_id),
+                        &meta_update,
+                    ) {
+                        tracing::debug!(block_id = %cmd.block_id, error = %e, "session:activity_summary: failed to write meta");
+                    }
+                }
+
+                Ok(Some(serde_json::to_value(&ActivitySummaryResult { summary }).unwrap()))
+            })
+        }),
+    );
+}
+
+/// Invoke the Claude CLI with Haiku model for a lightweight per-turn activity summary.
+/// Uses `--model claude-haiku-4-5-20251001` and a 15s timeout.
+async fn invoke_cli_for_activity(
+    cli_path: &str,
+    prompt: &str,
+    meta: &obj::MetaMapType,
+) -> Result<String, String> {
+    let auth_env: std::collections::HashMap<String, String> = match meta.get("cmd:env") {
+        Some(serde_json::Value::Object(obj_map)) => obj_map
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    };
+
+    let mut child = crate::server::cli_handlers::make_cli_cmd(cli_path)
+        .args(["-p", "--output-format", "stream-json", "--verbose",
+               "--model", "claude-haiku-4-5-20251001"])
+        .envs(&auth_env)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("failed to spawn activity CLI: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        stdin.write_all(prompt.as_bytes()).await
+            .map_err(|e| format!("activity CLI stdin write: {e}"))?;
+        stdin.shutdown().await
+            .map_err(|e| format!("activity CLI stdin shutdown: {e}"))?;
+    }
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        child.wait_with_output(),
+    )
+    .await
+    .map_err(|_| "activity CLI timed out after 15s".to_string())?
+    .map_err(|e| format!("activity CLI wait: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!("activity CLI exited with status {}", output.status));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut last_text = String::new();
+    for line in stdout.lines() {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if val.get("type").and_then(|v| v.as_str()) == Some("assistant") {
+            if let Some(content) = val.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for block in content {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            last_text = text.trim().to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if last_text.is_empty() {
+        return Err("no text in activity CLI response".to_string());
+    }
+
+    Ok(last_text)
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.
