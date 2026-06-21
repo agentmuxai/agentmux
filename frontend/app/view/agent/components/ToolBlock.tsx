@@ -121,10 +121,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 and
     // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md — the 3 s
     // post-completion timer was replaced by scroll-position-driven collapse.
+    const isFailTerminal = (): boolean => {
+        const s = props.node.status;
+        return s === "failed" || s === "denied" || s === "canceled";
+    };
     const autoExpanded = (): boolean => {
         const s = props.node.status;
         return s === "running" || s === "pending_approval"
-            || !!props.heldOpen;
+            || (!isFailTerminal() && !!props.heldOpen);
     };
     // Hover-to-peek was removed in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28
     // — expansion is now driven exclusively by pin + active-state auto-
