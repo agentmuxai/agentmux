@@ -46,6 +46,7 @@
 import clsx from "clsx";
 import { Show, createSignal, onCleanup, type JSX } from "solid-js";
 import type { UserMessageNode } from "../types";
+import { LinkifiedText } from "@/app/element/linkified-text";
 import {
     findScrollContainerRect,
     maxOverlayHeight,
@@ -241,7 +242,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                             {props.pinned ? "✕" : "📌"}
                         </button>
                     </Show>
-                    <pre>{props.node.message}</pre>
+                    <pre><LinkifiedText text={props.node.message} /></pre>
                 </div>
             </Show>
         </div>

@@ -32,6 +32,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { openLink } from "../store/global";
+import { rehypeLinkify } from "./rehype-linkify";
 import { IconButton } from "./iconbutton";
 import "./markdown.scss";
 
@@ -478,6 +479,7 @@ const Markdown = (props: MarkdownProps) => {
                   rehypeRaw,
                   ...((props.highlight ?? true) ? [rehypeHighlight] : []),
                   rehypeAlignToClass,
+                  rehypeLinkify,
                   () =>
                       rehypeSanitize({
                           ...defaultSchema,
