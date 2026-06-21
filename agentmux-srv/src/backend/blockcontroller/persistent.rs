@@ -563,6 +563,20 @@ impl PersistentSubprocessController {
 
         core::apply_working_dir(&mut cmd, &self.block_id, &config.working_dir, &config.env_vars);
 
+        // On Windows: suppress console-window allocation. The srv runs without a
+        // console of its own, so spawning the agent CLI without CREATE_NO_WINDOW
+        // makes Windows allocate a fresh console — which Windows 11's default-
+        // terminal handler renders as a NEW Windows Terminal window. One leaks per
+        // agent start / resume / respawn; a flapping or restart-heavy session
+        // accumulates dozens. stdio is piped here, so the console is never needed.
+        // See docs/retro/retro-windows-terminal-window-leak-2026-06-21.md.
+        // Matches acp.rs / subprocess.rs; sibling of shell.rs's PTY path.
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());

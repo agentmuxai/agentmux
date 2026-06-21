@@ -123,6 +123,15 @@ pub(crate) async fn run_agent_with_bin(
     if let Some(n) = task.max_turns {
         cmd.arg("--max-turns").arg(n.to_string());
     }
+    // On Windows: suppress console-window allocation. Spawned from the windowless
+    // srv without CREATE_NO_WINDOW, this one-shot task-agent CLI opens a Windows
+    // Terminal window per run (Win11 default-terminal handler). stdio is piped, so
+    // no console is needed. See docs/retro/retro-windows-terminal-window-leak-2026-06-21.md.
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     let mut child = cmd
         .arg(&task.prompt)
         .current_dir(&working_dir)
