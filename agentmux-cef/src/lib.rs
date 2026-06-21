@@ -197,36 +197,38 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         .map(|v| v.trim() == "1")
         .unwrap_or(false);
 
-    // macOS sandbox availability: the cef::sandbox::Sandbox type resolves
-    // libcef_sandbox.dylib via a path relative to current_exe() that is only
-    // valid when running as a Helper app inside a packaged .app bundle:
-    //   ../../../Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib
-    // In `task dev` the renderer re-execs the flat binary in dist/cef-dev/, so
-    // the path lands three levels above the build tree — no dylib there.
-    // We check existence once and use it in two places:
-    //   1. Seatbelt init (subprocess only) — skip if not in bundle.
-    //   2. no_sandbox flag to CefInitialize — must also be 1 when not in bundle,
-    //      otherwise CEF tries to sandbox GPU/network/renderer processes and they
-    //      get killed by the OS before they can start.
+    // macOS sandbox availability: probe for libcef_sandbox.dylib to detect
+    // whether we are running inside a packaged .app bundle. Two uses:
+    //   1. Seatbelt init (subprocess only) — skip if dylib not reachable.
+    //   2. no_sandbox flag to CefInitialize — must be 1 when not in bundle,
+    //      otherwise CEF kills GPU/network/renderer with a sandbox error.
+    //
+    // The path is relative to current_exe().parent() and differs by role
+    // because the Host and Helper processes live at different depths:
+    //
+    //   Host   — Contents/MacOS/AgentMux
+    //            → ../Frameworks/Chromium Embedded Framework.framework/…
+    //
+    //   Helper — Contents/Frameworks/AgentMux Helper.app/Contents/MacOS/AgentMux Helper
+    //            → ../../../Chromium Embedded Framework.framework/…
+    //
+    // In task dev neither path exists (flat dist/cef-dev/ tree), so the probe
+    // returns false for both roles → sandbox skipped, no crash.
     #[cfg(all(target_os = "macos", feature = "sandbox"))]
     let macos_sandbox_available = {
-        const LIBCEF_SANDBOX_REL: &str =
-            "../../../Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib";
+        let is_subprocess = std::env::args().any(|a| a.starts_with("--type="));
+        let rel: &str = if is_subprocess {
+            "../../../Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib"
+        } else {
+            "../Frameworks/Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib"
+        };
         std::env::current_exe()
             .ok()
-            .and_then(|p| p.parent().map(|d| d.join(LIBCEF_SANDBOX_REL)))
+            .and_then(|p| p.parent().map(|d| d.join(rel)))
             .map(|p| p.exists())
             .unwrap_or(false)
     };
 
-    // macOS: initialize Seatbelt sandbox context BEFORE the CEF framework is
-    // loaded. This is the order required by CEF (cefsimple/process_helper_mac.cc):
-    //   1. cef_sandbox_initialize     ← here, before dlopen
-    //   2. LoadInHelper / _library    ← CEF framework loaded within the sandbox
-    //   3. CefExecuteProcess
-    // Subprocess mode is detected from raw argv (--type=…) because cef::Args
-    // cannot be parsed until after the framework is loaded. Browser process
-    // skips this entirely — the host process is unsandboxed by design.
     // Non-macOS / sandbox-off: define macos_sandbox_available as a no-op
     // placeholder so the no_sandbox computation below compiles on all targets.
     // On those targets cfg!(all(target_os="macos",feature="sandbox")) is false,
