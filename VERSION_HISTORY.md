@@ -1,5 +1,36 @@
 # AgentMux Version History
 
+## 0.47.0 — 2026-06-20
+
+- feat(sound): ambient waiting tone when agent is blocked for user input
+- feat(pool): pane tear-off pool on macOS/Linux — floating-pool-{uuid} pre-warmed frameless windows
+- feat(pool): Windows pane tear-off pool — WS_POPUP pre-warmed floating-pool windows
+- feat(tear-off): resize mother window when tearing off a full-height pane column
+- feat(muxbus): auto-register agents with cloud subscriber at spawn/stop
+- feat(linux): session-aware startup splash (X11 + Wayland backends)
+- feat(trust-center): rename Memory bundles to Presets; presets are provider-agnostic
+- fix(mcp): prefer AGENTMUX_BLOCKID over AGENTMUX_AGENT_BUS_ID for shell scope
+- fix(win32): suppress console windows for bashwrap and persistent shell spawns
+- feat(voice): Whisper STT engine — capture audio and transcribe via Groq
+- security(cef): enable renderer sandbox on macOS and Linux (issue #1374)
+- feat(voice): offline whisper.cpp backend (whisper-local engine)
+- fix(auth): provider environment isolation — agents read/refresh credentials in the AgentMux dir, never the user's ~/.claude (provider-isolation auth half: migration reversal of #983 pointer-to-ambient + sweep + hardened seed target)
+- feat(voice): auto-download whisper model for the local engine
+- fix(editor): markdown preview width, first-open blank render, and tab path tooltip
+- chore(M1): set VITE_MUXBUS_CLIENT_ID from deployed Cognito stack
+- feat(agent): context compaction transcript marker
+- fix(linux-splash): fade-out, rounded corners, and primary-monitor centering
+- feat(agent-pane): aggressive URL hyperlinking — linkify-it detects bare domains, localhost:PORT, and https:// links in all agent pane text nodes
+- security(cef): enable renderer sandbox on Windows via DLL wrapper pattern (issue #1374)
+- feat(tab): larger close button, context-menu dismiss, close-confirm modal
+- fix(macos): add LSUIElement to launcher Info.plist to eliminate duplicate Dock icon on macOS 26 Tahoe
+- fix(cef): disable macOS renderer sandbox in dev — skip Seatbelt init and pass no_sandbox=1 when libcef_sandbox.dylib is absent (task dev flat layout)
+- fix(ui): pane tear-off renders full window instead of floating pane when using pool fast path
+- fix(cef): root per-window browser contexts under root_cache_path (stop in-memory fallback) + pick a free remote-debugging port per instance (stop multi-instance bind() collision)
+- fix(cursor): restrict hand cursor to hyperlinks only — arrow on all UI controls
+- fix(exec): pin Claude CLI to 2.1.185, annotate detect_cli as informational-only (INV-X)
+
+
 ## 0.46.6 — 2026-06-20
 
 - fix(win32): bind floater cascade to source window; fix z-order and multi-window regression
