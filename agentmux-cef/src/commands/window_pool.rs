@@ -887,34 +887,34 @@ pub fn promote_pool_window(
             None => (pos_x, pos_y, win_w, win_h),
         };
 
-    // Take the window out of WS_EX_TOOLWINDOW so the promoted window
-    // appears in the taskbar / Alt+Tab like any other AgentMux
-    // instance. Must run BEFORE the position/show below; otherwise
-    // the taskbar entry won't appear until the next style refresh.
-    set_taskbar_hidden(raw_hwnd, false);
-
-    // Reposition + raise to top + show. SWP_NOZORDER is intentionally
-    // *not* set — for tear-off we need the new window at the top of
-    // the Z-order so the subsequent SC_MOVE handshake routes the
-    // mouse-capture correctly. With SWP_NOZORDER set, HWND_TOP would
-    // be silently ignored.
+    // FIX — Stage 0 (RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21,
+    // cef#3638): position the window at its final ON-SCREEN rect while it is still
+    // HIDDEN, then perform the FIRST show THERE.
+    //
+    // Pool windows are created hidden (set_taskbar_hidden(true) -> SW_HIDE at
+    // spawn; CEF Views show skipped). The previous order showed the window first —
+    // via set_taskbar_hidden(false)'s internal SW_SHOWNA — at the OFF-SCREEN pool
+    // position, and THEN moved it on-screen. On Windows that binds the browser
+    // compositor's visibility/surface state to the off-screen show, and the
+    // subsequent move+resize never re-syncs it, so the promoted window paints
+    // BLANK despite a valid DOM. Showing for the first time at the final on-screen
+    // position gives Chromium the genuine hidden->visible transition it needs.
+    // (macOS is unaffected — occlusion-driven visibility / IOSurface.)
+    //
+    // SWP_NOZORDER is intentionally *not* set on the placement move — tear-off
+    // needs the window at the top of the Z-order for the SC_MOVE mouse-capture
+    // handshake.
     unsafe {
+        use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            SetWindowPos, ShowWindow, HWND_TOP, SW_SHOW,
+            GetWindowRect, SetWindowPos, ShowWindow, HWND_TOP, SW_SHOW, SWP_NOACTIVATE,
         };
-        let pos_ok = SetWindowPos(
-            raw_hwnd,
-            HWND_TOP,
-            pos_x,
-            pos_y,
-            win_w,
-            win_h,
-            0, // no flags — apply move + size + Z-order all
-        );
+
+        // 1. Position to the final on-screen rect WHILE HIDDEN (no show yet).
+        let pos_ok = SetWindowPos(raw_hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, 0);
         if pos_ok == 0 {
-            // Non-fatal: the SC_MOVE handshake will still try to
-            // run, but the user may see a misplaced window. Log
-            // for diagnostics so we can detect a pattern.
+            // Non-fatal: the SC_MOVE handshake still runs; the user may see a
+            // misplaced window. Log so we can detect a pattern.
             let err = windows_sys::Win32::Foundation::GetLastError();
             tracing::error!(
                 target: "dnd:tearoff:pool",
@@ -923,40 +923,36 @@ pub fn promote_pool_window(
                 "[pool] SetWindowPos failed"
             );
         }
+
+        // 2. Apply the taskbar (APPWINDOW) style AND perform the genuine first
+        //    show: set_taskbar_hidden(false)'s SW_HIDE -> style -> SW_SHOWNA cycle
+        //    is now the first hidden->visible transition, at the on-screen rect
+        //    set in step 1 (set_taskbar_hidden's inner SetWindowPos is NOMOVE/
+        //    NOSIZE, so it preserves that position).
+        set_taskbar_hidden(raw_hwnd, false);
+
+        // 3. Ensure shown + activated (SW_SHOWNA above does not activate).
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
 
-        // Re-assert the rect AFTER show. The pre-show SetWindowPos can be lost to
-        // the pool window's create/show sequence and per-monitor DPI-context
-        // settling, which intermittently leaves the window at the (scaled)
-        // POOL_OFFSCREEN — shown and rendered, but off the screen (the HiDPI
-        // "blank new window" bug). A second, idempotent move after show makes the
-        // placement deterministic. SWP_NOACTIVATE so we don't steal focus again;
-        // HWND_TOP keeps it frontmost (same as the pre-show move).
-        {
-            use windows_sys::Win32::Foundation::RECT;
-            use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, SWP_NOACTIVATE};
-            let _ = SetWindowPos(
-                raw_hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE,
-            );
-            // Telemetry: flag any residual off-screen result so a regression of
-            // this class is caught in logs rather than only by users.
-            let mut r: RECT = std::mem::zeroed();
-            if GetWindowRect(raw_hwnd, &mut r) != 0 {
-                // Physical work area: GetWindowRect is physical px (reagent P2 #1652).
-                if let Some((wx, wy, ww, wh)) =
-                    crate::app::get_monitor_work_area_physical(pos_x, pos_y)
-                {
-                    let onscreen =
-                        r.right > wx && r.left < wx + ww && r.bottom > wy && r.top < wy + wh;
-                    if !onscreen {
-                        tracing::error!(
-                            target: "pool:new-window",
-                            label = %label,
-                            left = r.left,
-                            top = r.top,
-                            "[pool] promoted window still off-screen after post-show re-assert"
-                        );
-                    }
+        // 4. Re-assert the rect after show + off-screen telemetry (#1652).
+        //    SWP_NOACTIVATE so we don't steal focus again; HWND_TOP keeps it frontmost.
+        let _ = SetWindowPos(raw_hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE);
+        let mut r: RECT = std::mem::zeroed();
+        if GetWindowRect(raw_hwnd, &mut r) != 0 {
+            // Physical work area: GetWindowRect is physical px (reagent P2 #1652).
+            if let Some((wx, wy, ww, wh)) =
+                crate::app::get_monitor_work_area_physical(pos_x, pos_y)
+            {
+                let onscreen =
+                    r.right > wx && r.left < wx + ww && r.bottom > wy && r.top < wy + wh;
+                if !onscreen {
+                    tracing::error!(
+                        target: "pool:new-window",
+                        label = %label,
+                        left = r.left,
+                        top = r.top,
+                        "[pool] promoted window still off-screen after post-show re-assert"
+                    );
                 }
             }
         }
