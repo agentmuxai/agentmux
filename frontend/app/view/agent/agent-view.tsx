@@ -49,6 +49,7 @@ import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useBlockActivity } from "./hooks/useBlockActivity";
+import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
@@ -582,6 +583,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Subscribe to Claude Code OSC window-title extractions and write them
     // to term:activity block metadata for the tab label.
     useBlockActivity({ blockId: model.blockId });
+
+    // Haiku-powered live mini-summary: generates a fresh phrase in the pane header
+    // on every completed agent turn, replacing the non-functional OSC path.
+    useAgentActivitySummary({
+        blockId: model.blockId,
+        turnPhase: agentAtoms().turnPhaseAtom[0],
+        getRootWidth: () => rootRef?.offsetWidth,
+    });
 
     // Subagent event subscriptions. See hooks/useSubagentEvents.ts.
     useSubagentEvents({

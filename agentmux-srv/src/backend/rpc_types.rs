@@ -392,6 +392,9 @@ pub const COMMAND_SESSION_EXPORT: &str = "session:export";
 // Session digest
 pub const COMMAND_SESSION_DIGEST: &str = "session:digest";
 
+// Per-turn live activity summary (Haiku-powered, writes term:activity)
+pub const COMMAND_SESSION_ACTIVITY_SUMMARY: &str = "session:activity_summary";
+
 // Option E (PR 1 of 2) — agent-anchored session zones.
 // A session zone is bound to the *agent definition* (`definition_id`),
 // not the identity bundle. Every block of the same agent reads/writes
@@ -1133,6 +1136,24 @@ pub struct SessionDigestResult {
     pub generated_at: i64,
     /// true if we returned a previously-cached result (no new activity since last run).
     pub cached: bool,
+}
+
+// ---- Session activity summary types ----
+
+/// Request for session:activity_summary — generate a per-turn live summary via Haiku.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandActivitySummaryData {
+    pub block_id: String,
+    /// Target word count, derived from pane width. Defaults to 7.
+    pub word_target: Option<u32>,
+}
+
+/// Response from session:activity_summary. The backend also writes `term:activity` to block meta.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ActivitySummaryResult {
+    pub summary: String,
 }
 
 // ---- Session archival types ----
