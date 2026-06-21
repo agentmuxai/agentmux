@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.47.1 — 2026-06-21
+
+- fix(linux): restrict pane tear-off to header — whole-tile drag triggered tear-off anywhere
+- fix(cef): restore the AgentMux icon on Windows sandbox builds (Chrome-icon regression from #1633). Load the window/taskbar icon from the host module (cdylib) via GetModuleHandleExW(FROM_ADDRESS) instead of the bootstrap.exe process exe, and stamp the AgentMux icon onto the bootstrap.exe host at package time with rcedit (fixes the Explorer / Task Manager / Alt-Tab exe-file icon).
+
+
 ## 0.47.0 — 2026-06-20
 
 - feat(sound): ambient waiting tone when agent is blocked for user input
