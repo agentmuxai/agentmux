@@ -8,6 +8,34 @@
 
 ---
 
+## 0. RESOLUTION (what actually fixed it — added after implementation)
+
+The research's *diagnosis* was right (a Windows compositor visibility-state
+desync; macOS works because it shows via CEF Views), but the *plan's* "hidden
+pre-warm" approach was **not** what fixed it. The actual fix, verified on HiDPI:
+
+1. **Render (load-bearing):** the Windows promote positioned the raw HWND via
+   Win32 but **never drove the CEF Views `Window.show()`** that flips the
+   browser's compositor visibility — so the renderer's frame was evicted and the
+   window painted blank. Fix: cache the CEF Views `Window` at `on_window_created`
+   (a global `Mutex`, because `browser_view.window()` is `None` for pool windows
+   post-load and the promote runs on the IPC thread), then **post a UI task** that
+   runs `set_bounds()` + `show()` — the exact macOS sequence, on the UI thread.
+   Ruled out first (all no-ops/wrong-layer): HWND show-order; `was_hidden()`/
+   `was_resized()` host hints; a direct `show()` that couldn't reach the Window;
+   a thread-local cache read on the wrong thread.
+2. **Window identity (drag/close/min/max):** promoted pool windows never landed
+   in `state.window_hwnds`, so `resolve_window_hwnd` fell back to the main window
+   and the new window's chrome acted on the original. Fix: register the promoted
+   outer HWND under its label at promote.
+3. **Taskbar name:** the host exe is CEF's `bootstrap.exe` ("CEF Bootstrap
+   application" FileDescription). Fix: `inject-exe-icon.sh` now also stamps
+   `FileDescription`/`ProductName` = AgentMux via rcedit.
+
+The pool is fully retained (no cold-path fallback needed).
+
+---
+
 ## 1. Problem in one line
 
 Pool windows are created **visible-but-off-screen** at `(-32000,-32000)`. On Windows that puts the aura `Window` in the **"already visible"** state, so the promotion's move+resize generates no **hidden→visible transition**, and Chromium's compositor/occlusion state never re-syncs → the on-screen window is **blank** despite a correct DOM (research §1a, cef#3638). macOS is unaffected (research §3).
