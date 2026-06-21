@@ -2064,15 +2064,15 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map_err(|e| format!("session:activity_summary: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                // Read recent output from the WPS ring buffer only — we need the most
-                // recent activity (last ~30 lines) so there is no need to load the full
-                // session file, which can grow to many MB on long sessions.
+                // Read only the most recent ring buffer events — we need the last ~30
+                // lines, so 50 events is a generous upper bound without touching the
+                // full buffer (which can be large on long sessions).
                 let all_lines: Vec<String> = {
                     let scope = format!("block:{}", cmd.block_id);
                     let events = broker.read_event_history(
                         crate::backend::wps::EVENT_BLOCK_FILE,
                         &scope,
-                        usize::MAX,
+                        50,
                     );
                     let mut lines: Vec<String> = Vec::new();
                     for event in events {

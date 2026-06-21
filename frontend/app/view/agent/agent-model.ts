@@ -116,19 +116,16 @@ export class AgentViewModel implements ViewModel {
             const elems: HeaderElem[] = [];
 
             // Per-turn live mini-summary written by useAgentActivitySummary (Haiku
-            // call on every turn completion). Takes priority because it's always
-            // fresh — the session digest (session:digest_summary) is only generated
-            // on idle and would permanently shadow the live label otherwise.
+            // call on every turn completion). The hook clears this to null on
+            // Submitting so the header goes blank while the agent is working.
+            // session:digest_summary is intentionally not used here — the digest is
+            // already surfaced as a pane accessory and would leak through as a stale
+            // label during active turns if used as a fallback.
             const activity = this.blockAtom()?.meta?.["term:activity"] as string | undefined;
-            // AI-generated session summary (session:digest_summary). Falls back to
-            // this when no per-turn label is available (e.g. before the first turn
-            // completes, or on panes where the activity summary RPC is not wired).
-            const summary = this.blockAtom()?.meta?.["session:digest_summary"] as string | undefined;
-            const headerLabel = activity || summary;
-            if (headerLabel && headerLabel.length > 0) {
+            if (activity && activity.length > 0) {
                 elems.push({
                     elemtype: "text",
-                    text: headerLabel,
+                    text: activity,
                     className: "term-activity",
                 });
             }
