@@ -111,22 +111,39 @@ pub fn ensure_initial_data(store: &Store) -> Result<bool, StoreError> {
     // Create initial tab in workspace (pinned, matching Go's isInitialLaunch=true)
     let tab = create_tab_with_opts(store, &ws.oid, "", true)?;
 
-    // Seed the default 3-block layout:
-    //
-    //   ┌────────────────┬──────────────┐
-    //   │                │   sysinfo    │  size 2 of 10 ≈ 20%
-    //   │     agent      ├──────────────┤
-    //   │    (tall)      │              │
-    //   │                │    swarm     │  size 8 of 10 ≈ 80%
-    //   │                │              │
-    //   └────────────────┴──────────────┘
-    //        50% width         50% width
-    //
-    // We build `rootnode` directly instead of queuing `pendingbackendactions`
-    // because the frontend reducer has races when reducing multiple insert+
-    // split actions in a single drain cycle (the stress-harness hit this
-    // earlier — `layoutPersistence.ts` + `layoutNodeModels.ts::getNodeByBlockId`).
-    // A pre-built tree skips the reducer entirely; the frontend just renders.
+    // Seed the default 3-pane launch layout (agent + sysinfo + swarm). Shared
+    // with the new-window path so "Open another window" matches first launch.
+    seed_default_layout(store, &tab.oid)?;
+
+    Ok(first_launch)
+}
+
+/// Seed a tab with the default 3-pane launch layout (agent + sysinfo + swarm):
+///
+/// ```text
+///   ┌────────────────┬──────────────┐
+///   │                │   sysinfo    │  size 2 of 10 ≈ 20%
+///   │     agent      ├──────────────┤
+///   │    (tall)      │              │
+///   │                │    swarm     │  size 8 of 10 ≈ 80%
+///   └────────────────┴──────────────┘
+///        50% width         50% width
+/// ```
+///
+/// Shared by first-launch bootstrap (`ensure_initial_data`) and the new-window
+/// path (`server::service`'s `CreateWindow` with an empty workspace) so "Open
+/// another window" gets the same starter layout instead of opening blank
+/// (regression — see docs/retro/retro-blank-new-window-2026-06-21.md). The tab
+/// must already exist with a valid `layoutstate`; both `create_tab_with_opts`
+/// and the reducer's `apply_tab_created` provision one.
+///
+/// `rootnode` is built directly rather than queued via `pendingbackendactions`:
+/// the frontend reducer races when draining multiple insert+split actions in one
+/// cycle (`layoutPersistence.ts` + `layoutNodeModels.ts::getNodeByBlockId`); a
+/// pre-built tree skips the reducer entirely and just renders.
+pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), StoreError> {
+    let tab = store.must_get::<Tab>(tab_id)?;
+
     let mut agent_meta = MetaMapType::new();
     agent_meta.insert("view".to_string(), serde_json::json!("agent"));
     let agent_block = create_block(store, &tab.oid, agent_meta)?;
@@ -210,8 +227,7 @@ pub fn ensure_initial_data(store: &Store) -> Result<bool, StoreError> {
     ]);
     layout.pendingbackendactions = None;
     store.update(&mut layout)?;
-
-    Ok(first_launch)
+    Ok(())
 }
 
 /// Get the singleton client record.
@@ -357,6 +373,48 @@ mod tests {
         assert!(store.get::<Block>(&block.oid).unwrap().is_none());
         let tab = store.must_get::<Tab>(&tab.oid).unwrap();
         assert!(tab.blockids.is_empty());
+    }
+
+    #[test]
+    fn seed_default_layout_creates_three_pane_layout() {
+        // Regression: "Open another window" opened blank because new windows
+        // never received the default layout (only first launch did). This is
+        // the shared primitive both paths now use.
+        // See docs/retro/retro-blank-new-window-2026-06-21.md.
+        let store = make_store();
+        let ws = create_workspace(&store, "WS").unwrap();
+        let tab = create_tab(&store, &ws.oid).unwrap();
+        assert!(tab.blockids.is_empty(), "fresh tab starts blank");
+        let layout = store.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        assert!(layout.rootnode.is_none(), "fresh tab has no layout");
+
+        seed_default_layout(&store, &tab.oid).unwrap();
+
+        // 3 blocks: agent + sysinfo + swarm.
+        let tab = store.must_get::<Tab>(&tab.oid).unwrap();
+        assert_eq!(tab.blockids.len(), 3, "agent + sysinfo + swarm");
+        let views: Vec<String> = tab
+            .blockids
+            .iter()
+            .map(|bid| {
+                store
+                    .must_get::<Block>(bid)
+                    .unwrap()
+                    .meta
+                    .get("view")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect();
+        assert!(views.contains(&"agent".to_string()));
+        assert!(views.contains(&"sysinfo".to_string()));
+        assert!(views.contains(&"swarm".to_string()));
+
+        // Layout populated (the regression was new windows getting rootnode=None).
+        let layout = store.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        assert!(layout.rootnode.is_some(), "rootnode must be populated, not blank");
+        assert_eq!(layout.leaforder.as_ref().unwrap().len(), 3);
     }
 
     #[test]
