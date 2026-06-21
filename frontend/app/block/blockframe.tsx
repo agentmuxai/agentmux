@@ -480,8 +480,8 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     nodeModel={props.nodeModel}
                     onContextMenu={onContextMenu}
                     blockView={blockData()?.meta?.view}
-                    isMinimized={isMinimized}
-                    toggleMinimize={toggleMinimize}
+                    isMinimized={props.isMinimized}
+                    toggleMinimize={props.toggleMinimize}
                 />
             </div>
         </div>
