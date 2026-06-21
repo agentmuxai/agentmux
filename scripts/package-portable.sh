@@ -35,6 +35,20 @@ for f in target/release/agentmux-cef.exe dist/cef/libcef.dll dist/bin/agentmux-s
     fi
 done
 
+# Phase 3 sandbox preflight (issue #1374). A sandbox build (the default
+# `--features sandbox`) produces the cdylib `agentmux_cef.dll` plus CEF's
+# `bootstrap.exe`; the host entry point is bootstrap (renamed), which loads the
+# DLL and passes a real `sandbox_info` to `CefExecuteProcess`. If the DLL is
+# present but bootstrap.exe is missing we must NOT package — the shipped host
+# would run `no_sandbox=0` with a null `sandbox_info` and the sandbox can't
+# initialize. Fail loudly instead of shipping a silently-broken artifact.
+# (reagent P1/P2 on #1633.)
+if [ -f target/release/agentmux_cef.dll ] && [ ! -f target/release/bootstrap.exe ]; then
+    echo "ERROR: agentmux_cef.dll was built (sandbox ON) but target/release/bootstrap.exe is missing —" >&2
+    echo "       cannot stage the Phase-3 host. Re-run 'task build:host' (sandbox feature) and retry." >&2
+    exit 1
+fi
+
 # Refuse to wipe a portable that's currently running. Without this guard,
 # `rm -rf "$PORTABLE"` will silently delete the on-disk files of a live
 # install — NTFS lets you unlink mapped exe/dll files, so the process
@@ -109,8 +123,22 @@ It is safe to back up. Do not delete it while AgentMux is running.
   data/cef/      — browser cache (safe to delete when app is closed)
 DATAEOF
 
-# Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions
-cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
+# Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions.
+# Phase 3 sandbox (#1374): when the cdylib was built (sandbox feature ON — the
+# default), the host entry point is CEF's bootstrap.exe renamed to the host exe
+# name; bootstrap loads <basename>.dll (the cdylib) and passes a real
+# sandbox_info, so the renderer sandbox can initialize. Mirror
+# build:host:windows. Versioned names keep exe↔dll basenames matched so
+# bootstrap resolves the right DLL. Without the DLL (a --no-default-features /
+# non-sandbox build) the raw rlib bin runs the no_sandbox path directly.
+if [ -f target/release/agentmux_cef.dll ]; then
+    cp target/release/bootstrap.exe    "$PORTABLE/runtime/agentmux-$VERSION.exe"
+    cp target/release/agentmux_cef.dll "$PORTABLE/runtime/agentmux-$VERSION.dll"
+else
+    echo "WARNING: no target/release/agentmux_cef.dll — packaging a NON-SANDBOX host (raw bin)." >&2
+    echo "         Build with the default 'sandbox' feature for a sandboxed Windows portable." >&2
+    cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
+fi
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
 # Streaming bash wrapper — invoked by Claude's Bash subprocess via the
