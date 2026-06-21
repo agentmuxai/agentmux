@@ -241,8 +241,15 @@ bundle_tool \
     "d0f534024c42afd6cb4d38907c25cd2b249b79bbe6cc1dbee8e3e37c2b6e25a1" \
     "ripgrep-14.1.1-x86_64-pc-windows-msvc/rg.exe"
 
-# Verify versions match
-CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.exe" | head -1)
+# Verify versions match. In a sandbox build the host exe is CEF's bootstrap.exe
+# (no agentmux version baked in) — the agentmux version lives in the cdylib DLL
+# (env!("CARGO_PKG_VERSION")) — so verify the DLL when it was staged, else the
+# raw bin. (reagent P1 #1633.)
+if [ -f "$PORTABLE/runtime/agentmux-$VERSION.dll" ]; then
+    CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.dll" | head -1)
+else
+    CEF_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-$VERSION.exe" | head -1)
+fi
 SRV_VER=$(grep -ao "$VERSION" "$PORTABLE/runtime/agentmux-srv-$VERSION-windows.x64.exe" | head -1)
 if [ "$CEF_VER" != "$VERSION" ] || [ "$SRV_VER" != "$VERSION" ]; then
     echo "ERROR: Binary version mismatch! CEF=$CEF_VER SRV=$SRV_VER expected=$VERSION" >&2
