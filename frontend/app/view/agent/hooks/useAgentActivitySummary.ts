@@ -4,17 +4,17 @@
 /**
  * useAgentActivitySummary — drives the live mini-summary in the agent pane header.
  *
- * On every completed agent turn, sends the last 30 lines of session output to
+ * On every completed agent turn, sends recent session output to
  * claude-haiku-4-5-20251001 and asks for a short phrase (~word_target words)
- * describing what was just done. The backend writes the result directly to the
- * `term:activity` block meta key, which agent-model.ts already surfaces in the
- * pane header (viewText fallback chain).
+ * describing what was just done. The result is written to the `term:activity`
+ * block meta key, which agent-model.ts surfaces in the pane header.
  *
  * Word target is derived from pane width so narrow panes get ~5 words and wide
  * panes can accommodate up to 12.
  *
- * On turn start (Submitting phase) the stale label is cleared so the header
- * doesn't show a phrase from the previous turn while the agent is working.
+ * On turn start (Submitting phase) the stale label is cleared. A turn counter
+ * ensures a slow Haiku response from a superseded turn cannot overwrite the
+ * cleared header once a new turn has already started.
  */
 
 import { createEffect, on, type Accessor } from "solid-js";
@@ -34,9 +34,14 @@ export interface UseAgentActivitySummaryOptions {
 export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): void {
     const { blockId, turnPhase, getRootWidth } = opts;
 
+    // Monotonically increasing turn ID. Bumped on every Submitting transition so
+    // any in-flight Haiku response from a prior turn can detect it is stale and
+    // skip the meta write.
+    let activeTurnId = 0;
+
     createEffect(on(turnPhase, (phase) => {
         if (phase.kind === "Submitting") {
-            // Clear the stale label immediately when the user sends a new message.
+            activeTurnId++;
             fireAndForget(() =>
                 ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
                     "term:activity": null,
@@ -46,18 +51,26 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
         }
 
         if (phase.kind === "Done") {
+            const myTurnId = activeTurnId;
             const rootWidth = getRootWidth() ?? 400;
-            // Approximate available header text width; subtract space for icon, name, buttons.
             const textWidth = Math.max(0, rootWidth - 280);
-            // ~48px per word at typical proportional font size.
             const wordTarget = Math.max(5, Math.min(12, Math.floor(textWidth / 48)));
 
             RpcApi.AgentActivitySummaryCommand(
                 TabRpcClient,
                 { block_id: blockId, word_target: wordTarget },
                 { timeout: 20_000 },
-            ).catch(() => {
-                // Silently ignore errors — the header just stays blank.
+            ).then((result) => {
+                if (activeTurnId !== myTurnId) return; // superseded by a newer turn
+                if (result.summary) {
+                    fireAndForget(() =>
+                        ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
+                            "term:activity": result.summary,
+                        } as any)
+                    );
+                }
+            }).catch(() => {
+                // Silently ignore — the header just stays blank.
             });
         }
     }));

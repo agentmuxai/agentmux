@@ -2046,14 +2046,12 @@ fn register_session_digest(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
-    let filestore = state.filestore.clone();
     let broker = state.broker.clone();
 
     engine.register_handler(
         COMMAND_SESSION_ACTIVITY_SUMMARY,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
-            let filestore = filestore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandActivitySummaryData = serde_json::from_value(data)
@@ -2066,50 +2064,32 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map_err(|e| format!("session:activity_summary: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                // Read last 30 lines from FileStore, falling back to WPS ring buffer.
+                // Read recent output from the WPS ring buffer only — we need the most
+                // recent activity (last ~30 lines) so there is no need to load the full
+                // session file, which can grow to many MB on long sessions.
                 let all_lines: Vec<String> = {
-                    let filestore_lines = match filestore.stat(&cmd.block_id, "output") {
-                        Ok(Some(ref wf)) if wf.size > 0 => {
-                            match filestore.read_file(&cmd.block_id, "output") {
-                                Ok(Some(bytes)) => {
-                                    let text = String::from_utf8_lossy(&bytes);
-                                    Some(text.lines()
-                                        .filter(|l| !l.trim().is_empty())
-                                        .map(|l| l.to_string())
-                                        .collect::<Vec<_>>())
-                                }
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    };
-
-                    if let Some(lines) = filestore_lines {
-                        lines
-                    } else {
-                        let scope = format!("block:{}", cmd.block_id);
-                        let events = broker.read_event_history(
-                            crate::backend::wps::EVENT_BLOCK_FILE,
-                            &scope,
-                            usize::MAX,
-                        );
-                        let mut lines: Vec<String> = Vec::new();
-                        for event in events {
-                            let Some(ref ed) = event.data else { continue };
-                            if ed.get("filename").and_then(|v| v.as_str()).unwrap_or("") != "output" { continue; }
-                            if let Some(d64) = ed.get("data64").and_then(|v| v.as_str()) {
-                                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(d64) {
-                                    let text = String::from_utf8_lossy(&bytes);
-                                    for line in text.lines() {
-                                        if !line.trim().is_empty() {
-                                            lines.push(line.to_string());
-                                        }
+                    let scope = format!("block:{}", cmd.block_id);
+                    let events = broker.read_event_history(
+                        crate::backend::wps::EVENT_BLOCK_FILE,
+                        &scope,
+                        usize::MAX,
+                    );
+                    let mut lines: Vec<String> = Vec::new();
+                    for event in events {
+                        let Some(ref ed) = event.data else { continue };
+                        if ed.get("filename").and_then(|v| v.as_str()).unwrap_or("") != "output" { continue; }
+                        if let Some(d64) = ed.get("data64").and_then(|v| v.as_str()) {
+                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(d64) {
+                                let text = String::from_utf8_lossy(&bytes);
+                                for line in text.lines() {
+                                    if !line.trim().is_empty() {
+                                        lines.push(line.to_string());
                                     }
                                 }
                             }
                         }
-                        lines
                     }
+                    lines
                 };
 
                 let n = all_lines.len();
@@ -2149,18 +2129,8 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                         String::new()
                     });
 
-                if !summary.is_empty() {
-                    let mut meta_update = obj::MetaMapType::new();
-                    meta_update.insert("term:activity".to_string(), json!(summary.clone()));
-                    if let Err(e) = crate::server::service::update_object_meta(
-                        &wstore,
-                        &format!("block:{}", cmd.block_id),
-                        &meta_update,
-                    ) {
-                        tracing::debug!(block_id = %cmd.block_id, error = %e, "session:activity_summary: failed to write meta");
-                    }
-                }
-
+                // The frontend writes `term:activity` after receiving this response so it
+                // can discard results from turns that were superseded before they returned.
                 Ok(Some(serde_json::to_value(&ActivitySummaryResult { summary }).unwrap()))
             })
         }),
