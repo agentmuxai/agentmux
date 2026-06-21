@@ -131,6 +131,17 @@ impl LspSupervisor {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
+        // On Windows: suppress console-window allocation. Spawned from the
+        // windowless srv without CREATE_NO_WINDOW, each LSP server (ts-language-
+        // server, pyright, gopls, rust-analyzer) opens a Windows Terminal window
+        // (Win11 default-terminal handler). stdio is piped, so no console is
+        // needed. See docs/retro/retro-windows-terminal-window-leak-2026-06-21.md.
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
         let mut child = cmd
             .spawn()
             .map_err(|e| LspError::SpawnFailed(e.to_string()))?;
