@@ -33,6 +33,15 @@ use super::{
     DISMISS_TIMEOUT, FRAME_MS, PADDING,
 };
 
+/// Cheap reachability probe for the backend selector (`super::detect`): can we
+/// actually open an X11 connection? `DISPLAY` being set doesn't guarantee a live
+/// server, so we test the real handshake (which fails fast when there's none).
+/// Only when this succeeds do we prefer the self-centering X11/XWayland splash
+/// over the native-Wayland fallback.
+pub(super) fn server_reachable() -> bool {
+    x11rb::connect(None).is_ok()
+}
+
 pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
     let (conn, screen_num) = x11rb::connect(None)?;
     let screen = conn.setup().roots[screen_num].clone();
