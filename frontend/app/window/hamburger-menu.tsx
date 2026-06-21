@@ -154,7 +154,7 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             {
                 label: "Exit",
                 icon: "right-from-bracket",
-                onClick: () => fireAndForget(() => invokeCommand("close_window", {})),
+                onClick: () => getApi().closeWindow().catch(console.error),
             },
         ];
     });
