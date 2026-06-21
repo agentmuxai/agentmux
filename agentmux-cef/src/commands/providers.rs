@@ -138,6 +138,11 @@ fn save_config(config_dir: &str, config: &ProviderConfig) -> Result<(), String> 
 
 // ---- CLI detection helpers ----
 
+// INFORMATIONAL ONLY — for display in setup/toolchain UI.
+// INV-X (SPEC_PROVIDER_ISOLATION): the path returned here must NEVER be used as
+// an agent run target. Agents run ONLY the AgentMux-installed versioned binary
+// under ~/.agentmux/.../cli/<provider>/. If the UI needs to detect a usable CLI,
+// it must call the srv `ResolveCli` RPC instead (which installs if absent).
 fn detect_cli(name: &str) -> CliDetectionResult {
     let find_cmd = if cfg!(windows) { "where" } else { "which" };
 
@@ -188,9 +193,13 @@ fn detect_cli(name: &str) -> CliDetectionResult {
 
 // ---- CLI installer helpers ----
 
-const CLAUDE_VERSION: &str = "latest";
-const CODEX_VERSION: &str = "0.107.0";
-const GEMINI_VERSION: &str = "0.31.0";
+// Pinned CLI versions — update when a new version is validated.
+// INV-X (SPEC_PROVIDER_ISOLATION): agents MUST run the AgentMux-installed,
+// version-pinned binary; "latest" is never acceptable here because it bypasses
+// the repeatable-install guarantee and could pull in a breaking CLI version.
+const CLAUDE_VERSION: &str = "2.1.185";
+const CODEX_VERSION: &str = "0.116.0";
+const GEMINI_VERSION: &str = "0.32.1";
 
 fn get_provider_install_dir(data_dir: &str, provider: &str) -> Result<std::path::PathBuf, String> {
     Ok(std::path::PathBuf::from(data_dir)
