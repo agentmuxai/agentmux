@@ -197,6 +197,45 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         .map(|v| v.trim() == "1")
         .unwrap_or(false);
 
+    // macOS sandbox availability: probe for libcef_sandbox.dylib to detect
+    // whether we are running inside a packaged .app bundle. Two uses:
+    //   1. Seatbelt init (subprocess only) — skip if dylib not reachable.
+    //   2. no_sandbox flag to CefInitialize — must be 1 when not in bundle,
+    //      otherwise CEF kills GPU/network/renderer with a sandbox error.
+    //
+    // The path is relative to current_exe().parent() and differs by role
+    // because the Host and Helper processes live at different depths:
+    //
+    //   Host   — Contents/MacOS/AgentMux
+    //            → ../Frameworks/Chromium Embedded Framework.framework/…
+    //
+    //   Helper — Contents/Frameworks/AgentMux Helper.app/Contents/MacOS/AgentMux Helper
+    //            → ../../../Chromium Embedded Framework.framework/…
+    //
+    // In task dev neither path exists (flat dist/cef-dev/ tree), so the probe
+    // returns false for both roles → sandbox skipped, no crash.
+    #[cfg(all(target_os = "macos", feature = "sandbox"))]
+    let macos_sandbox_available = {
+        let is_subprocess = std::env::args().any(|a| a.starts_with("--type="));
+        let rel: &str = if is_subprocess {
+            "../../../Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib"
+        } else {
+            "../Frameworks/Chromium Embedded Framework.framework/Libraries/libcef_sandbox.dylib"
+        };
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join(rel)))
+            .map(|p| p.exists())
+            .unwrap_or(false)
+    };
+
+    // Non-macOS / sandbox-off: define macos_sandbox_available as a no-op
+    // placeholder so the no_sandbox computation below compiles on all targets.
+    // On those targets cfg!(all(target_os="macos",feature="sandbox")) is false,
+    // so the `&& !macos_sandbox_available` branch is never reached at runtime.
+    #[cfg(not(all(target_os = "macos", feature = "sandbox")))]
+    let macos_sandbox_available = true; // irrelevant — guarded by cfg!() in no_sandbox
+
     // macOS: initialize Seatbelt sandbox context BEFORE the CEF framework is
     // loaded. This is the order required by CEF (cefsimple/process_helper_mac.cc):
     //   1. cef_sandbox_initialize     ← here, before dlopen
@@ -208,6 +247,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     #[cfg(all(target_os = "macos", feature = "sandbox"))]
     let _macos_sandbox = if std::env::args().any(|a| a.starts_with("--type="))
         && !force_no_sandbox
+        && macos_sandbox_available
     {
         let raw = cef::args::Args::new();
         let mut s = cef::sandbox::Sandbox::new();
@@ -694,7 +734,10 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // (kernel namespace isolation), and Windows (bootstrap.exe DLL wrapper,
     // Phase 3) when built with `--features sandbox` (the default).
     // Escape hatch: AGENTMUX_UNSAFE_NOSANDBOX=1 disables on all platforms.
-    let no_sandbox: i32 = if cfg!(not(feature = "sandbox")) || force_no_sandbox {
+    let no_sandbox: i32 = if cfg!(not(feature = "sandbox"))
+        || force_no_sandbox
+        || cfg!(all(target_os = "macos", feature = "sandbox")) && !macos_sandbox_available
+    {
         1
     } else {
         0
