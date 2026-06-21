@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Linux-specific TileLayout.
-// dragHandle: undefined — whole-tile drag because WebKitGTK does not
-// support HTML5 DnD from draggable="true" child inside draggable="false" parent.
+//
+// WebKitGTK does not support HTML5 DnD from draggable="true" child inside an
+// explicit draggable="false" parent — pragmatic-dnd's dragHandle option sets
+// exactly that, so we cannot use it. The fix (same as win32) is to register
+// draggable() directly on the header element. Only the header gets
+// draggable="true"; the tile root receives no draggable attribute (implicitly
+// non-draggable). No explicit draggable="false" on any parent → no WebKitGTK
+// breakage, and drag is correctly restricted to the header.
 
 import { getApi, getSettingsKeyAtom } from "@/app/store/global";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -348,26 +354,39 @@ const DisplayNode = (props: DisplayNodeProps) => {
         }
     };
 
-    // Register pragmatic-dnd draggable on the tile node, using the header
-    // (dragHandleRef) as the drag handle. pragmatic-dnd wraps HTML5 DnD but
-    // fires onDragStart AFTER the browser commits the drag, so SolidJS
-    // reactive state updates here won't cause mid-event DOM mutations.
+    // Register pragmatic-dnd draggable on the live header element. Registering
+    // on the header (not the tile) means only the header gets draggable="true";
+    // the tile root stays attribute-free. This avoids the WebKitGTK constraint
+    // (see file header) while still restricting drag — and tear-off — to the
+    // header strip only.
     //
-    // The header ref may not be available at mount time (block content loads
-    // async behind a Show gate). Poll briefly until the ref is set, then
-    // register with the correct drag handle. Without a drag handle, the
-    // entire tile would be draggable — breaking text selection in panes.
-    const dragHandleRef = nodeModel.dragHandleRef;
+    // The header is not in the DOM at tile mount time (block content loads
+    // async behind a Show gate). Poll until it appears, then re-register if
+    // SolidJS ever swaps the element (ErrorBoundary Show-gate replacement).
+    // Never re-register while a drag is active — that would remove pragmatic-dnd's
+    // onDrop listener mid-drag and leave activeDrag stuck true ("widgets broken").
     onMount(() => {
         if (!tileNodeRef) return;
         let cleanupFn: (() => void) | null = null;
+        let registeredHandle: HTMLElement | null = null;
+
+        const findHandle = (): HTMLElement | null =>
+            tileNodeRef?.querySelector<HTMLElement>('[data-role="block-header"]') ?? null;
 
         const register = () => {
-            // WebKitGTK does not support HTML5 DnD from draggable="true" child
-            // inside draggable="false" parent — no dragHandle restriction.
+            const handle = findHandle();
+            if (handle === registeredHandle) return;
+            if (props.layoutModel.activeDrag()) return;
+
+            cleanupFn?.();
+            cleanupFn = null;
+            registeredHandle = null;
+
+            if (!handle) return;
+
+            registeredHandle = handle;
             cleanupFn = draggable({
-                element: tileNodeRef,
-                dragHandle: undefined,
+                element: handle,
                 canDrag: () => !isEphemeral() && !isMagnified(),
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                 onGenerateDragPreview: ({ nativeSetDragImage }) => {
@@ -406,13 +425,14 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     // Cleared in dropTargetForElements.onDrop instead.
                 },
             });
-            return true;
         };
 
-        // Register immediately — no dragHandle needed on Linux.
         register();
-
-        onCleanup(() => cleanupFn?.());
+        const interval = setInterval(register, 100);
+        onCleanup(() => {
+            clearInterval(interval);
+            cleanupFn?.();
+        });
     });
 
     const leafContent = () => (
