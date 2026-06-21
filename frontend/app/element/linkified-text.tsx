@@ -29,7 +29,7 @@ function toSegments(text: string): Segment[] {
         if (match.index > lastIndex) {
             segments.push({ text: text.slice(lastIndex, match.index) });
         }
-        segments.push({ text: match.text, href: normalizeHref(match.url) });
+        segments.push({ text: match.text, href: normalizeHref(match.schema, match.url) });
         lastIndex = match.lastIndex;
     }
 

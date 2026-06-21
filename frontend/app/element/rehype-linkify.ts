@@ -42,7 +42,7 @@ export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
             newNodes.push({
                 type: "element",
                 tagName: "a",
-                properties: { href: normalizeHref(match.url) },
+                properties: { href: normalizeHref(match.schema, match.url) },
                 children: [{ type: "text", value: match.text }],
             });
             lastIndex = match.lastIndex;

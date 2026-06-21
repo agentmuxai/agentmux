@@ -11,18 +11,32 @@ export const linkify = new LinkifyIt();
 // fuzzyEmail off: avoids false positives on name@host patterns in shell output
 linkify.set({ fuzzyLink: true, fuzzyEmail: false });
 
-// Local addresses open with http://, not https://
+// Local addresses stay on http://, everything else is upgraded to https://
 const LOCAL_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
 
-// Matches any RFC 3986 scheme prefix (http:, https:, mailto:, ftp:, ssh:, …)
-const HAS_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
-
-export function normalizeHref(url: string): string {
-    if (url.startsWith("//")) return "https:" + url;
-    if (HAS_SCHEME_RE.test(url)) return url;
-    const host = url.split("/")[0].split(":")[0];
-    const scheme = LOCAL_HOST_RE.test(host) ? "http" : "https";
-    return `${scheme}://${url}`;
+/**
+ * Normalize a linkify-it match to a final href.
+ *
+ * linkify-it always populates match.url with an absolute URL (it prepends
+ * "http://" to schemeless fuzzy matches), so the raw url is always usable.
+ * We only need to act when schema is empty (fuzzy match) and the user typed a
+ * bare public domain — in that case linkify-it already prepended "http://" but
+ * we want to serve "https://" for security. Local addresses keep "http://".
+ *
+ * Explicit-schema matches (http://, https://, mailto:, ssh:, …) are returned
+ * unchanged — the user or model typed a real URL and we respect it.
+ */
+export function normalizeHref(schema: string, url: string): string {
+    // Explicit schema typed by user/model — honour it as-is
+    if (schema) return url;
+    // Fuzzy match: linkify-it prepended "http://"; upgrade public hosts to https://
+    if (url.startsWith("http://")) {
+        const host = url.slice(7).split("/")[0].split(":")[0];
+        if (!LOCAL_HOST_RE.test(host)) {
+            return "https://" + url.slice(7);
+        }
+    }
+    return url;
 }
 
 // ccTLDs that double as common source-code file extensions.
@@ -42,8 +56,9 @@ const FILENAME_STEMS = new Set([
 export function isLikelyFilename(schema: string, url: string): boolean {
     // Matches with an explicit protocol are real URLs
     if (schema) return false;
-    // Strip path/port to get the bare host (e.g. "main.rs" from "main.rs/foo")
-    const host = url.split("/")[0].split(":")[0];
+    // linkify-it prepends http:// to fuzzy matches — strip it to get the host
+    const schemeless = url.startsWith("http://") ? url.slice(7) : url;
+    const host = schemeless.split("/")[0].split(":")[0];
     const dotIdx = host.lastIndexOf(".");
     if (dotIdx === -1) return false;
     const ext = host.slice(dotIdx + 1).toLowerCase();
@@ -59,8 +74,8 @@ export function isLikelyFilename(schema: string, url: string): boolean {
     return FILENAME_STEMS.has(label.toLowerCase());
 }
 
-export const SAFE_SCHEMES = /^(https?|ftp|mailto|ssh|file):\/\//i;
-
+// Allow-list of schemes safe to pass to openExternal. No :// requirement —
+// mailto: and ssh: are valid without it.
 export function isSafeHref(url: string): boolean {
-    return SAFE_SCHEMES.test(url) || url.startsWith("//");
+    return /^(https?|ftp|mailto|ssh|file):/i.test(url) || url.startsWith("//");
 }
