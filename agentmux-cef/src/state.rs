@@ -803,6 +803,13 @@ pub struct AppState {
     /// pane targets. See `docs/specs/SPEC_BROWSER_DOM_API.md` §6.
     pub debug_port: Mutex<u16>,
 
+    /// CEF `root_cache_path` (the version's `cef-cache` dir). Stored so
+    /// per-window RequestContexts (`create_isolated_request_context`) root their
+    /// `cache_path` UNDER it — CEF requires every context cache_path to be a
+    /// descendant of root_cache_path, else it rejects it and falls back to
+    /// in-memory storage. See SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.
+    pub cef_cache_dir: Mutex<Option<String>>,
+
     // Phase B.1 removed `job_handle` (was Windows-only). Launcher
     // owns J0 wrapping srv now; host no longer needs its own job.
 
@@ -871,6 +878,7 @@ impl Default for AppState {
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
+            cef_cache_dir: Mutex::new(None),
             #[cfg(target_os = "windows")]
             window_hwnds: Mutex::new(HashMap::new()),
         }

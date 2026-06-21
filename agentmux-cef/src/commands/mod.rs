@@ -25,7 +25,9 @@ use crate::state::AppState;
 /// Each browser window needs its own renderer process to get an isolated
 /// JavaScript context (own `document`, own module state, own SolidJS render tree).
 /// CEF assigns a separate renderer process when the RequestContext has a unique
-/// `cache_path`. We use `<data_dir>/browser-contexts/<label>/` for this.
+/// `cache_path`. We use `<root_cache_path>/browser-contexts/<label>/` — it MUST
+/// be a child of `Settings.root_cache_path` (the cef-cache dir) or CEF rejects it
+/// and falls back to in-memory storage. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.
 pub fn create_isolated_request_context(state: &Arc<AppState>, label: &str) -> Option<cef::RequestContext> {
     // Phase 1 diagnostic tracing (added 2026-05-02 freeze investigation, see
     // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md). The freeze
@@ -35,7 +37,12 @@ pub fn create_isolated_request_context(state: &Arc<AppState>, label: &str) -> Op
     let t0 = std::time::Instant::now();
     tracing::info!(label = %label, "[cef-profile-init] entering create_isolated_request_context");
 
-    let data_dir = state.version_data_dir.lock().clone()
+    // Root the per-window context UNDER root_cache_path (the cef-cache dir) so
+    // CEF accepts it — it requires cache_path to be a descendant of
+    // root_cache_path, else it rejects it and falls back to in-memory storage
+    // (SPEC_CEF_LOG_ROBUSTNESS §1). Fall back to a temp dir only if
+    // root_cache_path isn't initialized yet (pre-boot edge).
+    let cache_root = state.cef_cache_dir.lock().clone()
         .unwrap_or_else(|| {
             std::env::temp_dir()
                 .join("agentmux-cef-contexts")
@@ -43,7 +50,7 @@ pub fn create_isolated_request_context(state: &Arc<AppState>, label: &str) -> Op
                 .to_string()
         });
 
-    let ctx_path = std::path::PathBuf::from(&data_dir)
+    let ctx_path = std::path::PathBuf::from(&cache_root)
         .join("browser-contexts")
         .join(label);
     // Do NOT pre-create the directory — CEF's Chrome profile initializer
