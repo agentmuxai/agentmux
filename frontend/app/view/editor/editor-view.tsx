@@ -97,14 +97,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     ];
 
     // ── Markdown rendered/source view ────────────────────────────────────────
-    // Markdown files open in the styled <Markdown> renderer by default; a
-    // toolbar toggle (and Mod-Shift-V) flips the active tab to CodeMirror
-    // source to edit, and back. We track only the tabs the user flipped TO
-    // source (default = rendered), keyed by tab id so each tab remembers its
-    // own mode. CodeMirror stays mounted underneath the preview (markdown isn't
-    // LSP-backed, so this is cheap) — the preview is an overlay, which keeps
-    // cursor/scroll/undo intact across toggles and sidesteps CM build-timing.
-    const [mdSourceTabs, setMdSourceTabs] = createSignal<Set<string>>(new Set());
     // Live CodeMirror doc text for the active tab — the markdown preview binds
     // to this, NOT model.contentAtom(): that memo only recomputes on file
     // load / tab change (onContentChange deliberately doesn't bump it on
@@ -112,21 +104,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     // whenever CM is (re)built or restored, and update it on every doc change.
     const [liveDoc, setLiveDoc] = createSignal("");
     const isMarkdown = (): boolean => model.languageAtom() === "markdown";
-    const showRendered = (): boolean =>
-        isMarkdown() &&
-        // Never auto-render an untitled scratch buffer — it's for typing.
-        !model.activeTabAtom()?.isScratch &&
-        !mdSourceTabs().has(model.activeIdAtom() ?? "");
-    const toggleMdMode = () => {
-        const id = model.activeIdAtom();
-        if (!id || !isMarkdown()) return;
-        setMdSourceTabs((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id);
-            else next.add(id);
-            return next;
-        });
-    };
 
     // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
     // block meta, same path used by terminal/agent/swarm). Capture phase so
@@ -163,18 +140,18 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             // there's nothing editable to search. See
             // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
             if (!ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
-                if (!cmView || showRendered()) return;
+                if (!cmView) return;
                 ev.preventDefault();
                 ev.stopPropagation();
                 openSearchPanel(cmView);
                 return;
             }
-            // Mod-Shift-V toggles markdown rendered/source for the active tab.
+            // Mod-Shift-V toggles the markdown preview panel.
             if (ev.shiftKey && (ev.key === "v" || ev.key === "V")) {
                 if (!isMarkdown()) return;
                 ev.preventDefault();
                 ev.stopPropagation();
-                toggleMdMode();
+                void model.togglePreview();
             }
         };
         rootRef.addEventListener("keydown", handleEditorKeys, { capture: true });
@@ -447,6 +424,27 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         document.addEventListener("mouseup", onUp);
     };
 
+    // Preview-panel resize — drag up = taller, drag down = shorter.
+    const handlePreviewResizeMouseDown = (e: MouseEvent) => {
+        e.preventDefault();
+        const startY = e.clientY;
+        const startH = model.previewHeightAtom();
+        const onMove = (ev: MouseEvent) => {
+            model.setPreviewHeight(startH + (startY - ev.clientY));
+        };
+        const onUp = () => {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            void model.commitPreviewHeight();
+        };
+        document.body.style.cursor = "row-resize";
+        document.body.style.userSelect = "none";
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+    };
+
     // Rebuild CodeMirror on tab change. Tracks activeIdAtom (not just
     // filePathAtom) so we get a unique trigger per tab — multiple tabs
     // could share the same path in pathological cases, but each has its own
@@ -496,14 +494,6 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     const unsubSliceEvents = model.onSliceEvent((event) => {
         if (event.type === "TabClosed") {
             cmStates.delete(event.tabId);
-            // Drop any remembered rendered/source mode for the closed tab.
-            if (mdSourceTabs().has(event.tabId)) {
-                setMdSourceTabs((prev) => {
-                    const next = new Set(prev);
-                    next.delete(event.tabId);
-                    return next;
-                });
-            }
         }
     });
 
@@ -843,27 +833,47 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 >
                     <div class="editor-body-wrap">
                         <div class="editor-codemirror" ref={setContainerRef} />
-                        {/* Styled markdown preview, overlaid over CodeMirror for
-                            .md tabs in rendered mode. CM stays mounted beneath so
-                            toggling back keeps cursor/scroll/undo. */}
-                        <Show when={showRendered()}>
-                            <div class="editor-md-preview">
-                                <Markdown textAtom={() => liveDoc()} />
-                            </div>
-                        </Show>
-                        {/* Rendered/Source toggle — markdown tabs only. */}
                         <Show when={isMarkdown()}>
-                            <button
-                                class="editor-md-toggle"
-                                title={
-                                    showRendered()
-                                        ? "Edit source (Ctrl+Shift+V)"
-                                        : "Show rendered preview (Ctrl+Shift+V)"
+                            <Show when={model.previewOpenAtom()}>
+                                <div
+                                    class="editor-preview-divider"
+                                    onMouseDown={handlePreviewResizeMouseDown}
+                                    title="Drag to resize preview"
+                                />
+                            </Show>
+                            <div
+                                class="editor-preview-pane"
+                                classList={{ "editor-preview-pane--collapsed": !model.previewOpenAtom() }}
+                                style={
+                                    model.previewOpenAtom()
+                                        ? { height: `${model.previewHeightAtom()}px` }
+                                        : undefined
                                 }
-                                onClick={toggleMdMode}
+                                id="editor-preview-panel"
                             >
-                                {showRendered() ? "✎ Source" : "👁 Preview"}
-                            </button>
+                                <div class="editor-preview-header">
+                                    <span class="editor-preview-header-label">Preview</span>
+                                    <button
+                                        type="button"
+                                        class="editor-preview-chevron"
+                                        aria-expanded={model.previewOpenAtom()}
+                                        aria-controls="editor-preview-panel"
+                                        aria-label={
+                                            model.previewOpenAtom()
+                                                ? "Collapse preview"
+                                                : "Expand preview (Ctrl+Shift+V)"
+                                        }
+                                        onClick={() => void model.togglePreview()}
+                                    >
+                                        {model.previewOpenAtom() ? "▴" : "▾"}
+                                    </button>
+                                </div>
+                                <Show when={model.previewOpenAtom()}>
+                                    <div class="editor-preview-content">
+                                        <Markdown textAtom={() => liveDoc()} />
+                                    </div>
+                                </Show>
+                            </div>
                         </Show>
                     </div>
                 </Show>
