@@ -1045,6 +1045,15 @@ impl AppState {
             .cloned()
     }
 
+    /// Snapshot the current active drag session regardless of drag_id.
+    /// Used by `start_cross_drag` to detect and self-heal a *stale* session
+    /// (a prior drag whose end/cancel never reached the host — e.g. the
+    /// renderer threw mid-drop, or a window/pane was destroyed under it),
+    /// which would otherwise reject every future tear-off forever.
+    pub fn active_drag_snapshot(&self) -> Option<DragSession> {
+        self.host_state.lock().active_drag.clone()
+    }
+
     // ── PR #5 H.4 — pool read helpers ───────────────────────────────────
     //
     // Replace the legacy `state.unpromoted_pool_labels: Mutex<HashSet>` /

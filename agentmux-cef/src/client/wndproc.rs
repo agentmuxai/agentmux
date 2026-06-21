@@ -260,43 +260,24 @@ unsafe extern "system" fn floater_cascade_wndproc(
     lparam: isize,
 ) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DefWindowProcW, PostMessageW, SetWindowPos, ShowWindow,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE,
-        WM_ACTIVATE, WM_CLOSE, WM_DESTROY, WM_SIZE,
+        CallWindowProcW, DefWindowProcW, WM_DESTROY,
     };
-    const WA_INACTIVE: usize = 0;
-    const SIZE_MINIMIZED: usize = 1;
 
-    if msg == WM_ACTIVATE {
-        if (wparam & 0xFFFF) as usize != WA_INACTIVE {
-            // Main window activated — place every floater below it in z-order.
-            // This lets the user click the main window and have it visually
-            // appear in front of the floating pane (replaces the owned-window
-            // always-on-top invariant with a cooperative z-order contract).
-            for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
-                SetWindowPos(
-                    fhwnd as *mut _,
-                    hwnd, // insertAfter=main → floater is placed below main
-                    0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                );
-            }
-        }
-    } else if msg == WM_SIZE {
-        if wparam == SIZE_MINIMIZED {
-            for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
-                ShowWindow(fhwnd as *mut _, SW_HIDE);
-            }
-        } else {
-            for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
-                ShowWindow(fhwnd as *mut _, SW_SHOWNOACTIVATE);
-            }
-        }
-    } else if msg == WM_DESTROY {
-        for fhwnd in crate::floating_pane::floater_hwnds_for_parent(hwnd as isize) {
-            PostMessageW(fhwnd as *mut _, WM_CLOSE, 0, 0);
-        }
-    }
+    // FLOATER INDEPENDENCE (supersedes the issue #1560 cascade): a floating
+    // pane is now a fully independent top-level window. Closing, minimizing,
+    // restoring, or activating a FullInstance window must NOT touch its
+    // floaters — the OS already z-orders unowned top-level windows on its own,
+    // and a floater torn from one window can be redocked into another, so no
+    // window "owns" a floater's lifecycle. The previous WM_ACTIVATE z-order /
+    // WM_SIZE hide-show / WM_DESTROY close-cascade handlers are removed.
+    //
+    // Two bugs they caused: (1) WM_DESTROY cascade-closed any floater whose
+    // parent matched OR was parent==0, so closing one window killed unrelated
+    // floaters; (2) that surprise close destroyed the block under an in-flight
+    // tear-off, which then jammed the drag session and broke tear-off entirely.
+    //
+    // The subclass itself is kept ONLY as a pure observer-passthrough that
+    // self-prunes FLOATER_CASCADE_ORIGINALS on WM_DESTROY (HWND-reuse safety).
 
     // Always pass through — we observe only, never short-circuit.
     let original = FLOATER_CASCADE_ORIGINALS
