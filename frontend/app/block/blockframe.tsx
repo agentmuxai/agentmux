@@ -290,7 +290,7 @@ function EndIcons(props: {
     );
 }
 
-function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error }): JSX.Element {
+function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error; isMinimized: () => boolean; toggleMinimize: () => void }): JSX.Element {
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", props.nodeModel.blockId));
     const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
     const preIconButton = util.useAtomValueSafe(props.viewModel?.preIconButton);
@@ -793,10 +793,10 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     }
     const previewElem = <div class="block-frame-preview">{viewIconElem}</div>;
     const headerElem = (
-        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} />
+        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} isMinimized={isMinimized} toggleMinimize={toggleMinimize} />
     );
     const headerElemNoView = (
-        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} viewModel={null} />
+        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} viewModel={null} isMinimized={isMinimized} toggleMinimize={toggleMinimize} />
     );
 
     // Body right-click handler
