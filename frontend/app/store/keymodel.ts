@@ -32,6 +32,7 @@ import { fireAndForget } from "@/util/util";
 import { createSignal } from "solid-js";
 import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { triggerTabCloseRequest } from "@/app/tab/tab-close-request";
 
 // Debug logging function - writes to file
 const DEBUG_LOG_PATH = "C:/Systems/agentmux-debug.log";
@@ -155,21 +156,12 @@ function getStaticTabBlockCount(): number {
 
 function simpleCloseStaticTab() {
     debugLog("simpleCloseStaticTab called");
-    const ws = atoms.workspace();
-    const tabId = atoms.activeTabId();
-    // Guard: don't close the only tab. Mirrors the same check in the
-    // tabbar close button (`tabbar.tsx:63`). Without this gate, the
-    // backend rejects the CloseTab as "last tab" but
-    // `deleteLayoutModelForTab` still runs unconditionally, leaving
-    // client/server diverged. (reagent P1 round 2 PR #633.)
-    const allTabs = (ws.tabids ?? []).concat(ws.pinnedtabids ?? []);
-    if (allTabs.length <= 1) {
-        return;
-    }
-    WorkspaceService.CloseTab(ws.oid, tabId).catch((e) => {
-        console.error("[closeTab] failed:", e);
-    });
-    deleteLayoutModelForTab(tabId);
+    // Route through TabBar's requestClose so the close-confirmation modal
+    // (and the tab:skipcloseconfirm setting) is honoured on keyboard close
+    // the same way it is on the X-button path. The last-tab guard and the
+    // WorkspaceService.CloseTab + deleteLayoutModelForTab calls all live
+    // inside handleClose, which requestClose delegates to. (reagent P2 #1636.)
+    triggerTabCloseRequest();
 }
 
 function uxCloseBlock(blockId: string) {
