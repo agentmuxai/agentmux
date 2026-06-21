@@ -876,13 +876,16 @@ pub fn promote_pool_window(
     // target rect to the DESTINATION monitor's work area so a HiDPI coordinate
     // miscalc can't strand the promoted window off-screen — the "blank new
     // window" bug where the window rendered but sat at the DPI-scaled
-    // POOL_OFFSCREEN. The anchor/origin picks the monitor.
-    let (pos_x, pos_y, win_w, win_h) = match crate::app::get_monitor_work_area(pos_x, pos_y) {
-        Some((wa_x, wa_y, wa_w, wa_h)) => {
-            clamp_rect_within(pos_x, pos_y, win_w, win_h, wa_x, wa_y, wa_w, wa_h)
-        }
-        None => (pos_x, pos_y, win_w, win_h),
-    };
+    // POOL_OFFSCREEN. The anchor/origin picks the monitor. Use the PHYSICAL work
+    // area: pos/size here and SetWindowPos below are physical pixels, so the DIP
+    // variant would over-constrain on HiDPI (reagent P1 #1652).
+    let (pos_x, pos_y, win_w, win_h) =
+        match crate::app::get_monitor_work_area_physical(pos_x, pos_y) {
+            Some((wa_x, wa_y, wa_w, wa_h)) => {
+                clamp_rect_within(pos_x, pos_y, win_w, win_h, wa_x, wa_y, wa_w, wa_h)
+            }
+            None => (pos_x, pos_y, win_w, win_h),
+        };
 
     // Take the window out of WS_EX_TOOLWINDOW so the promoted window
     // appears in the taskbar / Alt+Tab like any other AgentMux
@@ -939,7 +942,10 @@ pub fn promote_pool_window(
             // this class is caught in logs rather than only by users.
             let mut r: RECT = std::mem::zeroed();
             if GetWindowRect(raw_hwnd, &mut r) != 0 {
-                if let Some((wx, wy, ww, wh)) = crate::app::get_monitor_work_area(pos_x, pos_y) {
+                // Physical work area: GetWindowRect is physical px (reagent P2 #1652).
+                if let Some((wx, wy, ww, wh)) =
+                    crate::app::get_monitor_work_area_physical(pos_x, pos_y)
+                {
                     let onscreen =
                         r.right > wx && r.left < wx + ww && r.bottom > wy && r.top < wy + wh;
                     if !onscreen {
