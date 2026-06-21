@@ -129,6 +129,13 @@ pub fn toggle_floating_maximize(
     };
     #[cfg(not(target_os = "windows"))]
     let current_rect: Option<crate::state::PaneRect> = None;
+    // On macOS/Linux the floater is a CEF Views window. Delegate to the same
+    // maximize/restore task used by normal windows — CEF Views handles the
+    // toggle and restore geometry natively via window.maximize()/restore().
+    // This must run before the reducer dispatch so the visual change is
+    // immediate; the reducer still records the placement state for the UI.
+    #[cfg(not(target_os = "windows"))]
+    crate::ui_tasks::post_maximize_window(state, &label);
 
     // 1. Pure reducer dispatch — flips Normal↔Maximized, stashes/returns rect.
     let out = state.host_dispatch(crate::reducer::HostCommand::ToggleFloatingMaximize {

@@ -125,13 +125,16 @@ static REOPEN_STATE: OnceLock<Arc<AppState>> = OnceLock::new();
 
 /// `applicationShouldHandleReopen:hasVisibleWindows:` — the NSApplicationDelegate
 /// method AppKit invokes when macOS re-activates the already-running app
-/// (Finder/Dock double-click, `open` without `-n`). We answer it by opening a
-/// new window — matching the Windows relaunch-forwards-`open_new_window`
-/// behavior — and returns **NO**: we've taken responsibility for this reopen, so
-/// AppKit must not *also* run its own default reopen handling on top of ours.
-/// (Per the AppKit contract, returning YES means "AppKit, perform your default
-/// reopen too" — which could raise/create an extra window, especially in the
-/// no-visible-windows case. NO = "handled; do nothing further.")
+/// (Dock single-click, Finder double-click, `open` without `-n`).
+///
+/// Behaviour follows the standard macOS convention:
+/// - `hasVisibleWindows = YES` (Dock click with a visible window): bring the
+///   main window to front rather than opening a new one.
+/// - `hasVisibleWindows = NO` (all windows hidden/minimised): open a new
+///   window (same action as the Windows relaunch forward).
+///
+/// Returns **NO**: we've handled the event; AppKit must not also run its own
+/// default reopen on top of ours.
 ///
 /// Why the delegate, not a raw `kAEReopenApplication` `NSAppleEventManager`
 /// handler (the previous attempt): Chromium re-registers its own AE handler
@@ -149,15 +152,24 @@ unsafe extern "C" fn should_handle_reopen(
     _has_visible_windows: u8,
 ) -> u8 {
     match REOPEN_STATE.get() {
-        // open_new_window is non-blocking: it enqueues + posts to the CEF UI
-        // thread, so invoking it from the AppKit main thread is safe.
-        Some(state) => match crate::commands::window::open_new_window(state) {
-            Ok(_) => tracing::info!("reopen-hook:fired — applicationShouldHandleReopen opened a new window"),
-            Err(e) => tracing::warn!(error = %e, "reopen-hook:fired — open_new_window failed"),
-        },
+        Some(state) => {
+            if _has_visible_windows != 0 {
+                // Visible window exists — focus it (standard Dock single-click).
+                // post_focus_window is non-blocking and safe to call from the
+                // AppKit main thread.
+                crate::ui_tasks::post_focus_window(state, "main");
+                tracing::info!("reopen-hook:fired — focused main window (hasVisibleWindows=YES)");
+            } else {
+                // No visible windows — open a new one.
+                match crate::commands::window::open_new_window(state) {
+                    Ok(_) => tracing::info!("reopen-hook:fired — opened new window (hasVisibleWindows=NO)"),
+                    Err(e) => tracing::warn!(error = %e, "reopen-hook:fired — open_new_window failed"),
+                }
+            }
+        }
         None => tracing::warn!("reopen-hook fired before REOPEN_STATE was set"),
     }
-    0 // NO — we opened the window; AppKit must not also run its default reopen
+    0 // NO — handled; AppKit must not also run its default reopen
 }
 
 /// Install the reopen handler by wiring `applicationShouldHandleReopen:` onto

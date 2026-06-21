@@ -403,6 +403,13 @@ pub fn resolve_window_at_cursor(
                                 None => None,
                             };
                             if let Some(label) = resolved_label {
+                                // Floating panes are never valid redock targets.
+                                // Continue the Z-order walk so the docked main
+                                // window behind the floater can still be found.
+                                if label.starts_with("floating-") {
+                                    hwnd = GetWindow(hwnd, GW_HWNDNEXT);
+                                    continue;
+                                }
                                 let wid = state.backend_window_id(label);
                                 return Ok(serde_json::json!({
                                     "label": label,
