@@ -272,6 +272,22 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     </Show>
                 </div>
             </Show>
+            <Show when={props.node() && props.node().type === "context_compacted"}>
+                {(() => {
+                    const n = props.node() as Extract<DocumentNode, { type: "context_compacted" }>;
+                    const fmt = (tok: number) => tok >= 1000 ? `${Math.round(tok / 1000)}k` : String(tok);
+                    return (
+                        <div class="agent-context-compacted">
+                            <div class="agent-context-compacted-label">
+                                context compacted
+                            </div>
+                            <div class="agent-context-compacted-detail">
+                                Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens
+                            </div>
+                        </div>
+                    );
+                })()}
+            </Show>
         </>
     );
 }
