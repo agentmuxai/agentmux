@@ -4,25 +4,10 @@
 import type { Root, Element, Text, ElementContent } from "hast";
 import type { Plugin } from "unified";
 import { visitParents, SKIP } from "unist-util-visit-parents";
-import LinkifyIt from "linkify-it";
-
-const linkify = new LinkifyIt();
-// fuzzyLink matches bare domains (github.com, localhost:3000) without http://
-// fuzzyEmail off to avoid false positives on name@host patterns in shell output
-linkify.set({ fuzzyLink: true, fuzzyEmail: false });
+import { linkify, normalizeHref, isLikelyFilename } from "./linkify-config";
 
 // Don't linkify text inside these elements — already an anchor, or code/pre
 const SKIP_ANCESTORS = new Set(["a", "code", "pre", "script", "style"]);
-
-// Local addresses use http://, not https://
-const LOCAL_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
-
-function normalizeHref(url: string): string {
-    if (url.startsWith("//")) return "https:" + url;
-    if (url.includes("://")) return url;
-    const scheme = LOCAL_HOST_RE.test(url.split("/")[0]) ? "http" : "https";
-    return `${scheme}://${url}`;
-}
 
 export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
     visitParents(tree, "text", (node: Text, ancestors) => {
@@ -40,6 +25,17 @@ export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
         let lastIndex = 0;
 
         for (const match of matches) {
+            // Drop fuzzy matches that are actually source-code filenames
+            // (e.g. README.md, main.rs, setup.py treated as ccTLD URLs)
+            if (isLikelyFilename(match.schema, match.url)) {
+                if (match.index > lastIndex) {
+                    newNodes.push({ type: "text", value: node.value.slice(lastIndex, match.index) });
+                }
+                newNodes.push({ type: "text", value: match.raw });
+                lastIndex = match.lastIndex;
+                continue;
+            }
+
             if (match.index > lastIndex) {
                 newNodes.push({ type: "text", value: node.value.slice(lastIndex, match.index) });
             }
@@ -55,6 +51,9 @@ export const rehypeLinkify: Plugin<[], Root> = () => (tree) => {
         if (lastIndex < node.value.length) {
             newNodes.push({ type: "text", value: node.value.slice(lastIndex) });
         }
+
+        // If nothing was actually linkified, bail out without mutating the tree
+        if (newNodes.length === 1 && newNodes[0].type === "text") return;
 
         const parent = ancestors[ancestors.length - 1] as Element;
         const index = parent.children.indexOf(node as ElementContent);

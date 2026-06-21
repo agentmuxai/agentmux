@@ -2,27 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, For, type JSX } from "solid-js";
-import LinkifyIt from "linkify-it";
 import { openLink } from "@/app/store/global";
-
-const linkify = new LinkifyIt();
-linkify.set({ fuzzyLink: true, fuzzyEmail: false });
-
-const SAFE_SCHEMES = /^(https?|ftp|mailto|ssh|file):\/\//i;
-
-function isSafeHref(url: string): boolean {
-    return SAFE_SCHEMES.test(url) || url.startsWith("//");
-}
-
-// Local addresses use http://, not https://
-const LOCAL_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
-
-function normalizeHref(url: string): string {
-    if (url.startsWith("//")) return "https:" + url;
-    if (url.includes("://")) return url;
-    const scheme = LOCAL_HOST_RE.test(url.split("/")[0]) ? "http" : "https";
-    return `${scheme}://${url}`;
-}
+import { linkify, normalizeHref, isLikelyFilename, isSafeHref } from "./linkify-config";
 
 type Segment = { text: string; href?: string };
 
@@ -34,6 +15,17 @@ function toSegments(text: string): Segment[] {
     let lastIndex = 0;
 
     for (const match of matches) {
+        // Drop fuzzy matches that are actually source-code filenames
+        // (e.g. README.md, main.rs, setup.py treated as ccTLD URLs)
+        if (isLikelyFilename(match.schema, match.url)) {
+            if (match.index > lastIndex) {
+                segments.push({ text: text.slice(lastIndex, match.index) });
+            }
+            segments.push({ text: match.raw });
+            lastIndex = match.lastIndex;
+            continue;
+        }
+
         if (match.index > lastIndex) {
             segments.push({ text: text.slice(lastIndex, match.index) });
         }
