@@ -92,8 +92,14 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |_data, _ctx| {
             let process_tracker = process_tracker.clone();
             Box::pin(async move {
+                let process_ids = process_tracker.list_all_blocks();
+                let reactive_ids = crate::backend::reactive::get_global_handler().list_active_blocks();
+                let mut seen = std::collections::HashSet::new();
+                let block_ids: Vec<String> = process_ids.into_iter().chain(reactive_ids)
+                    .filter(|id| seen.insert(id.clone()))
+                    .collect();
                 Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
-                    block_ids: process_tracker.list_all_blocks(),
+                    block_ids,
                 }).unwrap()))
             })
         }),
