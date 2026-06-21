@@ -6,7 +6,7 @@ members = ["agentmux-srv", "agentmux-cef", "agentmux-launcher", "agentmux-common
 # `version.workspace = true` so a single bump touches one Cargo.toml.
 # RFC #857 Phase 1.
 [workspace.package]
-version = "0.46.6"
+version = "0.47.0"
 
 [profile.release]
 strip = true
