@@ -807,6 +807,15 @@ wrap_app! {
                 cmd.append_switch(Some(&CefString::from("disable-sync")));
                 cmd.append_switch(Some(&CefString::from("disable-extensions")));
 
+                // Disable Chromium's Web Notifications API. We don't use
+                // `new Notification()` anywhere; CEF still registers both the
+                // main app and AgentMux Helper (Alerts) as OS notification
+                // sources and requests macOS permission for each at startup,
+                // showing two permission toasts on every new-version install.
+                // Suppressing the API at the command-line level prevents both
+                // registrations and eliminates the duplicate prompts.
+                cmd.append_switch(Some(&CefString::from("disable-notifications")));
+
                 // HTTP Basic / Digest auth — route the challenge to the
                 // embedder's `RequestHandler::on_auth_credentials` callback
                 // (which surfaces our `BrowserAuthModal` from PR #906)
