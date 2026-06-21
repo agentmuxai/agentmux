@@ -8,9 +8,14 @@
 //! over a dark backdrop in that gap — the Linux analogue of `splash.rs` (Win32)
 //! and `splash_mac.rs` (Cocoa).
 //!
-//! The backend mirrors the host's ozone choice (`agentmux-cef/src/app.rs`): an
-//! X11 splash for X11 / XWayland sessions, a Wayland splash for native-Wayland
-//! sessions — so the splash always speaks the same display protocol as the host.
+//! The backend is chosen for **centering fidelity**, not to mirror the host's
+//! ozone choice: the X11 backend draws an `override_redirect` window it positions
+//! itself (centered on the primary monitor) and XWayland honors that, so it
+//! centers under both X11 and native-Wayland sessions. A native-Wayland
+//! `xdg_toplevel`, by contrast, cannot self-position — Mutter drops small
+//! toplevels at the top-left, not centered. XWayland is present in nearly every
+//! Wayland session, so we prefer the X11 backend whenever an X server is reachable
+//! and fall back to the Wayland backend only when there is no X display at all.
 //!
 //! Dismiss protocol is the macOS one: `spawn()` sets `AGENTMUX_SPLASH_READY_FILE`
 //! (the host inherits it and writes the file on first paint); the splash thread
@@ -53,25 +58,28 @@ enum Session {
     X11,
 }
 
-/// Mirror the host's ozone selection (`agentmux-cef/src/app.rs`): an explicit
-/// `AGENTMUX_OZONE_PLATFORM` wins; otherwise native Wayland when `WAYLAND_DISPLAY`
-/// is set; otherwise X11. Keeping this in lockstep guarantees splash and host
-/// never end up on different display protocols.
+/// Pick the splash backend by **centering ability**. The X11 backend self-centers
+/// (override-redirect, positioned on the RANDR primary) and XWayland honors that,
+/// so prefer it whenever an X server is actually reachable — including under a
+/// native-Wayland session, where the Wayland backend can't self-center and Mutter
+/// drops the splash top-left. Only with no usable X display do we fall back to the
+/// best-effort Wayland backend.
+///
+/// An explicit `AGENTMUX_OZONE_PLATFORM=x11|wayland` still pins a specific backend
+/// (escape hatch / for exercising the Wayland path itself); note that pinning
+/// `wayland` re-introduces the top-left placement Mutter gives uncentered toplevels.
 fn detect() -> Session {
-    if let Ok(forced) = std::env::var("AGENTMUX_OZONE_PLATFORM") {
-        match forced.as_str() {
-            "wayland" => return Session::Wayland,
-            "x11" => return Session::X11,
-            _ => {}
-        }
+    match std::env::var("AGENTMUX_OZONE_PLATFORM").ok().as_deref() {
+        Some("x11") => return Session::X11,
+        Some("wayland") => return Session::Wayland,
+        _ => {}
     }
-    let on_wayland = std::env::var("WAYLAND_DISPLAY")
-        .map(|s| !s.is_empty())
-        .unwrap_or(false);
-    if on_wayland {
-        Session::Wayland
-    } else {
+    // `DISPLAY` being set doesn't prove a server is live (stale env / no
+    // XWayland), so probe a real connection — a failed handshake is fast.
+    if x11::server_reachable() {
         Session::X11
+    } else {
+        Session::Wayland
     }
 }
 

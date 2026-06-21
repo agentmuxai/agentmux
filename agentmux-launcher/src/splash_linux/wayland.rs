@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Wayland splash backend — a software-drawn (`wl_shm`) `xdg_toplevel` showing
-//! the pulsing brain, for native-Wayland sessions (the default since #1611).
+//! the pulsing brain. This is the **fallback** path, used only when no X server
+//! is reachable (`super::detect` prefers the self-centering X11/XWayland backend
+//! whenever XWayland is up — see that module's doc for why).
 //!
 //! Wayland deliberately denies clients window positioning and "always on top",
-//! and GNOME/Mutter does not implement `wlr-layer-shell`, so this is a
-//! best-effort splash: a borderless `xdg_toplevel` the compositor places (Mutter
-//! centers small toplevels) and which we dismiss the instant the host paints.
-//! No GPU/EGL — a shared-memory buffer we blit each frame. See
-//! docs/specs/SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20.md §3, §6.
+//! and GNOME/Mutter does not implement `wlr-layer-shell`, so this splash *cannot
+//! self-center*: it's a borderless `xdg_toplevel` the compositor places — Mutter
+//! drops small toplevels at the top-left, not centered — which we dismiss the
+//! instant the host paints. No GPU/EGL — a shared-memory buffer we blit each
+//! frame. See docs/specs/SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20.md §3, §6.
 
 use std::error::Error;
 use std::path::{Path, PathBuf};
