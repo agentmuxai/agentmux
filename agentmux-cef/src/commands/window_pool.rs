@@ -56,6 +56,47 @@ fn pool_hwnd_cache() -> &'static Mutex<HashMap<String, usize>> {
     POOL_HWND_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Global cache of pool windows' CEF Views `Window`, captured at
+/// `on_window_created` (UI thread) and consumed by a promote UI task. The
+/// macOS/Linux `state.windows` registry is cfg-gated OFF on Windows, and
+/// `browser_view.window()` returns None for pool windows post-load
+/// (SPEC_POOL_WINDOW_HWND_NULL), so the promote can't otherwise reach the Views
+/// `Window` to apply the macOS-parity `set_bounds()`+`show()` fix.
+///
+/// This is a Send `Mutex` (NOT a thread-local): `on_window_created` runs on the
+/// CEF UI thread but the Windows promote runs on the IPC thread, so the cache
+/// must cross threads. `cef::Window` is `Send` (same as the macOS `state.windows`
+/// registry). The actual `set_bounds()`+`show()` is still performed on the UI
+/// thread via a posted task — CEF Views calls are UI-thread-only.
+#[cfg(target_os = "windows")]
+static POOL_WINDOW_VIEWS: std::sync::OnceLock<Mutex<HashMap<String, cef::Window>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+fn pool_window_views() -> &'static Mutex<HashMap<String, cef::Window>> {
+    POOL_WINDOW_VIEWS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Cache a pool window's CEF Views `Window` (called from `on_window_created`,
+/// where the Window is valid). No-op for non-pool labels.
+#[cfg(target_os = "windows")]
+pub fn cache_pool_window_view(label: &str, window: &cef::Window) {
+    if !label.starts_with("window-pool-") {
+        return;
+    }
+    pool_window_views()
+        .lock()
+        .unwrap()
+        .insert(label.to_string(), window.clone());
+}
+
+/// Take (remove + return) a pool window's cached CEF Views `Window`. Called on
+/// the UI thread by the promote show task.
+#[cfg(target_os = "windows")]
+pub fn take_pool_window_view(label: &str) -> Option<cef::Window> {
+    pool_window_views().lock().unwrap().remove(label)
+}
+
 /// HWND cache for pane pool windows. Separate from `POOL_HWND_CACHE` because
 /// pane pool windows are WS_POPUP + WS_EX_TOOLWINDOW (unowned, no taskbar entry)
 /// and their outer HWND must be cached before the CEF child browser is created
@@ -505,6 +546,13 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     #[cfg(target_os = "windows")]
     {
         pool_hwnd_cache().lock().unwrap().remove(label);
+        // Likewise drop the cached CEF Views Window. Only `take_pool_window_view`
+        // (on promote) otherwise removes entries, so a pool window that dies
+        // *before* promote would leak its cached `cef::Window` for the process
+        // lifetime. Idempotent — `take_*` already removed it if this is a
+        // post-promote close. (reagent P2 PR #1654.) Windows-only: the cache
+        // and `take_pool_window_view` are `#[cfg(target_os = "windows")]`.
+        let _ = take_pool_window_view(label);
     }
     // PR #5 H.4 — atomic remove-from-{unpromoted,queue} + clear
     // respawn semaphore via reducer. The dispatch returns:
@@ -750,6 +798,22 @@ pub fn promote_pool_window(
         }
     };
 
+    // Register the promoted window's outer top-level HWND under its label in the
+    // chrome-resolution cache (`window_hwnds`) so the new window's title-bar
+    // DRAG / CLOSE / MINIMIZE / MAXIMIZE act on THIS window. Pool windows
+    // otherwise never land in `window_hwnds`: `capture_hwnd_for_label` reads
+    // `host.window_handle()`, which is null for pool windows
+    // (SPEC_POOL_WINDOW_HWND_NULL), so `resolve_window_hwnd` fell back to
+    // `find_own_top_level_window()` (the MAIN window) — which is why dragging the
+    // new window's header moved the original, and close/maximize would hit the
+    // wrong window. `raw_hwnd` is the CefWindow top-level handle (already the
+    // outer HWND), so store it directly; this also overwrites any stale entry
+    // pointing at the off-screen pre-promote pool window.
+    state
+        .window_hwnds
+        .lock()
+        .insert(label.clone(), raw_hwnd as isize);
+
     // Phase F.5 — explicit promote signal sent BETWEEN the matching
     // `report_pool_window_removed` (above) and `report_window_opened`
     // (next). The launcher's pool-respawn saga starts on the
@@ -887,34 +951,35 @@ pub fn promote_pool_window(
             None => (pos_x, pos_y, win_w, win_h),
         };
 
-    // Take the window out of WS_EX_TOOLWINDOW so the promoted window
-    // appears in the taskbar / Alt+Tab like any other AgentMux
-    // instance. Must run BEFORE the position/show below; otherwise
-    // the taskbar entry won't appear until the next style refresh.
-    set_taskbar_hidden(raw_hwnd, false);
-
-    // Reposition + raise to top + show. SWP_NOZORDER is intentionally
-    // *not* set — for tear-off we need the new window at the top of
-    // the Z-order so the subsequent SC_MOVE handshake routes the
-    // mouse-capture correctly. With SWP_NOZORDER set, HWND_TOP would
-    // be silently ignored.
+    // FIX — Stage 0 (RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21,
+    // cef#3638): position the window at its final ON-SCREEN rect while it is still
+    // HIDDEN, then perform the FIRST show THERE.
+    //
+    // Pool windows are spawned visible-but-OFF-SCREEN, then immediately
+    // SW_HIDE'd (set_taskbar_hidden(true)) in init_pool_window_hwnd, so by
+    // promote time the raw HWND is hidden. The previous order re-showed it
+    // first — via set_taskbar_hidden(false)'s internal SW_SHOWNA — at the
+    // OFF-SCREEN pool position, and THEN moved it on-screen. On Windows that binds the browser
+    // compositor's visibility/surface state to the off-screen show, and the
+    // subsequent move+resize never re-syncs it, so the promoted window paints
+    // BLANK despite a valid DOM. Showing for the first time at the final on-screen
+    // position gives Chromium the genuine hidden->visible transition it needs.
+    // (macOS is unaffected — occlusion-driven visibility / IOSurface.)
+    //
+    // SWP_NOZORDER is intentionally *not* set on the placement move — tear-off
+    // needs the window at the top of the Z-order for the SC_MOVE mouse-capture
+    // handshake.
     unsafe {
+        use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            SetWindowPos, ShowWindow, HWND_TOP, SW_SHOW,
+            GetWindowRect, SetWindowPos, ShowWindow, HWND_TOP, SW_SHOW, SWP_NOACTIVATE,
         };
-        let pos_ok = SetWindowPos(
-            raw_hwnd,
-            HWND_TOP,
-            pos_x,
-            pos_y,
-            win_w,
-            win_h,
-            0, // no flags — apply move + size + Z-order all
-        );
+
+        // 1. Position to the final on-screen rect WHILE HIDDEN (no show yet).
+        let pos_ok = SetWindowPos(raw_hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, 0);
         if pos_ok == 0 {
-            // Non-fatal: the SC_MOVE handshake will still try to
-            // run, but the user may see a misplaced window. Log
-            // for diagnostics so we can detect a pattern.
+            // Non-fatal: the SC_MOVE handshake still runs; the user may see a
+            // misplaced window. Log so we can detect a pattern.
             let err = windows_sys::Win32::Foundation::GetLastError();
             tracing::error!(
                 target: "dnd:tearoff:pool",
@@ -923,40 +988,36 @@ pub fn promote_pool_window(
                 "[pool] SetWindowPos failed"
             );
         }
+
+        // 2. Apply the taskbar (APPWINDOW) style AND perform the genuine first
+        //    show: set_taskbar_hidden(false)'s SW_HIDE -> style -> SW_SHOWNA cycle
+        //    is now the first hidden->visible transition, at the on-screen rect
+        //    set in step 1 (set_taskbar_hidden's inner SetWindowPos is NOMOVE/
+        //    NOSIZE, so it preserves that position).
+        set_taskbar_hidden(raw_hwnd, false);
+
+        // 3. Ensure shown + activated (SW_SHOWNA above does not activate).
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
 
-        // Re-assert the rect AFTER show. The pre-show SetWindowPos can be lost to
-        // the pool window's create/show sequence and per-monitor DPI-context
-        // settling, which intermittently leaves the window at the (scaled)
-        // POOL_OFFSCREEN — shown and rendered, but off the screen (the HiDPI
-        // "blank new window" bug). A second, idempotent move after show makes the
-        // placement deterministic. SWP_NOACTIVATE so we don't steal focus again;
-        // HWND_TOP keeps it frontmost (same as the pre-show move).
-        {
-            use windows_sys::Win32::Foundation::RECT;
-            use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, SWP_NOACTIVATE};
-            let _ = SetWindowPos(
-                raw_hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE,
-            );
-            // Telemetry: flag any residual off-screen result so a regression of
-            // this class is caught in logs rather than only by users.
-            let mut r: RECT = std::mem::zeroed();
-            if GetWindowRect(raw_hwnd, &mut r) != 0 {
-                // Physical work area: GetWindowRect is physical px (reagent P2 #1652).
-                if let Some((wx, wy, ww, wh)) =
-                    crate::app::get_monitor_work_area_physical(pos_x, pos_y)
-                {
-                    let onscreen =
-                        r.right > wx && r.left < wx + ww && r.bottom > wy && r.top < wy + wh;
-                    if !onscreen {
-                        tracing::error!(
-                            target: "pool:new-window",
-                            label = %label,
-                            left = r.left,
-                            top = r.top,
-                            "[pool] promoted window still off-screen after post-show re-assert"
-                        );
-                    }
+        // 4. Re-assert the rect after show + off-screen telemetry (#1652).
+        //    SWP_NOACTIVATE so we don't steal focus again; HWND_TOP keeps it frontmost.
+        let _ = SetWindowPos(raw_hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE);
+        let mut r: RECT = std::mem::zeroed();
+        if GetWindowRect(raw_hwnd, &mut r) != 0 {
+            // Physical work area: GetWindowRect is physical px (reagent P2 #1652).
+            if let Some((wx, wy, ww, wh)) =
+                crate::app::get_monitor_work_area_physical(pos_x, pos_y)
+            {
+                let onscreen =
+                    r.right > wx && r.left < wx + ww && r.bottom > wy && r.top < wy + wh;
+                if !onscreen {
+                    tracing::error!(
+                        target: "pool:new-window",
+                        label = %label,
+                        left = r.left,
+                        top = r.top,
+                        "[pool] promoted window still off-screen after post-show re-assert"
+                    );
                 }
             }
         }
@@ -967,6 +1028,30 @@ pub fn promote_pool_window(
         // window is visible and promoted so floaters torn from this window
         // follow its minimize/restore/destroy.
         crate::client::install_main_window_floater_cascade_hook(raw_hwnd);
+    }
+
+    // macOS-PARITY VISIBILITY FIX (the load-bearing one): drive the CEF Views
+    // `Window` set_bounds() + show() exactly as the macOS/Linux promote does — but
+    // POSTED TO THE UI THREAD, because CEF Views calls are UI-thread-only and this
+    // promote runs on the IPC thread (the previous in-line attempt no-op'd: the
+    // thread-local cache + show ran on the wrong thread). The Window was cached at
+    // on_window_created (browser_view.window() is None for pool windows post-load
+    // on Windows). The Win32 SetWindowPos + ShowWindow above position/show the raw
+    // HWND but do NOT flip the browser's view-hierarchy/compositor visibility —
+    // only the Views Window show() does, which is the one thing macOS does and
+    // Windows didn't, and is why macOS renders and Windows paints blank. set_bounds
+    // is DIP, so convert the physical rect we positioned the HWND at.
+    {
+        let scale = crate::app::dpi_scale_at(pos_x, pos_y);
+        let to_dip = |v: i32| (v as f32 / scale).round() as i32;
+        crate::ui_tasks::post_promote_pool_window_views_show(
+            state,
+            &label,
+            to_dip(pos_x),
+            to_dip(pos_y),
+            to_dip(win_w),
+            to_dip(win_h),
+        );
     }
 
     // Phase B.7.3.3 — the launcher's typed events drive the
