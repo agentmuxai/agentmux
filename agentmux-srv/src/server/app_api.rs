@@ -2348,6 +2348,7 @@ fn write_agent_config_files(
         &skills,
         &agent.name,
         &agent.id,
+        agent_slug,
     );
 
     // Expand ~ in work_dir
