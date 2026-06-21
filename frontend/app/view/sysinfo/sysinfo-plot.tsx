@@ -29,14 +29,24 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
 
     onMount(() => {
         if (!containerRef) return;
+        // Debounce so dock/undock animations don't trigger a re-render on every
+        // intermediate frame, which caused overlapping SVGs sharing the same
+        // gradient id to produce a sliding line artifact across the chart.
+        let resizeTimer: ReturnType<typeof setTimeout> | null = null;
         const rszObs = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                setPlotWidth(entry.contentRect.width);
-                setPlotHeight(entry.contentRect.height);
-            }
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                for (const entry of entries) {
+                    setPlotWidth(entry.contentRect.width);
+                    setPlotHeight(entry.contentRect.height);
+                }
+            }, 150);
         });
         rszObs.observe(containerRef);
-        onCleanup(() => rszObs.disconnect());
+        onCleanup(() => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            rszObs.disconnect();
+        });
     });
 
     createEffect(() => {
