@@ -15,8 +15,7 @@ import { ObjectService, WorkspaceService } from "../store/services";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
 import { makeORef, getObjectValue } from "../store/wos";
-import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/element/modal";
-import { Button } from "@/element/button";
+import { ConfirmModal } from "@/element/modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { deleteLayoutModelForTab } from "@/layout/index";
 import { DroppableTab } from "./droppable-tab";
@@ -61,24 +60,25 @@ function TabCloseConfirmModal(props: {
     const tabName = () => getObjectValue<Tab>(makeORef("tab", props.tabId))?.name ?? "this tab";
 
     return (
-        <Modal scope="window" open={true} onClose={props.onCancel} size="sm">
-            <ModalHeader title={`Close "${tabName()}"?`} />
-            <ModalBody>
-                <p style={{ margin: "0 0 12px 0" }}>This tab and all its panes will be closed.</p>
-                <label style={{ display: "flex", "align-items": "center", gap: "8px", cursor: "pointer", "font-size": "13px" }}>
-                    <input
-                        type="checkbox"
-                        checked={skipFuture()}
-                        onChange={(e) => setSkipFuture(e.currentTarget.checked)}
-                    />
-                    Don't ask again
-                </label>
-            </ModalBody>
-            <ModalFooter>
-                <Button className="ghost grey" onClick={props.onCancel}>Cancel</Button>
-                <Button className="solid red" onClick={() => props.onConfirm(skipFuture())}>Close tab</Button>
-            </ModalFooter>
-        </Modal>
+        <ConfirmModal
+            open={true}
+            scope="window"
+            title={`Close "${tabName()}"?`}
+            description="This tab and all its panes will be closed."
+            confirmLabel="Close tab"
+            destructive={true}
+            onConfirm={() => props.onConfirm(skipFuture())}
+            onCancel={props.onCancel}
+        >
+            <label style={{ display: "flex", "align-items": "center", gap: "8px", cursor: "pointer", "font-size": "13px" }}>
+                <input
+                    type="checkbox"
+                    checked={skipFuture()}
+                    onChange={(e) => setSkipFuture(e.currentTarget.checked)}
+                />
+                Don't ask again
+            </label>
+        </ConfirmModal>
     );
 }
 
