@@ -54,9 +54,7 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    // Tree text follows the per-pane zoom factor (set on .editor-view as
-    // --editor-zoom by editor-view.tsx). Toolbar chrome below is NOT zoomed.
-    font-size: calc(12px * var(--editor-zoom, 1));
+    font-size: 12px;
     color: var(--main-text-color);
 }
 
@@ -243,8 +241,7 @@
 }
 
 // ── Tab strip (Phase 1B of SPEC_EDITOR_TABS_2026-05-26.md) ─────────────────
-// Chrome above CodeMirror — not zoomed by --editor-zoom. Tabs flex 80–140px;
-// overflow chip lands in Phase 2.
+// Tabs flex 80–140px; overflow chip lands in Phase 2.
 
 .editor-tab-strip {
     flex: 0 0 auto;
@@ -546,10 +543,7 @@
 
     .cm-scroller {
         font-family: var(--termfontfamily, "JetBrains Mono", monospace);
-        // CodeMirror text follows the per-pane zoom factor — same source
-        // (--editor-zoom on .editor-view) the file tree uses, so both
-        // resize together.
-        font-size: calc(13px * var(--editor-zoom, 1));
+        font-size: 13px;
     }
 
     // Tight gutter — no debugger/breakpoint margin to reserve, so the line
@@ -643,10 +637,10 @@
 .editor-preview-content {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: calc(16px * var(--editor-zoom, 1)) calc(24px * var(--editor-zoom, 1));
+    padding: 16px 24px;
 
     .markdown {
-        font-size: calc(var(--markdown-font-size, 14px) * var(--editor-zoom, 1));
+        font-size: var(--markdown-font-size, 14px);
     }
 }
 
