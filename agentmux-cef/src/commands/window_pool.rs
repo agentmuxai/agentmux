@@ -119,6 +119,65 @@ const POOL_HEIGHT: i32 = 800;
 /// of the title bar after promotion.
 const TITLE_BAR_OFFSET_PX: i32 = 16;
 
+/// Clamp a window rect so it lies fully within a monitor work area.
+///
+/// Shrinks `(w, h)` to fit the work area if larger, then shifts the origin so no
+/// edge falls outside. The result is guaranteed on-screen — the safety net that
+/// prevents a HiDPI coordinate miscalc from stranding a pool-promoted new window
+/// off-screen (the 2026-06-21 "blank new window" bug: a window parked at the
+/// DPI-scaled `POOL_OFFSCREEN`, e.g. `-25600 = -32000 × 0.8` at 125%). Pure — the
+/// work-area rect is passed in — so the placement logic is unit-tested without
+/// Win32. See docs/specs/PLAN_POOL_NEW_WINDOW_DPI_POSITIONING_2026_06_21.md.
+pub(crate) fn clamp_rect_within(
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    wa_x: i32,
+    wa_y: i32,
+    wa_w: i32,
+    wa_h: i32,
+) -> (i32, i32, i32, i32) {
+    let w = w.clamp(1, wa_w.max(1));
+    let h = h.clamp(1, wa_h.max(1));
+    // Pull the right/bottom edge inside first, then the left/top edge — order
+    // matters so an oversized-or-far rect ends up flush against the work area
+    // origin rather than hanging off the far edge.
+    let x = x.min(wa_x + wa_w - w).max(wa_x);
+    let y = y.min(wa_y + wa_h - h).max(wa_y);
+    (x, y, w, h)
+}
+
+#[cfg(test)]
+mod clamp_tests {
+    use super::clamp_rect_within;
+
+    #[test]
+    fn brings_offscreen_rect_onscreen() {
+        // The Window 3 case: scaled POOL_OFFSCREEN with a broken size.
+        let (x, y, w, h) = clamp_rect_within(-25600, -25600, 159, 27, 0, 0, 1920, 1040);
+        assert!(x >= 0 && y >= 0 && x + w <= 1920 && y + h <= 1040, "got {:?}", (x, y, w, h));
+    }
+
+    #[test]
+    fn shrinks_oversized_and_keeps_inside() {
+        let (x, y, w, h) = clamp_rect_within(1800, 1000, 1200, 800, 0, 0, 1920, 1040);
+        assert!(w <= 1920 && h <= 1040 && x >= 0 && y >= 0 && x + w <= 1920 && y + h <= 1040);
+    }
+
+    #[test]
+    fn leaves_valid_rect_unchanged() {
+        assert_eq!(clamp_rect_within(421, 246, 960, 640, 0, 0, 1920, 1040), (421, 246, 960, 640));
+    }
+
+    #[test]
+    fn respects_negative_monitor_origin() {
+        // Secondary monitor to the left of the primary (negative virtual coords).
+        let (x, _y, w, _h) = clamp_rect_within(-1900, 100, 960, 640, -1920, 0, 1920, 1080);
+        assert!(x >= -1920 && x + w <= 0, "rect must stay on the left monitor: {:?}", (x, w));
+    }
+}
+
 // Tab-anchor placement: PR #730 hardcoded FIRST_TAB_INSET_X /
 // TAB_STRIP_TOP_OFFSET_PX as best-effort window-chrome offsets.
 // Smoke on v0.33.704 showed they were inaccurate (new window's
@@ -813,6 +872,18 @@ pub fn promote_pool_window(
         ),
     };
 
+    // Safety net (PLAN_POOL_NEW_WINDOW_DPI_POSITIONING_2026_06_21): clamp the
+    // target rect to the DESTINATION monitor's work area so a HiDPI coordinate
+    // miscalc can't strand the promoted window off-screen — the "blank new
+    // window" bug where the window rendered but sat at the DPI-scaled
+    // POOL_OFFSCREEN. The anchor/origin picks the monitor.
+    let (pos_x, pos_y, win_w, win_h) = match crate::app::get_monitor_work_area(pos_x, pos_y) {
+        Some((wa_x, wa_y, wa_w, wa_h)) => {
+            clamp_rect_within(pos_x, pos_y, win_w, win_h, wa_x, wa_y, wa_w, wa_h)
+        }
+        None => (pos_x, pos_y, win_w, win_h),
+    };
+
     // Take the window out of WS_EX_TOOLWINDOW so the promoted window
     // appears in the taskbar / Alt+Tab like any other AgentMux
     // instance. Must run BEFORE the position/show below; otherwise
@@ -850,6 +921,39 @@ pub fn promote_pool_window(
             );
         }
         let _ = ShowWindow(raw_hwnd, SW_SHOW);
+
+        // Re-assert the rect AFTER show. The pre-show SetWindowPos can be lost to
+        // the pool window's create/show sequence and per-monitor DPI-context
+        // settling, which intermittently leaves the window at the (scaled)
+        // POOL_OFFSCREEN — shown and rendered, but off the screen (the HiDPI
+        // "blank new window" bug). A second, idempotent move after show makes the
+        // placement deterministic. SWP_NOACTIVATE so we don't steal focus again;
+        // HWND_TOP keeps it frontmost (same as the pre-show move).
+        {
+            use windows_sys::Win32::Foundation::RECT;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, SWP_NOACTIVATE};
+            let _ = SetWindowPos(
+                raw_hwnd, HWND_TOP, pos_x, pos_y, win_w, win_h, SWP_NOACTIVATE,
+            );
+            // Telemetry: flag any residual off-screen result so a regression of
+            // this class is caught in logs rather than only by users.
+            let mut r: RECT = std::mem::zeroed();
+            if GetWindowRect(raw_hwnd, &mut r) != 0 {
+                if let Some((wx, wy, ww, wh)) = crate::app::get_monitor_work_area(pos_x, pos_y) {
+                    let onscreen =
+                        r.right > wx && r.left < wx + ww && r.bottom > wy && r.top < wy + wh;
+                    if !onscreen {
+                        tracing::error!(
+                            target: "pool:new-window",
+                            label = %label,
+                            left = r.left,
+                            top = r.top,
+                            "[pool] promoted window still off-screen after post-show re-assert"
+                        );
+                    }
+                }
+            }
+        }
 
         // Pool windows skip the cascade-hook install in on_after_created
         // (gated on !label.starts_with("window-pool-")) because they are
