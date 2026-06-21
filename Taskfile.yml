@@ -480,12 +480,13 @@ tasks:
             # build lost the race, cef_windows_x86_64/ is missing libcef_dll/ +
             # include/ + Resources/. Retry once after repair before failing hard.
             - cmd: bash -c 'cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp || { bash scripts/repair-cef-extract.sh && cargo build --release -p agentmux-cef -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp; }'
-            # Phase 3 sandbox: if agentmux_cef.dll was built (sandbox feature ON),
-            # stage bootstrap.exe (renamed agentmux-cef.exe) + the DLL.
-            # Without sandbox (--no-default-features), stage the binary directly.
+            # Phase 3 sandbox: bootstrap.exe presence means the sandbox feature
+            # was active (cef-dll-sys only emits it when cef/sandbox is ON).
+            # The cdylib agentmux_cef.dll is emitted unconditionally by
+            # crate-type so it cannot be used as the sandbox discriminator.
             - cmd: pwsh -Command "
                 New-Item -ItemType Directory -Force -Path dist/cef | Out-Null;
-                if (Test-Path 'target/release/agentmux_cef.dll') {
+                if (Test-Path 'target/release/bootstrap.exe') {
                   Copy-Item target/release/bootstrap.exe    dist/cef/agentmux-cef.exe -Force;
                   Copy-Item target/release/agentmux_cef.dll dist/cef/agentmux-cef.dll -Force;
                   Copy-Item target/release/agentmux_cef.pdb dist/cef/agentmux-cef.pdb -Force -EA SilentlyContinue
