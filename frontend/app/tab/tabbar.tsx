@@ -17,6 +17,7 @@ import { TabRpcClient } from "@/store/rpc-util";
 import { makeORef, getObjectValue } from "../store/wos";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "@/element/modal";
 import { Button } from "@/element/button";
+import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { deleteLayoutModelForTab } from "@/layout/index";
 import { DroppableTab } from "./droppable-tab";
 import {
@@ -126,6 +127,11 @@ function TabBar(props: TabBarProps): JSX.Element {
             setPendingCloseTabId(tabId);
         }
     };
+
+    onMount(() => {
+        const unregister = registerTabCloseRequestHandler(() => requestClose(activeTabId()));
+        onCleanup(unregister);
+    });
 
     const { dragProps } = useWindowDrag();
 

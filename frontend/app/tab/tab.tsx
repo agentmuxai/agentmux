@@ -35,7 +35,6 @@ interface TabContextPanelProps {
     onColorSelect: (hex: string | null) => void;
     onRename: () => void;
     onClose: (e?: MouseEvent) => void;
-    onCloseTab: () => void;
 }
 
 const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
@@ -315,7 +314,6 @@ function Tab(props: TabProps): JSX.Element {
                     onColorSelect={handleColorSelect}
                     onRename={() => handleRenameTab()}
                     onClose={() => setShowColorPicker(false)}
-                    onCloseTab={() => props.onClose(null)}
                 />
             </Show>
         </>
