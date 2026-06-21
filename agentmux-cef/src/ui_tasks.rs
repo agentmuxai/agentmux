@@ -25,6 +25,96 @@ fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Window> {
     browser_view.window()
 }
 
+/// Windows-only: drive the CEF Views `Window` set_bounds() + show() for a
+/// promoted pool window — the same path the macOS/Linux promote uses
+/// (`PromotePoolWindowTask`). The Windows promote positions the raw HWND via
+/// Win32 and never touched the Views `Window`, so the browser's view-hierarchy /
+/// compositor visibility never flipped from hidden -> the promoted window painted
+/// BLANK despite a valid DOM. This is the macOS-vs-Windows asymmetry. Bounds are
+/// DIP (CEF Views space); the Win32 caller converts physical -> DIP via
+/// `app::dpi_scale_at`. Must run on the UI thread.
+/// See docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md.
+// Windows-only: run the macOS-parity CEF Views show() on the UI thread. The
+// Windows promote runs on the IPC thread, but CEF Views calls are UI-thread-only,
+// so the set_bounds()+show() must be posted here (mirroring the macOS
+// PromotePoolWindowTask). The Window was cached at on_window_created because
+// browser_view.window() returns None for pool windows post-load on Windows.
+#[cfg(target_os = "windows")]
+wrap_task! {
+    pub struct PromotePoolWindowViewsShowTask {
+        state: Arc<AppState>,
+        label: String,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            use cef::ImplWindow;
+            match crate::commands::window_pool::take_pool_window_view(&self.label) {
+                Some(window) => {
+                    // set_bounds is DIP (the Win32 promote already positioned the
+                    // HWND in physical px; this syncs the Views Window so show()
+                    // doesn't jump and performs the real hidden->visible transition).
+                    window.set_bounds(Some(&cef::Rect {
+                        x: self.x,
+                        y: self.y,
+                        width: self.width,
+                        height: self.height,
+                    }));
+                    window.show();
+                    // Belt-and-suspenders compositor nudge. NOTE: CefBrowserHost
+                    // ::WasResized is only load-bearing in windowless/OSR mode; in
+                    // CEF windowed mode (our case) it is effectively a no-op. The
+                    // ACTUAL fix is the CEF Views window.show() above (the genuine
+                    // hidden->visible transition). Kept as a cheap hint in case the
+                    // host ever runs OSR; do not rely on it. (plan doc §6.)
+                    if let Some(host) =
+                        self.state.get_browser(&self.label).and_then(|b| b.host())
+                    {
+                        host.was_resized();
+                    }
+                    tracing::info!(
+                        target: "pool:new-window",
+                        label = %self.label,
+                        x = self.x, y = self.y, width = self.width, height = self.height,
+                        "[pool] CEF Views set_bounds + show on cached Window (macOS-parity, UI thread)"
+                    );
+                }
+                None => {
+                    tracing::warn!(
+                        target: "pool:new-window",
+                        label = %self.label,
+                        "[pool] no cached CEF Views Window at promote show task — fix not applied"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn post_promote_pool_window_views_show(
+    state: &Arc<AppState>,
+    label: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    let mut task = PromotePoolWindowViewsShowTask::new(
+        state.clone(),
+        label.to_string(),
+        x,
+        y,
+        width,
+        height,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Deferred load_url (used by on_before_popup to avoid UI-thread deadlock)
 //
 // Calling `frame.load_url(url)` synchronously inside a CEF callback that
