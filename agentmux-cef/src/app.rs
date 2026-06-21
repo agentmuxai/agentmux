@@ -78,6 +78,10 @@ wrap_window_delegate! {
                     if !raw_hwnd.is_null() {
                         crate::commands::window_pool::init_pool_window_hwnd(label, raw_hwnd);
                     }
+                    // Cache the CEF Views Window itself (valid here; lost post-load
+                    // via browser_view.window()) so the promote can run the
+                    // macOS-parity set_bounds()+show() visibility fix.
+                    crate::commands::window_pool::cache_pool_window_view(label, window);
                 }
             }
 
