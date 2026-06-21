@@ -115,8 +115,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Auto-expand while the tool is actively running (or awaiting approval), and
     // keep a completed tool expanded while it's held open (props.heldOpen — set
     // on completion, cleared when the row scrolls off the top). Pin still wins as
-    // an explicit override. Success and failure behave identically (the ✗ icon +
-    // red border-left at the collapsed row flag the failure).
+    // an explicit override. Fail-terminal statuses (failed/denied/canceled) skip
+    // the heldOpen hold and collapse immediately; success holds normally.
     //
     // Per SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md §4.2 and
     // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md — the 3 s
