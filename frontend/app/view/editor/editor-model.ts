@@ -39,11 +39,16 @@ import { FileTreeModel } from "./file-tree-model";
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
+const META_PREVIEW_OPEN = "editor:preview_open";
+const META_PREVIEW_HEIGHT = "editor:preview_height";
 const META_LEGACY_FILE = "file";
 const META_SCRATCH = "editor:scratch";
 const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;
 const TREE_WIDTH_MAX = 600;
+const PREVIEW_HEIGHT_DEFAULT = 300;
+const PREVIEW_HEIGHT_MIN = 80;
+const PREVIEW_HEIGHT_MAX = 1200;
 
 /** Hash a string with SHA-256 → hex. Used for the slice's contentHash field
  *  so the saga (Phase 1C) can decide whether a tab is dirty vs. disk. Cheap;
@@ -132,6 +137,12 @@ export class EditorViewModel implements ViewModel {
 
     private _treeWidth = createSignal<number>(TREE_WIDTH_DEFAULT);
     treeWidthAtom: Accessor<number> = this._treeWidth[0];
+
+    private _previewOpen = createSignal<boolean>(true);
+    previewOpenAtom: Accessor<boolean> = this._previewOpen[0];
+
+    private _previewHeight = createSignal<number>(PREVIEW_HEIGHT_DEFAULT);
+    previewHeightAtom: Accessor<number> = this._previewHeight[0];
 
     treeModel = new FileTreeModel();
 
@@ -281,6 +292,13 @@ export class EditorViewModel implements ViewModel {
         const persistedWidth = meta?.[META_TREE_WIDTH];
         if (typeof persistedWidth === "number") {
             this._treeWidth[1](clampTreeWidth(persistedWidth));
+        }
+        if (meta?.[META_PREVIEW_OPEN] === false) {
+            this._previewOpen[1](false);
+        }
+        const persistedPreviewH = meta?.[META_PREVIEW_HEIGHT];
+        if (typeof persistedPreviewH === "number") {
+            this._previewHeight[1](clampPreviewHeight(persistedPreviewH));
         }
 
         // Backwards-compat hydration: existing block meta uses `file` (the
@@ -817,6 +835,20 @@ export class EditorViewModel implements ViewModel {
         await this.persistMeta({ [META_TREE_WIDTH]: this._treeWidth[0]() });
     }
 
+    async togglePreview(): Promise<void> {
+        const next = !this._previewOpen[0]();
+        this._previewOpen[1](next);
+        await this.persistMeta({ [META_PREVIEW_OPEN]: next });
+    }
+
+    setPreviewHeight(height: number): void {
+        this._previewHeight[1](clampPreviewHeight(height));
+    }
+
+    async commitPreviewHeight(): Promise<void> {
+        await this.persistMeta({ [META_PREVIEW_HEIGHT]: this._previewHeight[0]() });
+    }
+
     private async persistMeta(meta: Record<string, unknown>): Promise<void> {
         try {
             await RpcApi.SetMetaCommand(TabRpcClient, {
@@ -846,6 +878,11 @@ export class EditorViewModel implements ViewModel {
 function clampTreeWidth(w: number): number {
     if (!Number.isFinite(w)) return TREE_WIDTH_DEFAULT;
     return Math.max(TREE_WIDTH_MIN, Math.min(TREE_WIDTH_MAX, Math.round(w)));
+}
+
+function clampPreviewHeight(h: number): number {
+    if (!Number.isFinite(h)) return PREVIEW_HEIGHT_DEFAULT;
+    return Math.max(PREVIEW_HEIGHT_MIN, Math.min(PREVIEW_HEIGHT_MAX, Math.round(h)));
 }
 
 /** Sniff content that's unsafe to hand to CodeMirror. Returns a human-readable
