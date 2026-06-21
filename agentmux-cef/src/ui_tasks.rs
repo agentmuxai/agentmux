@@ -1164,6 +1164,10 @@ wrap_task! {
                 }
                 if label.as_str() == "main" {
                     main_match = true;
+                } else if label.starts_with("floating-") {
+                    // Floating panes are never valid redock targets — skip
+                    // them so a dragged pane hovering over a stacked floater
+                    // doesn't ghost the idle floater instead of main.
                 } else {
                     // Deterministic pick among overlapping non-main windows:
                     // lexicographically smallest label. (HashMap iteration
