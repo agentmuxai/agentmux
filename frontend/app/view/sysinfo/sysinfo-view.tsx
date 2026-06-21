@@ -10,7 +10,7 @@ import type { JSX } from "solid-js";
 import type { SysinfoViewModel } from "./sysinfo-model";
 import { SingleLinePlot } from "./sysinfo-plot";
 import type { DataItem } from "./sysinfo-types";
-import { convertWaveEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
+import { convertWaveEventToDataItem } from "./sysinfo-util";
 
 type SysinfoViewProps = {
     blockId: string;
@@ -21,7 +21,6 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     const { model, blockId } = props;
     const connName = createMemo(() => model.connection());
     const connStatus = createMemo(() => model.connStatus());
-    const loading = createMemo(() => model.loadingAtom());
 
     let lastConnName = connName();
 
@@ -36,7 +35,10 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
         }
     });
 
-    // Subscribe to sysinfo events
+    // Subscribe to sysinfo events — hand every sample to the reducer.
+    // The reducer handles missing ticks via zero-order hold (≤3 missed) or
+    // a NaN sentinel (true break). No gap-triggered reload here: that caused
+    // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
         const unsubFn = waveEventSubscribe({
@@ -46,23 +48,17 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
                 if (model.loadingAtom()) return;
                 const dataItem = convertWaveEventToDataItem(event);
                 if (dataItem == null) return;
-                const prevData: DataItem[] = model.dataAtom();
-                const prevLastTs = prevData[prevData.length - 1]?.ts ?? 0;
-                const intervalSecs = model.intervalSecsAtom();
-                const gapThreshold = getGapThresholdMs(intervalSecs);
-                if (dataItem.ts - prevLastTs > gapThreshold) {
-                    model.loadInitialData();
-                } else {
-                    model.addContinuousData(dataItem);
-                }
+                model.appendData(dataItem);
             },
         });
         console.log("subscribe to sysinfo", cn);
         onCleanup(() => unsubFn());
     });
 
+    // Keep the chart visible while a reload is in flight — the reducer holds
+    // the previous data until resetData() replaces it with fresh history.
     return (
-        <Show when={connStatus()?.status == "connected" && !loading()}>
+        <Show when={connStatus()?.status == "connected"}>
             <SysinfoViewInner blockId={blockId} model={model} />
         </Show>
     );

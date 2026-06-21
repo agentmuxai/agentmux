@@ -15,6 +15,83 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
 import { convertWaveEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
 
+// ---------------------------------------------------------------------------
+// Sample ring-buffer reducer
+// ---------------------------------------------------------------------------
+
+function makeBlankItem(template: DataItem, ts: number): DataItem {
+    const blank: DataItem = { ts };
+    for (const key in template) {
+        if (key !== "ts") (blank as any)[key] = NaN;
+    }
+    (blank as any).blank = 1;
+    return blank;
+}
+
+type SampleAction =
+    | { type: "RESET"; items: DataItem[]; intervalSecs: number; numPoints: number }
+    | { type: "APPEND"; item: DataItem; intervalSecs: number; numPoints: number };
+
+function sampleReducer(state: DataItem[], action: SampleAction): DataItem[] {
+    if (action.type === "RESET") {
+        const { items, intervalSecs, numPoints } = action;
+        if (items.length === 0) return [];
+        const targetLen = numPoints + 1;
+        const gapThreshold = getGapThresholdMs(intervalSecs);
+        const latestTs = items[items.length - 1].ts;
+        const cutoffTs = latestTs - intervalSecs * 1000 * targetLen;
+        const filtered = items.filter((d) => d.ts >= cutoffTs);
+        if (filtered.length === 0) return [];
+        const template = filtered[filtered.length - 1];
+        const result: DataItem[] = [];
+        if (filtered[0].ts > cutoffTs) {
+            result.push(makeBlankItem(template, cutoffTs));
+            result.push(makeBlankItem(template, filtered[0].ts - 1));
+        }
+        result.push(filtered[0]);
+        for (let i = 1; i < filtered.length; i++) {
+            const prev = filtered[i - 1];
+            const cur = filtered[i];
+            if (cur.ts - prev.ts > gapThreshold) {
+                result.push(makeBlankItem(template, prev.ts + 1));
+                result.push(makeBlankItem(template, cur.ts - 1));
+            }
+            result.push(cur);
+        }
+        return result;
+    }
+
+    if (action.type === "APPEND") {
+        const { item, intervalSecs, numPoints } = action;
+        const intervalMs = intervalSecs * 1000;
+        const cutoffTs = item.ts - intervalMs * (numPoints + 1);
+        const trimmed = state.filter((d) => d.ts >= cutoffTs);
+        const last = trimmed.length > 0 ? trimmed[trimmed.length - 1] : null;
+
+        if (last) {
+            const gap = item.ts - last.ts;
+            if (gap > intervalMs * 1.5 && gap <= intervalMs * 3.5) {
+                // 1–2 missed ticks: zero-order hold — extend the last value
+                const steps = Math.round(gap / intervalMs) - 1;
+                const held: DataItem[] = [];
+                for (let i = 1; i <= steps; i++) {
+                    held.push({ ...last, ts: last.ts + i * intervalMs });
+                }
+                return [...trimmed, ...held, item];
+            } else if (gap > intervalMs * 3.5) {
+                // True break (connection hiccup / long pause): NaN sentinel
+                return [...trimmed, makeBlankItem(last, last.ts + 1), item];
+            }
+        }
+
+        return [...trimmed, item];
+    }
+
+    return state;
+}
+
+// ---------------------------------------------------------------------------
+
 class SysinfoViewModel implements ViewModel {
     viewType: string;
     blockAtom: () => Block;
@@ -33,60 +110,33 @@ class SysinfoViewModel implements ViewModel {
     plotTypeSelectedAtom: () => string;
     intervalSecsAtom: () => number;
 
-    // Writable actions (plain methods replacing jotai write-only atoms)
-    addInitialData(points: DataItem[]) {
-        const targetLen = this.numPoints() + 1;
-        const intervalSecs = this.getConfiguredInterval();
-        const gapThreshold = getGapThresholdMs(intervalSecs);
+    private dispatch(action: SampleAction) {
+        this.dataAtom._set(sampleReducer(this.dataAtom(), action));
+    }
+
+    resetData(items: DataItem[]) {
         try {
-            const newDataRaw = [...points];
-            if (newDataRaw.length == 0) return;
-            const latestItemTs = newDataRaw[newDataRaw.length - 1]?.ts ?? 0;
-            const cutoffTs = latestItemTs - intervalSecs * 1000 * targetLen;
-            const blankItemTemplate = { ...newDataRaw[newDataRaw.length - 1] };
-            for (const key in blankItemTemplate) {
-                (blankItemTemplate as any)[key] = NaN;
-            }
-            const newDataFiltered = newDataRaw.filter((dataItem) => dataItem.ts >= cutoffTs);
-            if (newDataFiltered.length == 0) return;
-            const newDataWithGaps: Array<DataItem> = [];
-            if (newDataFiltered[0].ts > cutoffTs) {
-                const blankItemStart = { ...blankItemTemplate, ts: cutoffTs };
-                const blankItemEnd = { ...blankItemTemplate, ts: newDataFiltered[0].ts - 1 };
-                newDataWithGaps.push(blankItemStart);
-                newDataWithGaps.push(blankItemEnd);
-            }
-            newDataWithGaps.push(newDataFiltered[0]);
-            for (let i = 1; i < newDataFiltered.length; i++) {
-                const prevIdxItem = newDataFiltered[i - 1];
-                const curIdxItem = newDataFiltered[i];
-                const timeDiff = curIdxItem.ts - prevIdxItem.ts;
-                if (timeDiff > gapThreshold) {
-                    const blankItemStart = { ...blankItemTemplate, ts: prevIdxItem.ts + 1, blank: 1 };
-                    const blankItemEnd = { ...blankItemTemplate, ts: curIdxItem.ts - 1, blank: 1 };
-                    newDataWithGaps.push(blankItemStart);
-                    newDataWithGaps.push(blankItemEnd);
-                }
-                newDataWithGaps.push(curIdxItem);
-            }
-            this.dataAtom._set(newDataWithGaps);
+            this.dispatch({
+                type: "RESET",
+                items,
+                intervalSecs: this.getConfiguredInterval(),
+                numPoints: this.numPoints(),
+            });
         } catch (e) {
-            console.log("Error adding data to sysinfo", e);
+            console.error("sysinfo: resetData error", e);
         }
     }
 
-    addContinuousData(newPoint: DataItem) {
-        const targetLen = this.numPoints() + 1;
-        const intervalSecs = this.getConfiguredInterval();
-        let data = this.dataAtom();
+    appendData(item: DataItem) {
         try {
-            const latestItemTs = newPoint?.ts ?? 0;
-            const cutoffTs = latestItemTs - intervalSecs * 1000 * targetLen;
-            data.push(newPoint);
-            const newData = data.filter((dataItem) => dataItem.ts >= cutoffTs);
-            this.dataAtom._set(newData);
+            this.dispatch({
+                type: "APPEND",
+                item,
+                intervalSecs: this.getConfiguredInterval(),
+                numPoints: this.numPoints(),
+            });
         } catch (e) {
-            console.log("Error adding data to sysinfo", e);
+            console.error("sysinfo: appendData error", e);
         }
     }
 
@@ -181,7 +231,7 @@ class SysinfoViewModel implements ViewModel {
             });
             if (initialData == null) return;
             const initialDataItems: DataItem[] = initialData.map(convertWaveEventToDataItem);
-            this.addInitialData(initialDataItems);
+            this.resetData(initialDataItems);
         } catch (e) {
             console.log("Error loading initial data for sysinfo", e);
         } finally {
