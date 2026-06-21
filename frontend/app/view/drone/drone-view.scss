@@ -95,7 +95,7 @@
     color: inherit;
     padding: 4px 12px;
     border-radius: 0;
-    cursor: pointer;
+    cursor: default;
     font-size: 12px;
     &:hover { background: color-mix(in srgb, var(--main-text-color) 8%, transparent); }
     &:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -193,7 +193,7 @@
     stroke-width: 14;
     fill: none;
     pointer-events: stroke;
-    cursor: pointer;
+    cursor: default;
 }
 
 .drone-edge-preview {
@@ -262,7 +262,7 @@
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     color: inherit;
-    cursor: pointer;
+    cursor: default;
     font-size: 15px;
     line-height: 1;
     &:hover {
@@ -314,7 +314,7 @@
     background: transparent;
     border: none;
     color: white;
-    cursor: pointer;
+    cursor: default;
     font-size: 14px;
     line-height: 1;
     padding: 0 4px;

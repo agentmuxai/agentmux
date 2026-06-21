@@ -53,7 +53,7 @@
     background: transparent;
     border: 1px solid transparent;
     color: var(--secondary-text-color);
-    cursor: pointer;
+    cursor: default;
     padding: 2px 4px;
     border-radius: 0;
     font-size: 12px;
@@ -91,7 +91,7 @@
     color: var(--main-text-color);
     font-size: 12px;
     text-align: left;
-    cursor: pointer;
+    cursor: default;
     line-height: 1.3;
 
     &:hover:not(:disabled) {
@@ -145,7 +145,7 @@
     padding: var(--space-1) var(--space-2);
     border-radius: 0;
     font-size: 12px;
-    cursor: pointer;
+    cursor: default;
 
     &:hover {
         background: var(--hover-bg-color);
@@ -183,7 +183,7 @@
     flex: 1 1 auto;
     height: 4px;
     accent-color: var(--accent-color);
-    cursor: pointer;
+    cursor: default;
 }
 
 .instance-panel-opacity-value {

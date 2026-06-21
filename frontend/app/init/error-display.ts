@@ -315,7 +315,7 @@ export function showStartupError(message: string): void {
     const restore = document.createElement("button");
     restore.textContent = "⟳ Restore";
     restore.style.cssText =
-        "padding:9px 18px;border-radius:7px;border:none;cursor:pointer;font-size:13px;font-weight:600;" +
+        "padding:9px 18px;border-radius:7px;border:none;font-size:13px;font-weight:600;" +
         "background:#4c8dff;color:#fff;";
     restore.onclick = () => {
         restore.disabled = true;
@@ -329,7 +329,7 @@ export function showStartupError(message: string): void {
     const details = document.createElement("details");
     const summary = document.createElement("summary");
     summary.textContent = "Technical details";
-    summary.style.cssText = "cursor:pointer;font-size:12px;color:rgba(255,255,255,0.55);";
+    summary.style.cssText = "font-size:12px;color:rgba(255,255,255,0.55);";
     details.appendChild(summary);
 
     const pre = document.createElement("pre");

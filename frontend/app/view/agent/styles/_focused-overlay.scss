@@ -53,7 +53,7 @@
     .agent-focused-panel-close {
         background: none;
         border: none;
-        cursor: pointer;
+        cursor: default;
         color: var(--secondary-text-color);
         font-size: 12px;
         padding: var(--space-0-5) var(--space-1);
@@ -98,7 +98,7 @@
         padding: var(--space-1) var(--space-3);
         border-radius: 0;
         font-size: 12px;
-        cursor: pointer;
+        cursor: default;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.2));
         background: rgba(255, 255, 255, 0.05);
         color: var(--main-text-color);

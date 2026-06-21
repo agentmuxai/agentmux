@@ -22,7 +22,7 @@
 
         .slider {
             position: absolute;
-            cursor: pointer;
+            cursor: default;
             content: "";
             top: 0;
             bottom: 0;
@@ -61,7 +61,7 @@
 
     label,
     .toggle-label {
-        cursor: pointer;
+        cursor: default;
         padding: 0 5px;
     }
 }

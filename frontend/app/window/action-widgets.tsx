@@ -118,7 +118,7 @@ const ActionWidget = (props: {
         <Tooltip
             content={props.widget.description || props.widget.label}
             placement="bottom"
-            divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white cursor-pointer rounded-sm h-full"
+            divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white rounded-sm h-full"
             divOnClick={() => handleWidgetSelect(props.widget)}
         >
             <div class="widget-icon text-sm">

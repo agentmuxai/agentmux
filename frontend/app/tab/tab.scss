@@ -125,7 +125,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        cursor: pointer;
+        cursor: default;
         z-index: var(--zindex-tab-name);
         padding: 0;
         /* Tab close button must NOT pick up the general `.tab *`
@@ -282,7 +282,7 @@ body:not(.nohover) .tab.tab-colored.dragging {
     border-radius: 0;
     color: var(--secondary-text-color);
     font-size: 11px;
-    cursor: pointer;
+    cursor: default;
     white-space: nowrap;
 
     &:hover {
@@ -300,7 +300,7 @@ body:not(.nohover) .tab.tab-colored.dragging {
     width: 20px;
     height: 20px;
     border-radius: 0;
-    cursor: pointer;
+    cursor: default;
     display: flex;
     align-items: center;
     justify-content: center;

@@ -79,7 +79,7 @@
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
             color: var(--main-text-color);
             font-size: 11px;
-            cursor: pointer;
+            cursor: default;
             transition: all 0.15s;
 
             &:hover:not(:disabled) {
@@ -144,11 +144,11 @@
             display: flex;
             align-items: center;
             gap: var(--space-2);
-            cursor: pointer;
+            cursor: default;
             font-size: 12px;
 
             input[type="checkbox"] {
-                cursor: pointer;
+                cursor: default;
             }
 
             &:hover {
@@ -167,7 +167,7 @@
         border-radius: 0;
         color: var(--accent-color);
         font-size: 11px;
-        cursor: pointer;
+        cursor: default;
         z-index: 10;
 
         &:hover {

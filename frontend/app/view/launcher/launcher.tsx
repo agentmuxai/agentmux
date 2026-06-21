@@ -233,7 +233,7 @@ function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element
                             onClick={() => model.handleWidgetSelect(widget)}
                             title={widget.description || widget.label}
                             class={clsx(
-                                "flex flex-col items-center justify-center cursor-pointer rounded-md p-2 text-center",
+                                "flex flex-col items-center justify-center rounded-md p-2 text-center",
                                 "transition-colors duration-150",
                                 index() === selectedIndex()
                                     ? "bg-white/20 text-white"

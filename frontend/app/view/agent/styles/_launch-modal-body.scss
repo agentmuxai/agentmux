@@ -95,7 +95,7 @@
     padding: var(--space-1-5) var(--space-2);
     border: 1px solid var(--border-color);
     border-radius: 0;
-    cursor: pointer;
+    cursor: default;
     transition: background 0.08s, border-color 0.08s;
 
     &:has(input:checked) {
@@ -162,7 +162,7 @@
 }
 
 .agent-launch-modal-advanced-summary {
-    cursor: pointer;
+    cursor: default;
     font-size: 11px;
     font-weight: 500;
     color: var(--secondary-text-color);
@@ -264,7 +264,7 @@
     border-radius: 0;
     color: var(--main-text-color);
     font-size: var(--text-sm);
-    cursor: pointer;
+    cursor: default;
     transition: border-color 0.12s, color 0.12s, background 0.12s;
 
     &:hover:not(:disabled) {
@@ -290,7 +290,7 @@
     font-size: 12px;
     font-family: inherit;
     color: var(--accent-color);
-    cursor: pointer;
+    cursor: default;
 
     &:hover:not(:disabled) {
         text-decoration: underline;
@@ -317,7 +317,7 @@
     font-size: 16px;
     font-weight: 500;
     line-height: 1;
-    cursor: pointer;
+    cursor: default;
     transition: border-color 0.12s, color 0.12s, background 0.12s;
 
     &:hover:not(:disabled) {

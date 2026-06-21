@@ -104,7 +104,7 @@
     border-radius: 3px;
     background: transparent;
     color: var(--secondary-text-color);
-    cursor: pointer;
+    cursor: default;
     font-size: 11px;
     transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
 
@@ -136,7 +136,7 @@
     align-items: center;
     gap: var(--space-1);
     padding: 2px var(--space-1);
-    cursor: pointer;
+    cursor: default;
     user-select: none;
     white-space: nowrap;
     overflow: hidden;
@@ -278,7 +278,7 @@
     border-right: 1px solid var(--border-color);
     background: transparent;
     color: var(--secondary-text-color);
-    cursor: pointer;
+    cursor: default;
     user-select: none;
     font-size: 11px;
     overflow: hidden;
@@ -340,7 +340,7 @@
     border-radius: 3px;
     background: transparent;
     color: inherit;
-    cursor: pointer;
+    cursor: default;
     font-size: 14px;
     line-height: 1;
     opacity: 0;
@@ -528,7 +528,7 @@
     border: 1px solid var(--border-color);
     border-radius: 3px;
     color: var(--main-text-color);
-    cursor: pointer;
+    cursor: default;
     font-size: 12px;
 
     &:hover {
@@ -612,7 +612,7 @@
     background: var(--secondary-bg-color, var(--block-bg-color));
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    cursor: pointer;
+    cursor: default;
     opacity: 0.75;
     user-select: none;
 
@@ -659,7 +659,7 @@
     background: transparent;
     border: none;
     color: var(--secondary-text-color);
-    cursor: pointer;
+    cursor: default;
     font-size: 16px;
     line-height: 1;
     padding: 0;
@@ -693,7 +693,7 @@
     border: 1px solid var(--border-color);
     border-radius: 3px;
     color: var(--main-text-color);
-    cursor: pointer;
+    cursor: default;
     font-size: 11px;
     text-decoration: none;
     font-family: var(--main-font-family, sans-serif);
