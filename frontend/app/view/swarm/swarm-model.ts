@@ -186,7 +186,12 @@ export class SwarmViewModel implements ViewModel {
         const subagents = this.subagentsAtom();
         const statuses = this.agentStatusesAtom();
 
-        return blockIds.map((blockId) => {
+        // Include parent block IDs from subagents as fallback for agent panes
+        // that registered subagents before their own registration propagated.
+        const parentIds = subagents.map((s) => s.parent_block_id).filter(Boolean);
+        const allBlockIds = [...new Set([...blockIds, ...parentIds])];
+
+        return allBlockIds.map((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
             const label =
