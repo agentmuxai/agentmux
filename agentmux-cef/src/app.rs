@@ -630,6 +630,30 @@ wrap_app! {
                 //                                  → content-autofill.googleapis.com
                 // The last two were the actual Google QUIC traffic observed via
                 // net-log; AgentMux makes no such calls itself.
+                //
+                //   MacAppCodeSignClone — Chromium's "code-sign safe updates"
+                //     feature: at startup it clonefile()s the whole .app into a
+                //     temp dir on the boot volume so an in-place auto-update can
+                //     swap the on-disk bundle without invalidating the running
+                //     process's code signature. clonefile() is single-volume, so
+                //     when the bundle runs from a *read-only DMG* (a different
+                //     volume from the temp dir) the clone fails EXDEV and Chromium
+                //     CHECK-aborts inside cef_initialize → SIGTRAP, before any
+                //     window is created. AgentMux ships its own launcher/updater
+                //     and sets --disable-component-update, so Chromium never
+                //     performs an in-place swap of its own bundle → the clone
+                //     buys nothing and only adds this failure mode (plus a >1 GB
+                //     temp copy). Disabling it lets the packaged app launch from
+                //     any volume, DMG included.
+                //     NOTE on timing: unlike the MachPort policy below (read
+                //     BEFORE FeatureList init — runtime flag too late, needs the
+                //     source patch), this is a genuine base::Feature, evaluated
+                //     AFTER FeatureList init, so the --disable-features switch
+                //     *should* apply — same path as the working entries above.
+                //     The clone runs early, though, so VERIFY by launching a
+                //     fresh build from a DMG; if it proves too-late like MachPort,
+                //     fall back to a code_sign_clone_manager source patch
+                //     (cf. docs/cef-patches/ for the established pattern).
                 let key = CefString::from("disable-features");
                 // MachPortRendezvous{Validate,Enforce}PeerRequirements: belt-and-
                 // suspenders flags kept for defence in depth. NOTE: the actual fix
@@ -641,7 +665,7 @@ wrap_app! {
                 let val = CefString::from(
                     "CalculateNativeWinOcclusion,MediaRouter,PreconnectToSearch,\
                      AutofillServerCommunication,MachPortRendezvousValidatePeerRequirements,\
-                     MachPortRendezvousEnforcePeerRequirements",
+                     MachPortRendezvousEnforcePeerRequirements,MacAppCodeSignClone",
                 );
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
