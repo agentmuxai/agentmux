@@ -14,9 +14,12 @@ linkify.set({ fuzzyLink: true, fuzzyEmail: false });
 // Local addresses open with http://, not https://
 const LOCAL_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
 
+// Matches any RFC 3986 scheme prefix (http:, https:, mailto:, ftp:, ssh:, …)
+const HAS_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+
 export function normalizeHref(url: string): string {
     if (url.startsWith("//")) return "https:" + url;
-    if (url.includes("://")) return url;
+    if (HAS_SCHEME_RE.test(url)) return url;
     const host = url.split("/")[0].split(":")[0];
     const scheme = LOCAL_HOST_RE.test(host) ? "http" : "https";
     return `${scheme}://${url}`;
