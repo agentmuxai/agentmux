@@ -25,6 +25,45 @@ fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Window> {
     browser_view.window()
 }
 
+/// Windows-only: drive the CEF Views `Window` set_bounds() + show() for a
+/// promoted pool window — the same path the macOS/Linux promote uses
+/// (`PromotePoolWindowTask`). The Windows promote positions the raw HWND via
+/// Win32 and never touched the Views `Window`, so the browser's view-hierarchy /
+/// compositor visibility never flipped from hidden -> the promoted window painted
+/// BLANK despite a valid DOM. This is the macOS-vs-Windows asymmetry. Bounds are
+/// DIP (CEF Views space); the Win32 caller converts physical -> DIP via
+/// `app::dpi_scale_at`. Must run on the UI thread.
+/// See docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md.
+#[cfg(target_os = "windows")]
+pub(crate) fn show_pool_window_via_views(
+    state: &Arc<AppState>,
+    label: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    match get_window_on_ui(state, label) {
+        Some(window) => {
+            window.set_bounds(Some(&cef::Rect { x, y, width, height }));
+            window.show();
+            tracing::info!(
+                target: "pool:new-window",
+                label = %label,
+                x, y, width, height,
+                "[pool] CEF Views set_bounds + show (macOS-parity visibility fix)"
+            );
+        }
+        None => {
+            tracing::warn!(
+                target: "pool:new-window",
+                label = %label,
+                "[pool] no CEF Views window for promote show — cannot apply visibility fix"
+            );
+        }
+    }
+}
+
 // ── Deferred load_url (used by on_before_popup to avoid UI-thread deadlock)
 //
 // Calling `frame.load_url(url)` synchronously inside a CEF callback that

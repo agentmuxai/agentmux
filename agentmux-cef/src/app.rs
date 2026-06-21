@@ -435,6 +435,25 @@ pub fn get_monitor_work_area_physical(px: i32, py: i32) -> Option<(i32, i32, i32
     }
 }
 
+/// Effective DPI scale (1.0 == 96 DPI == 100%) of the monitor under `(px, py)`
+/// in physical px. Used to convert physical-pixel rects to DIP for CEF Views
+/// `set_bounds` (which works in DIP). Returns 1.0 if the monitor can't be found.
+#[cfg(target_os = "windows")]
+pub fn dpi_scale_at(px: i32, py: i32) -> f32 {
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    unsafe {
+        let pt = windows_sys::Win32::Foundation::POINT { x: px, y: py };
+        let mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+        if mon.is_null() {
+            return 1.0;
+        }
+        let (mut dx, mut dy) = (96u32, 96u32);
+        let _ = GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+        (dx as f32 / 96.0).max(0.1)
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
     // TODO: Use NSScreen.main.visibleFrame for proper work area (minus Dock/menu bar).

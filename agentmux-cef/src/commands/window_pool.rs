@@ -981,6 +981,27 @@ pub fn promote_pool_window(
         host.was_resized();
     }
 
+    // macOS-PARITY VISIBILITY FIX (the load-bearing one): drive the CEF Views
+    // `Window` set_bounds() + show() exactly as the macOS/Linux promote does
+    // (ui_tasks::PromotePoolWindowTask). The Win32 ShowWindow + host.was_hidden()
+    // above show the HWND and hint the host, but they do NOT flip the browser's
+    // view-hierarchy/compositor visibility — only the Views Window show() does,
+    // which is the single thing macOS does and Windows didn't, and is why macOS
+    // renders and Windows paints blank. set_bounds is in DIP (Views space), so
+    // convert the physical rect we positioned the HWND at.
+    {
+        let scale = crate::app::dpi_scale_at(pos_x, pos_y);
+        let to_dip = |v: i32| (v as f32 / scale).round() as i32;
+        crate::ui_tasks::show_pool_window_via_views(
+            state,
+            &label,
+            to_dip(pos_x),
+            to_dip(pos_y),
+            to_dip(win_w),
+            to_dip(win_h),
+        );
+    }
+
     // Phase B.7.3.3 — the launcher's typed events drive the
     // InstancePanel atoms via the CEF JS bridge. No sync emit here.
 
