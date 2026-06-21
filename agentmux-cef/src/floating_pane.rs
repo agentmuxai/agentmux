@@ -95,21 +95,10 @@ pub(crate) fn unregister_floater_by_hwnd(hwnd: isize) {
     }
 }
 
-/// Floater HWNDs whose parent main window matches `parent_hwnd`, plus any
-/// floaters registered with parent=0 (unresolved source, legacy callers).
-/// Used by the cascade hook — parent=0 floaters are claimed by whichever
-/// window fires the hook first, preventing them from becoming permanent orphans.
-pub(crate) fn floater_hwnds_for_parent(parent_hwnd: isize) -> Vec<isize> {
-    ACTIVE_FLOATER_HWNDS
-        .lock()
-        .map(|m| {
-            m.values()
-                .filter(|(_, ph)| *ph == parent_hwnd || *ph == 0)
-                .map(|(fh, _)| *fh)
-                .collect()
-        })
-        .unwrap_or_default()
-}
+// `floater_hwnds_for_parent` removed: the window→floater cascade it fed was
+// deleted in favour of full floater independence (see the FLOATER INDEPENDENCE
+// note in `client/wndproc.rs::floater_cascade_wndproc`). The registry below is
+// retained for the diagnostic snapshot only.
 
 /// Snapshot for the `get_pane_debug_state` diagnostic command.
 pub(crate) fn floater_debug_snapshot() -> Vec<(String, isize)> {
