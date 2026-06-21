@@ -369,24 +369,15 @@ const FlashError = () => {
     );
 };
 
-// Detect floating-pane mode once at module load — the URL never changes
-// in-flight for an AgentMux renderer (each render process is opened with
-// its own URL and stays on it). Reading the search params once avoids
-// re-parsing on every render.
-//
-// When `?floatingPaneId=` is present the host opened this window via
-// `open_floating_pane_window` (SPEC_FLOATING_PANE_TEAROFF), and we
-// render `<FloatingPaneWorkspace>` instead of the standard
-// `<Workspace>` — same backend, no tab bar / widgets / status bar.
-const IS_FLOATING_PANE: boolean = (() => {
-    try {
-        return new URLSearchParams(window.location.search).has("floatingPaneId");
-    } catch {
-        return false;
-    }
-})();
-
 const AppInner = () => {
+    // Evaluated at component-mount time (not module-load time) so the pane
+    // pool fast path works: awaitPanePoolPromote() calls replaceState() to
+    // inject floatingPaneId into the URL BEFORE initHostNewWindow() calls
+    // render(App) — but a module-level IIFE fires before any of that, so it
+    // would always see the original ?pane-pool=1 URL and return false.
+    // Cold path (open_floating_pane_window) opens the window with floatingPaneId
+    // in the URL from the start, so both paths are correct here.
+    const IS_FLOATING_PANE = new URLSearchParams(window.location.search).has("floatingPaneId");
     const prefersReducedMotion = atoms.prefersReducedMotionAtom;
     const client = atoms.client;
     const windowData = atoms.waveWindow;
