@@ -11,8 +11,10 @@ export const linkify = new LinkifyIt();
 // fuzzyEmail off: avoids false positives on name@host patterns in shell output
 linkify.set({ fuzzyLink: true, fuzzyEmail: false });
 
-// Local addresses stay on http://, everything else is upgraded to https://
-const LOCAL_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\])(:\d+)?$/i;
+// Local / private-network addresses stay on http://, everything else → https://
+// Covers: loopback, any-addr, IPv6 loopback, RFC 1918 class A/B/C
+const LOCAL_HOST_RE =
+    /^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0|\[::1\]|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$/i;
 
 /**
  * Normalize a linkify-it match to a final href.
