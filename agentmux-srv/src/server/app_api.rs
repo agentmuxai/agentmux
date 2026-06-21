@@ -303,7 +303,10 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 // Agent identity
                 env_vars.insert("GH_CONFIG_DIR".to_string(), json!(format!("{}/gh-{}", config_home, agent_slug)));
-                env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(&agent.name));
+                // Use stored slug (stable across renames) for muxbus routing;
+                // fall back to the computed slug derived from the display name.
+                let routing_id = if !agent.slug.is_empty() { &agent.slug } else { &agent_slug };
+                env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(routing_id));
                 // Exit delay only for subprocess
                 if !is_persistent {
                     env_vars.insert("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY".to_string(), json!("30000"));

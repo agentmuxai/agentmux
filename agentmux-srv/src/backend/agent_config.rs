@@ -252,10 +252,17 @@ pub fn build_mcp_config(
     agent_name: &str,
     agent_bus_id: &str,
 ) -> Option<String> {
-    // Auto-injected AgentMux MCP server entry
+    // Auto-injected AgentMux MCP server entry.
+    // Slugify agent_name → stable lowercase routing ID (matches the
+    // pane env var set by app_api.rs and the TS buildMcpConfig).
     let mut env_map = serde_json::Map::new();
     if !agent_name.is_empty() {
-        env_map.insert("AGENTMUX_AGENT_ID".to_string(), json!(agent_name));
+        let slug: String = agent_name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+            .collect();
+        env_map.insert("AGENTMUX_AGENT_ID".to_string(), json!(slug));
     }
     if !agent_bus_id.is_empty() {
         env_map.insert("AGENTMUX_AGENT_BUS_ID".to_string(), json!(agent_bus_id));
@@ -565,7 +572,7 @@ mod tests {
         let servers = &parsed["mcpServers"];
         assert!(servers["agentmux"].is_object());
         assert_eq!(servers["agentmux"]["command"], "agentmux-mcp");
-        assert_eq!(servers["agentmux"]["env"]["AGENTMUX_AGENT_ID"], "Aria");
+        assert_eq!(servers["agentmux"]["env"]["AGENTMUX_AGENT_ID"], "aria");
         assert_eq!(servers["agentmux"]["env"]["AGENTMUX_AGENT_BUS_ID"], "bus-42");
     }
 
