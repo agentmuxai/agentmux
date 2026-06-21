@@ -1,5 +1,12 @@
 # AgentMux Version History
 
+## 0.47.2 — 2026-06-21
+
+- fix(macos): per-version bundle id (ai.agentmux.<channel>.<version>) — double-click any build without open -n
+- fix(srv): set CREATE_NO_WINDOW on persistent-agent, task-runner, and LSP spawns (stops Windows 11 opening a Terminal window per spawn)
+- fix(linux): center the startup splash on Wayland by routing it through the self-centering XWayland backend (Mutter drops uncentered toplevels top-left)
+
+
 ## 0.47.1 — 2026-06-21
 
 - fix(linux): restrict pane tear-off to header — whole-tile drag triggered tear-off anywhere
