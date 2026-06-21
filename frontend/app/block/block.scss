@@ -280,12 +280,6 @@
                         padding: 0;
                     }
 
-                    .block-frame-minimize {
-                        justify-content: center;
-                        align-items: center;
-                        padding: 0;
-                    }
-
                     .block-frame-btn-separator {
                         width: 1px;
                         height: 14px;
@@ -295,16 +289,6 @@
                         margin: 0 3px;
                         flex-shrink: 0;
                     }
-                }
-            }
-
-            &.minimized {
-                .block-frame-default-inner > *:not(.block-frame-default-header) {
-                    display: none;
-                }
-
-                .block-frame-default-header {
-                    border-bottom: none;
                 }
             }
 
