@@ -54,6 +54,8 @@ CEF 148 fixed the native-Wayland bug (verified: no `OnTrancheFlags Not implement
 
 The splash backend must therefore track the **same** session decision the host makes, so splash and host always speak the same display protocol.
 
+> **Correction (2026-06-21):** this "mirror the host's protocol" rule was superseded. It rested on the §3.2 assumption that Mutter centers small toplevels — which proved **false** (Mutter drops them top-left). Because the host/splash protocols need not match (dismiss is via the ready-file, not the wire protocol), the selector now picks the backend by **centering ability**: prefer the self-centering X11/XWayland backend whenever an X server is reachable (XWayland is up in nearly every Wayland session), falling back to the native-Wayland backend only when there is no X display. See `agentmux-launcher/src/splash_linux/mod.rs::detect`.
+
 ---
 
 ## 3. Research findings (Wayland/GNOME feasibility)
@@ -63,7 +65,7 @@ The splash backend must therefore track the **same** session decision the host m
 
 ### 3.2 Wayland forbids client-controlled positioning and stacking — by design
 Wayland intentionally does **not** expose absolute window position to clients, and there is **no client-side "always on top."** "Throughout the design of Wayland the approach has been for the client to make requests and the server to make the final decisions." A standalone `xdg_toplevel` therefore:
-- **Cannot self-center** — the compositor places it. (Mutter places small new toplevels roughly centered on the work area, which is acceptable for a splash.)
+- **Cannot self-center** — the compositor places it. (**Correction, 2026-06-21:** the original claim that "Mutter places small new toplevels roughly centered" is **false** — Mutter drops them at the **top-left**. This is exactly why the selector now prefers the self-centering XWayland backend; see the §2 correction note.)
 - **Cannot force itself above** the host window — best effort only.
 - **Cannot avoid the taskbar/overview** the way EWMH `_NET_WM_STATE_SKIP_TASKBAR` does on X11 (no equivalent without extension protocols).
 
@@ -128,7 +130,7 @@ New. Best-effort native-Wayland splash for the now-default path.
 - **Connection/thread:** dedicated thread; `Connection::connect_to_env()`, `registry_queue_init()`, bind `CompositorState` / `Shm` / `XdgShell`.
 - **Surface:** `XdgShell::create_window(surface, WindowDecorations::None, &qh)`; `set_title("AgentMux")`, `set_app_id("ai.agentmux.AgentMux")` — **same app_id as the host** so Mutter groups/associates them and is more likely to stack the splash with the app. Set a fixed `min`/`max` size = `SPLASH_SIZE` so the compositor gives us exactly that (a splash is non-resizable).
 - **Buffer/draw:** `SlotPool` → **ARGB8888** `wl_shm` buffer; blit the dark backdrop + alpha-modulated brain each `frame` callback (~16 ms); `damage` + `commit`. (Note: `wl_shm` ARGB is **pre-multiplied** straight-alpha per Wayland — match the backdrop opaque and the brain alpha-pulsed.)
-- **Placement / stacking — accepted limitations (§3.2):** we cannot center or force-on-top. We rely on Mutter's default centered placement for small toplevels and on dismissing *the instant* the host paints (so the two-window overlap window is sub-frame in practice). Document this as expected.
+- **Placement / stacking — accepted limitations (§3.2):** we cannot center or force-on-top. ~~We rely on Mutter's default centered placement for small toplevels~~ (**2026-06-21:** Mutter does **not** center — it drops the toplevel top-left, so this native-Wayland path is now a *fallback*; the splash is centered by preferring the XWayland backend, §2 correction note) and on dismissing *the instant* the host paints (so the two-window overlap window is sub-frame in practice). Document this as expected.
 - **Taskbar/overview:** the splash may flash briefly in the overview/alt-tab. Mitigations: minimal lifetime + matching `app_id`; if a suitable hint protocol is available at impl time (e.g. `xdg-toplevel-tag-v1`), set it, but do **not** depend on it.
 - **Dismiss:** identical file-poll + fade + teardown as X11.
 - **Crates:** `smithay-client-toolkit` (pulls `wayland-client`, `wayland-protocols`). Software-only; no GPU/EGL.
