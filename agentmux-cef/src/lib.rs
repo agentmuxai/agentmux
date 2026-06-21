@@ -670,10 +670,33 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     }
     tracing::info!("CEF cache dir: {}", data_dir.display());
     let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
+    // Expose root_cache_path so per-window RequestContexts root their cache_path
+    // UNDER it — CEF requires a descendant of root_cache_path, else it falls back
+    // to in-memory storage. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.
+    *app_state.cef_cache_dir.lock() = Some(data_dir.to_string_lossy().to_string());
 
     // Configure CEF settings.
-    let debug_port: u16 = if is_dev { 9223 } else { 9222 };
+    // Pick a FREE remote-debugging port instead of a fixed one: AgentMux runs
+    // many instances in parallel (isolation I1–I6), so a hardcoded port collides
+    // (WSAEADDRINUSE / 0x2740) and the 2nd+ instance gets no DevTools server →
+    // the browser DOM API (`/agentmux/browser/*`) can't connect. Prefer the
+    // conventional port (9223 dev / 9222 release) for muscle memory; fall back to
+    // an OS-assigned free port. Store the ACTUAL port so `browser_api` targets
+    // it. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §2.
+    let preferred: u16 = if is_dev { 9223 } else { 9222 };
+    let debug_port: u16 = {
+        use std::net::TcpListener;
+        if TcpListener::bind(("127.0.0.1", preferred)).is_ok() {
+            preferred
+        } else {
+            TcpListener::bind(("127.0.0.1", 0))
+                .and_then(|l| l.local_addr())
+                .map(|a| a.port())
+                .unwrap_or(preferred)
+        }
+    };
     *app_state.debug_port.lock() = debug_port;
+    tracing::info!("CEF remote-debugging port: {} (preferred {})", debug_port, preferred);
 
     // Route CEF's internal Chromium logging into our log dir alongside the
     // tracing-subscriber file. Without this, init failures leave an empty
