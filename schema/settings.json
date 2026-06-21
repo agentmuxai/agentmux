@@ -83,6 +83,9 @@
         "tab:preset": {
           "type": "string"
         },
+        "tab:skipcloseconfirm": {
+          "type": "boolean"
+        },
         "widget:*": {
           "type": "boolean"
         },
