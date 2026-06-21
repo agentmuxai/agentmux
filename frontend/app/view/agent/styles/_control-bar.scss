@@ -76,7 +76,7 @@
             width: 200%;
             height: 120px;
             left: -50%;
-            top: 50%;
+            top: calc(50% - 60px);
             transform-origin: center;
             background: linear-gradient(
                 135deg,
