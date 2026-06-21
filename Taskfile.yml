@@ -493,6 +493,10 @@ tasks:
                 } else {
                   Copy-Item target/release/agentmux-cef.exe dist/cef/agentmux-cef.exe -Force
                 }"
+            # Stamp the AgentMux icon onto the staged host exe — bootstrap.exe
+            # ships Chrome's icon under the Phase 3 sandbox; winres can't edit a
+            # built PE so rcedit rewrites the resource. Idempotent on the raw bin.
+            - cmd: bash scripts/inject-exe-icon.sh dist/cef/agentmux-cef.exe
             - echo "✓ Built host + launcher for Windows"
 
     build:host:darwin:

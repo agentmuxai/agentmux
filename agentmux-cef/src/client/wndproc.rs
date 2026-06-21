@@ -454,11 +454,27 @@ pub(super) unsafe fn skip_taskbar(hwnd: *mut std::ffi::c_void) {
 #[cfg(target_os = "windows")]
 pub(super) unsafe fn set_window_icon(hwnd: *mut std::ffi::c_void) {
     use windows_sys::Win32::UI::WindowsAndMessaging::*;
-    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::LibraryLoader::{
+        GetModuleHandleExW, GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+    };
 
-    let hinstance = GetModuleHandleW(std::ptr::null());
-    if hinstance.is_null() {
-        tracing::warn!("set_window_icon: GetModuleHandleW returned null");
+    // Resolve the module that CONTAINS this code, NOT the process exe. Under the
+    // Phase 3 Windows sandbox (#1633) the host process is CEF's bootstrap.exe —
+    // which has no AgentMux icon resource — while the real host logic + the
+    // winres-embedded icon live in agentmux_cef.dll. The old
+    // `GetModuleHandleW(null)` returned bootstrap.exe → no resource ID 1 → the
+    // window/taskbar fell back to Chrome's icon. `FROM_ADDRESS` on a function in
+    // this module returns the DLL (sandbox build) or the exe (non-sandbox build)
+    // — whichever actually carries the embedded resource.
+    let mut hinstance: windows_sys::Win32::Foundation::HMODULE = std::ptr::null_mut();
+    let got = GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        set_window_icon as *const () as *const u16,
+        &mut hinstance,
+    );
+    if got == 0 || hinstance.is_null() {
+        tracing::warn!("set_window_icon: GetModuleHandleExW(FROM_ADDRESS) failed");
         return;
     }
 

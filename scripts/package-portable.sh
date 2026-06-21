@@ -138,6 +138,15 @@ else
     echo "         Build with the default 'sandbox' feature for a sandboxed Windows portable." >&2
     cp target/release/agentmux-cef.exe "$PORTABLE/runtime/agentmux-$VERSION.exe"
 fi
+
+# Stamp the AgentMux icon onto the staged host exe. Under the Phase 3 sandbox the
+# host is CEF's bootstrap.exe (ships Chrome's icon); winres can't edit an
+# already-built PE, so rewrite the icon resource here (idempotent on the raw-bin
+# path too). Fixes the Explorer / Task Manager / Alt-Tab exe-file icon — the
+# #1633 regression. The running WINDOW icon is fixed separately at runtime
+# (set_window_icon → WM_SETICON).
+bash "$REPO_ROOT/scripts/inject-exe-icon.sh" "$PORTABLE/runtime/agentmux-$VERSION.exe"
+
 cp dist/bin/agentmux-srv-$VERSION-windows.x64.exe "$PORTABLE/runtime/"
 
 # Streaming bash wrapper — invoked by Claude's Bash subprocess via the
