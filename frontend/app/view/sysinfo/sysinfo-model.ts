@@ -71,7 +71,7 @@ function sampleReducer(state: DataItem[], action: SampleAction): DataItem[] {
         if (last) {
             const gap = item.ts - last.ts;
             if (gap > intervalMs * 1.5 && gap <= intervalMs * 3.5) {
-                // 1–2 missed ticks: zero-order hold — extend the last value
+                // 1–3 missed ticks: zero-order hold — extend the last value
                 const steps = Math.round(gap / intervalMs) - 1;
                 const held: DataItem[] = [];
                 for (let i = 1; i <= steps; i++) {
