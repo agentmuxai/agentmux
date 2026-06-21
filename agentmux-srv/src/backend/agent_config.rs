@@ -37,6 +37,7 @@ pub fn build_config_files(
     skills: &[AgentSkill],
     agent_name: &str,
     agent_id: &str,
+    agent_slug: &str,
 ) -> Vec<AgentConfigFile> {
     let mut files: Vec<AgentConfigFile> = Vec::new();
 
@@ -134,7 +135,7 @@ pub fn build_config_files(
     // should call build_mcp_config directly and push the result themselves,
     // or use the variant below.
     let mcp_content = content_map.get("mcp").map(|s| s.as_str());
-    if let Some(mcp_json) = build_mcp_config(mcp_content, agent_name, "") {
+    if let Some(mcp_json) = build_mcp_config(mcp_content, agent_slug, "") {
         files.push(AgentConfigFile {
             filename: ".mcp.json".to_string(),
             content: mcp_json,
@@ -156,6 +157,7 @@ pub fn build_config_files_with_bus(
     agent_id: &str,
     agent_bus_id: &str,
     working_directory: &str,
+    agent_slug: &str,
 ) -> Vec<AgentConfigFile> {
     let mut files: Vec<AgentConfigFile> = Vec::new();
 
@@ -226,7 +228,7 @@ pub fn build_config_files_with_bus(
 
     // MCP — use full bus_id variant
     let mcp_content = content_map.get("mcp").map(|s| s.as_str());
-    if let Some(mcp_json) = build_mcp_config(mcp_content, agent_name, agent_bus_id) {
+    if let Some(mcp_json) = build_mcp_config(mcp_content, agent_slug, agent_bus_id) {
         files.push(AgentConfigFile {
             filename: ".mcp.json".to_string(),
             content: mcp_json,
@@ -249,20 +251,16 @@ pub fn build_config_files_with_bus(
 /// Mirrors `buildMcpConfig()` in `frontend/app/view/agent/agent-model.ts`.
 pub fn build_mcp_config(
     user_mcp_content: Option<&str>,
-    agent_name: &str,
+    agent_slug: &str,
     agent_bus_id: &str,
 ) -> Option<String> {
     // Auto-injected AgentMux MCP server entry.
-    // Slugify agent_name → stable lowercase routing ID (matches the
-    // pane env var set by app_api.rs and the TS buildMcpConfig).
+    // agent_slug must be the pre-computed stable role slug (e.g. "korp"),
+    // NOT the display name — callers are responsible for passing the right
+    // value so renamed agents always advertise the same routing ID.
     let mut env_map = serde_json::Map::new();
-    if !agent_name.is_empty() {
-        let slug: String = agent_name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-            .collect();
-        env_map.insert("AGENTMUX_AGENT_ID".to_string(), json!(slug));
+    if !agent_slug.is_empty() {
+        env_map.insert("AGENTMUX_AGENT_ID".to_string(), json!(agent_slug));
     }
     if !agent_bus_id.is_empty() {
         env_map.insert("AGENTMUX_AGENT_BUS_ID".to_string(), json!(agent_bus_id));
@@ -567,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_build_mcp_config_no_user_content() {
-        let result = build_mcp_config(None, "Aria", "bus-42").unwrap();
+        let result = build_mcp_config(None, "aria", "bus-42").unwrap();
         let parsed: Value = serde_json::from_str(&result).unwrap();
         let servers = &parsed["mcpServers"];
         assert!(servers["agentmux"].is_object());
@@ -579,7 +577,7 @@ mod tests {
     #[test]
     fn test_build_mcp_config_merges_user_servers() {
         let user_mcp = r#"{"mcpServers": {"mytool": {"type": "stdio", "command": "mytool"}}}"#;
-        let result = build_mcp_config(Some(user_mcp), "Aria", "").unwrap();
+        let result = build_mcp_config(Some(user_mcp), "aria", "").unwrap();
         let parsed: Value = serde_json::from_str(&result).unwrap();
         let servers = &parsed["mcpServers"];
         assert!(servers["agentmux"].is_object());
@@ -588,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_build_mcp_config_invalid_user_json_uses_auto_injected() {
-        let result = build_mcp_config(Some("not json {{"), "Aria", "").unwrap();
+        let result = build_mcp_config(Some("not json {{"), "aria", "").unwrap();
         let parsed: Value = serde_json::from_str(&result).unwrap();
         assert!(parsed["mcpServers"]["agentmux"].is_object());
     }
@@ -599,7 +597,7 @@ mod tests {
         content_map.insert("soul".to_string(), "You are {{AGENT}}.".to_string());
         content_map.insert("agentmd".to_string(), "## Instructions\nDo stuff.".to_string());
 
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria");
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
         assert!(claude_md.content.contains("You are Aria."));
         assert!(claude_md.content.contains("---"));
@@ -614,7 +612,7 @@ mod tests {
             make_skill("Test", "test", "Run tests", "Run: test suite"),
         ];
 
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria");
 
         // CLAUDE.md should have the skills index
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
@@ -641,7 +639,7 @@ mod tests {
             r#"{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"my-audit"}]}]}"#
                 .to_string(),
         );
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria");
         let settings = files
             .iter()
             .find(|f| f.filename == ".claude/settings.json")
@@ -668,7 +666,7 @@ mod tests {
     #[test]
     fn test_build_config_files_mcp_written() {
         let content_map = HashMap::new();
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria");
         let mcp = files.iter().find(|f| f.filename == ".mcp.json").unwrap();
         let parsed: Value = serde_json::from_str(&mcp.content).unwrap();
         assert!(parsed["mcpServers"]["agentmux"].is_object());
