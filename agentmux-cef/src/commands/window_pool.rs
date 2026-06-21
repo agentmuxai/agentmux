@@ -546,13 +546,14 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     #[cfg(target_os = "windows")]
     {
         pool_hwnd_cache().lock().unwrap().remove(label);
+        // Likewise drop the cached CEF Views Window. Only `take_pool_window_view`
+        // (on promote) otherwise removes entries, so a pool window that dies
+        // *before* promote would leak its cached `cef::Window` for the process
+        // lifetime. Idempotent — `take_*` already removed it if this is a
+        // post-promote close. (reagent P2 PR #1654.) Windows-only: the cache
+        // and `take_pool_window_view` are `#[cfg(target_os = "windows")]`.
+        let _ = take_pool_window_view(label);
     }
-    // Likewise drop the cached CEF Views Window. Only `take_pool_window_view`
-    // (on promote) otherwise removes entries, so a pool window that dies
-    // *before* promote would leak its cached `cef::Window` for the process
-    // lifetime. Idempotent — `take_*` already removed it if this is a
-    // post-promote close. (reagent P2 PR #1654.)
-    let _ = take_pool_window_view(label);
     // PR #5 H.4 — atomic remove-from-{unpromoted,queue} + clear
     // respawn semaphore via reducer. The dispatch returns:
     //   - `pool_destroyed_was_unpromoted`: distinguishes pre-promote
