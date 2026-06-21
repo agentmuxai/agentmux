@@ -145,16 +145,18 @@ function sampleReducer(state: DataItem[], action: SampleAction): DataItem[] {
     case 'APPEND': {
       const last = state[state.length - 1];
       const gap  = last ? action.item.ts - last.ts : 0;
-      const maxGap = action.intervalSecs * 1000 * 3;  // >3 missed ticks = true break
+      // ZOH threshold: 1–3 missed ticks (gap ≤ 3.5× interval).
+      // Above that it's a true break and gets a NaN sentinel instead.
+      const zohMax = action.intervalSecs * 1000 * 3.5;
 
       let next = state;
-      if (last && gap > action.intervalSecs * 1000 * 1.5 && gap <= maxGap) {
+      if (last && gap > action.intervalSecs * 1000 * 1.5 && gap <= zohMax) {
         // 1–3 missed ticks: fill with hold-last values at nominal interval
         const steps = Math.round(gap / (action.intervalSecs * 1000)) - 1;
         for (let i = 1; i <= steps; i++) {
           next = [...next, { ...last, ts: last.ts + i * action.intervalSecs * 1000 }];
         }
-      } else if (last && gap > maxGap) {
+      } else if (last && gap > zohMax) {
         // True break: insert NaN sentinels (connection hiccup or long pause)
         next = [...next, { ...last, ts: last.ts + 1, blank: 1 } as DataItem];
       }
