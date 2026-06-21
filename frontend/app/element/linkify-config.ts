@@ -22,24 +22,38 @@ export function normalizeHref(url: string): string {
     return `${scheme}://${url}`;
 }
 
-// ccTLDs that are also ubiquitous source-code file extensions. fuzzyLink
-// would turn `README.md`, `main.rs`, `setup.py`, `build.sh` into bogus
-// external links (https://README.md etc.). We reject any fuzzy match whose
-// entire "hostname" is a single bare word + one of these extensions.
+// ccTLDs that double as common source-code file extensions.
 const FILE_EXT_TLDS = new Set(["md", "rs", "py", "sh", "pl", "ml"]);
 
+// Generic filename stem words. Combined with FILE_EXT_TLDS, these let us
+// reject `main.rs` / `README.md` / `setup.py` while keeping real single-label
+// domains like `docs.rs`, `pkg.sh`, `rustup.rs`.
+const FILENAME_STEMS = new Set([
+    "main", "build", "setup", "index", "mod", "lib", "test", "spec", "app",
+    "utils", "types", "constants", "config", "package", "requirements",
+    "cargo", "dockerfile", "vagrantfile", "makefile", "gemfile", "pipfile",
+    "procfile", "gruntfile", "gulpfile", "webpack", "rollup", "vite",
+    "init", "run", "start", "install", "update", "deploy", "release",
+]);
+
 export function isLikelyFilename(schema: string, url: string): boolean {
-    // Matches with an explicit protocol are never filenames
+    // Matches with an explicit protocol are real URLs
     if (schema) return false;
-    // Strip path/port to get the bare host (e.g. "README.md" from "README.md/foo")
+    // Strip path/port to get the bare host (e.g. "main.rs" from "main.rs/foo")
     const host = url.split("/")[0].split(":")[0];
     const dotIdx = host.lastIndexOf(".");
     if (dotIdx === -1) return false;
     const ext = host.slice(dotIdx + 1).toLowerCase();
-    // Only filter single-label hosts (one dot total): "README.md" yes,
-    // "example.io" or "api.github.md" both have more dots and are real URLs.
+    // Only FILE_EXT_TLDS trigger this check — .com/.io/.dev etc. are fine
+    if (!FILE_EXT_TLDS.has(ext)) return false;
+    // Only single-label hosts (one dot): "docs.rs" yes, "api.docs.rs" no
     const dotsInHost = (host.match(/\./g) ?? []).length;
-    return dotsInHost === 1 && FILE_EXT_TLDS.has(ext);
+    if (dotsInHost !== 1) return false;
+    const label = host.slice(0, dotIdx);
+    // All-uppercase label → always a filename (README, CHANGELOG, LICENSE)
+    if (label === label.toUpperCase() && label.length > 1) return true;
+    // Known generic filename stems (main, build, setup, …)
+    return FILENAME_STEMS.has(label.toLowerCase());
 }
 
 export const SAFE_SCHEMES = /^(https?|ftp|mailto|ssh|file):\/\//i;
