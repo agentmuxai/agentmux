@@ -965,6 +965,22 @@ pub fn promote_pool_window(
         crate::client::install_main_window_floater_cascade_hook(raw_hwnd);
     }
 
+    // FIX (the macOS-vs-Windows asymmetry — likely the real root cause):
+    // notify the CEF browser that it became visible at its new size. The Win32
+    // ShowWindow above only shows the HWND; it does NOT tell the CEF browser its
+    // visibility changed, so the renderer's compositor stays in the hidden/evicted
+    // state and the promoted window paints BLANK despite a valid DOM. macOS works
+    // precisely because it promotes via CEF Views `window.show()` (ui_tasks.rs),
+    // which notifies CEF — the Windows path used raw Win32 and skipped it.
+    // WasHidden(false) drives RenderWidgetHost::WasShown -> FrameEvictor::SetVisible(true);
+    // WasResized forces a fresh compositor frame at the new size. See
+    // docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md
+    // (electron#42378 FrameEvictor eviction; #32001 paints-only-after-show).
+    if let Some(host) = state.get_browser(&label).and_then(|b| b.host()) {
+        host.was_hidden(0); // 0 = not hidden = visible
+        host.was_resized();
+    }
+
     // Phase B.7.3.3 — the launcher's typed events drive the
     // InstancePanel atoms via the CEF JS bridge. No sync emit here.
 
