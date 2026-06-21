@@ -48,18 +48,25 @@ use crate::state::{AppState, WindowKind, WindowMeta};
 /// `Send + Sync` without `unsafe`; callers cast back to `HWND` /
 /// `*mut c_void` at use site.
 #[cfg(target_os = "windows")]
-/// UI-thread-local cache of pool windows' CEF Views `Window`, captured at
-/// `on_window_created`. The macOS/Linux `state.windows` registry is cfg-gated OFF
-/// on Windows, and `browser_view.window()` returns None for pool windows
-/// post-load (SPEC_POOL_WINDOW_HWND_NULL), so the Windows promote can't otherwise
-/// reach the Views `Window` to apply the macOS-parity `set_bounds()`+`show()`
-/// visibility fix. Both `on_window_created` and the promote run on the CEF UI
-/// thread, so a thread-local (no `Send`) is correct and avoids touching the
-/// shared `AppState`.
+/// Global cache of pool windows' CEF Views `Window`, captured at
+/// `on_window_created` (UI thread) and consumed by a promote UI task. The
+/// macOS/Linux `state.windows` registry is cfg-gated OFF on Windows, and
+/// `browser_view.window()` returns None for pool windows post-load
+/// (SPEC_POOL_WINDOW_HWND_NULL), so the promote can't otherwise reach the Views
+/// `Window` to apply the macOS-parity `set_bounds()`+`show()` fix.
+///
+/// This is a Send `Mutex` (NOT a thread-local): `on_window_created` runs on the
+/// CEF UI thread but the Windows promote runs on the IPC thread, so the cache
+/// must cross threads. `cef::Window` is `Send` (same as the macOS `state.windows`
+/// registry). The actual `set_bounds()`+`show()` is still performed on the UI
+/// thread via a posted task — CEF Views calls are UI-thread-only.
 #[cfg(target_os = "windows")]
-thread_local! {
-    static POOL_WINDOW_VIEWS: std::cell::RefCell<HashMap<String, cef::Window>> =
-        std::cell::RefCell::new(HashMap::new());
+static POOL_WINDOW_VIEWS: std::sync::OnceLock<Mutex<HashMap<String, cef::Window>>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+fn pool_window_views() -> &'static Mutex<HashMap<String, cef::Window>> {
+    POOL_WINDOW_VIEWS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Cache a pool window's CEF Views `Window` (called from `on_window_created`,
@@ -69,15 +76,17 @@ pub fn cache_pool_window_view(label: &str, window: &cef::Window) {
     if !label.starts_with("window-pool-") {
         return;
     }
-    POOL_WINDOW_VIEWS.with(|c| {
-        c.borrow_mut().insert(label.to_string(), window.clone());
-    });
+    pool_window_views()
+        .lock()
+        .unwrap()
+        .insert(label.to_string(), window.clone());
 }
 
-/// Take (remove + return) a pool window's cached CEF Views `Window` for promote.
+/// Take (remove + return) a pool window's cached CEF Views `Window`. Called on
+/// the UI thread by the promote show task.
 #[cfg(target_os = "windows")]
 pub fn take_pool_window_view(label: &str) -> Option<cef::Window> {
-    POOL_WINDOW_VIEWS.with(|c| c.borrow_mut().remove(label))
+    pool_window_views().lock().unwrap().remove(label)
 }
 
 static POOL_HWND_CACHE: std::sync::OnceLock<Mutex<HashMap<String, usize>>> =
@@ -997,46 +1006,27 @@ pub fn promote_pool_window(
         crate::client::install_main_window_floater_cascade_hook(raw_hwnd);
     }
 
-    // FIX (the macOS-vs-Windows asymmetry — likely the real root cause):
-    // notify the CEF browser that it became visible at its new size. The Win32
-    // ShowWindow above only shows the HWND; it does NOT tell the CEF browser its
-    // visibility changed, so the renderer's compositor stays in the hidden/evicted
-    // state and the promoted window paints BLANK despite a valid DOM. macOS works
-    // precisely because it promotes via CEF Views `window.show()` (ui_tasks.rs),
-    // which notifies CEF — the Windows path used raw Win32 and skipped it.
-    // WasHidden(false) drives RenderWidgetHost::WasShown -> FrameEvictor::SetVisible(true);
-    // WasResized forces a fresh compositor frame at the new size. See
-    // docs/research/RESEARCH_CEF_PREWARM_WINDOW_BLANK_ON_WINDOWS_2026_06_21.md
-    // (electron#42378 FrameEvictor eviction; #32001 paints-only-after-show).
-    if let Some(host) = state.get_browser(&label).and_then(|b| b.host()) {
-        host.was_hidden(0); // 0 = not hidden = visible
-        host.was_resized();
-    }
-
     // macOS-PARITY VISIBILITY FIX (the load-bearing one): drive the CEF Views
-    // `Window` set_bounds() + show() exactly as the macOS/Linux promote does
-    // (ui_tasks::PromotePoolWindowTask). The Win32 ShowWindow + host.was_hidden()
-    // above show the HWND and hint the host, but they do NOT flip the browser's
-    // view-hierarchy/compositor visibility — only the Views Window show() does,
-    // which is the single thing macOS does and Windows didn't, and is why macOS
-    // renders and Windows paints blank. set_bounds is in DIP (Views space), so
-    // convert the physical rect we positioned the HWND at.
-    if let Some(window) = take_pool_window_view(&label) {
+    // `Window` set_bounds() + show() exactly as the macOS/Linux promote does — but
+    // POSTED TO THE UI THREAD, because CEF Views calls are UI-thread-only and this
+    // promote runs on the IPC thread (the previous in-line attempt no-op'd: the
+    // thread-local cache + show ran on the wrong thread). The Window was cached at
+    // on_window_created (browser_view.window() is None for pool windows post-load
+    // on Windows). The Win32 SetWindowPos + ShowWindow above position/show the raw
+    // HWND but do NOT flip the browser's view-hierarchy/compositor visibility —
+    // only the Views Window show() does, which is the one thing macOS does and
+    // Windows didn't, and is why macOS renders and Windows paints blank. set_bounds
+    // is DIP, so convert the physical rect we positioned the HWND at.
+    {
         let scale = crate::app::dpi_scale_at(pos_x, pos_y);
         let to_dip = |v: i32| (v as f32 / scale).round() as i32;
-        crate::ui_tasks::show_pool_window_via_views(
-            &window,
+        crate::ui_tasks::post_promote_pool_window_views_show(
+            state,
             &label,
             to_dip(pos_x),
             to_dip(pos_y),
             to_dip(win_w),
             to_dip(win_h),
-        );
-    } else {
-        tracing::warn!(
-            target: "pool:new-window",
-            label = %label,
-            "[pool] no cached CEF Views Window — macOS-parity visibility fix NOT applied"
         );
     }
 
