@@ -170,6 +170,14 @@ for i in "${!HELPER_NAMES[@]}"; do
         "AgentMux Helper"|"AgentMux Helper (GPU)")
             for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done ;;
     esac
+    # Alerts helper needs a CFBundleIconFile so macOS shows the app icon in the
+    # notification permission prompt instead of a blank placeholder. The icns is
+    # copied into Resources after it's generated below.
+    local_icon_key=""
+    if [ "$hn" = "AgentMux Helper (Alerts)" ]; then
+        mkdir -p "$ha/Contents/Resources"
+        local_icon_key="    <key>CFBundleIconFile</key><string>AgentMux</string>"$'\n'
+    fi
     cat > "$ha/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -186,7 +194,7 @@ for i in "${!HELPER_NAMES[@]}"; do
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-</dict>
+${local_icon_key}</dict>
 </plist>
 PLIST
     HELPER_APPS+=("$ha")
@@ -204,6 +212,10 @@ for s in 16 32 64 128 256 512; do
   d=$((s * 2)); sips -z "$d" "$d" "$SRC_PNG" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AgentMux.icns"
+# Copy icon into the Alerts helper so the notification permission prompt shows
+# the app icon rather than a blank placeholder.
+cp "$APP/Contents/Resources/AgentMux.icns" \
+   "$APP/Contents/Frameworks/AgentMux Helper (Alerts).app/Contents/Resources/AgentMux.icns"
 
 # Info.plist
 cat > "$APP/Contents/Info.plist" <<PLIST
