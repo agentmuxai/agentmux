@@ -103,9 +103,9 @@
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
-    cursor: pointer;
+    cursor: default;
     font-size: var(--text-sm);
     color: var(--main-text-color);
 
-    input { cursor: pointer; }
+    input { cursor: default; }
 }

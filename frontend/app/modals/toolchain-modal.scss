@@ -174,7 +174,7 @@
     border-radius: var(--radius-md, 6px);
     border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
     background: var(--button-bg, transparent);
-    cursor: pointer;
+    cursor: default;
 
     &:hover {
         background: var(--panel-bg-alt, rgba(127, 127, 127, 0.12));
@@ -193,7 +193,7 @@
     border: none;
     background: transparent;
     color: var(--link-color, #58a6ff);
-    cursor: pointer;
+    cursor: default;
     border-radius: 4px;
 
     &:hover {

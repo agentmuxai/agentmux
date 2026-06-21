@@ -33,7 +33,7 @@
     border: none;
     background: transparent;
     color: var(--secondary-text-color);
-    cursor: pointer;
+    cursor: default;
     transition: background 0.1s, color 0.1s;
 
     &:hover {
@@ -55,7 +55,7 @@
     border: 1px solid var(--border-color);
     background: transparent;
     color: var(--accent-color);
-    cursor: pointer;
+    cursor: default;
 
     &:hover {
         background: var(--hover-bg-color);

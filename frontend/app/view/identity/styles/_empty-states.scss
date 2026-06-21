@@ -25,7 +25,7 @@
     border: 1px solid var(--accent-color);
     background: transparent;
     color: var(--accent-color);
-    cursor: pointer;
+    cursor: default;
 
     &:hover {
         background: var(--hover-bg-color);

@@ -260,7 +260,7 @@ const QuickTips = (): JSX.Element => {
                     <span class="text-foreground">Need More Help?</span>
                 </div>
                 <div class="grid grid-cols-1 @sm:grid-cols-2 gap-2">
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-brands fa-discord fa-fw" />
                         </IconBox>
@@ -273,7 +273,7 @@ const QuickTips = (): JSX.Element => {
                             Join Our Discord
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-sliders fa-fw" />
                         </IconBox>
@@ -286,7 +286,7 @@ const QuickTips = (): JSX.Element => {
                             Configuration Options
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-keyboard fa-fw" />
                         </IconBox>
@@ -299,7 +299,7 @@ const QuickTips = (): JSX.Element => {
                             All Keybindings
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-book fa-fw" />
                         </IconBox>
@@ -312,7 +312,7 @@ const QuickTips = (): JSX.Element => {
                             Full Documentation
                         </a>
                     </div>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-bug fa-fw" />
                         </IconBox>
@@ -342,7 +342,7 @@ const QuickTips = (): JSX.Element => {
                     <p>
                         To report bugs, request features, or flag issues with AI-generated content:
                     </p>
-                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors cursor-pointer mt-1">
+                    <div class="flex items-center gap-3 p-3 rounded-md bg-black/20 hover:bg-black/30 transition-colors mt-1">
                         <IconBox variant="secondary">
                             <i class="fa-brands fa-github fa-fw" />
                         </IconBox>

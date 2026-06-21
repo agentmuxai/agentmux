@@ -257,7 +257,7 @@
             border: 1px solid var(--border-color);
             border-radius: 0;
             padding: var(--space-3);
-            cursor: pointer;
+            cursor: default;
             transition: all 0.15s;
 
             &:hover {
@@ -270,7 +270,7 @@
             }
 
             input[type="radio"] {
-                cursor: pointer;
+                cursor: default;
             }
 
             .setup-wizard-provider-info {
@@ -332,7 +332,7 @@
             border-radius: 0;
             font-size: 12px;
             font-weight: 500;
-            cursor: pointer;
+            cursor: default;
             transition: all 0.15s;
             border: 1px solid var(--border-color);
             background: transparent;

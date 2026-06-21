@@ -155,7 +155,7 @@
                         direction: rtl;
                         text-align: left;
                         span {
-                            cursor: pointer;
+                            cursor: default;
 
                             &:hover {
                                 background: var(--highlight-bg-color);
@@ -585,7 +585,7 @@
         font-size: var(--text-xs);
         padding: 2px 8px;
         border-radius: var(--radius-sm);
-        cursor: pointer;
+        cursor: default;
 
         &:hover {
             color: var(--main-text-color);

@@ -42,7 +42,7 @@
                 border-radius: 0;
                 color: var(--secondary-text-color);
                 font-size: 12px;
-                cursor: pointer;
+                cursor: default;
                 transition: all 0.15s;
 
                 &:hover {
@@ -110,7 +110,7 @@
                 color: var(--main-bg-color);
                 font-size: 11px;
                 font-weight: 500;
-                cursor: pointer;
+                cursor: default;
                 transition: opacity 0.15s;
 
                 &:hover {
@@ -151,7 +151,7 @@
                 color: var(--main-bg-color);
                 font-size: 12px;
                 font-weight: 500;
-                cursor: pointer;
+                cursor: default;
                 transition: opacity 0.15s;
                 display: flex;
                 align-items: center;

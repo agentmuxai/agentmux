@@ -29,7 +29,7 @@
         color: var(--accent-text-color, #fff);
         border: none;
         border-radius: 0;
-        cursor: pointer;
+        cursor: default;
         font-size: 13px;
 
         &:hover {
@@ -47,7 +47,7 @@
 
     .memory-view-list-item {
         padding: 10px 12px;
-        cursor: pointer;
+        cursor: default;
         border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.06));
 
         &:hover {
@@ -187,7 +187,7 @@
         border-radius: 0;
         background: transparent;
         color: var(--main-text-color);
-        cursor: pointer;
+        cursor: default;
         font-size: 13px;
 
         &:hover:not(:disabled) {

@@ -21,7 +21,7 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm, 0);
     color: var(--secondary-text-color);
-    cursor: var(--cursor-interactive);
+    cursor: var(--cursor-default);
     font-size: var(--text-xs);
     transition: color 80ms ease, border-color 80ms ease, background 80ms ease;
 
