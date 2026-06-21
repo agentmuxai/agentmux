@@ -417,11 +417,11 @@ export class AgentViewModel implements ViewModel {
         // slug so renaming doesn't orphan ~/.agentmux/config/gh-<old>.
         envVars["GH_CONFIG_DIR"] = `${agentmuxHome()}/config/gh-${slug}`;
 
-        // AGENTMUX_AGENT_ID: the instance name (modal-supplied or
-        // definition-default). Shell integration scripts emit this
-        // as the terminal pane label, and agentmux-mcp routes
-        // inter-agent messages by it.
-        envVars["AGENTMUX_AGENT_ID"] = instanceName;
+        // AGENTMUX_AGENT_ID: stable role slug for muxbus routing.
+        // Keyed on by send_message/inject_terminal — must not change
+        // across respawns of the same definition. Display name is in
+        // AGENTMUX_AGENT_DISPLAY.
+        envVars["AGENTMUX_AGENT_ID"] = slug;
         // Stable definition slug — survives renames and re-launches.
         // Downstream code reads this when it needs the rename-stable
         // form (e.g. session-id lookup).
@@ -765,7 +765,8 @@ function buildConfigFiles(
     }
 
     // Build .mcp.json: auto-inject AgentMux MCP + merge user-provided config
-    const mcpConfig = buildMcpConfig(contentMap["mcp"], agent, instanceName);
+    const agentSlug = agent ? (agent.slug || agent.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-")) : undefined;
+    const mcpConfig = buildMcpConfig(contentMap["mcp"], agent, instanceName, agentSlug);
     if (mcpConfig) {
         files.push({ path: ".mcp.json", content: mcpConfig });
     }
@@ -888,12 +889,13 @@ function buildMcpConfig(
     userMcpContent: string | undefined,
     agent?: AgentDefinition,
     instanceName?: string,
+    slug?: string,
 ): string | null {
     // Auto-inject AgentMux MCP server for inter-agent messaging.
-    // `AGENTMUX_AGENT_ID` must match the shell's / pane title's
-    // `AGENTMUX_AGENT_ID` (the resolved instance name), otherwise
-    // inter-agent routing targets the definition name while
-    // everything else advertises the instance name.
+    // `AGENTMUX_AGENT_ID` must be the stable role slug (matching the
+    // pane env var) so agentmux-mcp advertises the same routing ID
+    // whether the agent reads it from its environment or from
+    // the MCP tool source field.
     const agentMuxServer: Record<string, any> = {
         type: "stdio",
         command: "agentmux-mcp",
@@ -901,7 +903,7 @@ function buildMcpConfig(
         env: {} as Record<string, string>,
     };
     if (agent) {
-        agentMuxServer.env["AGENTMUX_AGENT_ID"] = instanceName || agent.name;
+        agentMuxServer.env["AGENTMUX_AGENT_ID"] = slug || instanceName || agent.name;
         if (agent.agent_bus_id) {
             agentMuxServer.env["AGENTMUX_AGENT_BUS_ID"] = agent.agent_bus_id;
         }

@@ -78,6 +78,10 @@ wrap_window_delegate! {
                     if !raw_hwnd.is_null() {
                         crate::commands::window_pool::init_pool_window_hwnd(label, raw_hwnd);
                     }
+                    // Cache the CEF Views Window itself (valid here; lost post-load
+                    // via browser_view.window()) so the promote can run the
+                    // macOS-parity set_bounds()+show() visibility fix.
+                    crate::commands::window_pool::cache_pool_window_view(label, window);
                 }
             }
 
@@ -432,6 +436,25 @@ pub fn get_monitor_work_area_physical(px: i32, py: i32) -> Option<(i32, i32, i32
         }
         let rc = info.rcWork;
         Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+    }
+}
+
+/// Effective DPI scale (1.0 == 96 DPI == 100%) of the monitor under `(px, py)`
+/// in physical px. Used to convert physical-pixel rects to DIP for CEF Views
+/// `set_bounds` (which works in DIP). Returns 1.0 if the monitor can't be found.
+#[cfg(target_os = "windows")]
+pub fn dpi_scale_at(px: i32, py: i32) -> f32 {
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    unsafe {
+        let pt = windows_sys::Win32::Foundation::POINT { x: px, y: py };
+        let mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+        if mon.is_null() {
+            return 1.0;
+        }
+        let (mut dx, mut dy) = (96u32, 96u32);
+        let _ = GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+        (dx as f32 / 96.0).max(0.1)
     }
 }
 
@@ -806,6 +829,15 @@ wrap_app! {
                 // disabling explicit proxy config.
                 cmd.append_switch(Some(&CefString::from("disable-sync")));
                 cmd.append_switch(Some(&CefString::from("disable-extensions")));
+
+                // Disable Chromium's Web Notifications API. We don't use
+                // `new Notification()` anywhere; CEF still registers both the
+                // main app and AgentMux Helper (Alerts) as OS notification
+                // sources and requests macOS permission for each at startup,
+                // showing two permission toasts on every new-version install.
+                // Suppressing the API at the command-line level prevents both
+                // registrations and eliminates the duplicate prompts.
+                cmd.append_switch(Some(&CefString::from("disable-notifications")));
 
                 // HTTP Basic / Digest auth — route the challenge to the
                 // embedder's `RequestHandler::on_auth_credentials` callback

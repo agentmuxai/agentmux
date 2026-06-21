@@ -212,8 +212,6 @@ function EndIcons(props: {
     /** View key from `blockData.meta.view`, used to render a context-aware
      *  tooltip on the per-pane mic button (e.g. "Speak into this terminal"). */
     blockView?: string;
-    isMinimized: () => boolean;
-    toggleMinimize: () => void;
 }): JSX.Element {
     // createMemo so blockAtom reads inside endIconButtons() are tracked and
     // the button array re-evaluates when the agent loads/unloads.
@@ -258,15 +256,7 @@ function EndIcons(props: {
                     }
                 />
             </Show>
-            <IconButton
-                decl={{
-                    elemtype: "iconbutton",
-                    icon: "window-minimize",
-                    title: props.isMinimized() ? "Restore pane" : "Minimize pane",
-                    click: props.toggleMinimize,
-                }}
-                className="block-frame-minimize"
-            />
+
             <Show when={ephemeral()} fallback={
                 <Show when={floatingLabel()} fallback={
                     <OptMagnifyButton
@@ -480,8 +470,6 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     nodeModel={props.nodeModel}
                     onContextMenu={onContextMenu}
                     blockView={blockData()?.meta?.view}
-                    isMinimized={isMinimized}
-                    toggleMinimize={toggleMinimize}
                 />
             </div>
         </div>
@@ -716,15 +704,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
     let connBtnRef: { current: HTMLDivElement | null } = { current: null };
     const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
-    const isMinimized = () => !!blockData()?.meta?.["layout:minimized"];
-    const toggleMinimize = () => {
-        const next = !isMinimized();
-        RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", nodeModel.blockId),
-            meta: { "layout:minimized": next || null },
-        }).catch(console.error);
-    };
-
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.
     // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
@@ -827,7 +806,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 "has-agent-color": !!blockAgentColor(),
                 ephemeral: isEphemeral(),
                 magnified: isMagnified(),
-                minimized: isMinimized(),
             })}
             data-blockid={nodeModel.blockId}
             onClick={props.blockModel?.onClick}

@@ -93,8 +93,14 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |_data, _ctx| {
             let process_tracker = process_tracker.clone();
             Box::pin(async move {
+                let process_ids = process_tracker.list_all_blocks();
+                let reactive_ids = crate::backend::reactive::get_global_handler().list_active_blocks();
+                let mut seen = std::collections::HashSet::new();
+                let block_ids: Vec<String> = process_ids.into_iter().chain(reactive_ids)
+                    .filter(|id| seen.insert(id.clone()))
+                    .collect();
                 Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
-                    block_ids: process_tracker.list_all_blocks(),
+                    block_ids,
                 }).unwrap()))
             })
         }),
@@ -304,7 +310,10 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 // Agent identity
                 env_vars.insert("GH_CONFIG_DIR".to_string(), json!(format!("{}/gh-{}", config_home, agent_slug)));
-                env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(&agent.name));
+                // Use stored slug (stable across renames) for muxbus routing;
+                // fall back to the computed slug derived from the display name.
+                let routing_id = if !agent.slug.is_empty() { &agent.slug } else { &agent_slug };
+                env_vars.insert("AGENTMUX_AGENT_ID".to_string(), json!(routing_id));
                 // Exit delay only for subprocess
                 if !is_persistent {
                     env_vars.insert("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY".to_string(), json!("30000"));
@@ -393,7 +402,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //    missing and overwrites whatever's there. Same-
                 //    name same-hour launches will share a workdir;
                 //    proper allocation is tracked as a follow-up.
-                write_agent_config_files(&wstore, &agent, &agent_slug, &work_dir)?;
+                write_agent_config_files(&wstore, &agent, routing_id, &work_dir)?;
 
                 // 9. Register controller (resync)
                 let block_for_resync = wstore.must_get::<Block>(&block_id)
@@ -2546,6 +2555,7 @@ fn write_agent_config_files(
         &skills,
         &agent.name,
         &agent.id,
+        agent_slug,
     );
 
     // Expand ~ in work_dir

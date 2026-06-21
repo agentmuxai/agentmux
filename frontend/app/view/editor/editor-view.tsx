@@ -108,9 +108,9 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
     // block meta, same path used by terminal/agent/swarm). Capture phase so
     // we intercept before CodeMirror's bubble-phase wheel; preventDefault
-    // suppresses CEF's native Ctrl+Scroll page zoom. The view's CSS var
-    // `--editor-zoom` (bound below) drives both the CodeMirror font-size
-    // and the file-tree font-size, so both resize in lockstep.
+    // suppresses CEF's native Ctrl+Scroll page zoom. The resulting zoom
+    // factor is applied as a CSS `zoom` property on .editor-view (see below),
+    // scaling the entire subtree uniformly.
     onMount(() => {
         if (!rootRef) return;
         const handleCtrlWheel = (ev: WheelEvent) => {
@@ -409,7 +409,10 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         const startX = e.clientX;
         const startWidth = model.treeWidthAtom();
         const onMove = (ev: MouseEvent) => {
-            model.setTreeWidth(startWidth + (ev.clientX - startX));
+            // document mousemove coords are in viewport CSS pixels; divide by
+            // zoom so the delta maps correctly to local CSS pixels inside the
+            // zoomed .editor-view element.
+            model.setTreeWidth(startWidth + (ev.clientX - startX) / model.zoomAtom());
         };
         const onUp = () => {
             document.removeEventListener("mousemove", onMove);
@@ -430,7 +433,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         const startY = e.clientY;
         const startH = model.previewHeightAtom();
         const onMove = (ev: MouseEvent) => {
-            model.setPreviewHeight(startH + (startY - ev.clientY));
+            model.setPreviewHeight(startH + (startY - ev.clientY) / model.zoomAtom());
         };
         const onUp = () => {
             document.removeEventListener("mousemove", onMove);
@@ -696,7 +699,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             ref={(el) => { rootRef = el; }}
             class="editor-view"
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
-            style={{ "--editor-zoom": String(model.zoomAtom()) }}
+            style={{ zoom: model.zoomAtom() }}
         >
             <Show when={model.treeExpandedAtom()}>
                 <div

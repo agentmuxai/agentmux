@@ -47,6 +47,8 @@ function getBaseFontSize(blockId: string): number {
     if (typeof metaFontSize === "number" && !isNaN(metaFontSize) && metaFontSize >= 4 && metaFontSize <= 64) {
         return metaFontSize;
     }
+    const bcm = getBlockComponentModel(blockId);
+    if (bcm?.viewModel?.viewType === "editor") return 13;
     return 15;
 }
 

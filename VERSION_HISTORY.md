@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.47.3 — 2026-06-21
+
+- fix(srv): seed the default 3-pane layout for new windows so 'Open another window' is not blank
+- fix(macos): add icon to AgentMux Helper (Alerts) — notification permission prompt no longer shows blank icon
+- fix(pool): clamp + re-assert pool-promoted new window placement so it can't land off-screen on HiDPI
+- fix(macos): floating pane maximize button now works on macOS/Linux via CEF Views window.maximize()
+- fix(redock): floating panes are never valid redock targets — ghost no longer appears on idle floaters
+- fix(macos): Dock icon single-click focuses existing window instead of opening a new one
+- fix(pool): paint pool-promoted windows on Windows — drive CEF Views Window.show() on the UI thread at promote (macOS parity), register the promoted HWND for chrome ops (drag/close/min/max), and stamp FileDescription/ProductName=AgentMux on the host exe so the taskbar no longer shows "CEF Bootstrap application"
+- feat(editor): collapsible live markdown preview panel
+- fix(hamburger): Exit closes the current window, not main
+- chore(docs): remove Tauri-era spec files
+- feat(ui): pane minimize button with separator; collapse failed tool calls immediately
+- fix(macos): suppress duplicate notification permission prompts on new-version install
+- fix(editor): apply CSS zoom property instead of calc font-size scaling for correct per-pane zoom
+- fix(spawner): use stable role slug for AGENTMUX_AGENT_ID so muxbus routing is stable across respawns and renames
+- fix(ui): pass isMinimized/toggleMinimize as props to BlockFrame_Header
+
+
 ## 0.47.2 — 2026-06-21
 
 - fix(macos): per-version bundle id (ai.agentmux.<channel>.<version>) — double-click any build without open -n
