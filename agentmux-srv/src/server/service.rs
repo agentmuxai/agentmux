@@ -830,6 +830,30 @@ async fn handle_window_service(state: &AppState, call: &WebCallType) -> WebRetur
                             ));
                         }
                     }
+                    // Seed the default 3-pane launch layout (agent + sysinfo +
+                    // swarm) into the fresh tab so "Open another window" matches
+                    // first launch instead of opening blank. Only this
+                    // fresh-workspace branch seeds; tear-off (existing workspace,
+                    // the `else` arm) reattaches its populated workspace as-is.
+                    // Non-fatal: a seed failure leaves an empty tab (the prior
+                    // behaviour) rather than failing window creation.
+                    // See docs/retro/retro-blank-new-window-2026-06-21.md.
+                    if let Some(new_tab_id) = tab_events.iter().find_map(|e| match e {
+                        agentmux_common::ipc::Event::TabCreated { tab_id, .. } => {
+                            Some(tab_id.clone())
+                        }
+                        _ => None,
+                    }) {
+                        if let Err(e) =
+                            crate::backend::wcore::seed_default_layout(store, &new_tab_id)
+                        {
+                            tracing::warn!(
+                                tab_id = %new_tab_id,
+                                error = %e,
+                                "CreateWindow: default layout seed failed — opening blank tab"
+                            );
+                        }
+                    }
                     let mut combined = ws_events;
                     combined.extend(tab_events);
                     (new_ws_id, combined)
