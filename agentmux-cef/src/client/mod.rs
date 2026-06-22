@@ -425,18 +425,29 @@ impl AgentMuxHandler {
         // `browser-pane-`). LABEL is the source of truth. See
         // docs/retro/smoke-test-0.33.586-and-pr5-plan-2026-05-02.md.
         //
-        // Classification:
-        //   - label `browser-pane-<uuid>-<seq>` → Pane { block_id: uuid }
-        //   - label `window-pool-*` + still in unpromoted_pool_labels →
-        //     TopLevel { is_pool: true }
+        // Classification (LABEL is the source of truth at registration; after
+        // this the typed `BrowserKind` is authoritative — don't re-parse labels):
+        //   - `browser-pane-<uuid>-<seq>`            → Pane { block_id: uuid }
+        //   - `floating-<uuid>` / `floating-pool-<uuid>` → Floater { is_pool }
+        //       (is_pool=true only while a pane-pool floater is still warm /
+        //        unpromoted; a direct floater registers visible → is_pool:false)
+        //   - `window-pool-*` still unpromoted        → TopLevel { is_pool: true }
         //   - everything else (main, window-*, promoted pool windows) →
         //     TopLevel { is_pool: false }
+        // Floaters get their own variant so the last-window quit gate excludes
+        // them BY TYPE (invariant FP-LIFE) instead of a `floating-pool-` string
+        // check that missed direct `floating-<uuid>` floaters. Check `floating-`
+        // BEFORE `window-pool-` (a `floating-pool-` label also starts `floating-`).
         let kind = if let Some(rest) = label.strip_prefix("browser-pane-") {
             let block_id = rest
                 .rfind('-')
                 .map(|i| rest[..i].to_string())
                 .unwrap_or_default();
             crate::state::BrowserKind::Pane { block_id }
+        } else if label.starts_with("floating-") {
+            let is_pool = label.starts_with("floating-pool-")
+                && self.state.is_unpromoted_pane_pool_label(&label);
+            crate::state::BrowserKind::Floater { is_pool }
         } else if label.starts_with("window-pool-")
             && self.state.is_unpromoted_pool_label(&label)
         {

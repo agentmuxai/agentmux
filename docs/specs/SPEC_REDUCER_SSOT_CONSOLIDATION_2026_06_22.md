@@ -112,6 +112,25 @@ orphan_reconcile.rs:104/302-304, meta.rs:111, motion.rs:411/435, lifecycle.rs:47
 exclusions disappear (they become a typed match) and L2's `user_creation_in_flight` can read a typed
 `source`. **This is the keystone prerequisite for L2/L3.**
 
+**Chosen design (2026-06-22) — a typed `Floater` variant, not just pane-pool.** Investigation showed
+the gap is broader: there are TWO floater labelings (`floating-<uuid>` direct, `floating-pool-<uuid>`
+pane-pool), and the count gate only excluded `floating-pool-` — so direct floaters were *accidentally*
+counted as instance-keeping windows while pane-pool floaters were not (same user-facing thing,
+opposite behavior). The fix:
+- Add `BrowserKind::Floater { is_pool }` (warm pane-pool = `is_pool: true`; promoted/visible =
+  `is_pool: false`, flipped at the `pane_pool.rs` promote handler).
+- Classify BOTH `floating-` and `floating-pool-` into `Floater`.
+- `is_live_user_window` stays `matches!(kind, TopLevel { is_pool: false })` → **all** floaters are
+  excluded *by type*; the `!starts_with("floating-pool-")` string check is deleted, and
+  `counts_as_live_user_window` collapses back into `is_live_user_window` (no label needed).
+- **Policy CANONIZED:** floaters do NOT keep the instance alive (invariant **FP-LIFE**,
+  `docs/architecture/ARCHITECTURE_FLOATING_PANE_DOCKING_2026_05_30.md` §1.1), aligning the reducer
+  count with the win_event quit trigger that already excludes floaters by class. User-confirmed
+  2026-06-22.
+- Out of scope for this slice (separate concerns, left label-based for now): `host_counts_snapshot`
+  (must match the launcher mirror's report-driven count, NOT the keep-alive policy) and the
+  `pending_window_creations` prefix classifier (pre-registration — no `BrowserKind` exists yet).
+
 **L7 🟡 — H.6 top-level creation runner built, fully dormant.** `HostState.top_level_creation`
 (mod.rs:123), all of `reducer/top_level.rs`, the `EnqueueTopLevelWindow`/`PostCreateWindow` machinery —
 implemented + tested, **never dispatched** (every create calls `ui_tasks::post_create_window` directly:
