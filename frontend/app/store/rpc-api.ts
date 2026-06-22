@@ -1305,8 +1305,10 @@ class RpcApiType {
     // Bypasses browser CORS restrictions so agents (and the frontend) can call
     // ComfyUI /prompt, Grafana /api/query, etc. without a CORS header.
     // body must be a pre-serialised JSON string when calling JSON APIs.
-    // Never throws. HTTP errors → ok:false + status_code set.
-    // Transport failures (connection refused, timeout) → ok:false + error set.
+    // Never throws. ok:true means the HTTP exchange completed — check status_code
+    // for HTTP-level success/failure (4xx/5xx still return ok:true).
+    // ok:false means transport failure (connection refused, timeout) or invalid
+    // port/path — status_code is null and error is set.
     WidgetApiCommand(
         client: RpcClient,
         data: {
