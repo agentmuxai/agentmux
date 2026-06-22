@@ -21,6 +21,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # through package.sh).
 VERSION=$(node -p "require('./package.json').version")
 LABEL="${AGENTMUX_BUILD_LABEL:-$VERSION}"
+# CHANNEL matches the AGENTMUX_BUILD_CHANNEL_DEFAULT compiled into the binaries
+# (scripts/package.sh exports it; release CI uses "stable", task package uses a
+# local-… channel). Same fallback as package-macos.sh so the README data path
+# matches DataPaths::resolve exactly (~/.agentmux/channels/<channel>/…).
+CHANNEL="${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}"
 OUTDIR="${1:-$HOME/Desktop}"
 PORTABLE="$OUTDIR/agentmux-$LABEL-x64-portable"
 ZIPPATH="$OUTDIR/agentmux-$LABEL-x64-portable.zip"
@@ -78,20 +83,25 @@ fi
 # Clean previous
 rm -rf "$PORTABLE" "$ZIPPATH"
 
-# Create structure
+# Create structure. No `data/` dir: portable builds are stateless on disk —
+# user data lives in ~/.agentmux/versions/<version>/ (agentmux-common::
+# RuntimeMode). A bundled data/ folder was vestigial (nothing wrote to it) and
+# misled users into thinking their data lived next to the exe. See the README
+# below and PR #1693.
 mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend" "$PORTABLE/runtime/tools/bin"
-mkdir -p "$PORTABLE/data"
 
 # Launcher in root
 cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
 
 # Portable marker — read by agentmux-common::RuntimeMode::current to
-# distinguish portable extracts from installed builds. Both ship a
-# `runtime/` subdir, so the dir alone is not a discriminator. The
-# file's contents are advisory; the detection only checks for its
-# presence next to the launcher exe. Mac .app-bundle layouts are
-# also supported (marker can sit at the bundle root).
-printf 'AgentMux portable build %s\n' "$LABEL" > "$PORTABLE/agentmux-portable.marker"
+# distinguish portable extracts from installed builds (both ship a
+# `runtime/` subdir, so the dir alone is not a discriminator) and by
+# agentmux-cef read_build_label to show the ephemeral build label in the UI.
+# Lives INSIDE runtime/ to keep the extract root clean (just agentmux.exe +
+# README + runtime/). The launcher (at the root) looks one level down in
+# runtime/, and the host/srv (which run FROM runtime/) find it next to
+# themselves. Mac .app-bundle layouts (marker at the bundle root) still work.
+printf 'AgentMux portable build %s\n' "$LABEL" > "$PORTABLE/runtime/agentmux-portable.marker"
 
 # README
 cat > "$PORTABLE/README.txt" <<READMEEOF
@@ -107,22 +117,27 @@ Requirements:
   - No admin rights required
 
 Data:
-  All user data (sessions, settings, logs) is stored in the data/ folder
-  next to agentmux.exe. Back it up or move it along with this folder.
+  Your data is NOT stored in this folder. AgentMux keeps it in your user
+  profile, under a per-channel folder (this build's channel: ${CHANNEL}):
+
+    %USERPROFILE%\\.agentmux\\channels\\${CHANNEL}\\
+    (e.g. C:\\Users\\<you>\\.agentmux\\channels\\${CHANNEL}\\)
+
+  Per-version (a separate folder per AgentMux version):
+      versions\\${VERSION}\\data\\        session history and block state
+      versions\\${VERSION}\\logs\\        host and sidecar logs
+      versions\\${VERSION}\\cef-cache\\   browser cache (safe to delete when closed)
+
+  Channel-wide (shared across versions, so settings and agents survive upgrades):
+      config\\    settings.json, keybindings.json
+      agents\\    agent working directories
+
+  This makes the portable folder disposable: move it, re-extract it, or delete
+  it without losing anything. A portable copy and an installed copy of the same
+  version share this data, and your agents and sign-in carry across versions.
+  To back up or transfer your data, copy the channel folder above - NOT this
+  portable folder.
 READMEEOF
-
-# data/ placeholder so the folder is visible immediately after extraction
-cat > "$PORTABLE/data/README.txt" <<DATAEOF
-AgentMux user data
-
-This folder contains your sessions, settings, and logs.
-It is safe to back up. Do not delete it while AgentMux is running.
-
-  data/config/   — settings.json, keybindings.json
-  data/db/       — session history and block state
-  data/logs/     — host and sidecar log files
-  data/cef/      — browser cache (safe to delete when app is closed)
-DATAEOF
 
 # Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions.
 # Phase 3 sandbox (#1374): bootstrap.exe presence means sandbox feature was ON.
