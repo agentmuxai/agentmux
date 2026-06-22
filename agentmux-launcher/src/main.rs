@@ -855,6 +855,14 @@ async fn run_unix(
     // is auto-released on process exit even for SIGKILL.)
     let first_socket = bind_socket_with_recovery(&socket_path, &paths.data_dir, &dir_hash);
 
+    // macOS: we are the first instance (second-instance launches exit inside
+    // bind_socket_with_recovery). Publish this instance's bound-socket identity
+    // to the splash's reopen handler so a Finder double-click / `open` (no -n)
+    // forwards open_new_window to exactly THIS (channel, version) instance —
+    // never a recomputed hash. SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md.
+    #[cfg(target_os = "macos")]
+    splash_mac::set_reopen_target(paths.data_dir.clone(), dir_hash.clone());
+
     // Broadcast bus for reducer-emitted events. Same capacity (1024)
     // and rationale as the Windows path.
     let (events_tx, _) =

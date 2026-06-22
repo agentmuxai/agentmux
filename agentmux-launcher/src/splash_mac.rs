@@ -31,6 +31,7 @@
 
 use std::os::raw::c_char;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 // The brain logo (transparent PNG). NSImage decodes it natively at runtime.
@@ -173,6 +174,113 @@ unsafe fn nsstring(s: &str) -> id {
     )
 }
 
+// -----------------------------------------------------------------------------
+// Reopen handler (Finder double-click / `open` without -n of a RUNNING instance).
+//
+// On macOS the launcher is `CFBundleExecutable`, so LaunchServices delivers the
+// reopen Apple Event to THIS process (the host — a child ASN that owns the Dock
+// tile — only receives the Dock-click reopen; see
+// docs/specs/SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md). The launcher can't open
+// a CEF window itself, so it forwards `open_new_window` to the running host over
+// the single-instance socket this instance already bound. Without this handler
+// the reopen is unhandled and macOS shows "AgentMux is not responding".
+// -----------------------------------------------------------------------------
+
+/// `(data_dir, dir_hash)` of THIS instance's bound single-instance socket,
+/// published by the supervisor (`run_unix`) the moment it wins the bind. The
+/// reopen handler forwards to exactly this socket and never recomputes it — so a
+/// leaked `AGENTMUX_CHANNEL` or `AGENTMUX_IPC_VERSION_OVERRIDE` can't misroute the
+/// forward to the wrong (channel, version) instance.
+static REOPEN_TARGET: OnceLock<(PathBuf, String)> = OnceLock::new();
+
+/// Publish this launcher's bound-socket identity to the reopen handler. Called
+/// once from the supervisor thread after `bind_socket_with_recovery` wins the
+/// socket; no-op if already set.
+pub fn set_reopen_target(data_dir: PathBuf, dir_hash: String) {
+    let _ = REOPEN_TARGET.set((data_dir, dir_hash));
+}
+
+/// `-(BOOL)applicationShouldHandleReopen:(NSApplication*)sender
+/// hasVisibleWindows:(BOOL)flag` — type encoding `c@:@c` (BOOL = signed char).
+/// Always opens a NEW window (forward `open_new_window`), regardless of
+/// `hasVisibleWindows`. Returns NO so AppKit doesn't also run its default reopen.
+unsafe extern "C" fn should_handle_reopen(
+    _self: id,
+    _cmd: SEL,
+    _app: id,
+    _has_visible_windows: u8,
+) -> u8 {
+    match REOPEN_TARGET.get() {
+        Some((data_dir, dir_hash)) => {
+            crate::log("reopen-hook:fired proc=launcher — forwarding open_new_window");
+            crate::forward_open_new_window_or_log(data_dir, dir_hash);
+        }
+        // Reopen fired before the socket was bound (host still starting): the
+        // first window is already on its way, so do nothing (SPEC §6.4).
+        None => crate::log("reopen-hook:fired proc=launcher — ignored (socket not bound yet)"),
+    }
+    0 // NO — handled
+}
+
+/// Install `applicationShouldHandleReopen:hasVisibleWindows:` on the splash's
+/// `NSApplication`. The launcher's splash NSApp has no delegate, so we install a
+/// dedicated one; if one ever exists we add/override the method onto its class
+/// (the Chromium-proof technique the host uses in `agentmux-cef::macos_menu`).
+/// MUST run on the main thread after the NSApplication exists.
+unsafe fn install_reopen_handler() {
+    extern "C" {
+        fn objc_allocateClassPair(superclass: Class, name: *const c_char, extra: usize) -> Class;
+        fn objc_registerClassPair(cls: Class);
+        fn class_addMethod(cls: Class, sel: SEL, imp: usize, types: *const c_char) -> u8;
+        fn object_getClass(obj: id) -> Class;
+        fn class_getInstanceMethod(cls: Class, sel: SEL) -> *mut std::ffi::c_void;
+        fn method_setImplementation(
+            m: *mut std::ffi::c_void,
+            imp: *const std::ffi::c_void,
+        ) -> *const std::ffi::c_void;
+    }
+
+    let imp: unsafe extern "C" fn(id, SEL, id, u8) -> u8 = should_handle_reopen;
+    let sel_reopen = sel(b"applicationShouldHandleReopen:hasVisibleWindows:\0");
+    let types = b"c@:@c\0".as_ptr() as *const c_char;
+
+    let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
+    if app.is_null() {
+        crate::log("reopen-hook: sharedApplication nil; launcher handler not installed");
+        return;
+    }
+    let current_delegate = send(app, sel(b"delegate\0"));
+    if current_delegate.is_null() {
+        let name = b"AgentMuxLauncherReopenDelegate\0";
+        let mut dcls = objc_getClass(name.as_ptr() as *const c_char);
+        if dcls.is_null() {
+            let superclass = objc_getClass(b"NSObject\0".as_ptr() as *const c_char);
+            dcls = objc_allocateClassPair(superclass, name.as_ptr() as *const c_char, 0);
+            class_addMethod(dcls, sel_reopen, imp as usize, types);
+            objc_registerClassPair(dcls);
+        }
+        // alloc/init returns a +1-retained object we deliberately never release —
+        // NSApplication's `delegate` is a WEAK reference, so the leak keeps it
+        // valid for the process lifetime.
+        let delegate = send(send(dcls as id, sel(b"alloc\0")), sel(b"init\0"));
+        send_void_id(app, sel(b"setDelegate:\0"), delegate);
+        crate::log("reopen-hook: installed dedicated launcher reopen delegate");
+    } else {
+        // class_addMethod adds an override on THIS class only when the selector
+        // isn't already implemented directly; otherwise replace its own IMP.
+        let cls = object_getClass(current_delegate);
+        if class_addMethod(cls, sel_reopen, imp as usize, types) != 0 {
+            crate::log("reopen-hook: added applicationShouldHandleReopen to existing launcher delegate");
+        } else {
+            let m = class_getInstanceMethod(cls, sel_reopen);
+            if !m.is_null() {
+                method_setImplementation(m, imp as *const std::ffi::c_void);
+                crate::log("reopen-hook: swizzled applicationShouldHandleReopen on existing launcher delegate");
+            }
+        }
+    }
+}
+
 /// A live splash window plus the path the host touches when it's ready.
 pub struct Splash {
     window: id,
@@ -201,6 +309,10 @@ impl Splash {
             let pool = send(class(b"NSAutoreleasePool\0"), sel(b"alloc\0"));
             let pool = send(pool, sel(b"init\0"));
             let result = build_window();
+            // NSApplication now exists — install the reopen handler so a Finder
+            // double-click / `open` of the running app forwards a new window
+            // (SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md).
+            install_reopen_handler();
             send_void(pool, sel(b"drain\0"));
             result
         };
@@ -235,8 +347,10 @@ impl Splash {
         let mut fade_start: Option<Instant> = None;
 
         loop {
+            // NSApp event pump (not bare CFRunLoop) so a reopen Apple Event that
+            // arrives mid-splash is delivered to our delegate. See pump_app_events.
             unsafe {
-                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.016, 0);
+                pump_app_events(0.016);
             }
             let t = start.elapsed().as_secs_f64();
 
@@ -276,15 +390,57 @@ impl Splash {
             std::thread::sleep(Duration::from_millis(8));
         }
 
-        // Keep pumping so the order-out flushes and AppKit stays sane. The
-        // supervisor thread owns process lifetime and `process::exit`s when the
-        // host exits, which ends this loop with the process.
+        // Keep pumping NSApp events so the order-out flushes, AppKit stays sane,
+        // AND reopen Apple Events keep reaching our delegate for the rest of the
+        // process lifetime (the common case: user double-clicks a long-running
+        // app). The supervisor thread owns process lifetime and `process::exit`s
+        // when the host exits, which ends this loop with the process.
         loop {
             unsafe {
-                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.2, 0);
+                pump_app_events(0.2);
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+}
+
+/// Pump the launcher's `NSApplication` event loop for up to `seconds` on the main
+/// thread. Unlike a bare `CFRunLoopRunInMode`, NSApp's pump drains the AppKit
+/// event queue **and the Apple Event Mach port** — the reopen (`kAEReopenApplication`,
+/// `'rapp'`) event is delivered through this pump, not a plain CFRunLoop. Without
+/// it the launcher's reopen delegate is never invoked and a Finder/Dock reopen
+/// times out (`errAETimeout` → "AgentMux is not responding"). The AE is dispatched
+/// to the delegate as a side effect of the run-loop service inside
+/// `nextEventMatchingMask:`, so we don't need the returned event for reopen — we
+/// still forward any returned UI event to keep the splash window responsive.
+unsafe fn pump_app_events(seconds: f64) {
+    let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
+    if app.is_null() {
+        return;
+    }
+    let until: id = {
+        let f: extern "C" fn(id, SEL, f64) -> id =
+            std::mem::transmute(objc_msgSend as *const ());
+        f(
+            class(b"NSDate\0"),
+            sel(b"dateWithTimeIntervalSinceNow:\0"),
+            seconds,
+        )
+    };
+    // NSEventMaskAny == NSUIntegerMax; dequeue: YES. Blocks until an event or
+    // `until`; the AE port is serviced during that wait.
+    let next: extern "C" fn(id, SEL, u64, id, CFStringRef, u8) -> id =
+        std::mem::transmute(objc_msgSend as *const ());
+    let evt = next(
+        app,
+        sel(b"nextEventMatchingMask:untilDate:inMode:dequeue:\0"),
+        u64::MAX,
+        until,
+        kCFRunLoopDefaultMode,
+        1,
+    );
+    if !evt.is_null() {
+        send_void_id(app, sel(b"sendEvent:\0"), evt);
     }
 }
 
