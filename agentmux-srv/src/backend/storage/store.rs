@@ -22,11 +22,9 @@ use super::migrations::{check_schema_compat, run_object_schema, stamp_version, O
 
 /// SQLite-backed object store for StoreObj types.
 pub struct Store {
-    /// `pub(super)` so sibling subsystem modules (e.g.
-    /// `memory_bundles`) can take the lock. Phase R modularization
-    /// (SPEC_STORE_MODULARIZATION_2026_05_27.md) splits store.rs
-    /// into per-subsystem files; each adds methods to `Store` via
-    /// `impl Store {}` and needs the connection.
+    /// `pub(super)` so sibling subsystem modules (e.g. `memory_bundles`)
+    /// can take the lock. Each per-subsystem file adds methods to `Store`
+    /// via `impl Store {}` and needs the connection.
     pub(super) conn: Mutex<Connection>,
     /// Cross-version named-agent registry. `None` for in-memory test
     /// stores; `Some` for production srv. Mutations to
@@ -89,9 +87,9 @@ impl Store {
         &self.conn
     }
 
-    /// Run the Phase 3a `db_agents` consolidation backfill under the
-    /// wstore's exclusive connection lock. Idempotent — gated by a
-    /// marker file in `data_dir` (skip with `None` for tests).
+    /// Run the `db_agents` consolidation backfill under the wstore's
+    /// exclusive connection lock. Idempotent — gated by a marker file in
+    /// `data_dir` (skip with `None` for tests).
     pub fn run_agents_consolidate(
         &self,
         data_dir: Option<&Path>,
@@ -551,45 +549,17 @@ impl<'a> StoreTx<'a> {
     }
 }
 
-// Agent subsystem (AgentDefinition, AgentInstance, InstanceStatus,
-// agent_def_*, instance_*) moved to `super::agents` in Phase R.1
-// (SPEC_STORE_MODULARIZATION_2026_05_27.md). Re-exported here so
-// existing `storage::store::AgentDefinition` etc. imports keep working.
+// Re-exports so existing `storage::store::*` imports keep working.
 pub use super::agents::{derive_slug, AgentDefinition, AgentInstance, InstanceStatus};
-
-// `Memory` lives in `super::memory_bundles` (Phase R.3). Re-exported
-// here for legacy `storage::store::Memory` imports.
 pub use super::memory_bundles::Memory;
-
-// AgentContent / AgentSkill / AgentHistory moved to
-// `super::content` / `super::skills` / `super::history` in Phase R.4
-// (SPEC_STORE_MODULARIZATION_2026_05_27.md). Re-exported here so
-// external `storage::store::AgentContent` etc. imports keep working.
 pub use super::content::AgentContent;
 pub use super::history::AgentHistory;
 pub use super::skills::AgentSkill;
 
-
-// ====================================================================
-// Identity Accounts + Agent Instances + Junction
-// (Phase 2 of SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md)
-// ====================================================================
-
-// Identity-system structs (SecretRef, IdentityAccount, AgentIdentityLink,
-// Identity, IdentityBinding) moved to `super::identities` in Phase R.2
-// (SPEC_STORE_MODULARIZATION_2026_05_27.md). Re-exported here so
-// existing `storage::store::*` imports keep working.
+// Identity system types.
 pub use super::identities::{
     AgentIdentityLink, Identity, IdentityAccount, IdentityBinding, SecretRef,
 };
-
-
-
-// `agent_instance_to_record`, `empty_to_none`, `relative_workdir`,
-// and `Store::registry_upsert_if_named` moved to
-// `super::registry_mirror` in Phase R.6 of the storage modularization
-// (SPEC_STORE_MODULARIZATION_2026_05_27.md). The whole module retires
-// when Phase R sunsets the JSON registry.
 
 
 

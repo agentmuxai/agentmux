@@ -45,56 +45,64 @@
         flex-direction: column;
     }
 
-    // === Gradient Progress Bar ===
-    // 2px bar pinned position:absolute top:0. .agent-view already has
+    // === Marching-ants Progress Bar ===
+    // 3px bar pinned position:absolute top:0. .agent-view already has
     // position:relative (agent-view.scss). Animated while working, hidden
-    // at rest. All colors derived from --accent-color + --main-text-color
-    // via color-mix() so they adapt to every theme without hardcoded hex.
-    // SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §4.
+    // at rest. Colors via color-mix() so every theme inherits without
+    // hardcoded hex.
     //
-    // Animation uses transform: translateX() on a 3x-wide ::before so it
-    // always runs on the GPU compositor — background-position animation is
-    // not reliably promoted on all Linux GPU drivers and some Windows
-    // HW-accel paths, causing the bar to freeze when the main thread is busy.
+    // Uses transform: translateX() so the animation stays on the GPU
+    // compositor — background-position animation is not reliably promoted
+    // on all Linux GPU drivers and some Windows HW-accel paths.
+    // The ::before overshoots left/right by 12px so the translated edge
+    // never clips; parent overflow:hidden trims it.
     .agent-pane-progress-bar {
         position: absolute;
         top: 0;
         left: 0;
         right: 0;
-        height: 2px;
+        height: 3px;
         z-index: var(--z-pane-overlay, 4);
         pointer-events: none;
         opacity: 0;
         overflow: hidden;
         transition: opacity 200ms ease;
+        // Opaque base so the 3px strip fully covers the pane content beneath it.
+        // Without this the translucent stripe gaps reveal text reaching the top
+        // edge and the marching pattern is lost. Matches .agent-view's surface
+        // (--main-bg-color) so the bar reads as chrome.
+        background: var(--main-bg-color);
 
         &::before {
             content: "";
             position: absolute;
             top: 0;
             bottom: 0;
-            left: -100%;
-            width: 300%;
+            left: -12px;
+            right: -12px;
             // Solid fallback for Chromium < 111 where color-mix() is
-            // unsupported — the browser ignores the declaration below and
-            // keeps this one, so the bar is at least visible as a solid line.
+            // unsupported — browser ignores the declaration below and
+            // keeps this one so the bar remains visible.
             background: var(--accent-color);
-            background: linear-gradient(
-                90deg,
-                color-mix(in srgb, var(--accent-color) 35%, transparent)            0%,
-                var(--accent-color)                                                  25%,
-                color-mix(in srgb, var(--accent-color) 55%, var(--main-text-color)) 50%,
-                var(--accent-color)                                                  75%,
-                color-mix(in srgb, var(--accent-color) 35%, transparent)           100%
+            // Every stop is fully opaque (the faded stripe mixes against the
+            // pane background, NOT transparent) so the pattern stays crisp over
+            // any content in any theme.
+            background: repeating-linear-gradient(
+                -45deg,
+                var(--accent-color)                                              0px,
+                var(--accent-color)                                              4px,
+                color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 4px,
+                color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 8px
             );
-            will-change: transform;
         }
 
         &--active {
             opacity: 1;
 
             &::before {
-                animation: agent-gradient-sweep 2s linear infinite;
+                // Promote the layer only while animating, not at idle rest.
+                will-change: transform;
+                animation: agent-ant-march 0.5s linear infinite;
             }
         }
 
@@ -103,21 +111,31 @@
         }
     }
 
-    @keyframes agent-gradient-sweep {
-        // Sweeps the 3x-wide pseudo-element left→right across the visible
-        // 1x window. The element moves right (translateX increases), so the
-        // visible window scans the gradient from its right side to its left —
-        // the glint enters from the left edge and exits on the right.
-        // translateX percentages are relative to the element (300% of parent),
-        // so ±33.33% = ±100% of parent width.
-        from { transform: translateX(-33.33%); }
-        to   { transform: translateX(33.33%); }
+    @keyframes agent-ant-march {
+        // Shift by one stripe period (8px × √2 ≈ 11.314px) per cycle so the
+        // repeating pattern loops seamlessly. translateX keeps the animation
+        // on the GPU compositor.
+        from { transform: translateX(0); }
+        to   { transform: translateX(11.314px); }
     }
 
     @media (prefers-reduced-motion: reduce) {
+        // Don't translate. But `animation: none` alone leaves the diagonal
+        // stripe frozen mid-phase at full opacity, which reads as a stuck bar.
+        // (CEF maps reduced-motion to the Windows "Animation effects" toggle /
+        // SPI_GETCLIENTAREAANIMATION, so any machine with it off lands here.)
+        // Show a solid bar and breathe its opacity so "working" still reads,
+        // without positional motion.
         .agent-pane-progress-bar--active::before {
-            animation: none;
+            background: var(--accent-color);
+            will-change: opacity;
+            animation: agent-ant-breathe 1.6s ease-in-out infinite;
         }
+    }
+
+    @keyframes agent-ant-breathe {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.45; }
     }
 
     // === Working Row ===

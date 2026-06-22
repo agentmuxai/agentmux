@@ -377,28 +377,54 @@ pub fn resolve_window_at_cursor(
                                 main_hwnd = %format!("{:#x}", main_hwnd),
                                 "cursor inside window"
                             );
-                            // Resolution precedence (P1). The HWND→label
-                            // reverse map can carry a STALE `window-pool-*`
-                            // label for a promoted main frame: a warm-pool
-                            // window moved on-screen to serve as the user's
-                            // main window keeps its pool label in
-                            // `window_hwnds` while "main" is left with no live
-                            // HWND (proven 2026-05-30 — redock onto main
-                            // resolved the pool label, so the target rendered no
-                            // ghost and the drop was rejected: no dock).
-                            // `find_main_window` is the cache-INDEPENDENT
-                            // authority on which HWND is the main frame, so when
-                            // the cached label is a lingering pool label AND
-                            // this HWND is the main frame, "main" wins. Real
-                            // labels (floating-* / additional windows / an
-                            // already-correct "main") are used verbatim, so
-                            // multi-window resolution is unchanged.
+                            // Resolution (R3 identity, #1681). The redock ghost
+                            // only renders when the host-emitted `target_label`
+                            // === the target window's frontend `windowLabel`, so
+                            // resolve must return the label the frontend actually
+                            // uses for this HWND.
+                            //
+                            // window_hwnds maps this HWND to a `window-pool-*`
+                            // label (inserted at promote). Two different windows
+                            // wear a pool label, and they need OPPOSITE answers:
+                            //
+                            //  - A genuine promoted SECONDARY keeps its pool label
+                            //    as its real `windowLabel` and registers it via
+                            //    register_backend_window → it HAS a
+                            //    `backend_window_id`. Return the pool label
+                            //    verbatim so it matches.
+                            //  - The PRIMARY window can be served by a promoted
+                            //    pool window whose renderer re-identifies as
+                            //    "main" (it registers "main", NOT the pool label,
+                            //    so the pool label has NO backend_window_id, and
+                            //    window_hwnds never gets a "main" entry —
+                            //    capture_hwnd_for_label can't claim the
+                            //    already-pool-mapped HWND). Map to "main" when this
+                            //    is the main frame so its ghost matches.
+                            //
+                            // Using the registration (authoritative) instead of
+                            // find_main_window alone is what makes BOTH the first
+                            // window and secondary windows work: a registered pool
+                            // label is never rewritten, so find_main_window picking
+                            // the wrong frame can't mislabel a real secondary.
                             let is_main_frame = main_hwnd != 0 && h_isize == main_hwnd;
                             let resolved_label: Option<&str> = match label_by_hwnd.get(&h_isize) {
-                                Some(l) if l.starts_with("window-pool-") && is_main_frame => {
-                                    Some("main")
+                                Some(l) if l.starts_with("window-pool-") => {
+                                    if state.backend_window_id(l).is_some() {
+                                        // Registered → the frontend's real label.
+                                        Some(l.as_str())
+                                    } else if is_main_frame {
+                                        // Unregistered pool label on the main frame
+                                        // → primary served by a promoted pool
+                                        // window; its renderer is "main".
+                                        Some("main")
+                                    } else {
+                                        Some(l.as_str())
+                                    }
                                 }
+                                // Real label (e.g. "main", "floating-*") → verbatim.
                                 Some(l) => Some(l.as_str()),
+                                // Untracked but it IS the main frame: best-effort
+                                // "main" for the genuine cold-main-before-cache case.
                                 None if is_main_frame => Some("main"),
                                 None => None,
                             };

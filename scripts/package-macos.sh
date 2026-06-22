@@ -342,7 +342,16 @@ ln -s /Applications "$STAGE/Applications"
 # bundle as folders. Falls back to a plain DMG if Finder automation is
 # unavailable (headless / no TCC grant).
 RW="$(mktemp -u).dmg"
-hdiutil create -volname "$DMG_VOL" -srcfolder "$STAGE" -ov -format UDRW -fs HFS+ "$RW" >/dev/null
+# Use APFS (not HFS+) for the intermediate read-write volume. macOS 26 Tahoe
+# has a regression in HFS+ transparent file decompression (decmpfs, the `z`
+# attribute that hdiutil applies automatically to compressible files like JS/HTML
+# when building an HFS+ image). On the mounted HFS+ DMG, reading those files
+# fails with ENOTTY / Input/output error — the IPC server sets Content-Length
+# from file metadata but then can't stream the body, causing ERR_CONTENT_LENGTH_MISMATCH
+# in CEF. APFS images get the same `z` attribute but their decompressor is
+# unaffected on macOS 26, so switching here fixes the bug. APFS DMGs have been
+# mountable since macOS 10.14 and we target 11+, so this is safe.
+hdiutil create -volname "$DMG_VOL" -srcfolder "$STAGE" -ov -format UDRW -fs APFS "$RW" >/dev/null
 RWMNT="$(hdiutil attach "$RW" -nobrowse -noautoopen 2>/dev/null | sed -n 's/.*\(\/Volumes\/.*\)/\1/p' | tail -1)"
 if [ -n "$RWMNT" ]; then
     osascript >/dev/null 2>&1 <<OSA || echo "  ⚠ Finder layout skipped (automation unavailable) — DMG uses default view"
@@ -370,6 +379,9 @@ fi
 # ULMO (LZMA) compression — LZMA-class like Linux's SquashFS AppImage, vs the
 # default UDZO (zlib) which left the DMG ~50% larger. Requires macOS 10.15+ to
 # mount (we target 11+, so fine). On this build: UDZO 248MB -> ULMO 167MB.
+# Purge inactive pages first — LZMA peaks at 4-6GB RAM and gets OOM-killed if
+# the system is under memory pressure after the Rust compile phase.
+sudo -n purge 2>/dev/null || true
 hdiutil convert "$RW" -format ULMO -o "$DMG" >/dev/null
 rm -f "$RW"
 codesign --force --timestamp --sign "$CERT" "$DMG"

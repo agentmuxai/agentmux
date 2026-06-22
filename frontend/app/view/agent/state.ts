@@ -165,7 +165,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         // after PR G removed the legacy `turnActiveAtom` / `stoppingAtom`.
         initPhaseAtom: createSignal<InitPhase>({ kind: "InitPending" }),
         turnPhaseAtom: createSignal<TurnPhase>({ kind: "Idle" }),
-        // Composer details panel — reducer-owned (PR #1068).
+        // Composer details panel — reducer-owned.
         // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
         detailsOpenAtom: createSignal<boolean>(false),
         composerUnreadCountAtom: createSignal<number>(0),

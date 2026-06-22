@@ -20,10 +20,12 @@ import { createSignal } from "solid-js";
 
 // Short settle window after the layout applies the new rect synchronously —
 // covers rAF/scheduler slack so the per-frame sampling lands on the final rect.
-// Was 220ms when this tracked a CSS pane reflow animation; the animation was
-// removed and the placeholder rect is now final immediately, so 2 rAF frames
-// (≈32ms) is enough to let Solid's reactive flush + ResizeObserver tick settle.
-const REFLOW_WINDOW_MS = 32;
+// Was 220ms when this tracked a CSS pane reflow animation, then 32ms (≈2 rAF
+// frames) after the animation was removed and the placeholder rect became final
+// immediately. Tuned down further to 4ms for a snappier post-change settle. The
+// resample loop in browser-view.tsx is rAF-gated, so this floors at ~1 frame in
+// practice regardless of the exact sub-frame value.
+const REFLOW_WINDOW_MS = 4;
 
 // Wall-clock instant (performance.now() ms) until which the post-change settle
 // window is open. Stored in a signal so consumers can reactively start their

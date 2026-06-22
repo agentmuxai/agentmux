@@ -171,14 +171,16 @@ fn is_sensitive_env_key(key: &str) -> bool {
 /// rebuild). Released / installed / dev builds have no marker → returns
 /// `None` and the UI falls back to the plain version + git hash.
 ///
-/// The host runs from `<portable>/runtime/`, so the marker sits one
-/// level up; we also check the exe dir itself for layout robustness.
+/// The host runs from `<portable>/runtime/` and the marker is packaged INTO
+/// `runtime/`, so it sits right next to this exe (the `exe_dir` candidate). We
+/// also check one level up (the extract root) for robustness against older
+/// portables that wrote the marker at the root.
 fn read_build_label() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
     let candidates = [
-        exe_dir.parent().map(|p| p.join("agentmux-portable.marker")),
         Some(exe_dir.join("agentmux-portable.marker")),
+        exe_dir.parent().map(|p| p.join("agentmux-portable.marker")),
     ];
     for cand in candidates.into_iter().flatten() {
         if let Ok(contents) = std::fs::read_to_string(&cand) {

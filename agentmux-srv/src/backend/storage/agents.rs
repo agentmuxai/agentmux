@@ -3,21 +3,12 @@
 
 //! Agent subsystem — definitions, instances, and their lifecycle CRUD.
 //!
-//! This is the largest of the storage subsystems: 8 `agent_def_*`
-//! methods (template + user-clone definitions), 12 `instance_*`
-//! methods (per-launch instance rows, named-agent continuation,
-//! identity-bound active-for-block resolution), the
-//! `AgentDefinition` / `AgentInstance` structs, and the
-//! `InstanceStatus` enum.
-//!
-//! Extracted from `store.rs` in Phase R.1 of the storage
-//! modularization plan
-//! (`docs/specs/SPEC_STORE_MODULARIZATION_2026_05_27.md`) — the
-//! final phase of that plan. The method surface is unchanged —
-//! `Store::agent_def_*` and `Store::instance_*` still live on `Store`
-//! via the two `impl` blocks below; callers stay on
-//! `storage::store::AgentDefinition` / `AgentInstance` /
-//! `InstanceStatus` thanks to the re-exports.
+//! Covers `agent_def_*` methods (template + user-clone definitions),
+//! `instance_*` methods (per-launch instance rows, named-agent
+//! continuation, identity-bound active-for-block resolution), the
+//! `AgentDefinition` / `AgentInstance` structs, and the `InstanceStatus` enum.
+//! `db_agents` is the authoritative consolidated read table; `db_agent_definitions`
+//! and `db_agent_instances` remain the write targets with dual-write mirrors.
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -270,27 +261,17 @@ pub struct AgentInstance {
 impl Store {
     /// List all agent definitions, **most-recently-used first**.
     ///
-    /// Phase 3b: read from the consolidated `db_agents` table. Order is
-    /// most-recently-touched first (`updated_at DESC`) then stable on
-    /// creation (`created_at ASC`). Dual-write keeps `db_agents.updated_at`
-    /// fresh on every definition mutation AND every instance lifecycle
-    /// touch, so this approximates the old "MAX(started_at)" ordering
-    /// without joining the instances table — recency on a row tracks the
-    /// last time the agent was either edited or launched.
+    /// Reads from the consolidated `db_agents` table, ordered by
+    /// `updated_at DESC` then `created_at ASC`. Dual-write keeps
+    /// `db_agents.updated_at` fresh on every definition mutation AND every
+    /// instance lifecycle touch, so recency on a row tracks the last time
+    /// the agent was either edited or launched.
     ///
-    /// Result-set shape: every row in `db_agents` is returned. Under the
-    /// fold rule (`agents_consolidate.rs`):
-    ///   - Templates (`is_template = 1`) appear once each.
-    ///   - User-cloned defs (`is_template = 0`, id matches old `db_agent_definitions.id`)
-    ///     appear once each — instance bindings, when present, are folded
-    ///     into this same row.
-    ///   - Template-instances (`is_template = 0`, id matches old `db_agent_instances.id`)
-    ///     appear once each as first-class user agents.
-    /// `parent_id` on the returned struct is sourced from
-    /// `db_agents.parent_template_id` — the dual-write preserves the
-    /// legacy semantics (def.parent_id for user-clones, template id for
-    /// instance projections), so existing handlers that look up the parent
-    /// template by id continue to work.
+    /// Result-set shape: every `db_agents` row is returned — templates
+    /// (`is_template = 1`) and user-clone projections (`is_template = 0`)
+    /// each appear once. `parent_id` is sourced from
+    /// `db_agents.parent_template_id`.
+    ///
     /// Find user-clone definitions for a given seeded template (rows
     /// in `db_agent_definitions` with `is_seeded = 0` and
     /// `parent_id = <template.id>`). Returns the most-recent-first.
@@ -415,12 +396,8 @@ impl Store {
     }
 
     /// Count agent rows (used by seed engine to check if seeding is needed).
-    /// Phase 3b: reads from the consolidated `db_agents` table — every
-    /// definition AND every template-instance projection counts, mirroring
-    /// the new shape of `agent_def_list`. The seed engine only cares about
-    /// `== 0` to decide "fresh database, seed templates", so the broader
-    /// count doesn't false-positive that branch (an empty db_agents
-    /// guarantees an empty db_agent_definitions).
+    /// Reads from the consolidated `db_agents` table. The seed engine only
+    /// cares about `== 0` to decide "fresh database, seed templates".
     pub fn agent_def_count(&self) -> Result<i64, StoreError> {
         let conn = self.conn.lock().unwrap();
         let count: i64 = conn.query_row(
@@ -468,11 +445,9 @@ impl Store {
             let rows = conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?;
             (rows, ids)
         };
-        // Phase 3a dual-write (Phase 3b: errors propagate): drop template
-        // projections AND any cascaded instance projections. User-clone
-        // DEFINITION projections (`is_template = 0`, `id` is a def_id)
-        // are NOT touched here — those persist as long as the underlying
-        // user-clone def row in `db_agent_definitions` does.
+        // Drop template projections AND any cascaded instance projections from
+        // db_agents. User-clone definition projections (`is_template = 0`, `id`
+        // is a def_id) are NOT touched here — they persist with the def row.
         self.agents_dual_write_seeded_delete(&cascaded_inst_ids)?;
         Ok(rows)
     }
@@ -493,13 +468,10 @@ impl Store {
         } else {
             agent.slug.clone()
         };
-        // Collision-resolve: scan for existing slugs matching base or
-        // base-N. Phase 3b reads slug uniqueness from `db_agents` — the
-        // dual-write keeps every definition's slug mirrored there, and
-        // the consolidated table also surfaces template-instance
-        // projections, so a slug collision against an instance-derived
-        // row is caught now too (under the legacy schema, instances
-        // didn't have slugs at all, so this is a strict superset).
+        // Collision-resolve: scan for existing slugs matching base or base-N.
+        // Reads uniqueness from `db_agents` — the consolidated table surfaces
+        // both definition slugs and template-instance projections, so a slug
+        // collision against an instance-derived row is caught here too.
         let mut candidate = base.clone();
         let mut n: u32 = 2;
         loop {
@@ -564,8 +536,7 @@ impl Store {
         drop(conn);
         let mut snapshot = agent.clone();
         snapshot.updated_at = stamped_updated_at;
-        // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
-        // db_agents so readers see the new row immediately.
+        // Mirror new definition into db_agents immediately.
         self.agents_dual_write_definition_upsert(&snapshot)?;
         // Mirror into the global cross-channel definition store. Content +
         // skills are inserted after the definition (separate calls), so this
@@ -705,7 +676,7 @@ impl Store {
     /// against the canonical row).
     pub fn agent_def_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
-        // Phase 3b: precondition check reads `is_template` from `db_agents`.
+        // Only seeded templates (`is_template = 1`) may flip the hide flag.
         // Templates carry `is_template = 1` and are the only rows allowed
         // to flip the hide flag; folded user-clone-def projections and
         // template-instance projections (both `is_template = 0`) reject.
@@ -799,8 +770,7 @@ impl Store {
         // Reflect the persisted timestamp back to the caller's struct so an
         // RPC response carries the fresh value, not the pre-update one.
         agent.updated_at = now;
-        // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
-        // db_agents so the next read sees the new name/payload.
+        // Mirror updated definition into db_agents.
         if rows > 0 {
             self.agents_dual_write_definition_upsert(agent)?;
             // Mirror the updated definition into the global store. (P0.2b.)
@@ -855,9 +825,7 @@ impl Store {
                     }
                 }
             }
-            // Phase 3a dual-write (Phase 3b: errors propagate): drop
-            // the definition's projection + every cascaded user-clone
-            // (instance) projection.
+            // Mirror deleted definition out of db_agents.
             self.agents_dual_write_definition_delete(id)?;
             for instance_id in &cascaded_instance_ids {
                 self.agents_dual_write_instance_delete(instance_id)?;
@@ -872,11 +840,9 @@ impl Store {
         Ok(rows > 0 || global_retired)
     }
 
-    // AgentContent / AgentSkill / AgentHistory CRUD moved to
-    // `super::content` / `super::skills` / `super::history` in Phase R.4
-    // (SPEC_STORE_MODULARIZATION_2026_05_27.md). The `impl Store {}`
-    // blocks there add the same methods to this type. `format_epoch_date`
-    // moves with `agent_history_append`.
+    // AgentContent / AgentSkill / AgentHistory CRUD live in
+    // `super::content` / `super::skills` / `super::history` —
+    // each adds an `impl Store {}` block to this type.
 }
 
 impl Store {
@@ -890,8 +856,8 @@ impl Store {
     /// so a continued older agent ranks ahead of a brand-new untouched
     /// one).
     ///
-    /// Phase 3b.3a (no-status case): reads from the consolidated
-    /// `db_agents` table (`is_template = 0`, `user_hidden = 0`).
+    /// Reads from the consolidated `db_agents` table (`is_template = 0`,
+    /// `user_hidden = 0`) for the no-status case.
     /// Continuation chains pre-collapse — one row per logical agent.
     /// The `definition_id` filter, when supplied, matches the agent's
     /// own `id` only (templates aren't agents and user-clones derived
@@ -908,7 +874,7 @@ impl Store {
     /// - `display_hidden` → always `false`. The WHERE clause filters
     ///   `user_hidden = 0`, so hidden rows never surface here.
     ///
-    /// Phase 3b.3b (deferred — status filter case): callers passing a
+    /// Callers passing a
     /// `status` filter need transient runtime state that `db_agents`
     /// doesn't model. Route those to the legacy `db_agent_instances`
     /// path so existing semantics are preserved until the
@@ -1015,7 +981,7 @@ impl Store {
     /// Legacy `db_agent_instances` read — preserved for the
     /// status-filter case (transient state). Will retire when the
     /// updateagentinstance handler's fetch-and-merge pattern is
-    /// refactored (Phase 3b.3b). Do NOT add new callers; use
+    /// refactored. Do NOT add new callers; use
     /// `instance_list` instead.
     fn instance_list_legacy(
         &self,
@@ -1108,8 +1074,7 @@ impl Store {
             )?;
         }
         self.registry_upsert_if_named(inst);
-        // Phase 3a dual-write (Phase 3b: errors propagate): mirror to
-        // db_agents so the next read sees the new instance.
+        // Mirror new instance into db_agents.
         self.agents_dual_write_instance_create(inst)?;
         Ok(())
     }
@@ -1153,8 +1118,7 @@ impl Store {
                 }
             }
         }
-        // Phase 3a dual-write (Phase 3b: errors propagate): flip the
-        // hidden bit on db_agents.
+        // Flip the hidden bit on db_agents.
         self.agents_dual_write_instance_set_hidden(id, hidden)?;
         Ok(rows > 0 || registry_acted)
     }
@@ -1267,8 +1231,7 @@ impl Store {
         //
         // Before this dedup, a user with 5 continuations of one
         // logical agent saw 5 entries in My Agents. See discussion
-        // #1095 / `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md`
-        // Phase 3b.1.
+        // #1095 / `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md`.
         //
         // Mechanics:
         //   - A recursive CTE walks `parent_instance_id` from each
@@ -1397,7 +1360,7 @@ impl Store {
     /// resolve the consolidated row when the caller only knows the
     /// name. Hidden rows are excluded.
     ///
-    /// Phase 3b.2: reads from the consolidated `db_agents` table —
+    /// Reads from the consolidated `db_agents` table —
     /// `is_template = 0` (named user agent), `instance_name` matches,
     /// `user_hidden = 0`. Continuation chains are pre-collapsed in
     /// `db_agents` (one row per logical agent), so this returns the
@@ -1487,9 +1450,9 @@ impl Store {
     /// Returns the post-update row so callers that need `definition_id`
     /// for an event scope — or want to echo the row back — get it from
     /// the same authoritative reload this method already runs to refresh
-    /// the registry mirror + Phase-3a dual-write. Those consumers read
+    /// the registry mirror + dual-write. Those consumers read
     /// only non-transient fields, so the reload survives a future
-    /// `instance_get` → db_agents flip (Phase 3b.3c).
+    /// `instance_get` → db_agents flip.
     ///
     /// `None` is reserved for **not-found** (the id doesn't exist). An
     /// all-`None` update on an existing id is a no-op that returns the
@@ -1552,7 +1515,7 @@ impl Store {
         let fresh = self.instance_get(id)?;
         if let Some(f) = &fresh {
             self.registry_upsert_if_named(f);
-            // Phase 3a dual-write (Phase 3b: errors propagate).
+            // Mirror update to db_agents.
             self.agents_dual_write_instance_update(f)?;
         }
         Ok(fresh)
@@ -1594,9 +1557,7 @@ impl Store {
             // mirror exact.
             if let Ok(Some(fresh)) = self.instance_get(&inst.id) {
                 self.registry_upsert_if_named(&fresh);
-                // Phase 3a dual-write (Phase 3b: errors propagate):
-                // mirror the fields the consolidation cares about
-                // (github_context, updated_at).
+                // Mirror status fields to db_agents.
                 self.agents_dual_write_instance_update(&fresh)?;
             }
         }
@@ -1626,9 +1587,7 @@ impl Store {
                 params![new_def_id, old_def_id],
             )?
         };
-        // Phase 3a dual-write (Phase 3b: errors propagate): re-aim
-        // parent_template_id on the user-clone projection rows that
-        // were pointing at old_def_id.
+        // Re-aim parent_template_id on user-clone projection rows in db_agents.
         if rows > 0 {
             self.agents_dual_write_instance_repoint(old_def_id, new_def_id)?;
         }
@@ -1650,8 +1609,7 @@ impl Store {
                     );
                 }
             }
-            // Phase 3a dual-write (Phase 3b: errors propagate): drop
-            // the user-clone projection.
+            // Drop the user-clone projection from db_agents.
             self.agents_dual_write_instance_delete(id)?;
         }
         Ok(rows > 0)
@@ -1686,18 +1644,14 @@ impl Store {
                 params![new_identity_id],
             )?
         };
-        // Phase 3a dual-write (Phase 3b: errors propagate): same
-        // backfill on db_agents user-clone rows.
+        // Backfill the same identity_id on db_agents user-clone rows.
         self.agents_dual_write_backfill_identity(new_identity_id)?;
         Ok(rows)
     }
 
-    // `registry_upsert_if_named` moved to `super::registry_mirror`
-    // in Phase R.6 (SPEC_STORE_MODULARIZATION_2026_05_27.md).
-
     /// Resolve the agent bindings tied to a block.
     ///
-    /// Phase 3b.4: resolve through `block.meta.agentId` (or legacy
+    /// Resolve through `block.meta.agentId` (or legacy
     /// `agent:id`) against `db_agents` for the user-clone case;
     /// fall back to the legacy `db_agent_instances` lookup by
     /// `block_id` for seeded-template launches and any other block
@@ -1808,11 +1762,7 @@ impl Store {
         }
     }
 
-    // ====================================================================
-    // Phase 3a — db_agents dual-write helpers MOVED to `super::dual_write`
-    // in Phase R.5 (SPEC_STORE_MODULARIZATION_2026_05_27.md). The whole
-    // module retires entirely when Phase 3c drops the legacy tables.
-    // ====================================================================
+    // Dual-write helpers live in `super::dual_write`.
 }
 
 fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
@@ -1836,7 +1786,7 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
     })
 }
 
-/// Phase 3b — row mapper for `db_agents` rows projected back into the
+/// Row mapper for `db_agents` rows projected back into the
 /// `AgentDefinition` shape. The column order MUST match the SELECT in
 /// `agent_def_list`. `parent_template_id` maps to `parent_id` because
 /// the consolidated table renamed the field to clarify its semantics

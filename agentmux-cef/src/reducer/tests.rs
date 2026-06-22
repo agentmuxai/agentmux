@@ -807,3 +807,157 @@ fn queued_background_does_not_start_after_drain_begins() {
         "user-window completion still emitted"
     );
 }
+
+// ── Level-triggered quit reconciliation (spec §5.1/§10) ───────────────────
+//
+// Safety net for the reported regression (closing the last window orphaned the
+// whole process tree). The decision was previously edge-triggered inside
+// `client::on_before_close` with no test coverage; these pin the level-triggered
+// `reconcile_quit` decision so a gate regression can't ship silently again.
+
+use super::quit::{
+    is_live_user_window, reconcile_quit, should_begin_drain, user_creation_in_flight,
+};
+
+/// The last-window quit gate is decided PURELY BY TYPE (`is_live_user_window`),
+/// never by label-prefix string (SPEC_REDUCER_SSOT_CONSOLIDATION L4). Floaters
+/// (both `floating-<uuid>` and `floating-pool-<uuid>`) are `BrowserKind::Floater`
+/// and never keep the instance alive (invariant FP-LIFE) — this replaced a
+/// `!starts_with("floating-pool-")` string check that wrongly counted direct
+/// `floating-<uuid>` floaters (and the reagent P0 #1676 where warm pane-pool
+/// windows pinned the gate above 0 on macOS/Linux).
+#[test]
+fn is_live_user_window_counts_only_top_level_by_type() {
+    use crate::state::BrowserKind;
+    // Real user windows: main + a promoted window-pool window (keeps its
+    // `window-pool-` label, is_pool flipped false on promote) → both count.
+    assert!(is_live_user_window(&BrowserKind::TopLevel { is_pool: false }));
+    // Warm window pool → not a user window.
+    assert!(!is_live_user_window(&BrowserKind::TopLevel { is_pool: true }));
+    // Floaters NEVER count — warm pane-pool AND promoted/direct floaters alike,
+    // regardless of is_pool. Excluded by type, not by label.
+    assert!(!is_live_user_window(&BrowserKind::Floater { is_pool: true }));
+    assert!(!is_live_user_window(&BrowserKind::Floater { is_pool: false }));
+    // Browser-pane children never count.
+    assert!(!is_live_user_window(&BrowserKind::Pane {
+        block_id: "b1".into()
+    }));
+}
+
+/// Registered browsers are classified by the authoritative `is_pool` flag, NOT
+/// by label — a PROMOTED pool window keeps its `window-pool-*` label but is
+/// `is_pool:false`, i.e. the user's real live window, and MUST count (reagent P1
+/// #1676). Unpromoted pool windows (`is_pool:true`) and panes never count.
+#[test]
+fn is_live_user_window_classifies_by_is_pool_not_label() {
+    use crate::state::BrowserKind;
+    assert!(
+        is_live_user_window(&BrowserKind::TopLevel { is_pool: false }),
+        "promoted pool window / main / new window keeps the instance alive"
+    );
+    assert!(
+        !is_live_user_window(&BrowserKind::TopLevel { is_pool: true }),
+        "unpromoted warm-pool window does not"
+    );
+    assert!(
+        !is_live_user_window(&BrowserKind::Pane { block_id: "b1".into() }),
+        "browser-pane child never does"
+    );
+}
+
+/// The full decision truth table (CEF-free pure core).
+#[test]
+fn should_begin_drain_truth_table() {
+    // Running + zero user windows + no creation in flight → begin draining.
+    assert_eq!(
+        should_begin_drain(0, false, &QuitState::Running),
+        Some(QuitReason::LastWindowClosed)
+    );
+    // A live user window blocks drain.
+    assert_eq!(should_begin_drain(1, false, &QuitState::Running), None);
+    // §10.2 corner: a user creation in flight blocks drain even at zero
+    // registered windows — never quit while the user's "New Window" is loading.
+    assert_eq!(should_begin_drain(0, true, &QuitState::Running), None);
+    // Already draining / quit → never re-drains (monotonic with handle_begin_drain).
+    assert_eq!(
+        should_begin_drain(
+            0,
+            false,
+            &QuitState::Draining { reason: QuitReason::LastWindowClosed }
+        ),
+        None
+    );
+    assert_eq!(should_begin_drain(0, false, &QuitState::Quit), None);
+}
+
+/// Only USER-initiated creations block drain; pool/pane background creations don't.
+#[test]
+fn user_creation_in_flight_ignores_background_labels() {
+    let mut state = HostState::default();
+    // Pool refill, browser-pane, warm floating-pool, AND broad floating- tear-off
+    // are all background — none blocks drain (mirrors orphan_reconcile.rs:302-304).
+    for bg in ["window-pool-abc", "browser-pane-1", "floating-pool-xyz", "floating-tearoff-7"] {
+        update(
+            &mut state,
+            HostCommand::EnqueuePendingWindowCreation { entry: entry(bg) },
+        );
+    }
+    assert!(
+        !user_creation_in_flight(&state),
+        "background (pool/pane/floating) creations must not block drain"
+    );
+    update(
+        &mut state,
+        HostCommand::EnqueuePendingWindowCreation { entry: entry("window-uuid-1234") },
+    );
+    assert!(
+        user_creation_in_flight(&state),
+        "a user-initiated window creation must block drain"
+    );
+}
+
+/// After the last user window deregisters (no browsers, no pending creation),
+/// reconcile drains. (Composed over real `HostState`.)
+#[test]
+fn reconcile_quit_drains_when_no_windows_and_no_pending_creation() {
+    let state = HostState::default();
+    assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
+}
+
+/// The premature-quit corner (spec §10.2): zero registered user windows but a
+/// user "New Window" is mid-creation → must NOT drain; once it leaves the
+/// pending queue (registered or aborted), reconcile drains on the next tick.
+#[test]
+fn reconcile_quit_deferred_while_user_creation_pending() {
+    let mut state = HostState::default();
+    update(
+        &mut state,
+        HostCommand::EnqueuePendingWindowCreation { entry: entry("window-fresh-uuid") },
+    );
+    assert_eq!(reconcile_quit(&state), None, "must not quit mid user-window create");
+    update(&mut state, HostCommand::DequeuePendingWindowCreation);
+    assert_eq!(
+        reconcile_quit(&state),
+        Some(QuitReason::LastWindowClosed),
+        "drains once the pending user creation clears"
+    );
+}
+
+/// A background pool refill pending must NOT keep the host alive on last close.
+#[test]
+fn reconcile_quit_drains_despite_pending_pool_refill() {
+    let mut state = HostState::default();
+    update(
+        &mut state,
+        HostCommand::EnqueuePendingWindowCreation { entry: entry("window-pool-refill-1") },
+    );
+    assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
+}
+
+/// Idempotent: once draining, reconcile is a no-op (no double-drain).
+#[test]
+fn reconcile_quit_noop_once_draining() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
+    assert_eq!(reconcile_quit(&state), None);
+}

@@ -50,11 +50,37 @@ pub async fn run(
     // don't allocate a workspace + tab and then have to compensate.
     {
         let s = state.srv_state.lock().await;
+        // R3 diagnostic (#1681): a tear-off that references a workspace/tab/block
+        // this srv never created points at a frontend↔backend desync (a window
+        // bootstrapped a workspace that was never persisted), NOT a simple
+        // structural mismatch. The pre-condition used to reject SILENTLY (no log
+        // line — only an http-perf 0.05ms blip), which is why the 2nd-window
+        // tear-off failure was so hard to attribute. Log the full state context
+        // at ERROR on every rejection so a single repro is conclusive: does the
+        // source workspace exist in srv at all?
+        let reject = |reason: &str, s: &crate::state::State| {
+            tracing::error!(
+                target: "dnd:svc",
+                reason = %reason,
+                block_id = %block_id,
+                source_tab_id = %source_tab_id,
+                source_workspace_id = %source_workspace_id,
+                source_ws_exists = s.workspaces.contains_key(&source_workspace_id),
+                source_tab_exists = s.tabs.contains_key(&source_tab_id),
+                block_exists = s.blocks.contains_key(&block_id),
+                known_workspaces = s.workspaces.len(),
+                known_tabs = s.tabs.len(),
+                known_blocks = s.blocks.len(),
+                "[dnd:svc] TearOffBlock REJECTED — possible frontend/backend workspace desync"
+            );
+        };
         match s.blocks.get(&block_id) {
             None => {
+                reject("block_not_found", &s);
                 return Err(format!("TearOffBlock: block not found: {}", block_id));
             }
             Some(block) if block.tab_id != source_tab_id => {
+                reject("block_in_other_tab", &s);
                 return Err(format!(
                     "TearOffBlock: block {} is in tab {}, not {}",
                     block_id, block.tab_id, source_tab_id
@@ -64,12 +90,14 @@ pub async fn run(
         }
         match s.tabs.get(&source_tab_id) {
             None => {
+                reject("source_tab_not_found", &s);
                 return Err(format!(
                     "TearOffBlock: source tab not found: {}",
                     source_tab_id
                 ));
             }
             Some(tab) if tab.workspace_id != source_workspace_id => {
+                reject("tab_in_other_workspace", &s);
                 return Err(format!(
                     "TearOffBlock: tab {} is in workspace {}, not {}",
                     source_tab_id, tab.workspace_id, source_workspace_id

@@ -50,16 +50,11 @@ export type InitPhase =
     | { kind: "InitReady"; at: number }
     | { kind: "InitFailed"; at: number; reason: string };
 
-// ─────────────────────────────────────────────────────────────────────────
 // TurnPhase discriminated union — single source of truth for the turn
 // lifecycle (since PR G).
 //
 // SPEC: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §5.
-// This union replaces the scattered { turnActive, stopping, streaming.active }
-// booleans that PR A introduced as a dual-write, PR B migrated the view
-// off, and PR G removed entirely. Consumers project via `isWorking` /
-// `isDisconnected` / `state.turnPhase.kind`.
-// ─────────────────────────────────────────────────────────────────────────
+// Consumers project via `isWorking` / `isDisconnected` / `state.turnPhase.kind`.
 
 /** Why the turn entered Interrupting. */
 export type InterruptReason =
@@ -195,7 +190,6 @@ export interface AgentPaneState {
      */
     turnPhase: TurnPhase;
 
-    // ── Composer details panel ────────────────────────────────────────
     /**
      * Whether the composer details panel (the expandable section that
      * holds the activity log, session stats, permission/model/effort
@@ -357,7 +351,6 @@ export function isDisconnected(state: AgentPaneState): boolean {
 }
 
 export type AgentPaneCommand =
-    // ── Init lifecycle (gap 1) ─────────────────────────────────────
     /**
      * Caller signal: history fetch began. Idempotent — if the pane is
      * already in any terminal state (`InitReady` / `InitFailed`),
@@ -369,7 +362,6 @@ export type AgentPaneCommand =
     /** Caller signal: history fetch failed; reason surfaced for diagnostics. */
     | { type: "InitFailed"; at: number; reason: string }
 
-    // ── Stream lifecycle ───────────────────────────────────────────
     /** Hook signal: subscription is up. */
     | { type: "StreamSubscribe"; at: number }
     /** Hook signal: subscription torn down. */
@@ -386,7 +378,6 @@ export type AgentPaneCommand =
      */
     | { type: "StreamWatchdogTick"; nowMs: number }
 
-    // ── Turn lifecycle ─────────────────────────────────────────────
     /**
      * User pressed send — turn becomes active. Also clears stale
      * sessionStats from the previous turn.
@@ -418,15 +409,12 @@ export type AgentPaneCommand =
      */
     | { type: "TurnReset" }
 
-    // ── Tool ───────────────────────────────────────────────────────
     | { type: "ToolStart"; name: string }
     | { type: "ToolEnd" }
 
-    // ── Tokens (live deltas during a turn) ────────────────────────
     | { type: "TokensIn"; input: number; model?: string }
     | { type: "TokensOut"; output: number }
 
-    // ── Stop flow ──────────────────────────────────────────────────
     /** User pressed Esc / clicked Stop. */
     | { type: "RequestStop"; at: number }
     /** Stop RPC failed — bail on the stopping state. */
@@ -454,7 +442,6 @@ export type AgentPaneCommand =
      */
     | { type: "SubmitTimeoutElapsed"; at: number }
 
-    // ── Pending message queue (composer side) ─────────────────────
     | {
           type: "PendingMessageQueued";
           id: string;
@@ -482,7 +469,6 @@ export type AgentPaneCommand =
      */
     | { type: "PendingMessageExpired"; id: string }
 
-    // ── Composer details panel ────────────────────────────────────
     /**
      * User clicked the chevron or the strip body — toggle the details
      * panel. On flip-to-open, resets `composerUnreadCount` to 0.

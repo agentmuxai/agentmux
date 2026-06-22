@@ -1,5 +1,72 @@
 # AgentMux Version History
 
+## 0.48.1 — 2026-06-22
+
+- feat(widgets): per-widget port override and widget.api HTTP proxy RPC
+- docs(portable): correct README data location (~/.agentmux/versions, not local data/ folder)
+- feat(agent-pane): replace gradient sweep with marching-ants progress bar
+- fix(packaging): purge inactive pages before ULMO compression to prevent OOM kill
+- fix(statusbar): wrap long data-tip tooltips instead of overflowing the balloon
+- perf(layout): reduce native-pane reflow settle window from 32ms to 4ms
+- feat(agent): persist per-agent zoom across pane close/reopen
+- fix(window): accurate status-bar window count on close + event-stream gaps
+
+
+## 0.48.0 — 2026-06-22
+
+- fix(macos): disable MacAppCodeSignClone so packaged app launches from any volume
+- fix(lifecycle): level-triggered quit reconcile decision + safety-net tests
+- feat(toolchain): external widgets catalog, detection + health check
+- chore(rpc-api): remove vestigial command-label comments
+- chore(rust): strip phase-migration markers and trivial field doc comments
+- chore(frontend): trim verbose JSDoc blocks, section dividers, and ticket refs
+- fix(splash): center the macOS splash footer (unified NSTextAlignment value)
+- feat(toolchain): Open Pane button for running external widgets
+- fix(layout): seed new-window default blocks through the reducer so secondary-window tear-off works (R3, #1681)
+- fix(dnd): redock floating panes into secondary windows (R3 window-label resolve, #1681)
+- fix(dnd): create docked agent/pane blocks through the reducer so freshly-opened panes can tear off/redock (#1681)
+- feat(macos): open a new window on app reopen (fix 'not responding' on Finder double-click)
+- fix(lifecycle): quit instance on last-window close (Views recycle-on-close) + clean Windows exit
+- fix(dnd): redock into the first window when it is served by a promoted pool window (#1681)
+
+
+## 0.47.4 — 2026-06-22
+
+- fix(editor): apply CSS zoom property instead of calc font-size scaling for correct per-pane zoom
+- fix(packaging): use APFS for intermediate DMG to fix ERR_CONTENT_LENGTH_MISMATCH on macOS 26 Tahoe
+- fix(agent): show session digest summary in pane header; fall back to term:activity
+- fix(sysinfo): robust CPU chart — ZOH gap fill, debounced resize, no blank-on-reload
+- fix(swarm): show agent panes in Swarm view
+- fix(ui): remove stub pane minimize button that did nothing (no layout collapse on macOS/Linux)
+- fix(floating-pane): make floaters fully independent of their parent window and stop a failed tear-off from jamming all future tear-offs
+- feat(agent): Haiku-powered live mini-summary in agent pane header
+- feat(agent): organic aurora busy animation on agent progress bar
+- feat(splash): show user@host + version footer on the startup splash, and add a splash:disabled setting (all platforms)
+- fix(floating-pane): tear-off and redock no longer delete the moved block (onNodeDelete guard) — fixes empty-slot redock and logo-only floater on tear-off (#1662)
+- fix(floating-pane): dark floater background (browser + window class) so tear-off no longer flashes white
+- feat(splash): render the user@host + version footer on macOS and Windows too (completes the cross-platform footer)
+- fix(layout): a backend block-MOVE no longer deletes the moved block (R1) — removes the block-move guard band-aid; tear-off/redock preserve the block at the root
+
+
+## 0.47.3 — 2026-06-21
+
+- fix(srv): seed the default 3-pane layout for new windows so 'Open another window' is not blank
+- fix(macos): add icon to AgentMux Helper (Alerts) — notification permission prompt no longer shows blank icon
+- fix(pool): clamp + re-assert pool-promoted new window placement so it can't land off-screen on HiDPI
+- fix(macos): floating pane maximize button now works on macOS/Linux via CEF Views window.maximize()
+- fix(redock): floating panes are never valid redock targets — ghost no longer appears on idle floaters
+- fix(macos): Dock icon single-click focuses existing window instead of opening a new one
+- fix(pool): paint pool-promoted windows on Windows — drive CEF Views Window.show() on the UI thread at promote (macOS parity), register the promoted HWND for chrome ops (drag/close/min/max), and stamp FileDescription/ProductName=AgentMux on the host exe so the taskbar no longer shows "CEF Bootstrap application"
+- feat(editor): collapsible live markdown preview panel
+- fix(hamburger): Exit closes the current window, not main
+- chore(docs): remove Tauri-era spec files
+- feat(ui): pane minimize button with separator; collapse failed tool calls immediately
+- fix(macos): suppress duplicate notification permission prompts on new-version install
+- fix(editor): apply CSS zoom property instead of calc font-size scaling for correct per-pane zoom
+- fix(spawner): use stable role slug for AGENTMUX_AGENT_ID so muxbus routing is stable across respawns and renames
+- fix(ui): pass isMinimized/toggleMinimize as props to BlockFrame_Header
+
+
 ## 0.47.2 — 2026-06-21
 
 - fix(macos): per-version bundle id (ai.agentmux.<channel>.<version>) — double-click any build without open -n

@@ -43,7 +43,6 @@ use crate::backend::wps;
 /// WPS file subject name for ACP output.
 pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
-/// Controller type constant.
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
 
 /// Inner state protected by mutex.
