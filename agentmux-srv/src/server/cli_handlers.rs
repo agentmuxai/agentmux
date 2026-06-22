@@ -542,6 +542,80 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // widget.api — HTTP proxy to a widget's local server. Bypasses browser CORS
+    // restrictions: the frontend sends { port, path, method?, headers?, body? }
+    // and gets back { ok, status_code, body, error? }. Agents use this to call
+    // ComfyUI /prompt, Grafana /api/query, etc. without needing a CORS header.
+    // 30-second timeout accommodates generative tasks (image synthesis, etc.).
+    engine.register_handler(
+        "widget.api",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
+                if port_raw == 0 || port_raw > 65535 {
+                    return Ok(Some(serde_json::json!({
+                        "ok": false, "status_code": null, "body": null,
+                        "error": "invalid port"
+                    })));
+                }
+                let port = port_raw as u16;
+                let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("/").to_string();
+                let method = data
+                    .get("method")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("GET")
+                    .to_uppercase();
+                let body_str = data.get("body").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let headers_obj = data.get("headers").and_then(|v| v.as_object()).cloned();
+
+                let url = format!("http://127.0.0.1:{}{}", port, path);
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .map_err(|e| e.to_string())?;
+
+                let mut req = match method.as_str() {
+                    "POST" => client.post(&url),
+                    "PUT" => client.put(&url),
+                    "DELETE" => client.delete(&url),
+                    "PATCH" => client.patch(&url),
+                    _ => client.get(&url),
+                };
+
+                if let Some(headers) = headers_obj {
+                    for (k, v) in &headers {
+                        if let Some(vs) = v.as_str() {
+                            if let (Ok(hn), Ok(hv)) = (
+                                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                                reqwest::header::HeaderValue::from_str(vs),
+                            ) {
+                                req = req.header(hn, hv);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(body) = body_str {
+                    req = req
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(body);
+                }
+
+                match req.send().await {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16();
+                        let body = resp.text().await.unwrap_or_default();
+                        Ok(Some(serde_json::json!({ "ok": true, "status_code": status, "body": body })))
+                    }
+                    Err(e) => Ok(Some(serde_json::json!({
+                        "ok": false, "status_code": null, "body": null,
+                        "error": e.to_string()
+                    }))),
+                }
+            })
+        }),
+    );
 }
 
 /// Re-export from shared crate for internal use.
