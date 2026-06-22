@@ -169,6 +169,9 @@ fn splash_selftest() {
     #[cfg(target_os = "macos")]
     {
         let splash = splash_mac::Splash::show();
+        if let Ok(p) = std::env::var("AGENTMUX_SPLASH_DUMP_PNG") {
+            splash.dump_png(&p);
+        }
         let _ = splash; // run_until_dismissed parks; selftest just holds then exits
         std::thread::sleep(hold);
     }
