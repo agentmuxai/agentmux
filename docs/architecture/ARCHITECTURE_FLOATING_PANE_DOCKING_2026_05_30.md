@@ -38,6 +38,34 @@ Every regression in this area is an instance of one of these five themes:
 
 ---
 
+## 1.1 Lifecycle policy — **floaters do NOT keep the instance alive**
+
+**Invariant FP-LIFE: a floating pane dies with the last top-level window.** Closing the last
+`main`/`window-*` (real top-level) window quits the instance even if one or more floaters are still
+open — they are torn down with it. A floater is never the sole thing keeping the process tree alive.
+
+**Why.** A floater is part of the user's session, not an independent instance. The #1676 win_event
+last-window quit trigger (`count_visible_user_windows`) already excludes floaters by window-class, so
+at the OS-quit level this has always been the behavior; this invariant makes the *reducer count*
+agree — it previously, accidentally, counted direct `floating-<uuid>` floaters as instance-keeping
+windows but **not** `floating-pool-<uuid>` ones (same user-facing thing, opposite behavior, decided
+purely by which code path created the floater).
+
+**How it's enforced — by TYPE, not by label.** Floaters are their own `BrowserKind::Floater` variant
+(warm pane-pool = `is_pool: true`, promoted/visible = `is_pool: false`). The last-window gate
+`reducer::quit::is_live_user_window` counts only `TopLevel { is_pool: false }`, so **all** floaters
+are excluded *by type*, regardless of `floating-<uuid>` vs `floating-pool-<uuid>` labeling. This
+replaced a fragile `!label.starts_with("floating-pool-")` string check. See
+`SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md` (finding L4) and
+`SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md`.
+
+**If this ever changes** (e.g. "a *visible* floater should keep the instance alive"), it is a
+deliberate decision that MUST update BOTH the win_event quit trigger (`count_visible_user_windows`)
+AND the reducer count together — never just one, or they desync (which is the bug class this whole
+doc exists to prevent).
+
+---
+
 ## 2. Operation flows (frontend → host)
 
 ### 2.1 Tear-off (docked pane → floater)
