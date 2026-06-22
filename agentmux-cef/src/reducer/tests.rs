@@ -815,7 +815,36 @@ fn queued_background_does_not_start_after_drain_begins() {
 // `client::on_before_close` with no test coverage; these pin the level-triggered
 // `reconcile_quit` decision so a gate regression can't ship silently again.
 
-use super::quit::{is_live_user_window, reconcile_quit, should_begin_drain, user_creation_in_flight};
+use super::quit::{
+    counts_as_live_user_window, is_live_user_window, reconcile_quit, should_begin_drain,
+    user_creation_in_flight,
+};
+
+/// reagent P0 #1676: a pane-pool window (`floating-pool-*`) registers as
+/// `TopLevel{is_pool:false}` (classification only special-cases `window-pool-`),
+/// so the is_pool flag alone counts it as a user window. `counts_as_live_user_window`
+/// must exclude it by label so the always-seeded warm pane-pool window on
+/// macOS/Linux doesn't pin the last-window quit gate above 0.
+#[test]
+fn counts_as_live_user_window_excludes_floating_pool() {
+    use crate::state::BrowserKind;
+    let user = BrowserKind::TopLevel { is_pool: false };
+    // Real user windows count — main, and a promoted window-pool window that
+    // keeps its `window-pool-` label (is_pool flipped false on promote).
+    assert!(counts_as_live_user_window("main", &user));
+    assert!(counts_as_live_user_window("window-pool-abc", &user));
+    // Warm pane-pool window: is_pool:false but floating-pool- → must NOT count.
+    assert!(!counts_as_live_user_window("floating-pool-xyz", &user));
+    // Unpromoted window-pool (is_pool:true) and panes never count.
+    assert!(!counts_as_live_user_window(
+        "window-pool-abc",
+        &BrowserKind::TopLevel { is_pool: true }
+    ));
+    assert!(!counts_as_live_user_window(
+        "browser-pane-1",
+        &BrowserKind::Pane { block_id: "b1".into() }
+    ));
+}
 
 /// Registered browsers are classified by the authoritative `is_pool` flag, NOT
 /// by label — a PROMOTED pool window keeps its `window-pool-*` label but is

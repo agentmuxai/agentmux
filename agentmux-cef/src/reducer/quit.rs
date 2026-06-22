@@ -93,14 +93,31 @@ pub(crate) fn is_live_user_window(kind: &BrowserKind) -> bool {
     matches!(kind, BrowserKind::TopLevel { is_pool: false })
 }
 
+/// Whether a REGISTERED browser (label + kind) counts as a live, user-visible
+/// top-level window for the last-window quit gate.
+///
+/// `is_live_user_window` handles the per-browser `is_pool` flag (the window
+/// pool), but **pane-pool** windows (`floating-pool-*`) register as
+/// `TopLevel { is_pool: false }` — the `on_after_created` classification only
+/// special-cases `window-pool-`, and `PanePoolState` has no `is_pool` flag — so
+/// the flag alone would count the always-seeded warm pane-pool window
+/// (macOS/Linux `init_pane_pool`, `PANE_POOL_TARGET_SIZE = 1`) as a real user
+/// window, and the gate would never reach 0 (reagent P0 #1676). Exclude them by
+/// label, matching the canonical `compute_and_report_host_counts` exclusion
+/// (state.rs:~1121). A PROMOTED `window-pool-*` window (is_pool:false, still
+/// `window-pool-` labelled) correctly still counts.
+pub(crate) fn counts_as_live_user_window(label: &str, kind: &BrowserKind) -> bool {
+    is_live_user_window(kind) && !label.starts_with("floating-pool-")
+}
+
 /// Count of live, user-visible top-level windows — the windows that keep the
 /// instance alive. Live last-window quit gate via `AppState::count_live_user_windows`
-/// → `client::on_before_close`.
+/// → `client::on_before_close` and `wrr::win_event::maybe_quit_on_last_user_window`.
 pub(crate) fn count_live_user_windows(state: &HostState) -> usize {
     state
         .browsers
-        .values()
-        .filter(|h| is_live_user_window(&h.kind))
+        .iter()
+        .filter(|(label, h)| counts_as_live_user_window(label, &h.kind))
         .count()
 }
 
