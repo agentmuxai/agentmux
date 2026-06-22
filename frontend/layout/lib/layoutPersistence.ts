@@ -138,7 +138,25 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
             }
 
             if (leaf) {
-                await model.closeNode(leaf.id);
+                // R1 (#1681): a backend "delete" layout action means "remove this
+                // node from the layout tree" — NOT "delete the block". Every
+                // backend emitter of this action is a MOVE (tear_off_block,
+                // TearOffBlock / RedockFloatingPane / PromoteBlockToTab via
+                // queue_source_layout_delete); the block lives on in its new tab.
+                // Using closeNode() here ran onNodeDelete → DeleteBlock and
+                // destroyed the just-moved block (empty-slot redock, logo-only
+                // floater, "block not found"). Remove the node directly, like the
+                // orphaned-block branch above. Genuine pane CLOSE deletes the
+                // block through the frontend closeNode path, not this action — so
+                // it is unaffected. This makes the dedicated block-move guard
+                // obsolete (deleted).
+                model.treeReducer(
+                    {
+                        type: LayoutTreeActionType.DeleteNode,
+                        nodeId: leaf.id,
+                    } as LayoutTreeDeleteNodeAction,
+                    false
+                );
             } else {
                 console.error(
                     "Cannot apply eventbus layout action DeleteNode, could not find leaf node with blockId",
