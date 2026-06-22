@@ -339,6 +339,60 @@ mod tests {
     }
 
     #[test]
+    fn local_content_delete_propagates_to_global() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(def_store.clone());
+
+        // LOCAL user agent with a per-agent ui:zoom blob (mirrored to global).
+        let mut def = local_def("local-z", "LocalZ");
+        store.agent_def_insert(&mut def).unwrap();
+        store
+            .agent_content_set(&AgentContent {
+                agent_id: "local-z".into(),
+                content_type: "ui:zoom".into(),
+                content: "1.5".into(),
+                updated_at: 1,
+            })
+            .unwrap();
+        assert!(
+            def_store
+                .get("local-z")
+                .unwrap()
+                .unwrap()
+                .data
+                .content
+                .iter()
+                .any(|c| c.content_type == "ui:zoom"),
+            "content mirrored to global"
+        );
+
+        // Reset-to-default deletes the local row.
+        store.agent_content_delete("local-z", "ui:zoom").unwrap();
+
+        // Local read is clean (no resurrection from the global record)...
+        assert!(
+            store.agent_content_get("local-z", "ui:zoom").unwrap().is_none(),
+            "deleted local content must not reappear from the global record"
+        );
+        // ...and the deletion propagated to the global record, so a
+        // cross-channel/other-instance reopen won't restore the stale zoom.
+        // (reviewer P1 on #1700 — agent_content_delete must re-mirror, like set.)
+        assert!(
+            def_store
+                .get("local-z")
+                .unwrap()
+                .unwrap()
+                .data
+                .content
+                .iter()
+                .all(|c| c.content_type != "ui:zoom"),
+            "content deletion must propagate cross-channel"
+        );
+    }
+
+    #[test]
     fn delete_tombstones_a_cross_channel_only_agent() {
         let store = Store::open_in_memory().unwrap();
         let tmp = tempfile::tempdir().unwrap();
