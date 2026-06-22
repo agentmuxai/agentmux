@@ -31,12 +31,25 @@ export type LauncherEvent = VersionedEvent;
 const [latestEvent, setLatestEvent] = createSignal<LauncherEvent | null>(null);
 const [eventVersion, setEventVersion] = createSignal<number>(0);
 const [seenAnyEvent, setSeenAnyEvent] = createSignal<boolean>(false);
+const [gapSeq, setGapSeq] = createSignal<number>(0);
 
 /** Latest typed event delivered by the launcher. Null until the first event. */
 export const launcherEvent = latestEvent;
 
 /** Monotonic version of the most recent event. 0 until the first event. */
 export const launcherEventVersion = eventVersion;
+
+/**
+ * Monotonic counter, bumped each time the launcher event stream detects a
+ * VERSION GAP (one or more events dropped on the wire). The per-renderer
+ * incremental `instances` state cannot self-heal from a dropped event — a
+ * missed `window_closed` leaves the window count permanently over-counting
+ * (the "3 vs 4" desync). The launcher-event reducer reacts to this signal by
+ * re-pulling the authoritative `list_window_instances` snapshot and
+ * reconciling. 0 until the first gap.
+ * See `docs/specs/SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md` §9.
+ */
+export const launcherEventGapSeq = gapSeq;
 
 /**
  * True once we've received at least one typed event. Kept as a
@@ -47,7 +60,17 @@ export const launcherEventVersion = eventVersion;
 export const launcherEventsActive = seenAnyEvent;
 
 const tracker = new PerSourceTracker<LauncherEvent>(
-    { source: "launcher" },
+    {
+        source: "launcher",
+        onVersionGap: (gap, prev, next) => {
+            // Keep the diagnostic warning (matches the default handler)…
+            console.warn(
+                `[launcher-events] version gap: expected ${prev + 1}, got ${next} (${gap} event${gap === 1 ? "" : "s"} possibly dropped); scheduling authoritative resync`,
+            );
+            // …and signal the reducer to reconcile against the authority.
+            setGapSeq((n) => n + 1);
+        },
+    },
     {
         setLatest: setLatestEvent,
         setVersion: setEventVersion,
