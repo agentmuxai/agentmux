@@ -211,6 +211,20 @@ impl Splash {
         }
     }
 
+    /// Dev affordance (used by `--splash-selftest` + `AGENTMUX_SPLASH_DUMP_PNG`):
+    /// pump the runloop briefly so layout/draw settle, then render the splash's
+    /// content view to a PNG at `path` — lets us eyeball footer centering without
+    /// Screen Recording permission. Offscreen `cacheDisplayInRect:` only.
+    pub fn dump_png(&self, path: &str) {
+        for _ in 0..25 {
+            unsafe {
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.016, 0);
+            }
+            std::thread::sleep(Duration::from_millis(8));
+        }
+        unsafe { dump_window_png(self.window, path) };
+    }
+
     /// Pump the splash runloop on the main thread: animate the brain pulse, and
     /// once the host signals first paint (ready-file appears) — or the safety
     /// timeout elapses — fade the whole splash out and order it away. Then keep
@@ -272,6 +286,49 @@ impl Splash {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
+}
+
+/// Render `window`'s content view to a PNG at `path` (offscreen — no Screen
+/// Recording permission needed). Best-effort; silently no-ops on any failure.
+unsafe fn dump_window_png(window: id, path: &str) {
+    let view = send(window, sel(b"contentView\0"));
+    if view.is_null() {
+        return;
+    }
+    let bounds: CGRect = {
+        let f: extern "C" fn(id, SEL) -> CGRect = std::mem::transmute(objc_msgSend as *const ());
+        f(view, sel(b"bounds\0"))
+    };
+    let rep = {
+        let f: extern "C" fn(id, SEL, CGRect) -> id =
+            std::mem::transmute(objc_msgSend as *const ());
+        f(
+            view,
+            sel(b"bitmapImageRepForCachingDisplayInRect:\0"),
+            bounds,
+        )
+    };
+    if rep.is_null() {
+        return;
+    }
+    {
+        let f: extern "C" fn(id, SEL, CGRect, id) =
+            std::mem::transmute(objc_msgSend as *const ());
+        f(view, sel(b"cacheDisplayInRect:toBitmapImageRep:\0"), bounds, rep);
+    }
+    let props = send(class(b"NSDictionary\0"), sel(b"dictionary\0"));
+    // NSBitmapImageFileTypePNG == 4
+    let data = {
+        let f: extern "C" fn(id, SEL, u64, id) -> id =
+            std::mem::transmute(objc_msgSend as *const ());
+        f(rep, sel(b"representationUsingType:properties:\0"), 4, props)
+    };
+    if data.is_null() {
+        return;
+    }
+    let nspath = nsstring(path);
+    let f: extern "C" fn(id, SEL, id, u8) -> u8 = std::mem::transmute(objc_msgSend as *const ());
+    f(data, sel(b"writeToFile:atomically:\0"), nspath, 1);
 }
 
 /// Build the splash window: a dark rounded backdrop with the brain centered on
@@ -437,7 +494,11 @@ unsafe fn build_window() -> (id, id) {
             send_void_rect(label, sel(b"setFrame:\0"), rect);
             send_void_id(label, sel(b"setTextColor:\0"), footer_color);
             send_void_id(label, sel(b"setFont:\0"), font);
-            send_void_i64(label, sel(b"setAlignment:\0"), 2); // NSTextAlignmentCenter
+            // NSTextAlignmentCenter == 1 in the *unified* NSTextAlignment enum
+            // (macOS 10.12+ adopted UIKit's values: Left 0, Center 1, Right 2,
+            // Justified 3, Natural 4). The pre-Sierra macOS value for center was
+            // 2 — using it here right-aligns the footer instead of centering it.
+            send_void_i64(label, sel(b"setAlignment:\0"), 1);
             send_void_id(backdrop, sel(b"addSubview:\0"), label);
         }
     }
