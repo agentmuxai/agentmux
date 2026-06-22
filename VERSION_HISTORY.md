@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.48.0 — 2026-06-22
+
+- fix(macos): disable MacAppCodeSignClone so packaged app launches from any volume
+- fix(lifecycle): level-triggered quit reconcile decision + safety-net tests
+- feat(toolchain): external widgets catalog, detection + health check
+- chore(rpc-api): remove vestigial command-label comments
+- chore(rust): strip phase-migration markers and trivial field doc comments
+- chore(frontend): trim verbose JSDoc blocks, section dividers, and ticket refs
+- fix(splash): center the macOS splash footer (unified NSTextAlignment value)
+- feat(toolchain): Open Pane button for running external widgets
+- fix(layout): seed new-window default blocks through the reducer so secondary-window tear-off works (R3, #1681)
+- fix(dnd): redock floating panes into secondary windows (R3 window-label resolve, #1681)
+- fix(dnd): create docked agent/pane blocks through the reducer so freshly-opened panes can tear off/redock (#1681)
+- feat(macos): open a new window on app reopen (fix 'not responding' on Finder double-click)
+- fix(lifecycle): quit instance on last-window close (Views recycle-on-close) + clean Windows exit
+- fix(dnd): redock into the first window when it is served by a promoted pool window (#1681)
+
+
 ## 0.47.4 — 2026-06-22
 
 - fix(editor): apply CSS zoom property instead of calc font-size scaling for correct per-pane zoom
