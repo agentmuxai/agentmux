@@ -175,7 +175,11 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
         try {
             const h = await RpcApi.WidgetHealthCommand(
                 TabRpcClient,
-                { port: w.defaultPort, health_check_path: w.healthCheckPath },
+                {
+                    port: w.defaultPort,
+                    health_check_path: w.healthCheckPath,
+                    health_check_body_contains: w.healthCheckBodyContains,
+                },
                 { timeout: 5000 }
             );
             setWrows(idx, { healthLoading: false, running: h.healthy, statusCode: h.status_code ?? undefined });

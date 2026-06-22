@@ -493,23 +493,29 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // widget.health — HTTP liveness probe for an external widget server running
-    // on localhost. The frontend passes { port, health_check_path } and gets
-    // back { healthy, status_code }. A connection-refused or timeout is treated
-    // as not-healthy (not an RPC error) so the UI can show a "not running" pill
-    // without surfacing a JS exception.
+    // on localhost. The frontend passes { port, health_check_path,
+    // health_check_body_contains? } and gets back { healthy, status_code }.
+    // Connection-refused or timeout → { healthy: false } (not an RPC error).
+    // health_check_body_contains lets callers distinguish services that share
+    // a default port (e.g. Flowise and Grafana both default to 3000).
     engine.register_handler(
         "widget.health",
         Box::new(|data, _ctx| {
             Box::pin(async move {
-                let port = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
+                if port_raw == 0 || port_raw > 65535 {
+                    return Ok(Some(serde_json::json!({ "healthy": false, "status_code": null })));
+                }
+                let port = port_raw as u16;
                 let path = data
                     .get("health_check_path")
                     .and_then(|v| v.as_str())
                     .unwrap_or("/")
                     .to_string();
-                if port == 0 {
-                    return Ok(Some(serde_json::json!({ "healthy": false, "status_code": null })));
-                }
+                let body_contains = data
+                    .get("health_check_body_contains")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 let url = format!("http://127.0.0.1:{}{}", port, path);
                 let client = reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(3))
@@ -518,10 +524,18 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 match client.get(&url).send().await {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
-                        Ok(Some(serde_json::json!({
-                            "healthy": resp.status().is_success(),
-                            "status_code": status,
-                        })))
+                        let ok_status = resp.status().is_success();
+                        if !ok_status {
+                            return Ok(Some(serde_json::json!({ "healthy": false, "status_code": status })));
+                        }
+                        // Optionally verify response body for service identity.
+                        let healthy = if let Some(needle) = body_contains {
+                            let body = resp.text().await.unwrap_or_default();
+                            body.contains(&needle)
+                        } else {
+                            true
+                        };
+                        Ok(Some(serde_json::json!({ "healthy": healthy, "status_code": status })))
                     }
                     Err(_) => Ok(Some(serde_json::json!({ "healthy": false, "status_code": null }))),
                 }
