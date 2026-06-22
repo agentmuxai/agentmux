@@ -42,6 +42,31 @@ pub fn start_cross_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Resu
 
     tracing::info!(drag_id = %drag_id, drag_type = ?drag_type, source_window = %source_window, "[dnd:cef] start_cross_drag");
 
+    // Self-heal a STALE drag session before starting a new one. The reducer
+    // enforces a singleton (StartDrag errors if one is already active), which
+    // is correct for a genuinely-concurrent drag — but if a prior drag's
+    // end/cancel never reached the host (the renderer threw mid-drop, or the
+    // dragged pane/window was destroyed under it), `active_drag` would stay
+    // Some forever and reject EVERY future tear-off ("drag session already
+    // active"). No legitimate drag is held for tens of seconds, so an active
+    // session older than STALE_MS is presumed dead: cancel it (EndDrag) so the
+    // new drag can proceed. Belt-and-suspenders behind the frontend's
+    // catch-path cancelCrossDrag — recovers even if the renderer never runs it.
+    const STALE_MS: u64 = 30_000;
+    if let Some(prev) = state.active_drag_snapshot() {
+        if now.saturating_sub(prev.started_at) > STALE_MS {
+            tracing::warn!(
+                stale_drag_id = %prev.drag_id,
+                age_ms = now.saturating_sub(prev.started_at),
+                "[dnd:cef] clearing stale drag session before new start_cross_drag"
+            );
+            state.host_dispatch(crate::reducer::HostCommand::EndDrag {
+                drag_id: prev.drag_id.clone(),
+                outcome: crate::reducer::DragOutcome::Cancelled,
+            });
+        }
+    }
+
     let session = DragSession {
         drag_id: drag_id.clone(),
         drag_type,

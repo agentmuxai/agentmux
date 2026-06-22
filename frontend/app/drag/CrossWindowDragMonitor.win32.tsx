@@ -21,6 +21,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { beginBlockMoveGuard } from "@/app/workspace/block-move-guard";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -200,8 +201,11 @@ async function handleCrossWindowDragEnd(
         dragType = "tab";
     }
 
+    // Hoisted so the catch can release the session even when startCrossDrag
+    // succeeded but a later step (TearOffBlock / drop) threw.
+    let dragId: string | null = null;
     try {
-        const dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
+        dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
         const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
 
         if (targetWindow && targetWindow !== src) {
@@ -216,6 +220,12 @@ async function handleCrossWindowDragEnd(
         }
     } catch (e) {
         Logger.error("dnd:cross", "cross-window drag error", { error: String(e), dragType, dragPayloadForApi });
+        // CRITICAL: release the host drag session. If startCrossDrag set
+        // active_drag and a later step threw (e.g. TearOffBlock "block not
+        // found" when the source block was destroyed under the drag), the
+        // session would otherwise stay Some forever and reject EVERY future
+        // tear-off with "drag session already active" until restart.
+        if (dragId) { try { await api.cancelCrossDrag(dragId); } catch {} }
     }
 }
 
@@ -240,6 +250,11 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
+        // Arm the block-move guard BEFORE TearOffBlock + the source-node
+        // removal it triggers: that removal fires tabcontent's onNodeDelete,
+        // which would otherwise DeleteBlock the just-moved block and leave the
+        // new floater showing only the empty-tab logo (#1662, race).
+        beginBlockMoveGuard(3000);
         // Phase 2 of SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md (issue #1077):
         // tearing a pane out spawns a floating CHILD window of the
         // source instance, NOT a new full instance. We mirror the
