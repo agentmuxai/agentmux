@@ -45,25 +45,23 @@
         flex-direction: column;
     }
 
-    // === Gradient Progress Bar ===
-    // 2px bar pinned position:absolute top:0. .agent-view already has
-    // position:relative (agent-view.scss). SPEC_AGENT_BUSY_ANIMATION_2026_06_21.md.
+    // === Marching-ants Progress Bar ===
+    // 3px bar pinned position:absolute top:0. .agent-view already has
+    // position:relative (agent-view.scss). Animated while working, hidden
+    // at rest. Colors via color-mix() so every theme inherits without
+    // hardcoded hex.
     //
-    // Color: complement of --accent-color via CSS relative color syntax
-    // (hue + 180°) — maximally distinct from the theme's primary hue.
-    //
-    // Animation: oversized ::before (200% wide, 120px tall) clipped to 2px by
-    // overflow:hidden on the parent. A diagonal 135deg gradient is rotated and
-    // translated in a single @keyframes so different slices of the gradient
-    // cross the visible 2px window each cycle — organic, non-periodic aurora
-    // effect, compositor-only (will-change: transform, no paint/layout).
-    // SVG feTurbulence was ruled out (CPU-bound for thin bars, not composited).
+    // Uses transform: translateX() so the animation stays on the GPU
+    // compositor — background-position animation is not reliably promoted
+    // on all Linux GPU drivers and some Windows HW-accel paths.
+    // The ::before overshoots left/right by 12px so the translated edge
+    // never clips; parent overflow:hidden trims it.
     .agent-pane-progress-bar {
         position: absolute;
         top: 0;
         left: 0;
         right: 0;
-        height: 2px;
+        height: 3px;
         z-index: var(--z-pane-overlay, 4);
         pointer-events: none;
         opacity: 0;
@@ -73,18 +71,20 @@
         &::before {
             content: "";
             position: absolute;
-            width: 200%;
-            height: 120px;
-            left: -50%;
-            top: calc(50% - 60px);
-            transform-origin: center;
-            background: linear-gradient(
-                135deg,
-                hsl(from var(--accent-color) calc(h + 160) s calc(l * 0.85))  0%,
-                hsl(from var(--accent-color) calc(h + 180) s l)               30%,
-                hsl(from var(--accent-color) calc(h + 200) s calc(l * 0.90)) 60%,
-                hsl(from var(--accent-color) calc(h + 175) s calc(l * 1.10)) 85%,
-                hsl(from var(--accent-color) calc(h + 160) s calc(l * 0.85)) 100%
+            top: 0;
+            bottom: 0;
+            left: -12px;
+            right: -12px;
+            // Solid fallback for Chromium < 111 where color-mix() is
+            // unsupported — browser ignores the declaration below and
+            // keeps this one so the bar remains visible.
+            background: var(--accent-color);
+            background: repeating-linear-gradient(
+                -45deg,
+                var(--accent-color)                                        0px,
+                var(--accent-color)                                        4px,
+                color-mix(in srgb, var(--accent-color) 25%, transparent)  4px,
+                color-mix(in srgb, var(--accent-color) 25%, transparent)  8px
             );
             will-change: transform;
         }
@@ -93,7 +93,7 @@
             opacity: 1;
 
             &::before {
-                animation: aurora-sweep 9s ease-in-out infinite;
+                animation: agent-ant-march 0.5s linear infinite;
             }
         }
 
@@ -102,22 +102,17 @@
         }
     }
 
-    @keyframes aurora-sweep {
-        // Non-uniform stops + rotation means the diagonal gradient slice
-        // through the 2px window looks different every cycle — aperiodic
-        // organic motion without noise functions or canvas.
-        0%   { transform: translateX(-15%) rotate(-12deg); }
-        25%  { transform: translateX(5%)   rotate(4deg);  }
-        50%  { transform: translateX(15%)  rotate(-6deg); }
-        75%  { transform: translateX(-5%)  rotate(10deg); }
-        100% { transform: translateX(-15%) rotate(-12deg); }
+    @keyframes agent-ant-march {
+        // Shift by one stripe period (8px × √2 ≈ 11.314px) per cycle so the
+        // repeating pattern loops seamlessly. translateX keeps the animation
+        // on the GPU compositor.
+        from { transform: translateX(0); }
+        to   { transform: translateX(11.314px); }
     }
 
     @media (prefers-reduced-motion: reduce) {
         .agent-pane-progress-bar--active::before {
             animation: none;
-            transform: translateX(0) rotate(0deg);
-            opacity: 0.7;
         }
     }
 
