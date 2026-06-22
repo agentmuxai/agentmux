@@ -971,43 +971,38 @@ impl AgentMuxHandler {
 
         dlog(&format!("browser_list after remove: {}", self.browser_list.len()));
 
-        // App-exit decision: count remaining USER-FACING browsers.
-        // Unpromoted pool windows are pre-warmed scratch windows
-        // hidden from the user via WS_EX_TOOLWINDOW — they have no
-        // taskbar entry, can't be closed by the user, and would
-        // otherwise keep the app alive forever after the last
-        // visible window closes. Browser-pane child HWNDs
-        // (`browser-pane-*`) are sub-views of a parent window, not
-        // standalone instances, so they don't count either.
+        // App-exit decision (authoritative): count remaining live USER windows
+        // by the per-browser `BrowserKind::is_pool` flag, NOT pool
+        // set-membership. The closing browser was already removed from the
+        // reducer's `browsers` map above (`UnregisterBrowser`), so this reflects
+        // what REMAINS.
         //
-        // Use `user_visibility_snapshot()` — atomic read of pool
-        // inventory (`unpromoted` ∪ `pool.queue`) AND the browser
-        // registry under ONE host_state lock. Both pool states are
-        // hidden off-screen with no user UI; counting them as
-        // user-visible inflates this gate and prevents the cascade
-        // from firing when the user really did close their last
-        // visible window.
+        // Why the flag, not `user_visibility_snapshot()`'s pool-SET count
+        // (which this used to use, and which is kept below for logging only):
+        // the snapshot excludes labels found in `pool.unpromoted ∪ pool.queue`.
+        // If a pool window left those SETS without its `is_pool` flag clearing
+        // (a failed/partial promote, an out-of-band drop), the snapshot counted
+        // it as user-visible while it was really a hidden scratch window —
+        // `user_browser_count` never hit 0, `BeginDrain` never fired, and the
+        // host never quit. That is the orphaned-process-tree regression
+        // (confirmed: 9,483-line orphan host log with no drain marker). The
+        // `is_pool` flag is the single source of truth, flipped atomically at
+        // promote (`pool.rs`) and read here under one lock, so it can't drift or
+        // race a concurrent promote the way the two-set read can.
         //
-        // The single-lock read is required because a two-lock
-        // variant races against `promote_pool_window`: a label can
-        // move from `pool.queue` to promoted between the two reads,
-        // leaving the stale inventory excluding a now-real user
-        // window — making `was_last` true and triggering a cascade
-        // that closes the freshly torn-off window.
-        //
-        // Promoted pool windows ARE counted: they're removed from
-        // BOTH pool sets at promote time.
-        let (user_browser_count, browsers_keys, pool_keys) = {
+        // A PROMOTED pool window keeps its `window-pool-*` label but is
+        // `is_pool: false`, so it still correctly counts; unpromoted pool
+        // windows (`is_pool: true`) and `BrowserKind::Pane` children don't. See
+        // SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md §5.1/§10.1.
+        let user_browser_count = self.state.count_live_user_windows();
+
+        // Snapshot retained for the diagnostic trace below only (label lists);
+        // the gate above is the authoritative `is_pool` count.
+        let (browsers_keys, pool_keys) = {
             let (pool_labels, browsers) = self.state.user_visibility_snapshot();
             let keys: Vec<String> = browsers.into_iter().map(|(l, _)| l).collect();
-            let count = keys
-                .iter()
-                .filter(|label| {
-                    !pool_labels.contains(label.as_str()) && !label.starts_with("browser-pane-")
-                })
-                .count();
             let pool: Vec<String> = pool_labels.into_iter().collect();
-            (count, keys, pool)
+            (keys, pool)
         };
 
         // Phase B.9.3 diagnostic — fires for every close (incl.

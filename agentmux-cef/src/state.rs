@@ -995,6 +995,21 @@ impl AppState {
             .collect()
     }
 
+    /// Count of live, user-visible top-level windows — the authoritative
+    /// last-window quit gate (`client::on_before_close` +
+    /// `wrr::win_event::maybe_quit_on_last_user_window`). Delegates to
+    /// `reducer::count_live_user_windows`, which counts registered
+    /// `BrowserKind::TopLevel { is_pool: false }` browsers EXCEPT `floating-pool-*`
+    /// (pane-pool windows register as is_pool:false but must be excluded — see
+    /// `reducer::counts_as_live_user_window`). Promoted `window-pool-*` windows
+    /// (is_pool:false, still `window-pool-` labelled) correctly count. Single
+    /// host_state lock. See SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md §5.1/§10.1.
+    pub fn count_live_user_windows(&self) -> usize {
+        // Delegate to the reducer's pure counter under one lock (deref-coerces
+        // the guard to &HostState) — single counting implementation.
+        crate::reducer::count_live_user_windows(&self.host_state.lock())
+    }
+
     /// First registered browser (for "any browser" callers like command
     /// palette routing). Returns the label + Browser pair, or None if
     /// the registry is empty.
@@ -1084,7 +1099,9 @@ impl AppState {
         // Pane pool emits NO launcher events (report_pool_window_added/removed/promoted),
         // so including pane_pool.* here would cause permanent DriftDetected{Pool}.
         // Only the tab pool (window-pool-*) participates in launcher mirror accounting.
-        // See user_visibility_snapshot for the app-exit gate (which correctly includes pane pool).
+        // (The last-window app-exit gate is `reducer::count_live_user_windows`, which
+        // EXCLUDES pane pool — a separate count from this launcher-mirror one;
+        // `user_visibility_snapshot` is the snapshot used for on_before_close logging.)
         let pool_inventory: std::collections::HashSet<&str> = st
             .pool
             .unpromoted
