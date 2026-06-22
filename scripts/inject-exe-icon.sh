@@ -51,7 +51,17 @@ win_ico="$(win "$ICO")"
 err="$(mktemp)"
 attempt=0
 max=6
-until "$RCEDIT" "$win_exe" --set-icon "$win_ico" 2>"$err"; do
+# Also stamp the version-info strings. The host exe is CEF's bootstrap.exe, whose
+# FileDescription is "CEF Bootstrap application" — that is what Explorer's
+# Properties, Task Manager's Details, and the TASKBAR right-click (jump list)
+# header show. Overwrite them so the user sees "AgentMux" everywhere. Same rcedit
+# call as the icon (one PE rewrite, one retry loop).
+until "$RCEDIT" "$win_exe" --set-icon "$win_ico" \
+    --set-version-string "FileDescription" "AgentMux" \
+    --set-version-string "ProductName" "AgentMux" \
+    --set-version-string "CompanyName" "AgentMux Corp" \
+    --set-version-string "InternalName" "AgentMux" \
+    --set-version-string "OriginalFilename" "agentmux.exe" 2>"$err"; do
     attempt=$((attempt + 1))
     if [ "$attempt" -ge "$max" ]; then
         echo "  [icon] WARNING: rcedit failed after $max attempts on $(basename "$EXE") —" >&2
@@ -64,4 +74,4 @@ until "$RCEDIT" "$win_exe" --set-icon "$win_ico" 2>"$err"; do
     sleep 2
 done
 rm -f "$err"
-echo "  [icon] set AgentMux icon on $(basename "$EXE")"
+echo "  [icon] set AgentMux icon + version strings (FileDescription/ProductName=AgentMux) on $(basename "$EXE")"

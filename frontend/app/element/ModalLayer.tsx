@@ -2,49 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ModalLayer — scope-parameterized modal host.
+ * ModalLayer — scope-parameterized modal host component.
  *
- * Single dispatcher used by both tab-scoped and pane-scoped modal
- * hosts. Same request union, same imperative API (`open` / `replace`
- * / `close` / `current`), same render-dispatch table — the only knob
- * is the `scope` prop, which selects:
- *  - which `<Modal>` scope is used (`scope="tab"` vs `scope="pane"`),
- *  - which scope-mount context Provider is set (TabModalScope vs
- *    PaneModalScope) so the inner `<Modal>` resolves its mount node
- *    via the same scope axis.
- *
- * Mount strategy (unchanged from the original TabModalLayer):
- *  1. A real DOM mount node (`.modal-layer-mount`) wraps `props.children`
- *     and hosts the portalled `<Modal>` as a sibling.
- *  2. The Scope.Provider exposes that mount node as an accessor so the
- *     descendant `<Modal>` can resolve its mount via `useContext`.
- *  3. The unified `<Modal>` owns backdrop, panel chrome, ESC, focus
- *     trap, scope-relative `inert` + scroll lock, and the pane-overlay
- *     clip — this layer only handles dispatch.
- *
- * Use:
- *  - `<ModalLayer scope="tab">{props.children}</ModalLayer>` wraps a
- *    tab's tile layout in `frontend/app/tab/tabcontent.tsx`.
- *  - `<ModalLayer scope="pane">{props.children}</ModalLayer>` wraps a
- *    pane's content in `frontend/app/view/agent/agent-view.tsx` (and
- *    any other pane that wants pane-scoped modals).
- *
- * Inner components call `useModalLayer()` (from `./modal-layer`) and
- * never care which scope they're inside — pane wins over tab via
- * normal context resolution when both layers wrap the call site.
- *
- * History: this file is the descendant of `TabModalLayer` (per
- * `docs/specs/launch-modal-rearchitecture-2026-05-01.md`,
- * `SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md` §3/§5/§7/§9/§11). Lifted
- * out of `tab/` and parameterized over scope for the launch-modal
- * pane-scope work (`SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md`).
- *
- * Dismissal: `closeOnBackdropClick={false}` keeps the no-backdrop-
- * dismiss behaviour — a backdrop click nudges the panel's
- * `[data-modal-dismiss]` Cancel/Close control instead of closing.
- * ESC routes through `safeClose`, which no-ops while a submit RPC
- * is in-flight so the user can't lose error feedback or trigger a
- * duplicate launch.
+ * Wraps children in a `.modal-layer-mount` container that hosts the portalled
+ * `<Modal>`. The `scope` prop selects which `<Modal>` scope and Scope.Provider
+ * are used; pane-scope layers override tab-scope ones via context resolution.
+ * ESC is blocked while a submit RPC is in-flight (`safeClose` guard).
  */
 
 import { createMemo, createSignal, Show, type Component, type JSX } from "solid-js";

@@ -40,7 +40,6 @@ use crate::backend::wps;
 /// WPS file subject name for subprocess output (replaces "term" from PTY).
 pub const SUBPROCESS_OUTPUT_SUBJECT: &str = "output";
 
-/// Controller type constant.
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 
 /// Configuration for spawning a subprocess turn.
@@ -114,10 +113,8 @@ struct SubprocessControllerInner {
 /// `SubprocessController` spawns a fresh process for each user turn.
 /// Multi-turn continuity comes from `--resume <session-id>`.
 pub struct SubprocessController {
-    /// Parent tab UUID.
     #[allow(dead_code)]
     tab_id: String,
-    /// Block UUID.
     block_id: String,
     /// Prevents concurrent spawns.
     run_lock: Arc<AtomicBool>,

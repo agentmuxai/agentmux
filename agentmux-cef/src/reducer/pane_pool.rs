@@ -66,9 +66,12 @@ pub(super) fn handle_pop_and_promote_front_pane_pool_window(state: &mut HostStat
         None => return DispatchOutput::default(),
     };
     state.pane_pool.unpromoted.remove(&label);
-    // Mark the BrowserHandle as no longer a pool window.
+    // Mark the BrowserHandle as no longer a warm pane-pool floater. Pane-pool
+    // windows are `BrowserKind::Floater` (NOT TopLevel) — a promoted floater is
+    // still a Floater, just `is_pool: false`. It remains excluded from the
+    // last-window quit gate by type (invariant FP-LIFE).
     if let Some(handle) = state.browsers.get_mut(&label) {
-        if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
+        if let BrowserKind::Floater { is_pool } = &mut handle.kind {
             *is_pool = false;
         }
     }

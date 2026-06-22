@@ -2,23 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ModalLayer types + context — generic modal-host dispatcher.
+ * ModalLayer types + context — scope-neutral modal-host dispatcher.
  *
- * Single, scope-neutral dispatcher used by both tab-scoped and pane-
- * scoped modal hosts. A `<ModalLayer scope="tab">` wraps every tab's
- * tile layout (see `frontend/app/tab/tabcontent.tsx`); a
- * `<ModalLayer scope="pane">` wraps an individual pane's content (see
- * `frontend/app/view/agent/agent-view.tsx`). Components inside any
- * such layer call `useModalLayer()` to open / replace / close modals
- * scoped to the nearest layer in the tree — pane wins over tab via
- * normal context resolution.
- *
- * Background: this primitive started as `TabModalLayer` (per
- * `docs/specs/launch-modal-rearchitecture-2026-05-01.md`); when the
- * launch modal needed to lock only its agent pane — not the whole
- * tab — the dispatcher was lifted out of `tab/` and parameterized
- * over scope (`SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md`). One
- * dispatch table, one hook, one set of request types — DRY.
+ * `useModalLayer()` resolves to the nearest `<ModalLayer>` in the tree;
+ * pane-scoped layers override tab-scoped ones via normal context resolution.
  */
 
 import { createContext, useContext, type Accessor } from "solid-js";
@@ -55,8 +42,7 @@ export interface LaunchAgentRequest {
     /** Initial form state for the launch modal — used by the
      *  "+ New" → create → replace-back flow to restore the user's
      *  in-progress edits (name, runtime, image, identity, memory)
-     *  across the new-bundle round-trip. Codex P2 on PR #910
-     *  rounds 6 + 7. */
+     *  across the new-bundle round-trip. */
     initialFormState?: Partial<LaunchFormStateWire>;
     /** When true, the launch modal fires its OAuth `startConnect()`
      *  exactly once on mount. Set by the OAuth-Connect → New Identity
@@ -131,9 +117,8 @@ export interface InstallAgentRequest {
      *    the launch modal as the natural next step.
      *  - `false` — "Close": flip install state but do not chain.
      *
-     * Callers MUST flip cached install state in both branches; codex
-     * caught a regression on PR #895 where the Close path skipped the
-     * flip and stranded users on a stale ribbon.
+     * Callers MUST flip cached install state in both branches — the Close
+     * path skipping the flip strands users on a stale ribbon.
      */
     onInstalled: (continueToLaunch: boolean) => void;
 }
@@ -173,8 +158,7 @@ export interface AgentPrereqRequest {
  *
  * The actual UpsertIdentityBundle RPC is owned by the layer so its
  * `submitting()` flag (which gates safeClose) tracks the in-flight
- * call — see reagent P1 on PR #911. Callers only supply the chain
- * callbacks for after-success / on-cancel.
+ * call. Callers only supply the chain callbacks for after-success / on-cancel.
  *
  * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
  */
@@ -197,7 +181,7 @@ export interface NewIdentityBundleRequest {
      *  `modalLayer.replace(launchRequest)` with the prior selection
      *  intact, OR `modalLayer.close()` to exit. The layer does NOT
      *  close after this fires — running both replace + close
-     *  synchronously nullified the replace, reagent P1 on PR #910. */
+     *  synchronously nullified the replace. */
     onCancel: () => void;
 }
 

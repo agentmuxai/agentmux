@@ -39,6 +39,14 @@ mod splash;
 mod splash_mac;
 #[cfg(target_os = "linux")]
 mod splash_linux;
+// Splash footer support. The baked font + software text blitter are only used by
+// the software-buffer backends (Linux, Windows); macOS renders native text.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod splash_font;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod splash_text;
+mod splash_config;
+mod splash_info;
 mod srv_spawner;
 mod state;
 mod wrr;
@@ -76,6 +84,14 @@ fn suppress_os_crash_dialogs() {}
 fn main() {
     suppress_os_crash_dialogs();
 
+    // Dev/demo affordance: `--splash-selftest` shows the splash in isolation
+    // (no srv/host), holds it briefly, then exits — for eyeballing the footer +
+    // layout. See SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21.md.
+    if std::env::args().any(|a| a == "--splash-selftest") {
+        splash_selftest();
+        return;
+    }
+
     // macOS: paint the splash FIRST, on the main thread, before any heavy work
     // — this is the whole reason the splash lives in the small fast launcher
     // rather than the slow CEF host. AppKit must own the main thread, so the
@@ -84,6 +100,14 @@ fn main() {
     // until the host signals first paint. See `splash_mac`.
     #[cfg(target_os = "macos")]
     {
+        // Splash disabled → no AppKit splash; run the supervisor directly on the
+        // main thread (there's no runloop to pump without a splash window).
+        if splash_config::splash_disabled() {
+            tokio::runtime::Runtime::new()
+                .expect("failed to build Tokio runtime")
+                .block_on(launcher_main());
+            return;
+        }
         let splash = splash_mac::Splash::show();
         std::thread::Builder::new()
             .name("launcher-supervisor".into())
@@ -117,11 +141,44 @@ fn main() {
         // Windows keeps spawning its splash inside launcher_main (event-name
         // model). See splash_linux/.
         #[cfg(target_os = "linux")]
-        splash_linux::spawn();
+        if !splash_config::splash_disabled() {
+            splash_linux::spawn();
+        }
 
         tokio::runtime::Runtime::new()
             .expect("failed to build Tokio runtime")
             .block_on(launcher_main());
+    }
+}
+
+/// `--splash-selftest`: show the splash with no srv/host behind it, hold it for a
+/// few seconds (or `AGENTMUX_SPLASH_HOLD_MS`), then exit. A demo/dev affordance
+/// for eyeballing the footer + centering without launching the whole app.
+fn splash_selftest() {
+    let hold = std::env::var("AGENTMUX_SPLASH_HOLD_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|ms| std::time::Duration::from_millis(ms.max(3000)))
+        .unwrap_or_else(|| std::time::Duration::from_secs(6));
+
+    #[cfg(target_os = "linux")]
+    {
+        splash_linux::spawn();
+        std::thread::sleep(hold);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let splash = splash_mac::Splash::show();
+        if let Ok(p) = std::env::var("AGENTMUX_SPLASH_DUMP_PNG") {
+            splash.dump_png(&p);
+        }
+        let _ = splash; // run_until_dismissed parks; selftest just holds then exits
+        std::thread::sleep(hold);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = splash::spawn_splash("selftest");
+        std::thread::sleep(hold);
     }
 }
 
@@ -798,6 +855,14 @@ async fn run_unix(
     // is auto-released on process exit even for SIGKILL.)
     let first_socket = bind_socket_with_recovery(&socket_path, &paths.data_dir, &dir_hash);
 
+    // macOS: we are the first instance (second-instance launches exit inside
+    // bind_socket_with_recovery). Publish this instance's bound-socket identity
+    // to the splash's reopen handler so a Finder double-click / `open` (no -n)
+    // forwards open_new_window to exactly THIS (channel, version) instance —
+    // never a recomputed hash. SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md.
+    #[cfg(target_os = "macos")]
+    splash_mac::set_reopen_target(paths.data_dir.clone(), dir_hash.clone());
+
     // Broadcast bus for reducer-emitted events. Same capacity (1024)
     // and rationale as the Windows path.
     let (events_tx, _) =
@@ -1363,7 +1428,11 @@ async fn run_windows(
     // The event name is forwarded to the CEF host as
     // AGENTMUX_SPLASH_EVENT so it can signal dismiss from on_load_end.
     #[cfg(target_os = "windows")]
-    let splash_event_name = splash::spawn_splash(&dir_hash);
+    let splash_event_name = if splash_config::splash_disabled() {
+        None // splash:disabled / AGENTMUX_SPLASH=0 — no event, no window (SPEC §6)
+    } else {
+        splash::spawn_splash(&dir_hash)
+    };
     #[cfg(not(target_os = "windows"))]
     let splash_event_name: Option<String> = None;
 

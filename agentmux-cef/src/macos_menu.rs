@@ -158,12 +158,12 @@ unsafe extern "C" fn should_handle_reopen(
                 // post_focus_window is non-blocking and safe to call from the
                 // AppKit main thread.
                 crate::ui_tasks::post_focus_window(state, "main");
-                tracing::info!("reopen-hook:fired — focused main window (hasVisibleWindows=YES)");
+                tracing::info!("reopen-hook:fired proc=host — focused main window (hasVisibleWindows=YES)");
             } else {
                 // No visible windows — open a new one.
                 match crate::commands::window::open_new_window(state) {
-                    Ok(_) => tracing::info!("reopen-hook:fired — opened new window (hasVisibleWindows=NO)"),
-                    Err(e) => tracing::warn!(error = %e, "reopen-hook:fired — open_new_window failed"),
+                    Ok(_) => tracing::info!("reopen-hook:fired proc=host — opened new window (hasVisibleWindows=NO)"),
+                    Err(e) => tracing::warn!(error = %e, "reopen-hook:fired proc=host — open_new_window failed"),
                 }
             }
         }

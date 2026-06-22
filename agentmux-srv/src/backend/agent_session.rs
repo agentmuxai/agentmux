@@ -1,37 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Agent-anchored session zones (Option E, PR 1 of 2).
+//! Agent-anchored session zones: one zone per agent definition, keyed by
+//! `definition_id` (not identity bundle or block).
 //!
-//! A session zone is bound to the **agent definition** (`definition_id`),
-//! not the identity bundle the agent currently uses. Two agents that
-//! share an identity bundle keep separate session histories.
-//!
-//! ## Zone naming
-//!
-//! - Active:   `agent:<defId>:current`
-//! - Archived: `agent:<defId>:archive:<unix_ms>`
-//!
-//! Files inside a zone keep the existing shape:
-//! `output.state.json` (full UI snapshot) and `output` (raw NDJSON
-//! stream for crash-recovery replay).
-//!
-//! ## Migration (`migrate_block_zones_v1`)
-//!
-//! On first srv startup after this PR ships, the per-block zones (the
-//! pre-Option-E layout where each `blockId` owned its own zone) are
-//! back-filled into the new per-agent layout:
-//!
-//! 1. For each `db_block` row with `meta.view = "agent"` and a
-//!    non-empty `output.state.json` in its block-keyed zone, copy the
-//!    contents to `agent:<defId>:archive:<block-zone-createdts>`.
-//! 2. For each definition, copy the most-recently-modified per-block
-//!    snapshot to `agent:<defId>:current`.
-//! 3. Write the marker file `<data_dir>/migration_agent_zones_v1.flag`.
-//!
-//! The migration is read-only against the existing per-block zones —
-//! GC of those is a later PR.
-//!
+//! Zone names: active = `agent:<defId>:current`,
+//! archived = `agent:<defId>:archive:<unix_ms>`. Each zone holds
+//! `output.state.json` (full UI snapshot) and `output` (raw NDJSON stream).
 //! See `docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md`.
 
 use std::collections::HashMap;

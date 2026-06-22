@@ -42,6 +42,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_blockfile_read_state(engine, state);
     register_blockfile_write_state(engine, state);
     register_session_digest(engine, state);
+    register_session_activity_summary(engine, state);
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
     register_session_export_handler(engine, state);
@@ -92,8 +93,14 @@ fn register_agent_tracked_blocks(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |_data, _ctx| {
             let process_tracker = process_tracker.clone();
             Box::pin(async move {
+                let process_ids = process_tracker.list_all_blocks();
+                let reactive_ids = crate::backend::reactive::get_global_handler().list_active_blocks();
+                let mut seen = std::collections::HashSet::new();
+                let block_ids: Vec<String> = process_ids.into_iter().chain(reactive_ids)
+                    .filter(|id| seen.insert(id.clone()))
+                    .collect();
                 Ok(Some(serde_json::to_value(&AgentTrackedBlocksResult {
-                    block_ids: process_tracker.list_all_blocks(),
+                    block_ids,
                 }).unwrap()))
             })
         }),
@@ -147,6 +154,9 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let event_bus = state.event_bus.clone();
     let filestore = state.filestore.clone();
+    // Capture the whole (Arc-backed, Clone) AppState so the block can be created
+    // through the reducer (#1681) — see the create-block site below.
+    let app_state = state.clone();
 
     engine.register_handler(
         COMMAND_AGENT_OPEN,
@@ -155,6 +165,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             let event_bus = event_bus.clone();
             let filestore = filestore.clone();
+            let app_state = app_state.clone();
             Box::pin(async move {
                 let cmd: CommandAgentOpenData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.open: {e}"))?;
@@ -315,6 +326,17 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut meta = MetaMapType::new();
                 meta.insert("view".to_string(), json!("agent"));
                 meta.insert("agentId".to_string(), json!(&agent.id));
+                // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): seed
+                // the new block's `term:zoom` from the agent's saved `ui:zoom`
+                // (per-agent content store, global cross-channel) so reopening
+                // the same agent restores its zoom instead of resetting to 1.0.
+                // Stored only for non-default zooms; clamp to the frontend's
+                // [0.5, 2.0] range so a corrupt value can't escape it.
+                if let Ok(Some(c)) = wstore.agent_content_get(&agent.id, "ui:zoom") {
+                    if let Some(z) = parse_seed_zoom(&c.content) {
+                        meta.insert("term:zoom".to_string(), json!(z));
+                    }
+                }
                 meta.insert("agentProvider".to_string(), json!(&agent.provider));
                 meta.insert("agentName".to_string(), json!(&agent.name));
                 meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "sparkles" } else { &agent.icon }));
@@ -351,10 +373,44 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
                 meta.insert("agent:session_id_field".to_string(), json!(provider.session_id_field));
 
-                // 7. Create block + insert into layout tree
-                let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
-                    .map_err(|e| format!("agent.open: create_block: {e}"))?;
-                let block_id = block.oid.clone();
+                // 7. Create block + insert into layout tree.
+                // Through the reducer (#1681), not wcore-direct: a store-only
+                // block is invisible to the reducer-canonical `state.blocks`
+                // (only hydrated from SQLite at bootstrap), so tearing this agent
+                // pane off later was rejected "block not found". BlockCreated
+                // carries meta → apply_block_created writes the wstore Block,
+                // which the controller resync below reloads by id.
+                let meta_val = serde_json::to_value(&meta)
+                    .map_err(|e| format!("agent.open: meta serialize: {e}"))?;
+                let create_events = crate::server::service::dispatch_to_reducer(
+                    &app_state,
+                    agentmux_common::ipc::Command::CreateBlock {
+                        tab_id: tab_id.clone(),
+                        meta: meta_val,
+                    },
+                )
+                .await;
+                if let Some(msg) = create_events.iter().find_map(|e| match e {
+                    agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                    _ => None,
+                }) {
+                    return Err(format!("agent.open: CreateBlock: {msg}"));
+                }
+                let block_id = create_events
+                    .iter()
+                    .find_map(|e| match e {
+                        agentmux_common::ipc::Event::BlockCreated { block_id, .. } => {
+                            Some(block_id.clone())
+                        }
+                        _ => None,
+                    })
+                    .ok_or_else(|| "agent.open: CreateBlock emitted no BlockCreated".to_string())?;
+                for ev in &create_events {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
+                        tracing::warn!("agent.open: CreateBlock wstore apply failed: {e}");
+                    }
+                }
+                crate::server::service::publish_events(&app_state, &create_events);
 
                 // Enqueue a layout insert action for the frontend to process.
                 // The frontend's LayoutModel watches pendingbackendactions on the
@@ -915,10 +971,44 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         return open_pane_floating(state, &wstore, &event_bus, cmd.view, tab_id, meta).await;
     }
 
-    // Create block (docked path)
-    let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
-        .map_err(|e| format!("pane.open: create_block: {e}"))?;
-    let block_id = block.oid.clone();
+    // Create block (docked path) THROUGH THE REDUCER (#1681), not wcore-direct.
+    // A store-only `create_block` lands the block in SQLite but never in the
+    // reducer-canonical `state.blocks` map — and this RPC runs after bootstrap,
+    // which is the only time `srv_state` is hydrated from SQLite. The pane then
+    // renders fine (frontend reads SQLite) but a later TearOffBlock /
+    // RedockFloatingPane is rejected "block not found" because the saga
+    // pre-conditions check the reducer. The BlockCreated event carries meta,
+    // which apply_block_created writes to the wstore Block. Mirrors the
+    // already-correct open_pane_floating path.
+    let meta_val = serde_json::to_value(&meta)
+        .map_err(|e| format!("pane.open: meta serialize: {e}"))?;
+    let create_events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::CreateBlock {
+            tab_id: tab_id.clone(),
+            meta: meta_val,
+        },
+    )
+    .await;
+    if let Some(msg) = create_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.open: CreateBlock: {msg}"));
+    }
+    let block_id = create_events
+        .iter()
+        .find_map(|e| match e {
+            agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "pane.open: CreateBlock emitted no BlockCreated".to_string())?;
+    for ev in &create_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
+            tracing::warn!("pane.open: CreateBlock wstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &create_events);
 
     // Enqueue layout action — split if requested, else append
     let (actiontype, targetblockid, position) = resolve_placement(
@@ -2033,6 +2123,176 @@ fn register_session_digest(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// session:activity_summary — per-turn live mini-summary via Haiku
+// ---------------------------------------------------------------------------
+
+fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+
+    engine.register_handler(
+        COMMAND_SESSION_ACTIVITY_SUMMARY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandActivitySummaryData = serde_json::from_value(data)
+                    .map_err(|e| format!("session:activity_summary: {e}"))?;
+
+                let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
+
+                let block: Block = wstore
+                    .get(&cmd.block_id)
+                    .map_err(|e| format!("session:activity_summary: {e}"))?
+                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+
+                // Read only the most recent ring buffer events — we need the last ~30
+                // lines, so 50 events is a generous upper bound without touching the
+                // full buffer (which can be large on long sessions).
+                let all_lines: Vec<String> = {
+                    let scope = format!("block:{}", cmd.block_id);
+                    let events = broker.read_event_history(
+                        crate::backend::wps::EVENT_BLOCK_FILE,
+                        &scope,
+                        50,
+                    );
+                    let mut lines: Vec<String> = Vec::new();
+                    for event in events {
+                        let Some(ref ed) = event.data else { continue };
+                        if ed.get("filename").and_then(|v| v.as_str()).unwrap_or("") != "output" { continue; }
+                        if let Some(d64) = ed.get("data64").and_then(|v| v.as_str()) {
+                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(d64) {
+                                let text = String::from_utf8_lossy(&bytes);
+                                for line in text.lines() {
+                                    if !line.trim().is_empty() {
+                                        lines.push(line.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    lines
+                };
+
+                let n = all_lines.len();
+                let start = n.saturating_sub(30);
+                let window: Vec<&str> = all_lines[start..].iter().map(|s| s.as_str()).collect();
+
+                if window.is_empty() {
+                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
+                        summary: String::new(),
+                    }).unwrap()));
+                }
+
+                let extracted = extract_digest_text(&window);
+                if extracted.is_empty() {
+                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
+                        summary: String::new(),
+                    }).unwrap()));
+                }
+
+                let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+                if cli_path.is_empty() {
+                    tracing::debug!(block_id = %cmd.block_id, "session:activity_summary: no CLI path in meta");
+                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
+                        summary: String::new(),
+                    }).unwrap()));
+                }
+
+                let prompt = format!(
+                    "Summarize in {word_target} words or fewer what is currently being worked on. \
+                     Use a short terse phrase with no quotes or punctuation.\n\n\
+                     Recent activity:\n\n{extracted}"
+                );
+
+                let summary = invoke_cli_for_activity(&cli_path, &prompt, &block.meta).await
+                    .unwrap_or_else(|e| {
+                        tracing::debug!(block_id = %cmd.block_id, error = %e, "session:activity_summary: CLI failed");
+                        String::new()
+                    });
+
+                // The frontend writes `term:activity` after receiving this response so it
+                // can discard results from turns that were superseded before they returned.
+                Ok(Some(serde_json::to_value(&ActivitySummaryResult { summary }).unwrap()))
+            })
+        }),
+    );
+}
+
+/// Invoke the Claude CLI with Haiku model for a lightweight per-turn activity summary.
+/// Uses `--model claude-haiku-4-5-20251001` and a 15s timeout.
+async fn invoke_cli_for_activity(
+    cli_path: &str,
+    prompt: &str,
+    meta: &obj::MetaMapType,
+) -> Result<String, String> {
+    let auth_env: std::collections::HashMap<String, String> = match meta.get("cmd:env") {
+        Some(serde_json::Value::Object(obj_map)) => obj_map
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    };
+
+    let mut child = crate::server::cli_handlers::make_cli_cmd(cli_path)
+        .args(["-p", "--output-format", "stream-json", "--verbose",
+               "--model", "claude-haiku-4-5-20251001"])
+        .envs(&auth_env)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("failed to spawn activity CLI: {e}"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        stdin.write_all(prompt.as_bytes()).await
+            .map_err(|e| format!("activity CLI stdin write: {e}"))?;
+        stdin.shutdown().await
+            .map_err(|e| format!("activity CLI stdin shutdown: {e}"))?;
+    }
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        child.wait_with_output(),
+    )
+    .await
+    .map_err(|_| "activity CLI timed out after 15s".to_string())?
+    .map_err(|e| format!("activity CLI wait: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!("activity CLI exited with status {}", output.status));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut last_text = String::new();
+    for line in stdout.lines() {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if val.get("type").and_then(|v| v.as_str()) == Some("assistant") {
+            if let Some(content) = val.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for block in content {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                            last_text = text.trim().to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if last_text.is_empty() {
+        return Err("no text in activity CLI response".to_string());
+    }
+
+    Ok(last_text)
+}
+
 /// Extract meaningful text from raw stream-json lines for digest summarization.
 /// Skips system/result events and raw stream_event deltas; extracts assistant text
 /// and tool call summaries.
@@ -2901,3 +3161,123 @@ mod cross_channel_tests {
     }
 }
 
+
+#[cfg(test)]
+mod pane_open_reducer_tests {
+    use super::*;
+    use crate::backend::rpc_types::CommandPaneOpenData;
+    use crate::server::tests::test_state;
+    use agentmux_common::ipc::{Command, Event};
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        for ev in &evs {
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+        }
+        evs
+    }
+
+    /// Regression for #1681: the docked `pane.open` path created its block
+    /// store-only (`wcore::create_block`), so the block was absent from the
+    /// reducer's `state.blocks` and a later TearOffBlock / RedockFloatingPane
+    /// was rejected "block not found". Assert the block now lands in `srv_state`
+    /// and a tear-off of the freshly-opened pane succeeds end-to-end.
+    #[tokio::test]
+    async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
+        let state = test_state();
+
+        // Workspace + tab through the reducer (→ srv_state AND, via apply, wstore).
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        // Open a docked sysinfo pane (no required args).
+        let cmd = CommandPaneOpenData {
+            view: "sysinfo".into(),
+            file: None,
+            url: None,
+            cwd: None,
+            title: None,
+            tab_id: Some(tab_id.clone()),
+            split_direction: None,
+            split_reference_block_id: None,
+            focus: None,
+            tree_expanded: None,
+            floating: None,
+        };
+        let res = open_pane(&state, cmd).await.expect("open_pane docked");
+
+        // The block is now visible to the reducer (was the bug: store-only).
+        {
+            let s = state.srv_state.lock().await;
+            assert!(
+                s.blocks.contains_key(&res.block_id),
+                "docked pane.open block must be tracked in srv_state"
+            );
+        }
+
+        // And tearing it off no longer hits "block not found".
+        let r = crate::sagas::tear_off_block::run(
+            &state,
+            res.block_id.clone(),
+            tab_id.clone(),
+            ws_id.clone(),
+        )
+        .await;
+        assert!(r.is_ok(), "tear-off of an opened pane must succeed, got: {:?}", r.err());
+    }
+}
+
+/// Parse + validate a saved per-agent `ui:zoom` content blob for seeding a new
+/// agent block's `term:zoom`. Returns `Some(z)` only for a parseable,
+/// non-default (≠ 1.0), in-[0.5, 2.0] zoom (the range the frontend enforces in
+/// term.tsx); anything else (default, out of range, garbage) returns `None` so
+/// the new block opens at the default 1.0. See SPEC_AGENT_ZOOM_PERSISTENCE §4.2.
+fn parse_seed_zoom(raw: &str) -> Option<f64> {
+    let z = raw.trim().parse::<f64>().ok()?;
+    if (z - 1.0).abs() > f64::EPSILON && (0.5..=2.0).contains(&z) {
+        Some(z)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod agent_zoom_seed_tests {
+    use super::parse_seed_zoom;
+
+    #[test]
+    fn seeds_valid_non_default_zoom() {
+        assert_eq!(parse_seed_zoom("1.3"), Some(1.3));
+        assert_eq!(parse_seed_zoom("0.5"), Some(0.5));
+        assert_eq!(parse_seed_zoom("2"), Some(2.0));
+        assert_eq!(parse_seed_zoom("  1.4  "), Some(1.4)); // trims
+    }
+
+    #[test]
+    fn rejects_default_out_of_range_and_garbage() {
+        assert_eq!(parse_seed_zoom("1.0"), None, "default seeds nothing");
+        assert_eq!(parse_seed_zoom("1"), None, "default seeds nothing");
+        assert_eq!(parse_seed_zoom("2.5"), None, "above range");
+        assert_eq!(parse_seed_zoom("0.4"), None, "below range");
+        assert_eq!(parse_seed_zoom("abc"), None, "unparseable");
+        assert_eq!(parse_seed_zoom(""), None, "empty");
+    }
+}

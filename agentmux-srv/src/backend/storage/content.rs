@@ -170,17 +170,25 @@ impl Store {
     }
 
     /// Delete a specific content blob. Returns true if a row was deleted.
-    #[allow(dead_code)]
     pub fn agent_content_delete(
         &self,
         agent_id: &str,
         content_type: &str,
     ) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM db_agent_content WHERE agent_id=?1 AND content_type=?2",
-            params![agent_id, content_type],
-        )?;
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM db_agent_content WHERE agent_id=?1 AND content_type=?2",
+                params![agent_id, content_type],
+            )?
+        };
+        // conn dropped — re-mirror the definition so the global cross-channel
+        // record drops the just-deleted content key too. Symmetric with
+        // `agent_content_set`: without this a reset-to-default (e.g. ui:zoom)
+        // clears the local row but leaves the stale value in the shared
+        // def-registry, which a cross-channel/other-instance reopen would
+        // resurrect via the `agent_content_get` registry fallback. (P0.2b.)
+        self.registry_def_upsert(agent_id);
         Ok(rows > 0)
     }
 }

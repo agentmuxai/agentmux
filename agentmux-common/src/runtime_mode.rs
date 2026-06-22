@@ -18,10 +18,12 @@
 //! # Detection priority
 //!
 //! 1. `AGENTMUX_RUNTIME_MODE` env override (testing, CI).
-//! 2. Marker-based portable detection: `<exe-dir>/agentmux-portable.marker`
-//!    exists (also looks two levels up for macOS .app bundles). Written
-//!    by `scripts/package-portable.sh` at packaging time (see the
-//!    `printf '...' > "$PORTABLE/agentmux-portable.marker"` line).
+//! 2. Marker-based portable detection: an `agentmux-portable.marker` file
+//!    written by `scripts/package-portable.sh`. Looked for next to the
+//!    detecting exe, one level down in `runtime/` (the packaging puts it
+//!    there to keep the extract root clean; the launcher is at the root and
+//!    the host/srv run from `runtime/`), and two levels up for macOS .app
+//!    bundles.
 //! 3. Path-based dev detection: exe is under a known dev-build dir
 //!    (`dist/cef-dev/`, `target/debug/`, `target/release/`).
 //! 4. `AGENTMUX_DEV_BRANCH` env override (CI override for dev mode).
@@ -347,7 +349,16 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
 /// Falls back to `false` (i.e., not portable) if the dir isn't readable
 /// — installed-mode default is the safer guess when unsure.
 fn is_portable_marker_present(exe_dir: &Path) -> bool {
+    // Next to the detecting binary. Covers the host/srv (which live in
+    // `runtime/`, so `exe_dir` IS `runtime/`) and legacy portables that wrote
+    // the marker at the extract root next to the launcher.
     if exe_dir.join("agentmux-portable.marker").is_file() {
+        return true;
+    }
+    // The launcher sits at the extract root with the marker one level down in
+    // `runtime/` (the packaging keeps the root clean: just agentmux.exe +
+    // README + runtime/). Check there so root-level detection still works.
+    if exe_dir.join("runtime").join("agentmux-portable.marker").is_file() {
         return true;
     }
     // On macOS the launcher exe is at <Bundle>.app/Contents/MacOS/<exe>;
@@ -687,16 +698,26 @@ mod tests {
         // No marker → not portable.
         assert!(!is_portable_marker_present(exe_dir));
 
-        // With marker → portable.
+        // With marker next to the exe → portable (host/srv in runtime/, or a
+        // legacy portable with the marker at the root).
         std::fs::write(exe_dir.join("agentmux-portable.marker"), b"").unwrap();
         assert!(is_portable_marker_present(exe_dir));
+        std::fs::remove_file(exe_dir.join("agentmux-portable.marker")).unwrap();
 
-        // Marker two levels up (macOS .app bundle case).
+        // Marker inside runtime/ → portable (the launcher sits at the root and
+        // the marker lives one level down in runtime/). An empty runtime/ with
+        // no marker must NOT count (covered by
+        // current_with_only_runtime_subdir_is_not_portable).
+        std::fs::create_dir_all(exe_dir.join("runtime")).unwrap();
+        assert!(!is_portable_marker_present(exe_dir));
+        std::fs::write(exe_dir.join("runtime").join("agentmux-portable.marker"), b"").unwrap();
+        assert!(is_portable_marker_present(exe_dir));
+        std::fs::remove_file(exe_dir.join("runtime").join("agentmux-portable.marker")).unwrap();
+
+        // Marker two levels up (macOS .app bundle case). All markers are
+        // already removed above, so the bundle exe dir starts clean.
         let nested = exe_dir.join("Contents/MacOS");
         std::fs::create_dir_all(&nested).unwrap();
-        // Removing top-level marker would still allow detection via the
-        // bundle-root walk-up.
-        std::fs::remove_file(exe_dir.join("agentmux-portable.marker")).unwrap();
         assert!(!is_portable_marker_present(&nested));
         std::fs::write(exe_dir.join("agentmux-portable.marker"), b"").unwrap();
         assert!(is_portable_marker_present(&nested));

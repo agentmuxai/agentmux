@@ -42,7 +42,6 @@ fn now_ms() -> i64 {
 /// All fields are plain integers — no locking needed because each controller
 /// calls `record_line` from its single async stdout-reader task only.
 pub struct SessionStatsAccumulator {
-    /// Block ID this accumulator belongs to.
     block_id: String,
     /// Unix ms when the first line was seen; 0 = not yet set.
     start_ts_ms: i64,

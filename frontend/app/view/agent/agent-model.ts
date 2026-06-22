@@ -115,8 +115,12 @@ export class AgentViewModel implements ViewModel {
         this.viewText = (): HeaderElem[] => {
             const elems: HeaderElem[] = [];
 
-            // Session-topic label from Claude Code OSC window-title extraction
-            // (written by useBlockActivity via term:activity block metadata).
+            // Per-turn live mini-summary written by useAgentActivitySummary (Haiku
+            // call on every turn completion). The hook clears this to null on
+            // Submitting so the header goes blank while the agent is working.
+            // session:digest_summary is intentionally not used here — the digest is
+            // already surfaced as a pane accessory and would leak through as a stale
+            // label during active turns if used as a fallback.
             const activity = this.blockAtom()?.meta?.["term:activity"] as string | undefined;
             if (activity && activity.length > 0) {
                 elems.push({

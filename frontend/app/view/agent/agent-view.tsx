@@ -49,6 +49,7 @@ import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
 import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useBlockActivity } from "./hooks/useBlockActivity";
+import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
@@ -91,11 +92,10 @@ import "./agent-view.scss";
  * an agentId exists. If the layer wrapped only the presentation
  * view, every first-launch / template-launch call site would resolve
  * `useModalLayer()` to the outer tab-scope layer and the modal would
- * inert the whole tab instead of just this pane (codex P1 on PR
- * #1034). Wrapping at the wrapper covers both the pre-launch picker
- * AND the post-launch presentation view, so the pane-scope lock
- * holds across the entire pane lifecycle.
- * SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
+ * inert the whole tab instead of just this pane. Wrapping at the
+ * wrapper covers both the pre-launch picker AND the post-launch
+ * presentation view, so the pane-scope lock holds across the entire
+ * pane lifecycle. SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md.
  */
 export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Element => {
     const block = model.blockAtom;
@@ -117,8 +117,6 @@ AgentViewWrapper.displayName = "AgentViewWrapper";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
-
-// ── Presentation View ───────────────────────────────────────────────────────────
 
 const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agentId: string }): JSX.Element => {
     const block = model.blockAtom;
@@ -146,7 +144,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // list. A plain function-mutation (_hasAgentDef = () => ...) would
     // not create a tracking subscription — BlockFrame evaluates
     // endIconButtons once with the default () => false and the id-card
-    // button never appears (codex P1 on PR #1587).
+    // button never appears without a reactive signal atom.
     createEffect(() => {
         model._agentDefLoaded._set(currentAgent() != null);
     });
@@ -183,19 +181,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Register this pane with BOTH the document store and the pane-state
     // store SYNCHRONOUSLY in one atomic call, during component-body
-    // execution — before any hook's onMount can dispatch
-    // (codex P1 PR #681 round 1). The stores throw on dispatch to an
-    // unregistered slot to prevent silent reducer-command drops, so both
-    // slots must exist before useAgentStream / useHistoryPagination call
-    // their first dispatch from `onMount` handlers.
+    // execution — before any hook's onMount can dispatch. The stores throw
+    // on dispatch to an unregistered slot to prevent silent reducer-command
+    // drops, so both slots must exist before useAgentStream /
+    // useHistoryPagination call their first dispatch from `onMount` handlers.
     //
-    // PR-3 of the cascade follow-up sequence: registration is unified so
-    // a dispatcher can never observe the pane registered in one store
-    // but not the other. The half-registered window was the structural
-    // root of the cascade-mid-dispatch failure mode PR #878 detected and
-    // PR #989 migrated three call sites away from
-    // (docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md + the
-    // 2026-05-23 replaceChild retro). See agent-pane-registration.ts.
+    // Registration is unified so a dispatcher can never observe the pane
+    // registered in one store but not the other — the half-registered window
+    // was the structural root of a cascade-mid-dispatch failure mode. See
+    // agent-pane-registration.ts.
     //
     // `turnPhase` is the single-source-of-truth working/stopping signal
     // since PR G — the legacy `turnActive` / `stopping` /
@@ -203,9 +197,8 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // removed. The view binds the working animation to
     // `workingFromPhase(turnPhase)` and the "Stopping…" label to
     // `turnPhase.kind === "Interrupting"`.
-    // Capture the model returned by registerPane (PR-4 of the cascade
-    // follow-up) — passed into hooks/views so their dispatch callsites
-    // are default-safe against post-unmount races. The disposed flag on
+    // Capture the model returned by registerPane — passed into hooks/views
+    // so their dispatch callsites are default-safe against post-unmount races. The disposed flag on
     // the model flips synchronously inside `unregisterAgentPane` BEFORE
     // either store unregisters, so any deferred dispatcher landing in
     // the cleanup window observes disposed=true and silently drops.
@@ -313,8 +306,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // History pagination: dispatches HistoryLoaded into the agent-document-store
     // for the trailing 200 lines on mount + each user-triggered loadOlder.
     //
-    // Option E (PR #1007 backend, this PR frontend): pass the agent
-    // definition id so the snapshot fast-path reads from the
+    // Pass the agent definition id so the snapshot fast-path reads from the
     // agent-anchored zone (`agent:<defId>:current`) rather than the
     // per-block zone. `agentId` here is the AgentDefinition slug/UUID —
     // a non-empty string is guaranteed at this point by the `Show
@@ -323,11 +315,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // here on mount (before any async history work starts), so
     // useHistoryPagination can signal "history done" into the viewState
     // that lives inside AgentDocumentView. This drives the enter-animation
-    // gate on the streaming buffer. See PR #1212.
+    // gate on the streaming buffer.
     let historyReadyFn: (() => void) | undefined;
     const history = useHistoryPagination({
         blockId: model.blockId,
-        // PR-4 — see useAgentStream above; same rationale.
         model: paneModel,
         outputFormat,
         definitionId: agentId,
@@ -356,7 +347,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
     // `getDocument` is read-only; for writes we MUST dispatch through
-    // agent-document-store so slot.state stays in sync (codex P1 PR #681).
+    // agent-document-store so slot.state stays in sync.
     const [getDocument] = agentAtoms().documentAtom;
 
     // Agent-pane state-persistence (RFC #857 + spec
@@ -366,12 +357,11 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     //     the lossy 200-line NDJSON replay;
     // (b) during the pane lifetime, write a snapshot every 30s if the
     //     document changed since the last save. Bounds crash-loss to ~30s.
-    // Serialize concurrent writes through a single promise chain
-    // (codex P2 on #877 round 5): the 30s interval and the on-close
-    // cleanup can both call writeSnapshotNow() with their own captured
-    // `nodes` snapshot, then race through an async line-count RPC and
-    // write. Without ordering, the older interval write can resolve
-    // LAST and overwrite the close-time snapshot, losing recent nodes.
+    // Serialize concurrent writes through a single promise chain: the 30s
+    // interval and the on-close cleanup can both call writeSnapshotNow()
+    // with their own captured `nodes` snapshot, then race through an async
+    // line-count RPC and write. Without ordering, the older interval write
+    // can resolve LAST and overwrite the close-time snapshot, losing recent nodes.
     let inFlightSnapshot: Promise<void> = Promise.resolve();
     const writeSnapshotNow = () => {
         // Don't let a cross-block continuation pane (one that mounted against a
@@ -474,8 +464,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // transitioning its status. Defer is HANDLED INSIDE THE PANEL
     // (it minimizes locally) — per
     // docs/specs/SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md §7,
-    // the parent must NOT filter pending. The actual
-    // `tool:decision` IPC + sidecar stdin write lands in PR-3.
+    // the parent must NOT filter pending.
     const pendingDecisions = (): import("./types").ToolNode[] => {
         const docs = getDocument();
         const out: import("./types").ToolNode[] = [];
@@ -511,11 +500,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 "user",
             );
         }
-        // Send the decision to the sidecar so it can record + audit
-        // it (PR-3a). Actual delivery to the agent CLI — rules
-        // persistence (path 1) or interactive subprocess stdin (path
-        // 2) — is deferred to PR-3b/PR-4 per
-        // SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
+        // Send the decision to the sidecar so it can record + audit it.
+        // Delivery routes: rules persistence (path 1) or interactive
+        // subprocess stdin (path 2) per SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
         void RpcApi.ToolDecisionCommand(TabRpcClient, {
             blockid: model.blockId,
             request_id: decision.request_id,
@@ -582,6 +569,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Subscribe to Claude Code OSC window-title extractions and write them
     // to term:activity block metadata for the tab label.
     useBlockActivity({ blockId: model.blockId });
+
+    // Haiku-powered live mini-summary: generates a fresh phrase in the pane header
+    // on every completed agent turn, replacing the non-functional OSC path.
+    useAgentActivitySummary({
+        blockId: model.blockId,
+        turnPhase: agentAtoms().turnPhaseAtom[0],
+        getRootWidth: () => rootRef?.offsetWidth,
+    });
 
     // Subagent event subscriptions. See hooks/useSubagentEvents.ts.
     useSubagentEvents({
@@ -659,17 +654,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
     useAgentStream({
         blockId: model.blockId,
-        // PR-4 — pass the per-pane model so the hook's dispatch sites
-        // are default-safe against post-unmount races. Without the
-        // model, the hook had to import / remember the soft variant
-        // (`dispatchIfRegistered`) per call site; with the model the
-        // disposed-flag check is centralized.
+        // Pass the per-pane model so the hook's dispatch sites are
+        // default-safe against post-unmount races — the disposed-flag
+        // check is centralized in the model rather than per call site.
         model: paneModel,
         outputFormat: outputFormat(),
         documentAtom: agentAtoms().documentAtom,
-        // turnPhase is the SoT for "is a stop in flight" — replaces the
-        // legacy `stoppingAtom` dropped in PR G. useAgentStream needs
-        // it to detect user-initiated stops and append the
+        // turnPhase is the SoT for "is a stop in flight". useAgentStream
+        // needs it to detect user-initiated stops and append the
         // "⏹ Interrupted by user" row when session_end lands.
         turnPhaseAtom: agentAtoms().turnPhaseAtom,
         pendingMessagesAtom,
@@ -692,7 +684,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // See hooks/useAgentCommands.ts.
     const commands = useAgentCommands({
         blockId: model.blockId,
-        // PR-4 — see useAgentStream above; same rationale.
+        // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
         block,
         provider,
@@ -853,7 +845,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         });
     };
 
-    // ── Startup sequence ────────────────────────────────────────────────────────
     // On first connect (no existing session), assemble a structured startup
     // payload from agent-definition + Identity data and send it as the opening turn.
     // See docs/specs/SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md
@@ -896,8 +887,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             log("warn", `startup sequence failed: ${err}`, "warn");
         }
     };
-
-    // ── Jump-to-node ───────────────────────────────────────────────────────────
 
     // Signal-based jump command. AgentDocumentView reacts via a
     // createEffect and scrolls inside its own container — no mutable
@@ -1107,8 +1096,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 tool calls are gated by the CLI awaiting user approval.
                 Sits above the queue so it can't be missed. The panel
                 renders nothing when no ToolNode is in pending_approval.
-                v1 PR-2 wires the UI; PR-3 adds the IPC + sidecar stdin
-                write so decisions actually reach the subprocess.
                 Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §5. */}
             <AgentDecisionPanel
                 pending={pendingDecisions}

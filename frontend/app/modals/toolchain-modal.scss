@@ -120,6 +120,48 @@
     white-space: nowrap;
 }
 
+.toolchain-widget-desc {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+}
+
+.toolchain-widget-port {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.toolchain-widget-port-label {
+    font-size: 0.72rem;
+    opacity: 0.5;
+    min-width: 26px;
+}
+
+.toolchain-widget-port-input {
+    width: 60px;
+    font-size: 0.78rem;
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
+    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
+    color: inherit;
+    text-align: right;
+
+    &:focus {
+        outline: none;
+        border-color: var(--accent-color, rgba(88, 166, 255, 0.6));
+    }
+
+    // hide number spinners — the field is narrow, arrows would clutter it
+    &::-webkit-inner-spin-button,
+    &::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+    }
+    -moz-appearance: textfield;
+}
+
 .toolchain-row-cmd {
     display: flex;
     align-items: center;

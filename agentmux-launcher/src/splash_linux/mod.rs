@@ -53,6 +53,19 @@ pub(crate) const FADE_OUT: Duration = Duration::from_millis(160);
 pub(crate) static BRAIN_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/brain_rgba.bin"));
 include!(concat!(env!("OUT_DIR"), "/brain_dims.rs")); // pub const BRAIN_W / BRAIN_H (i32)
 
+// ── Footer (identity strip near the bottom) ─────────────────────────────────
+/// Muted footer text color (#8A8A93) on the #1A1A1F backdrop.
+pub(crate) const FOOTER_COLOR: [u8; 3] = [0x8A, 0x8A, 0x93];
+pub(crate) const FOOTER_PAD_TOP: i32 = 12;
+pub(crate) const FOOTER_LINE_GAP: i32 = 3;
+pub(crate) const FOOTER_PAD_BOTTOM: i32 = 12;
+/// Bottom band height: top pad + 2 glyph rows + inter-line gap + bottom pad.
+pub(crate) const FOOTER_H: i32 =
+    FOOTER_PAD_TOP + 2 * crate::splash_font::GLYPH_H as i32 + FOOTER_LINE_GAP + FOOTER_PAD_BOTTOM;
+/// Full card dimensions: brain + padding, with the footer band added to height.
+pub(crate) const CARD_W: i32 = BRAIN_W + PADDING * 2;
+pub(crate) const CARD_H: i32 = BRAIN_H + PADDING * 2 + FOOTER_H;
+
 enum Session {
     Wayland,
     X11,
@@ -155,9 +168,12 @@ pub(crate) fn render_frame(
     window_alpha: f32,
     radius: f32,
     bgr: bool,
+    footer: &[String],
 ) {
     let ox = (w - BRAIN_W) / 2;
-    let oy = (h - BRAIN_H) / 2;
+    // Center the brain in the brain region (above the footer band), not the
+    // whole card — otherwise the footer would push it off-center.
+    let oy = (h - FOOTER_H - BRAIN_H) / 2;
     for y in 0..h {
         for x in 0..w {
             // Backdrop, in RGB.
@@ -183,6 +199,13 @@ pub(crate) fn render_frame(
             buf[di + 3] = (a * 255.0) as u8;
         }
     }
+
+    // Footer: muted identity lines in the bottom band (static; fades with the card).
+    let footer_top = h - FOOTER_H + FOOTER_PAD_TOP;
+    for (i, line) in footer.iter().enumerate() {
+        let y = footer_top + i as i32 * (crate::splash_font::GLYPH_H as i32 + FOOTER_LINE_GAP);
+        crate::splash_text::draw_text_centered(buf, w, h, y, line, FOOTER_COLOR, window_alpha, bgr);
+    }
 }
 
 /// Spawn the startup splash. Sets `AGENTMUX_SPLASH_READY_FILE` (inherited by the
@@ -199,12 +222,17 @@ pub fn spawn() {
     // splash_mac.rs). Safe: the launcher is single-threaded at this point.
     std::env::set_var("AGENTMUX_SPLASH_READY_FILE", &ready_file);
 
+    // Footer identity, gathered once and clamped to the card width.
+    let info = crate::splash_info::SplashInfo::gather();
+    let max_chars = ((CARD_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
+    let footer = info.footer_lines(max_chars);
+
     match detect() {
         Session::X11 => {
             std::thread::Builder::new()
                 .name("agentmux-splash".into())
                 .spawn(move || {
-                    if let Err(e) = x11::run(&ready_file) {
+                    if let Err(e) = x11::run(&ready_file, footer) {
                         eprintln!("[splash] x11 backend disabled: {e}");
                     }
                 })
@@ -214,7 +242,7 @@ pub fn spawn() {
             std::thread::Builder::new()
                 .name("agentmux-splash".into())
                 .spawn(move || {
-                    if let Err(e) = wayland::run(&ready_file) {
+                    if let Err(e) = wayland::run(&ready_file, footer) {
                         eprintln!("[splash] wayland backend disabled: {e}");
                     }
                 })

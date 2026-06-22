@@ -2,42 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Type definitions for the browser-pane-state reducer.
+ * Type definitions for the browser-pane-state reducer (multi-tab shape).
  *
- * **Phase 1A — multi-tab scaffolding (slice #9 extension).**
- * See `specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md` §"State management".
- *
- * The slice was originally per-pane single-URL — `url`, `title`,
- * `loading`, `error`, `canGoBack`, `canGoForward`, `faviconUrl` all
- * lived directly on `BrowserPaneState`. Phase 1A moves those into a
- * `BrowserTab` record and introduces a list of tabs per pane, modelled
- * on the slice #10 (editor-tabs) shape.
- *
- * Pane-level state retained:
- *   - `closed` — terminal flag from `dispose()`. Once true every command
- *     is a no-op. (Existing invariant; preserved verbatim.)
- *
- * Per-tab state (was pane-level pre-Phase-1A):
- *   - `url` / `title` / `faviconUrl` — display + identity
- *   - `loading` / `error` — page-load tracking
- *   - `canGoBack` / `canGoForward` — history navigability
- *   - `titleOverridden` / `faviconOverridden` — optimistic-header
- *     placeholder vs. real-CEF-value tracking flags (carried per-tab
- *     so each tab keeps its own placeholder/real-value distinction)
- *
- * New per-tab state (Phase 1A introductions):
- *   - `id` — uuid, stable across reorders
- *   - `isPreview` — VS Code-style preview slot; all tabs pinned in
- *     Phase 1 but the field is reserved for Phase 2 "middle-click
- *     opens preview" semantics
- *   - `backendCreated` — tracker; flips true once the BrowserView
- *     has been created backend-side. Set by the view via
- *     `TabBackendCreated`; defaults false so hydrated tabs are
- *     lazy-created on first activation.
- *
- * Backend-driven commands carry `source: "backend"` so the reducer
- * can suppress the `navigate` event emission and prevent the
- * OnAddressChange-becomes-Navigate echo loop documented in slice #10.
+ * Each pane holds an ordered list of `BrowserTab` records; pane-level state
+ * retains only `closed` (terminal flag — once true, all commands are no-ops).
+ * Backend-driven commands carry `source: "backend"` to suppress the
+ * navigate-event echo loop.
  */
 
 /** A single browsing context within a Browser pane. */
@@ -238,7 +208,6 @@ export interface HydratedBrowserTab {
 }
 
 export type BrowserPaneCommand =
-    // ─── Tab list management (new in Phase 1A) ─────────────────────
     /**
      * Append a new tab and (by default) activate it. `mode: "background"`
      * appends without activating — used for Phase 2 middle-click-link
@@ -272,7 +241,6 @@ export type BrowserPaneCommand =
           toIndex: number;
           source?: BrowserCommandSource;
       }
-    // ─── Per-tab backend-driven updates (new in Phase 1A) ──────────
     /** Backend reported a URL change (typically `OnAddressChange`). */
     | {
           type: "TabUrlChanged";
@@ -319,7 +287,6 @@ export type BrowserPaneCommand =
           activeTabId: string | null;
           source?: BrowserCommandSource;
       }
-    // ─── Existing commands (pre-Phase-1A) — now operate on active tab
     /**
      * The user (or the host's link-click forwarding) initiated a
      * navigation in the active tab. Sets loading=true, clears error.
@@ -383,7 +350,6 @@ export type BrowserPaneCommand =
     | { type: "Disposed" };
 
 export type BrowserPaneEvent =
-    // ─── Tab list events (new in Phase 1A) ────────────────────────
     | { type: "tab-opened"; tabId: string; url: string; atIndex: number }
     | { type: "tab-closed"; tabId: string; url: string }
     | { type: "tab-activated"; tabId: string }
@@ -418,7 +384,6 @@ export type BrowserPaneEvent =
           type: "hydrate-suppressed";
           reason: "duplicate-tab-ids" | "empty-tabs-with-active-id";
       }
-    // ─── Existing events (pre-Phase-1A) ───────────────────────────
     /** Active-tab navigate intent. Suppressed when the originating
      *  command carried `source: "backend"` (echo-loop guard). */
     | { type: "navigate"; url: string }

@@ -78,6 +78,10 @@ wrap_window_delegate! {
                     if !raw_hwnd.is_null() {
                         crate::commands::window_pool::init_pool_window_hwnd(label, raw_hwnd);
                     }
+                    // Cache the CEF Views Window itself (valid here; lost post-load
+                    // via browser_view.window()) so the promote can run the
+                    // macOS-parity set_bounds()+show() visibility fix.
+                    crate::commands::window_pool::cache_pool_window_view(label, window);
                 }
             }
 
@@ -435,6 +439,25 @@ pub fn get_monitor_work_area_physical(px: i32, py: i32) -> Option<(i32, i32, i32
     }
 }
 
+/// Effective DPI scale (1.0 == 96 DPI == 100%) of the monitor under `(px, py)`
+/// in physical px. Used to convert physical-pixel rects to DIP for CEF Views
+/// `set_bounds` (which works in DIP). Returns 1.0 if the monitor can't be found.
+#[cfg(target_os = "windows")]
+pub fn dpi_scale_at(px: i32, py: i32) -> f32 {
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+    unsafe {
+        let pt = windows_sys::Win32::Foundation::POINT { x: px, y: py };
+        let mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+        if mon.is_null() {
+            return 1.0;
+        }
+        let (mut dx, mut dy) = (96u32, 96u32);
+        let _ = GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+        (dx as f32 / 96.0).max(0.1)
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub fn get_monitor_work_area(_px: i32, _py: i32) -> Option<(i32, i32, i32, i32)> {
     // TODO: Use NSScreen.main.visibleFrame for proper work area (minus Dock/menu bar).
@@ -607,6 +630,30 @@ wrap_app! {
                 //                                  → content-autofill.googleapis.com
                 // The last two were the actual Google QUIC traffic observed via
                 // net-log; AgentMux makes no such calls itself.
+                //
+                //   MacAppCodeSignClone — Chromium's "code-sign safe updates"
+                //     feature: at startup it clonefile()s the whole .app into a
+                //     temp dir on the boot volume so an in-place auto-update can
+                //     swap the on-disk bundle without invalidating the running
+                //     process's code signature. clonefile() is single-volume, so
+                //     when the bundle runs from a *read-only DMG* (a different
+                //     volume from the temp dir) the clone fails EXDEV and Chromium
+                //     CHECK-aborts inside cef_initialize → SIGTRAP, before any
+                //     window is created. AgentMux ships its own launcher/updater
+                //     and sets --disable-component-update, so Chromium never
+                //     performs an in-place swap of its own bundle → the clone
+                //     buys nothing and only adds this failure mode (plus a >1 GB
+                //     temp copy). Disabling it lets the packaged app launch from
+                //     any volume, DMG included.
+                //     NOTE on timing: unlike the MachPort policy below (read
+                //     BEFORE FeatureList init — runtime flag too late, needs the
+                //     source patch), this is a genuine base::Feature, evaluated
+                //     AFTER FeatureList init, so the --disable-features switch
+                //     *should* apply — same path as the working entries above.
+                //     The clone runs early, though, so VERIFY by launching a
+                //     fresh build from a DMG; if it proves too-late like MachPort,
+                //     fall back to a code_sign_clone_manager source patch
+                //     (cf. docs/cef-patches/ for the established pattern).
                 let key = CefString::from("disable-features");
                 // MachPortRendezvous{Validate,Enforce}PeerRequirements: belt-and-
                 // suspenders flags kept for defence in depth. NOTE: the actual fix
@@ -618,7 +665,7 @@ wrap_app! {
                 let val = CefString::from(
                     "CalculateNativeWinOcclusion,MediaRouter,PreconnectToSearch,\
                      AutofillServerCommunication,MachPortRendezvousValidatePeerRequirements,\
-                     MachPortRendezvousEnforcePeerRequirements",
+                     MachPortRendezvousEnforcePeerRequirements,MacAppCodeSignClone",
                 );
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 

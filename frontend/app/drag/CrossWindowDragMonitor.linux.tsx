@@ -132,8 +132,11 @@ async function handleCrossWindowDragEnd(
         dragType = "tab";
     }
 
+    // Hoisted so the catch can release the session even when startCrossDrag
+    // succeeded but a later step (TearOffBlock / drop) threw.
+    let dragId: string | null = null;
     try {
-        const dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
+        dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
         const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
 
         if (targetWindow && targetWindow !== src) {
@@ -147,6 +150,9 @@ async function handleCrossWindowDragEnd(
         }
     } catch (e) {
         Logger.error("dnd:cross", "cross-window drag error", { error: String(e), dragType, dragPayloadForApi });
+        // CRITICAL: release the host drag session so a failed drop/tear-off
+        // can't jam every future tear-off with "drag session already active".
+        if (dragId) { try { await api.cancelCrossDrag(dragId); } catch {} }
     }
 }
 

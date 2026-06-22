@@ -139,9 +139,7 @@ pub type ConnFactory =
 pub struct ShellController {
     /// Controller type: "shell" or "cmd".
     controller_type: String,
-    /// Parent tab UUID.
     tab_id: String,
-    /// Block UUID.
     block_id: String,
     /// Prevents concurrent run() calls.
     run_lock: Arc<AtomicBool>,

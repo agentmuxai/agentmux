@@ -40,11 +40,11 @@ use smithay_client_toolkit::reexports::client::{
 };
 
 use super::{
-    fade_alpha, min_hold, pulse_alpha, render_frame, BRAIN_H, BRAIN_W, CORNER_RADIUS_PX,
-    DISMISS_TIMEOUT, PADDING,
+    fade_alpha, min_hold, pulse_alpha, render_frame, CARD_H, CARD_W, CORNER_RADIUS_PX,
+    DISMISS_TIMEOUT,
 };
 
-pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
+pub(super) fn run(ready_file: &Path, footer: Vec<String>) -> Result<(), Box<dyn Error>> {
     let conn = Connection::connect_to_env()?;
     let (globals, mut event_queue) = registry_queue_init::<SplashState>(&conn)?;
     let qh = event_queue.handle();
@@ -53,8 +53,8 @@ pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
     let shm = Shm::bind(&globals, &qh)?;
     let xdg_shell = XdgShell::bind(&globals, &qh)?;
 
-    let w = (BRAIN_W + PADDING * 2) as u32;
-    let h = (BRAIN_H + PADDING * 2) as u32;
+    let w = CARD_W as u32;
+    let h = CARD_H as u32;
 
     let surface = compositor.create_surface(&qh);
     let window = xdg_shell.create_window(surface, WindowDecorations::None, &qh);
@@ -80,6 +80,7 @@ pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
         ready_file: ready_file.to_path_buf(),
         fade_start: None,
         exit: false,
+        footer,
     };
 
     while !state.exit {
@@ -101,6 +102,7 @@ struct SplashState {
     ready_file: PathBuf,
     fade_start: Option<Instant>,
     exit: bool,
+    footer: Vec<String>,
 }
 
 impl SplashState {
@@ -148,6 +150,7 @@ impl SplashState {
             window_alpha,
             CORNER_RADIUS_PX,
             /* bgr = */ true,
+            &self.footer,
         );
 
         let surface = self.window.wl_surface();
