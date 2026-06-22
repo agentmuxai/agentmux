@@ -561,6 +561,15 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 let port = port_raw as u16;
                 let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("/").to_string();
+                // Reject paths that could escape localhost: must start with '/',
+                // no '@' (user-info injection: 127.0.0.1@evil.com), no backslash,
+                // no protocol-relative '//' prefix.
+                if !path.starts_with('/') || path.contains('@') || path.contains('\\') || path.starts_with("//") {
+                    return Ok(Some(serde_json::json!({
+                        "ok": false, "status_code": null, "body": null,
+                        "error": "invalid path"
+                    })));
+                }
                 let method = data
                     .get("method")
                     .and_then(|v| v.as_str())
