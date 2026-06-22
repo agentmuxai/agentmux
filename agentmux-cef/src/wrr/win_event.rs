@@ -255,9 +255,17 @@ unsafe fn count_visible_user_windows() -> usize {
         if !classify::is_app_class(&read_class_name(hwnd)) {
             return 1;
         }
-        let mut rect: RECT = std::mem::zeroed();
-        if GetWindowRect(hwnd, &mut rect) != 0 && rect.left < OFFSCREEN_POOL_THRESHOLD_X {
-            return 1; // off-screen warm-pool window — not user-visible
+        // A MINIMIZED window's GetWindowRect also reports (-32000, -32000) on
+        // Win32, so guard the off-screen pool exclusion with IsIconic: a
+        // minimized user window stays counted (minimize ≠ close — else
+        // minimizing the last window + any HIDE churn would quit the instance,
+        // reagent P1 #1676); only a NON-minimized off-screen window is a
+        // warm-pool member.
+        if IsIconic(hwnd) == 0 {
+            let mut rect: RECT = std::mem::zeroed();
+            if GetWindowRect(hwnd, &mut rect) != 0 && rect.left < OFFSCREEN_POOL_THRESHOLD_X {
+                return 1; // off-screen warm-pool window — not user-visible
+            }
         }
         ctx.count += 1;
         1
