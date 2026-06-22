@@ -815,7 +815,28 @@ fn queued_background_does_not_start_after_drain_begins() {
 // `client::on_before_close` with no test coverage; these pin the level-triggered
 // `reconcile_quit` decision so a gate regression can't ship silently again.
 
-use super::quit::{reconcile_quit, should_begin_drain, user_creation_in_flight};
+use super::quit::{is_live_user_window, reconcile_quit, should_begin_drain, user_creation_in_flight};
+
+/// Registered browsers are classified by the authoritative `is_pool` flag, NOT
+/// by label — a PROMOTED pool window keeps its `window-pool-*` label but is
+/// `is_pool:false`, i.e. the user's real live window, and MUST count (reagent P1
+/// #1676). Unpromoted pool windows (`is_pool:true`) and panes never count.
+#[test]
+fn is_live_user_window_classifies_by_is_pool_not_label() {
+    use crate::state::BrowserKind;
+    assert!(
+        is_live_user_window(&BrowserKind::TopLevel { is_pool: false }),
+        "promoted pool window / main / new window keeps the instance alive"
+    );
+    assert!(
+        !is_live_user_window(&BrowserKind::TopLevel { is_pool: true }),
+        "unpromoted warm-pool window does not"
+    );
+    assert!(
+        !is_live_user_window(&BrowserKind::Pane { block_id: "b1".into() }),
+        "browser-pane child never does"
+    );
+}
 
 /// The full decision truth table (CEF-free pure core).
 #[test]
@@ -846,7 +867,9 @@ fn should_begin_drain_truth_table() {
 #[test]
 fn user_creation_in_flight_ignores_background_labels() {
     let mut state = HostState::default();
-    for bg in ["window-pool-abc", "floating-pool-xyz", "browser-pane-1"] {
+    // Pool refill, browser-pane, warm floating-pool, AND broad floating- tear-off
+    // are all background — none blocks drain (mirrors orphan_reconcile.rs:302-304).
+    for bg in ["window-pool-abc", "browser-pane-1", "floating-pool-xyz", "floating-tearoff-7"] {
         update(
             &mut state,
             HostCommand::EnqueuePendingWindowCreation { entry: entry(bg) },
@@ -854,7 +877,7 @@ fn user_creation_in_flight_ignores_background_labels() {
     }
     assert!(
         !user_creation_in_flight(&state),
-        "background (pool/pane) creations must not block drain"
+        "background (pool/pane/floating) creations must not block drain"
     );
     update(
         &mut state,

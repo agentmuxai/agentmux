@@ -59,32 +59,45 @@ pub(super) fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
 // executor — is the explicit next step. Hence `#[allow(dead_code)]`, matching the
 // reducer-scaffolding convention documented in `state.rs`.
 
-/// Labels for background (non-user-visible) browsers / pending creations: a
-/// warm-pool tab window, a warm-pool floating pane, or a browser-pane child
-/// view — none keeps the instance alive. (Spec Stage 1 upgrades this prefix test
-/// to a typed `source`/`BrowserKind` field; this mirrors the predicate
-/// `commands::orphan_reconcile` already trusts in production, so it is a faithful
-/// minimal stopgap, not a new taxonomy.)
+/// Background PENDING-CREATION labels — warm-pool tab refills (`window-pool-`),
+/// browser-pane children (`browser-pane-`), and floating panes (`floating-`, the
+/// BROAD prefix). A pending creation with one of these prefixes is not a user
+/// "New Window" and must not block drain. Mirrors EXACTLY the exclusion
+/// `commands::orphan_reconcile` applies to `pending_window_creations`
+/// (orphan_reconcile.rs:302-304) — including the broad `floating-`: a #810/#811
+/// failure path can leak a pending `floating-` entry, and gating drain on it
+/// would block reconciliation forever (reagent P2 #1676).
+///
+/// Used ONLY for pending creations. Registered browsers are classified by
+/// `is_live_user_window` (the `is_pool` flag), NOT by label — see its doc.
 #[allow(dead_code)]
-pub(super) fn is_background_creation_label(label: &str) -> bool {
+fn is_background_pending_creation_label(label: &str) -> bool {
     label.starts_with("window-pool-")
-        || label.starts_with("floating-pool-")
         || label.starts_with("browser-pane-")
+        || label.starts_with("floating-")
+}
+
+/// Whether a registered browser is a live, user-visible top-level window — one
+/// that keeps the instance alive. The authoritative signal is the per-browser
+/// `BrowserKind::is_pool` flag, flipped `false` atomically at promote time
+/// (`pool.rs`). We must NOT classify by label here: a PROMOTED pool window keeps
+/// its `window-pool-` label forever yet IS the user's real window — classifying
+/// by label would drop it and quit with a window open (reagent P1 #1676).
+/// Unpromoted pool windows are `is_pool: true`; panes are `BrowserKind::Pane`;
+/// both are correctly excluded by the `is_pool: false` match.
+#[allow(dead_code)]
+pub(super) fn is_live_user_window(kind: &BrowserKind) -> bool {
+    matches!(kind, BrowserKind::TopLevel { is_pool: false })
 }
 
 /// Count of live, user-visible top-level windows — the windows that keep the
-/// instance alive. A promoted pool window has `is_pool == false` (flipped
-/// atomically at promote time, `pool.rs`), so it counts; an unpromoted pool
-/// window (`is_pool == true`) does not; `BrowserKind::Pane` children never do.
+/// instance alive.
 #[allow(dead_code)]
 pub(super) fn count_live_user_windows(state: &HostState) -> usize {
     state
         .browsers
-        .iter()
-        .filter(|(label, h)| {
-            matches!(h.kind, BrowserKind::TopLevel { is_pool: false })
-                && !is_background_creation_label(label)
-        })
+        .values()
+        .filter(|h| is_live_user_window(&h.kind))
         .count()
 }
 
@@ -93,13 +106,13 @@ pub(super) fn count_live_user_windows(state: &HostState) -> usize {
 /// invisible to `count_live_user_windows` — which is exactly why the gate must
 /// consult the PRE-registration `pending_window_creations` queue (spec §10.2):
 /// draining while a user's "New Window" is still loading would quit the instance
-/// out from under it. Background creations (pool refill, panes) do not block drain.
+/// out from under it. Background creations (pool refill / panes) do not block drain.
 #[allow(dead_code)]
 pub(super) fn user_creation_in_flight(state: &HostState) -> bool {
     state
         .pending_window_creations
         .iter()
-        .any(|p| !is_background_creation_label(&p.label))
+        .any(|p| !is_background_pending_creation_label(&p.label))
 }
 
 /// Pure decision: should the host begin draining NOW? `Some(reason)` iff the host
