@@ -151,12 +151,26 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            // Use try_close_browser rather than window.close() — the latter
-            // calls Widget::Close directly, which CHECKs !on_call_stack_ and
-            // aborts if the widget is already being destroyed (e.g. the OS
-            // sent windowShouldClose on macOS while our close_window IPC task
-            // was already queued). try_close_browser goes through do_close
-            // which sets is_closing and is idempotent on re-entry.
+            use cef::ImplWindow;
+            // CEF Views: close the WINDOW (CefWindow::close), which routes through
+            // WindowDelegate::can_close (app.rs) → try_close_browser → on_before_close
+            // → host quit cascade. Calling try_close_browser DIRECTLY on a
+            // Views-hosted browser tears the Window down WITHOUT firing
+            // on_before_close, so the browser is never unregistered and the host
+            // never quits — the orphaned-tree regression (Discussion #1680).
+            //
+            // The historical reason this used try_close_browser — window.close()'s
+            // Widget::Close CHECKs !on_call_stack_ and aborts if the widget is
+            // already being destroyed (e.g. macOS windowShouldClose racing this
+            // queued IPC task) — is handled by the is_closed() guard below.
+            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                if window.is_closed() == 0 {
+                    window.close();
+                }
+                return;
+            }
+            // Fallback: no CefWindow for this label (non-Views path / pre-init
+            // teardown) — close the browser handle directly.
             if let Some(mut browser) = self.state.get_browser(&self.label) {
                 if let Some(host) = browser.host() {
                     host.try_close_browser();

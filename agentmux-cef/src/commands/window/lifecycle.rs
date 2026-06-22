@@ -38,9 +38,22 @@ use cef::{ImplBrowser, ImplBrowserHost};
 pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
 
+    // Close via the registered browser's CefWindow (post_close_window →
+    // CloseWindowTask → window.close()) when one exists — reliable for the CEF
+    // *Views* main window, whose window_handle() is NULL on Win32 so the old
+    // WM_CLOSE-to-resolved-HWND path posted to a fragile EnumWindows guess that
+    // hid the frame without closing the browser (on_before_close never fired →
+    // host never quit → orphaned process tree). Fall back to WM_CLOSE-by-HWND
+    // only for labels with no registered browser (e.g. a floating-pane outer
+    // popup HWND tracked only in the window_hwnds cache). See Discussion #1680.
+    if state.get_browser(label).is_some() {
+        crate::ui_tasks::post_close_window(state, label);
+        return Ok(serde_json::Value::Null);
+    }
+
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
         let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
