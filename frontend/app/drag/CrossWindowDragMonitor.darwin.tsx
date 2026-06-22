@@ -9,6 +9,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { beginBlockMoveGuard } from "@/app/workspace/block-move-guard";
 import { invokeCommand } from "@/app/platform/ipc";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
@@ -132,8 +133,11 @@ async function handleCrossWindowDragEnd(
         dragType = "tab";
     }
 
+    // Hoisted so the catch can release the session even when startCrossDrag
+    // succeeded but a later step (TearOffBlock / drop) threw.
+    let dragId: string | null = null;
     try {
-        const dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
+        dragId = await api.startCrossDrag(dragType, src, workspace.oid, activeTabId, dragPayloadForApi);
         const targetWindow = await api.updateCrossDrag(dragId, cursorPoint.x, cursorPoint.y);
 
         if (targetWindow && targetWindow !== src) {
@@ -147,6 +151,9 @@ async function handleCrossWindowDragEnd(
         }
     } catch (e) {
         Logger.error("dnd:cross", "cross-window drag error", { error: String(e), dragType, dragPayloadForApi });
+        // CRITICAL: release the host drag session so a failed drop/tear-off
+        // can't jam every future tear-off with "drag session already active".
+        if (dragId) { try { await api.cancelCrossDrag(dragId); } catch {} }
     }
 }
 
@@ -167,6 +174,11 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
+        // Arm the block-move guard BEFORE TearOffBlock + the source-node
+        // removal it triggers: that removal fires tabcontent's onNodeDelete,
+        // which would otherwise DeleteBlock the just-moved block and leave the
+        // new floater showing only the empty-tab logo (#1662, race).
+        beginBlockMoveGuard(3000);
         // PANE → chromeless floating window (just the pane: no tab bar, no
         // widget bar). Mirrors the Windows pane branch
         // (CrossWindowDragMonitor.win32.tsx). `TearOffBlock` moves the block
