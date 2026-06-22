@@ -40,6 +40,12 @@ export interface ExternalWidget {
     defaultPort: number;
     /** URL path to GET for liveness check — must return 2xx when healthy. */
     healthCheckPath: string;
+    /**
+     * If set, the response body must contain this substring for the health
+     * check to pass. Used to distinguish services that share a default port
+     * (e.g. Flowise and Grafana both default to 3000).
+     */
+    healthCheckBodyContains?: string;
     /** URL path to embed (relative to http://127.0.0.1:<port>). */
     embedPath: string;
     license: string;
@@ -123,6 +129,7 @@ export const EXTERNAL_WIDGETS: ExternalWidget[] = [
         install: { kind: "npm", package: "flowise" },
         defaultPort: 3000,
         healthCheckPath: "/api/v1/ping",
+        healthCheckBodyContains: "pong",
         embedPath: "/",
         license: "Apache-2.0",
         docsUrl: "https://docs.flowiseai.com/",
@@ -167,6 +174,7 @@ export const EXTERNAL_WIDGETS: ExternalWidget[] = [
         install: { kind: "manual" },
         defaultPort: 3000,
         healthCheckPath: "/api/health",
+        healthCheckBodyContains: "database",
         embedPath: "/",
         license: "AGPL-3.0",
         docsUrl: "https://grafana.com/docs/grafana/latest/setup-grafana/installation/",

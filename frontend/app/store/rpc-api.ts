@@ -1474,9 +1474,12 @@ class RpcApiType {
     // command "widget.health" [call] — HTTP liveness probe for an external widget
     // server on localhost. Returns { healthy, status_code } — never throws on
     // connection failure so the UI can show a "not running" pill gracefully.
+    // health_check_body_contains: optional substring the response body must contain;
+    // used to distinguish services that share a default port (e.g. Flowise/Grafana
+    // both default to 3000).
     WidgetHealthCommand(
         client: RpcClient,
-        data: { port: number; health_check_path: string },
+        data: { port: number; health_check_path: string; health_check_body_contains?: string },
         opts?: RpcOpts,
     ): Promise<{ healthy: boolean; status_code: number | null }> {
         return client.rpcCall("widget.health", data, opts);
