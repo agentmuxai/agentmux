@@ -600,6 +600,27 @@ async fn handle_object_service(state: &AppState, call: &WebCallType) -> WebRetur
                 }
             }
             publish_events(state, &events);
+            // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): when an
+            // agent block's `term:zoom` changes, mirror it (debounced) into the
+            // agent's per-agent `ui:zoom` content so the zoom survives the block
+            // and is restored at `agent.open`. Only blocks carrying `agentId`
+            // (agent panes) participate; everything else is untouched. A `null`
+            // `term:zoom` (the frontend's reset-to-1.0 convention) deletes the
+            // saved value so a default agent stores nothing.
+            if oref.otype == OTYPE_BLOCK && meta_update.contains_key("term:zoom") {
+                if let Ok(block) = store.must_get::<Block>(&oref.oid) {
+                    let agent_id = block
+                        .meta
+                        .get("agentId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if !agent_id.is_empty() {
+                        let zoom = meta_update.get("term:zoom").and_then(|v| v.as_f64());
+                        schedule_agent_zoom_mirror(store.clone(), agent_id, zoom);
+                    }
+                }
+            }
             // Return the updated object so the frontend WOS cache stays in sync.
             if oref.otype == OTYPE_BLOCK {
                 if let Ok(block) = store.must_get::<Block>(&oref.oid) {
@@ -2789,6 +2810,56 @@ pub(crate) fn update_object_meta(
 /// events. Locks the reducer mutex briefly; the lock is released
 /// before any I/O (caller is responsible for publishing the events
 /// to the broadcast bus).
+/// Per-`agent_id` debounce generation for zoom mirroring. Each `term:zoom`
+/// change bumps the agent's generation; the spawned trailing-write task only
+/// commits if its captured generation is still current 300ms later, so a
+/// Ctrl+Wheel burst collapses into a single durable write (+ one global
+/// def-registry re-mirror). See SPEC_AGENT_ZOOM_PERSISTENCE §4.3.
+static ZOOM_MIRROR_GEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
+    std::sync::OnceLock::new();
+
+fn zoom_mirror_gen() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> {
+    ZOOM_MIRROR_GEN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Debounced trailing mirror of an agent block's `term:zoom` into the per-agent
+/// `ui:zoom` content blob. `zoom = Some(z)` upserts; `zoom = None` (term:zoom
+/// reset to null / 1.0) deletes the row so a default agent persists nothing.
+fn schedule_agent_zoom_mirror(
+    store: std::sync::Arc<crate::backend::storage::store::Store>,
+    agent_id: String,
+    zoom: Option<f64>,
+) {
+    let generation = {
+        let mut gens = zoom_mirror_gen().lock().unwrap();
+        let g = gens.entry(agent_id.clone()).or_insert(0);
+        *g += 1;
+        *g
+    };
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // Superseded by a newer zoom change for this agent → drop this write.
+        if zoom_mirror_gen().lock().unwrap().get(&agent_id).copied() != Some(generation) {
+            return;
+        }
+        let now = chrono::Utc::now().timestamp_millis();
+        let result = match zoom {
+            Some(z) => store.agent_content_set(
+                &crate::backend::storage::store::AgentContent {
+                    agent_id: agent_id.clone(),
+                    content_type: "ui:zoom".to_string(),
+                    content: format!("{}", z),
+                    updated_at: now,
+                },
+            ),
+            None => store.agent_content_delete(&agent_id, "ui:zoom").map(|_| ()),
+        };
+        if let Err(e) = result {
+            tracing::warn!(agent_id = %agent_id, error = %e, "[zoom] agent zoom mirror write failed");
+        }
+    });
+}
+
 pub(crate) async fn dispatch_to_reducer(
     state: &AppState,
     cmd: agentmux_common::ipc::Command,
@@ -3099,6 +3170,78 @@ mod create_window_seed_tests {
             result.is_ok(),
             "tear-off from a freshly-created window must succeed, got: {:?}",
             result.err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod agent_zoom_mirror_tests {
+    use super::schedule_agent_zoom_mirror;
+    use crate::backend::storage::store::{AgentContent, AgentDefinition, Store};
+    use std::sync::Arc;
+
+    /// `db_agent_content.agent_id` has a FK to the agent-definitions table, so a
+    /// real mirror only ever fires for an existing agent (the def was loaded at
+    /// agent.open). Seed a minimal def so the test mirrors that invariant.
+    fn seed_agent_def(store: &Store, id: &str) {
+        let mut def: AgentDefinition = serde_json::from_value(serde_json::json!({
+            "id": id,
+            "name": id,
+            "icon": "sparkles",
+            "provider": "claude",
+            "description": "",
+            "created_at": 1,
+        }))
+        .expect("build minimal AgentDefinition");
+        store.agent_def_insert(&mut def).expect("insert agent def");
+    }
+
+    /// A Ctrl+Wheel burst of `term:zoom` changes must collapse into a single
+    /// durable write of the FINAL value (SPEC_AGENT_ZOOM_PERSISTENCE §4.3).
+    #[tokio::test]
+    async fn debounced_mirror_persists_only_final_value() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let agent = "agent-zoom-burst";
+        seed_agent_def(&store, agent);
+
+        schedule_agent_zoom_mirror(store.clone(), agent.into(), Some(1.1));
+        schedule_agent_zoom_mirror(store.clone(), agent.into(), Some(1.2));
+        schedule_agent_zoom_mirror(store.clone(), agent.into(), Some(1.4));
+
+        // Nothing committed before the debounce window elapses.
+        assert!(store.agent_content_get(agent, "ui:zoom").unwrap().is_none());
+
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        let saved = store
+            .agent_content_get(agent, "ui:zoom")
+            .unwrap()
+            .expect("zoom persisted after debounce");
+        assert_eq!(saved.content, "1.4", "only the final zoom of the burst persists");
+    }
+
+    /// `term:zoom` reset to null/1.0 → `None` → delete the saved row so a
+    /// default agent stores nothing.
+    #[tokio::test]
+    async fn reset_to_default_deletes_saved_zoom() {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let agent = "agent-zoom-reset";
+        seed_agent_def(&store, agent);
+        store
+            .agent_content_set(&AgentContent {
+                agent_id: agent.into(),
+                content_type: "ui:zoom".into(),
+                content: "1.5".into(),
+                updated_at: 1,
+            })
+            .unwrap();
+
+        schedule_agent_zoom_mirror(store.clone(), agent.into(), None);
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        assert!(
+            store.agent_content_get(agent, "ui:zoom").unwrap().is_none(),
+            "reset-to-default removes the persisted zoom"
         );
     }
 }
