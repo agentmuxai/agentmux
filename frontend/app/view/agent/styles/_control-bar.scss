@@ -67,6 +67,11 @@
         opacity: 0;
         overflow: hidden;
         transition: opacity 200ms ease;
+        // Opaque base so the 3px strip fully covers the pane content beneath it.
+        // Without this the translucent stripe gaps reveal text reaching the top
+        // edge and the marching pattern is lost. Matches .agent-view's surface
+        // (--main-bg-color) so the bar reads as chrome.
+        background: var(--main-bg-color);
 
         &::before {
             content: "";
@@ -79,20 +84,24 @@
             // unsupported — browser ignores the declaration below and
             // keeps this one so the bar remains visible.
             background: var(--accent-color);
+            // Every stop is fully opaque (the faded stripe mixes against the
+            // pane background, NOT transparent) so the pattern stays crisp over
+            // any content in any theme.
             background: repeating-linear-gradient(
                 -45deg,
-                var(--accent-color)                                        0px,
-                var(--accent-color)                                        4px,
-                color-mix(in srgb, var(--accent-color) 25%, transparent)  4px,
-                color-mix(in srgb, var(--accent-color) 25%, transparent)  8px
+                var(--accent-color)                                              0px,
+                var(--accent-color)                                              4px,
+                color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 4px,
+                color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 8px
             );
-            will-change: transform;
         }
 
         &--active {
             opacity: 1;
 
             &::before {
+                // Promote the layer only while animating, not at idle rest.
+                will-change: transform;
                 animation: agent-ant-march 0.5s linear infinite;
             }
         }
@@ -111,9 +120,22 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
+        // Don't translate. But `animation: none` alone leaves the diagonal
+        // stripe frozen mid-phase at full opacity, which reads as a stuck bar.
+        // (CEF maps reduced-motion to the Windows "Animation effects" toggle /
+        // SPI_GETCLIENTAREAANIMATION, so any machine with it off lands here.)
+        // Show a solid bar and breathe its opacity so "working" still reads,
+        // without positional motion.
         .agent-pane-progress-bar--active::before {
-            animation: none;
+            background: var(--accent-color);
+            will-change: opacity;
+            animation: agent-ant-breathe 1.6s ease-in-out infinite;
         }
+    }
+
+    @keyframes agent-ant-breathe {
+        0%, 100% { opacity: 1; }
+        50%      { opacity: 0.45; }
     }
 
     // === Working Row ===
