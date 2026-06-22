@@ -581,6 +581,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let url = format!("http://127.0.0.1:{}{}", port, path);
                 let client = reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(30))
+                    .redirect(reqwest::redirect::Policy::none())
                     .build()
                     .map_err(|e| e.to_string())?;
 
