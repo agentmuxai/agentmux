@@ -303,15 +303,13 @@ unsafe extern "system" fn floater_cascade_wndproc(
     result
 }
 
-/// Subclass a FullInstance window's WndProc to cascade lifecycle events to all
-/// active floating panes (issue #1560 — replaces the owned-window cascade that
-/// was removed when we switched to unowned `WS_POPUP` windows).
-///
-/// Handles:
-/// - `WM_ACTIVATE(active)` → z-order floaters below the main HWND
-/// - `WM_SIZE(SIZE_MINIMIZED)` → `SW_HIDE` every floater
-/// - `WM_SIZE(restored/maximized)` → `SW_SHOWNOACTIVATE` every floater
-/// - `WM_DESTROY` → `PostMessage(WM_CLOSE)` every floater
+/// Subclass a FullInstance window's WndProc. Historically (issue #1560) this
+/// cascaded lifecycle events to floaters; that behavior was removed in favour of
+/// FULL FLOATER INDEPENDENCE — a window's activate/minimize/restore/close must
+/// NOT touch its floaters (see the FLOATER INDEPENDENCE note in
+/// `floater_cascade_wndproc`). The subclass is retained ONLY as a pure
+/// observer-passthrough that self-prunes `FLOATER_CASCADE_ORIGINALS` on
+/// `WM_DESTROY` (HWND-reuse safety); it no longer acts on any floater.
 ///
 /// Idempotent: re-calling on an already-hooked HWND is a no-op.
 #[cfg(target_os = "windows")]
