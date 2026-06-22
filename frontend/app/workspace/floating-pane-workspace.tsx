@@ -41,6 +41,7 @@
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { isLinux, isMacOS, isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
+import { beginRedockGuard, endRedockGuard } from "@/app/workspace/redock-guard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
@@ -828,10 +829,17 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
 
         const tryRedockAtCursor = async (screenX: number, screenY: number) => {
             setRedockInProgress(true);
+            // Open the redock guard BEFORE any layout teardown can fire: the
+            // floater's node removal triggers tabcontent's onNodeDelete, which
+            // would otherwise DeleteBlock the block we're redocking (#1662).
+            // Released below if no redock actually happened (drop on desktop).
+            beginRedockGuard();
+            let redocked = false;
             try {
-                await tryRedockAtCursorInner(screenX, screenY);
+                redocked = (await tryRedockAtCursorInner(screenX, screenY)) === true;
             } finally {
                 setRedockInProgress(false);
+                if (!redocked) endRedockGuard();
             }
         };
 
@@ -931,9 +939,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 );
                 // After successful redock, source tab.blockids empties
                 // → the auto-close watcher dismisses the floater.
+                // Signal "a redock happened" so the caller keeps the redock
+                // guard open through the floater's close + node teardown.
+                return true;
             } catch (e) {
                 console.error("[floating-pane] RedockFloatingPane failed", e);
             }
+            return false;
         };
 
         // Both mousedown and mouseup are capture-phase so they always fire
