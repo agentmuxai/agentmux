@@ -708,7 +708,7 @@ fn create_popup(
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, RegisterClassExW, CS_HREDRAW, CS_VREDRAW,
+        CreateWindowExW, RegisterClassExW, ShowWindow, CS_HREDRAW, CS_VREDRAW, SW_SHOWNOACTIVATE,
         WNDCLASSEXW, WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
     };
 
@@ -838,34 +838,11 @@ fn create_popup(
         }
     }
 
-    // Do NOT show here. The window is created HIDDEN and revealed only after
-    // its embedded browser paints its first frame (on_load_end → show_floater
-    // in client/mod.rs). Showing now — before the CEF child exists/paints —
-    // flashes white: the global CefSettings.background_color is transparent
-    // (lib.rs, for the frameless cascade) and the DWM-extended frame glass
-    // composites to white/desktop until content covers it. Mirrors the main
-    // window's "not shown until on_load_end". (#1662 polish — tear-off flash)
+    unsafe {
+        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    }
 
     Ok(hwnd as *mut std::ffi::c_void)
-}
-
-/// Show a floater's outer popup HWND (deferred reveal after first paint).
-/// `SW_SHOWNOACTIVATE` so the floater doesn't steal focus. Returns false if the
-/// label isn't a tracked floater. Windows-only (raw popup).
-#[cfg(target_os = "windows")]
-pub(crate) fn show_floater(label: &str) -> bool {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
-    let hwnd = ACTIVE_FLOATER_HWNDS
-        .lock()
-        .ok()
-        .and_then(|m| m.get(label).map(|(fh, _)| *fh));
-    match hwnd {
-        Some(fh) if fh != 0 => {
-            unsafe { ShowWindow(fh as *mut _, SW_SHOWNOACTIVATE) };
-            true
-        }
-        _ => false,
-    }
 }
 
 #[cfg(test)]

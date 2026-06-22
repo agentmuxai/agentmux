@@ -1266,23 +1266,6 @@ impl AgentMuxHandler {
             return;
         }
 
-        // Reveal a Windows floater popup now that its first frame has painted.
-        // Floaters embed via `set_as_child` and use the browser-pane handler
-        // (is_browser_pane = true), so on_load_end takes the pane early-return
-        // just below — the deferred reveal must happen HERE first. create_popup
-        // leaves the popup HIDDEN; showing it before paint flashes white (the
-        // transparent CefSettings bg + DWM-extended frame glass). Mirrors the
-        // main window's "not shown until on_load_end". (#1662 polish)
-        #[cfg(target_os = "windows")]
-        {
-            let mut floater = browser.as_deref().map(|b| b.clone());
-            if let Some(label) = floater.as_mut().and_then(|b| self.window_label_for(b)) {
-                if label.starts_with("floating-") && !label.starts_with("floating-pool-") {
-                    crate::floating_pane::show_floater(&label);
-                }
-            }
-        }
-
         // Pane-specific on_load_end work (focus subclass re-install after
         // Chromium rebuilds Chrome_RenderWidgetHostHWND on navigation)
         // lives in `crate::browser_pane::callbacks` after Phase 4. Returning early
