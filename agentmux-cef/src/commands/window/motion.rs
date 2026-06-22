@@ -377,38 +377,54 @@ pub fn resolve_window_at_cursor(
                                 main_hwnd = %format!("{:#x}", main_hwnd),
                                 "cursor inside window"
                             );
-                            // Resolution (R3 identity fix, #1681). The label
-                            // stored in `window_hwnds` is ALWAYS the same string
-                            // the target window's frontend carries as its
-                            // `?windowLabel=` (promote inserts the
-                            // `window-pool-*` label; the renderer's URL carries
-                            // the same one; cold "main" and "floating-*" match
-                            // likewise). The redock ghost only renders when the
-                            // host-emitted `target_label` === that frontend
-                            // `windowLabel`, so resolve MUST return the tracked
-                            // label VERBATIM.
+                            // Resolution (R3 identity, #1681). The redock ghost
+                            // only renders when the host-emitted `target_label`
+                            // === the target window's frontend `windowLabel`, so
+                            // resolve must return the label the frontend actually
+                            // uses for this HWND.
                             //
-                            // A prior heuristic rewrote a tracked `window-pool-*`
-                            // label to "main" whenever `find_main_window()`
-                            // pointed at this HWND. But `find_main_window()` only
-                            // returns the topmost non-floater window — with
-                            // several promoted windows open it routinely picks a
-                            // SECONDARY one, so that window got relabeled "main",
-                            // never matched its own `window-pool-*` frontend, and
-                            // rendered no ghost (and `backend_window_id("main")`
-                            // mis-targeted the redock). That is exactly the
-                            // "can only redock into the home window" bug. Promoted
-                            // pool windows are always inserted into `window_hwnds`
-                            // at promote, so a tracked label is authoritative and
-                            // `is_main_frame` must NOT override it.
+                            // window_hwnds maps this HWND to a `window-pool-*`
+                            // label (inserted at promote). Two different windows
+                            // wear a pool label, and they need OPPOSITE answers:
+                            //
+                            //  - A genuine promoted SECONDARY keeps its pool label
+                            //    as its real `windowLabel` and registers it via
+                            //    register_backend_window → it HAS a
+                            //    `backend_window_id`. Return the pool label
+                            //    verbatim so it matches.
+                            //  - The PRIMARY window can be served by a promoted
+                            //    pool window whose renderer re-identifies as
+                            //    "main" (it registers "main", NOT the pool label,
+                            //    so the pool label has NO backend_window_id, and
+                            //    window_hwnds never gets a "main" entry —
+                            //    capture_hwnd_for_label can't claim the
+                            //    already-pool-mapped HWND). Map to "main" when this
+                            //    is the main frame so its ghost matches.
+                            //
+                            // Using the registration (authoritative) instead of
+                            // find_main_window alone is what makes BOTH the first
+                            // window and secondary windows work: a registered pool
+                            // label is never rewritten, so find_main_window picking
+                            // the wrong frame can't mislabel a real secondary.
                             let is_main_frame = main_hwnd != 0 && h_isize == main_hwnd;
                             let resolved_label: Option<&str> = match label_by_hwnd.get(&h_isize) {
-                                // Tracked → return verbatim (matches the frontend).
+                                Some(l) if l.starts_with("window-pool-") => {
+                                    if state.backend_window_id(l).is_some() {
+                                        // Registered → the frontend's real label.
+                                        Some(l.as_str())
+                                    } else if is_main_frame {
+                                        // Unregistered pool label on the main frame
+                                        // → primary served by a promoted pool
+                                        // window; its renderer is "main".
+                                        Some("main")
+                                    } else {
+                                        Some(l.as_str())
+                                    }
+                                }
+                                // Real label (e.g. "main", "floating-*") → verbatim.
                                 Some(l) => Some(l.as_str()),
                                 // Untracked but it IS the main frame: best-effort
-                                // "main" for the genuine cold-main-before-cache
-                                // case. (Promoted windows are always tracked, so
-                                // this can't mislabel a secondary.)
+                                // "main" for the genuine cold-main-before-cache case.
                                 None if is_main_frame => Some("main"),
                                 None => None,
                             };
