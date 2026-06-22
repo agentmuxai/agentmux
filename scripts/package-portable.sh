@@ -78,20 +78,25 @@ fi
 # Clean previous
 rm -rf "$PORTABLE" "$ZIPPATH"
 
-# Create structure
+# Create structure. No `data/` dir: portable builds are stateless on disk —
+# user data lives in ~/.agentmux/versions/<version>/ (agentmux-common::
+# RuntimeMode). A bundled data/ folder was vestigial (nothing wrote to it) and
+# misled users into thinking their data lived next to the exe. See the README
+# below and PR #1693.
 mkdir -p "$PORTABLE/runtime/locales" "$PORTABLE/runtime/frontend" "$PORTABLE/runtime/tools/bin"
-mkdir -p "$PORTABLE/data"
 
 # Launcher in root
 cp target/release/agentmux-launcher.exe "$PORTABLE/agentmux.exe"
 
 # Portable marker — read by agentmux-common::RuntimeMode::current to
-# distinguish portable extracts from installed builds. Both ship a
-# `runtime/` subdir, so the dir alone is not a discriminator. The
-# file's contents are advisory; the detection only checks for its
-# presence next to the launcher exe. Mac .app-bundle layouts are
-# also supported (marker can sit at the bundle root).
-printf 'AgentMux portable build %s\n' "$LABEL" > "$PORTABLE/agentmux-portable.marker"
+# distinguish portable extracts from installed builds (both ship a
+# `runtime/` subdir, so the dir alone is not a discriminator) and by
+# agentmux-cef read_build_label to show the ephemeral build label in the UI.
+# Lives INSIDE runtime/ to keep the extract root clean (just agentmux.exe +
+# README + runtime/). The launcher (at the root) looks one level down in
+# runtime/, and the host/srv (which run FROM runtime/) find it next to
+# themselves. Mac .app-bundle layouts (marker at the bundle root) still work.
+printf 'AgentMux portable build %s\n' "$LABEL" > "$PORTABLE/runtime/agentmux-portable.marker"
 
 # README
 cat > "$PORTABLE/README.txt" <<READMEEOF
@@ -125,23 +130,6 @@ Data:
   To back up or transfer your data, copy the .agentmux folder above - NOT this
   portable folder.
 READMEEOF
-
-# data/ placeholder. NOTE: AgentMux does not actually write here — data lives
-# under ~/.agentmux/versions/<version>/ (see the README above and
-# agentmux-common::RuntimeMode). This README exists so anyone who opens the
-# leftover data/ folder is pointed at the real location instead of assuming
-# their data is here.
-cat > "$PORTABLE/data/README.txt" <<DATAEOF
-This folder is not used.
-
-AgentMux does NOT store your data here. Your sessions, settings, logs, and
-browser cache live in your user profile, scoped by version:
-
-  %USERPROFILE%\.agentmux\versions\$VERSION\
-
-Back up or transfer THAT folder - not this one. This empty data\ folder is a
-leftover from an older layout and can be safely ignored or deleted.
-DATAEOF
 
 # Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions.
 # Phase 3 sandbox (#1374): bootstrap.exe presence means sandbox feature was ON.

@@ -141,8 +141,9 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
             None => {
                 // No launcher env — derive from the host's own vantage.
                 // Mode detection works at this point even though the host
-                // exe lives inside `runtime/`, because portable detection
-                // uses the `agentmux-portable.marker` (not `runtime/`).
+                // exe lives inside `runtime/`: the `agentmux-portable.marker`
+                // is packaged INTO `runtime/`, so it sits next to this host
+                // exe (`is_portable_marker_present` checks the exe dir).
                 let mode = agentmux_common::RuntimeMode::current(host_exe_dir);
                 agentmux_common::DataPaths::resolve(current_version, &mode)?
             }
