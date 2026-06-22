@@ -115,14 +115,14 @@ Data:
   Your data is NOT stored in this folder. AgentMux keeps it in your user
   profile, scoped by version:
 
-    %USERPROFILE%\.agentmux\versions\$VERSION\
-    (e.g. C:\Users\<you>\.agentmux\versions\$VERSION\)
+    %USERPROFILE%\\.agentmux\\versions\\${VERSION}\\
+    (e.g. C:\\Users\\<you>\\.agentmux\\versions\\${VERSION}\\)
 
-      config\      settings.json, keybindings.json
-      data\db\     session history and block state
-      logs\        host and sidecar logs
-      cef-cache\   browser cache (safe to delete when the app is closed)
-      agents\      agent working directories
+      config\\      settings.json, keybindings.json
+      data\\db\\     session history and block state
+      logs\\        host and sidecar logs
+      cef-cache\\   browser cache (safe to delete when the app is closed)
+      agents\\      agent working directories
 
   This makes the portable folder disposable: move it, re-extract it, or delete
   it without losing anything. A portable copy and an installed copy of the same
