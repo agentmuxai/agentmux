@@ -381,7 +381,7 @@ fi
 # mount (we target 11+, so fine). On this build: UDZO 248MB -> ULMO 167MB.
 # Purge inactive pages first — LZMA peaks at 4-6GB RAM and gets OOM-killed if
 # the system is under memory pressure after the Rust compile phase.
-sudo purge 2>/dev/null || true
+sudo -n purge 2>/dev/null || true
 hdiutil convert "$RW" -format ULMO -o "$DMG" >/dev/null
 rm -f "$RW"
 codesign --force --timestamp --sign "$CERT" "$DMG"
