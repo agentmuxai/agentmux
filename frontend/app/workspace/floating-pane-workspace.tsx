@@ -41,7 +41,6 @@
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { isLinux, isMacOS, isWindows } from "@/util/platformutil";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
-import { beginBlockMoveGuard, endBlockMoveGuard } from "@/app/workspace/block-move-guard";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
@@ -829,17 +828,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
 
         const tryRedockAtCursor = async (screenX: number, screenY: number) => {
             setRedockInProgress(true);
-            // Open the redock guard BEFORE any layout teardown can fire: the
-            // floater's node removal triggers tabcontent's onNodeDelete, which
-            // would otherwise DeleteBlock the block we're redocking (#1662).
-            // Released below if no redock actually happened (drop on desktop).
-            beginBlockMoveGuard(5000);
-            let redocked = false;
             try {
-                redocked = (await tryRedockAtCursorInner(screenX, screenY)) === true;
+                await tryRedockAtCursorInner(screenX, screenY);
             } finally {
                 setRedockInProgress(false);
-                if (!redocked) endBlockMoveGuard();
             }
         };
 

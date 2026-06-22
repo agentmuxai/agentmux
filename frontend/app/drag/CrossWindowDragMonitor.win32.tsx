@@ -21,7 +21,6 @@
  */
 
 import { atoms, getApi } from "@/store/global";
-import { beginBlockMoveGuard } from "@/app/workspace/block-move-guard";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
 import { invokeCommand } from "@/app/platform/ipc";
@@ -250,11 +249,6 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
-        // Arm the block-move guard BEFORE TearOffBlock + the source-node
-        // removal it triggers: that removal fires tabcontent's onNodeDelete,
-        // which would otherwise DeleteBlock the just-moved block and leave the
-        // new floater showing only the empty-tab logo (#1662, race).
-        beginBlockMoveGuard(3000);
         // Phase 2 of SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md (issue #1077):
         // tearing a pane out spawns a floating CHILD window of the
         // source instance, NOT a new full instance. We mirror the
