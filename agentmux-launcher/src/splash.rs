@@ -46,11 +46,27 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 // renderer. Provides `BRAIN_W` / `BRAIN_H` as `i32` consts.
 include!(concat!(env!("OUT_DIR"), "/brain_dims.rs"));
 
-// Splash window is the brain bitmap plus a 12px BG border on each side.
+// Splash window is the brain bitmap plus a 12px BG border on each side, with an
+// identity footer band added below (SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21).
 const SPLASH_PADDING: i32 = 12;
+/// Brain-region square (brain + border). The card adds the footer band below.
 const SPLASH_SIZE: i32 = BRAIN_W + SPLASH_PADDING * 2;
 const BRAIN_X: i32 = SPLASH_PADDING;
 const BRAIN_Y: i32 = SPLASH_PADDING;
+
+// ── Footer (identity strip near the bottom) ─────────────────────────────────
+/// Muted footer text color (R, G, B) = #8A8A93.
+const FOOTER_COLOR: [u8; 3] = [0x8A, 0x8A, 0x93];
+const FOOTER_PAD_TOP: i32 = 12;
+const FOOTER_LINE_GAP: i32 = 3;
+const FOOTER_PAD_BOTTOM: i32 = 12;
+const FOOTER_H: i32 = FOOTER_PAD_TOP
+    + 2 * crate::splash_font::GLYPH_H as i32
+    + FOOTER_LINE_GAP
+    + FOOTER_PAD_BOTTOM;
+/// Full card: width = brain-region; height = brain-region + footer band.
+const SPLASH_W: i32 = SPLASH_SIZE;
+const SPLASH_H: i32 = SPLASH_SIZE + FOOTER_H;
 
 // Background color (B, G, R) — dark app background. Stored as
 // channels rather than a packed COLORREF because the compositor
@@ -129,15 +145,15 @@ unsafe fn run_splash(dismiss_ev: HANDLE, class_name: String) {
 
     let sw = GetSystemMetrics(SM_CXSCREEN);
     let sh = GetSystemMetrics(SM_CYSCREEN);
-    let x = (sw - SPLASH_SIZE) / 2;
-    let y = (sh - SPLASH_SIZE) / 2;
+    let x = (sw - SPLASH_W) / 2;
+    let y = (sh - SPLASH_H) / 2;
 
     let hwnd = CreateWindowExW(
         WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         class.as_ptr(),
         std::ptr::null(),     // no title
         WS_POPUP,
-        x, y, SPLASH_SIZE, SPLASH_SIZE,
+        x, y, SPLASH_W, SPLASH_H,
         std::ptr::null_mut(), // no parent
         std::ptr::null_mut(), // no menu
         hinst,
@@ -156,9 +172,9 @@ unsafe fn run_splash(dismiss_ev: HANDLE, class_name: String) {
     let mem_dc = CreateCompatibleDC(screen_dc);
     let mut bmi: BITMAPINFO = std::mem::zeroed();
     bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-    bmi.bmiHeader.biWidth = SPLASH_SIZE;
+    bmi.bmiHeader.biWidth = SPLASH_W;
     // Negative height = top-down rows (matches our pixel layout).
-    bmi.bmiHeader.biHeight = -SPLASH_SIZE;
+    bmi.bmiHeader.biHeight = -SPLASH_H;
     bmi.bmiHeader.biPlanes = 1;
     bmi.bmiHeader.biBitCount = 32;
     bmi.bmiHeader.biCompression = BI_RGB as u32;
@@ -183,10 +199,15 @@ unsafe fn run_splash(dismiss_ev: HANDLE, class_name: String) {
 
     let dib_pixels = std::slice::from_raw_parts_mut(
         dib_pixels_raw as *mut u8,
-        (SPLASH_SIZE * SPLASH_SIZE * 4) as usize,
+        (SPLASH_W * SPLASH_H * 4) as usize,
     );
 
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+    // Footer identity, gathered once and clamped to the card width.
+    let info = crate::splash_info::SplashInfo::gather();
+    let max_chars = ((SPLASH_W - 24) / crate::splash_font::GLYPH_W as i32).max(8) as usize;
+    let footer = info.footer_lines(max_chars);
 
     let start = std::time::Instant::now();
 
@@ -207,7 +228,7 @@ unsafe fn run_splash(dismiss_ev: HANDLE, class_name: String) {
             (160.0 + pulse * 60.0) as u8
         };
 
-        composite(dib_pixels, brain_alpha);
+        composite(dib_pixels, brain_alpha, &footer);
         push_layered(hwnd, mem_dc, 255);
 
         std::thread::sleep(std::time::Duration::from_millis(16)); // ~60 fps
@@ -227,7 +248,7 @@ unsafe fn run_splash(dismiss_ev: HANDLE, class_name: String) {
 /// Brain bytes are pre-multiplied BGRA (alpha already baked into
 /// RGB by build.rs). Modulating by `brain_alpha / 255` keeps them
 /// pre-multiplied for `UpdateLayeredWindow`'s AC_SRC_ALPHA blend.
-fn composite(dib: &mut [u8], brain_alpha: u8) {
+fn composite(dib: &mut [u8], brain_alpha: u8, footer: &[String]) {
     // Fast path: fill with opaque BG. Loop unrolled by the compiler.
     for px in dib.chunks_exact_mut(4) {
         px[0] = BG_B;
@@ -241,7 +262,7 @@ fn composite(dib: &mut [u8], brain_alpha: u8) {
     // standard premultiplied OVER onto the BG.
     let ba = brain_alpha as u16;
     for y in 0..BRAIN_H {
-        let dib_row = ((BRAIN_Y + y) * SPLASH_SIZE * 4) as usize;
+        let dib_row = ((BRAIN_Y + y) * SPLASH_W * 4) as usize;
         let src_row = (y * BRAIN_W * 4) as usize;
         for x in 0..BRAIN_W {
             let di = dib_row + ((BRAIN_X + x) * 4) as usize;
@@ -269,12 +290,21 @@ fn composite(dib: &mut [u8], brain_alpha: u8) {
             // dib[di+3] left at 255 — window stays opaque.
         }
     }
+
+    // Footer: muted identity lines in the bottom band. window_alpha = 1.0 — the
+    // whole window fades uniformly via the layered-window constant alpha
+    // (fade_out / push_layered), so the footer needs no per-pixel fade.
+    let footer_top = SPLASH_H - FOOTER_H + FOOTER_PAD_TOP;
+    for (i, line) in footer.iter().enumerate() {
+        let y = footer_top + i as i32 * (crate::splash_font::GLYPH_H as i32 + FOOTER_LINE_GAP);
+        crate::splash_text::draw_text_centered(dib, SPLASH_W, SPLASH_H, y, line, FOOTER_COLOR, 1.0, true);
+    }
 }
 
 unsafe fn push_layered(hwnd: HWND, mem_dc: HDC, source_alpha: u8) {
     let mut sz = SIZE {
-        cx: SPLASH_SIZE,
-        cy: SPLASH_SIZE,
+        cx: SPLASH_W,
+        cy: SPLASH_H,
     };
     let mut src_pt = POINT { x: 0, y: 0 };
     let blend = BLENDFUNCTION {

@@ -38,8 +38,21 @@ static BRAIN_PNG: &[u8] = include_bytes!("../resources/brain.png");
 
 const BRAIN_PX: f64 = 150.0; // displayed brain size
 const PAD_PX: f64 = 35.0; // backdrop padding around the brain
-const SPLASH_PX: f64 = BRAIN_PX + PAD_PX * 2.0; // 220×220 dark card
+const SPLASH_PX: f64 = BRAIN_PX + PAD_PX * 2.0; // 220×220 brain-region square
 const CORNER_RADIUS: f64 = 16.0;
+
+// Footer (identity strip near the bottom) — native NSTextField labels showing
+// user@host / v<version> (+ dev label). SPEC_SPLASH_USERINFO_AND_DISABLE.
+const FOOTER_LINE_H: f64 = 18.0;
+const FOOTER_PAD: f64 = 10.0;
+const FOOTER_BAND_H: f64 = FOOTER_PAD * 2.0 + FOOTER_LINE_H * 2.0; // 56
+/// Full card: width = brain region; height = brain region + footer band.
+const SPLASH_W: f64 = SPLASH_PX;
+const SPLASH_H: f64 = SPLASH_PX + FOOTER_BAND_H;
+// Muted footer text color #8A8A93.
+const FOOTER_R: f64 = 0x8A as f64 / 255.0;
+const FOOTER_G: f64 = 0x8A as f64 / 255.0;
+const FOOTER_B: f64 = 0x93 as f64 / 255.0;
 
 // Backdrop color — matches the Win32 splash's BG (R=0x1A, G=0x1A, B=0x1F).
 const BG_R: f64 = 26.0 / 255.0;
@@ -137,6 +150,27 @@ unsafe fn send_void_i64(recv: id, s: SEL, a: i64) {
 unsafe fn send_void_f64(recv: id, s: SEL, a: f64) {
     let f: extern "C" fn(id, SEL, f64) = std::mem::transmute(objc_msgSend as *const ());
     f(recv, s, a)
+}
+#[inline]
+unsafe fn send_id_f64(recv: id, s: SEL, a: f64) -> id {
+    let f: extern "C" fn(id, SEL, f64) -> id = std::mem::transmute(objc_msgSend as *const ());
+    f(recv, s, a)
+}
+#[inline]
+unsafe fn send_void_rect(recv: id, s: SEL, a: CGRect) {
+    let f: extern "C" fn(id, SEL, CGRect) = std::mem::transmute(objc_msgSend as *const ());
+    f(recv, s, a)
+}
+/// `[NSString stringWithUTF8String:]` — copies, so the temporary CString is fine.
+unsafe fn nsstring(s: &str) -> id {
+    let cstr = std::ffi::CString::new(s).unwrap_or_default();
+    let f: extern "C" fn(id, SEL, *const c_char) -> id =
+        std::mem::transmute(objc_msgSend as *const ());
+    f(
+        class(b"NSString\0"),
+        sel(b"stringWithUTF8String:\0"),
+        cstr.as_ptr(),
+    )
 }
 
 /// A live splash window plus the path the host touches when it's ready.
@@ -271,13 +305,13 @@ unsafe fn build_window() -> (id, id) {
         let f: extern "C" fn(id, SEL) -> CGRect = std::mem::transmute(objc_msgSend as *const ());
         f(screen, sel(b"frame\0"))
     };
-    let x = screen_frame.origin.x + (screen_frame.size.width - SPLASH_PX) / 2.0;
-    let y = screen_frame.origin.y + (screen_frame.size.height - SPLASH_PX) / 2.0;
+    let x = screen_frame.origin.x + (screen_frame.size.width - SPLASH_W) / 2.0;
+    let y = screen_frame.origin.y + (screen_frame.size.height - SPLASH_H) / 2.0;
     let win_rect = CGRect {
         origin: CGPoint { x, y },
         size: CGSize {
-            width: SPLASH_PX,
-            height: SPLASH_PX,
+            width: SPLASH_W,
+            height: SPLASH_H,
         },
     };
 
@@ -308,8 +342,8 @@ unsafe fn build_window() -> (id, id) {
     let local = CGRect {
         origin: CGPoint { x: 0.0, y: 0.0 },
         size: CGSize {
-            width: SPLASH_PX,
-            height: SPLASH_PX,
+            width: SPLASH_W,
+            height: SPLASH_H,
         },
     };
     let backdrop = {
@@ -337,11 +371,12 @@ unsafe fn build_window() -> (id, id) {
     send_void_f64(layer, sel(b"setCornerRadius:\0"), CORNER_RADIUS);
     send_void_bool(layer, sel(b"setMasksToBounds:\0"), 1);
 
-    // Brain image view centered on the backdrop, proportional scaling.
+    // Brain image view in the upper (brain) region, above the footer band.
+    // macOS Y is bottom-up, so a larger y sits higher.
     let brain_rect = CGRect {
         origin: CGPoint {
             x: PAD_PX,
-            y: PAD_PX,
+            y: FOOTER_BAND_H + PAD_PX,
         },
         size: CGSize {
             width: BRAIN_PX,
@@ -362,6 +397,51 @@ unsafe fn build_window() -> (id, id) {
     send_void_f64(image_view, sel(b"setAlphaValue:\0"), 0.0); // fades in
 
     send_void_id(backdrop, sel(b"addSubview:\0"), image_view);
+
+    // Footer: native NSTextField labels in the bottom band (muted, centered).
+    // They fade with the window on dismiss (window alpha ramps) and do not
+    // pulse. macOS Y is bottom-up: line[0] (user@host) sits above line[1] (version).
+    {
+        let info = crate::splash_info::SplashInfo::gather();
+        let max_chars = ((SPLASH_W - 24.0) / 7.5) as usize; // ~7.5 px/char at 13px mono
+        let lines = info.footer_lines(max_chars.max(8));
+        let footer_color = {
+            let f: extern "C" fn(id, SEL, f64, f64, f64, f64) -> id =
+                std::mem::transmute(objc_msgSend as *const ());
+            f(
+                class(b"NSColor\0"),
+                sel(b"colorWithSRGBRed:green:blue:alpha:\0"),
+                FOOTER_R,
+                FOOTER_G,
+                FOOTER_B,
+                1.0,
+            )
+        };
+        let font = send_id_f64(class(b"NSFont\0"), sel(b"userFixedPitchFontOfSize:\0"), 13.0);
+        let n = lines.len();
+        for (i, line) in lines.iter().enumerate() {
+            let ly = FOOTER_PAD + (n - 1 - i) as f64 * FOOTER_LINE_H;
+            let rect = CGRect {
+                origin: CGPoint { x: 0.0, y: ly },
+                size: CGSize {
+                    width: SPLASH_W,
+                    height: FOOTER_LINE_H,
+                },
+            };
+            // labelWithString: → a non-editable, borderless, transparent label.
+            let label = send_id(
+                class(b"NSTextField\0"),
+                sel(b"labelWithString:\0"),
+                nsstring(line),
+            );
+            send_void_rect(label, sel(b"setFrame:\0"), rect);
+            send_void_id(label, sel(b"setTextColor:\0"), footer_color);
+            send_void_id(label, sel(b"setFont:\0"), font);
+            send_void_i64(label, sel(b"setAlignment:\0"), 2); // NSTextAlignmentCenter
+            send_void_id(backdrop, sel(b"addSubview:\0"), label);
+        }
+    }
+
     send_void_id(window, sel(b"setContentView:\0"), backdrop);
 
     // Bring the app + window up immediately.
