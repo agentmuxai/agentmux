@@ -2,61 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentPaneModel — per-pane lifecycle handle with a `disposed` flag.
+ * AgentPaneModel — per-pane lifecycle handle that carries a `disposed` flag
+ * and dispatch helpers for both agent-pane stores.
  *
- * PR-4 of the cascade follow-up sequence (see
- * docs/retro/retro-agent-pane-cascade-replacechild-2026-05-23.md §"Action
- * items" → "PR-4", + docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md).
- *
- * ## What this adds
- *
- * Each agent pane gets a model object whose lifetime matches the pane
- * itself: created during `registerPane`, marked `disposed` at the very
- * START of `unregisterPane` (before either store deletes its slot), and
- * carried by props/opts into the hooks that need to dispatch.
- *
- * Hooks that previously had to remember "use `dispatchIfRegistered`
- * here because it's an async callsite that can race against unmount"
- * call `model.dispatchPane(cmd)` / `model.dispatchDoc(cmd)` instead. The
- * disposed-flag check inside the model is the structural safeguard —
- * new code is default-safe, no need for a reviewer to spot the soft
- * variant choice case-by-case.
- *
- * ## Pattern source
- *
- * `frontend/app/view/drone/drone-model.ts` (see `DroneViewModel.disposed`
- * + `DroneViewModel.dispatchIfAlive` at lines ~131 and 509–515): same
- * idempotency-flag rule applied to a single-store handle. PR-4
- * generalizes it across both agent-pane stores in one helper.
- *
- * ## Coexistence with module-level `dispatchIfRegistered`
- *
- * We picked **Option B-coexist**: the per-store `dispatchIfRegistered`
- * exports stay live. Reasons:
- *
- *   - Some dispatchers don't have a model handle (the cascade-detection
- *     log inside the stores themselves; tests; future code that doesn't
- *     thread the model in).
- *   - Migration can land incrementally — each hook that gains a
- *     `model` opt flips its own dispatches.
- *
- * The model is the PREFERRED path; new code defaults to it. The
- * cleanup PR that removes `dispatchIfRegistered` is downstream, gated
- * on every production call site migrating.
- *
- * ## Why this AND the per-store cascade detection
- *
- * The cascade-detection logging in agent-pane-state-store.ts (PR #878)
- * + the unified atomic registration (PR #999) close the cascade source.
- * The model-level disposed flag is a SECOND safety net: even if some
- * future code path manages to schedule a dispatch that lands AFTER the
- * cleanup runs (a stale setTimeout, an unhandled promise resolution, a
- * subscribe handler still in flight), the disposed check catches it
- * and turns it into a fire-and-forget no-op with one debug log line.
- *
- * The two safety nets compose: cascade detection identifies the trigger
- * setter when a dispatch lands mid-frame; the disposed flag stops a
- * post-cleanup dispatch from reaching the underlying store at all.
+ * Created during `registerPane`, marked `disposed` at the start of
+ * `unregisterPane` (before either store deletes its slot). Hooks pass
+ * `model.dispatchPane` / `model.dispatchDoc` so async call sites are
+ * default-safe against post-unmount races without having to remember the
+ * soft-dispatch variant per call site. The module-level `dispatchIfRegistered`
+ * exports remain live for call sites that lack a model handle.
  */
 
 import { trail } from "@/log/render-trail";

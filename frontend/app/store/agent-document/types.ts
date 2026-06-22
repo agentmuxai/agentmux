@@ -66,9 +66,8 @@ export type AgentDocumentCommand =
      *
      * Why prepend (not full-replace): `useAgentStream` may dispatch
      * `StreamFlush` during the async snapshot read window. A full
-     * replace would wipe those live arrivals. Codex P1 on PR #877
-     * round 4. Existing nodes (live arrivals) win on id collision; the
-     * snapshot version is dropped.
+     * replace would wipe those live arrivals. Existing nodes (live
+     * arrivals) win on id collision; the snapshot version is dropped.
      *
      * `fromSnapshot: true` is a discriminator field per spec §4.5 — the
      * view layer reads it from the audit event (history-restored) to
