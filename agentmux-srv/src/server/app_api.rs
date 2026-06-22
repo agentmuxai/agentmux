@@ -326,6 +326,17 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut meta = MetaMapType::new();
                 meta.insert("view".to_string(), json!("agent"));
                 meta.insert("agentId".to_string(), json!(&agent.id));
+                // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): seed
+                // the new block's `term:zoom` from the agent's saved `ui:zoom`
+                // (per-agent content store, global cross-channel) so reopening
+                // the same agent restores its zoom instead of resetting to 1.0.
+                // Stored only for non-default zooms; clamp to the frontend's
+                // [0.5, 2.0] range so a corrupt value can't escape it.
+                if let Ok(Some(c)) = wstore.agent_content_get(&agent.id, "ui:zoom") {
+                    if let Some(z) = parse_seed_zoom(&c.content) {
+                        meta.insert("term:zoom".to_string(), json!(z));
+                    }
+                }
                 meta.insert("agentProvider".to_string(), json!(&agent.provider));
                 meta.insert("agentName".to_string(), json!(&agent.name));
                 meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "sparkles" } else { &agent.icon }));
@@ -3231,5 +3242,42 @@ mod pane_open_reducer_tests {
         )
         .await;
         assert!(r.is_ok(), "tear-off of an opened pane must succeed, got: {:?}", r.err());
+    }
+}
+
+/// Parse + validate a saved per-agent `ui:zoom` content blob for seeding a new
+/// agent block's `term:zoom`. Returns `Some(z)` only for a parseable,
+/// non-default (≠ 1.0), in-[0.5, 2.0] zoom (the range the frontend enforces in
+/// term.tsx); anything else (default, out of range, garbage) returns `None` so
+/// the new block opens at the default 1.0. See SPEC_AGENT_ZOOM_PERSISTENCE §4.2.
+fn parse_seed_zoom(raw: &str) -> Option<f64> {
+    let z = raw.trim().parse::<f64>().ok()?;
+    if (z - 1.0).abs() > f64::EPSILON && (0.5..=2.0).contains(&z) {
+        Some(z)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod agent_zoom_seed_tests {
+    use super::parse_seed_zoom;
+
+    #[test]
+    fn seeds_valid_non_default_zoom() {
+        assert_eq!(parse_seed_zoom("1.3"), Some(1.3));
+        assert_eq!(parse_seed_zoom("0.5"), Some(0.5));
+        assert_eq!(parse_seed_zoom("2"), Some(2.0));
+        assert_eq!(parse_seed_zoom("  1.4  "), Some(1.4)); // trims
+    }
+
+    #[test]
+    fn rejects_default_out_of_range_and_garbage() {
+        assert_eq!(parse_seed_zoom("1.0"), None, "default seeds nothing");
+        assert_eq!(parse_seed_zoom("1"), None, "default seeds nothing");
+        assert_eq!(parse_seed_zoom("2.5"), None, "above range");
+        assert_eq!(parse_seed_zoom("0.4"), None, "below range");
+        assert_eq!(parse_seed_zoom("abc"), None, "unparseable");
+        assert_eq!(parse_seed_zoom(""), None, "empty");
     }
 }
