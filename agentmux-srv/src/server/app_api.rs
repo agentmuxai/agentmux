@@ -154,6 +154,9 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let event_bus = state.event_bus.clone();
     let filestore = state.filestore.clone();
+    // Capture the whole (Arc-backed, Clone) AppState so the block can be created
+    // through the reducer (#1681) — see the create-block site below.
+    let app_state = state.clone();
 
     engine.register_handler(
         COMMAND_AGENT_OPEN,
@@ -162,6 +165,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             let event_bus = event_bus.clone();
             let filestore = filestore.clone();
+            let app_state = app_state.clone();
             Box::pin(async move {
                 let cmd: CommandAgentOpenData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.open: {e}"))?;
@@ -358,10 +362,44 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
                 meta.insert("agent:session_id_field".to_string(), json!(provider.session_id_field));
 
-                // 7. Create block + insert into layout tree
-                let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
-                    .map_err(|e| format!("agent.open: create_block: {e}"))?;
-                let block_id = block.oid.clone();
+                // 7. Create block + insert into layout tree.
+                // Through the reducer (#1681), not wcore-direct: a store-only
+                // block is invisible to the reducer-canonical `state.blocks`
+                // (only hydrated from SQLite at bootstrap), so tearing this agent
+                // pane off later was rejected "block not found". BlockCreated
+                // carries meta → apply_block_created writes the wstore Block,
+                // which the controller resync below reloads by id.
+                let meta_val = serde_json::to_value(&meta)
+                    .map_err(|e| format!("agent.open: meta serialize: {e}"))?;
+                let create_events = crate::server::service::dispatch_to_reducer(
+                    &app_state,
+                    agentmux_common::ipc::Command::CreateBlock {
+                        tab_id: tab_id.clone(),
+                        meta: meta_val,
+                    },
+                )
+                .await;
+                if let Some(msg) = create_events.iter().find_map(|e| match e {
+                    agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+                    _ => None,
+                }) {
+                    return Err(format!("agent.open: CreateBlock: {msg}"));
+                }
+                let block_id = create_events
+                    .iter()
+                    .find_map(|e| match e {
+                        agentmux_common::ipc::Event::BlockCreated { block_id, .. } => {
+                            Some(block_id.clone())
+                        }
+                        _ => None,
+                    })
+                    .ok_or_else(|| "agent.open: CreateBlock emitted no BlockCreated".to_string())?;
+                for ev in &create_events {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
+                        tracing::warn!("agent.open: CreateBlock wstore apply failed: {e}");
+                    }
+                }
+                crate::server::service::publish_events(&app_state, &create_events);
 
                 // Enqueue a layout insert action for the frontend to process.
                 // The frontend's LayoutModel watches pendingbackendactions on the
@@ -922,10 +960,44 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         return open_pane_floating(state, &wstore, &event_bus, cmd.view, tab_id, meta).await;
     }
 
-    // Create block (docked path)
-    let block = crate::backend::wcore::create_block(&wstore, &tab_id, meta)
-        .map_err(|e| format!("pane.open: create_block: {e}"))?;
-    let block_id = block.oid.clone();
+    // Create block (docked path) THROUGH THE REDUCER (#1681), not wcore-direct.
+    // A store-only `create_block` lands the block in SQLite but never in the
+    // reducer-canonical `state.blocks` map — and this RPC runs after bootstrap,
+    // which is the only time `srv_state` is hydrated from SQLite. The pane then
+    // renders fine (frontend reads SQLite) but a later TearOffBlock /
+    // RedockFloatingPane is rejected "block not found" because the saga
+    // pre-conditions check the reducer. The BlockCreated event carries meta,
+    // which apply_block_created writes to the wstore Block. Mirrors the
+    // already-correct open_pane_floating path.
+    let meta_val = serde_json::to_value(&meta)
+        .map_err(|e| format!("pane.open: meta serialize: {e}"))?;
+    let create_events = crate::server::service::dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::CreateBlock {
+            tab_id: tab_id.clone(),
+            meta: meta_val,
+        },
+    )
+    .await;
+    if let Some(msg) = create_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(format!("pane.open: CreateBlock: {msg}"));
+    }
+    let block_id = create_events
+        .iter()
+        .find_map(|e| match e {
+            agentmux_common::ipc::Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| "pane.open: CreateBlock emitted no BlockCreated".to_string())?;
+    for ev in &create_events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
+            tracing::warn!("pane.open: CreateBlock wstore apply failed: {e}");
+        }
+    }
+    crate::server::service::publish_events(state, &create_events);
 
     // Enqueue layout action — split if requested, else append
     let (actiontype, targetblockid, position) = resolve_placement(
@@ -3078,3 +3150,86 @@ mod cross_channel_tests {
     }
 }
 
+
+#[cfg(test)]
+mod pane_open_reducer_tests {
+    use super::*;
+    use crate::backend::rpc_types::CommandPaneOpenData;
+    use crate::server::tests::test_state;
+    use agentmux_common::ipc::{Command, Event};
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        for ev in &evs {
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+        }
+        evs
+    }
+
+    /// Regression for #1681: the docked `pane.open` path created its block
+    /// store-only (`wcore::create_block`), so the block was absent from the
+    /// reducer's `state.blocks` and a later TearOffBlock / RedockFloatingPane
+    /// was rejected "block not found". Assert the block now lands in `srv_state`
+    /// and a tear-off of the freshly-opened pane succeeds end-to-end.
+    #[tokio::test]
+    async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
+        let state = test_state();
+
+        // Workspace + tab through the reducer (→ srv_state AND, via apply, wstore).
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        // Open a docked sysinfo pane (no required args).
+        let cmd = CommandPaneOpenData {
+            view: "sysinfo".into(),
+            file: None,
+            url: None,
+            cwd: None,
+            title: None,
+            tab_id: Some(tab_id.clone()),
+            split_direction: None,
+            split_reference_block_id: None,
+            focus: None,
+            tree_expanded: None,
+            floating: None,
+        };
+        let res = open_pane(&state, cmd).await.expect("open_pane docked");
+
+        // The block is now visible to the reducer (was the bug: store-only).
+        {
+            let s = state.srv_state.lock().await;
+            assert!(
+                s.blocks.contains_key(&res.block_id),
+                "docked pane.open block must be tracked in srv_state"
+            );
+        }
+
+        // And tearing it off no longer hits "block not found".
+        let r = crate::sagas::tear_off_block::run(
+            &state,
+            res.block_id.clone(),
+            tab_id.clone(),
+            ws_id.clone(),
+        )
+        .await;
+        assert!(r.is_ok(), "tear-off of an opened pane must succeed, got: {:?}", r.err());
+    }
+}
