@@ -107,21 +107,40 @@ Requirements:
   - No admin rights required
 
 Data:
-  All user data (sessions, settings, logs) is stored in the data/ folder
-  next to agentmux.exe. Back it up or move it along with this folder.
+  Your data is NOT stored in this folder. AgentMux keeps it in your user
+  profile, scoped by version:
+
+    %USERPROFILE%\.agentmux\versions\$VERSION\
+    (e.g. C:\Users\<you>\.agentmux\versions\$VERSION\)
+
+      config\      settings.json, keybindings.json
+      data\db\     session history and block state
+      logs\        host and sidecar logs
+      cef-cache\   browser cache (safe to delete when the app is closed)
+      agents\      agent working directories
+
+  This makes the portable folder disposable: move it, re-extract it, or delete
+  it without losing anything. A portable copy and an installed copy of the same
+  version share this data, and your agents and sign-in carry across versions.
+  To back up or transfer your data, copy the .agentmux folder above - NOT this
+  portable folder.
 READMEEOF
 
-# data/ placeholder so the folder is visible immediately after extraction
+# data/ placeholder. NOTE: AgentMux does not actually write here — data lives
+# under ~/.agentmux/versions/<version>/ (see the README above and
+# agentmux-common::RuntimeMode). This README exists so anyone who opens the
+# leftover data/ folder is pointed at the real location instead of assuming
+# their data is here.
 cat > "$PORTABLE/data/README.txt" <<DATAEOF
-AgentMux user data
+This folder is not used.
 
-This folder contains your sessions, settings, and logs.
-It is safe to back up. Do not delete it while AgentMux is running.
+AgentMux does NOT store your data here. Your sessions, settings, logs, and
+browser cache live in your user profile, scoped by version:
 
-  data/config/   — settings.json, keybindings.json
-  data/db/       — session history and block state
-  data/logs/     — host and sidecar log files
-  data/cef/      — browser cache (safe to delete when app is closed)
+  %USERPROFILE%\.agentmux\versions\$VERSION\
+
+Back up or transfer THAT folder - not this one. This empty data\ folder is a
+leftover from an older layout and can be safely ignored or deleted.
 DATAEOF
 
 # Runtime binaries — versioned filenames so WER dumps & Event Viewer show versions.
