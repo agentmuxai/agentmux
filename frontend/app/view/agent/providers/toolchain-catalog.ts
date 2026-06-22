@@ -16,9 +16,15 @@
 export type Platform = "windows" | "macos" | "linux";
 
 export interface CoreTool {
-    /** Stable id + the binary name probed on PATH. */
+    /** Stable id. */
     id: string;
+    /**
+     * Binary name probed on PATH. Use `cliCommandByPlatform` to override on
+     * specific platforms (e.g. python3 on Unix, python on Windows).
+     */
     cliCommand: string;
+    /** Per-platform CLI command override — takes precedence over `cliCommand`. */
+    cliCommandByPlatform?: Partial<Record<Platform, string>>;
     label: string;
     /** Font Awesome (solid) icon name, rendered as `fa-solid fa-<icon>`. */
     icon: string;
@@ -34,6 +40,11 @@ export interface CoreTool {
     installCommand?: Partial<Record<Platform, string>>;
     /** Homebrew formula — enables the P3 one-click install when brew exists. */
     brewFormula?: string;
+}
+
+/** Resolve the CLI command for the current platform. */
+export function cliCommandForPlatform(tool: CoreTool, plat: Platform): string {
+    return tool.cliCommandByPlatform?.[plat] ?? tool.cliCommand;
 }
 
 const NODE_DOWNLOAD = "https://nodejs.org/en/download";
@@ -92,5 +103,46 @@ export const CORE_TOOLS: CoreTool[] = [
             linux: "https://docs.docker.com/engine/install/",
         },
         brewFormula: "docker",
+    },
+    {
+        id: "python",
+        cliCommand: "python3",
+        cliCommandByPlatform: { windows: "python" },
+        label: "Python",
+        icon: "snake",
+        minVersion: "3.10",
+        description: "Required runtime for ComfyUI, JupyterLab, MLflow, and other AI tools.",
+        docsUrl: "https://www.python.org/downloads/",
+        installUrls: {
+            windows: "https://www.python.org/downloads/windows/",
+            macos: "https://www.python.org/downloads/macos/",
+            linux: "https://www.python.org/downloads/source/",
+        },
+        installCommand: {
+            windows: "winget install Python.Python.3.12",
+            macos: "brew install python@3.12",
+            linux: "sudo apt install -y python3 python3-pip python3-venv",
+        },
+        brewFormula: "python@3.12",
+    },
+    {
+        id: "uv",
+        cliCommand: "uv",
+        label: "uv",
+        icon: "bolt",
+        optional: true,
+        description: "Fast Python package manager — 10–100× faster than pip. Recommended for widget installs.",
+        docsUrl: "https://docs.astral.sh/uv/",
+        installUrls: {
+            windows: "https://docs.astral.sh/uv/getting-started/installation/",
+            macos: "https://docs.astral.sh/uv/getting-started/installation/",
+            linux: "https://docs.astral.sh/uv/getting-started/installation/",
+        },
+        installCommand: {
+            windows: 'powershell -c "irm https://astral.sh/uv/install.ps1 | iex"',
+            macos: "brew install uv",
+            linux: "curl -LsSf https://astral.sh/uv/install.sh | sh",
+        },
+        brewFormula: "uv",
     },
 ];
