@@ -9,6 +9,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { beginBlockMoveGuard } from "@/app/workspace/block-move-guard";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
@@ -174,6 +175,11 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
+        // Arm the block-move guard BEFORE TearOffBlock + the source-node
+        // removal it triggers: that removal fires tabcontent's onNodeDelete,
+        // which would otherwise DeleteBlock the just-moved block and leave the
+        // new floater showing only the empty-tab logo (#1662, race).
+        beginBlockMoveGuard(3000);
         // PANE → chromeless floating window (just the pane: no tab bar, no
         // widget bar). Mirrors the Windows and macOS pane branches.
         // `TearOffBlock` moves the block into a fresh backend workspace+tab;

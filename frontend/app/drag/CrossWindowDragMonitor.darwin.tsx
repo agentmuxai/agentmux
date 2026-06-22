@@ -9,6 +9,7 @@
  */
 
 import { atoms, getApi } from "@/store/global";
+import { beginBlockMoveGuard } from "@/app/workspace/block-move-guard";
 import { invokeCommand } from "@/app/platform/ipc";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "@/layout/index";
@@ -173,6 +174,11 @@ async function performTearOff(
 ) {
     const api = getApi();
     if (dragType === "pane" && payload.blockId) {
+        // Arm the block-move guard BEFORE TearOffBlock + the source-node
+        // removal it triggers: that removal fires tabcontent's onNodeDelete,
+        // which would otherwise DeleteBlock the just-moved block and leave the
+        // new floater showing only the empty-tab logo (#1662, race).
+        beginBlockMoveGuard(3000);
         // PANE → chromeless floating window (just the pane: no tab bar, no
         // widget bar). Mirrors the Windows pane branch
         // (CrossWindowDragMonitor.win32.tsx). `TearOffBlock` moves the block

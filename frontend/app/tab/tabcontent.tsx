@@ -9,7 +9,7 @@ import logoUrl from "@/app/asset/logo-brain.svg?url";
 import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layout/index";
 import { TileLayoutContents } from "@/layout/lib/types";
 import { atoms, createBlock, getApi, getHostName, getUserName, isDev } from "@/store/global";
-import { isRedockGuardActive } from "@/app/workspace/redock-guard";
+import { isBlockMoveGuardActive } from "@/app/workspace/block-move-guard";
 import * as services from "@/store/services";
 import * as WOS from "@/store/wos";
 import { createMemo, Show } from "solid-js";
@@ -65,9 +65,9 @@ function TabContent(props: { tabId: string }): JSX.Element {
             // A redock removes the floater's layout node (firing this hook), but
             // the block is being MOVED into another window, not closed — deleting
             // it here destroys the redocked pane and leaves an empty slot (#1662).
-            if (isRedockGuardActive()) {
+            if (isBlockMoveGuardActive()) {
                 getApi().sendLog(
-                    `[redock-guard] suppressing DeleteBlock for ${data.blockId} (redock in flight)`,
+                    `[block-move-guard] suppressing DeleteBlock for ${data.blockId} (move in flight)`,
                 );
                 return;
             }

@@ -2,4 +2,4 @@
 type: patch
 ---
 
-fix(floating-pane): redock no longer deletes the block (onNodeDelete guard) so the pane renders in the target instead of an empty slot (#1662)
+fix(floating-pane): tear-off and redock no longer delete the moved block (onNodeDelete guard) — fixes empty-slot redock and logo-only floater on tear-off (#1662)
