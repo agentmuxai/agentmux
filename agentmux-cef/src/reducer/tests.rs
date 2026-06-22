@@ -807,3 +807,107 @@ fn queued_background_does_not_start_after_drain_begins() {
         "user-window completion still emitted"
     );
 }
+
+// ── Level-triggered quit reconciliation (spec §5.1/§10) ───────────────────
+//
+// Safety net for the reported regression (closing the last window orphaned the
+// whole process tree). The decision was previously edge-triggered inside
+// `client::on_before_close` with no test coverage; these pin the level-triggered
+// `reconcile_quit` decision so a gate regression can't ship silently again.
+
+use super::quit::{reconcile_quit, should_begin_drain, user_creation_in_flight};
+
+/// The full decision truth table (CEF-free pure core).
+#[test]
+fn should_begin_drain_truth_table() {
+    // Running + zero user windows + no creation in flight → begin draining.
+    assert_eq!(
+        should_begin_drain(0, false, &QuitState::Running),
+        Some(QuitReason::LastWindowClosed)
+    );
+    // A live user window blocks drain.
+    assert_eq!(should_begin_drain(1, false, &QuitState::Running), None);
+    // §10.2 corner: a user creation in flight blocks drain even at zero
+    // registered windows — never quit while the user's "New Window" is loading.
+    assert_eq!(should_begin_drain(0, true, &QuitState::Running), None);
+    // Already draining / quit → never re-drains (monotonic with handle_begin_drain).
+    assert_eq!(
+        should_begin_drain(
+            0,
+            false,
+            &QuitState::Draining { reason: QuitReason::LastWindowClosed }
+        ),
+        None
+    );
+    assert_eq!(should_begin_drain(0, false, &QuitState::Quit), None);
+}
+
+/// Only USER-initiated creations block drain; pool/pane background creations don't.
+#[test]
+fn user_creation_in_flight_ignores_background_labels() {
+    let mut state = HostState::default();
+    for bg in ["window-pool-abc", "floating-pool-xyz", "browser-pane-1"] {
+        update(
+            &mut state,
+            HostCommand::EnqueuePendingWindowCreation { entry: entry(bg) },
+        );
+    }
+    assert!(
+        !user_creation_in_flight(&state),
+        "background (pool/pane) creations must not block drain"
+    );
+    update(
+        &mut state,
+        HostCommand::EnqueuePendingWindowCreation { entry: entry("window-uuid-1234") },
+    );
+    assert!(
+        user_creation_in_flight(&state),
+        "a user-initiated window creation must block drain"
+    );
+}
+
+/// After the last user window deregisters (no browsers, no pending creation),
+/// reconcile drains. (Composed over real `HostState`.)
+#[test]
+fn reconcile_quit_drains_when_no_windows_and_no_pending_creation() {
+    let state = HostState::default();
+    assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
+}
+
+/// The premature-quit corner (spec §10.2): zero registered user windows but a
+/// user "New Window" is mid-creation → must NOT drain; once it leaves the
+/// pending queue (registered or aborted), reconcile drains on the next tick.
+#[test]
+fn reconcile_quit_deferred_while_user_creation_pending() {
+    let mut state = HostState::default();
+    update(
+        &mut state,
+        HostCommand::EnqueuePendingWindowCreation { entry: entry("window-fresh-uuid") },
+    );
+    assert_eq!(reconcile_quit(&state), None, "must not quit mid user-window create");
+    update(&mut state, HostCommand::DequeuePendingWindowCreation);
+    assert_eq!(
+        reconcile_quit(&state),
+        Some(QuitReason::LastWindowClosed),
+        "drains once the pending user creation clears"
+    );
+}
+
+/// A background pool refill pending must NOT keep the host alive on last close.
+#[test]
+fn reconcile_quit_drains_despite_pending_pool_refill() {
+    let mut state = HostState::default();
+    update(
+        &mut state,
+        HostCommand::EnqueuePendingWindowCreation { entry: entry("window-pool-refill-1") },
+    );
+    assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
+}
+
+/// Idempotent: once draining, reconcile is a no-op (no double-drain).
+#[test]
+fn reconcile_quit_noop_once_draining() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
+    assert_eq!(reconcile_quit(&state), None);
+}
