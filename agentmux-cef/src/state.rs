@@ -240,9 +240,19 @@ impl std::fmt::Debug for BrowserHandle {
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub enum BrowserKind {
-    /// Top-level window. `is_pool=true` while the window is in the warm
-    /// pool; cleared on promote.
+    /// Top-level window (`main`, `window-*`, and the window pool). `is_pool=true`
+    /// while the window is in the warm window pool; cleared on promote. This is
+    /// the ONLY kind that keeps the instance alive — see `is_live_user_window`.
     TopLevel { is_pool: bool },
+    /// Floating pane / tear-off in its own frameless `WS_POPUP` window —
+    /// `floating-<uuid>` (created directly) or `floating-pool-<uuid>` (taken from
+    /// the pane pool). `is_pool=true` while warm in the pane pool; cleared on
+    /// promote (`pane_pool.rs`). Floaters do **not** keep the instance alive
+    /// (invariant FP-LIFE) — `is_live_user_window` counts only
+    /// `TopLevel { is_pool: false }`, so a Floater is excluded by type, not by a
+    /// label-prefix string. They ARE trusted top-level renderers, so
+    /// `list_top_level_browsers` includes them for host JS-event emission.
+    Floater { is_pool: bool },
     /// Browser pane child window. `block_id` correlates with the
     /// `HostState.browser_panes` entry.
     Pane { block_id: String },
@@ -980,17 +990,24 @@ impl AppState {
             .collect()
     }
 
-    /// Snapshot of TOP-LEVEL browsers only — excludes `BrowserKind::Pane`
-    /// child browsers whose main frame is loading untrusted remote
-    /// content. Callers emitting JS-injected host events must use this
-    /// (or `emit_event_to_window`) so a hostile page in one pane can't
-    /// observe events meant for the host frontend.
+    /// Snapshot of top-level + floater browsers — excludes only `BrowserKind::Pane`
+    /// child browsers whose main frame is loading untrusted remote content.
+    /// Floaters render the trusted frontend (`FloatingPaneWorkspace`), so they
+    /// ARE included (they need host JS events); only `Pane` children are excluded.
+    /// Callers emitting JS-injected host events must use this (or
+    /// `emit_event_to_window`) so a hostile page in one pane can't observe events
+    /// meant for the host frontend.
     pub fn list_top_level_browsers(&self) -> Vec<(String, Browser)> {
         self.host_state
             .lock()
             .browsers
             .iter()
-            .filter(|(_, h)| matches!(h.kind, BrowserKind::TopLevel { .. }))
+            .filter(|(_, h)| {
+                matches!(
+                    h.kind,
+                    BrowserKind::TopLevel { .. } | BrowserKind::Floater { .. }
+                )
+            })
             .map(|(k, h)| (k.clone(), h.browser.clone()))
             .collect()
     }
@@ -999,11 +1016,14 @@ impl AppState {
     /// last-window quit gate (`client::on_before_close` +
     /// `wrr::win_event::maybe_quit_on_last_user_window`). Delegates to
     /// `reducer::count_live_user_windows`, which counts registered
-    /// `BrowserKind::TopLevel { is_pool: false }` browsers EXCEPT `floating-pool-*`
-    /// (pane-pool windows register as is_pool:false but must be excluded — see
-    /// `reducer::counts_as_live_user_window`). Promoted `window-pool-*` windows
-    /// (is_pool:false, still `window-pool-` labelled) correctly count. Single
-    /// host_state lock. See SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md §5.1/§10.1.
+    /// `BrowserKind::TopLevel { is_pool: false }` browsers ONLY. Floaters are a
+    /// distinct `BrowserKind::Floater` and do NOT count (invariant FP-LIFE — they
+    /// die with the last top-level window); warm window-pool windows are
+    /// `is_pool: true` and don't count; promoted `window-pool-*` windows
+    /// (`is_pool: false`, still `window-pool-` labelled) correctly count. No
+    /// label-prefix strings — excluded purely by type. Single host_state lock.
+    /// See SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md §5.1/§10.1 +
+    /// SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md (L4).
     pub fn count_live_user_windows(&self) -> usize {
         // Delegate to the reducer's pure counter under one lock (deref-coerces
         // the guard to &HostState) — single counting implementation.
@@ -1144,6 +1164,15 @@ impl AppState {
     /// `client.rs::on_after_created` BrowserKind classification.
     pub fn is_unpromoted_pool_label(&self, label: &str) -> bool {
         self.host_state.lock().pool.unpromoted.contains(label)
+    }
+
+    /// Single-label check against the unpromoted PANE-pool set. Mirror of
+    /// `is_unpromoted_pool_label` for `floating-pool-*` windows — used by
+    /// `client.rs::on_after_created` to classify a warm pane-pool floater as
+    /// `Floater { is_pool: true }` (a promoted one, no longer in the set, is
+    /// `is_pool: false`).
+    pub fn is_unpromoted_pane_pool_label(&self, label: &str) -> bool {
+        self.host_state.lock().pane_pool.unpromoted.contains(label)
     }
 
     /// Number of pool windows currently in the renderer-ready queue
