@@ -26,7 +26,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
 import { getPlatform } from "@/util/platformutil";
-import { CORE_TOOLS, type Platform } from "@/app/view/agent/providers/toolchain-catalog";
+import { CORE_TOOLS, cliCommandForPlatform, type Platform } from "@/app/view/agent/providers/toolchain-catalog";
+import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
 import "./toolchain-modal.scss";
 
@@ -46,6 +47,25 @@ interface ToolRow {
     docsUrl?: string;
     installUrl?: string;
     installCommand?: string;
+}
+
+interface WidgetRow {
+    id: string;
+    label: string;
+    icon: string;
+    description: string;
+    defaultPort: number;
+    healthCheckPath: string;
+    docsUrl: string;
+    installKind: "pip" | "npm" | "manual";
+    installPkg?: string;
+    /** CLI detection */
+    cliLoading: boolean;
+    cliFound: boolean;
+    /** Health check (only run after cliFound or for manual installs) */
+    healthLoading: boolean;
+    running: boolean;
+    statusCode?: number;
 }
 
 interface ToolEnv {
@@ -110,6 +130,60 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
 
     const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...providerRows]);
 
+    const widgetRows0: WidgetRow[] = EXTERNAL_WIDGETS.map((w) => ({
+        id: w.id,
+        label: w.label,
+        icon: w.icon,
+        description: w.description,
+        defaultPort: w.defaultPort,
+        healthCheckPath: w.healthCheckPath,
+        docsUrl: w.docsUrl,
+        installKind: w.install.kind,
+        installPkg: w.install.kind !== "manual" ? w.install.package : undefined,
+        cliLoading: true,
+        cliFound: false,
+        healthLoading: false,
+        running: false,
+    }));
+    const [wrows, setWrows] = createStore<WidgetRow[]>(widgetRows0);
+
+    const probeWidget = async (idx: number) => {
+        const w = EXTERNAL_WIDGETS[idx];
+        const cliCmd = widgetCliCommandForPlatform(w, plat);
+        // For manual-install tools without a CLI command, skip CLI check and go
+        // straight to health so the Running pill still lights up when they're live.
+        if (!cliCmd) {
+            setWrows(idx, { cliLoading: false, cliFound: false, healthLoading: true });
+        } else {
+            const data = {
+                provider_id: w.id,
+                cli_command: cliCmd,
+                npm_package: "",
+                pinned_version: "",
+                windows_install_command: "",
+                unix_install_command: "",
+            };
+            try {
+                await RpcApi.ResolveCliCommand(TabRpcClient, data, { timeout: 10000 });
+                setWrows(idx, { cliLoading: false, cliFound: true, healthLoading: true });
+            } catch {
+                setWrows(idx, { cliLoading: false, cliFound: false, healthLoading: true });
+            }
+        }
+        // Always run the health check regardless of CLI result — user may have
+        // started the server manually even without the CLI on PATH.
+        try {
+            const h = await RpcApi.WidgetHealthCommand(
+                TabRpcClient,
+                { port: w.defaultPort, health_check_path: w.healthCheckPath },
+                { timeout: 5000 }
+            );
+            setWrows(idx, { healthLoading: false, running: h.healthy, statusCode: h.status_code ?? undefined });
+        } catch {
+            setWrows(idx, { healthLoading: false, running: false });
+        }
+    };
+
     const probe = async (idx: number) => {
         const row = rows[idx];
         const def =
@@ -125,9 +199,13 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
         // the versioned dir. We pass an EMPTY npm_package so it only probes the
         // versioned install dir then the system PATH (never installs). Install
         // is an explicit, user-initiated action (P2). See SPEC_TOOLCHAIN_MANAGER.
+        const cliCmd =
+            row.kind === "core"
+                ? cliCommandForPlatform(def as any, plat)
+                : (def as any).cliCommand;
         const data = {
             provider_id: row.id,
-            cli_command: (def as any).cliCommand,
+            cli_command: cliCmd,
             npm_package: "",
             pinned_version: "",
             windows_install_command: "",
@@ -154,11 +232,16 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
             .catch(() => setEnv(null));
         // Probe every row in parallel — each updates its own store entry.
         rows.forEach((_, i) => void probe(i));
+        wrows.forEach((_, i) => void probeWidget(i));
     });
 
     const refresh = () => {
         rows.forEach((_, i) => setRows(i, { loading: true, found: false, version: undefined }));
         rows.forEach((_, i) => void probe(i));
+        wrows.forEach((_, i) =>
+            setWrows(i, { cliLoading: true, cliFound: false, healthLoading: false, running: false, statusCode: undefined })
+        );
+        wrows.forEach((_, i) => void probeWidget(i));
     };
 
     const open = (url?: string) => {
@@ -294,6 +377,51 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">Agent CLIs</h3>
                     <For each={rows.filter((r) => r.kind === "provider")}>{renderRow}</For>
+                </section>
+
+                {/* External Widgets */}
+                <section class="toolchain-section">
+                    <h3 class="toolchain-section-title">External Widgets</h3>
+                    <For each={wrows}>
+                        {(row) => (
+                            <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.cliLoading && !row.cliFound && !row.running }}>
+                                <i class={`toolchain-row-icon fa-solid fa-${row.icon}`} aria-hidden="true" />
+                                <div class="toolchain-row-main">
+                                    <div class="toolchain-row-title">
+                                        <span class="toolchain-row-name">{row.label}</span>
+                                        {/* Running pill — shown first when healthy */}
+                                        <Show when={row.running}>
+                                            <span class="toolchain-pill toolchain-pill--ok">
+                                                <i class="fa-solid fa-circle" style="font-size:0.5em;vertical-align:middle" /> Running
+                                            </span>
+                                        </Show>
+                                        {/* CLI detected pill */}
+                                        <Show when={!row.cliLoading && row.cliFound && !row.running}>
+                                            <span class="toolchain-pill toolchain-pill--muted">Installed</span>
+                                        </Show>
+                                        {/* Loading state */}
+                                        <Show when={row.cliLoading || row.healthLoading}>
+                                            <span class="toolchain-pill toolchain-pill--muted">Checking…</span>
+                                        </Show>
+                                        {/* Not found */}
+                                        <Show when={!row.cliLoading && !row.healthLoading && !row.cliFound && !row.running}>
+                                            <span class="toolchain-pill toolchain-pill--muted">
+                                                {row.installKind === "manual" ? "Not detected" : "Not installed"}
+                                            </span>
+                                        </Show>
+                                    </div>
+                                    <div class="toolchain-row-path toolchain-widget-desc">{row.description}</div>
+                                </div>
+                                <div class="toolchain-row-actions">
+                                    <Show when={row.docsUrl}>
+                                        <button class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
+                                            <i class="fa-solid fa-book" />
+                                        </button>
+                                    </Show>
+                                </div>
+                            </div>
+                        )}
+                    </For>
                 </section>
             </div>
             <div class="modal-panel-footer">
