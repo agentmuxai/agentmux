@@ -1471,6 +1471,17 @@ class RpcApiType {
         return client.rpcCall("toolchain.env", {}, opts);
     }
 
+    // command "widget.health" [call] — HTTP liveness probe for an external widget
+    // server on localhost. Returns { healthy, status_code } — never throws on
+    // connection failure so the UI can show a "not running" pill gracefully.
+    WidgetHealthCommand(
+        client: RpcClient,
+        data: { port: number; health_check_path: string },
+        opts?: RpcOpts,
+    ): Promise<{ healthy: boolean; status_code: number | null }> {
+        return client.rpcCall("widget.health", data, opts);
+    }
+
     // command "checkcliauth" [call]
     CheckCliAuthCommand(client: RpcClient, data: CommandCheckCliAuthData, opts?: RpcOpts): Promise<CheckCliAuthResult> {
         return client.rpcCall("checkcliauth", data, opts);

@@ -120,6 +120,12 @@
     white-space: nowrap;
 }
 
+.toolchain-widget-desc {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+}
+
 .toolchain-row-cmd {
     display: flex;
     align-items: center;

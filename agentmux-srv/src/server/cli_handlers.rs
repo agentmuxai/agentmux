@@ -491,6 +491,43 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // widget.health — HTTP liveness probe for an external widget server running
+    // on localhost. The frontend passes { port, health_check_path } and gets
+    // back { healthy, status_code }. A connection-refused or timeout is treated
+    // as not-healthy (not an RPC error) so the UI can show a "not running" pill
+    // without surfacing a JS exception.
+    engine.register_handler(
+        "widget.health",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let port = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                let path = data
+                    .get("health_check_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("/")
+                    .to_string();
+                if port == 0 {
+                    return Ok(Some(serde_json::json!({ "healthy": false, "status_code": null })));
+                }
+                let url = format!("http://127.0.0.1:{}{}", port, path);
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(3))
+                    .build()
+                    .map_err(|e| e.to_string())?;
+                match client.get(&url).send().await {
+                    Ok(resp) => {
+                        let status = resp.status().as_u16();
+                        Ok(Some(serde_json::json!({
+                            "healthy": resp.status().is_success(),
+                            "status_code": status,
+                        })))
+                    }
+                    Err(_) => Ok(Some(serde_json::json!({ "healthy": false, "status_code": null }))),
+                }
+            })
+        }),
+    );
 }
 
 /// Re-export from shared crate for internal use.
