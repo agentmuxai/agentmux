@@ -2232,6 +2232,17 @@ declare global {
         cached: boolean;
     };
 
+    // wshrpc.CommandActivitySummaryData
+    type CommandActivitySummaryData = {
+        block_id: string;
+        word_target?: number;
+    };
+
+    // wshrpc.ActivitySummaryResult
+    type ActivitySummaryResult = {
+        summary: string;
+    };
+
     // wshrpc.CommandSessionArchiveData
     type CommandSessionArchiveData = {
         block_id: string;

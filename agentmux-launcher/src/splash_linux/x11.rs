@@ -29,8 +29,8 @@ use x11rb::wrapper::ConnectionExt as _;
 use x11rb::NONE;
 
 use super::{
-    fade_alpha, min_hold, pulse_alpha, render_frame, BRAIN_H, BRAIN_W, CORNER_RADIUS_PX,
-    DISMISS_TIMEOUT, FRAME_MS, PADDING,
+    fade_alpha, min_hold, pulse_alpha, render_frame, CARD_H, CARD_W, CORNER_RADIUS_PX,
+    DISMISS_TIMEOUT, FRAME_MS,
 };
 
 /// Cheap reachability probe for the backend selector (`super::detect`): can we
@@ -42,13 +42,13 @@ pub(super) fn server_reachable() -> bool {
     x11rb::connect(None).is_ok()
 }
 
-pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
+pub(super) fn run(ready_file: &Path, footer: Vec<String>) -> Result<(), Box<dyn Error>> {
     let (conn, screen_num) = x11rb::connect(None)?;
     let screen = conn.setup().roots[screen_num].clone();
     let root = screen.root;
 
-    let w = (BRAIN_W + PADDING * 2) as u16;
-    let h = (BRAIN_H + PADDING * 2) as u16;
+    let w = CARD_W as u16;
+    let h = CARD_H as u16;
 
     // Per-pixel alpha (→ fade + rounded corners) needs a compositor + an ARGB
     // visual. Otherwise fall back to an opaque depth-24 square.
@@ -133,7 +133,16 @@ pub(super) fn run(ready_file: &Path) -> Result<(), Box<dyn Error>> {
         }
 
         let brain_alpha = pulse_alpha(elapsed.as_secs_f32());
-        render_frame(&mut buf, w as i32, h as i32, brain_alpha, window_alpha, radius, true);
+        render_frame(
+            &mut buf,
+            w as i32,
+            h as i32,
+            brain_alpha,
+            window_alpha,
+            radius,
+            true,
+            &footer,
+        );
 
         // PutImage in horizontal strips so no single request exceeds the server's
         // max request size (~380 KB frame > the 256 KB non-BIG-REQUESTS limit).

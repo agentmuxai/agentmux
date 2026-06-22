@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.47.4 — 2026-06-22
+
+- fix(editor): apply CSS zoom property instead of calc font-size scaling for correct per-pane zoom
+- fix(packaging): use APFS for intermediate DMG to fix ERR_CONTENT_LENGTH_MISMATCH on macOS 26 Tahoe
+- fix(agent): show session digest summary in pane header; fall back to term:activity
+- fix(sysinfo): robust CPU chart — ZOH gap fill, debounced resize, no blank-on-reload
+- fix(swarm): show agent panes in Swarm view
+- fix(ui): remove stub pane minimize button that did nothing (no layout collapse on macOS/Linux)
+- fix(floating-pane): make floaters fully independent of their parent window and stop a failed tear-off from jamming all future tear-offs
+- feat(agent): Haiku-powered live mini-summary in agent pane header
+- feat(agent): organic aurora busy animation on agent progress bar
+- feat(splash): show user@host + version footer on the startup splash, and add a splash:disabled setting (all platforms)
+- fix(floating-pane): tear-off and redock no longer delete the moved block (onNodeDelete guard) — fixes empty-slot redock and logo-only floater on tear-off (#1662)
+- fix(floating-pane): dark floater background (browser + window class) so tear-off no longer flashes white
+- feat(splash): render the user@host + version footer on macOS and Windows too (completes the cross-platform footer)
+- fix(layout): a backend block-MOVE no longer deletes the moved block (R1) — removes the block-move guard band-aid; tear-off/redock preserve the block at the root
+
+
 ## 0.47.3 — 2026-06-21
 
 - fix(srv): seed the default 3-pane layout for new windows so 'Open another window' is not blank

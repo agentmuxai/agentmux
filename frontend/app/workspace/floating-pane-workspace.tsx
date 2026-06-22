@@ -931,9 +931,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 );
                 // After successful redock, source tab.blockids empties
                 // → the auto-close watcher dismisses the floater.
+                // Signal "a redock happened" so the caller keeps the redock
+                // guard open through the floater's close + node teardown.
+                return true;
             } catch (e) {
                 console.error("[floating-pane] RedockFloatingPane failed", e);
             }
+            return false;
         };
 
         // Both mousedown and mouseup are capture-phase so they always fire
