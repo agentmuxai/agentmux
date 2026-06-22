@@ -377,28 +377,38 @@ pub fn resolve_window_at_cursor(
                                 main_hwnd = %format!("{:#x}", main_hwnd),
                                 "cursor inside window"
                             );
-                            // Resolution precedence (P1). The HWND→label
-                            // reverse map can carry a STALE `window-pool-*`
-                            // label for a promoted main frame: a warm-pool
-                            // window moved on-screen to serve as the user's
-                            // main window keeps its pool label in
-                            // `window_hwnds` while "main" is left with no live
-                            // HWND (proven 2026-05-30 — redock onto main
-                            // resolved the pool label, so the target rendered no
-                            // ghost and the drop was rejected: no dock).
-                            // `find_main_window` is the cache-INDEPENDENT
-                            // authority on which HWND is the main frame, so when
-                            // the cached label is a lingering pool label AND
-                            // this HWND is the main frame, "main" wins. Real
-                            // labels (floating-* / additional windows / an
-                            // already-correct "main") are used verbatim, so
-                            // multi-window resolution is unchanged.
+                            // Resolution (R3 identity fix, #1681). The label
+                            // stored in `window_hwnds` is ALWAYS the same string
+                            // the target window's frontend carries as its
+                            // `?windowLabel=` (promote inserts the
+                            // `window-pool-*` label; the renderer's URL carries
+                            // the same one; cold "main" and "floating-*" match
+                            // likewise). The redock ghost only renders when the
+                            // host-emitted `target_label` === that frontend
+                            // `windowLabel`, so resolve MUST return the tracked
+                            // label VERBATIM.
+                            //
+                            // A prior heuristic rewrote a tracked `window-pool-*`
+                            // label to "main" whenever `find_main_window()`
+                            // pointed at this HWND. But `find_main_window()` only
+                            // returns the topmost non-floater window — with
+                            // several promoted windows open it routinely picks a
+                            // SECONDARY one, so that window got relabeled "main",
+                            // never matched its own `window-pool-*` frontend, and
+                            // rendered no ghost (and `backend_window_id("main")`
+                            // mis-targeted the redock). That is exactly the
+                            // "can only redock into the home window" bug. Promoted
+                            // pool windows are always inserted into `window_hwnds`
+                            // at promote, so a tracked label is authoritative and
+                            // `is_main_frame` must NOT override it.
                             let is_main_frame = main_hwnd != 0 && h_isize == main_hwnd;
                             let resolved_label: Option<&str> = match label_by_hwnd.get(&h_isize) {
-                                Some(l) if l.starts_with("window-pool-") && is_main_frame => {
-                                    Some("main")
-                                }
+                                // Tracked → return verbatim (matches the frontend).
                                 Some(l) => Some(l.as_str()),
+                                // Untracked but it IS the main frame: best-effort
+                                // "main" for the genuine cold-main-before-cache
+                                // case. (Promoted windows are always tracked, so
+                                // this can't mislabel a secondary.)
                                 None if is_main_frame => Some("main"),
                                 None => None,
                             };

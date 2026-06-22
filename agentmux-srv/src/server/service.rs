@@ -838,24 +838,93 @@ async fn handle_window_service(state: &AppState, call: &WebCallType) -> WebRetur
                     // Non-fatal: a seed failure leaves an empty tab (the prior
                     // behaviour) rather than failing window creation.
                     // See docs/retro/retro-blank-new-window-2026-06-21.md.
+                    //
+                    // 2nd-window-tear-off desync fix (#1681): the seed blocks
+                    // MUST be created through the reducer (CreateBlock command),
+                    // NOT via the store-only `seed_default_layout`/`create_block`
+                    // path. This handler runs AFTER bootstrap, so anything
+                    // written straight to SQLite is invisible to the in-memory
+                    // reducer `srv_state` until the next restart. A new window
+                    // seeded store-only renders fine (frontend reads SQLite) but
+                    // its blocks are absent from `srv_state`, so a later
+                    // `TearOffBlock` from that window is rejected "block not
+                    // found" (ws/tab exist — they went through the reducer — but
+                    // the block did not). Dispatch CreateBlock per pane so the
+                    // blocks land in BOTH srv_state and (via the subscriber)
+                    // SQLite, then write the shared layout referencing them.
+                    let mut block_seed_events: Vec<agentmux_common::ipc::Event> = Vec::new();
                     if let Some(new_tab_id) = tab_events.iter().find_map(|e| match e {
                         agentmux_common::ipc::Event::TabCreated { tab_id, .. } => {
                             Some(tab_id.clone())
                         }
                         _ => None,
                     }) {
-                        if let Err(e) =
-                            crate::backend::wcore::seed_default_layout(store, &new_tab_id)
-                        {
-                            tracing::warn!(
-                                tab_id = %new_tab_id,
-                                error = %e,
-                                "CreateWindow: default layout seed failed — opening blank tab"
-                            );
+                        // Dispatch the three seed blocks through the reducer.
+                        let mut seeded_ids: Vec<String> = Vec::new();
+                        for view in ["agent", "sysinfo", "swarm"] {
+                            let evs = dispatch_to_reducer(
+                                state,
+                                agentmux_common::ipc::Command::CreateBlock {
+                                    tab_id: new_tab_id.clone(),
+                                    meta: serde_json::json!({ "view": view }),
+                                },
+                            )
+                            .await;
+                            if let Some(err_msg) = evs.iter().find_map(|e| match e {
+                                agentmux_common::ipc::Event::Error { message, .. } => {
+                                    Some(message.clone())
+                                }
+                                _ => None,
+                            }) {
+                                tracing::warn!(
+                                    tab_id = %new_tab_id,
+                                    view = %view,
+                                    error = %err_msg,
+                                    "CreateWindow: seed block create failed — opening blank tab"
+                                );
+                                break;
+                            }
+                            for ev in &evs {
+                                if let Err(e) =
+                                    crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                                {
+                                    tracing::warn!(
+                                        tab_id = %new_tab_id,
+                                        error = %e,
+                                        "CreateWindow: seed block SQLite write failed"
+                                    );
+                                }
+                            }
+                            if let Some(block_id) = evs.iter().find_map(|e| match e {
+                                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => {
+                                    Some(block_id.clone())
+                                }
+                                _ => None,
+                            }) {
+                                seeded_ids.push(block_id);
+                            }
+                            block_seed_events.extend(evs);
+                        }
+
+                        if seeded_ids.len() == 3 {
+                            if let Err(e) = crate::backend::wcore::write_default_three_pane_layout(
+                                store,
+                                &new_tab_id,
+                                &seeded_ids[0],
+                                &seeded_ids[1],
+                                &seeded_ids[2],
+                            ) {
+                                tracing::warn!(
+                                    tab_id = %new_tab_id,
+                                    error = %e,
+                                    "CreateWindow: default layout write failed — opening blank tab"
+                                );
+                            }
                         }
                     }
                     let mut combined = ws_events;
                     combined.extend(tab_events);
+                    combined.extend(block_seed_events);
                     (new_ws_id, combined)
                 } else {
                     // Existing workspace — verify it's in the reducer
@@ -2951,5 +3020,85 @@ mod agent_context_tests {
         wcore::ensure_initial_data(&store).unwrap();
         let err = resolve_agent_context(&store, "does-not-exist").unwrap_err();
         assert!(err.contains("block not found"), "unexpected error: {err}");
+    }
+}
+
+#[cfg(test)]
+mod create_window_seed_tests {
+    use super::handle_window_service;
+    use crate::backend::service::WebCallType;
+    use crate::server::tests::test_state;
+
+    fn create_window_call(workspace_id: &str) -> WebCallType {
+        WebCallType {
+            service: "window".to_string(),
+            method: "CreateWindow".to_string(),
+            uicontext: None,
+            // arg0 is ignored by the handler; arg1 is the (optional) workspace
+            // to reattach. Empty → fresh-workspace seed path.
+            args: vec![
+                serde_json::Value::Null,
+                serde_json::Value::String(workspace_id.to_string()),
+            ],
+        }
+    }
+
+    /// Regression for the 2nd-window-tear-off desync (#1681).
+    ///
+    /// "Open another window" used to seed its three default blocks straight
+    /// into SQLite (`seed_default_layout` → `create_block`), bypassing the
+    /// reducer. The handler runs after bootstrap, so those blocks never
+    /// reached the in-memory `srv_state`. The frontend rendered them (it reads
+    /// SQLite) but a subsequent `TearOffBlock` from that window was rejected
+    /// "block not found" — the workspace/tab existed (they went through the
+    /// reducer) but the block did not. This asserts the seed blocks now land in
+    /// `srv_state` AND that a tear-off from the new window succeeds end-to-end.
+    #[tokio::test]
+    async fn new_window_seed_blocks_are_in_reducer_state_and_tear_off_succeeds() {
+        let state = test_state();
+        let blocks_before = state.srv_state.lock().await.blocks.len();
+
+        let ret = handle_window_service(&state, &create_window_call("")).await;
+        assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+
+        let win = ret.data.expect("CreateWindow returns the Window");
+        let workspace_id = win
+            .get("workspaceid")
+            .and_then(|v| v.as_str())
+            .expect("window has a workspaceid")
+            .to_string();
+
+        // The fix: the three seed blocks are present in the in-memory reducer
+        // state, attached to the new window's tab.
+        let (tab_id, block_id) = {
+            let s = state.srv_state.lock().await;
+            assert_eq!(
+                s.blocks.len(),
+                blocks_before + 3,
+                "the 3 seed blocks must be tracked in srv_state, not only SQLite"
+            );
+            let ws = s
+                .workspaces
+                .get(&workspace_id)
+                .expect("new workspace is in the reducer");
+            let tab_id = ws.tab_ids.first().expect("new workspace has a tab").clone();
+            let tab = s.tabs.get(&tab_id).expect("new tab is in the reducer");
+            assert_eq!(
+                tab.block_ids.len(),
+                3,
+                "the new window's tab must hold its 3 seed blocks in the reducer"
+            );
+            (tab_id, tab.block_ids[0].clone())
+        };
+
+        // End-to-end: tearing a block off the freshly-created window no longer
+        // hits the "block not found" pre-condition.
+        let result =
+            crate::sagas::tear_off_block::run(&state, block_id, tab_id, workspace_id).await;
+        assert!(
+            result.is_ok(),
+            "tear-off from a freshly-created window must succeed, got: {:?}",
+            result.err()
+        );
     }
 }
