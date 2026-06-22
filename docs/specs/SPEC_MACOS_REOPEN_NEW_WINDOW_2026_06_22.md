@@ -209,15 +209,24 @@ the handler **no-ops and returns NO** — the first window is already coming up;
 second window for a not-yet-ready instance is undesirable. (Optional: a bounded
 retry, e.g. 3×250 ms, never blocking the main thread.)
 
-### 6.5 Run-loop delivery
+### 6.5 Run-loop delivery — REQUIRED (verified)
 
-Confirm AppKit delivers `applicationShouldHandleReopen:` to the launcher's NSApp
-while the main thread is in the `CFRunLoopRunInMode(kCFRunLoopDefaultMode, …)` park
-loop. Default-mode CFRunLoop services the main thread's Apple Event Mach port, so
-delivery is expected — but it MUST be verified (a `reopen-hook:fired proc=launcher`
-log). If it is *not* delivered under the bare park loop, switch the post-dismiss park
-to an AppKit-aware wait (`[NSApp run]` with dismissal on a timer, or process `NSApp`
-events) rather than a raw CFRunLoop spin.
+A bare `CFRunLoopRunInMode(kCFRunLoopDefaultMode, …)` park does **NOT** deliver the
+reopen Apple Event to the delegate. Confirmed empirically: with the handler
+installed but the launcher parking on a raw CFRunLoop, `open -b <bundleid>`
+returned **`-1712` (`errAETimeout`)** and the handler never fired — i.e. exactly
+the "not responding" timeout. In Cocoa the `'rapp'` event is drained through
+NSApplication's event pump (`nextEventMatchingMask:`/`[NSApp run]`, which pulls the
+AE Mach port via HIToolbox), not a standalone CFRunLoop source.
+
+**Fix (implemented):** both launcher park loops (`run_until_dismissed` — the splash
+animation loop and the post-dismiss park) pump `NSApp` instead:
+`pump_app_events(seconds)` calls
+`[NSApp nextEventMatchingMask:NSEventMaskAny untilDate:(now+seconds)
+inMode:kCFRunLoopDefaultMode dequeue:YES]` (sending any returned UI event). The AE
+is dispatched to the delegate as a side effect of the run-loop service inside that
+call. After this change the same `open -b` returns 0, logs `reopen-hook:fired
+proc=launcher`, forwards `open_new_window`, and the host logs a `CreateWindow`.
 
 ---
 
@@ -225,7 +234,7 @@ events) rather than a raw CFRunLoop spin.
 
 | File | Change |
 |---|---|
-| `agentmux-launcher/src/splash_mac.rs` | Add `install_reopen_handler()` (delegate add/swizzle, mirrors `macos_menu.rs`); call from `Splash::show()` after the NSApp exists. Body reads `REOPEN_TARGET` and forwards. |
+| `agentmux-launcher/src/splash_mac.rs` | Add `install_reopen_handler()` (delegate add/swizzle, mirrors `macos_menu.rs`); call from `Splash::show()` after the NSApp exists. Body reads `REOPEN_TARGET` and forwards. **Add `pump_app_events()` and use it in both `run_until_dismissed` loops instead of `CFRunLoopRunInMode` (§6.5) — without this the handler never fires.** |
 | `agentmux-launcher/src/main.rs` | Define `REOPEN_TARGET: OnceLock<(PathBuf,String)>`; `set` it right after `bind_socket_with_recovery` wins the socket (~`:856`). Expose `forward_open_new_window_or_log` to the splash module (or pass a closure). Log `reopen-hook:fired proc=launcher`. |
 | `agentmux-cef/src/macos_menu.rs` | No behavior change. Add `proc=host` to the existing `reopen-hook:fired` log to disambiguate the two paths in `muxlog`. |
 

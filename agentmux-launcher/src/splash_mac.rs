@@ -347,8 +347,10 @@ impl Splash {
         let mut fade_start: Option<Instant> = None;
 
         loop {
+            // NSApp event pump (not bare CFRunLoop) so a reopen Apple Event that
+            // arrives mid-splash is delivered to our delegate. See pump_app_events.
             unsafe {
-                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.016, 0);
+                pump_app_events(0.016);
             }
             let t = start.elapsed().as_secs_f64();
 
@@ -388,15 +390,57 @@ impl Splash {
             std::thread::sleep(Duration::from_millis(8));
         }
 
-        // Keep pumping so the order-out flushes and AppKit stays sane. The
-        // supervisor thread owns process lifetime and `process::exit`s when the
-        // host exits, which ends this loop with the process.
+        // Keep pumping NSApp events so the order-out flushes, AppKit stays sane,
+        // AND reopen Apple Events keep reaching our delegate for the rest of the
+        // process lifetime (the common case: user double-clicks a long-running
+        // app). The supervisor thread owns process lifetime and `process::exit`s
+        // when the host exits, which ends this loop with the process.
         loop {
             unsafe {
-                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.2, 0);
+                pump_app_events(0.2);
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+}
+
+/// Pump the launcher's `NSApplication` event loop for up to `seconds` on the main
+/// thread. Unlike a bare `CFRunLoopRunInMode`, NSApp's pump drains the AppKit
+/// event queue **and the Apple Event Mach port** — the reopen (`kAEReopenApplication`,
+/// `'rapp'`) event is delivered through this pump, not a plain CFRunLoop. Without
+/// it the launcher's reopen delegate is never invoked and a Finder/Dock reopen
+/// times out (`errAETimeout` → "AgentMux is not responding"). The AE is dispatched
+/// to the delegate as a side effect of the run-loop service inside
+/// `nextEventMatchingMask:`, so we don't need the returned event for reopen — we
+/// still forward any returned UI event to keep the splash window responsive.
+unsafe fn pump_app_events(seconds: f64) {
+    let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
+    if app.is_null() {
+        return;
+    }
+    let until: id = {
+        let f: extern "C" fn(id, SEL, f64) -> id =
+            std::mem::transmute(objc_msgSend as *const ());
+        f(
+            class(b"NSDate\0"),
+            sel(b"dateWithTimeIntervalSinceNow:\0"),
+            seconds,
+        )
+    };
+    // NSEventMaskAny == NSUIntegerMax; dequeue: YES. Blocks until an event or
+    // `until`; the AE port is serviced during that wait.
+    let next: extern "C" fn(id, SEL, u64, id, CFStringRef, u8) -> id =
+        std::mem::transmute(objc_msgSend as *const ());
+    let evt = next(
+        app,
+        sel(b"nextEventMatchingMask:untilDate:inMode:dequeue:\0"),
+        u64::MAX,
+        until,
+        kCFRunLoopDefaultMode,
+        1,
+    );
+    if !evt.is_null() {
+        send_void_id(app, sel(b"sendEvent:\0"), evt);
     }
 }
 
