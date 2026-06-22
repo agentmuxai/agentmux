@@ -27,7 +27,8 @@
 
 import { createEffect } from "solid-js";
 
-import { launcherEvent, launcherEventVersion } from "@/util/launcher-events";
+import { launcherEvent, launcherEventVersion, launcherEventGapSeq } from "@/util/launcher-events";
+import { getApi } from "@/store/app-api";
 import {
     setOpenWindowEntriesAtom,
     setOpenWindowLabelsAtom,
@@ -149,6 +150,35 @@ export function reconcileKnownEntriesFromSnapshot(
     dispatch({ type: "ReconcileFromSnapshot", entries });
 }
 
+/**
+ * Re-pull the authoritative window-instance snapshot and reconcile after the
+ * launcher event stream drops one or more events (a detected version gap).
+ *
+ * The stream is best-effort per-renderer dispatch — a dropped `window_closed`
+ * leaves this renderer's `knownEntries` permanently over-counting (the window
+ * count "(N)" never decrements; the observed "3 vs 4" desync). `ReconcileFromSnapshot`
+ * heals it (wholesale add/remove vs the authoritative `list_window_instances`).
+ *
+ * Race guard (mirrors the codex P1 #733 concern that gated the InstancePanel
+ * reconcile to dev-only): capture the event version BEFORE the async RPC; if a
+ * newer typed event lands while the RPC is in flight, that event already
+ * advanced state past the snapshot — discard the reconcile rather than clobber
+ * fresh state with a stale snapshot. We reconcile ONLY on a detected gap, never
+ * unconditionally, so this never fights the normal event flow.
+ * See `docs/specs/SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md` §9.
+ */
+async function resyncFromAuthorityAfterGap(): Promise<void> {
+    const versionAtRequest = launcherEventVersion();
+    try {
+        const snapshot = await getApi().listWindowInstances();
+        if (!Array.isArray(snapshot)) return;
+        if (launcherEventVersion() !== versionAtRequest) return; // raced a newer event — skip
+        reconcileKnownEntriesFromSnapshot(snapshot);
+    } catch (e) {
+        console.error("[launcher-event] gap resync failed", e);
+    }
+}
+
 let started = false;
 
 /**
@@ -176,6 +206,17 @@ export function startLauncherEventReducer(): void {
             applyingRemote = false;
         }
     });
+
+    // Resync-on-gap: the launcher event stream is lossy, and a dropped event
+    // leaves this renderer's `instances` stale forever. When the tracker detects
+    // a version gap it bumps `launcherEventGapSeq`; reconcile against the
+    // authoritative snapshot. Seeded at 0 so the initial run is a no-op (only a
+    // real gap, seq > prev, triggers a resync).
+    createEffect((prevSeq: number) => {
+        const seq = launcherEventGapSeq();
+        if (seq > prevSeq) void resyncFromAuthorityAfterGap();
+        return seq;
+    }, 0);
 }
 
 // ── Test/diagnostics helpers ───────────────────────────────────────────
