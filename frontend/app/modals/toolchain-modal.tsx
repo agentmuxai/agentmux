@@ -25,6 +25,25 @@ import { openModal, type ModalCloseProps } from "@/app/store/modalmodel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi, createBlock } from "@/store/global";
+
+function loadWidgetPorts(): Record<string, number> {
+    try {
+        const raw = localStorage.getItem("agentmux:widget-ports");
+        return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    } catch {
+        return {};
+    }
+}
+
+function saveWidgetPort(widgetId: string, port: number | undefined): void {
+    const saved = loadWidgetPorts();
+    if (port === undefined) {
+        delete saved[widgetId];
+    } else {
+        saved[widgetId] = port;
+    }
+    localStorage.setItem("agentmux:widget-ports", JSON.stringify(saved));
+}
 import { getPlatform } from "@/util/platformutil";
 import { CORE_TOOLS, cliCommandForPlatform, type Platform } from "@/app/view/agent/providers/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
@@ -63,6 +82,8 @@ interface WidgetRow {
     /** CLI detection */
     cliLoading: boolean;
     cliFound: boolean;
+    /** User-overridden port; falls back to defaultPort when undefined */
+    customPort?: number;
     /** Health check (only run after cliFound or for manual installs) */
     healthLoading: boolean;
     running: boolean;
@@ -131,6 +152,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
 
     const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...providerRows]);
 
+    const savedPorts = loadWidgetPorts();
     const widgetRows0: WidgetRow[] = EXTERNAL_WIDGETS.map((w) => ({
         id: w.id,
         label: w.label,
@@ -142,6 +164,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
         docsUrl: w.docsUrl,
         installKind: w.install.kind,
         installPkg: w.install.kind !== "manual" ? w.install.package : undefined,
+        customPort: savedPorts[w.id],
         cliLoading: true,
         cliFound: false,
         healthLoading: false,
@@ -151,6 +174,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
 
     const probeWidget = async (idx: number) => {
         const w = EXTERNAL_WIDGETS[idx];
+        const effectivePort = wrows[idx].customPort ?? w.defaultPort;
         const cliCmd = widgetCliCommandForPlatform(w, plat);
         // For manual-install tools without a CLI command, skip CLI check and go
         // straight to health so the Running pill still lights up when they're live.
@@ -178,7 +202,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
             const h = await RpcApi.WidgetHealthCommand(
                 TabRpcClient,
                 {
-                    port: w.defaultPort,
+                    port: effectivePort,
                     health_check_path: w.healthCheckPath,
                     health_check_body_contains: w.healthCheckBodyContains,
                 },
@@ -389,7 +413,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">External Widgets</h3>
                     <For each={wrows}>
-                        {(row) => (
+                        {(row, i) => (
                             <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.cliLoading && !row.cliFound && !row.running }}>
                                 <i class={`toolchain-row-icon fa-solid fa-${row.icon}`} aria-hidden="true" />
                                 <div class="toolchain-row-main">
@@ -417,6 +441,40 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                         </Show>
                                     </div>
                                     <div class="toolchain-row-path toolchain-widget-desc">{row.description}</div>
+                                    <div class="toolchain-widget-port">
+                                        <span class="toolchain-widget-port-label">Port</span>
+                                        <input
+                                            class="toolchain-widget-port-input"
+                                            type="number"
+                                            min="1"
+                                            max="65535"
+                                            value={row.customPort ?? row.defaultPort}
+                                            onBlur={(e) => {
+                                                const val = parseInt(e.currentTarget.value, 10);
+                                                if (isNaN(val) || val <= 0 || val > 65535) {
+                                                    e.currentTarget.value = String(row.customPort ?? row.defaultPort);
+                                                    return;
+                                                }
+                                                const newPort = val === row.defaultPort ? undefined : val;
+                                                setWrows(i(), { customPort: newPort, cliLoading: true, cliFound: false, healthLoading: false, running: false });
+                                                saveWidgetPort(row.id, newPort);
+                                                void probeWidget(i());
+                                            }}
+                                        />
+                                        <Show when={row.customPort !== undefined}>
+                                            <button
+                                                class="toolchain-link-btn"
+                                                onClick={() => {
+                                                    setWrows(i(), { customPort: undefined, cliLoading: true, cliFound: false, healthLoading: false, running: false });
+                                                    saveWidgetPort(row.id, undefined);
+                                                    void probeWidget(i());
+                                                }}
+                                                title="Reset to default port"
+                                            >
+                                                <i class="fa-solid fa-rotate-left" />
+                                            </button>
+                                        </Show>
+                                    </div>
                                 </div>
                                 <div class="toolchain-row-actions">
                                     <Show when={row.running}>
@@ -426,7 +484,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                                 void createBlock({
                                                     meta: {
                                                         view: "browser",
-                                                        url: `http://127.0.0.1:${row.defaultPort}${row.embedPath}`,
+                                                        url: `http://127.0.0.1:${row.customPort ?? row.defaultPort}${row.embedPath}`,
                                                         "frame:title": row.label,
                                                     },
                                                 });

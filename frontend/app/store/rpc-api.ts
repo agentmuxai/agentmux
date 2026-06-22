@@ -1301,6 +1301,28 @@ class RpcApiType {
         return client.rpcCall("widget.health", data, opts);
     }
 
+    // command "widget.api" [call] — HTTP proxy to a widget's local server.
+    // Bypasses browser CORS restrictions so agents (and the frontend) can call
+    // ComfyUI /prompt, Grafana /api/query, etc. without a CORS header.
+    // body must be a pre-serialised JSON string when calling JSON APIs.
+    // Never throws. ok:true means the HTTP exchange completed — check status_code
+    // for HTTP-level success/failure (4xx/5xx still return ok:true).
+    // ok:false means transport failure (connection refused, timeout) or invalid
+    // port/path — status_code is null and error is set.
+    WidgetApiCommand(
+        client: RpcClient,
+        data: {
+            port: number;
+            path: string;
+            method?: string;
+            headers?: Record<string, string>;
+            body?: string;
+        },
+        opts?: RpcOpts,
+    ): Promise<{ ok: boolean; status_code: number | null; body: string | null; error?: string }> {
+        return client.rpcCall("widget.api", data, opts);
+    }
+
 
     CheckCliAuthCommand(client: RpcClient, data: CommandCheckCliAuthData, opts?: RpcOpts): Promise<CheckCliAuthResult> {
         return client.rpcCall("checkcliauth", data, opts);
