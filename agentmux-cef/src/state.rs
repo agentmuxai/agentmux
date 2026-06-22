@@ -1099,7 +1099,9 @@ impl AppState {
         // Pane pool emits NO launcher events (report_pool_window_added/removed/promoted),
         // so including pane_pool.* here would cause permanent DriftDetected{Pool}.
         // Only the tab pool (window-pool-*) participates in launcher mirror accounting.
-        // See user_visibility_snapshot for the app-exit gate (which correctly includes pane pool).
+        // (The last-window app-exit gate is `reducer::count_live_user_windows`, which
+        // EXCLUDES pane pool — a separate count from this launcher-mirror one;
+        // `user_visibility_snapshot` is the snapshot used for on_before_close logging.)
         let pool_inventory: std::collections::HashSet<&str> = st
             .pool
             .unpromoted
