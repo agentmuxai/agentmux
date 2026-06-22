@@ -236,7 +236,12 @@ wrap_task! {
             let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
 
             let url_cef = CefString::from(self.url.as_str());
-            let settings = BrowserSettings::default();
+            let mut settings = BrowserSettings::default();
+            // Opaque dark base (theme #1e1e2e) so the browser surface paints
+            // dark — not white — between window-show and first content paint.
+            // A 0-alpha would fall back to the transparent CefSettings default
+            // and flash white over the desktop on this unowned popup. (#1662 polish)
+            settings.background_color = 0xFF1E1E2E;
 
             let parent_hwnd = sys::HWND(outer_hwnd as *mut _);
             let mut window_info = WindowInfo::default().set_as_child(parent_hwnd, &rect);
@@ -453,7 +458,12 @@ wrap_task! {
             );
             let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
             let url_cef = CefString::from(self.url.as_str());
-            let settings = BrowserSettings::default();
+            let mut settings = BrowserSettings::default();
+            // Opaque dark base (theme #1e1e2e) so the browser surface paints
+            // dark — not white — between window-show and first content paint.
+            // A 0-alpha would fall back to the transparent CefSettings default
+            // and flash white over the desktop on this unowned popup. (#1662 polish)
+            settings.background_color = 0xFF1E1E2E;
             let parent_hwnd = sys::HWND(outer_hwnd as *mut _);
             let mut window_info = WindowInfo::default().set_as_child(parent_hwnd, &rect);
             window_info.runtime_style = RuntimeStyle::ALLOY;
@@ -734,6 +744,13 @@ fn create_popup(
     CLASS_REGISTERED.call_once(|| unsafe {
         let h_instance =
             windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null());
+        // Dark class background brush (theme #1e1e2e). With a null brush the
+        // popup's initial WM_ERASEBKGND paints white, flashing on tear-off
+        // before the embedded CEF child covers the client area. COLORREF is
+        // 0x00BBGGRR, so #1e1e2e -> 0x002E1E1E. Process-lifetime leak is fine
+        // (one brush for the one class). (#1662 polish)
+        let dark_brush =
+            windows_sys::Win32::Graphics::Gdi::CreateSolidBrush(0x002E1E1E);
         let wnd_class = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: CS_HREDRAW | CS_VREDRAW,
@@ -743,7 +760,7 @@ fn create_popup(
             hInstance: h_instance,
             hIcon: std::ptr::null_mut(),
             hCursor: std::ptr::null_mut(),
-            hbrBackground: std::ptr::null_mut(),
+            hbrBackground: dark_brush,
             lpszMenuName: std::ptr::null(),
             lpszClassName: class_name_utf16.as_ptr(),
             hIconSm: std::ptr::null_mut(),
