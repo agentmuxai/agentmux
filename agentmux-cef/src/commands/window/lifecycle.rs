@@ -38,6 +38,19 @@ use cef::{ImplBrowser, ImplBrowserHost};
 pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
 
+    // Report the logical window-close to the launcher so the frontend's window
+    // count ("(N)" next to the version) decrements. `on_before_close` — the only
+    // other caller of `report_window_closed` — does NOT fire on a CEF Views
+    // recycle-on-close (the window hides, the browser is reused), so without
+    // this the count goes stale (Discussion #1680, sibling of #1676). The
+    // launcher pairs WindowClosed with WindowOpened and no-ops unknown/
+    // already-removed labels, so an extra report (if on_before_close DOES fire,
+    // e.g. a real destroy) is harmless. Skip browser-pane-* — same gate as
+    // on_before_close (client/mod.rs).
+    if !label.starts_with("browser-pane-") {
+        crate::launcher_ipc::report_window_closed(label.to_string());
+    }
+
     // Close via the registered browser's CefWindow (post_close_window →
     // CloseWindowTask → window.close()) when one exists — reliable for the CEF
     // *Views* main window, whose window_handle() is NULL on Win32 so the old
