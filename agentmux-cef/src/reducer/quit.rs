@@ -85,15 +85,18 @@ fn is_background_pending_creation_label(label: &str) -> bool {
 /// by label would drop it and quit with a window open (reagent P1 #1676).
 /// Unpromoted pool windows are `is_pool: true`; panes are `BrowserKind::Pane`;
 /// both are correctly excluded by the `is_pool: false` match.
-#[allow(dead_code)]
-pub(super) fn is_live_user_window(kind: &BrowserKind) -> bool {
+///
+/// `pub(crate)` + re-exported from `reducer` so the live last-window quit gate
+/// (`AppState::count_live_user_windows`, used by `client::on_before_close`) shares
+/// this one definition rather than duplicating the predicate.
+pub(crate) fn is_live_user_window(kind: &BrowserKind) -> bool {
     matches!(kind, BrowserKind::TopLevel { is_pool: false })
 }
 
 /// Count of live, user-visible top-level windows — the windows that keep the
-/// instance alive.
-#[allow(dead_code)]
-pub(super) fn count_live_user_windows(state: &HostState) -> usize {
+/// instance alive. Live last-window quit gate via `AppState::count_live_user_windows`
+/// → `client::on_before_close`.
+pub(crate) fn count_live_user_windows(state: &HostState) -> usize {
     state
         .browsers
         .values()

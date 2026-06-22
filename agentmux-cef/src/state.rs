@@ -995,6 +995,21 @@ impl AppState {
             .collect()
     }
 
+    /// Count of live, user-visible top-level windows — the authoritative
+    /// last-window quit gate (`client::on_before_close`). Counts by the
+    /// per-browser `BrowserKind::is_pool` flag via the shared
+    /// `reducer::is_live_user_window` predicate (`is_pool: false` = a real user
+    /// window, INCLUDING promoted pool windows which keep their `window-pool-*`
+    /// label), NOT pool set-membership. Single host_state lock — the `is_pool`
+    /// flag is flipped atomically at promote, so this can't drift or race a
+    /// concurrent promote the way a two-set read can. See
+    /// SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md §5.1/§10.1.
+    pub fn count_live_user_windows(&self) -> usize {
+        // Delegate to the reducer's pure counter under one lock (deref-coerces
+        // the guard to &HostState) — single counting implementation.
+        crate::reducer::count_live_user_windows(&self.host_state.lock())
+    }
+
     /// First registered browser (for "any browser" callers like command
     /// palette routing). Returns the label + Browser pair, or None if
     /// the registry is empty.

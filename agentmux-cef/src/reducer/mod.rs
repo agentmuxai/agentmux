@@ -892,6 +892,11 @@ mod pool;
 mod quit;
 mod top_level;
 
+/// Shared with `AppState::count_live_user_windows` (the live last-window quit
+/// gate) so the "is this a live user window?" predicate + count have a single
+/// definition.
+pub(crate) use quit::{count_live_user_windows, is_live_user_window};
+
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     match cmd {
         HostCommand::EnqueuePendingWindowCreation { entry } => {
