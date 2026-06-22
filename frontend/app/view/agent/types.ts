@@ -647,6 +647,8 @@ export const TOOL_ICONS: Record<string, string> = {
     Agent: "🤖",
     WebSearch: "🌐",
     web_search: "🌐",
+    WebFetch: "🌐",
+    web_fetch: "🌐",
     Other: "🛠️",
 };
 

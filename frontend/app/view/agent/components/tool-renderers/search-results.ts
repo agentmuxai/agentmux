@@ -46,8 +46,9 @@ function findResultArray(result: unknown): unknown[] | null {
         const o = result as Record<string, unknown>;
         for (const k of ARRAY_KEYS) {
             if (Array.isArray(o[k])) return o[k] as unknown[];
-            // Value may be a JSON-encoded array (common when CLI serialises tool_result content as string)
-            const parsed = tryParseJsonArray(o[k]);
+            // Value may be a JSON-encoded array (e.g. when buildToolResults wraps
+            // block.content as { content: "[{...}]" } for string-body tool results).
+            const parsed = tryParseJsonArray(o[k] as unknown);
             if (parsed) return parsed;
         }
     }

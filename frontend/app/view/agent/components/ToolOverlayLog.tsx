@@ -31,8 +31,9 @@ import {
     byKind,
     anyTool,
 } from "./tool-renderers/registry";
-// Side-effect: registers the rich renderers (WebSearch cards, record tables, …).
+// Side-effect: registers the rich renderers (WebSearch cards, WebFetch view, record tables, …).
 import "./tool-renderers/SearchResults";
+import "./tool-renderers/WebFetchResult";
 import "./tool-renderers/RecordTable";
 
 interface ToolOverlayLogProps {
