@@ -335,6 +335,23 @@ the running window to `agentmux.desktop` only. Only `agentmux.desktop` is needed
 
 ---
 
+## Naming Conventions
+
+### Cloud messaging layer — canonical name: **muxbus**
+
+The cloud messaging layer has gone through several names (`agentbus`, `agentmux`). The canonical name is **muxbus** — use it for all new code, env vars, types, and docs.
+
+| Layer | Canonical prefix | Examples |
+|-------|-----------------|---------|
+| Cloud auth env vars | `MUXBUS_` | `MUXBUS_TOKEN`, `MUXBUS_COGNITO_DOMAIN` |
+| Frontend build vars | `VITE_MUXBUS_` | `VITE_MUXBUS_CLIENT_ID` |
+| Rust types/modules | `MuxBus` / `muxbus` | `MuxBusCredentials`, `crate::muxbus::` |
+| RPC commands | `muxbus.` | `muxbus.login`, `muxbus.status` |
+
+Old specs in `specs/` use `AGENTBUS_*` / `agentbus.asaf.cc` — those are historical documents describing the predecessor service. Do not update them; do not introduce new `agentbus` naming.
+
+---
+
 ## Reference
 
 - **Project Docs:** `./README.md`, `./VERSION_HISTORY.md`
