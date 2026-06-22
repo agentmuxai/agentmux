@@ -21,6 +21,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # through package.sh).
 VERSION=$(node -p "require('./package.json').version")
 LABEL="${AGENTMUX_BUILD_LABEL:-$VERSION}"
+# CHANNEL matches the AGENTMUX_BUILD_CHANNEL_DEFAULT compiled into the binaries
+# (scripts/package.sh exports it; release CI uses "stable", task package uses a
+# local-… channel). Same fallback as package-macos.sh so the README data path
+# matches DataPaths::resolve exactly (~/.agentmux/channels/<channel>/…).
+CHANNEL="${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}"
 OUTDIR="${1:-$HOME/Desktop}"
 PORTABLE="$OUTDIR/agentmux-$LABEL-x64-portable"
 ZIPPATH="$OUTDIR/agentmux-$LABEL-x64-portable.zip"
@@ -113,21 +118,24 @@ Requirements:
 
 Data:
   Your data is NOT stored in this folder. AgentMux keeps it in your user
-  profile, scoped by version:
+  profile, under a per-channel folder (this build's channel: ${CHANNEL}):
 
-    %USERPROFILE%\\.agentmux\\versions\\${VERSION}\\
-    (e.g. C:\\Users\\<you>\\.agentmux\\versions\\${VERSION}\\)
+    %USERPROFILE%\\.agentmux\\channels\\${CHANNEL}\\
+    (e.g. C:\\Users\\<you>\\.agentmux\\channels\\${CHANNEL}\\)
 
-      config\\      settings.json, keybindings.json
-      data\\db\\     session history and block state
-      logs\\        host and sidecar logs
-      cef-cache\\   browser cache (safe to delete when the app is closed)
-      agents\\      agent working directories
+  Per-version (a separate folder per AgentMux version):
+      versions\\${VERSION}\\data\\        session history and block state
+      versions\\${VERSION}\\logs\\        host and sidecar logs
+      versions\\${VERSION}\\cef-cache\\   browser cache (safe to delete when closed)
+
+  Channel-wide (shared across versions, so settings and agents survive upgrades):
+      config\\    settings.json, keybindings.json
+      agents\\    agent working directories
 
   This makes the portable folder disposable: move it, re-extract it, or delete
   it without losing anything. A portable copy and an installed copy of the same
   version share this data, and your agents and sign-in carry across versions.
-  To back up or transfer your data, copy the .agentmux folder above - NOT this
+  To back up or transfer your data, copy the channel folder above - NOT this
   portable folder.
 READMEEOF
 
