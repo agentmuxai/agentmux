@@ -1,5 +1,17 @@
 # AgentMux Version History
 
+## 0.48.1 — 2026-06-22
+
+- feat(widgets): per-widget port override and widget.api HTTP proxy RPC
+- docs(portable): correct README data location (~/.agentmux/versions, not local data/ folder)
+- feat(agent-pane): replace gradient sweep with marching-ants progress bar
+- fix(packaging): purge inactive pages before ULMO compression to prevent OOM kill
+- fix(statusbar): wrap long data-tip tooltips instead of overflowing the balloon
+- perf(layout): reduce native-pane reflow settle window from 32ms to 4ms
+- feat(agent): persist per-agent zoom across pane close/reopen
+- fix(window): accurate status-bar window count on close + event-stream gaps
+
+
 ## 0.48.0 — 2026-06-22
 
 - fix(macos): disable MacAppCodeSignClone so packaged app launches from any volume
