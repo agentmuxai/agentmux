@@ -41,7 +41,6 @@ use crate::backend::wps;
 /// WPS file subject name for persistent subprocess output.
 pub const PERSISTENT_OUTPUT_SUBJECT: &str = "output";
 
-/// Controller type constant.
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 
 /// Resolve the muxbus address (the agent's display name) from a spawn env map.
