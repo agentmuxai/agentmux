@@ -24,7 +24,7 @@ import { Modal } from "@/element/modal";
 import { openModal, type ModalCloseProps } from "@/app/store/modalmodel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getApi } from "@/store/global";
+import { getApi, createBlock } from "@/store/global";
 import { getPlatform } from "@/util/platformutil";
 import { CORE_TOOLS, cliCommandForPlatform, type Platform } from "@/app/view/agent/providers/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
@@ -55,6 +55,7 @@ interface WidgetRow {
     icon: string;
     description: string;
     defaultPort: number;
+    embedPath: string;
     healthCheckPath: string;
     docsUrl: string;
     installKind: "pip" | "npm" | "manual";
@@ -136,6 +137,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
         icon: w.icon,
         description: w.description,
         defaultPort: w.defaultPort,
+        embedPath: w.embedPath,
         healthCheckPath: w.healthCheckPath,
         docsUrl: w.docsUrl,
         installKind: w.install.kind,
@@ -417,6 +419,23 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                     <div class="toolchain-row-path toolchain-widget-desc">{row.description}</div>
                                 </div>
                                 <div class="toolchain-row-actions">
+                                    <Show when={row.running}>
+                                        <button
+                                            class="toolchain-btn"
+                                            onClick={() => {
+                                                void createBlock({
+                                                    meta: {
+                                                        view: "browser",
+                                                        url: `http://127.0.0.1:${row.defaultPort}${row.embedPath}`,
+                                                        "frame:title": row.label,
+                                                    },
+                                                });
+                                                props.close();
+                                            }}
+                                        >
+                                            Open Pane <i class="fa-solid fa-arrow-up-right-from-square" />
+                                        </button>
+                                    </Show>
                                     <Show when={row.docsUrl}>
                                         <button class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
                                             <i class="fa-solid fa-book" />
