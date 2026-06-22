@@ -198,6 +198,121 @@ pub fn uninstall_hooks() {
 /// hooking thread, posted via the message pump). Must not block
 /// for long: we only do quick HWND-property reads and dispatch
 /// non-blocking sync IPC reports.
+// ── B1: last-user-window teardown trigger (Discussion #1680) ──────────────────
+//
+// The Views main window does NOT fire `on_before_close` when closed — closing
+// HIDES/recycles it (warm pool) rather than destroying the browser, so the
+// host's CEF-lifecycle quit never starts and the launcher (gated on host exit
+// via host_child.wait → Job Object KILL_ON_JOB_CLOSE) never reaps the tree.
+// Instead we trigger teardown off the RELIABLE OS signal: when the last
+// user-visible top-level window goes away, quit the message loop → host exits →
+// launcher reaps. This callback runs on the CEF UI thread (install_hooks is
+// called immediately before run_message_loop on the main thread, and
+// WINEVENT_OUTOFCONTEXT callbacks are delivered on the hook-installing thread's
+// message pump), so `quit_message_loop()` — the canonical, reliable exit
+// (unlike PostThreadMessage(WM_QUIT), which CEF's pump ignores, or post_task,
+// which drops during teardown) — is safe to call here.
+
+/// Set true once any user-visible top-level window has been shown — prevents a
+/// startup-time `count == 0` (before the first window appears) from quitting.
+static HAD_VISIBLE_USER_WINDOW: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// Set true once the quit has been initiated, so a flurry of HIDE/DESTROY
+/// events can't call `quit_message_loop()` more than once.
+static QUIT_INITIATED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// X-coordinate below which a top-level window is an off-screen warm-pool member
+/// (created at -32000), not a real user window. Mirrors
+/// `commands::window::lifecycle::OFFSCREEN_POOL_THRESHOLD_X`.
+const OFFSCREEN_POOL_THRESHOLD_X: i32 = -20000;
+
+/// Count this process's user-visible top-level windows: `IsWindowVisible`,
+/// app-class (`Chrome_WidgetWin_*`; floaters use a different class and are
+/// excluded), and on-screen (off-screen warm-pool windows excluded). A promoted
+/// pool window counts (on-screen + app-class); a hidden/recycled or off-screen
+/// pool window does not. Minimized windows remain `IsWindowVisible` and count
+/// (minimize ≠ close).
+unsafe fn count_visible_user_windows() -> usize {
+    use windows_sys::Win32::Foundation::{BOOL, LPARAM, RECT};
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowRect};
+
+    struct Ctx {
+        pid: u32,
+        count: usize,
+    }
+    unsafe extern "system" fn enum_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = &mut *(lparam as *mut Ctx);
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid != ctx.pid {
+            return 1;
+        }
+        if IsWindowVisible(hwnd) == 0 {
+            return 1;
+        }
+        if !classify::is_app_class(&read_class_name(hwnd)) {
+            return 1;
+        }
+        let mut rect: RECT = std::mem::zeroed();
+        if GetWindowRect(hwnd, &mut rect) != 0 && rect.left < OFFSCREEN_POOL_THRESHOLD_X {
+            return 1; // off-screen warm-pool window — not user-visible
+        }
+        ctx.count += 1;
+        1
+    }
+    let mut ctx = Ctx {
+        pid: GetCurrentProcessId(),
+        count: 0,
+    };
+    EnumWindows(Some(enum_cb), &mut ctx as *mut Ctx as LPARAM);
+    ctx.count
+}
+
+/// Called from HIDE/DESTROY of an app-class window. If a user window has ever
+/// been shown and now zero user-visible windows remain, quit the CEF message
+/// loop. Idempotent (QUIT_INITIATED guard).
+unsafe fn maybe_quit_on_last_user_window() {
+    use std::sync::atomic::Ordering::SeqCst;
+    if QUIT_INITIATED.load(SeqCst) {
+        return;
+    }
+    // "Have we ever had a real user window?" — gate primarily on the CEF
+    // registry: `main` registers as a `is_pool:false` top-level at startup and
+    // STAYS registered through the recycle-on-close (the browser is hidden, not
+    // destroyed; `on_before_close` never fires), so this is ≥1 at close time
+    // yet 0 during early startup before `main` registers — preventing a
+    // premature quit. `HAD_VISIBLE_USER_WINDOW` (armed when a user window is
+    // shown/created-visible) is kept as a belt-and-suspenders OR.
+    let registered = app_state()
+        .get()
+        .map(|s| s.count_live_user_windows())
+        .unwrap_or(0);
+    let armed = registered > 0 || HAD_VISIBLE_USER_WINDOW.load(SeqCst);
+    if !armed {
+        return;
+    }
+    let visible = count_visible_user_windows();
+    tracing::debug!(
+        target: "wrr-trace",
+        "[wrr] last-window check: registered_user_windows={} os_visible={}",
+        registered, visible
+    );
+    if visible != 0 {
+        return;
+    }
+    if QUIT_INITIATED.swap(true, SeqCst) {
+        return; // another event won the race and already initiated quit
+    }
+    tracing::warn!(
+        target: "wrr",
+        "[wrr] all user windows hidden/closed (registered={}, 0 visible) — quitting message loop",
+        registered
+    );
+    cef::quit_message_loop();
+}
+
 unsafe extern "system" fn win_event_callback(
     _hook: HWINEVENTHOOK,
     event: u32,
@@ -304,6 +419,10 @@ unsafe extern "system" fn win_event_callback(
             launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, visible);
             let iconic = IsIconic(hwnd) != 0;
             launcher_ipc::report_hwnd_iconic_changed(raw_hwnd, iconic);
+            // B1: a user-visible window appeared — arm the last-window quit.
+            if visible {
+                HAD_VISIBLE_USER_WINDOW.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         }
         EVENT_OBJECT_DESTROY => {
             // No class-name filter on destroy — the HWND may be
@@ -313,6 +432,10 @@ unsafe extern "system" fn win_event_callback(
             // membership check.
             position_debounce::forget(raw_hwnd);
             launcher_ipc::report_hwnd_destroyed(raw_hwnd);
+            // B1: a top-level window was destroyed — if it was the last
+            // user-visible one, quit. (No class filter on destroy; the fresh
+            // EnumWindows count doesn't depend on this HWND's class.)
+            maybe_quit_on_last_user_window();
         }
         EVENT_OBJECT_SHOW => {
             let class = read_class_name(hwnd);
@@ -320,13 +443,22 @@ unsafe extern "system" fn win_event_callback(
                 return;
             }
             launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, true);
+            // B1: a user-visible window was shown — arm the last-window quit.
+            HAD_VISIBLE_USER_WINDOW.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         EVENT_OBJECT_HIDE => {
             let class = read_class_name(hwnd);
-            if !classify::is_app_class(&class) {
-                return;
+            if classify::is_app_class(&class) {
+                launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, false);
             }
-            launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, false);
+            // B1: a HIDE may mean the last user window is gone. Do NOT gate this
+            // on is_app_class — closing a window fires HIDE for its CHILD render
+            // widget (`Chrome_RenderWidgetHostHWND`), not the top-level
+            // `Chrome_WidgetWin_` frame (confirmed via Discussion #1680 smoke).
+            // `count_visible_user_windows` does its own EnumWindows filtering, so
+            // the check is independent of which HWND triggered it. Cheap + the
+            // QUIT_INITIATED guard makes it idempotent.
+            maybe_quit_on_last_user_window();
         }
         EVENT_SYSTEM_FOREGROUND => {
             let class = read_class_name(hwnd);

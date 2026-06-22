@@ -893,9 +893,9 @@ mod quit;
 mod top_level;
 
 /// Shared with `AppState::count_live_user_windows` (the live last-window quit
-/// gate) so the "is this a live user window?" predicate + count have a single
-/// definition.
-pub(crate) use quit::{count_live_user_windows, is_live_user_window};
+/// gate) so the count has a single definition. (`is_live_user_window` stays
+/// internal to `quit` — used by `count_live_user_windows` and its tests.)
+pub(crate) use quit::count_live_user_windows;
 
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     match cmd {

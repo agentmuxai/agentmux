@@ -960,13 +960,8 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
 
     tracing::info!("CEF message loop exited, shutting down");
 
-    // Phase B.9.1 (WRR) — tear down Win32 event hooks before any
-    // further teardown. UnhookWinEvent is cheap; doing it early
-    // prevents stray callbacks during shutdown from racing the
-    // launcher_ipc channel close.
-    wrr::uninstall_hooks();
-
-    // Kill the backend sidecar on shutdown.
+    // Kill the backend sidecar. (The launcher's Job Object also reaps it once
+    // we exit; kill explicitly for promptness.)
     {
         let mut sidecar = app_state.sidecar_child.lock();
         if let Some(ref mut child) = *sidecar {
@@ -975,41 +970,55 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         }
     }
 
-    // Clean shutdown.
-    shutdown();
-
-    // Phase B.6 (post-fix): clean up the forwarding hint so a stale
-    // file doesn't survive a graceful exit. (Hard crashes will leave
-    // it behind; harmless because pipe-bind on next launch is
-    // authoritative — see comment at the port_file declaration.)
+    // Phase B.6 (post-fix): clean up the forwarding hint so a stale file doesn't
+    // survive a graceful exit. (Hard crashes leave it behind; harmless because
+    // pipe-bind on next launch is authoritative.)
     let _ = std::fs::remove_file(&port_file);
 
-    // `drop(runtime)` blocks forever here on macOS after the last window
-    // closes: the multi-thread runtime's drop waits for every background
-    // task/blocking thread to finish, and at least one `spawn_blocking`
-    // (a pipe/PTY reader) is parked on a blocking read that never returns.
-    // The window is already destroyed at this point, so the user sees it
-    // close — but the host wedges in the runtime drop and never exits, and
-    // the launcher (which waits for the host to exit) wedges with it → the
-    // instance "stays open hidden". Reaching this code at all means the CEF
-    // message loop returned, which only happens on the intended
-    // LastWindowClosed quit — so a hard exit here is correct, not a crash.
-    //
-    // `shutdown_background()` initiates runtime teardown without blocking;
-    // then exit the process explicitly so a parked blocking thread can't
-    // keep it resident. macOS-only; other platforms keep the plain drop.
+    // Reaching here means run_message_loop() returned, which ONLY happens on the
+    // intended LastWindowClosed quit — so a hard exit(0) is correct here, NOT a
+    // crash. It is also NECESSARY. After a CEF Views last-window close the
+    // browsers are HIDDEN/recycled (the close never fires on_before_close), so
+    // they're still alive at shutdown; CEF's teardown then access-violates on
+    // Windows (`cef::shutdown()` / `UnhookWinEvent`, exit 0xC0000005) and wedges
+    // in the tokio runtime drop on macOS. Either way the launcher (which
+    // classifies host exit) sees an ABNORMAL exit and RELAUNCHES the instance —
+    // the "reopens on its own" symptom (Discussion #1680). exit(0) gives the
+    // launcher a clean code-0 shutdown; it reaps the host's children via its Job
+    // Object (KILL_ON_JOB_CLOSE).
+    // Unhook the Win32 event hooks before exit (no-op off Windows; a cheap,
+    // safe UnhookWinEvent — NOT a crash site).
+    wrr::uninstall_hooks();
     #[cfg(target_os = "macos")]
     {
+        // macOS keeps the prior sequence (works): cef::shutdown() then a
+        // non-blocking runtime teardown (#1268).
+        shutdown();
         runtime.shutdown_background();
-        tracing::info!("AgentMux host shutdown complete (fast exit)");
-        std::process::exit(0);
     }
     #[cfg(not(target_os = "macos"))]
     {
+        // Windows/Linux: SKIP cef::shutdown() — the Windows crash site on the
+        // still-alive recycled browsers. Drop the tokio runtime (safe +
+        // non-blocking here) before the hard exit.
         drop(runtime);
-        tracing::info!("AgentMux host shutdown complete");
     }
-    0
+    tracing::info!("AgentMux host shutdown complete (fast exit)");
+
+    // On Windows, hard-terminate so the C-runtime / CEF-DLL static teardown
+    // (atexit handlers + DLL_PROCESS_DETACH) does NOT run: with the recycled
+    // browsers still alive, that teardown raises a fail-fast (exit 0xC0000602)
+    // even though we reached this line, which the launcher classifies as an
+    // ABNORMAL exit and RELAUNCHES ("reopens on its own"). `std::process::exit`
+    // still runs that cleanup, so use `TerminateProcess(self, 0)` for an
+    // immediate, clean code-0 termination; the launcher then shuts down and
+    // reaps the host's children via its Job Object. See Discussion #1680.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        TerminateProcess(GetCurrentProcess(), 0);
+    }
+    std::process::exit(0)
 }
 
 /// Windows DLL wrapper sandbox entry point (Phase 3, issue #1374).
