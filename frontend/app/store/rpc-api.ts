@@ -1180,7 +1180,7 @@ class RpcApiType {
         return client.rpcCall("geteditorhome", data, opts);
     }
 
-    // file-tree renders these as sibling top-level roots.
+    // Returns home + drives/mounts; the editor file-tree renders these as sibling top-level roots.
     GetEditorRootsCommand(
         client: RpcClient,
         data: Record<string, never> = {},
@@ -1230,7 +1230,7 @@ class RpcApiType {
         return client.rpcCall("deleteeditorfile", data, opts);
     }
 
-    // ~/.agentmux/cache/scratch/. Returns the backing path + scratch_id.
+    // Creates a scratch buffer file in ~/.agentmux/cache/scratch/. Returns the backing path + scratch_id.
     // Spec: specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
     CreateScratchFileCommand(
         client: RpcClient,
@@ -1282,7 +1282,7 @@ class RpcApiType {
         return client.rpcCall("resolvecli", data, opts);
     }
 
-    // resolves tools in, how it was derived, and OS/arch. Powers the
+    // Reports the effective PATH the srv resolves tools in, how it was derived, and OS/arch. Powers the
     // Toolchain modal's Environment section. See SPEC_TOOLCHAIN_MANAGER.
     ToolchainEnvCommand(
         client: RpcClient,
