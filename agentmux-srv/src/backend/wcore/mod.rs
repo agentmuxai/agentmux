@@ -156,6 +156,38 @@ pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), Sto
     swarm_meta.insert("view".to_string(), serde_json::json!("swarm"));
     let swarm_block = create_block(store, &tab.oid, swarm_meta)?;
 
+    write_default_three_pane_layout(
+        store,
+        tab_id,
+        &agent_block.oid,
+        &sysinfo_block.oid,
+        &swarm_block.oid,
+    )
+}
+
+/// Write the default 3-pane launch layout (`agent | [sysinfo / swarm]`) into
+/// `tab_id`'s `LayoutState`, wrapping three block IDs that the caller has
+/// ALREADY created.
+///
+/// Split out of `seed_default_layout` for the 2nd-window-tear-off desync fix
+/// (#1681). `seed_default_layout` creates its blocks store-only via
+/// `create_block`, which is correct for first-launch (`ensure_initial_data`
+/// runs before bootstrap loads SQLite into the in-memory reducer `srv_state`).
+/// But the post-bootstrap "open another window" path (`service.rs` CreateWindow)
+/// must create the blocks THROUGH THE REDUCER so they also land in `srv_state`;
+/// otherwise the new window's blocks live only in SQLite, the frontend renders
+/// them, and `TearOffBlock` rejects them as "block not found" (the reducer never
+/// saw them). Both callers share this one function for the tree shape so the
+/// layout can never drift between the two paths.
+pub(crate) fn write_default_three_pane_layout(
+    store: &Store,
+    tab_id: &str,
+    agent_block_id: &str,
+    sysinfo_block_id: &str,
+    swarm_block_id: &str,
+) -> Result<(), StoreError> {
+    let tab = store.must_get::<Tab>(tab_id)?;
+
     // Node IDs for each tree position. Leaves get their own node IDs distinct
     // from the block IDs they wrap.
     let agent_node_id = Uuid::new_v4().to_string();
@@ -177,7 +209,7 @@ pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), Sto
                 size: 5.0,
                 children: Vec::new(),
                 data: Some(LayoutNodeData {
-                    block_id: agent_block.oid.clone(),
+                    block_id: agent_block_id.to_string(),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -193,7 +225,7 @@ pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), Sto
                         size: 2.0,
                         children: Vec::new(),
                         data: Some(LayoutNodeData {
-                            block_id: sysinfo_block.oid.clone(),
+                            block_id: sysinfo_block_id.to_string(),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -204,7 +236,7 @@ pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), Sto
                         size: 8.0,
                         children: Vec::new(),
                         data: Some(LayoutNodeData {
-                            block_id: swarm_block.oid.clone(),
+                            block_id: swarm_block_id.to_string(),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -221,9 +253,9 @@ pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), Sto
     layout.rootnode = Some(rootnode);
     layout.focusednodeid = agent_node_id.clone();
     layout.leaforder = Some(vec![
-        LeafOrderEntry { nodeid: agent_node_id, blockid: agent_block.oid.clone() },
-        LeafOrderEntry { nodeid: sysinfo_node_id, blockid: sysinfo_block.oid.clone() },
-        LeafOrderEntry { nodeid: swarm_node_id, blockid: swarm_block.oid.clone() },
+        LeafOrderEntry { nodeid: agent_node_id, blockid: agent_block_id.to_string() },
+        LeafOrderEntry { nodeid: sysinfo_node_id, blockid: sysinfo_block_id.to_string() },
+        LeafOrderEntry { nodeid: swarm_node_id, blockid: swarm_block_id.to_string() },
     ]);
     layout.pendingbackendactions = None;
     store.update(&mut layout)?;
