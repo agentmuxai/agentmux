@@ -1363,6 +1363,19 @@ impl AgentMuxHandler {
                 }
             }
         }
+
+        // Windows floaters are raw Win32 popups (not CEF Views windows), so the
+        // block above no-ops for them (`bv.window()` is None). They are created
+        // HIDDEN by `create_popup` and revealed HERE, now that the embedded
+        // browser has painted — otherwise a show-before-paint flashes white (the
+        // transparent CefSettings bg + DWM-extended frame glass). Mirrors the
+        // main window's deferred show. Pool floaters are revealed by promote.
+        #[cfg(target_os = "windows")]
+        if let Some(label) = browser_label.as_deref() {
+            if label.starts_with("floating-") && !label.starts_with("floating-pool-") {
+                crate::floating_pane::show_floater(label);
+            }
+        }
     }
 
     fn on_load_error(
