@@ -239,6 +239,7 @@ export function useAgentControllerStatus(
     // then poll for credentials seeding into the isolated dir.
     const loginViaTerminal = async () => {
         if (reloginInFlight) return;
+        loginCancelled = false;
         const prov = opts.provider();
         if (!prov) {
             opts.log("auth", "login via terminal: no active provider", "warn");
