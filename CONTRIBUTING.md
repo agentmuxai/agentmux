@@ -98,6 +98,26 @@ The async backend server — auto-spawned by the launcher, never launched manual
 
 Changes here require `task build:backend` followed by restarting `task dev`.
 
+### Launcher (`agentmux-launcher/`)
+
+The portable entry-point process (~325 KB). It owns process and single-instance
+lifecycle so the host and backend can stay focused on the app:
+
+- **Single-instance enforcement** keyed on `(channel, version)` — a second launch
+  of the same instance forwards an "open new window" request to the running host
+  instead of starting a duplicate.
+- **Job Object (Windows)** — the launcher creates the job that owns the whole
+  process tree (`KILL_ON_JOB_CLOSE`), so closing the app cleanly reaps the host
+  and backend with no orphans.
+- **Named-pipe / socket IPC** and the **saga coordinator** for crash-safe startup
+  and shutdown.
+- **Splash** while the host warms up, then **spawns the host** from `runtime/`.
+- Owns the **`agentmux-srv` lifecycle** (spawns and supervises the backend).
+
+On Windows, `task dev` exercises the launcher exactly as a packaged build does
+(production-parallel layout). See the isolation invariants (I1–I6) in
+[`CLAUDE.md`](./CLAUDE.md) for the contract that keeps parallel instances safe.
+
 ### Communication Flow
 
 ```
