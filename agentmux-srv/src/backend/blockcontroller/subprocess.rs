@@ -999,6 +999,20 @@ impl SubprocessController {
                 Ok(s) => s,
                 Err(e) => {
                     tracing::warn!(block_id = %block_id, error = %e, "container exec failed");
+                    // Surface the error in the agent pane so the user sees what went wrong.
+                    if let Some(ref b) = broker {
+                        let error_frame = serde_json::json!({
+                            "type": "result",
+                            "is_error": true,
+                            "subtype": "error_during_execution",
+                            "error": {"message": format!("[AgentMux] container exec failed: {e}")}
+                        }).to_string();
+                        super::shell::handle_append_block_file(
+                            b, &block_id, SUBPROCESS_OUTPUT_SUBJECT,
+                            format!("{error_frame}\n").as_bytes(),
+                            filestore.as_ref(), None,
+                        );
+                    }
                     // A failed exec must still run the SAME completion + queue
                     // drain as the normal-exit path below: publish a terminal
                     // status so the client sees the turn end (exit 1), mark the

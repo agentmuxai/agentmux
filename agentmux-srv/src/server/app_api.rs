@@ -193,7 +193,11 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Ensure the controller is registered (may be missing if block
                     // was created by the frontend without backend initialization)
                     if blockcontroller::get_controller(&existing.oid).is_none() {
-                        let controller_type = provider.controller_type_str();
+                        let controller_type = if agent.agent_type == "container" {
+                            "subprocess"
+                        } else {
+                            provider.controller_type_str()
+                        };
                         // Set essential metadata if missing
                         let mut meta_update = obj::MetaMapType::new();
                         meta_update.insert("controller".to_string(), json!(controller_type));
@@ -255,6 +259,14 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // 6. Build metadata
                 let controller_type = provider.controller_type_str();
+                // Container agents use per-turn docker exec; the subprocess controller
+                // is required regardless of what the provider defaults to (claude returns
+                // "persistent", which causes AgentInput to skip the container exec path).
+                let controller_type = if agent.agent_type == "container" {
+                    "subprocess"
+                } else {
+                    controller_type
+                };
                 let is_persistent = controller_type == "persistent";
                 let mut cli_args: Vec<String> = if is_persistent {
                     provider.persistent_launch_args
