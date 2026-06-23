@@ -48,14 +48,19 @@ slow part on a schedule, not on every push.
 ## 3. Design — two lanes
 
 ### Lane A — PR/push fast lane (CEF-free) — `ci-fast.yml`
-- **Trigger:** `pull_request` + `push`.
-- **Runner:** `ubuntu-latest` (standard).
+- **Trigger:** `pull_request` + `push` (to `main`).
+- **Runner:** the rust job is an **OS matrix** — `windows-latest` is the REQUIRED gate (primary dev
+  platform; green), `ubuntu-latest` + `macos-latest` run **non-blocking** (`continue-on-error`) for
+  cross-platform visibility (see §6.4 items 5-6 — the suite has untested-platform failures). The
+  vitest job runs on `ubuntu-latest` (platform-agnostic). All STANDARD runners (free; CI-1).
 - **Runs:**
-  - `cargo test -p agentmux-launcher -p agentmux-srv -p agentmux-common` (no CEF link → no CEF build).
-  - `npm ci && npx vitest run` (frontend).
-- **Wall-clock target:** < 5 min. Gives fast PR feedback on the bulk of the logic (launcher saga,
-  srv, shared utils, frontend) without paying the CEF build.
-- **Cache:** `actions/cache` (or `Swatinem/rust-cache`) on `~/.cargo` + `target/`; npm cache.
+  - `cargo test -p agentmux-launcher -p agentmux-srv -p agentmux-common -- --test-threads=1` (no CEF
+    link → no CEF build; serial for the test-isolation flakes in §6.4 item 1). ubuntu installs the
+    Wayland dev headers first (§6.4 item 5).
+  - `npm ci && npx vitest run` (frontend; `tools/**` excluded, §6.4 item 3).
+- **Wall-clock target:** < 5 min rust (Windows a bit slower), ~1 min vitest. Fast PR feedback on the
+  bulk of the logic without paying the CEF build.
+- **Cache:** `Swatinem/rust-cache` on `~/.cargo` + `target/`; npm cache.
 
 ### Lane B — nightly full suite (incl. CEF) — `ci-nightly.yml`
 - **Trigger:** `schedule:` (cron, ~daily off-peak, e.g. `0 9 * * *` UTC) + `workflow_dispatch`.
@@ -63,8 +68,8 @@ slow part on a schedule, not on every push.
   (`wrr/win_event.rs`, `lib.rs` `TerminateProcess`, the `#[cfg(windows)]` close paths from #1676)
   actually compiles + runs; the cross-platform reducer/launcher/srv tests run here too.
 - **Setup:** install Ninja (`ninja --version` must work for `cef-dll-sys`); CMake is preinstalled.
-- **Runs:** `cargo test --workspace` (incl. `agentmux-cef` — pays the CEF build once/night) +
-  `npx vitest run`.
+- **Runs:** `cargo test --workspace -- --test-threads=1` (incl. `agentmux-cef` — pays the CEF build
+  once/night; serial per §6.4 item 1) + `npx vitest run`.
 - **Cache:** `~/.cargo`, `target/`, **and the CEF download dir** (the cef-rs crate's download cache)
   keyed on the pinned `cef-dll-sys` rev — turns the cold ~20 min into a warm few-min build.
 - **Wall-clock:** cold ~20 min, warm ~5-10 min. Free on the standard runner regardless.
