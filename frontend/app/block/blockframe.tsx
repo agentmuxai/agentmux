@@ -170,6 +170,16 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
     }
 }
 
+function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => void }): JSX.Element {
+    const decl = createMemo<IconButtonDecl>(() => ({
+        elemtype: "iconbutton",
+        icon: props.minimized ? "chevron-up" : "chevron-down",
+        title: props.minimized ? "Restore" : "Minimize",
+        click: props.toggleMinimize,
+    }));
+    return <IconButton decl={decl()} className="block-frame-minimize" />;
+}
+
 function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void; disabled: boolean }): JSX.Element {
     const magnifyDecl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
@@ -217,7 +227,9 @@ function EndIcons(props: {
     // the button array re-evaluates when the agent loads/unloads.
     const endIconButtons = createMemo(() => util.useAtomValueSafe(props.viewModel?.endIconButtons));
     const magnified = () => props.nodeModel.isMagnified();
+    const minimized = () => props.nodeModel.isMinimized();
     const ephemeral = () => props.nodeModel.isEphemeral();
+    const numLeafs = () => props.nodeModel.numLeafs();
     const magnifyDisabled = () => false;
     // In a torn-off floating shell the window carries a `?windowLabel=floating-…`
     // URL param (set by the host when it opens the popup). When present, the
@@ -254,6 +266,13 @@ function EndIcons(props: {
                                 ? "Speak into this agent (Ctrl+Shift+V)"
                                 : undefined
                     }
+                />
+            </Show>
+
+            <Show when={!ephemeral() && !magnified() && numLeafs() > 1}>
+                <OptMinimizeButton
+                    minimized={minimized()}
+                    toggleMinimize={props.nodeModel.toggleMinimize}
                 />
             </Show>
 

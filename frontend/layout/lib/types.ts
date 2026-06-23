@@ -188,6 +188,8 @@ export interface LayoutNode {
     children?: LayoutNode[];
     flexDirection: FlexDirection;
     size: number;
+    /** Original size before minimization. Presence indicates the node is minimized. */
+    minimizedSize?: number;
 }
 
 export type LayoutTreeStateSetter = (value: LayoutState) => void;
@@ -264,10 +266,12 @@ export interface NodeModel {
     isSplitterDragging: Accessor<boolean>;
     isFocused: Accessor<boolean>;
     isMagnified: Accessor<boolean>;
+    isMinimized: Accessor<boolean>;
     isEphemeral: Accessor<boolean>;
     ready: Accessor<boolean>;
     disablePointerEvents: Accessor<boolean>;
     toggleMagnify: () => void;
+    toggleMinimize: () => void;
     focusNode: () => void;
     onClose: () => void;
     // DOM refs in SolidJS are plain { current: T | null } objects
