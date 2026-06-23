@@ -2375,12 +2375,20 @@ async fn handle_workspace_service(state: &AppState, call: &WebCallType) -> WebRe
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
+            // Phase 4b — optional direction hint from the ghost overlay.
+            // Both must be present; if either is absent fall back to InsertNode.
+            let target_block_id: Option<String> = service::get_optional_arg(args, 5)
+                .unwrap_or(None);
+            let direction: Option<u8> = service::get_optional_arg(args, 6)
+                .unwrap_or(None);
             tracing::info!(
                 block_id = %block_id,
                 source_tab = %source_tab_id,
                 source_ws = %source_ws_id,
                 target_tab = %target_tab_id,
                 target_ws = %target_ws_id,
+                target_block_id = ?target_block_id,
+                direction = ?direction,
                 "[dnd:svc] RedockFloatingPane via saga"
             );
             let saga_result = crate::sagas::redock_floating_pane::run(
@@ -2397,26 +2405,28 @@ async fn handle_workspace_service(state: &AppState, call: &WebCallType) -> WebRe
                 return WebReturnType::error(reason);
             }
 
-            // Target layout: enqueue an "insert" action on its
-            // `pendingbackendactions` so the target window's frontend
-            // grows a new leaf for the redocked block through its
-            // standard LayoutTreeActionType.InsertNode reducer.
-            // Direct rootnode writes don't propagate because the
-            // LayoutModel doesn't auto-sync from external WaveObj
-            // updates — see `queue_target_layout_insert`'s docstring.
-            // Layout writes are required before the Tab broadcast — if
-            // either fails the block becomes invisible (moved in SQLite
-            // but no LayoutState entry in the target). Return error so
-            // the caller can retry; the saga state is dirty but no
-            // visible change has propagated to the renderers yet.
-            if let Err(e) = queue_target_layout_insert(store, &target_tab_id, &block_id) {
+            // Target layout: enqueue the appropriate action on its
+            // `pendingbackendactions`. Phase 4b: when a direction hint is
+            // present, queue SplitHorizontal/SplitVertical so the block lands
+            // in the exact slot the ghost previewed. Otherwise fall back to
+            // the generic InsertNode (Phase 4a behavior).
+            // Layout writes are required before the Tab broadcast — if either
+            // fails the block becomes invisible. Return error so the caller can
+            // retry; no visible change has propagated to the renderers yet.
+            let target_layout_result = match (target_block_id.as_deref(), direction) {
+                (Some(tbid), Some(dir)) => {
+                    queue_target_layout_split(store, &target_tab_id, &block_id, tbid, dir)
+                }
+                _ => queue_target_layout_insert(store, &target_tab_id, &block_id),
+            };
+            if let Err(e) = target_layout_result {
                 tracing::error!(
                     target_tab = %target_tab_id,
-                    "RedockFloatingPane: target layout insert failed — aborting broadcast: {}",
+                    "RedockFloatingPane: target layout action failed — aborting broadcast: {}",
                     e
                 );
                 return WebReturnType::error(format!(
-                    "redock layout insert failed: {e}"
+                    "redock layout action failed: {e}"
                 ));
             }
             if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
@@ -2983,6 +2993,61 @@ fn queue_target_layout_insert(
         ephemeral: false,
         targetblockid: String::new(),
         position: String::new(),
+    });
+    target_layout.pendingbackendactions = Some(actions);
+    store.update(&mut target_layout)?;
+    Ok(())
+}
+
+/// Phase 4b — enqueue a directional split action on the TARGET tab's
+/// `LayoutState.pendingbackendactions` so the redocked block lands in
+/// the exact slot the ghost overlay previewed.
+///
+/// `dir` maps the `DropDirection` enum values to action types:
+/// * 0/4 (Top/OuterTop)    → `SplitVertical`,   position `before`
+/// * 2/6 (Bottom/OuterBot) → `SplitVertical`,   position `after`
+/// * 3/7 (Left/OuterLeft)  → `SplitHorizontal`, position `before`
+/// * 1/5 (Right/OuterRight)→ `SplitHorizontal`, position `after`
+/// * 8   (Center)          → falls through to `InsertNode` (handled by caller)
+///
+/// Outer directions use `nodesize = 2.5` so the new node occupies ≈20%
+/// (2.5 / (10 + 2.5)) matching the ghost's `height/5` appearance.
+/// Inner directions use `nodesize = None` (DefaultNodeSize = 10 → 50/50).
+fn queue_target_layout_split(
+    store: &Store,
+    target_tab_id: &str,
+    block_id: &str,
+    target_block_id: &str,
+    dir: u8,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Inner directions (Top=0,Right=1,Bottom=2,Left=3): new node at
+    // DefaultNodeSize (10) → 50/50 split, matching the ghost's half-leaf.
+    // Outer directions (4-7): nodesize=3 → ≈23% (3/13), close to the
+    // ghost's 20% (1/5). The exact ratio depends on the target node's
+    // current flex size which isn't available server-side; 3 is a
+    // reasonable integer approximation when the target is at DefaultNodeSize.
+    let (actiontype, position, nodesize): (&str, &str, Option<u32>) = match dir {
+        0 | 4 => ("splitvertical",   "before", if dir >= 4 { Some(3) } else { None }),
+        2 | 6 => ("splitvertical",   "after",  if dir >= 4 { Some(3) } else { None }),
+        3 | 7 => ("splithorizontal", "before", if dir >= 4 { Some(3) } else { None }),
+        1 | 5 => ("splithorizontal", "after",  if dir >= 4 { Some(3) } else { None }),
+        // Center (8) or unknown — caller should use queue_target_layout_insert.
+        _ => return queue_target_layout_insert(store, target_tab_id, block_id),
+    };
+    let target_tab = store.must_get::<Tab>(target_tab_id)?;
+    let mut target_layout = store.must_get::<LayoutState>(&target_tab.layoutstate)?;
+    let mut actions = target_layout.pendingbackendactions.take().unwrap_or_default();
+    actions.push(LayoutActionData {
+        actiontype: actiontype.to_string(),
+        actionid: uuid::Uuid::new_v4().to_string(),
+        blockid: block_id.to_string(),
+        nodesize,
+        indexarr: None,
+        focused: true,
+        magnified: false,
+        ephemeral: false,
+        targetblockid: target_block_id.to_string(),
+        position: position.to_string(),
     });
     target_layout.pendingbackendactions = Some(actions);
     store.update(&mut target_layout)?;
