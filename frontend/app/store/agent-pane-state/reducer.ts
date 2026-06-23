@@ -207,8 +207,11 @@ export function update(
             // set. After a stream drop + resubscribe (e.g. an agent kill+respawn
             // during a long upstream stall) the phase lands in Idle/Disconnected,
             // and without this promotion the "in progress" indicator stays OFF
-            // while output streams in. Done (a completed turn) and Interrupting
-            // (user is stopping) are intentional and kept.
+            // while output streams in. Done is now included: session_end fires
+            // after every model API round, so Done can mean "first round of a
+            // multi-round tool-continuation turn finished" — live flush content
+            // arriving while Done is proof the agent picked up another round.
+            // Interrupting (user is stopping) is intentionally kept excluded.
             const nextPhase: TurnPhase =
                 state.turnPhase.kind === "Streaming"
                     ? {
@@ -219,6 +222,7 @@ export function update(
                     : state.turnPhase.kind === "Submitting"
                         || state.turnPhase.kind === "Idle"
                         || state.turnPhase.kind === "Disconnected"
+                        || state.turnPhase.kind === "Done"
                         ? {
                               kind: "Streaming",
                               bufferSize: newBuf,
@@ -864,7 +868,8 @@ function bumpEvent(
     } else if (
         next.turnPhase.kind === "Submitting" ||
         next.turnPhase.kind === "Idle" ||
-        next.turnPhase.kind === "Disconnected"
+        next.turnPhase.kind === "Disconnected" ||
+        next.turnPhase.kind === "Done"
     ) {
         // codex P1 on #987: `StreamSubscribe` fires once at mount, so
         // subsequent turns enter Submitting and then no transition
@@ -877,7 +882,12 @@ function bumpEvent(
         // proof the agent is working. After a stream drop + resubscribe
         // (agent kill+respawn during a long upstream stall) the phase lands
         // in Idle/Disconnected; without this the working indicator stays off
-        // while output streams. Done / Interrupting are intentional and kept.
+        // while output streams.
+        // Done is now included: session_end fires after every model API round,
+        // so Done can mean "first round of a multi-round tool-continuation
+        // finished." Live tool/token activity arriving while Done means the
+        // backend picked up a continuation round — re-enter Streaming.
+        // Interrupting is intentionally excluded (user is stopping).
         next.turnPhase = {
             kind: "Streaming",
             bufferSize: next.streaming.bufferSize,
