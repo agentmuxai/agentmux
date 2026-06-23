@@ -127,10 +127,13 @@ is handled minimally + tracked; the follow-up is a "test-health" pass that remov
 3. **`tools/**` excluded from the frontend vitest** (`vitest.config.ts`). `tools/tests/lib/
    bench-stats.test.mjs` is standalone Node tooling, not a frontend jsdom test. *Follow-up: a
    separate tools-test job if those are worth gating.*
-4. **`AgentLaunchModal` "auth state on memory change" is `it.skip`'d — a REAL pre-existing failure**
-   (fails in isolation): a Memory selection change resets auth-ready state. This is a genuine
-   regression that shipped because there was no CI. *Follow-up (highest priority of the four):
-   triage product-bug-vs-stale-test and fix → un-skip.*
+4. **`AgentLaunchModal` "auth state on memory change" — ✅ RESOLVED (was a stale test, NOT a
+   regression).** It looked like an auth regression, but triage showed the test's selector had gone
+   stale on the **Memory bundle → Preset** rename (the select's `aria-label` is now `"Preset"`); the
+   `findByLabelText("Memory bundle")` failed before reaching the auth assertion. The §6.10
+   requirement holds — changing the preset does NOT reset auth. Fixed the selector + un-skipped; the
+   test passes. (Lesson: "real regression vs stale test" must be triaged, not assumed — here it was
+   the latter.)
 5. **Rust fast lane is an OS matrix; only Windows is REQUIRED.** AgentMux ships on
    Windows/macOS/Linux, so the rust fast lane runs all three — but only the `windows-latest` leg
    blocks PRs (the primary dev platform; green). `ubuntu-latest` + `macos-latest` run **non-blocking**
