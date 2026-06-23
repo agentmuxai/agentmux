@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -23,7 +23,7 @@ import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capChars, createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, collapseSpinnerChunks, createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { detectLanguage } from "./detectLanguage";
 import {
     registerToolRenderer,
@@ -186,25 +186,31 @@ interface ChunkListProps {
     chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
-    // All CR/spinner handling is in the Rust layer: pending_cr_override slots
-    // in pty_reader_loop and stream_reader collapse throttled spinner frames
-    // before they become LineEvents; spawn_publisher_loop strips any leading \r
-    // before publishing. No \r reaches the frontend. The cap is the only
-    // transform needed here.
     const cap = createChunkCapper();
-    const capped = () => cap(props.chunks);
+
+    const view = createMemo(() => {
+        const { chunks, hiddenLines } = cap(props.chunks);
+        const { display, spinnerSlot } = collapseSpinnerChunks(chunks);
+        return { display, spinnerSlot, hiddenLines };
+    });
+
     return (
         <>
-            <Show when={capped().hiddenLines > 0}>
-                <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
+            <Show when={view().hiddenLines > 0}>
+                <OutputHiddenMarker hidden={view().hiddenLines} noun="line" from="tail" />
             </Show>
-            <For each={capped().chunks}>
+            <For each={view().display}>
                 {(chunk) => (
                     <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
                         {capChars(chunk.content)}
                     </pre>
                 )}
             </For>
+            <Show when={view().spinnerSlot !== null}>
+                <pre class={`agent-tool-log-line ${KIND_CLASS[view().spinnerSlot?.kind ?? ""] ?? ""}`}>
+                    {view().spinnerSlot?.content}
+                </pre>
+            </Show>
         </>
     );
 }
