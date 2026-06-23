@@ -201,6 +201,60 @@ opaque token; `--main-bg-color` is the match for the agent view.)
 
 ---
 
+## 3b. Problem 3: bar scales with pane zoom
+
+### Root cause
+
+`.agent-view` applies per-pane zoom as the CSS `zoom` property
+(`agent-view.tsx:1000`, `style={{ zoom: zoomFactor() }}`, range 0.5-2.0). The
+progress bar is a child of `.agent-view`, so `zoom` scales the whole bar: at 2x
+the 3px bar renders 6px tall with a doubled stripe period and march distance; at
+0.5x it shrinks. The busy indicator is chrome, not content, so it should read at
+a constant size no matter how the user has zoomed the pane.
+
+### Requirement
+
+The bar's height, stripe period, overshoot, and march distance render at a fixed
+screen size at any pane zoom. (Width still spans the pane, by design.)
+
+### Proposed fix
+
+Counter-scale every px dimension by the zoom. `zoom` re-multiplies all lengths in
+the subtree, so dividing first yields a fixed rendered size. Expose the factor as
+a custom property (custom properties are plain values, unaffected by `zoom`):
+
+```tsx
+// agent-view.tsx
+style={{ zoom: zoomFactor(), "--agent-pane-zoom": String(zoomFactor()) }}
+```
+
+```scss
+// _control-bar.scss — divide every px by var(--agent-pane-zoom, 1)
+.agent-pane-progress-bar { height: calc(3px / var(--agent-pane-zoom, 1)); }
+.agent-pane-progress-bar::before {
+    left:  calc(-12px / var(--agent-pane-zoom, 1));
+    right: calc(-12px / var(--agent-pane-zoom, 1));
+    background: repeating-linear-gradient(-45deg,
+        var(--accent-color) 0px,
+        var(--accent-color) calc(4px / var(--agent-pane-zoom, 1)),
+        color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) calc(4px / var(--agent-pane-zoom, 1)),
+        color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) calc(8px / var(--agent-pane-zoom, 1)));
+}
+@keyframes agent-ant-march {
+    from { transform: translateX(0); }
+    to   { transform: translateX(calc(11.314px / var(--agent-pane-zoom, 1))); }
+}
+```
+
+Notes:
+- `var(--agent-pane-zoom)` is set on `.agent-view` and inherits down to the bar
+  and its `::before` (custom properties inherit), so the keyframe resolves it per
+  element. Fallback `1` keeps current behavior if the var is ever absent.
+- Overshoot is scaled by the same factor so it stays larger than the (also
+  scaled) march distance, preserving edge coverage at every zoom.
+
+---
+
 ## 4. Out of scope
 
 - The 0.5s march speed, stripe width (4px/4px), -45deg angle, and 3px height are
