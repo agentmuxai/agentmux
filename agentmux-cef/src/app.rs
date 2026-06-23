@@ -611,15 +611,22 @@ wrap_app! {
                 }
 
                 // macOS dev mode: the dev binary runs unsigned from a flat
-                // directory, not inside a signed .app bundle. macOS gates Metal
-                // GPU access on code-signing + bundle structure; without it the
-                // GPU subprocess crashes immediately with exit_code=5 (Metal
-                // context init denied by the sandbox). The installed app is
-                // properly signed and never hits this. For `task dev` we fall
-                // back to software rendering — good enough for visual testing.
+                // directory, not inside a signed .app bundle. macOS sandbox
+                // policy SIGTRAP-kills subprocesses (GPU, Network/utility) that
+                // call APIs gated on code-signing — exit_code=5 from both the
+                // GPU helper and the network service utility process. The
+                // installed app is properly signed and never hits this.
+                //
+                // For `task dev`, disable all sandboxing so subprocesses can
+                // init normally from the unsigned binary. --no-sandbox is the
+                // standard solution for unsigned CEF builds in dev/test
+                // environments; it's safe for a local dev machine. Also add
+                // --disable-gpu so that even if there are residual GPU issues,
+                // the renderer stays alive using software compositing.
                 #[cfg(target_os = "macos")]
                 if process_type.is_none() && std::env::var("AGENTMUX_DEV").is_ok() {
-                    tracing::info!("macOS dev mode — using software rendering (--disable-gpu) to avoid GPU sandbox crash");
+                    tracing::info!("macOS dev mode — disabling sandbox + GPU compositing (unsigned binary)");
+                    cmd.append_switch(Some(&CefString::from("no-sandbox")));
                     cmd.append_switch(Some(&CefString::from("disable-gpu")));
                 }
 
