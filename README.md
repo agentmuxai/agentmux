@@ -27,40 +27,42 @@ follow below so the warning is never pushed below the fold. -->
 
 # AgentMux
 
-**Agent Operating Environment**
+**The agent operating environment**
 
-Watch your agents. Stay in control. A rich monitoring and orchestration environment for AI agents — see every tool call, catch regressions mid-task, and tune your agent system in real time.
+Run any agent as a first-class pane — Claude Code, Codex, Gemini, Copilot, and more — each with its own identity, native memory, and a structured view of tool calls and diffs. Agents can drive the workspace itself through a local API. Multi-provider, local-first, 100% Rust. Free and open source.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Website](https://img.shields.io/badge/Website-agentmux.ai-blue)](https://agentmux.ai)
 
 ## The Problem
 
-Knowledge workers running AI agents across long-horizon tasks are blind while it happens. You can't see which agent found something important. You can't see which one went off-track. You can't redirect mid-task. You find out when it's done, or when something is wrong.
+Today's agents run inside terminal wrappers — raw stdout, no real identity, no shared context, and no way to talk to each other. You re-onboard a stranger every session, you can't see what an agent is actually doing mid-task, and long-lived provider CLIs sit there hogging memory the whole time.
 
-- **Agents regress.** An agent fixes a bug and then undoes its own work in a later step. By the time you notice, the context is cold and the decision chain is opaque.
-- **Guardrails are tuned blind.** No live signal on which constraints are firing, which are too tight, which agents are working around.
-- **Multi-agent conflicts are invisible.** Two agents reach conflicting conclusions. The synthesis picks one. You never know the conflict happened.
+- **Agents are afterthoughts.** A terminal wrapper hands you raw output, not a structured view of tool calls, reasoning steps, and file diffs.
+- **Every provider is a silo.** Claude, Codex, and Gemini each run in isolation — no shared workspace, no interop, no way for one agent to hand off to another.
+- **You're the integration layer.** Copy-pasting between windows, re-explaining the same context, babysitting heavyweight CLI processes.
 
 ## What AgentMux Does
 
-AgentMux is an open-source agent operating environment that surfaces what agents are doing in real time: tool calls, reasoning steps, source citations, output streams, and conflicts between agents. The human role is observer and supervisor, not driver.
+AgentMux is an open-source agent operating environment. Run any agent as a first-class pane — with its own identity, native memory, and a structured view of tool calls and file diffs — and let agents drive the workspace itself through a local API. AgentMux owns the session state, so most provider CLIs run one-shot per turn instead of as long-lived, memory-hogging processes, and a light Rust core holds many agents at once.
 
 Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF host (bundled Chromium). Apache 2.0.
 
-- **Live agent monitoring** — Watch every tool call and decision step as it happens. Catch an agent undoing correct work mid-task and redirect it before the damage compounds.
-- **Multi-agent orchestration** — Run parallel agents and see all of them at once. Spot conflicts before synthesis. Redirect any agent without killing the others.
-- **Guardrail observability** — See which constraints are active and firing. Tune your agent system from live signal, not post-mortem guesswork.
-- **Multi-provider agent support** — Claude Code, Codex CLI, Gemini CLI, OpenClaw, Kimi Code CLI, GitHub Copilot CLI, and Pi as first-class providers, alongside **Terminal**, **Editor**, **Browser**, and **Sysinfo** panes.
-- **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.) that you assign per agent at launch. Survives renames; swappable without restart.
-- **Memory bundles** — Reusable agent personality + capability stacks (provider, model, instructions, MCP, skills). Manage via the Memory pane inside an Agent pane's settings; launch-modal selection arrives with the spawn-time content-injection layer (PR-F.4).
+- **Multi-provider agent panes** — Claude Code, Codex, Gemini, GitHub Copilot, Qwen, Kimi, OpenClaw, and Pi as first-class providers, alongside **Terminal**, **Editor**, **Browser**, and **Sysinfo** panes. Structured views of tool calls, reasoning, and diffs — not a terminal wrapper.
+- **Agents drive the workspace** — Via the App API, a running agent can open panes, rename tabs, navigate the layout, and message peer agents — over a typed local WebSocket. Agents are operators, not passengers.
+- **Interagent comms** — `SendMessage` routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
+- **Swarm** — A live two-level agent/subagent tree. Watch delegation chains and every subagent's activity in one view.
+- **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.), keychain-backed, assigned per agent at launch. Survive renames; swappable without restart.
+- **Reusable presets** — Capture an agent's provider, model, instructions, MCP servers, skills, and environment once and relaunch it as that agent. (Backend: `db_memory_bundles`; surfaced as Presets in the UI.)
+- **Native memory** — Agents read and write their own memory files (`agent:memory:*`). Deeper cross-session memory is actively in development.
+- **One-shot CLIs, AgentMux owns state** — Most provider CLIs are invoked per turn (Subprocess/ACP controllers); Claude Code runs as a persistent stream. Either way AgentMux holds the durable session state, so a 150–350MB Rust core stays flat over long sessions (no GC pauses, no heap growth).
+- **Reducer stack** — A multi-layer reducer architecture (launcher / host / sidecar / frontend) with structured event logs, so "what mutated this state?" has one place to look.
 - **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
-- **App API** — Local WebSocket RPC with both an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and a low-level command catalog (block, file, event, conn). External tools and agents can drive the host directly.
-- **Audited dispatch** — 4-layer reducer stack (launcher / host / sidecar / frontend slices) with structured event logs at every layer, so "what mutated this state?" has exactly one place to look.
-- **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, drag panes and tabs across windows.
-- **Per-pane zoom** — Independent zoom level per pane, plus global chrome zoom.
+- **App API** — Local WebSocket RPC with an intent-based layer (`agent.open`, `agent.send`, `pane.open`) and a low-level command catalog (block, file, event, conn). External tools and agents can drive the host directly.
+- **Drag and drop** — Rearrange panes by dragging headers, reorder tabs, tear panes off into floating windows, and dock them into any window.
 - **Real PTY support** — Authentic terminal emulation via xterm.js and portable-pty.
 - **Run multiple versions side-by-side** — Each instance is fully isolated (separate CEF data, separate backend sidecar, separate ports). Test a new build while the old one is still running.
+- **Local-first** — Agents run on your machine. No telemetry, no phone-home; air-gap capable.
 
 ## Quick Start
 
