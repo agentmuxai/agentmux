@@ -149,13 +149,20 @@ ditto "dist/Frameworks/Chromium Embedded Framework.framework" \
 # The patched from-source CEF 148 framework spawns renderer/GPU/utility
 # subprocesses as per-type named helpers (Renderer/GPU/Plugin/Alloy) regardless
 # of browser_subprocess_path — it derives the path from the bundle name directly.
-# All six variants are required:
+# Five variants are required:
 #   Generic  — fallback + resolve_browser_subprocess_path() target
 #   Renderer / GPU / Plugin / Alloy — spawned by the patched CEF 148 framework
-#   Alerts   — Chromium's native notification service
+# Alerts (Chromium's native notification service) is intentionally excluded.
+# AgentMux never uses OS notifications; including the helper triggers macOS to
+# show a "Notifications may include alerts…" permission prompt on first launch
+# of every new version (dual-bundle registration — main app + Alerts helper each
+# prompt independently). With --disable-notifications in on_before_command_line_
+# processing (agentmux-cef/src/app.rs) CEF never spawns the Alerts helper, so
+# omitting it from the bundle is safe and eliminates both prompts permanently.
+# See docs/retro/retro-macos-notification-double-prompt-regression-2026-06-22.md
 HELPER_NAMES=("AgentMux Helper" "AgentMux Helper (GPU)" "AgentMux Helper (Plugin)" \
-              "AgentMux Helper (Renderer)" "AgentMux Helper (Alloy)" "AgentMux Helper (Alerts)")
-HELPER_IDS=("helper" "helper.gpu" "helper.plugin" "helper.renderer" "helper.alloy" "helper.alerts")
+              "AgentMux Helper (Renderer)" "AgentMux Helper (Alloy)")
+HELPER_IDS=("helper" "helper.gpu" "helper.plugin" "helper.renderer" "helper.alloy")
 HELPER_APPS=()
 shopt -s nullglob
 for i in "${!HELPER_NAMES[@]}"; do
@@ -170,14 +177,6 @@ for i in "${!HELPER_NAMES[@]}"; do
         "AgentMux Helper"|"AgentMux Helper (GPU)")
             for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done ;;
     esac
-    # Alerts helper needs a CFBundleIconFile so macOS shows the app icon in the
-    # notification permission prompt instead of a blank placeholder. The icns is
-    # copied into Resources after it's generated below.
-    local_icon_key=""
-    if [ "$hn" = "AgentMux Helper (Alerts)" ]; then
-        mkdir -p "$ha/Contents/Resources"
-        local_icon_key="    <key>CFBundleIconFile</key><string>AgentMux</string>"$'\n'
-    fi
     cat > "$ha/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -194,7 +193,7 @@ for i in "${!HELPER_NAMES[@]}"; do
     <key>LSMinimumSystemVersion</key><string>11.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-${local_icon_key}</dict>
+</dict>
 </plist>
 PLIST
     HELPER_APPS+=("$ha")
@@ -212,11 +211,6 @@ for s in 16 32 64 128 256 512; do
   d=$((s * 2)); sips -z "$d" "$d" "$SRC_PNG" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AgentMux.icns"
-# Copy icon into the Alerts helper so the notification permission prompt shows
-# the app icon rather than a blank placeholder.
-cp "$APP/Contents/Resources/AgentMux.icns" \
-   "$APP/Contents/Frameworks/AgentMux Helper (Alerts).app/Contents/Resources/AgentMux.icns"
-
 # Info.plist
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
