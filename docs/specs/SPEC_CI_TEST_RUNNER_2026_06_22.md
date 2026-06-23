@@ -134,6 +134,12 @@ is handled minimally + tracked; the follow-up is a "test-health" pass that remov
    build deps (installed in-job) AND fails `registry::schema::dotdot_workdir_is_rejected` (OS-sensitive
    `..`-path handling); macOS is TBD on first run. *Follow-up: triage + green each platform, then flip
    its leg to required.* (vitest stays a single ubuntu job — JS is platform-agnostic and passes.)
+6. **`agentmux-srv::identity::auth_session::timeout_transitions_pending_to_failed_on_poll` `#[ignore]`d.**
+   Its `force_age` test helper does `Instant::now() - Duration::from_secs(SESSION_TIMEOUT_SECS + 1)`,
+   which underflows (panics) on a CI runner whose monotonic uptime is below the timeout — passes
+   locally (high uptime), fails on a freshly-booted runner. Production is unaffected (never subtracts
+   from `Instant`). *Follow-up: make the timeout mockable (deadline model / injectable clock) →
+   un-ignore.*
 
 These workarounds keep the gate meaningful (it catches NEW regressions today) without blocking the
 runner on a multi-test cleanup. Track the cleanup as its own effort.
