@@ -3010,8 +3010,9 @@ fn queue_target_layout_insert(
 /// * 1/5 (Right/OuterRight)→ `SplitHorizontal`, position `after`
 /// * 8   (Center)          → falls through to `InsertNode` (handled by caller)
 ///
-/// Outer directions use `nodesize = 2.5` so the new node occupies ≈20%
-/// (2.5 / (10 + 2.5)) matching the ghost's `height/5` appearance.
+/// Outer directions use `nodesize = Some(3)` so the new node occupies ≈23%
+/// (3 / 13) — the nearest representable integer to the ghost's `height/5`
+/// (20%) when the target node is at DefaultNodeSize (10).
 /// Inner directions use `nodesize = None` (DefaultNodeSize = 10 → 50/50).
 fn queue_target_layout_split(
     store: &Store,
