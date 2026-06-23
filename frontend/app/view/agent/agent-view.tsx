@@ -55,6 +55,7 @@ import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
 import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
+import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityDock } from "./components/ActivityDock";
@@ -224,6 +225,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
+
+        // Register with the reactive handler so the Swarm view sees this pane.
+        // Uses the same handleAgentIdChange path as the PTY/OSC flow — handles
+        // de-dup and block-to-agent bookkeeping identically.
+        handleAgentIdChange(model.blockId, agentName());
+
         onCleanup(() => {
             // [DIAGNOSTIC] Capture WHY this pane disposed. The "pane went blank
             // mid-stream" failure is a SILENT dispose by an OUTER owner (e.g.
@@ -250,6 +257,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             }
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
+            handleAgentIdChange(model.blockId, undefined);
         });
     }
 
