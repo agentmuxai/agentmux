@@ -244,6 +244,14 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // 6. Build metadata
                 let controller_type = provider.controller_type_str();
+                // Container agents use per-turn docker exec; the subprocess controller
+                // is required regardless of what the provider defaults to (claude returns
+                // "persistent", which causes AgentInput to skip the container exec path).
+                let controller_type = if agent.agent_type == "container" {
+                    "subprocess"
+                } else {
+                    controller_type
+                };
                 let is_persistent = controller_type == "persistent";
                 let mut cli_args: Vec<String> = if is_persistent {
                     provider.persistent_launch_args

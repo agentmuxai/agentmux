@@ -353,6 +353,20 @@ pub fn resync_controller(
         return Ok(());
     }
 
+    // Container agents (agentMode == "container") require a subprocess controller for
+    // per-turn docker exec. Persistent is incompatible. Override any stale "persistent"
+    // value that may have been written before this invariant was enforced at creation time.
+    let agent_mode = super::obj::meta_get_string(block_meta, "agentMode", "");
+    let controller_type = if agent_mode == "container" && controller_type == BLOCK_CONTROLLER_PERSISTENT {
+        tracing::warn!(
+            block_id = %block_id,
+            "container agent has persistent controller in meta — overriding to subprocess"
+        );
+        BLOCK_CONTROLLER_SUBPROCESS.to_string()
+    } else {
+        controller_type
+    };
+
     tracing::info!(
         block_id = %block_id,
         controller_type = %controller_type,
