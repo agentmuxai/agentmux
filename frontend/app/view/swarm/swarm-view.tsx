@@ -8,6 +8,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WOS, workspace, setActiveTab, atoms } from "@/app/store/global";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
+import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs if needed.
@@ -125,6 +126,24 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
     );
 }
 
+// ── Status derived from TurnPhase ────────────────────────────────────────
+
+type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected";
+
+function phaseToDisplayStatus(blockId: string, fallback: "running" | "idle"): AgentDisplayStatus {
+    const phaseAccessor = getBlockTurnPhase(blockId);
+    if (!phaseAccessor) return fallback === "running" ? "working" : "idle";
+    const phase = phaseAccessor();
+    switch (phase.kind) {
+        case "Submitting":    return "working";
+        case "Streaming":     return phase.toolsActive > 0 ? "tools" : "working";
+        case "Interrupting":  return "stopping";
+        case "Done":          return phase.outcome === "errored" ? "error" : "idle";
+        case "Disconnected":  return "disconnected";
+        default:              return "idle";
+    }
+}
+
 // ── Agent root row ───────────────────────────────────────────────────────
 
 function AgentRow({
@@ -134,6 +153,10 @@ function AgentRow({
     node: AgentTreeNode;
     focusedBlockId: () => string | null;
 }): JSX.Element {
+    const displayStatus = createMemo<AgentDisplayStatus>(() =>
+        phaseToDisplayStatus(node.blockId, node.agentStatus)
+    );
+
     return (
         <div class="swarm-agent-group">
             <div
@@ -147,7 +170,7 @@ function AgentRow({
             >
                 <span class="swarm-agent-icon">⬡</span>
                 <span class="swarm-agent-label">{node.agentName}</span>
-                <StatusChip status={node.agentStatus === "running" ? "running" : "idle"} />
+                <AgentStatusChip status={displayStatus()} />
             </div>
             <div class="swarm-children">
                 <Show when={node.activitySummary}>
@@ -182,19 +205,27 @@ function SubagentRow({ sub }: { sub: ActiveSubagent }): JSX.Element {
             title={sub.slug || sub.agent_id}
         >
             <span class="swarm-subagent-slug">{sub.slug || sub.agent_id.substring(0, 7)}</span>
-            <StatusChip status={sub.status === "active" ? "running" : "done"} />
+            <AgentStatusChip status={sub.status === "active" ? "working" : "idle"} />
         </div>
     );
 }
 
 // ── Status chip ──────────────────────────────────────────────────────────
 
-function StatusChip({ status }: { status: "running" | "idle" | "done" }): JSX.Element {
-    const label = status === "running" ? "running" : status === "done" ? "done" : "idle";
+const STATUS_LABEL: Record<AgentDisplayStatus, string> = {
+    working:      "working",
+    tools:        "tools",
+    stopping:     "stopping",
+    idle:         "idle",
+    error:        "error",
+    disconnected: "offline",
+};
+
+function AgentStatusChip({ status }: { status: AgentDisplayStatus }): JSX.Element {
     return (
         <span class={`swarm-status-chip swarm-status-chip--${status}`}>
             <span class={`swarm-status-dot swarm-status-dot--${status}`} />
-            {label}
+            {STATUS_LABEL[status]}
         </span>
     );
 }
