@@ -71,17 +71,10 @@ export function extractFetchResult(result: unknown): FetchResultData | null {
     return null;
 }
 
-/** True when the content looks like JSON (try-parse prefix). */
+/** True when the content looks like JSON — heuristic, not a full parse. */
 export function looksLikeJson(content: string): boolean {
     const trimmed = content.trimStart();
-    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
-    try {
-        JSON.parse(trimmed.length > 2000 ? trimmed.slice(0, 2000) + "}" : trimmed);
-        return true;
-    } catch {
-        // heuristic: still likely JSON if it starts with { or [
-        return trimmed.startsWith("{") || trimmed.startsWith("[");
-    }
+    return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
 /** Map HTTP status code to a short label. */
