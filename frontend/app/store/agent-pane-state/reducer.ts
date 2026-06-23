@@ -174,6 +174,7 @@ export function update(
                     // and clears tool / token chips so the header
                     // doesn't show ghosts.
                     currentTool: null,
+                    currentToolArg: null,
                     turnTokens: null,
                     lastEventMs: null,
                     turnPhase: nextPhase,
@@ -329,12 +330,11 @@ export function update(
                         submittedAt: command.at,
                         pendingContent: "",
                     },
-                    // Auto-collapse the composer details panel on send:
-                    // the user pressed Enter, they don't want to be
-                    // looking at a dropdown over the textarea while the
-                    // turn starts.
+                    // Auto-collapse the composer details panel and shell
+                    // history panel on send — don't obscure the turn start.
                     // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
                     detailsOpen: false,
+                    shellOpen: false,
                 },
                 events,
             };
@@ -404,6 +404,7 @@ export function update(
                     ...state,
                     sessionStats: merged,
                     currentTool: null,
+                    currentToolArg: null,
                     turnTokens: null,
                     lastTurnHadQuestion,
                     turnPhase: {
@@ -429,6 +430,7 @@ export function update(
                     ...state,
                     sessionStats: null,
                     currentTool: null,
+                    currentToolArg: null,
                     turnTokens: null,
                     lastContextTokens: 0,
                     lastTurnHadQuestion: false,
@@ -442,7 +444,7 @@ export function update(
 
         case "ToolStart": {
             const nextState = bumpEvent(
-                { ...state, currentTool: command.name },
+                { ...state, currentTool: command.name, currentToolArg: command.arg ?? null },
                 nowMs,
                 /* toolsDelta */ +1,
             );
@@ -454,7 +456,7 @@ export function update(
 
         case "ToolEnd": {
             const nextState = bumpEvent(
-                { ...state, currentTool: null },
+                { ...state, currentTool: null, currentToolArg: null },
                 nowMs,
                 /* toolsDelta */ -1,
             );
@@ -623,10 +625,8 @@ export function update(
             return {
                 state: {
                     ...state,
-                    // Per-turn sidecars cleared the same way TurnEnd
-                    // does — the working spinner settles and the
-                    // header doesn't show ghost tool/token chips.
                     currentTool: null,
+                    currentToolArg: null,
                     turnTokens: null,
                     turnPhase: {
                         kind: "Done",
@@ -662,10 +662,8 @@ export function update(
             return {
                 state: {
                     ...state,
-                    // Per-turn sidecar cleanup mirrors the
-                    // InterruptTimeoutElapsed arm — a forced exit from
-                    // a working state clears tool / token chips.
                     currentTool: null,
+                    currentToolArg: null,
                     turnTokens: null,
                     turnPhase: {
                         kind: "Done",
@@ -772,26 +770,56 @@ export function update(
                 state: {
                     ...state,
                     detailsOpen: opening,
-                    // On flip-to-open, reset the unread counter — the
-                    // entries are now visible. On flip-to-close, leave
-                    // the counter alone (it will accumulate fresh).
+                    // Mutual exclusion: opening details closes shell.
+                    shellOpen: opening ? false : state.shellOpen,
                     composerUnreadCount: opening ? 0 : state.composerUnreadCount,
                 },
                 events: [],
             };
         }
         case "DetailsExpand": {
-            // Idempotent if already open (same-ref no-op preserves
-            // reactive identity).
-            if (state.detailsOpen && state.composerUnreadCount === 0) {
+            if (state.detailsOpen && state.composerUnreadCount === 0 && !state.shellOpen) {
                 return { state, events: [] };
             }
             return {
                 state: {
                     ...state,
                     detailsOpen: true,
+                    shellOpen: false,
                     composerUnreadCount: 0,
                 },
+                events: [],
+            };
+        }
+
+        // ── Shell history panel ────────────────────────────────────
+        case "ShellToggle": {
+            const opening = !state.shellOpen;
+            return {
+                state: {
+                    ...state,
+                    shellOpen: opening,
+                    // Mutual exclusion: opening shell closes details.
+                    detailsOpen: opening ? false : state.detailsOpen,
+                },
+                events: [],
+            };
+        }
+        case "ShellExpand": {
+            if (state.shellOpen && !state.detailsOpen) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, shellOpen: true, detailsOpen: false },
+                events: [],
+            };
+        }
+        case "ShellClose": {
+            if (!state.shellOpen) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, shellOpen: false },
                 events: [],
             };
         }

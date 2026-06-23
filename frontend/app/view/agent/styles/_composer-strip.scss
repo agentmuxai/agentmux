@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // AgentComposerStrip — slim 28-32px status row above the textarea.
-// Replaces AgentStatusLine's loading-bar slab + AgentControlBar's
-// always-visible chrome with a single inline row + expand affordance.
-// Spec: docs/specs/SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md.
+// Redesigned per SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md:
+//   LEFT:  model select · effort select · Shell button
+//   RIGHT: token stats · elapsed · process badge · perm pill · context text · chevron
 
 @use "../../../mixins.scss";
 
@@ -30,65 +30,83 @@
         background: color-mix(in srgb, var(--main-bg-color) 92%, var(--main-text-color));
     }
 
-    // While expanded the strip reads as "open container header" — flatten
-    // the bottom border so it joins the details panel.
     &--expanded {
         border-bottom: 1px solid transparent;
     }
-    // No `:focus-visible` here — the wrapper is purely a layout
-    // container; keyboard focus lands on the chevron button (and
-    // process badge when present), each with its own focus ring.
 }
 
-.agent-composer-strip-left {
+// ── Controls zone (left) ────────────────────────────────────────────────────
+
+.agent-composer-strip-controls {
     display: flex;
     align-items: center;
-    gap: var(--space-1-5);
-    min-width: 0;     // flex-shrink trap break — let the text truncate
-    flex: 1 1 auto;
+    gap: var(--space-1);
+    flex-shrink: 0;
 }
 
-.agent-composer-strip-left-text {
-    // Single-line latest-log-line ticker. Truncates at any width.
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--main-text-color);
-    font-family: inherit;
-}
+.agent-composer-strip-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    border-radius: 0;
+    color: var(--secondary-text-color);
+    font: inherit;
+    font-size: 10px;
+    padding: 1px var(--space-1);
+    cursor: default;
+    outline: none;
 
-.agent-composer-strip-spinner {
-    display: inline-flex;
-    align-items: center;
-    color: var(--accent-color, #3b82f6);
-    animation: agent-strip-spin 1s linear infinite;
+    // Tight widths so the strip stays compact.
+    &:first-child { min-width: 62px; }   // model
+    &:nth-child(2) { min-width: 58px; }  // effort
 
-    &--decelerating {
-        // Stopping… — decelerate to a halt over ~600ms so the user
-        // sees the interrupt was accepted.
-        animation: agent-strip-spin 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-        opacity: 0.7;
+    &:hover {
+        border-color: var(--border-color);
+        color: var(--main-text-color);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 1px;
+    }
+
+    option {
+        background: var(--main-bg-color, #222);
+        color: var(--main-text-color);
     }
 }
 
-@keyframes agent-strip-spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-}
+.agent-composer-strip-shell-btn {
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    border-radius: 0;
+    color: var(--secondary-text-color);
+    font: inherit;
+    font-size: 10px;
+    padding: 1px var(--space-1-5);
+    cursor: default;
+    outline: none;
+    transition: color 0.08s, border-color 0.08s, background 0.08s;
 
-@include mixins.respect-reduced-motion {
-    // Loading spinners are FUNCTIONAL "agent is working" indicators — never
-    // freeze them under reduced motion. A stuck spinner reads as a hung app,
-    // which is worse for everyone (motion-sensitive users included: they then
-    // can't tell it's busy). A small continuous rotate is low vestibular risk;
-    // keep it spinning, just slower/gentler. reduced-motion targets decorative
-    // / large-translation motion, not essential status indicators.
-    .agent-composer-strip-spinner,
-    .agent-composer-strip-spinner--decelerating {
-        animation-duration: 2.4s;
+    &:hover {
+        border-color: var(--border-color);
+        color: var(--main-text-color);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 1px;
+    }
+
+    &--active {
+        color: var(--accent-color);
+        border-color: color-mix(in srgb, var(--accent-color) 50%, transparent);
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
     }
 }
+
+// ── Right zone ──────────────────────────────────────────────────────────────
 
 .agent-composer-strip-right {
     display: flex;
@@ -133,10 +151,35 @@
     border-radius: 0;
 }
 
+// Context text (replaces ContextWindowBar graphic).
+.agent-composer-strip-ctx {
+    font-family: var(--termfontfamily, monospace);
+    font-size: 10px;
+    white-space: nowrap;
+    opacity: 0.8;
+
+    // Color bands — text color only, no background.
+    &--low     { color: var(--secondary-text-color); }
+    &--mid     { color: var(--main-text-color); }
+    &--high    { color: var(--warning-color); }
+    &--critical {
+        color: var(--error-color);
+        animation: ctx-text-pulse 1.2s ease-in-out infinite;
+    }
+}
+
+@keyframes ctx-text-pulse {
+    0%, 100% { opacity: 0.8; }
+    50%       { opacity: 0.4; }
+}
+
+@include mixins.respect-reduced-motion {
+    .agent-composer-strip-ctx--critical {
+        animation-duration: 2.4s;
+    }
+}
+
 .agent-composer-strip-chevron {
-    // Real <button> per the ARIA contract — reset the browser
-    // default appearance so it reads as a chevron glyph, not a
-    // chrome-style button.
     display: inline-flex;
     align-items: center;
     position: relative;
@@ -164,8 +207,6 @@
         outline-offset: 2px;
     }
 
-    // Hover only on the chevron itself (not via the strip hover) —
-    // makes the toggle target feel discoverable.
     &:hover {
         color: var(--main-text-color);
     }
@@ -186,87 +227,15 @@
     border-radius: 8px;
 }
 
-// Narrow-pane truncation — when the pane is < 240px, drop stats first,
-// then process badge stays; chevron always visible.
-// Uses container queries so behavior is consistent with the modal
-// compact-variant design (MODAL_COMPACT_VARIANT_ARCHITECTURE_2026_05_26).
+// Narrow-pane truncation — drop stats, then ctx text.
 @container modal-mount (max-width: 240px) {
-    .agent-composer-strip-stats {
+    .agent-composer-strip-stats,
+    .agent-composer-strip-ctx {
         display: none;
     }
 }
 
-// ── Context Window Fill Bar ────────────────────────────────────────────
-// Rendered inside AgentComposerStrip's right segment by ContextWindowBar.
-
-.ctx-window-bar {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    opacity: 0.75;
-    cursor: default;
-
-    &:hover { opacity: 1; }
-}
-
-.ctx-window-raw {
-    color: var(--color-text-secondary, #888);
-}
-
-.ctx-window-track {
-    position: relative;
-    height: 6px;
-    width: 72px;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.1);
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-}
-
-.ctx-window-fill {
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.3s ease;
-
-    .ctx-window-track--low &     { background: #4caf50; }
-    .ctx-window-track--mid &     { background: #ffc107; }
-    .ctx-window-track--high &    { background: #ff9800; }
-    .ctx-window-track--critical & {
-        background: #f44336;
-        animation: ctx-pulse 1.2s ease-in-out infinite;
-    }
-}
-
-.ctx-window-label {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    text-align: center;
-    font-size: 9px;
-    line-height: 1;
-    color: rgba(255, 255, 255, 0.9);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    padding: 0 2px;
-}
-
-@keyframes ctx-pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.6; }
-}
-
-@include mixins.respect-reduced-motion {
-    // Critical context fill: keep the pulse but slow it down.
-    // Must match specificity of .ctx-window-track--critical .ctx-window-fill
-    // (0,2,0) — a bare .ctx-window-fill (0,1,0) is outranked by the animation
-    // shorthand and the duration override silently loses.
-    .ctx-window-track--critical .ctx-window-fill {
-        animation-duration: 2.4s;
-    }
+@container modal-mount (max-width: 320px) {
+    .agent-composer-strip-select { display: none; }
+    .agent-composer-strip-shell-btn { font-size: 9px; padding: 1px 3px; }
 }

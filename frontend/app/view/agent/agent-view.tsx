@@ -66,6 +66,10 @@ import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
+import { AgentShellHistoryPanel } from "./components/AgentShellHistoryPanel";
+import { getShellHistory, clearShellHistory } from "@/app/store/shell-history";
+import { getRuntimeConfig } from "./buildRuntimeArgs";
+import { applyRuntimeChange } from "./runtime-apply";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
@@ -221,7 +225,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 initPhase: a.initPhaseAtom[1],
                 turnPhase: a.turnPhaseAtom[1],
                 detailsOpen: a.detailsOpenAtom[1],
+                shellOpen: a.shellOpenAtom[1],
                 composerUnreadCount: a.composerUnreadCountAtom[1],
+                currentToolArg: a.currentToolArgAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -258,6 +264,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
             handleAgentIdChange(model.blockId, undefined);
+            clearShellHistory(model.blockId);
         });
     }
 
@@ -726,6 +733,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
+        getShellHistory(model.blockId).push(message);
         return commands.sendMessage(message, wasAlreadyWorking);
     };
 
@@ -1094,6 +1102,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     loading={status.isLoading() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
                     stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
                     currentTool={agentAtoms().currentToolAtom[0]()}
+                    currentToolArg={agentAtoms().currentToolArgAtom[0]()}
                     sessionStats={agentAtoms().sessionStatsAtom[0]()}
                     turnTokens={agentAtoms().turnTokensAtom[0]()}
                 />
@@ -1237,15 +1246,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     status.isLoading()
                     || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
                 }
-                stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
-                currentTool={agentAtoms().currentToolAtom[0]()}
                 sessionStats={agentAtoms().sessionStatsAtom[0]()}
                 turnTokens={agentAtoms().turnTokensAtom[0]()}
                 processCount={processCount()}
                 onProcessBadgeClick={() => {
                     createBlock({ meta: { view: "swarm" } });
                 }}
-                latestLogLine={logLines()[logLines().length - 1]?.text}
                 permissionMode={
                     (block()?.meta?.["agent:runtime"]?.permissionMode) as
                         import("./types").PermissionMode | undefined
@@ -1257,16 +1263,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 }
                 contextTokens={agentAtoms().contextTokensAtom[0]()}
                 contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
+                shellOpen={agentAtoms().shellOpenAtom[0]()}
+                onToggleShell={() =>
+                    dispatchPane(model.blockId, { type: "ShellToggle" }, "user")
+                }
+                blockId={model.blockId}
+                blockAtom={block}
+                providerId={provider()?.id ?? ""}
             />
 
             <div class="agent-composer-region">
-                {/* Details panel — when the user expands the strip, show
-                    the activity log + control bar inside this section.
-                    Phase 1 of the redesign keeps the activity log and
-                    control bar mostly intact (just gated on
-                    `detailsOpen`); a follow-up will consolidate them
-                    into a single AgentComposerDetails component.
-                    SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §4. */}
+                {/* Details panel — activity log + control bar. */}
                 <Show when={agentAtoms().detailsOpenAtom[0]()}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
                         <ActivityLogPanel entries={logLines} />
@@ -1276,6 +1283,19 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                             providerId={provider()?.id ?? ""}
                         />
                     </div>
+                </Show>
+                {/* Shell history panel — sent-message recall. */}
+                <Show when={agentAtoms().shellOpenAtom[0]()}>
+                    <AgentShellHistoryPanel
+                        history={getShellHistory(model.blockId).get}
+                        onResend={(msg) => {
+                            dispatchPane(model.blockId, { type: "ShellClose" }, "user");
+                            void handleSendMessage(msg);
+                        }}
+                        onClose={() =>
+                            dispatchPane(model.blockId, { type: "ShellClose" }, "user")
+                        }
+                    />
                 </Show>
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel
