@@ -2,4 +2,4 @@
 type: patch
 ---
 
-fix(cef): disable GPU process in macOS dev mode to avoid sandbox crash
+fix(cef): use --no-sandbox in macOS dev mode so unsigned dev binary can init GPU and network service
