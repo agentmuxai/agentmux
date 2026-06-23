@@ -29,6 +29,9 @@ pub(super) fn handle_enqueue_browser_pane_create(
             block_id: block_id.clone(),
             label: label.clone(),
             lifecycle: BrowserPaneLifecycle::Live,
+            // Test-only path — no window context; redock-move detection is a
+            // no-op for `None` (falls through to re-navigate).
+            window_label: None,
         },
     );
     let v = state.bump_version();
@@ -89,16 +92,35 @@ pub(super) fn handle_try_register_browser_pane_live(
         );
     }
     if let Some(entry) = state.browser_panes.get(&block_id) {
-        let result = match entry.lifecycle {
-            BrowserPaneLifecycle::Live => RegisterResult::AlreadyLive(entry.label.clone()),
-            BrowserPaneLifecycle::Closing { .. } => RegisterResult::Closing,
+        let entry_label = entry.label.clone();
+        let is_closing = matches!(entry.lifecycle, BrowserPaneLifecycle::Closing { .. });
+        // Redock MOVE detection (Discussion #1205, theme #1/#2 — the `AlreadyLive`
+        // smoking gun in browser_panes.rs): the existing pane is still `Live` but
+        // a create arrived for a DIFFERENT window — the redock's close raced
+        // behind and hasn't flipped it to `Closing` yet. Re-navigating in place
+        // would leave the pane in the OLD, closing window → black. Treat it
+        // EXACTLY like `Closing`: defer the create; the imminent close drains +
+        // replays it into the requested window. A same-window re-mount (or an
+        // unknown current window — the test enqueue path) stays a plain
+        // re-navigate (`AlreadyLive`).
+        let redock_to_other_window = !is_closing
+            && match (
+                entry.window_label.as_deref(),
+                pending.as_ref().map(|p| p.window_label.as_str()),
+            ) {
+                (Some(current), Some(requested)) => current != requested,
+                _ => false,
+            };
+        let result = if is_closing || redock_to_other_window {
+            RegisterResult::Closing
+        } else {
+            RegisterResult::AlreadyLive(entry_label)
         };
-        // Closing: stash the pending create (if the caller supplied one) so the
-        // close-completion arm (`CompleteBrowserPaneClose`/`DrainBrowserPaneByLabel`)
-        // can replay it. Done HERE, under the same host_state lock that just
-        // observed `Closing`, so the stash is atomic with that observation —
-        // no TOCTOU with a separate map (reagent P1 on #1168). The `entry`
-        // borrow ended with the match above, so this mutation is sound.
+        // Stash the pending create (if supplied) for the close-completion arm
+        // (`CompleteBrowserPaneClose`/`DrainBrowserPaneByLabel`) to replay into
+        // the requested window. Done HERE under the same host_state lock that
+        // observed the state, so the stash is atomic — no TOCTOU with a separate
+        // map (reagent P1 on #1168). The `entry` borrow ended above.
         if matches!(result, RegisterResult::Closing) {
             if let Some(p) = pending {
                 state.pending_browser_pane_creates.insert(block_id.clone(), p);
@@ -110,12 +132,14 @@ pub(super) fn handle_try_register_browser_pane_live(
         };
     }
     let label = super::next_browser_pane_label(&block_id);
+    let window_label = pending.as_ref().map(|p| p.window_label.clone());
     state.browser_panes.insert(
         block_id.clone(),
         BrowserPaneEntry {
             block_id: block_id.clone(),
             label: label.clone(),
             lifecycle: BrowserPaneLifecycle::Live,
+            window_label,
         },
     );
     let v = state.bump_version();
