@@ -1,6 +1,6 @@
 # SPEC — Nightly cross-platform CI builds
 
-- **Status:** Phase A implementing; Phase B deferred
+- **Status:** Phase A ✅ MERGED (all 3 platforms green); Phase B implementing (Windows only — macOS/Linux deferred, see §3)
 - **Date:** 2026-06-23
 - **Author:** AgentA
 - **Tracking:** GitHub issue **#1718**
