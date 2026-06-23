@@ -134,6 +134,13 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         styledOutputFormat: "claude-stream-json",
         authType: "oauth",
         authCheckCommand: ["auth", "status", "--json"],
+        // NOTE (2026-06-23, SPEC_HOST_CLI_LOGIN_CAPTURE §0): in-app OAuth is a DEAD
+        // END for Claude v2.1.x — the login is a self-driving TUI that opens its own
+        // browser, and when WE spawn it (host→PTY, not a real terminal) the browser
+        // never opens (it hangs). `setup-token` shares the same browser front-end, so
+        // it can't help in-app either (confirmed via two live captures). The robust
+        // path is seed-from-global (§5.5): authenticate once in a real terminal, then
+        // seed. Kept as ["auth","login"] only for the legacy Connect CTA.
         authLoginCommand: ["auth", "login"],
         // Run `claude auth login` under a PTY (run_cli_login's PTY branch).
         // Spawned with plain pipes from the GUI host, the CLI exits cleanly

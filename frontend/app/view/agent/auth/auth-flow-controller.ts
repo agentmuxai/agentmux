@@ -431,6 +431,17 @@ export class AuthFlowController {
         this.dispatch({ type: "ConnectFailed", error: message });
     }
 
+    /** Seed-from-global accepted — the agent's isolated dir now holds the
+     *  user's valid global credential, so auth is satisfied WITHOUT in-app
+     *  OAuth (the dead end for Claude v2.1.x; SPEC_HOST_CLI_LOGIN_CAPTURE §0).
+     *  The seed RPC itself is fired by the view (PreLaunchAuthPanel via the
+     *  seed-global-login flow); this records the success in the state machine
+     *  so the reducer transitions to `ready` and the Launch button enables.
+     *  Single-phase — no session, no poll. */
+    markSeeded(bundleId: string): void {
+        this.dispatch({ type: "Seeded", bundleId });
+    }
+
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
         // don't leave an orphan CLI subprocess on the backend. Reagent
