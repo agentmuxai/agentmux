@@ -162,6 +162,9 @@ export interface AgentPaneState {
     streaming: StreamingState;
     sessionStats: SessionStats | null;
     currentTool: string | null;
+    /** First significant argument of the active tool (file path, command, etc.).
+     *  Cleared alongside currentTool on ToolEnd / TurnEnd / TurnReset. */
+    currentToolArg: string | null;
     turnTokens: TurnTokens | null;
     pending: PendingMessage[];
     /**
@@ -206,6 +209,13 @@ export interface AgentPaneState {
      * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
      */
     detailsOpen: boolean;
+    /**
+     * Whether the shell history panel (list of sent messages) is open.
+     * Mutually exclusive with `detailsOpen` — opening one closes the other.
+     * Auto-closes on `TurnStart`.
+     * Spec: docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §4.
+     */
+    shellOpen: boolean;
 
     /**
      * Number of activity-log entries that arrived while
@@ -258,6 +268,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     streaming: { agentId, bufferSize: 0, lastEventTime: 0 },
     sessionStats: null,
     currentTool: null,
+    currentToolArg: null,
     turnTokens: null,
     lastContextTokens: null,
     lastContextWindow: null,
@@ -267,6 +278,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
     detailsOpen: false,
+    shellOpen: false,
     composerUnreadCount: 0,
     lastTurnHadQuestion: false,
 });
@@ -409,7 +421,8 @@ export type AgentPaneCommand =
      */
     | { type: "TurnReset" }
 
-    | { type: "ToolStart"; name: string }
+    // ── Tool ───────────────────────────────────────────────────────
+    | { type: "ToolStart"; name: string; arg?: string }
     | { type: "ToolEnd" }
 
     | { type: "TokensIn"; input: number; model?: string }
@@ -469,6 +482,19 @@ export type AgentPaneCommand =
      */
     | { type: "PendingMessageExpired"; id: string }
 
+    // ── Shell history panel ───────────────────────────────────────
+    /**
+     * Toggle the shell history panel. Mutually exclusive with
+     * `detailsOpen` — opening shell closes details, and vice versa.
+     * Spec: docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §4.
+     */
+    | { type: "ShellToggle" }
+    /** Idempotent open — also closes `detailsOpen`. */
+    | { type: "ShellExpand" }
+    /** Idempotent close. */
+    | { type: "ShellClose" }
+
+    // ── Composer details panel ────────────────────────────────────
     /**
      * User clicked the chevron or the strip body — toggle the details
      * panel. On flip-to-open, resets `composerUnreadCount` to 0.
