@@ -225,6 +225,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // Sentinel for the listenEvent .then() race: if the component unmounts
         // before the Promise resolves, the .then() immediately calls unlisten.
         let cleaned = false;
+        // Phase 4b — ghost pre-captured in onMouseUp before clear_floating_redock_hover
+        // broadcasts the hover-state null event (which triggers clearPlaceholder on the
+        // target renderer and would wipe the ghost before tryRedockAtCursorInner reads it).
+        let capturedGhostForDrop: Promise<{ block_id?: string; dir?: number }> | null = null;
+        let capturedGhostForWindow: string | null = null;
 
         const label = windowLabel();
 
@@ -482,6 +487,20 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (jsDrivenDrag) jsDragMouseDownId += 1;
             if (!dragging) return;
             dragging = false;
+            // Phase 4b — dispatch get_floating_redock_target BEFORE clear_floating_redock_hover.
+            // Both are fire-and-forget IPCs from the same floater renderer → CEF backend
+            // channel (FIFO). The ghost read queues ahead of the event broadcast that
+            // triggers clearPlaceholder on the target renderer. This avoids the cross-
+            // process race where the target's set_floating_redock_target(null) arrives
+            // before tryRedockAtCursorInner's delayed call to get_floating_redock_target.
+            const preGhostWindow = dwellCurrentHoverTarget;
+            capturedGhostForWindow = preGhostWindow;
+            capturedGhostForDrop = preGhostWindow
+                ? invokeCommand<{ block_id?: string; dir?: number }>(
+                      "get_floating_redock_target",
+                      { window_label: preGhostWindow },
+                  ).catch(() => ({}))
+                : Promise.resolve({});
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
             if (isWindows()) {
                 // On Windows: preserve arm state before clearing — window_drag_ended
@@ -921,14 +940,17 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 return;
             }
 
-            // Phase 4b — query the ghost state the target renderer stored so
-            // the saga can emit a directional split action. Best-effort: a
-            // failed query (CEF IPC error, no stored state) falls back to the
-            // existing InsertNode path without breaking the redock.
-            const ghost = await invokeCommand<{ block_id?: string; dir?: number }>(
-                "get_floating_redock_target",
-                { window_label: target.label! },
-            ).catch(() => ({}));
+            // Phase 4b — use the ghost pre-captured in onMouseUp (before
+            // clear_floating_redock_hover cleared it). If the resolved target
+            // window differs from the captured window, fall back to empty ghost
+            // (InsertNode path). Clear after consuming so a subsequent drag
+            // can't accidentally reuse stale state.
+            const ghost =
+                capturedGhostForDrop != null && capturedGhostForWindow === target.label
+                    ? await capturedGhostForDrop
+                    : {};
+            capturedGhostForDrop = null;
+            capturedGhostForWindow = null;
 
             try {
                 await WorkspaceService.RedockFloatingPane(
