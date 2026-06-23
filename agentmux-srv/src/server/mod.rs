@@ -190,7 +190,7 @@ pub fn build_router(state: AppState) -> Router {
     // security audit (C1 + C2) showed that any local process — or a
     // web page driving 127.0.0.1 via the permissive CORS layer — could
     // drive `/agentmux/reactive/inject` and reconfigure the cloud
-    // agentbus poller. These routes are now merged into `authed_routes`
+    // muxbus poller. These routes are now merged into `authed_routes`
     // below and gated by `auth_middleware`.
     let reactive_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))

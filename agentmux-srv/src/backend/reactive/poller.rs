@@ -38,7 +38,7 @@ impl Poller {
     #[allow(dead_code)]
     pub fn is_configured(&self) -> bool {
         let config = self.config.read().unwrap();
-        config.agentmux_url.is_some() && config.agentmux_token.is_some()
+        config.muxbus_url.is_some() && config.muxbus_token.is_some()
     }
 
     /// Check if the poller is running.
@@ -72,10 +72,10 @@ impl Poller {
     pub fn status(&self) -> PollerStatus {
         let config = self.config.read().unwrap();
         PollerStatus {
-            configured: config.agentmux_url.is_some() && config.agentmux_token.is_some(),
+            configured: config.muxbus_url.is_some() && config.muxbus_token.is_some(),
             running: self.is_running(),
-            url: config.agentmux_url.clone(),
-            has_token: config.agentmux_token.is_some(),
+            url: config.muxbus_url.clone(),
+            has_token: config.muxbus_token.is_some(),
             poll_count: *self.poll_count.lock().unwrap(),
             injections_count: *self.injections_count.lock().unwrap(),
             last_poll: *self.last_poll.lock().unwrap(),
@@ -85,8 +85,8 @@ impl Poller {
     /// Reconfigure the poller with new URL and token.
     pub fn reconfigure(&self, url: Option<String>, token: Option<String>) {
         let mut config = self.config.write().unwrap();
-        config.agentmux_url = url;
-        config.agentmux_token = token;
+        config.muxbus_url = url;
+        config.muxbus_token = token;
     }
 
     /// Record a successful poll.
