@@ -134,6 +134,16 @@
                     outline: none;
                     border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
                 }
+
+                &.bang-command {
+                    color: var(--error-color);
+                    border-color: var(--error-color);
+                    caret-color: var(--error-color);
+
+                    &:focus {
+                        border-color: var(--error-color);
+                    }
+                }
             }
 
 
