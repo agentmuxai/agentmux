@@ -674,6 +674,12 @@ async fn run_cli_login_pty(
         cmd.cwd(cwd);
     }
 
+    // §5.1: capture the isolated CLAUDE_CONFIG_DIR so the reaper can report
+    // whether `setup-token` wrote `.credentials.json` there on completion — that
+    // decides whether the agent is auto-authed via the dir (no env-persist needed)
+    // or we must persist the captured CLAUDE_CODE_OAUTH_TOKEN into the spawn env.
+    let cred_check_dir = auth_env.get("CLAUDE_CONFIG_DIR").cloned();
+
     let child = pair
         .slave
         .spawn_command(cmd)
@@ -740,7 +746,24 @@ async fn run_cli_login_pty(
                     // tell capture-miss from no-browser from a silent exit.
                     let t = line.trim_end();
                     if !t.trim().is_empty() {
-                        tracing::info!(target: "login_pty", "[login-pty] {}", t);
+                        // SECURITY: `claude setup-token` (§5.1) prints a live
+                        // CLAUDE_CODE_OAUTH_TOKEN (`sk-ant-oat…`) to stdout — never
+                        // write it to the host log. redact_secrets masks it while
+                        // preserving the surrounding shape so we can still read the
+                        // output format from the capture.
+                        tracing::info!(target: "login_pty", "[login-pty] {}", redact_secrets(t));
+                    }
+                    // §5.1 (SPEC_HOST_CLI_LOGIN_CAPTURE): a CLAUDE_CODE_OAUTH_TOKEN /
+                    // `sk-ant-oat…` line is the setup-token headless contract — the
+                    // login completed and the token arrived. Log the capture (redacted)
+                    // so we can confirm format + completion without leaking the secret.
+                    // (Parser/env-persist wiring lands once this confirms the format.)
+                    if t.contains("sk-ant-oat") || t.contains("CLAUDE_CODE_OAUTH_TOKEN") {
+                        tracing::info!(
+                            target: "login_pty",
+                            "[login-pty] setup-token output detected ({} chars; token redacted above)",
+                            t.len()
+                        );
                     }
                     // Still capture an OAuth URL for providers that DO print one
                     // (Codex/Gemini/OpenClaw); a no-op for Claude v2.1.x.
@@ -803,6 +826,18 @@ async fn run_cli_login_pty(
                         exit_code = ?status.exit_code(),
                         "run_cli_login_pty: child exited"
                     );
+                    // §5.1: report whether the login persisted isolated creds. If
+                    // this is `true` after a setup-token completion, the agent is
+                    // auto-authed via CLAUDE_CONFIG_DIR and no env-persist is needed.
+                    if let Some(dir) = &cred_check_dir {
+                        let cred = std::path::Path::new(dir).join(".credentials.json");
+                        tracing::info!(
+                            target: "login_pty",
+                            "[login-pty] post-login: {}/.credentials.json exists = {}",
+                            dir,
+                            cred.exists()
+                        );
+                    }
                     break;
                 }
                 Ok(None) => {
@@ -836,6 +871,37 @@ async fn run_cli_login_pty(
     });
 
     Ok(serde_json::json!({ "auth_url": auth_url }))
+}
+
+/// Mask secret tokens before a PTY line is logged. `claude setup-token` (§5.1)
+/// prints a live `CLAUDE_CODE_OAUTH_TOKEN` (`sk-ant-oat…`, a ~1-year credential)
+/// to stdout; the slice-1 line logging would otherwise write it verbatim to the
+/// host log. We keep `sk-ant-` + 4 chars (enough to recognize the output format)
+/// and mask the rest of the token run, so the capture stays useful without
+/// leaking the credential. ASCII-only token chars → all byte slices are on char
+/// boundaries.
+fn redact_secrets(line: &str) -> String {
+    const PREFIX: &str = "sk-ant-";
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(pos) = rest.find(PREFIX) {
+        out.push_str(&rest[..pos]);
+        let after = &rest[pos..];
+        // Token run = PREFIX followed by [A-Za-z0-9_-]*.
+        let tok_end = after
+            .char_indices()
+            .skip(PREFIX.len())
+            .find(|(_, c)| !(c.is_ascii_alphanumeric() || *c == '-' || *c == '_'))
+            .map(|(idx, _)| idx)
+            .unwrap_or(after.len());
+        let token = &after[..tok_end];
+        let keep = token.len().min(PREFIX.len() + 4);
+        out.push_str(&token[..keep]);
+        out.push_str("…REDACTED");
+        rest = &after[tok_end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Extract an OAuth URL from a line of CLI output.
@@ -1213,6 +1279,42 @@ mod external_url_tests {
         assert!(!is_external_http_url("data:text/html,hi"));
         assert!(!is_external_http_url("blob:abc"));
         assert!(!is_external_http_url("vscode://file/x"));
+    }
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::redact_secrets;
+
+    #[test]
+    fn masks_oauth_token_keeps_prefix() {
+        let red = redact_secrets("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-AbCdEf123456789");
+        assert!(red.starts_with("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat0"));
+        assert!(red.contains("…REDACTED"));
+        assert!(!red.contains("AbCdEf123456789"));
+    }
+
+    #[test]
+    fn masks_bare_token_and_preserves_surroundings() {
+        let red = redact_secrets("  token: sk-ant-api03-SECRETSECRETSECRET done");
+        assert!(!red.contains("SECRETSECRETSECRET"));
+        assert!(red.contains("sk-ant-api0")); // prefix + 4 kept
+        assert!(red.contains("…REDACTED"));
+        assert!(red.contains(" done")); // trailing text preserved
+    }
+
+    #[test]
+    fn passes_through_non_secret_lines() {
+        let s = "Visit https://claude.ai/oauth?code=xyz to continue";
+        assert_eq!(redact_secrets(s), s);
+    }
+
+    #[test]
+    fn masks_multiple_occurrences() {
+        let red = redact_secrets("sk-ant-oat01-AAAA and sk-ant-oat01-BBBB");
+        assert!(!red.contains("AAAA"));
+        assert!(!red.contains("BBBB"));
+        assert_eq!(red.matches("…REDACTED").count(), 2);
     }
 }
 

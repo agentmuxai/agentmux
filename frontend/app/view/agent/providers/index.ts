@@ -134,8 +134,15 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         styledOutputFormat: "claude-stream-json",
         authType: "oauth",
         authCheckCommand: ["auth", "status", "--json"],
-        authLoginCommand: ["auth", "login"],
-        // Run `claude auth login` under a PTY (run_cli_login's PTY branch).
+        // §5.1 (SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20): switched from
+        // ["auth","login"] — the un-scrapeable v2.1.x TUI (URL goes to clipboard,
+        // no stdout line) — to `setup-token`, the documented headless path that
+        // prints a long-lived CLAUDE_CODE_OAUTH_TOKEN to stdout after a one-time
+        // browser OAuth. The host runs it under a PTY and captures the printed
+        // token instead of scraping a URL. (Capture-build step: confirm the token
+        // output format via slice-1 `login_pty` logs before wiring the parser.)
+        authLoginCommand: ["setup-token"],
+        // Run under a PTY (run_cli_login's PTY branch).
         // Spawned with plain pipes from the GUI host, the CLI exits cleanly
         // ~5s after printing the OAuth URL — before the user can return from
         // the browser and paste the code — so the login always appeared stuck
