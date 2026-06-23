@@ -1,5 +1,37 @@
 # AgentMux Version History
 
+## 0.49.0 — 2026-06-23
+
+- fix(sysinfo): robust CPU chart — ZOH gap fill, debounced resize, no blank-on-reload
+- fix(lifecycle): typed Floater BrowserKind; floaters excluded from quit gate by type
+- fix(agent-pane): busy bar no longer freezes under reduced-motion + opaque bar (no text bleed-through)
+- feat(tool-renderers): WebFetch content view + fix WebSearch JSON-string extraction
+- fix(swarm): emit agent:process-added on reactive register so panes appear in Swarm view
+- chore(ci): fast (PR) + nightly (CEF) test runners on standard runners
+- fix(memory): agent_def_get global-registry fallback, autoMemory guard, brain UI inline input, seed memory discipline
+- fix(agent-pane): keep the busy bar a fixed size regardless of pane zoom
+- fix(macos): remove AlertNotificationService helper from bundle to eliminate duplicate notification prompts
+- fix(test): un-skip AgentLaunchModal preset test (stale Memory->Preset label)
+- fix(agent-pane): keep marching ants under reduced-motion (slower) instead of an opacity breathe
+- feat(tool-log): collapse consecutive spinner-char frames to in-place animation
+- chore(ci): run test workflows nightly, not per-PR
+- chore(ci): nightly cross-platform compile-build (Phase A, #1718)
+- chore(ci): move input-handler guardrails to nightly (not per-PR)
+- fix(agent-pane): marching ants freeze on macOS with Reduce Motion — add animation-iteration-count: infinite in reduced-motion block
+- fix(cef): use --no-sandbox in macOS dev mode so unsigned dev binary can init GPU and network service
+- fix(agent-pane): red input styling when bang-cmd; sh -c on Windows; MSYS path fix
+- fix(auth): seed-from-global primary; redact tokens in login PTY logs
+- feat(auth): seed-from-global is the primary pre-launch CTA for Claude
+- feat(swarm): agent pane visibility in Swarm, click-to-focus, and two-way active-row highlight
+- feat(swarm): granular per-block agent status from TurnPhase (working/tools/stopping/error/offline)
+- fix(container-agent): empty image fallback, skip empty meta, guard null blockId in swarm
+- feat(layout): fix floating-pane redock ghost-size mismatch (Phase 4b)
+- docs(readme): refresh tone + accuracy (first-class agents, multi-provider, one-shot CLIs, local-first)
+- ci: nightly Windows artifact build — portable ZIP + setup installer (Phase B of #1718)
+- refactor(reactive): rename PollerConfig fields to muxbus_* (ARCH-001; wire key unchanged)
+- fix(auth): Use existing login primary for Claude in failure banner; add Login via terminal fallback (CREATE_NEW_CONSOLE)
+
+
 ## 0.48.1 — 2026-06-22
 
 - feat(widgets): per-widget port override and widget.api HTTP proxy RPC
