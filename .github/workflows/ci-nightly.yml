@@ -1,0 +1,43 @@
+name: CI — nightly (full + CEF)
+
+# The FULL workspace incl. agentmux-cef (the CEF build) + the frontend suite, on a
+# Windows runner so the #[cfg(windows)] host/lifecycle code (wrr/win_event,
+# TerminateProcess, the close paths from #1676) actually compiles + runs. Nightly
+# rather than per-PR because cef-dll-sys downloads ~200 MB of CEF and builds its C
+# wrapper with CMake/Ninja (~10-20 min cold). Standard windows-latest runner only
+# (free on public repos). See docs/specs/SPEC_CI_TEST_RUNNER_2026_06_22.md.
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # 09:00 UTC daily (off-peak)
+  workflow_dispatch: {}
+
+jobs:
+  full:
+    name: cargo test --workspace + vitest (Windows / CEF)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # cef-dll-sys builds CEF's C wrapper with CMake (preinstalled on
+      # windows-latest via Visual Studio) + Ninja (installed here).
+      - name: Install Ninja
+        run: choco install ninja -y
+      - uses: Swatinem/rust-cache@v2
+      # Reducer/lifecycle tests (the #1676/#1701/#1703 class) live in agentmux-cef
+      # and need the CEF link. Open Q (spec §6.1): whether windows-latest has
+      # enough disk for the CEF download + target/ — verify on the first run; if it
+      # ENOSPCs that's a maintainer cost decision (larger runner = billed), NOT a
+      # silent opt-in.
+      # --test-threads=1: accumulated test-isolation flakes (process-shared
+      # in-memory FileStore, a focus-flag global) flake under parallel runs; serial
+      # is deterministic. Follow-up to fix isolation + drop this (spec §6.4).
+      - name: cargo test --workspace
+        run: cargo test --workspace -- --test-threads=1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: vitest run
+        run: npx vitest run

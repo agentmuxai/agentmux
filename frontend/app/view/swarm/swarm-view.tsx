@@ -6,8 +6,27 @@ import type { SwarmViewModel, AgentTreeNode, ActiveSubagent } from "./swarm-mode
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, refocusNode } from "@/app/store/global";
+import { WOS, workspace, setActiveTab } from "@/app/store/global";
+import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import "./swarm-view.scss";
+
+// Navigate to the pane for a given block ID, switching tabs if needed.
+// Uses layout models (always cached for visited tabs) rather than Tab.blockids
+// (which requires the Tab object to be in the WOS cache).
+async function focusBlock(blockId: string): Promise<void> {
+    const ws = workspace();
+    if (!ws) return;
+    const allTabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
+    for (const tabId of allTabIds) {
+        const layoutModel = getLayoutModelForTabById(tabId);
+        const node = layoutModel?.getNodeByBlockId(blockId);
+        if (node?.id != null) {
+            await setActiveTab(tabId);
+            layoutModel.focusNode(node.id);
+            return;
+        }
+    }
+}
 
 export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Element {
     const model = props.model;
@@ -98,39 +117,24 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 // ── Agent root row ───────────────────────────────────────────────────────
 
 function AgentRow({ node }: { node: AgentTreeNode }): JSX.Element {
-    const handleOpen = () => {
-        refocusNode(node.blockId);
-    };
-
     return (
         <div class="swarm-agent-group">
             <div
                 class={`swarm-agent-row swarm-agent-row--${node.agentStatus}`}
-                onClick={handleOpen}
-                title={node.label}
+                onClick={() => void focusBlock(node.blockId)}
+                title={node.agentName}
             >
                 <span class="swarm-agent-icon">⬡</span>
-                <span class="swarm-agent-label">{node.label}</span>
+                <span class="swarm-agent-label">{node.agentName}</span>
                 <StatusChip status={node.agentStatus === "running" ? "running" : "idle"} />
-                <button
-                    class="swarm-open-btn"
-                    onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                    title="Focus agent pane"
-                >
-                    Open
-                </button>
             </div>
             <div class="swarm-children">
-                <Show
-                    when={node.subagents.length > 0}
-                    fallback={
-                        <div class="swarm-no-subagents">no subagents yet</div>
-                    }
-                >
-                    <For each={node.subagents}>
-                        {(sub) => <SubagentRow sub={sub} />}
-                    </For>
+                <Show when={node.activitySummary}>
+                    <div class="swarm-activity-summary">{node.activitySummary}</div>
                 </Show>
+                <For each={node.subagents}>
+                    {(sub) => <SubagentRow sub={sub} />}
+                </For>
             </div>
         </div>
     );
@@ -158,13 +162,6 @@ function SubagentRow({ sub }: { sub: ActiveSubagent }): JSX.Element {
         >
             <span class="swarm-subagent-slug">{sub.slug || sub.agent_id.substring(0, 7)}</span>
             <StatusChip status={sub.status === "active" ? "running" : "done"} />
-            <button
-                class="swarm-open-btn"
-                onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                title="Open subagent pane"
-            >
-                Open
-            </button>
         </div>
     );
 }
