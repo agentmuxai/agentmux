@@ -14,7 +14,7 @@
  */
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-import { AgentNativeMemoryModel } from "../agent-native-memory-model";
+import { AgentNativeMemoryModel, normalizeMemoryFilename, validateMemoryFilename } from "../agent-native-memory-model";
 import "./AgentNativeMemoryModal.scss";
 
 interface AgentNativeMemoryModalProps {
@@ -48,10 +48,38 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
     const model = new AgentNativeMemoryModel(props.agentId, props.agentName);
     onCleanup(() => model.dispose());
 
-    const handleNewFile = () => {
-        const raw = window.prompt("New memory file name (e.g. project-notes):");
-        if (raw == null) return; // cancelled
-        void model.createFile(raw, "");
+    const [newFileName, setNewFileName] = createSignal("");
+    const [showNewInput, setShowNewInput] = createSignal(false);
+    const [newFileError, setNewFileError] = createSignal<string | null>(null);
+
+    const openNewInput = () => {
+        setNewFileName("");
+        setNewFileError(null);
+        setShowNewInput(true);
+    };
+
+    const cancelNewInput = () => {
+        setShowNewInput(false);
+        setNewFileName("");
+        setNewFileError(null);
+    };
+
+    const commitNewFile = () => {
+        const normalized = normalizeMemoryFilename(newFileName());
+        const err = validateMemoryFilename(normalized);
+        if (err) {
+            setNewFileError(err);
+            return;
+        }
+        setShowNewInput(false);
+        setNewFileName("");
+        setNewFileError(null);
+        void model.createFile(normalized, "");
+    };
+
+    const onNewFileKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Enter") { e.preventDefault(); commitNewFile(); }
+        if (e.key === "Escape") { e.preventDefault(); cancelNewInput(); }
     };
 
     return (
@@ -114,7 +142,34 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                             )}
                         </For>
                     </Show>
-                    <button class="agent-memory-modal-new-btn" onClick={handleNewFile}>
+
+                    <Show when={showNewInput()}>
+                        <div class="agent-memory-modal-new-input-row">
+                            <input
+                                class="agent-memory-modal-new-input"
+                                classList={{ "is-error": newFileError() !== null }}
+                                type="text"
+                                placeholder="filename.md"
+                                value={newFileName()}
+                                autofocus
+                                onInput={(e) => { setNewFileName(e.currentTarget.value); setNewFileError(null); }}
+                                onKeyDown={onNewFileKeyDown}
+                            />
+                            <Show when={newFileError()}>
+                                <div class="agent-memory-modal-new-input-error">{newFileError()}</div>
+                            </Show>
+                            <div class="agent-memory-modal-new-input-actions">
+                                <button class="agent-memory-modal-btn" onClick={cancelNewInput}>Cancel</button>
+                                <button class="agent-memory-modal-btn agent-memory-modal-btn-primary" onClick={commitNewFile}>Create</button>
+                            </div>
+                        </div>
+                    </Show>
+
+                    <button
+                        class="agent-memory-modal-new-btn"
+                        classList={{ "is-hidden": showNewInput() }}
+                        onClick={openNewInput}
+                    >
                         + New file
                     </button>
                 </div>
