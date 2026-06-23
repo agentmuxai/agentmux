@@ -43,7 +43,9 @@ import {
     type SelectionOutcome,
 } from "../auth";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { seedGlobalLogin } from "../flows/seed-global-login";
 import type { ProviderDefinition } from "../providers";
+import type { LogFn } from "../types";
 import "./PreLaunchAuthPanel.scss";
 
 export interface PreLaunchAuthPanelProps {
@@ -222,6 +224,39 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         void startConnect(controller, prov);
     };
 
+    // "Use my existing login" — the PRIMARY path for Claude v2.1.x, whose
+    // in-app OAuth can't open a browser when WE spawn it (a dead end —
+    // SPEC_HOST_CLI_LOGIN_CAPTURE §0). Copies the user's valid GLOBAL login
+    // into the agent's isolated dir, then marks the controller `ready` so
+    // Launch enables — no in-app browser, no OAuth.
+    const seedLog: LogFn = (_cat, msg) => console.log(`[auth-diag] seed: ${msg}`);
+    const handleUseExistingLogin = async (): Promise<void> => {
+        const prov = props.provider;
+        if (!prov) return;
+        // Resolve the agent's isolated auth dir so the seed lands where the
+        // agent reads it (host falls back to the shared dir if absent/invalid).
+        let configDir: string | undefined;
+        if (prov.authConfigDirEnvVar) {
+            try {
+                configDir = await getApi().ensureAuthDir(prov.id);
+            } catch (e) {
+                console.warn(
+                    `[auth-diag] seed ensureAuthDir failed: ${(e as Error)?.message ?? String(e)}`,
+                );
+            }
+        }
+        const ok = await seedGlobalLogin(prov.id, seedLog, configDir);
+        if (ok) {
+            controller.markSeeded(props.identityId());
+        } else {
+            controller.failConnect(
+                new Error(
+                    "No valid global Claude login to copy. Run `claude setup-token` in a real terminal (it opens a browser), complete it, then click “Use my existing login” again.",
+                ),
+            );
+        }
+    };
+
     // Auto-start OAuth once on mount when the parent set `autoStartAuth`
     // — the New Identity → launch round-trip (spec §2). By this point
     // the user has named + created the bundle, so the dropdown carries
@@ -274,6 +309,8 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         bindingStatus={props.bindingStatus?.() ?? null}
                         hasBinding={props.hasMatchingBinding()}
                         onConnect={() => handleConnect()}
+                        canSeed={props.provider?.id === "claude"}
+                        onUseExistingLogin={() => void handleUseExistingLogin()}
                         disabled={props.disabled ?? false}
                     />
                 </Match>
@@ -325,6 +362,8 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         bindingStatus={props.bindingStatus?.() ?? null}
                         hasBinding={props.hasMatchingBinding()}
                         onConnect={() => handleConnect()}
+                        canSeed={props.provider?.id === "claude"}
+                        onUseExistingLogin={() => void handleUseExistingLogin()}
                         disabled={props.disabled ?? false}
                     />
                 </Match>
@@ -458,6 +497,12 @@ const ConnectCta = (p: {
      *  Connect CTA wording the user already knows). */
     hasBinding: boolean;
     onConnect: () => void;
+    /** True for providers where seed-from-global is the path (Claude
+     *  v2.1.x — in-app OAuth can't open a browser under our spawn, so the
+     *  Connect CTA is a dead end). When true the panel leads with "Use my
+     *  existing login" instead of OAuth. SPEC_HOST_CLI_LOGIN_CAPTURE §0. */
+    canSeed: boolean;
+    onUseExistingLogin: () => void;
     disabled: boolean;
 }): JSX.Element => {
     const catalog = () =>
@@ -480,31 +525,56 @@ const ConnectCta = (p: {
                     ? `⚠ Your ${providerLabel()} credentials need reconnecting.`
                     : isExpired()
                         ? `⚠ Your ${providerLabel()} session is expired. Re-authenticate before launching.`
-                        : `⚠ ${providerLabel()} requires an OAuth login before launch.`}
+                        : `⚠ ${providerLabel()} requires a login before launch.`}
             </div>
-            <Button
-                onClick={() => p.onConnect()}
-                disabled={p.disabled}
-                className="pre-launch-auth-panel-connect green solid"
+            <Show
+                when={p.canSeed}
+                fallback={
+                    <>
+                        <Button
+                            onClick={() => p.onConnect()}
+                            disabled={p.disabled}
+                            className="pre-launch-auth-panel-connect green solid"
+                        >
+                            <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">
+                                {catalog()?.icon ?? "🔐"}
+                            </span>
+                            <span class="pre-launch-auth-panel-connect-label">
+                                {needsReconnect()
+                                    ? `Reconnect ${providerLabel()}`
+                                    : isExpired()
+                                        ? "Re-authenticate"
+                                        : `Connect to ${providerLabel()}`}
+                            </span>
+                        </Button>
+                        <div class="pre-launch-auth-panel-hint">
+                            {needsReconnect()
+                                ? `Re-runs OAuth into your existing Identity bundle. Launch stays available — your CLI will refresh on first call.`
+                                : `Opens browser → ${providerLabel()} login → returns to AgentMux.
+                                Tokens get saved into a new Identity bundle so the next
+                                agent doesn't have to re-authenticate.`}
+                        </div>
+                    </>
+                }
             >
-                <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">
-                    {catalog()?.icon ?? "🔐"}
-                </span>
-                <span class="pre-launch-auth-panel-connect-label">
-                    {needsReconnect()
-                        ? `Reconnect ${providerLabel()}`
-                        : isExpired()
-                            ? "Re-authenticate"
-                            : `Connect to ${providerLabel()}`}
-                </span>
-            </Button>
-            <div class="pre-launch-auth-panel-hint">
-                {needsReconnect()
-                    ? `Re-runs OAuth into your existing Identity bundle. Launch stays available — your CLI will refresh on first call.`
-                    : `Opens browser → ${providerLabel()} login → returns to AgentMux.
-                    Tokens get saved into a new Identity bundle so the next
-                    agent doesn't have to re-authenticate.`}
-            </div>
+                {/* Claude v2.1.x: in-app OAuth can't open a browser under our
+                    spawn (SPEC_HOST_CLI_LOGIN_CAPTURE §0), so seed the user's
+                    existing global login instead — the upstream-recommended
+                    method (issue #7100). PRIMARY path. */}
+                <Button
+                    onClick={() => p.onUseExistingLogin()}
+                    disabled={p.disabled}
+                    className="pre-launch-auth-panel-connect green solid"
+                >
+                    <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">🌐</span>
+                    <span class="pre-launch-auth-panel-connect-label">Use my existing login</span>
+                </Button>
+                <div class="pre-launch-auth-panel-hint">
+                    Copies your existing terminal login into this agent — no in-app
+                    browser needed. First time? Run <code>claude setup-token</code> in a
+                    terminal, finish it in the browser, then click this.
+                </div>
+            </Show>
         </div>
     );
 };

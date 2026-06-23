@@ -182,6 +182,19 @@ export type AuthCommand =
      */
     | { type: "ApiKeyAccepted"; bundleId: string }
     /**
+     * Seed-from-global accepted (SPEC_HOST_CLI_LOGIN_CAPTURE §0 / §5.5):
+     * the user's valid GLOBAL Claude login was copied into the agent's
+     * isolated dir, so auth is satisfied WITHOUT in-app OAuth — which is a
+     * dead end for Claude v2.1.x (the spawned login can't open a browser).
+     * Single-phase, like `ApiKeyAccepted`: the credential file IS the
+     * persistence, so transition straight to `ready`. Honored only from
+     * connect-able kinds (`unauthenticated`/`expired`/`failed`); a stale
+     * dispatch from `ready`/`waiting`/etc. is dropped. `bundleId` may be ""
+     * for the default identity (the existing dir is seeded in place — no new
+     * bundle row created).
+     */
+    | { type: "Seeded"; bundleId: string }
+    /**
      * User confirmed the bundle name in the SaveBundle panel. View
      * fires `auth.savebundle` RPC on the emitted event. Transitions
      * to `saving`. Reagent-pinned: only honored from `authenticated`.
@@ -258,6 +271,7 @@ export type AuthEvent =
           accountName: string;
       }
     | { type: "api-key-accepted"; bundleId: string }
+    | { type: "seeded"; bundleId: string }
     | { type: "disposed" }
     | { type: "post-close-command-dropped"; commandType: string };
 
@@ -560,6 +574,39 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
                     error: "",
                 },
                 events: [{ type: "api-key-accepted", bundleId: command.bundleId }],
+            };
+        }
+
+        case "Seeded": {
+            // Honored only from connect-able kinds, so a stale dispatch can't
+            // clobber a newer `ready`/`waiting`/`saving`/`idle`.
+            if (
+                state.kind !== "unauthenticated" &&
+                state.kind !== "expired" &&
+                state.kind !== "failed"
+            ) {
+                return {
+                    state,
+                    events: [
+                        { type: "post-close-command-dropped", commandType: "Seeded" },
+                    ],
+                };
+            }
+            // Single-phase (the seeded credential file IS the persistence) →
+            // straight to `ready`. bundleId may be "" for the default identity
+            // (no new bundle row — the existing isolated dir was seeded in place).
+            const bundleId = command.bundleId || state.bundleId;
+            return {
+                state: {
+                    ...state,
+                    kind: "ready",
+                    bundleId,
+                    sessionId: "",
+                    authUrl: "",
+                    deviceCode: null,
+                    error: "",
+                },
+                events: [{ type: "seeded", bundleId }],
             };
         }
 

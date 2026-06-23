@@ -1,0 +1,86 @@
+name: CI — nightly artifacts (Windows)
+
+# Phase B of SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md (issue #1718):
+# Full build → package → upload runnable Windows artifacts (portable ZIP +
+# setup installer). Runs nightly so each morning there's a fresh downloadable
+# build from HEAD.
+#
+# Linux AppImage: deferred — the libcef.so BeginWindowDrag patch gate blocks
+#   packaging unless AGENTMUX_SKIP_CEF_PATCH_CHECK=1; the upstream cef-dll-sys
+#   cache lacks the patch. Tracked on #1718.
+# macOS DMG: deferred — package:macos hard-requires a Developer ID certificate
+#   (no unsigned path in scripts/package-macos.sh); needs secrets/keychain
+#   plumbing before it can run in CI. Tracked on #1718.
+#
+# Standard runners only (free on public repos for any workload; CI-1).
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # 06:00 UTC daily (ahead of Phase A at 07:00)
+  workflow_dispatch: {}
+
+jobs:
+  windows:
+    name: Windows portable + installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Ninja: CEF's C wrapper (cef-dll-sys) needs CMake + Ninja; CMake ships
+      # with VS on this runner. go-task: scripts/package.sh delegates build
+      # steps to `task`. innosetup: package-installer.ps1 needs ISCC.
+      - name: Install build tools (Ninja, go-task, Inno Setup)
+        shell: pwsh
+        run: choco install ninja go-task innosetup -y
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Full build + assemble portable. Outputs:
+      #   artifacts/agentmux-<LABEL>-x64-portable/   ← unpacked tree
+      #   artifacts/agentmux-<LABEL>-x64-portable.zip
+      # RELEASE_CHANNEL=stable so the artifact opens the user's real data dir.
+      # STRIP_MAPS=1 removes ~28 MB of source maps (release build).
+      # rcedit is self-downloading (curl in scripts/inject-exe-icon.sh).
+      - name: Build portable (task package:release)
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh "$GITHUB_WORKSPACE/artifacts"
+
+      # Inno Setup installer. package-installer.ps1 defaults to picking the
+      # newest portable on the Desktop; we discover it in artifacts/ instead.
+      # Output: artifacts/AgentMux-<ver>-x64-setup.exe
+      - name: Build installer (task package:installer)
+        shell: pwsh
+        run: |
+          $artifacts = Join-Path $env:GITHUB_WORKSPACE "artifacts"
+          $portableDir = Get-ChildItem $artifacts -Directory -Filter "agentmux-*-x64-portable" |
+                         Sort-Object LastWriteTime -Descending |
+                         Select-Object -First 1 -ExpandProperty FullName
+          if (-not $portableDir) { throw "portable dir not found in $artifacts" }
+          Write-Host "Portable: $portableDir"
+          & (Join-Path $env:GITHUB_WORKSPACE "scripts\package-installer.ps1") `
+            -PortableDir $portableDir `
+            -OutputDir $artifacts
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: ${{ github.workspace }}/artifacts/agentmux-*-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload installer EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: ${{ github.workspace }}/artifacts/AgentMux-*-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 7

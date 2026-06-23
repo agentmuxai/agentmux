@@ -1,8 +1,37 @@
 # SPEC: Host-side CLI login capture is broken for Claude Code v2.1.183
 **Date:** 2026-06-20
 **Author:** AgentA
-**Status:** Draft — revised 2026-06-20 after upstream-docs research + code re-read
-**Related:** SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20 (frontend force-login, merged #1604)
+**Status:** Draft — revised 2026-06-20; **2026-06-23 capture outcome: §5.1 (`setup-token`) is a confirmed DEAD END under our spawn; §5.5 (seed-from-global) is now the PRIMARY path.**
+**Related:** SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20 (frontend force-login, merged #1604); retro `docs/retro/retro-claude-v2-1-auth-spawn-2026-06-23.md`
+
+---
+
+## 0. CAPTURE OUTCOME + DECISION (2026-06-23) — READ FIRST
+
+Two live captures (agents "Marks", "Lazo") on a `setup-token` build proved §5.1 **cannot work
+in-app**: `run_cli_login: spawned (PTY)` → `no auth URL captured within 15s`, **zero `[login-pty]`
+lines** (the v2.1.x login is a full-screen TUI that redraws with no newlines), and **no browser
+opened**. Web research confirms why: the OAuth flow opens the OS default browser via a localhost
+callback, but **in any spawned / piped / tmux / headless context it hangs silently** — and
+`setup-token` shares that same browser front-end (the token only prints *after* an OAuth that
+can't start under our spawn). Upstream's own remedy (issue #7100) is exactly seed-from-global:
+authenticate once where a browser works, then seed the creds into the headless env.
+
+**DECISION:**
+- §5.1 (`setup-token` capture), §5.2 (paste-code), and §5.6 (URL-scrape) are **abandoned for
+  Claude v2.1.x** — all founder on the un-spawnable TUI / no-browser problem.
+- **§5.5 (seed-from-global) is the PRIMARY auth path.** Make it a first-class, up-front flow
+  ("Use my existing login" offered on launch/create when a valid global login exists), not just a
+  401-row fallback. `auth login`/`setup-token` survive only as the "no global login yet → go
+  authenticate in a real terminal, then seed" instruction.
+- **Salvage kept:** `redact_secrets()` + token-line detection in `run_cli_login_pty` (security —
+  `setup-token` would otherwise log a live token). Also: a pending login PTY's 6-min reap can
+  block host clean-exit (auth × lifecycle orphan leak — see lifecycle consolidation notes); the
+  robust machine should cancel the reap on quit.
+
+Evidence: [authentication](https://code.claude.com/docs/en/authentication) ·
+[headless](https://code.claude.com/docs/en/headless) ·
+[#7100](https://github.com/anthropics/claude-code/issues/7100).
 
 ---
 
