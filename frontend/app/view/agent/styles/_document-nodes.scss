@@ -1362,6 +1362,107 @@
     }
 }
 
+// WebFetch result view (WebFetchResult.tsx) — URL header, status badge, scrollable body.
+.agent-tool-fetch-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    font-size: 12px;
+
+    .agent-fetch-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-1);
+        padding: var(--space-0-5) var(--space-1);
+        border-radius: var(--border-radius-sm);
+        background: var(--secondary-bg-color);
+        cursor: pointer;
+
+        &:hover {
+            background: var(--hover-bg-color);
+        }
+    }
+
+    .agent-fetch-header-left {
+        display: flex;
+        align-items: center;
+        gap: var(--space-0-5);
+        min-width: 0;
+    }
+
+    .agent-fetch-favicon {
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        border-radius: 2px;
+    }
+
+    .agent-fetch-domain {
+        color: var(--success-color);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .agent-fetch-status {
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 10px;
+        flex-shrink: 0;
+        font-weight: 600;
+
+        &.agent-fetch-status-ok {
+            color: var(--success-color);
+            background: color-mix(in srgb, var(--success-color) 15%, transparent);
+        }
+
+        &.agent-fetch-status-redirect {
+            color: var(--warning-color, #d4a017);
+            background: color-mix(in srgb, var(--warning-color, #d4a017) 15%, transparent);
+        }
+
+        &.agent-fetch-status-error {
+            color: var(--error-color);
+            background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        }
+    }
+
+    .agent-fetch-title {
+        font-size: 11px;
+        opacity: 0.7;
+        font-style: italic;
+        padding: 0 var(--space-0-5);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .agent-fetch-content {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 11px;
+        line-height: 1.5;
+        max-height: calc(100vh - 240px);
+        overflow-y: auto;
+        padding: var(--space-0-5);
+        border-radius: var(--border-radius-sm);
+        background: var(--secondary-bg-color);
+
+        &.agent-fetch-content-json {
+            font-family: var(--mono-font, monospace);
+        }
+    }
+
+    .agent-fetch-truncated {
+        font-size: 10px;
+        opacity: 0.5;
+        padding: var(--space-0-5);
+        text-align: center;
+    }
+}
+
 // Write tool file-path row with byte count badge (ToolOverlayLog renderWrite).
 .agent-tool-write {
     .agent-tool-file-path-row {
