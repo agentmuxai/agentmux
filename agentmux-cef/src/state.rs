@@ -146,6 +146,13 @@ pub struct BrowserPaneEntry {
     pub block_id: String,
     pub label: String,
     pub lifecycle: BrowserPaneLifecycle,
+    /// The window this pane is currently parented to (`main`, `window-*`,
+    /// `floating-*`). `None` only for the test-only `EnqueueBrowserPaneCreate`
+    /// path. Used to detect a redock MOVE — a create requested in a DIFFERENT
+    /// window while the old pane is still `Live` (the close raced behind) — so
+    /// it defers-for-replay into the new window instead of re-navigating in the
+    /// old, closing window (→ black; Discussion #1205, theme #1/#2).
+    pub window_label: Option<String>,
 }
 
 // ── Pane window-placement state (pane-state reducer, Phase 0) ─────────────

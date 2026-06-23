@@ -242,6 +242,74 @@ fn try_register_browser_pane_live_already_live_returns_existing_label() {
     assert!(out.events.is_empty(), "no event for AlreadyLive — caller just navigates");
 }
 
+/// Discussion #1205 (browser-black-on-redock): a redock create that races ahead
+/// of the old pane's close (entry still `Live`) but targets a DIFFERENT window
+/// must DEFER (return `Closing` + stash the pending) so the close-completion arm
+/// replays it into the NEW window — instead of re-navigating in the OLD, closing
+/// window, which leaves the pane parented to the dying floater → black. A
+/// same-window re-mount stays `AlreadyLive` (plain re-navigate).
+#[test]
+fn redock_to_other_window_defers_for_replay() {
+    let mk = |win: &str| crate::state::PendingBrowserPaneCreate {
+        url: "https://x/".into(),
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        window_label: win.into(),
+    };
+    let mut state = HostState::default();
+    // Fresh create in `main` → records window_label = main.
+    assert!(matches!(
+        update(
+            &mut state,
+            HostCommand::TryRegisterBrowserPaneLive {
+                block_id: "b1".into(),
+                pending: Some(mk("main")),
+            }
+        )
+        .browser_pane_register_result,
+        Some(RegisterResult::Fresh(_))
+    ));
+    // Re-mount in the SAME window → AlreadyLive, no stash.
+    assert!(matches!(
+        update(
+            &mut state,
+            HostCommand::TryRegisterBrowserPaneLive {
+                block_id: "b1".into(),
+                pending: Some(mk("main")),
+            }
+        )
+        .browser_pane_register_result,
+        Some(RegisterResult::AlreadyLive(_))
+    ));
+    assert!(
+        state.pending_browser_pane_creates.is_empty(),
+        "same-window re-mount must not stash"
+    );
+    // Create for a DIFFERENT window while still Live → DEFER + stash for replay.
+    let out = update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive {
+            block_id: "b1".into(),
+            pending: Some(mk("floating-x")),
+        },
+    );
+    assert!(
+        matches!(out.browser_pane_register_result, Some(RegisterResult::Closing)),
+        "redock to a different window must defer, not re-navigate in place"
+    );
+    assert!(out.events.is_empty());
+    assert_eq!(
+        state
+            .pending_browser_pane_creates
+            .get("b1")
+            .map(|p| p.window_label.as_str()),
+        Some("floating-x"),
+        "deferred create stashed for replay into the NEW window"
+    );
+}
+
 #[test]
 fn try_register_browser_pane_live_closing_returns_closing() {
     let mut state = HostState::default();
