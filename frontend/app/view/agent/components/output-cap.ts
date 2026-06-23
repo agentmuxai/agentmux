@@ -152,6 +152,55 @@ export function createChunkCapper(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
     };
 }
 
+/** Braille and quarter-circle spinner-frame characters used by ora, listr,
+ *  tqdm, etc. ASCII chars (-|/\) are intentionally excluded — they also
+ *  appear as legitimate single-char output (table separators, diff/graph
+ *  markers, line continuations) and would produce false positives. */
+export const SPINNER_CHARS = new Set([
+    '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏',
+    '⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷',
+    '◐','◓','◑','◒','◴','◷','◶','◵',
+]);
+
+export interface SpinnerCollapseResult<T> {
+    display: T[];
+    spinnerSlot: { content: string; kind: string } | null;
+}
+
+/**
+ * Collapse consecutive spinner-char runs in a capped chunk array.
+ * Trailing run → spinnerSlot (a single DOM node Solid updates in place).
+ * Completed run (followed by non-spinner output) → last frame frozen in display.
+ */
+export function collapseSpinnerChunks<T extends { kind: string; content: string }>(
+    chunks: ReadonlyArray<T>,
+): SpinnerCollapseResult<T> {
+    const display: T[] = [];
+    let spinnerSlot: { content: string; kind: string } | null = null;
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const trimmed = capChars(chunk.content).trim();
+        if (SPINNER_CHARS.has(trimmed)) {
+            let last = chunk;
+            while (i + 1 < chunks.length && SPINNER_CHARS.has(capChars(chunks[i + 1].content).trim())) {
+                i++;
+                last = chunks[i];
+            }
+            const lastFrame = capChars(last.content).trim();
+            if (i === chunks.length - 1) {
+                spinnerSlot = { content: lastFrame, kind: last.kind };
+            } else {
+                display.push({ ...last, content: lastFrame });
+                spinnerSlot = null;
+            }
+        } else {
+            display.push(chunk);
+            spinnerSlot = null;
+        }
+    }
+    return { display, spinnerSlot };
+}
+
 /** Visual line count of a string (newline-delimited), allocation-free. */
 function countLines(s: string): number {
     if (!s) return 0;

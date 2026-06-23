@@ -13,7 +13,7 @@
 
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
-import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, collapseSpinnerChunks, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -99,11 +99,13 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
     // createChunkCapper tracks total lines incrementally and returns hiddenLines.
     // Using capChunksByLines directly only returns keptLines (no hidden count).
     const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
-    const capped = createMemo(() =>
-        chunkCap(props.node.log.chunks as ToolLogChunk[])
-    );
-    const visibleChunks = () => capped().chunks;
-    const hiddenCount = () => capped().hiddenLines;
+    const cappedView = createMemo(() => {
+        const { chunks, hiddenLines } = chunkCap(props.node.log.chunks as ToolLogChunk[]);
+        const { display, spinnerSlot } = collapseSpinnerChunks(chunks);
+        return { display, spinnerSlot, hiddenLines };
+    });
+    const visibleChunks = () => cappedView().display;
+    const hiddenCount = () => cappedView().hiddenLines;
 
     return (
         <div
@@ -163,6 +165,11 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                                 </pre>
                             )}
                         </For>
+                        <Show when={cappedView().spinnerSlot !== null}>
+                            <pre class={`agent-tool-log-line ${KIND_CLASS[cappedView().spinnerSlot?.kind ?? ""] ?? ""}`}>
+                                {cappedView().spinnerSlot?.content}
+                            </pre>
+                        </Show>
                         <Show when={props.node.log.open}>
                             <div class="agent-shell-streaming-indicator" />
                         </Show>
