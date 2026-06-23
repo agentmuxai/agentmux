@@ -31,13 +31,21 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // shellexec → run a shell command in the agent's working directory and return output.
+    // shellexec → run a shell command and return output.
     // Invoked by the `!cmd` prefix in the agent pane composer.
+    //
+    // Host agents:      sh -c <cmd> in the agent's working directory (all platforms;
+    //                   Git Bash provides sh on Windows).
+    // Container agents: docker exec <container> sh -c <cmd> via bollard.
+    //                   The host cmd:cwd is not valid inside the container — the
+    //                   command runs in the container's own working directory.
     let wstore_se = state.wstore.clone();
+    let container_manager = state.container_manager.clone();
     engine.register_handler(
         COMMAND_SHELL_EXEC,
         Box::new(move |data, _ctx| {
             let wstore = wstore_se.clone();
+            let cm_opt = container_manager.clone();
             Box::pin(async move {
                 let cmd: CommandShellExecData = serde_json::from_value(data)
                     .map_err(|e| format!("shellexec: {e}"))?;
@@ -47,10 +55,6 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 tracing::info!(block_id = %cmd.blockid, "ShellExec");
                 tracing::debug!(command = %cmd.command, "ShellExec command");
 
-                // Reject container agents: their filesystem lives inside the
-                // Docker container, so running sh on the host gives misleading
-                // results or mutates the wrong environment.  Routing through
-                // `docker exec` is tracked as a follow-up feature.
                 let block: crate::backend::obj::Block = wstore
                     .get(&cmd.blockid)
                     .map_err(|e| format!("shellexec: load block: {e}"))?
@@ -58,13 +62,123 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let agent_mode = crate::backend::obj::meta_get_string(
                     &block.meta, "agentMode", "host",
                 );
-                if agent_mode == "container" {
-                    return Err(
-                        "shellexec: container agents are not supported; \
-                         run the command from within the agent session instead".to_string()
-                    );
+
+                // 300s process timeout matches the frontend's RPC timeout so
+                // the client sees a clean error rather than a silent EC-TIME.
+                const TIMEOUT_SECS: u64 = 300;
+                // 1 MB cap per stream — bounds memory for runaway commands
+                // (`! yes`, `! dd if=/dev/zero`).
+                const MAX_OUTPUT: u64 = 1_000_000;
+
+                // Shared output formatter: if we accumulated more than MAX_OUTPUT
+                // bytes, the stream was truncated — append a notice.
+                fn format_output(bytes: Vec<u8>, cap: u64) -> String {
+                    if bytes.len() > cap as usize {
+                        let s = String::from_utf8_lossy(&bytes[..cap as usize]);
+                        format!("{s}…[output capped at {cap} bytes]")
+                    } else {
+                        String::from_utf8_lossy(&bytes).into_owned()
+                    }
                 }
 
+                // ── Container agents ─────────────────────────────────────────
+                if agent_mode == "container" {
+                    let cm = cm_opt.as_deref().ok_or_else(|| {
+                        "shellexec: Docker not available on this host; \
+                         cannot exec in container agent".to_string()
+                    })?;
+
+                    let agent_id = crate::backend::obj::meta_get_string(
+                        &block.meta, "agentId", "",
+                    );
+                    if agent_id.is_empty() {
+                        return Err("shellexec: container agent missing agentId in block meta".to_string());
+                    }
+                    let container_name =
+                        crate::backend::container::container_name_for_slug(&agent_id);
+
+                    let session = cm.exec(
+                        &container_name,
+                        &["sh".to_string(), "-c".to_string(), cmd.command.clone()],
+                        None, // container's own working directory (host path invalid inside)
+                        &[],  // no extra env vars for !cmd
+                    ).await.map_err(|e| format!("shellexec: container exec failed: {e}"))?;
+
+                    let exec_id = session.exec_id.clone();
+                    // No stdin needed for !cmd — drop to signal EOF immediately.
+                    drop(session.input);
+
+                    let mut stdout_buf: Vec<u8> = Vec::new();
+                    let mut stderr_buf: Vec<u8> = Vec::new();
+
+                    use futures_util::StreamExt as _;
+                    use bollard::container::LogOutput;
+
+                    let timeout_result = tokio::time::timeout(
+                        std::time::Duration::from_secs(TIMEOUT_SECS),
+                        async {
+                            let mut output = std::pin::pin!(session.output);
+                            while let Some(item) = output.next().await {
+                                match item {
+                                    Err(e) => return Err(format!(
+                                        "shellexec: container output read: {e}"
+                                    )),
+                                    Ok(log) => match log {
+                                        LogOutput::StdOut { message } => {
+                                            // Accumulate MAX_OUTPUT+1 bytes (the +1 sentinel lets
+                                            // format_output distinguish "exactly at cap" from
+                                            // "truncated", matching the host branch's take logic).
+                                            let cap = (MAX_OUTPUT + 1) as usize;
+                                            let take = cap
+                                                .saturating_sub(stdout_buf.len())
+                                                .min(message.len());
+                                            stdout_buf.extend_from_slice(&message[..take]);
+                                        }
+                                        LogOutput::StdErr { message } => {
+                                            let cap = (MAX_OUTPUT + 1) as usize;
+                                            let take = cap
+                                                .saturating_sub(stderr_buf.len())
+                                                .min(message.len());
+                                            stderr_buf.extend_from_slice(&message[..take]);
+                                        }
+                                        _ => {} // StdIn / Console frames not relevant here
+                                    }
+                                }
+                            }
+                            Ok(())
+                        }
+                    ).await;
+
+                    if timeout_result.is_err() {
+                        return Err(format!("shellexec: timed out after {TIMEOUT_SECS}s"));
+                    }
+                    timeout_result.unwrap()?;
+
+                    // The output stream closing does not carry the exit status —
+                    // retrieve it separately via inspect_exec.
+                    let exit_code = cm.inspect_exec(&exec_id).await
+                        .ok()
+                        .flatten()
+                        .unwrap_or(1) as i32;
+
+                    tracing::debug!(
+                        block_id = %cmd.blockid,
+                        container = %container_name,
+                        exit_code,
+                        "ShellExec container done",
+                    );
+
+                    let result = ShellExecResult {
+                        exit_code,
+                        stdout: format_output(stdout_buf, MAX_OUTPUT),
+                        stderr: format_output(stderr_buf, MAX_OUTPUT),
+                    };
+                    return Ok(Some(
+                        serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?
+                    ));
+                }
+
+                // ── Host agents ───────────────────────────────────────────────
                 let cwd: Option<std::path::PathBuf> = if cmd.working_dir.is_empty() {
                     None
                 } else {
@@ -96,16 +210,6 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         ))?;
                     Some(canonical)
                 };
-
-                // 300s process timeout matches the frontend's RPC timeout so
-                // the client sees a clean error rather than a silent EC-TIME.
-                const TIMEOUT_SECS: u64 = 300;
-                // 1 MB cap per stream — bounded during read via take() so a
-                // runaway command (`! yes`, `! dd if=/dev/zero`) cannot exhaust
-                // RAM before the timeout fires. The pipes are read concurrently
-                // to prevent deadlock when one buffer fills while the process is
-                // blocked writing to the other.
-                const MAX_OUTPUT: u64 = 1_000_000;
 
                 // Use sh -c on all platforms: agents run in a bash environment
                 // (Git Bash on Windows, sh on Unix) so Unix commands like ls/pwd/grep
@@ -197,7 +301,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 )
                 .await;
 
-                // On timeout: kill_on_drop kills the direct sh/cmd child, but
+                // On timeout: kill_on_drop kills the direct sh child, but
                 // compound commands (`! a | b`, `! foo &`) fork grandchildren
                 // in the same process group.  Kill the whole group so they don't
                 // linger.  (Unix only; on Windows the job-object approach is a
@@ -214,23 +318,10 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let status = timeout_result
                     .map_err(|_| format!("shellexec: timed out after {TIMEOUT_SECS}s"))??;
 
-                let format_output = |bytes: Vec<u8>| -> String {
-                    // bytes.len() > MAX_OUTPUT means we read the MAX_OUTPUT+1
-                    // sentinel — the stream was truncated.  Checking for equality
-                    // with MAX_OUTPUT (without +1) would be a false positive for
-                    // commands that emit exactly MAX_OUTPUT bytes.
-                    if bytes.len() > MAX_OUTPUT as usize {
-                        let s = String::from_utf8_lossy(&bytes[..MAX_OUTPUT as usize]);
-                        format!("{s}…[output capped at {MAX_OUTPUT} bytes]")
-                    } else {
-                        String::from_utf8_lossy(&bytes).into_owned()
-                    }
-                };
-
                 let result = ShellExecResult {
                     exit_code: status.code().unwrap_or(1),
-                    stdout: format_output(stdout_buf),
-                    stderr: format_output(stderr_buf),
+                    stdout: format_output(stdout_buf, MAX_OUTPUT),
+                    stderr: format_output(stderr_buf, MAX_OUTPUT),
                 };
                 Ok(Some(serde_json::to_value(result).map_err(|e| format!("shellexec: {e}"))?))
             })
