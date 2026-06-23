@@ -23,6 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # agentmux-launcher's Linux splash pulls smithay-client-toolkit (Wayland)
+      # transitively; its build.rs needs the Wayland + xkbcommon dev headers,
+      # which a bare ubuntu-latest runner lacks. (The Windows nightly doesn't.)
+      - name: Install Linux windowing dev headers (smithay-client-toolkit build)
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev
       - uses: Swatinem/rust-cache@v2
       # launcher / srv / common have ZERO cef-dll-sys deps, so this skips the
       # ~200 MB CEF download + CMake/Ninja build entirely (target < ~5 min).
