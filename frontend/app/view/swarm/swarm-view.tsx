@@ -6,28 +6,26 @@ import type { SwarmViewModel, AgentTreeNode, ActiveSubagent } from "./swarm-mode
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, refocusNode, workspace, setActiveTab } from "@/app/store/global";
+import { WOS, workspace, setActiveTab } from "@/app/store/global";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs if needed.
+// Uses layout models (always cached for visited tabs) rather than Tab.blockids
+// (which requires the Tab object to be in the WOS cache).
 async function focusBlock(blockId: string): Promise<void> {
     const ws = workspace();
     if (!ws) return;
     const allTabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
     for (const tabId of allTabIds) {
-        const tab = WOS.getObjectValue<Tab>(WOS.makeORef("tab", tabId));
-        if (tab?.blockids?.includes(blockId)) {
+        const layoutModel = getLayoutModelForTabById(tabId);
+        const node = layoutModel?.getNodeByBlockId(blockId);
+        if (node?.id != null) {
             await setActiveTab(tabId);
-            // After tab switch, focus the specific node within it.
-            const layoutModel = getLayoutModelForTabById(tabId);
-            const node = layoutModel?.getNodeByBlockId(blockId);
-            if (node?.id != null) layoutModel.focusNode(node.id);
+            layoutModel.focusNode(node.id);
             return;
         }
     }
-    // Fallback: block is in current tab layout (e.g. same tab as Swarm pane).
-    refocusNode(blockId);
 }
 
 export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Element {
