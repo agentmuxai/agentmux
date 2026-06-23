@@ -872,8 +872,8 @@ async fn main() {
     }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
-            agentmux_url: None,
-            agentmux_token: None,
+            muxbus_url: None,
+            muxbus_token: None,
             poll_interval_secs: reactive::DEFAULT_POLL_INTERVAL_SECS,
         },
         reactive_handler,
@@ -936,8 +936,8 @@ async fn main() {
     let local_web_url = format!("http://{}", web_addr);
 
     // Make local backend URL available to child processes (PTY shells).
-    // agentbus-client reads AGENTMUX_LOCAL_URL and uses it for local PTY delivery
-    // instead of routing through the cloud agentbus.
+    // the muxbus client (agentbus-client package) reads AGENTMUX_LOCAL_URL for local PTY delivery
+    // instead of routing through the cloud muxbus relay.
     std::env::set_var("AGENTMUX_LOCAL_URL", &local_web_url);
 
     // LAN discovery via mDNS — opt-in to avoid Windows Firewall prompt.

@@ -70,10 +70,14 @@ pub struct AuditLogEntry {
 /// Poller configuration for AgentMux cloud service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PollerConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agentmux_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agentmux_token: Option<String>,
+    // ARCH-001: the Rust identifier is `muxbus_*`; the wire key stays
+    // `agentmux_url`/`agentmux_token` (the cloud poller protocol rename is a
+    // separate, coordinated phase) and `muxbus_*` is accepted as a forward-
+    // compat alias on input.
+    #[serde(rename = "agentmux_url", alias = "muxbus_url", default, skip_serializing_if = "Option::is_none")]
+    pub muxbus_url: Option<String>,
+    #[serde(rename = "agentmux_token", alias = "muxbus_token", default, skip_serializing_if = "Option::is_none")]
+    pub muxbus_token: Option<String>,
     #[serde(default)]
     pub poll_interval_secs: u64,
 }

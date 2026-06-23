@@ -583,7 +583,7 @@ impl Controller for ShellController {
                 .join("logs");
             c.env("AGENTMUX_LOG_DIR", log_dir.to_string_lossy().as_ref());
 
-            // Propagate local backend URL so agentbus-client prefers local PTY delivery.
+            // Propagate local backend URL so the muxbus client (agentbus-client package) prefers local PTY delivery.
             // Set by main.rs after binding; absent in test/mock contexts (graceful no-op).
             if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
                 c.env("AGENTMUX_LOCAL_URL", &local_url);

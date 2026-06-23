@@ -36,7 +36,7 @@ pub struct AgentEntry {
     /// struct (serde default) so older on-disk entries still deserialize;
     /// a missing or empty value means a forward to this entry will be
     /// rejected by the peer's auth layer (graceful — falls back to cloud
-    /// agentbus).
+    /// muxbus).
     #[serde(default)]
     pub auth_key: String,
 }
