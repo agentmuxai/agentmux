@@ -23,7 +23,7 @@ import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capChars, createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, collapseSpinnerChunks, createChunkCapper, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { detectLanguage } from "./detectLanguage";
 import {
     registerToolRenderer,
@@ -182,60 +182,15 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
 
 type LogChunk = { kind: string; content: string; timestamp: number };
 
-// Single-character animation frames emitted by spinners (ora, listr, tqdm, …).
-// Consecutive runs of these in the chunk list collapse to one <pre> that
-// updates in place rather than stacking a new line per frame.
-const SPINNER_CHARS = new Set([
-    '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏',
-    '⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷',
-    '◐','◓','◑','◒','◴','◷','◶','◵',
-    '-','\\','|','/',
-]);
-function isSpinnerChar(s: string): boolean {
-    return SPINNER_CHARS.has(s.trim());
-}
-
 interface ChunkListProps {
     chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
     const cap = createChunkCapper();
 
-    // Collapse consecutive spinner-char runs so frames animate in place rather
-    // than stacking as new lines. A trailing run (tool still streaming) goes
-    // into spinnerSlot — a single <pre> whose text Solid updates in place.
-    // A completed run (followed by non-spinner output) freezes to its last
-    // frame and is added to display as a static line.
     const view = createMemo(() => {
         const { chunks, hiddenLines } = cap(props.chunks);
-        const display: LogChunk[] = [];
-        let spinnerSlot: { content: string; kind: string } | null = null;
-
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const trimmed = capChars(chunk.content).trim();
-            if (isSpinnerChar(trimmed)) {
-                let last = chunk;
-                while (
-                    i + 1 < chunks.length &&
-                    isSpinnerChar(capChars(chunks[i + 1].content).trim())
-                ) {
-                    i++;
-                    last = chunks[i];
-                }
-                const lastFrame = capChars(last.content).trim();
-                if (i === chunks.length - 1) {
-                    spinnerSlot = { content: lastFrame, kind: last.kind };
-                } else {
-                    display.push({ ...last, content: lastFrame });
-                    spinnerSlot = null;
-                }
-            } else {
-                display.push(chunk);
-                spinnerSlot = null;
-            }
-        }
-
+        const { display, spinnerSlot } = collapseSpinnerChunks(chunks);
         return { display, spinnerSlot, hiddenLines };
     });
 
