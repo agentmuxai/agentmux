@@ -1,0 +1,47 @@
+name: CI — fast (PR/push)
+
+# Fast, CEF-free checks on every PR/push: the non-CEF Rust crates + the frontend
+# vitest suite. The FULL workspace (incl. agentmux-cef's ~10-20 min CEF build)
+# runs nightly — see ci-nightly.yml. Standard GitHub-hosted runners only (free on
+# public repos). See docs/specs/SPEC_CI_TEST_RUNNER_2026_06_22.md (invariant CI-1:
+# never a larger/self-hosted runner — those are always billed).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save runner time.
+concurrency:
+  group: ci-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-fast:
+    name: cargo test (CEF-free crates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # launcher / srv / common have ZERO cef-dll-sys deps, so this skips the
+      # ~200 MB CEF download + CMake/Ninja build entirely (target < ~5 min).
+      # --test-threads=1: these crates have accumulated test-isolation flakes
+      # (e.g. a process-shared in-memory FileStore raced across sibling tests),
+      # so run serially for determinism. Follow-up: fix the isolation + drop this
+      # (SPEC_CI_TEST_RUNNER_2026_06_22.md §6.4).
+      - name: cargo test (launcher, srv, common)
+        run: cargo test -p agentmux-launcher -p agentmux-srv -p agentmux-common -- --test-threads=1
+
+  frontend:
+    name: vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: vitest run
+        run: npx vitest run
