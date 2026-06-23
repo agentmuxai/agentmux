@@ -226,6 +226,10 @@ class WorkspaceServiceType {
     // via the empty-tab watcher in floating-pane-workspace.tsx (PR #1089)
     // once its tab.blockids becomes empty.
     //
+    // Phase 4b: optional targetBlockId + direction route the drop to the
+    // exact slot the ghost previewed (SplitHorizontal/SplitVertical instead of
+    // the generic InsertNode). Pass null for both to keep the old behavior.
+    //
     // @returns { redocked: true, block_id, target_tab_id } (and object updates)
     RedockFloatingPane(
         blockId: string,
@@ -233,6 +237,8 @@ class WorkspaceServiceType {
         sourceWsId: string,
         targetTabId: string,
         targetWsId: string,
+        targetBlockId?: string | null,
+        direction?: number | null,
     ): Promise<{ redocked: boolean; block_id?: string; target_tab_id?: string }> {
         return WOS.callBackendService("workspace", "RedockFloatingPane", Array.from(arguments))
     }

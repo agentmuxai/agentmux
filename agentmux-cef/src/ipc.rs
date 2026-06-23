@@ -299,6 +299,8 @@ async fn route_command(
             .map_err(|e| format!("update_floating_redock_hover join error: {}", e))?
         }
         "clear_floating_redock_hover" => commands::window::clear_floating_redock_hover(state, args),
+        "set_floating_redock_target" => commands::window::set_floating_redock_target(state, args),
+        "get_floating_redock_target" => commands::window::get_floating_redock_target(state, args),
         "move_window_by" => commands::window::move_window_by(state, args),
         "set_window_position" => commands::window::set_window_position(state, args),
         "toggle_devtools" => commands::window::toggle_devtools(state, args),
