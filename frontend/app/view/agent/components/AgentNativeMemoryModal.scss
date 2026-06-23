@@ -148,6 +148,56 @@
     &:hover {
         background: var(--hover-bg-color);
     }
+
+    &.is-hidden {
+        visibility: hidden;
+    }
+}
+
+// ── Inline new-file input ──────────────────────────────────────────────────
+
+.agent-memory-modal-new-input-row {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-1-5) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--panel-bg-color);
+}
+
+.agent-memory-modal-new-input {
+    width: 100%;
+    padding: var(--space-1) var(--space-1-5);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    font-family: var(--fixed-font, monospace);
+    outline: none;
+    box-sizing: border-box;
+
+    &:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 1px var(--accent-color);
+    }
+
+    &.is-error {
+        border-color: var(--error-color);
+        box-shadow: 0 0 0 1px var(--error-color);
+    }
+}
+
+.agent-memory-modal-new-input-error {
+    font-size: var(--text-xs);
+    color: var(--error-color);
+}
+
+.agent-memory-modal-new-input-actions {
+    display: flex;
+    gap: var(--space-1);
+    justify-content: flex-end;
 }
 
 // ── Detail / editor ────────────────────────────────────────────────────────
