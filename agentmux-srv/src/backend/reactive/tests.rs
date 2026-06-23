@@ -98,35 +98,35 @@ fn test_validate_agent_id_max_length() {
 
 #[test]
 fn test_validate_url_https() {
-    assert!(validate_agentmux_url("https://agentmux.example.com/api").is_ok());
+    assert!(validate_muxbus_url("https://agentmux.example.com/api").is_ok());
 }
 
 #[test]
 fn test_validate_url_http_localhost() {
-    assert!(validate_agentmux_url("http://localhost:8080/api").is_ok());
-    assert!(validate_agentmux_url("http://127.0.0.1:8080/api").is_ok());
-    assert!(validate_agentmux_url("http://[::1]:8080/api").is_ok());
+    assert!(validate_muxbus_url("http://localhost:8080/api").is_ok());
+    assert!(validate_muxbus_url("http://127.0.0.1:8080/api").is_ok());
+    assert!(validate_muxbus_url("http://[::1]:8080/api").is_ok());
 }
 
 #[test]
 fn test_validate_url_http_remote_rejected() {
-    assert!(validate_agentmux_url("http://evil.com/api").is_err());
+    assert!(validate_muxbus_url("http://evil.com/api").is_err());
 }
 
 #[test]
 fn test_validate_url_bad_scheme() {
-    assert!(validate_agentmux_url("ftp://example.com").is_err());
-    assert!(validate_agentmux_url("file:///etc/passwd").is_err());
+    assert!(validate_muxbus_url("ftp://example.com").is_err());
+    assert!(validate_muxbus_url("file:///etc/passwd").is_err());
 }
 
 #[test]
 fn test_validate_url_empty() {
-    assert!(validate_agentmux_url("").is_err());
+    assert!(validate_muxbus_url("").is_err());
 }
 
 #[test]
 fn test_validate_url_no_scheme() {
-    assert!(validate_agentmux_url("example.com/api").is_err());
+    assert!(validate_muxbus_url("example.com/api").is_err());
 }
 
 // -- Format injected message tests --

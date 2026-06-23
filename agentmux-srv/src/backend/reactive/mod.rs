@@ -43,7 +43,7 @@ pub use handler::{get_global_handler, Handler, ReactiveHandler};
 pub use poller::Poller;
 #[allow(unused_imports)]
 pub use sanitize::{
-    format_injected_message, sanitize_message, validate_agent_id, validate_agentmux_url,
+    format_injected_message, sanitize_message, validate_agent_id, validate_muxbus_url,
 };
 #[allow(unused_imports)]
 pub use types::*;
