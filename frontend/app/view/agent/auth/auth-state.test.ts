@@ -129,6 +129,58 @@ describe("auth-state reducer", () => {
         });
     });
 
+    describe("Seeded (seed-from-global → ready)", () => {
+        it("transitions unauthenticated → ready single-phase", () => {
+            const r = update(
+                seed({ kind: "unauthenticated", providerId: "claude", bundleId: "b1" }),
+                { type: "Seeded", bundleId: "b1" },
+            );
+            expect(r.state.kind).toBe("ready");
+            expect(r.state.bundleId).toBe("b1");
+            expect(r.state.sessionId).toBe("");
+            expect(r.events[0]).toMatchObject({ type: "seeded", bundleId: "b1" });
+        });
+
+        it("empty bundleId falls back to the existing bundle (default identity)", () => {
+            const r = update(
+                seed({ kind: "expired", providerId: "claude", bundleId: "b2" }),
+                { type: "Seeded", bundleId: "" },
+            );
+            expect(r.state.kind).toBe("ready");
+            expect(r.state.bundleId).toBe("b2");
+        });
+
+        it("clears a prior error when seeding from `failed`", () => {
+            const r = update(seed({ kind: "failed", error: "boom" }), {
+                type: "Seeded",
+                bundleId: "b3",
+            });
+            expect(r.state.kind).toBe("ready");
+            expect(r.state.error).toBe("");
+        });
+
+        it("is dropped from non-connect-able kinds (never clobbers ready/waiting/saving)", () => {
+            for (const kind of [
+                "ready",
+                "waiting",
+                "saving",
+                "authenticated",
+                "idle",
+            ] as const) {
+                const r = update(seed({ kind, bundleId: "keep" }), {
+                    type: "Seeded",
+                    bundleId: "other",
+                });
+                expect(r.state.kind).toBe(kind);
+                expect(r.state.bundleId).toBe("keep");
+                expect(r.events[0]).toMatchObject({
+                    type: "post-close-command-dropped",
+                    commandType: "Seeded",
+                });
+            }
+        });
+    });
+
     describe("Polled", () => {
         it("`pending` is a no-op", () => {
             const seeded = seed({ kind: "waiting", sessionId: "s1" });
