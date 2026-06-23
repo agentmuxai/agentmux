@@ -98,39 +98,24 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 // ── Agent root row ───────────────────────────────────────────────────────
 
 function AgentRow({ node }: { node: AgentTreeNode }): JSX.Element {
-    const handleOpen = () => {
-        refocusNode(node.blockId);
-    };
-
     return (
         <div class="swarm-agent-group">
             <div
                 class={`swarm-agent-row swarm-agent-row--${node.agentStatus}`}
-                onClick={handleOpen}
-                title={node.label}
+                onClick={() => refocusNode(node.blockId)}
+                title={node.agentName}
             >
                 <span class="swarm-agent-icon">⬡</span>
-                <span class="swarm-agent-label">{node.label}</span>
+                <span class="swarm-agent-label">{node.agentName}</span>
                 <StatusChip status={node.agentStatus === "running" ? "running" : "idle"} />
-                <button
-                    class="swarm-open-btn"
-                    onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                    title="Focus agent pane"
-                >
-                    Open
-                </button>
             </div>
             <div class="swarm-children">
-                <Show
-                    when={node.subagents.length > 0}
-                    fallback={
-                        <div class="swarm-no-subagents">no subagents yet</div>
-                    }
-                >
-                    <For each={node.subagents}>
-                        {(sub) => <SubagentRow sub={sub} />}
-                    </For>
+                <Show when={node.activitySummary}>
+                    <div class="swarm-activity-summary">{node.activitySummary}</div>
                 </Show>
+                <For each={node.subagents}>
+                    {(sub) => <SubagentRow sub={sub} />}
+                </For>
             </div>
         </div>
     );
@@ -158,13 +143,6 @@ function SubagentRow({ sub }: { sub: ActiveSubagent }): JSX.Element {
         >
             <span class="swarm-subagent-slug">{sub.slug || sub.agent_id.substring(0, 7)}</span>
             <StatusChip status={sub.status === "active" ? "running" : "done"} />
-            <button
-                class="swarm-open-btn"
-                onClick={(e) => { e.stopPropagation(); handleOpen(); }}
-                title="Open subagent pane"
-            >
-                Open
-            </button>
         </div>
     );
 }
