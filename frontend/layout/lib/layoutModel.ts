@@ -90,6 +90,10 @@ import {
     validateMagnifiedNode as validateMagnifiedNodeImpl,
 } from "./layoutMagnify";
 import {
+    minimizeNodeToggle as minimizeNodeToggleImpl,
+    rebuildMinimizedSet as rebuildMinimizedSetImpl,
+} from "./layoutMinimize";
+import {
     initializeFromWaveObject as initializeFromWaveObjectImpl,
     onBackendUpdate as onBackendUpdateImpl,
     persistToBackend as persistToBackendImpl,
@@ -288,6 +292,12 @@ export class LayoutModel {
     magnifyMount: SignalAtom<HTMLElement | null>;
 
     /**
+     * Set of node IDs that are currently minimized (collapsed to header bar).
+     * Kept in sync with `node.minimizedSize` on each LayoutNode in the tree.
+     */
+    minimizedNodeIds: SignalAtom<Set<string>>;
+
+    /**
      * The size of the resize handles, in CSS pixels.
      * @internal
      */
@@ -450,6 +460,7 @@ export class LayoutModel {
             this.ephemeralNode = createSignalAtom<LayoutNode>(undefined);
             this.magnifiedNodeSizeAtom = getSettingsKeyAtom("window:magnifiedblocksize");
             this.magnifyMount = createSignalAtom<HTMLElement | null>(null);
+            this.minimizedNodeIds = createSignalAtom<Set<string>>(new Set());
 
             this.magnifiedNodeIdAtom = createMemo(() => {
                 const treeState = this.localTreeStateAtom();
@@ -758,6 +769,14 @@ export class LayoutModel {
 
     magnifyNodeToggle(nodeId: string, setState = true) {
         magnifyNodeToggleImpl(this, nodeId, setState);
+    }
+
+    minimizeNodeToggle(nodeId: string) {
+        minimizeNodeToggleImpl(this, nodeId);
+    }
+
+    rebuildMinimizedSet() {
+        rebuildMinimizedSetImpl(this);
     }
 
     async closeNode(nodeId: string) {
