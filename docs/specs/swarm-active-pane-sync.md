@@ -27,27 +27,9 @@ The highlight is **subtle**: a slightly lighter background or a left-border acce
 
 ## Architecture
 
-### 1. Expose a reactive `focusedNodeIdAtom` on `LayoutModel`
+### 1. Derive `focusedBlockId` from the existing `focusedNode` memo
 
-`LayoutModel.focusedNodeId` is currently a plain getter over `focusedNodeIdStack[0]`, which is not a SolidJS signal and cannot be tracked reactively.
-
-**Change:** add a `createSignal` pair inside `LayoutModel` and update it whenever `focusedNodeIdStack` changes in `updateTree`:
-
-```ts
-// layoutModel.ts — inside the LayoutModel class
-
-private _focusedNodeId = createSignal<string | undefined>(undefined);
-focusedNodeIdAtom: Accessor<string | undefined> = this._focusedNodeId[0];
-private setFocusedNodeId: Setter<string | undefined> = this._focusedNodeId[1];
-```
-
-In `updateTree`, after the line that sets `focusedNodeIdStack`:
-```ts
-this.focusedNodeIdStack = [newId, ...this.focusedNodeIdStack.filter(id => id !== newId)];
-this.setFocusedNodeId(this.focusedNodeIdStack[0]);
-```
-
-Also update `setFocusedNodeId` in the existing place where `focusedNodeIdStack` is cleared/reset (e.g. on tab teardown or magnify changes that reset focus). The getter `focusedNodeId` stays unchanged — it's still the authoritative read path for non-reactive callers.
+`LayoutModel` already exposes `focusedNode: () => LayoutNode` as a reactive `createMemo` (reading from `localTreeStateAtom`). No changes to `layoutModel.ts` are needed.
 
 ### 2. Compute `focusedBlockId` reactively in `SwarmView`
 
@@ -59,37 +41,34 @@ const focusedBlockId = createMemo<string | null>(() => {
     if (!tabId) return null;
     const layoutModel = getLayoutModelForTabById(tabId);
     if (!layoutModel) return null;
-    const nodeId = layoutModel.focusedNodeIdAtom();
-    if (!nodeId) return null;
-    // Map nodeId → blockId via leafOrder (reactive signal, geometry-ordered)
-    const entry = layoutModel.leafOrder().find(e => e.nodeid === nodeId);
-    return entry?.blockid ?? null;
+    return layoutModel.focusedNode()?.data?.blockId ?? null;
 });
 ```
 
-`atoms.activeTabId()` and `layoutModel.focusedNodeIdAtom()` and `layoutModel.leafOrder()` are all reactive, so `focusedBlockId` re-computes automatically whenever the active tab changes or the focused tile changes within the active tab.
+`atoms.activeTabId()` and `layoutModel.focusedNode()` are both reactive, so `focusedBlockId` re-computes automatically whenever the active tab changes or the focused tile changes within the active tab.
 
-### 3. Pass `focusedBlockId` into `AgentRow`
+### 3. Pass `focusedBlockId` accessor into `AgentRow`
+
+The accessor is passed as a prop (not the evaluated value) so it can be read reactively inside the row via `classList`:
 
 ```tsx
 <For each={tree()}>
-    {(node) => (
-        <AgentRow
-            node={node}
-            active={focusedBlockId() === node.blockId}
-        />
-    )}
+    {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} />}
 </For>
 ```
 
 ### 4. Visual treatment in `AgentRow`
 
 ```tsx
-function AgentRow({ node, active }: { node: AgentTreeNode; active: boolean }): JSX.Element {
+function AgentRow({ node, focusedBlockId }: { node: AgentTreeNode; focusedBlockId: () => string | null }): JSX.Element {
     return (
         <div class="swarm-agent-group">
             <div
-                class={`swarm-agent-row swarm-agent-row--${node.agentStatus}${active ? " swarm-agent-row--active" : ""}`}
+                classList={{
+                    "swarm-agent-row": true,
+                    [`swarm-agent-row--${node.agentStatus}`]: true,
+                    "swarm-agent-row--active": focusedBlockId() === node.blockId,
+                }}
                 onClick={() => void focusBlock(node.blockId)}
                 title={node.agentName}
             >
@@ -106,12 +85,12 @@ function AgentRow({ node, active }: { node: AgentTreeNode; active: boolean }): J
 ```scss
 .swarm-agent-row--active {
     background: var(--highlight-bg);
-    border-left: 2px solid var(--accent-color, #5b8dd9);
-    padding-left: 8px; // compensate for the 2px border so text doesn't shift
+    outline: 1px solid var(--accent-color, #5b8dd9);
+    border-radius: 0;
 }
 ```
 
-The hover state (`&:hover { background: var(--highlight-bg) }`) already uses `--highlight-bg`, so the active state differentiates via the left-border accent. The active + hover combination is naturally identical to hover (background already shown), which is fine.
+`outline` renders outside the box model, avoiding any layout shift. `border-radius: 0` overrides the row's default `4px` to give hard corners that frame the entire row.
 
 ---
 
@@ -119,11 +98,10 @@ The hover state (`&:hover { background: var(--highlight-bg) }`) already uses `--
 
 | File | Change |
 |------|--------|
-| `frontend/layout/lib/layoutModel.ts` | Add `focusedNodeIdAtom` signal; update it in `updateTree` and wherever `focusedNodeIdStack` is reset |
-| `frontend/app/view/swarm/swarm-view.tsx` | Add `focusedBlockId` memo; pass `active` prop to `AgentRow`; apply `--active` class |
+| `frontend/app/view/swarm/swarm-view.tsx` | Add `focusedBlockId` memo using existing `layoutModel.focusedNode()`; pass accessor to `AgentRow`; apply `--active` class via `classList` |
 | `frontend/app/view/swarm/swarm-view.scss` | Add `.swarm-agent-row--active` style |
 
-No changes to `swarm-model.ts`, `termagent.ts`, or the backend.
+No changes to `layoutModel.ts`, `swarm-model.ts`, `termagent.ts`, or the backend.
 
 ---
 
@@ -133,7 +111,7 @@ No changes to `swarm-model.ts`, `termagent.ts`, or the backend.
 |------|-----------|
 | Focused pane is not a tracked agent (terminal, browser) | `focusedBlockId()` returns null → no row highlighted |
 | Swarm pane itself is focused | Swarm blockId is not in the agent tree → no row highlighted |
-| Agent pane in a non-active tab | `activeTabId` points to a different tab; `focusedNodeIdAtom` for the active tab won't match → no row highlighted. This is intentional: the "active" indicator reflects the currently visible/interactive pane, not a historical selection. |
+| Agent pane in a non-active tab | `activeTabId` points to a different tab; `focusedNode()` for the active tab won't match → no row highlighted. This is intentional: the "active" indicator reflects the currently visible/interactive pane, not a historical selection. |
 | Tab switch | `atoms.activeTabId()` changes → `focusedBlockId` recomputes for the new tab immediately |
 | Agent pane unmounted mid-session | Its block ID leaves `tree()`; the `--active` class naturally disappears with the row |
 | Two agent panes tiled in the same tab | Only the one with the focused tile gets `--active`; the other shows no highlight |
