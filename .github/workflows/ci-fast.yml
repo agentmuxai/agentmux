@@ -1,20 +1,16 @@
-name: CI — fast (PR/push)
+name: CI — cross-platform CEF-free crates (nightly)
 
-# Fast, CEF-free checks on every PR/push: the non-CEF Rust crates + the frontend
-# vitest suite. The FULL workspace (incl. agentmux-cef's ~10-20 min CEF build)
-# runs nightly — see ci-nightly.yml. Standard GitHub-hosted runners only (free on
-# public repos). See docs/specs/SPEC_CI_TEST_RUNNER_2026_06_22.md (invariant CI-1:
-# never a larger/self-hosted runner — those are always billed).
+# NIGHTLY, NOT per-PR (repo policy, 2026-06-23): the CEF-free Rust crates (OS
+# matrix) + the frontend vitest suite. The FULL workspace incl. agentmux-cef's
+# ~10-20 min CEF build runs in ci-nightly.yml. Standard GitHub-hosted runners
+# only (free on public repos). See docs/specs/SPEC_CI_TEST_RUNNER_2026_06_22.md
+# (invariant CI-1: never a larger/self-hosted runner — those are always billed).
+# Run manually anytime via the Actions tab (workflow_dispatch).
 
 on:
-  pull_request:
-  push:
-    branches: [main]
-
-# Cancel superseded runs on the same ref to save runner time.
-concurrency:
-  group: ci-fast-${{ github.ref }}
-  cancel-in-progress: true
+  schedule:
+    - cron: '0 8 * * *' # 08:00 UTC daily (an hour before the full CEF nightly)
+  workflow_dispatch: {}
 
 jobs:
   rust-fast:
