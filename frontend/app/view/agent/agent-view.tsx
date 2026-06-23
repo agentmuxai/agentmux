@@ -748,6 +748,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         blockId: model.blockId,
         onRetry: retryLastTurn,
         onTrustCenter: () => openBundleManager(),
+        canSeed: () => provider()?.id === "claude",
         // context_exceeded recovery — drop the over-full session and return to
         // the picker for a clean relaunch (resuming would only re-fail).
         onNewSession: () => {
@@ -776,6 +777,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         onUseExistingLogin: () => {
             log("auth", "Use existing login — seeding from your global Claude login");
             void status.useGlobalLogin();
+        },
+        // Open a real console window (CREATE_NEW_CONSOLE) so the browser OAuth
+        // can launch. Polls for new credentials and seeds when they appear.
+        onLoginViaTerminal: () => {
+            log("auth", "Login via terminal — opening a console window for browser login");
+            void status.loginViaTerminal();
         },
     });
 

@@ -615,6 +615,9 @@ export function buildCefApi(): AppApi {
                 { providerId, configDir: configDir ?? null },
             );
         },
+        openLoginTerminal: async (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => {
+            return await invokeCommand<{ opened: boolean }>("open_login_terminal", { cliPath, loginArgs, authEnv });
+        },
 
         listen: async (event: string, callback: (event: any) => void) => {
             const unlisten = await listenEvent(event, callback);

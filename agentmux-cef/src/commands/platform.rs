@@ -1014,6 +1014,79 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
     Ok(serde_json::Value::Null)
 }
 
+/// Spawn the CLI login command in a NEW visible console window so the OS can
+/// open a browser (the piped/PTY paths used by `run_cli_login` are headless
+/// and block the browser from launching — confirmed for Claude v2.1.x).
+///
+/// Fire-and-forget: returns immediately; the frontend polls for credentials
+/// via `seed_provider_auth_from_global` and seeds them once they appear.
+pub fn open_login_terminal(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let cli_path = args
+        .get("cli_path")
+        .or_else(|| args.get("cliPath"))
+        .and_then(|v| v.as_str())
+        .ok_or("open_login_terminal: missing cliPath")?;
+
+    let login_args: Vec<String> = args
+        .get("loginArgs")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let auth_env: std::collections::HashMap<String, String> = args
+        .get("authEnv")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Quote the CLI path if it contains spaces (cmd.exe /k token split).
+    let quoted_cli = if cli_path.contains(' ') {
+        format!("\"{}\"", cli_path.replace('"', ""))
+    } else {
+        cli_path.to_string()
+    };
+    let cmd_str = if login_args.is_empty() {
+        quoted_cli
+    } else {
+        format!("{} {}", quoted_cli, login_args.join(" "))
+    };
+
+    tracing::info!(cmd = %cmd_str, "open_login_terminal: spawning new console");
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NEW_CONSOLE (0x10): the child gets its own visible console
+        // window, separate from the host's hidden console. This is what allows
+        // the Claude CLI to open the OS default browser for OAuth.
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        std::process::Command::new("cmd.exe")
+            .args(["/k", &cmd_str])
+            .envs(&auth_env)
+            .stdin(std::process::Stdio::null())
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| format!("open_login_terminal: spawn failed: {e}"))?;
+    }
+
+    #[cfg(not(windows))]
+    {
+        // macOS / Linux: xterm / open -a Terminal. Tracked follow-up.
+        let _ = (cmd_str, auth_env);
+        return Err("open_login_terminal: not yet implemented on this platform".to_string());
+    }
+
+    Ok(serde_json::json!({ "opened": true }))
+}
+
 /// Platform-specific best-effort kill of a child process by PID.
 #[cfg(windows)]
 fn kill_pid(pid: u32) -> std::io::Result<()> {
