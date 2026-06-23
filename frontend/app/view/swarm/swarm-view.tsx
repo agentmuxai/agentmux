@@ -116,7 +116,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                 >
                     <div class="swarm-tree">
                         <For each={tree()}>
-                            {(node) => <AgentRow node={node} active={focusedBlockId() === node.blockId} />}
+                            {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} />}
                         </For>
                     </div>
                 </Show>
@@ -127,11 +127,21 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
 // ── Agent root row ───────────────────────────────────────────────────────
 
-function AgentRow({ node, active }: { node: AgentTreeNode; active: boolean }): JSX.Element {
+function AgentRow({
+    node,
+    focusedBlockId,
+}: {
+    node: AgentTreeNode;
+    focusedBlockId: () => string | null;
+}): JSX.Element {
     return (
         <div class="swarm-agent-group">
             <div
-                class={`swarm-agent-row swarm-agent-row--${node.agentStatus}${active ? " swarm-agent-row--active" : ""}`}
+                classList={{
+                    "swarm-agent-row": true,
+                    [`swarm-agent-row--${node.agentStatus}`]: true,
+                    "swarm-agent-row--active": focusedBlockId() === node.blockId,
+                }}
                 onClick={() => void focusBlock(node.blockId)}
                 title={node.agentName}
             >
