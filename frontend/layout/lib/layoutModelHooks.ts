@@ -66,7 +66,7 @@ export function useTileLayout(tabAtom: () => Tab, tileContent: TileLayoutContent
     tabAtom();
     const layoutModel = useLayoutModel(tabAtom);
 
-    useOnResize(layoutModel?.displayContainerRef, layoutModel?.onContainerResize, 50);
+    useOnResize(layoutModel?.displayContainerRef, layoutModel?.onContainerResize);
 
     // Once the TileLayout is mounted, re-run the state update to get all nodes to flow into the layout.
     onMount(() => fireAndForget(() => layoutModel.onTreeStateAtomUpdated(true)));
