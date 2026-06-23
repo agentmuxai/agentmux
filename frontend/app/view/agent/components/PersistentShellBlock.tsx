@@ -14,6 +14,13 @@
 import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+
+const SPINNER_CHARS = new Set([
+    '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏',
+    '⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷',
+    '◐','◓','◑','◒','◴','◷','◶','◵',
+    '-','\\','|','/',
+]);
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -99,11 +106,37 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
     // createChunkCapper tracks total lines incrementally and returns hiddenLines.
     // Using capChunksByLines directly only returns keptLines (no hidden count).
     const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
-    const capped = createMemo(() =>
-        chunkCap(props.node.log.chunks as ToolLogChunk[])
-    );
-    const visibleChunks = () => capped().chunks;
-    const hiddenCount = () => capped().hiddenLines;
+    const cappedView = createMemo(() => {
+        const { chunks, hiddenLines } = chunkCap(props.node.log.chunks as ToolLogChunk[]);
+        // Collapse consecutive spinner-char runs: trailing run → live slot,
+        // completed run → frozen last frame. Mirrors ToolOverlayLog ChunkList.
+        const display: ToolLogChunk[] = [];
+        let spinnerSlot: { content: string; kind: string } | null = null;
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const trimmed = capChars(chunk.content).trim();
+            if (SPINNER_CHARS.has(trimmed)) {
+                let last = chunk;
+                while (i + 1 < chunks.length && SPINNER_CHARS.has(capChars(chunks[i + 1].content).trim())) {
+                    i++;
+                    last = chunks[i];
+                }
+                const lastFrame = capChars(last.content).trim();
+                if (i === chunks.length - 1) {
+                    spinnerSlot = { content: lastFrame, kind: last.kind };
+                } else {
+                    display.push({ ...last, content: lastFrame });
+                    spinnerSlot = null;
+                }
+            } else {
+                display.push(chunk);
+                spinnerSlot = null;
+            }
+        }
+        return { display, spinnerSlot, hiddenLines };
+    });
+    const visibleChunks = () => cappedView().display;
+    const hiddenCount = () => cappedView().hiddenLines;
 
     return (
         <div
@@ -163,6 +196,11 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                                 </pre>
                             )}
                         </For>
+                        <Show when={cappedView().spinnerSlot !== null}>
+                            <pre class={`agent-tool-log-line ${KIND_CLASS[cappedView().spinnerSlot?.kind ?? ""] ?? ""}`}>
+                                {cappedView().spinnerSlot?.content}
+                            </pre>
+                        </Show>
                         <Show when={props.node.log.open}>
                             <div class="agent-shell-streaming-indicator" />
                         </Show>

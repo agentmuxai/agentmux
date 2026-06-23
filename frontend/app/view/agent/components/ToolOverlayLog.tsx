@@ -15,7 +15,7 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -182,29 +182,80 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
 
 type LogChunk = { kind: string; content: string; timestamp: number };
 
+// Single-character animation frames emitted by spinners (ora, listr, tqdm, …).
+// Consecutive runs of these in the chunk list collapse to one <pre> that
+// updates in place rather than stacking a new line per frame.
+const SPINNER_CHARS = new Set([
+    '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏',
+    '⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷',
+    '◐','◓','◑','◒','◴','◷','◶','◵',
+    '-','\\','|','/',
+]);
+function isSpinnerChar(s: string): boolean {
+    return SPINNER_CHARS.has(s.trim());
+}
+
 interface ChunkListProps {
     chunks: ReadonlyArray<LogChunk>;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
-    // All CR/spinner handling is in the Rust layer: pending_cr_override slots
-    // in pty_reader_loop and stream_reader collapse throttled spinner frames
-    // before they become LineEvents; spawn_publisher_loop strips any leading \r
-    // before publishing. No \r reaches the frontend. The cap is the only
-    // transform needed here.
     const cap = createChunkCapper();
-    const capped = () => cap(props.chunks);
+
+    // Collapse consecutive spinner-char runs so frames animate in place rather
+    // than stacking as new lines. A trailing run (tool still streaming) goes
+    // into spinnerSlot — a single <pre> whose text Solid updates in place.
+    // A completed run (followed by non-spinner output) freezes to its last
+    // frame and is added to display as a static line.
+    const view = createMemo(() => {
+        const { chunks, hiddenLines } = cap(props.chunks);
+        const display: LogChunk[] = [];
+        let spinnerSlot: { content: string; kind: string } | null = null;
+
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const trimmed = capChars(chunk.content).trim();
+            if (isSpinnerChar(trimmed)) {
+                let last = chunk;
+                while (
+                    i + 1 < chunks.length &&
+                    isSpinnerChar(capChars(chunks[i + 1].content).trim())
+                ) {
+                    i++;
+                    last = chunks[i];
+                }
+                const lastFrame = capChars(last.content).trim();
+                if (i === chunks.length - 1) {
+                    spinnerSlot = { content: lastFrame, kind: last.kind };
+                } else {
+                    display.push({ ...last, content: lastFrame });
+                    spinnerSlot = null;
+                }
+            } else {
+                display.push(chunk);
+                spinnerSlot = null;
+            }
+        }
+
+        return { display, spinnerSlot, hiddenLines };
+    });
+
     return (
         <>
-            <Show when={capped().hiddenLines > 0}>
-                <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
+            <Show when={view().hiddenLines > 0}>
+                <OutputHiddenMarker hidden={view().hiddenLines} noun="line" from="tail" />
             </Show>
-            <For each={capped().chunks}>
+            <For each={view().display}>
                 {(chunk) => (
                     <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
                         {capChars(chunk.content)}
                     </pre>
                 )}
             </For>
+            <Show when={view().spinnerSlot !== null}>
+                <pre class={`agent-tool-log-line ${KIND_CLASS[view().spinnerSlot?.kind ?? ""] ?? ""}`}>
+                    {view().spinnerSlot?.content}
+                </pre>
+            </Show>
         </>
     );
 }
