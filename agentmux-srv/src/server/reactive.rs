@@ -234,11 +234,12 @@ pub(super) async fn handle_reactive_register(
             }
 
             // Notify the Swarm view so it calls AgentTrackedBlocksCommand and
-            // shows this pane. The Swarm model only polls on agent:process-added
-            // / agent:process-exited; reactive registrations have no OS process
-            // so we emit the same event here to trigger that refresh.
+            // shows this pane. We use a dedicated event name so useProcessCount
+            // (which subscribes to agent:process-added / agent:process-exited)
+            // doesn't treat this as a phantom OS process and show a spurious ⚙ N
+            // badge or trigger the kill-tree modal on pane close.
             state.broker.publish(crate::backend::wps::WaveEvent {
-                event: "agent:process-added".to_string(),
+                event: "agent:reactive-registered".to_string(),
                 scopes: vec![format!("block:{}", req.block_id)],
                 sender: String::new(),
                 persist: 0,
@@ -283,7 +284,7 @@ pub(super) async fn handle_reactive_unregister(
     // Symmetric refresh: tell the Swarm view this pane is gone.
     if let Some(bid) = block_id {
         state.broker.publish(crate::backend::wps::WaveEvent {
-            event: "agent:process-exited".to_string(),
+            event: "agent:reactive-unregistered".to_string(),
             scopes: vec![format!("block:{}", bid)],
             sender: String::new(),
             persist: 0,

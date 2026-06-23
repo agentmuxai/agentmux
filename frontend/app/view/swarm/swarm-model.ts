@@ -100,6 +100,22 @@ export class SwarmViewModel implements ViewModel {
         });
         if (unsubProcExited) this.unsubs.push(unsubProcExited);
 
+        // When a reactive-handler agent (Claude Code pane) registers or
+        // unregisters, refresh the block list. These events are distinct from
+        // agent:process-added / agent:process-exited so useProcessCount doesn't
+        // treat reactive registrations as phantom OS processes.
+        const unsubReactiveReg = waveEventSubscribe({
+            eventType: "agent:reactive-registered",
+            handler: () => void this.loadTrackedBlocks(),
+        });
+        if (unsubReactiveReg) this.unsubs.push(unsubReactiveReg);
+
+        const unsubReactiveUnreg = waveEventSubscribe({
+            eventType: "agent:reactive-unregistered",
+            handler: () => void this.loadTrackedBlocks(),
+        });
+        if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
+
         // Block:activity meta changes (term:activity) — force re-read of block meta.
         // The block atom in WOS updates reactively, so the memo in the view
         // already reacts; no explicit handler needed here beyond the WOS atom.
