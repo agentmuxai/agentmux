@@ -53,7 +53,7 @@ Guidelines:
 
 ## Project Structure
 
-AgentMux is a **Tauri v2** desktop application with a **100% Rust backend**.
+AgentMux is a **four-process Rust desktop application** running a bundled Chromium (CEF) host.
 
 ```
 agentmux/
@@ -69,33 +69,24 @@ agentmux/
 
 ### Frontend (`frontend/`)
 
-Written in React 19 + TypeScript, bundled by Vite. Entry point is [`frontend/wave.ts`](./frontend/wave.ts), React root is [`frontend/app/app.tsx`](./frontend/app/app.tsx).
+Written in **SolidJS + TypeScript**, bundled by Vite. Entry point is [`frontend/app/app.tsx`](./frontend/app/app.tsx).
 
-When running `task dev`, the frontend loads via Vite with Hot Module Reloading — most styling and component changes reload automatically. For state-level changes (Jotai atoms, layout), force-reload with `Ctrl+Shift+R`.
+When running `task dev`, the frontend loads via Vite with Hot Module Reloading — most styling and component changes reload automatically. For state-level changes (reducer stack, layout), force-reload with `Ctrl+Shift+R`.
 
 Key subdirectories:
-- `frontend/app/view/` — 10 pane view types (agent, term, codeeditor, sysinfo, webview, etc.)
-- `frontend/app/block/` — Block/pane rendering and registry
-- `frontend/app/store/` — Jotai atom state management
-- `frontend/app/element/` — 40+ reusable UI components
-- `frontend/app/aipanel/` — AI panel chat interface
+- `frontend/app/view/` — pane view types (agent, terminal, webview, etc.)
+- `frontend/app/store/` — signals + 4-layer reducer stack state management
+- `frontend/app/element/` — reusable UI components
 
-Each view type implements the `ViewModel` interface and is registered in the block registry:
+### CEF Host (`agentmux-cef/`)
 
-```typescript
-// frontend/app/block/block.tsx
-BlockRegistry.set("myview", MyViewModel);
-```
+The native desktop layer — handles window management, system tray, browser pane lifecycle, and IPC between the frontend and backend. Bundles its own Chromium via CEF; no system WebView is used.
 
-### Tauri Shell (`src-tauri/`)
-
-The native desktop layer — handles window management, system tray, native menus, file dialogs, and spawning the backend sidecar. Uses Tauri IPC commands (defined in `src-tauri/src/commands/`) to communicate with the frontend.
-
-Changes here do not hot-reload — Tauri auto-rebuilds in `task dev` when Rust files change, but the process restarts.
+Changes here require rebuilding: `task build` followed by restarting `task dev`.
 
 ### Rust Backend (`agentmux-srv/`)
 
-The async backend server — auto-spawned by Tauri, never launched manually. Handles:
+The async backend server — auto-spawned by the launcher, never launched manually. Handles:
 
 - Block/pane lifecycle and controller execution
 - WebSocket server for real-time frontend communication (JSON-RPC 2.0)
