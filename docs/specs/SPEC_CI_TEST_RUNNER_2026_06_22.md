@@ -126,12 +126,14 @@ is handled minimally + tracked; the follow-up is a "test-health" pass that remov
    (fails in isolation): a Memory selection change resets auth-ready state. This is a genuine
    regression that shipped because there was no CI. *Follow-up (highest priority of the four):
    triage product-bug-vs-stale-test and fix → un-skip.*
-5. **Rust fast lane runs on `windows-latest`, not ubuntu.** AgentMux is Windows-primary, and the
-   CEF-free crates have Linux-portability gaps no CI ever caught: `agentmux-launcher`'s Linux splash
-   pulls `smithay-client-toolkit` (needs Wayland build deps) AND `registry::schema::dotdot_workdir_is_rejected`
-   fails on Linux (OS-sensitive `..`-path handling). The fast lane tests the primary platform.
-   *Follow-up: green the suite on Linux, then add an ubuntu leg for portability coverage.* (vitest
-   stays on ubuntu — JS is platform-agnostic and it passes there.)
+5. **Rust fast lane is an OS matrix; only Windows is REQUIRED.** AgentMux ships on
+   Windows/macOS/Linux, so the rust fast lane runs all three — but only the `windows-latest` leg
+   blocks PRs (the primary dev platform; green). `ubuntu-latest` + `macos-latest` run **non-blocking**
+   (`continue-on-error: ${{ matrix.os != 'windows-latest' }}`) for cross-platform visibility, because
+   the CEF-free crates have untested-platform failures: Linux needs `smithay-client-toolkit`'s Wayland
+   build deps (installed in-job) AND fails `registry::schema::dotdot_workdir_is_rejected` (OS-sensitive
+   `..`-path handling); macOS is TBD on first run. *Follow-up: triage + green each platform, then flip
+   its leg to required.* (vitest stays a single ubuntu job — JS is platform-agnostic and passes.)
 
 These workarounds keep the gate meaningful (it catches NEW regressions today) without blocking the
 runner on a multi-test cleanup. Track the cleanup as its own effort.

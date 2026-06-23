@@ -19,17 +19,28 @@ concurrency:
 jobs:
   rust-fast:
     name: cargo test (CEF-free crates)
-    # Windows, NOT ubuntu: AgentMux is Windows-primary (dev + the lifecycle code
-    # these tests cover). The CEF-free crates pass on Windows but have Linux-
-    # portability gaps no CI ever caught — agentmux-launcher's Linux splash pulls
-    # smithay-client-toolkit (needs Wayland build deps) AND a Linux-specific path
-    # test (registry::schema::dotdot_workdir_is_rejected) fails. Test the PRIMARY
-    # platform here; Linux-greening + a Linux leg is a tracked follow-up (spec §6.4).
+    # OS matrix — AgentMux ships on Windows / macOS / Linux. Only the WINDOWS leg
+    # is REQUIRED (the primary dev platform; green). ubuntu + macos run for
+    # cross-platform visibility but are NON-BLOCKING (`continue-on-error`) until
+    # their platform-specific failures are greened — Linux has smithay-client-toolkit
+    # Wayland build deps (installed below) + a Linux-failing `..`-path test
+    # (registry::schema::dotdot_workdir_is_rejected); macOS is TBD on first run.
+    # Flip each to required as it passes (SPEC_CI_TEST_RUNNER_2026_06_22.md §6.4 item 5).
     # Still fast — these crates have ZERO cef-dll-sys deps, so no CEF build.
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os != 'windows-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # agentmux-launcher's Linux splash pulls smithay-client-toolkit (Wayland);
+      # its build.rs needs these dev headers, absent on a bare ubuntu runner.
+      - name: Install Linux windowing dev headers
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev
       - uses: Swatinem/rust-cache@v2
       # --test-threads=1: these crates have accumulated test-isolation flakes
       # (e.g. a process-shared in-memory FileStore raced across sibling tests),
