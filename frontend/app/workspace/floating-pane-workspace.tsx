@@ -644,6 +644,21 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 hoverArmed = false;
                 indicatorShowing = false;
                 pendingRedockArmed = false;
+                // Phase 4b — pre-capture ghost if onMouseUp hasn't already done so
+                // (window_drag_ended can arrive before DOM mouseup on Windows — separate
+                // CEF IPC channels, documented above). Guards against double-consume:
+                // get_floating_redock_target removes the entry atomically, so the
+                // second caller would get {} anyway, but skip the IPC entirely.
+                if (!capturedGhostForDrop) {
+                    const preGhostWindow = dwellCurrentHoverTarget;
+                    capturedGhostForWindow = preGhostWindow;
+                    capturedGhostForDrop = preGhostWindow
+                        ? invokeCommand<{ block_id?: string; dir?: number }>(
+                              "get_floating_redock_target",
+                              { window_label: preGhostWindow },
+                          ).catch(() => ({}))
+                        : Promise.resolve({});
+                }
                 // Always clear hover — safety net for non-Windows where onMouseUp
                 // may not have fired (BeginWindowDrag absorbs the release).
                 invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
