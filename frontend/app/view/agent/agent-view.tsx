@@ -1067,8 +1067,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 authProviderId={provider()?.id ?? providerKey()}
                 onSubagentClick={handleSubagentClick}
                 onAgentErrorLogin={() => {
-                    log("auth", "Login Again (inline error node) — forcing a fresh provider login");
-                    void status.relogin();
+                    if (provider()?.id === "claude") {
+                        log("auth", "Use existing login (inline error node) — seeding from global Claude login");
+                        void status.useGlobalLogin();
+                    } else {
+                        log("auth", "Login Again (inline error node) — forcing a fresh provider login");
+                        void status.relogin();
+                    }
                 }}
                 onLoadOlder={history.loadOlder}
                 loadingOlder={history.loadingOlder}
