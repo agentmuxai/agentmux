@@ -3686,8 +3686,8 @@ mod recent_sessions_tests {
         let reactive_handler = crate::backend::reactive::get_global_handler();
         let poller = Arc::new(crate::backend::reactive::Poller::new(
             crate::backend::reactive::PollerConfig {
-                agentmux_url: None,
-                agentmux_token: None,
+                muxbus_url: None,
+                muxbus_token: None,
                 poll_interval_secs: 30,
             },
             reactive_handler,
@@ -3976,8 +3976,8 @@ mod recent_sessions_tests {
         let reactive_handler = crate::backend::reactive::get_global_handler();
         let poller = Arc::new(crate::backend::reactive::Poller::new(
             crate::backend::reactive::PollerConfig {
-                agentmux_url: None,
-                agentmux_token: None,
+                muxbus_url: None,
+                muxbus_token: None,
                 poll_interval_secs: 30,
             },
             reactive_handler,
