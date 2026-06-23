@@ -87,8 +87,6 @@
 
     &:hover {
         background: var(--highlight-bg);
-
-        .swarm-open-btn { opacity: 1; }
     }
 
     .swarm-agent-icon {
@@ -129,8 +127,6 @@
 
     &:hover {
         background: var(--highlight-bg);
-
-        .swarm-open-btn { opacity: 1; }
     }
 
     &--completed {
@@ -148,17 +144,16 @@
     }
 }
 
-// ── "no subagents yet" placeholder ──────────────────────────────────────
+// ── Haiku activity summary ───────────────────────────────────────────────
 
-.swarm-no-subagents {
-    padding: 0 6px 0 30px;
-    height: 26px;
-    display: flex;
-    align-items: center;
+.swarm-activity-summary {
+    padding: 0 10px 4px 30px;
     font-size: 11px;
     color: var(--secondary-text-color);
-    opacity: 0.5;
     font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 // ── Status chip ──────────────────────────────────────────────────────────
@@ -197,23 +192,3 @@
     50%       { opacity: 0.3; }
 }
 
-// ── Open button ──────────────────────────────────────────────────────────
-
-.swarm-open-btn {
-    opacity: 0;
-    transition: opacity 100ms;
-    font-size: 11px;
-    padding: 2px 7px;
-    border-radius: 3px;
-    border: 1px solid var(--border-color);
-    color: var(--secondary-text-color);
-    background: transparent;
-    cursor: default;
-    flex-shrink: 0;
-    font-family: inherit;
-
-    &:hover {
-        background: var(--highlight-bg);
-        color: var(--main-text-color);
-    }
-}

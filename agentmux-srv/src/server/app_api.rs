@@ -2557,14 +2557,12 @@ fn write_agent_config_files(
         content_map.insert(fc.content_type.clone(), fc.content.clone());
     }
 
-    // Agents that fall back to the shared slug-based workdir (~/.agentmux/agents/<slug>)
-    // have no collision resolution between same-name multi-tab launches. Enabling
-    // autonomous memory writes there risks concurrent MEMORY.md corruption (GitHub
-    // upstream issue #29051 — non-atomic truncate+write). Disable until per-definition
-    // workdir allocation lands proper isolation.
-    // Agents with an explicit working_directory are already isolated and keep writes on.
-    let workdir_is_shared = work_dir.starts_with("~/.agentmux/agents/")
-        || work_dir.contains("/.agentmux/agents/");
+    // Disable autonomous memory writes only when using the bare slug-fallback workdir
+    // (~/.agentmux/agents/<slug>) — that path is shared across same-name multi-tab
+    // launches with no collision resolution, risking concurrent MEMORY.md corruption
+    // (upstream issue #29051). An empty working_directory field means the caller
+    // chose the fallback; any explicitly set workdir is isolated and keeps writes on.
+    let workdir_is_shared = agent.working_directory.is_empty();
     if workdir_is_shared {
         let settings_str = content_map
             .entry("settings".to_string())
