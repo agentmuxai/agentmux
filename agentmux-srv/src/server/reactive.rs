@@ -233,6 +233,18 @@ pub(super) async fn handle_reactive_register(
                 sub.add_agent(&req.agent_id);
             }
 
+            // Notify the Swarm view so it calls AgentTrackedBlocksCommand and
+            // shows this pane. The Swarm model only polls on agent:process-added
+            // / agent:process-exited; reactive registrations have no OS process
+            // so we emit the same event here to trigger that refresh.
+            state.broker.publish(crate::backend::wps::WaveEvent {
+                event: "agent:process-added".to_string(),
+                scopes: vec![format!("block:{}", req.block_id)],
+                sender: String::new(),
+                persist: 0,
+                data: Some(json!({ "block_id": req.block_id })),
+            });
+
             Json(json!({"success": true})).into_response()
         }
         Err(e) => (
@@ -252,6 +264,10 @@ pub(super) async fn handle_reactive_unregister(
     State(state): State<AppState>,
     Json(req): Json<UnregisterRequest>,
 ) -> Json<serde_json::Value> {
+    // Capture block_id before unregistering so we can emit the Swarm refresh event.
+    let block_id = state.reactive_handler.get_agent(&req.agent_id)
+        .map(|r| r.block_id.clone());
+
     state.reactive_handler.unregister_agent(&req.agent_id);
     // Also remove from cross-instance file registry.
     let data_dir = base::get_wave_data_dir();
@@ -263,6 +279,18 @@ pub(super) async fn handle_reactive_unregister(
     if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
         sub.remove_agent(&req.agent_id);
     }
+
+    // Symmetric refresh: tell the Swarm view this pane is gone.
+    if let Some(bid) = block_id {
+        state.broker.publish(crate::backend::wps::WaveEvent {
+            event: "agent:process-exited".to_string(),
+            scopes: vec![format!("block:{}", bid)],
+            sender: String::new(),
+            persist: 0,
+            data: Some(json!({ "block_id": bid })),
+        });
+    }
+
     Json(json!({"success": true}))
 }
 
