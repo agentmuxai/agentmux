@@ -47,8 +47,11 @@ slow part on a schedule, not on every push.
 
 ## 3. Design — two lanes
 
-### Lane A — PR/push fast lane (CEF-free) — `ci-fast.yml`
-- **Trigger:** `pull_request` + `push` (to `main`).
+### Lane A — cross-platform CEF-free crates (CEF-free) — `ci-fast.yml`
+- **Trigger:** **nightly** `schedule` (08:00 UTC, an hour before Lane B) + `workflow_dispatch`.
+  **Repo policy (2026-06-23): CI runs nightly, NOT per-PR** — the per-PR `pull_request`/`push`
+  triggers were removed (PRs aren't gated by CI on this repo; run on demand via the Actions tab).
+  ("fast" now denotes *scope* — CEF-free, ~5 min — not cadence.)
 - **Runner:** the rust job is an **OS matrix** — `windows-latest` is the REQUIRED gate (primary dev
   platform; green), `ubuntu-latest` + `macos-latest` run **non-blocking** (`continue-on-error`) for
   cross-platform visibility (see §6.4 items 5-6 — the suite has untested-platform failures). The
