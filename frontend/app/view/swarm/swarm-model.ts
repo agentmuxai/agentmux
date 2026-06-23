@@ -26,7 +26,7 @@ export interface ActiveSubagent {
 }
 
 export interface AgentTreeNode {
-    blockId: string;
+    blockId: string | null;
     agentName: string;
     activitySummary: string | null;
     agentStatus: "running" | "idle";
