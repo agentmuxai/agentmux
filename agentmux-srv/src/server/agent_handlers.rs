@@ -3289,10 +3289,12 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         if let Err(e) = cm.ensure_running(&container_name, &container_image, &volumes, &[]).await {
                             // Surface the error in the agent pane before returning, so the user
                             // sees why the container failed (image not found, Docker down, etc.).
-                            let safe_msg = e.to_string().replace('"', "'");
-                            let error_frame = format!(
-                                r#"{{"type":"result","is_error":true,"subtype":"error_during_execution","error":{{"message":"[AgentMux] container ensure_running failed: {safe_msg}"}}}}"#
-                            );
+                            let error_frame = serde_json::json!({
+                                "type": "result",
+                                "is_error": true,
+                                "subtype": "error_during_execution",
+                                "error": {"message": format!("[AgentMux] container ensure_running failed: {e}")}
+                            }).to_string();
                             crate::backend::blockcontroller::shell::handle_append_block_file(
                                 &broker,
                                 &cmd.blockid,

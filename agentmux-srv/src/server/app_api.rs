@@ -182,7 +182,11 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Ensure the controller is registered (may be missing if block
                     // was created by the frontend without backend initialization)
                     if blockcontroller::get_controller(&existing.oid).is_none() {
-                        let controller_type = provider.controller_type_str();
+                        let controller_type = if agent.agent_type == "container" {
+                            "subprocess"
+                        } else {
+                            provider.controller_type_str()
+                        };
                         // Set essential metadata if missing
                         let mut meta_update = obj::MetaMapType::new();
                         meta_update.insert("controller".to_string(), json!(controller_type));
