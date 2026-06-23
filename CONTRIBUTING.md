@@ -82,7 +82,7 @@ Key subdirectories:
 
 The native desktop layer — handles window management, system tray, browser pane lifecycle, and IPC between the frontend and backend. Bundles its own Chromium via CEF; no system WebView is used.
 
-Changes here require rebuilding: `task build` followed by restarting `task dev`.
+Changes here require rebuilding: `task build:host` followed by restarting `task dev`.
 
 ### Rust Backend (`agentmux-srv/`)
 
