@@ -610,6 +610,19 @@ wrap_app! {
                     }
                 }
 
+                // macOS dev mode: the dev binary runs unsigned from a flat
+                // directory, not inside a signed .app bundle. macOS gates Metal
+                // GPU access on code-signing + bundle structure; without it the
+                // GPU subprocess crashes immediately with exit_code=5 (Metal
+                // context init denied by the sandbox). The installed app is
+                // properly signed and never hits this. For `task dev` we fall
+                // back to software rendering — good enough for visual testing.
+                #[cfg(target_os = "macos")]
+                if process_type.is_none() && std::env::var("AGENTMUX_DEV").is_ok() {
+                    tracing::info!("macOS dev mode — using software rendering (--disable-gpu) to avoid GPU sandbox crash");
+                    cmd.append_switch(Some(&CefString::from("disable-gpu")));
+                }
+
                 // Prevent empty browser on visibility change (CEF #3638).
                 //
                 // Also disable MediaRouter: Chromium's Cast/DIAL device
