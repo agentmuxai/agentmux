@@ -551,7 +551,7 @@ export class AgentViewModel implements ViewModel {
                 agentName: instanceName,
                 agentIcon: agent.icon,
                 agentMode: overrides?.agentType ?? agent.agent_type ?? "host",
-                "agent:container_image": overrides?.containerImage ?? agent.container_image ?? "",
+                ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
                 controller: isPersistent ? "persistent" : "subprocess",
                 cmd: cliBin,
                 "cmd:args": cliArgs,

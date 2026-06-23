@@ -142,7 +142,7 @@ function AgentRow({
                     [`swarm-agent-row--${node.agentStatus}`]: true,
                     "swarm-agent-row--active": focusedBlockId() === node.blockId,
                 }}
-                onClick={() => void focusBlock(node.blockId)}
+                onClick={() => node.blockId && void focusBlock(node.blockId)}
                 title={node.agentName}
             >
                 <span class="swarm-agent-icon">⬡</span>
