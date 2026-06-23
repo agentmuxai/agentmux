@@ -172,7 +172,7 @@ for i in "${!HELPER_NAMES[@]}"; do
     cp dist/cef/agentmux-cef "$ha/Contents/MacOS/${hn}"
     # GL libs next to generic + GPU helpers only — the GPU subprocess resolves
     # them via its DIR_MODULE; the generic helper needs them as a fallback.
-    # Renderer/Plugin/Alloy/Alerts never touch GL.
+    # Renderer/Plugin/Alloy never touch GL.
     case "$hn" in
         "AgentMux Helper"|"AgentMux Helper (GPU)")
             for f in dist/cef/*.dylib; do cp "$f" "$ha/Contents/MacOS/"; done ;;

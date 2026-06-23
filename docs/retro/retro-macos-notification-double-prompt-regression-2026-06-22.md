@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-22
 - **Severity:** Medium (UX regression; prompts for a capability we never use)
-- **Status:** Regression confirmed; root cause under investigation; fix options enumerated
+- **Status:** Resolved — PR #1713 removes `AgentMux Helper (Alerts).app` from the bundle (option A)
 - **Scope:** macOS only — `AgentMux Helper (Alerts).app` notification registration
 
 ---
@@ -93,7 +93,7 @@ delivery helper.
 | #1659 | `--disable-notifications` switch | Verified 0 prompts in 0.47.3/0.47.4 |
 | 0.48.1 | Multiple unrelated changes | 2 prompts return |
 
-Total: 3 PRs touching this, still regressing.
+Total: 4 PRs touching this (including this one).
 
 ---
 
