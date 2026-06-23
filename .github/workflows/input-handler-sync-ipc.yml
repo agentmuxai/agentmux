@@ -8,26 +8,16 @@ name: Input-handler sync-IPC guardrail
 # but must never BLOCK on it before paint. See
 # docs/analysis/ANALYSIS_KEYDOWN_IPC_AUDIT_2026_05_29.md for the audit baseline.
 #
-# Path-filtered — only runs when an in-scope file is modified.
+# Repo policy (2026-06-23): CI runs NIGHTLY, not per-PR — so this runs on a
+# nightly schedule + manual dispatch instead of on pull_request (reagent still
+# reviews PRs). The path filter is dropped — the lint is fast and runs whole-tree
+# nightly. Trade-off: an in-scope sync-IPC regression is now caught the next
+# morning, not at PR time.
 
 on:
-  pull_request:
-    paths:
-      - 'frontend/app/store/keymodel.ts'
-      - 'frontend/app/view/term/termViewModel.ts'
-      - 'frontend/app/view/launcher/launcher.tsx'
-      - 'frontend/app/view/agent/components/AgentFooter.tsx'
-      - 'tools/lint/check-input-handler-sync-ipc.sh'
-      - '.github/workflows/input-handler-sync-ipc.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'frontend/app/store/keymodel.ts'
-      - 'frontend/app/view/term/termViewModel.ts'
-      - 'frontend/app/view/launcher/launcher.tsx'
-      - 'frontend/app/view/agent/components/AgentFooter.tsx'
-      - 'tools/lint/check-input-handler-sync-ipc.sh'
+  schedule:
+    - cron: '0 10 * * *' # nightly
+  workflow_dispatch: {}
 
 jobs:
   check:
