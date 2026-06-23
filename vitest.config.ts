@@ -33,6 +33,12 @@ export default mergeConfig(
                 // Spec: docs/specs/SPEC_FRONTEND_TEST_HEALTH_2026_05_24.md §1.
                 "**/.claude/**",
                 "**/worktrees/**",
+                // `tools/**` holds standalone Node tooling (muxlog, bench
+                // analysis) with `.mjs` tests that aren't frontend and don't run
+                // under this jsdom + RPC-mock setup (e.g. tools/tests/lib/
+                // bench-stats.test.mjs). They belong to their own runner, not the
+                // frontend suite. See SPEC_CI_TEST_RUNNER_2026_06_22.md §6.4.
+                "**/tools/**",
             ],
             coverage: {
                 provider: "istanbul",
