@@ -260,10 +260,18 @@ export function useAgentControllerStatus(
         }
         const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
 
+        // Strip CLAUDE_CONFIG_DIR (and equivalents) from the terminal env so the
+        // login writes to the user's global ~/.claude instead of the isolated dir.
+        // seedGlobalLogin polls the global dir and copies on success — if we kept
+        // the isolated dir key the poll would look in global but the creds would
+        // land in isolated, and a terminal-fresh login would never be detected.
+        const terminalEnv: Record<string, string> = { ...authEnv };
+        if (prov.authConfigDirEnvVar) delete terminalEnv[prov.authConfigDirEnvVar];
+
         reloginInFlight = true;
         setLoginWaiting(true);
         try {
-            await getApi().openLoginTerminal(cliPath, prov.authLoginCommand, authEnv);
+            await getApi().openLoginTerminal(cliPath, prov.authLoginCommand, terminalEnv);
             opts.log("auth", "A terminal window opened — complete the login there, then come back.");
 
             // Poll silently every 5s for up to 5 minutes; seed on first hit.
