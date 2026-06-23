@@ -55,6 +55,10 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     const treeState = model.localTreeStateAtom();
                     return treeState.magnifiedNodeId === nodeid;
                 }),
+                isMinimized: createMemo(() => {
+                    const minimizedIds = model.minimizedNodeIds();
+                    return minimizedIds.has(nodeid);
+                }),
                 isEphemeral: createMemo(() => {
                     const ephemeralNode = model.ephemeralNode();
                     return ephemeralNode?.id === nodeid;
@@ -67,6 +71,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     fireAndForget(() => model.closeNode(nodeid));
                 },
                 toggleMagnify: () => model.magnifyNodeToggle(nodeid),
+                toggleMinimize: () => model.minimizeNodeToggle(nodeid),
                 focusNode: () => model.focusNode(nodeid),
                 dragHandleRef: { current: null as HTMLDivElement | null },
                 displayContainerRef: model.displayContainerRef,

@@ -98,8 +98,12 @@ export function onResizeMove(model: LayoutModel, resizeHandle: ResizeHandleProps
     const beforeNodeSize = model.resizeContext.beforeNodeStartSize - clientDiff;
     const afterNodeSize = model.resizeContext.afterNodeStartSize + clientDiff;
 
-    // If either node will be too small after this resize, don't let it happen.
-    if (beforeNodeSize < minNodeSize || afterNodeSize < minNodeSize) {
+    // Minimized nodes can legitimately be smaller than MinNodeSizePx — skip the guard for them.
+    const beforeNode = findNode(model.treeState.rootNode, model.resizeContext.beforeNodeId);
+    const afterNode = findNode(model.treeState.rootNode, model.resizeContext.afterNodeId);
+    const beforeMinimized = beforeNode?.minimizedSize !== undefined;
+    const afterMinimized = afterNode?.minimizedSize !== undefined;
+    if ((!beforeMinimized && beforeNodeSize < minNodeSize) || (!afterMinimized && afterNodeSize < minNodeSize)) {
         return;
     }
 

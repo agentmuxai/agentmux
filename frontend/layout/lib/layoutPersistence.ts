@@ -4,6 +4,7 @@
 import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
 import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
+import { rebuildMinimizedSet } from "./layoutMinimize";
 import {
     LayoutTreeActionType,
     LayoutTreeClearTreeAction,
@@ -35,6 +36,7 @@ export function initializeFromWaveObject(model: LayoutModel) {
     model.treeState = initialState;
     model.magnifiedNodeId = initialState.magnifiedNodeId;
     model.setter(model.localTreeStateAtom, { ...initialState });
+    rebuildMinimizedSet(model);
 
     if (initialState.pendingBackendActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
