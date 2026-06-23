@@ -140,9 +140,16 @@
         // glow/"aurora", and `animation: none` freezes the stripe = looks
         // stuck). CEF maps reduced-motion to the Windows "Animation effects"
         // toggle (SPI_GETCLIENTAREAANIMATION), so machines with it off land
-        // here. Override only the duration so the same keyframe runs slower.
+        // here. On macOS, "Reduce Motion" in System Settings → Accessibility
+        // → Display triggers this branch.
+        // IMPORTANT: also explicitly set animation-iteration-count: infinite.
+        // Chromium internally limits `infinite` animations to a single
+        // iteration when prefers-reduced-motion fires, so without this override
+        // the ants march once (~1.5s), then freeze — the bug reported on macOS
+        // with Reduce Motion on and on Windows with Animation effects off.
         .agent-pane-progress-bar--active::before {
             animation-duration: 1.5s;
+            animation-iteration-count: infinite;
         }
     }
 
