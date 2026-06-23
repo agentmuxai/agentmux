@@ -37,14 +37,23 @@ const [busyPanes, setBusyPanes] = createSignal<ReadonlySet<string>>(
 export const busyCount: Accessor<number> = () => busyPanes().size;
 export const anyBusy: Accessor<boolean> = () => busyPanes().size > 0;
 
-// Per-block phase accessor registry — plain Map (not reactive) because the
-// Swarm already rebuilds its row list when blocks are added/removed.
-// Reading the RETURNED accessor inside a reactive computation tracks changes.
-const phaseRegistry = new Map<string, Accessor<TurnPhase>>();
+// Per-block phase accessor registry as a SolidJS signal so that reads
+// inside createMemo/createEffect track it. A createMemo with no tracked
+// dependencies never re-runs; using a plain Map would leave AgentRows
+// permanently stuck on the fallback if they mount before registerActivity
+// is called (the common case when the Swarm pane is already open).
+const [phaseRegistry, setPhaseRegistry] = createSignal<ReadonlyMap<string, Accessor<TurnPhase>>>(
+    new Map(),
+    { equals: false },
+);
 
-/** Returns the live TurnPhase accessor for a registered block, or null. */
+/**
+ * Returns the live TurnPhase accessor for a registered block, or null.
+ * Reading this inside a reactive computation tracks the registry signal,
+ * so the computation re-runs when the block later registers its phase.
+ */
 export function getBlockTurnPhase(blockId: string): Accessor<TurnPhase> | null {
-    return phaseRegistry.get(blockId) ?? null;
+    return phaseRegistry().get(blockId) ?? null;
 }
 
 /**
@@ -62,7 +71,7 @@ export function registerActivity(
     blockId: string,
     turnPhase: Accessor<TurnPhase>,
 ): void {
-    phaseRegistry.set(blockId, turnPhase);
+    setPhaseRegistry((prev) => new Map(prev).set(blockId, turnPhase));
     createEffect(() => {
         const working = workingFromPhase(turnPhase());
         const cur = new Set(busyPanes());
@@ -78,7 +87,7 @@ export function registerActivity(
 }
 
 export function unregisterActivity(blockId: string): void {
-    phaseRegistry.delete(blockId);
+    setPhaseRegistry((prev) => { const m = new Map(prev); m.delete(blockId); return m; });
     const cur = new Set(busyPanes());
     if (cur.delete(blockId)) setBusyPanes(cur);
 }
