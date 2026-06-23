@@ -610,6 +610,22 @@ wrap_app! {
                     }
                 }
 
+                // macOS dev mode: the dev binary runs unsigned from a flat
+                // directory, not inside a signed .app bundle. macOS sandbox
+                // policy SIGTRAP-kills subprocesses (GPU, Network/utility) that
+                // call APIs gated on code-signing — exit_code=5 from both the
+                // GPU helper and the network service utility process. The
+                // installed app is properly signed and never hits this.
+                //
+                // --no-sandbox disables all sandbox restrictions so subprocesses
+                // can init normally (Metal GPU, network stack) from the unsigned
+                // binary. Hardware GPU compositing is preserved — no --disable-gpu.
+                #[cfg(target_os = "macos")]
+                if process_type.is_none() && std::env::var("AGENTMUX_DEV").is_ok() {
+                    tracing::info!("macOS dev mode — disabling sandbox for unsigned binary (hardware GPU retained)");
+                    cmd.append_switch(Some(&CefString::from("no-sandbox")));
+                }
+
                 // Prevent empty browser on visibility change (CEF #3638).
                 //
                 // Also disable MediaRouter: Chromium's Cast/DIAL device
