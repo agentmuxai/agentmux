@@ -640,9 +640,10 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if agent_mode == "container" {
                         let cm = container_manager.as_deref()
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
-                        let container_image = obj::meta_get_string(
-                            &block.meta, "agent:container_image", "ghcr.io/agentmuxai/agent-claude:latest",
-                        );
+                        let container_image = {
+                            let img = obj::meta_get_string(&block.meta, "agent:container_image", "");
+                            if img.is_empty() { "ghcr.io/agentmuxai/agent-claude:latest".to_string() } else { img }
+                        };
                         // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
                         let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
                         let container_name = crate::backend::container::container_name_for_slug(&agent_id);
