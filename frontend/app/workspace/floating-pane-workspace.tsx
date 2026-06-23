@@ -921,6 +921,15 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 return;
             }
 
+            // Phase 4b — query the ghost state the target renderer stored so
+            // the saga can emit a directional split action. Best-effort: a
+            // failed query (CEF IPC error, no stored state) falls back to the
+            // existing InsertNode path without breaking the redock.
+            const ghost = await invokeCommand<{ block_id?: string; dir?: number }>(
+                "get_floating_redock_target",
+                { window_label: target.label! },
+            ).catch(() => ({}));
+
             try {
                 await WorkspaceService.RedockFloatingPane(
                     sourceBlockId,
@@ -928,6 +937,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     sourceWsId,
                     targetTabId,
                     targetWsId,
+                    ghost.block_id ?? null,
+                    ghost.dir ?? null,
                 );
                 // After successful redock, source tab.blockids empties
                 // → the auto-close watcher dismisses the floater.
