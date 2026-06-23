@@ -126,6 +126,16 @@ function installFloatingRedockHoverListener(): void {
             placeholderEl.remove();
             placeholderEl = null;
         }
+        // Phase 4b — clear the stored ghost state for this window so a stale
+        // direction cannot bleed into the next drop event.
+        fireAndForget(async () => {
+            const { invokeCommand } = await import("@/app/platform/ipc");
+            await invokeCommand("set_floating_redock_target", {
+                window_label: myLabel,
+                block_id: null,
+                dir: null,
+            });
+        });
     };
 
     // Map a DropDirection to a sub-rect (top, left, width, height in
@@ -176,7 +186,7 @@ function installFloatingRedockHoverListener(): void {
     let dwellSince = 0;
 
     fireAndForget(async () => {
-        const { listenEvent } = await import("@/app/platform/ipc");
+        const { listenEvent, invokeCommand } = await import("@/app/platform/ipc");
         const { determineDropDirection } = await import("@/layout/lib/utils");
         await listenEvent<{
             target_label: string | null;
@@ -243,6 +253,19 @@ function installFloatingRedockHoverListener(): void {
             ph.style.left = `${slot.left}px`;
             ph.style.width = `${slot.width}px`;
             ph.style.height = `${slot.height}px`;
+
+            // Phase 4b — store the computed direction and target block so
+            // the floater can pass them to RedockFloatingPane at drop time.
+            // Fire-and-forget: the set is best-effort and must not stall the
+            // event handler (ghost rendering happens synchronously above).
+            const targetBlockId = leafEl.dataset.blockid;
+            if (targetBlockId) {
+                void invokeCommand("set_floating_redock_target", {
+                    window_label: myLabel,
+                    block_id: targetBlockId,
+                    dir,
+                });
+            }
         });
     });
 }

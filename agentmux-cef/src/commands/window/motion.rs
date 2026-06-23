@@ -561,3 +561,67 @@ pub fn clear_floating_redock_hover(
     Ok(serde_json::Value::Null)
 }
 
+/// Phase 4b — store the ghost `{ block_id, dir }` for a target window.
+///
+/// Called by the TARGET window's renderer (`app-init.ts`) each time it
+/// computes the drop-zone direction. Passing `block_id: null` (or omitting
+/// it) clears the entry for that window so a stale direction is not used
+/// if the cursor leaves without a drop.
+///
+/// Args: `{ "window_label": string, "block_id": string|null, "dir": number|null }`.
+pub fn set_floating_redock_target(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let window_label = args
+        .get("window_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if window_label.is_empty() {
+        return Err("set_floating_redock_target: window_label is required".into());
+    }
+    let block_id = args.get("block_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let dir = args.get("dir").and_then(|v| v.as_u64()).map(|d| d as u8);
+
+    let mut g = state.floating_redock_ghost.lock();
+    match (block_id, dir) {
+        (Some(bid), Some(d)) => {
+            g.insert(window_label, crate::state::FloatingRedockGhostState { block_id: bid, dir: d });
+        }
+        _ => {
+            g.remove(&window_label);
+        }
+    }
+    Ok(serde_json::Value::Null)
+}
+
+/// Phase 4b — consume the ghost state for a target window (read + remove).
+///
+/// Called by the FLOATER's renderer just before emitting `RedockFloatingPane`
+/// so the saga can emit a directional `SplitHorizontal`/`SplitVertical` action
+/// instead of a generic `InsertNode`. Consuming (rather than just reading) the
+/// entry avoids any stale ghost from a prior drag being applied to a future drop
+/// where no new ghost state was set.
+///
+/// Args: `{ "window_label": string }`.
+/// Returns: `{ "block_id": string, "dir": number }` or `{}` if no state stored.
+pub fn get_floating_redock_target(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let window_label = args
+        .get("window_label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mut g = state.floating_redock_ghost.lock();
+    match g.remove(&window_label) {
+        Some(ghost) => Ok(serde_json::json!({
+            "block_id": ghost.block_id,
+            "dir": ghost.dir,
+        })),
+        None => Ok(serde_json::json!({})),
+    }
+}
+
