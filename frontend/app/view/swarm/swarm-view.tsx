@@ -6,7 +6,7 @@ import type { SwarmViewModel, AgentTreeNode, ActiveSubagent } from "./swarm-mode
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, workspace, setActiveTab } from "@/app/store/global";
+import { WOS, workspace, setActiveTab, atoms } from "@/app/store/global";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import "./swarm-view.scss";
 
@@ -85,6 +85,17 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
     const tree = createMemo(() => model.buildTree());
 
+    // Derive the currently-focused block ID from the active tab's layout model.
+    // focusedNode is already a reactive memo on LayoutModel, so this updates
+    // automatically when the user clicks any tile or switches tabs.
+    const focusedBlockId = createMemo<string | null>(() => {
+        const tabId = atoms.activeTabId();
+        if (!tabId) return null;
+        const layoutModel = getLayoutModelForTabById(tabId);
+        if (!layoutModel) return null;
+        return layoutModel.focusedNode()?.data?.blockId ?? null;
+    });
+
     return (
         <div ref={rootRef} class="swarm-view" style={{ zoom: zoomFactor() }} tabIndex={-1}>
             <Show
@@ -105,7 +116,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                 >
                     <div class="swarm-tree">
                         <For each={tree()}>
-                            {(node) => <AgentRow node={node} />}
+                            {(node) => <AgentRow node={node} active={focusedBlockId() === node.blockId} />}
                         </For>
                     </div>
                 </Show>
@@ -116,11 +127,11 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
 // ── Agent root row ───────────────────────────────────────────────────────
 
-function AgentRow({ node }: { node: AgentTreeNode }): JSX.Element {
+function AgentRow({ node, active }: { node: AgentTreeNode; active: boolean }): JSX.Element {
     return (
         <div class="swarm-agent-group">
             <div
-                class={`swarm-agent-row swarm-agent-row--${node.agentStatus}`}
+                class={`swarm-agent-row swarm-agent-row--${node.agentStatus}${active ? " swarm-agent-row--active" : ""}`}
                 onClick={() => void focusBlock(node.blockId)}
                 title={node.agentName}
             >

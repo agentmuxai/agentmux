@@ -89,6 +89,12 @@
         background: var(--highlight-bg);
     }
 
+    &--active {
+        background: var(--highlight-bg);
+        border-left: 2px solid var(--accent-color, #5b8dd9);
+        padding-left: 8px; // compensate so text position stays stable
+    }
+
     .swarm-agent-icon {
         font-size: 14px;
         flex-shrink: 0;
