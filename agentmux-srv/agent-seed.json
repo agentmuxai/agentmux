@@ -4,7 +4,7 @@
     {
       "id": "claude",
       "name": "Claude",
-      "icon": "✖",
+      "icon": "\u2716",
       "provider": "claude",
       "agent_type": "container",
       "container_image": "ghcr.io/agentmuxai/agent-claude:latest",
@@ -22,14 +22,14 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
     {
       "id": "codex",
       "name": "Codex",
-      "icon": "✦",
+      "icon": "\u2726",
       "provider": "codex",
       "agent_type": "host",
       "description": "OpenAI's coding agent",
@@ -46,14 +46,14 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
     {
       "id": "gemini",
       "name": "Gemini",
-      "icon": "⚡",
+      "icon": "\u26a1",
       "provider": "gemini",
       "agent_type": "host",
       "description": "Google's coding agent",
@@ -70,14 +70,14 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
     {
       "id": "kimi",
       "name": "Kimi",
-      "icon": "◈",
+      "icon": "\u25c8",
       "provider": "kimi",
       "agent_type": "host",
       "description": "Moonshot's 262k-context agent",
@@ -94,14 +94,14 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
     {
       "id": "pi",
       "name": "Pi",
-      "icon": "π",
+      "icon": "\u03c0",
       "provider": "pi",
       "agent_type": "host",
       "description": "Plandex's multi-provider agent",
@@ -118,14 +118,14 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
     {
       "id": "openclaw",
       "name": "OpenClaw",
-      "icon": "◎",
+      "icon": "\u25ce",
       "provider": "openclaw",
       "agent_type": "host",
       "description": "ACP orchestration platform",
@@ -142,14 +142,14 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     },
     {
       "id": "copilot",
       "name": "Copilot",
-      "icon": "⛶",
+      "icon": "\u26f6",
       "provider": "copilot",
       "agent_type": "host",
       "description": "Microsoft's coding agent",
@@ -166,25 +166,32 @@
           "trigger": "startup",
           "skill_type": "prompt",
           "description": "Re-run tool verification checks and report status table",
-          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages — install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
         }
       ]
     }
   ],
   "memories": [
     {
+      "id": "seed-agent-memory",
+      "name": "Agent Memory",
+      "description": "When and how agents read and update their persistent native memory",
+      "is_global": true,
+      "instructions": "## Agent Memory\n\nYour persistent memory lives in `~/.claude/projects/<path>/memory/`. Claude Code reads it automatically at session start.\n\n### Structure\n\n- **`MEMORY.md`** - Index file. Loaded into *every* session (200-line / ~25 KB limit). Keep it as a pointer list. Entries past 200 lines are truncated.\n- **Topic files** (`*.md`) - Detail files (e.g. `user_role.md`, `feedback_testing.md`). Loaded on-demand when relevant. Store depth here, not in MEMORY.md.\n\n### File format\n\nEach topic file:\n```markdown\n---\nname: short-kebab-slug\ndescription: one-line summary\nmetadata:\n  type: user | feedback | project | reference\n---\n\nBody content here.\n```\n\nMEMORY.md - one line per entry:\n```markdown\n- [Title](file.md) - one-line hook\n```\n\n### When to save\n\nSave when you learn something non-obvious that would help future sessions:\n- User preferences, role, expertise (type: user)\n- Corrections or confirmed approaches: avoid X, always do Y (type: feedback)\n- Project context not in code/git: deadlines, stakeholder decisions, why (type: project)\n- Where things live in external systems: Slack, dashboards, Linear (type: reference)\n\nDo NOT save:\n- Things derivable from code or git history\n- Ephemeral task state or in-progress work\n- Duplicates - update existing entries instead\n- Anything already in CLAUDE.md files\n\n### When to update\n\n- End of a session where you learned something worth keeping\n- When the user corrects you\n- When you discover project context the user has not written down\n- When you find where something lives in an external system\n\n### Discipline\n\n- MEMORY.md stays under 200 lines. Consolidate if it grows past ~150.\n- One file per topic - do not dump everything in MEMORY.md body.\n- Link topic files from MEMORY.md with [[name]] cross-references.\n- Stale memories rot - update or remove when things change."
+    },
+    {
       "id": "seed-workspace-rules",
       "name": "Workspace Rules",
-      "description": "Git workflow, task management, GitHub access tiers, and safety rules — injected into all agents",
+      "description": "Git workflow, task management, GitHub access tiers, and safety rules \u2014 injected into all agents",
       "is_global": true,
-      "instructions": "## Workspace Rules\n\n### Git Workflow\n\n- **Never push directly to main.** Always create a feature branch first.\n- Branch names: `<agent-name>/feature-description`.\n- Every code change goes through a PR — no direct pushes, no exceptions.\n- Never reuse a branch after its PR is merged; create a new branch.\n- Resolve merge conflicts rather than force-pushing or discarding changes.\n\n### Task Management\n\n- Use task tracking for any task with 3 or more steps.\n- Mark a task **in_progress** before starting it.\n- Mark a task **completed** immediately when done — do not batch.\n\n### GitHub Access\n\n| Tier | Tool | Use when |\n|------|------|---------|\n| 1 | MCP `mcp__github__*` tools | Primary — tokens auto-refresh |\n| 2 | `gh` CLI | MCP unavailable |\n| 3 | Admin PAT via `secrets` | Package publish, admin ops only |\n\n### Safety\n\n- Kill processes by PID only — never by image name (kills all instances).\n- Never skip pre-commit hooks (`--no-verify`) without explicit user approval.\n- Confirm before any destructive operation: force-push, reset --hard, branch -D."
+      "instructions": "## Workspace Rules\n\n### Git Workflow\n\n- **Never push directly to main.** Always create a feature branch first.\n- Branch names: `<agent-name>/feature-description`.\n- Every code change goes through a PR \u2014 no direct pushes, no exceptions.\n- Never reuse a branch after its PR is merged; create a new branch.\n- Resolve merge conflicts rather than force-pushing or discarding changes.\n\n### Task Management\n\n- Use task tracking for any task with 3 or more steps.\n- Mark a task **in_progress** before starting it.\n- Mark a task **completed** immediately when done \u2014 do not batch.\n\n### GitHub Access\n\n| Tier | Tool | Use when |\n|------|------|---------|\n| 1 | MCP `mcp__github__*` tools | Primary \u2014 tokens auto-refresh |\n| 2 | `gh` CLI | MCP unavailable |\n| 3 | Admin PAT via `secrets` | Package publish, admin ops only |\n\n### Safety\n\n- Kill processes by PID only \u2014 never by image name (kills all instances).\n- Never skip pre-commit hooks (`--no-verify`) without explicit user approval.\n- Confirm before any destructive operation: force-push, reset --hard, branch -D."
     },
     {
       "id": "seed-agentmux-dev",
       "name": "AgentMux Development",
       "description": "Stack, build commands, version management, and workflow for the AgentMux codebase",
       "is_global": false,
-      "instructions": "## AgentMux Development\n\nContext for working on the AgentMux codebase. Select this Memory bundle when\nopening an agent to work on agentmux.\n\n### Stack\n\n- **agentmux-cef** — Chromium host, window management, IPC bridge\n- **agentmux-launcher** — Job Object, single-instance pipe, saga coordinator\n- **agentmux-srv** — Async Rust backend (SQLite, agent/block management)\n- **agentmux-common** — Shared types and utilities\n- **Frontend** — SolidJS + SCSS, built with Vite\n\n### Build Commands\n\n| Command | Purpose |\n|---------|---------|\n| `task dev` | Development (hot reload) |\n| `task package` | Portable ZIP build |\n| `task build:backend` | Rebuild Rust sidecar after changes |\n| `task test` | Run tests |\n\nAfter Rust changes: `task build:backend`, then restart `task dev`.\n\n### Version Management\n\nFeature PRs use changesets — do NOT bump versions manually:\n```bash\ntask changeset -- patch \"fix(scope): short description\"\n```\n\n### Logs\n\n`muxlog host` / `muxlog srv` / `muxlog fe` — pipe to `grep` for filtering.\n\n### Reagent Bot\n\nAll PRs are auto-reviewed by reagent (Claude Opus). Address P1 findings before\nmerging. P2 findings should also be fixed if feasible.\n\n### Critical Rule\n\n**NEVER kill AgentMux by image name** — use PID only. Multiple instances share\nthe same binary name; killing by name kills ALL of them."
+      "instructions": "## AgentMux Development\n\nContext for working on the AgentMux codebase. Select this Memory bundle when\nopening an agent to work on agentmux.\n\n### Stack\n\n- **agentmux-cef** \u2014 Chromium host, window management, IPC bridge\n- **agentmux-launcher** \u2014 Job Object, single-instance pipe, saga coordinator\n- **agentmux-srv** \u2014 Async Rust backend (SQLite, agent/block management)\n- **agentmux-common** \u2014 Shared types and utilities\n- **Frontend** \u2014 SolidJS + SCSS, built with Vite\n\n### Build Commands\n\n| Command | Purpose |\n|---------|---------|\n| `task dev` | Development (hot reload) |\n| `task package` | Portable ZIP build |\n| `task build:backend` | Rebuild Rust sidecar after changes |\n| `task test` | Run tests |\n\nAfter Rust changes: `task build:backend`, then restart `task dev`.\n\n### Version Management\n\nFeature PRs use changesets \u2014 do NOT bump versions manually:\n```bash\ntask changeset -- patch \"fix(scope): short description\"\n```\n\n### Logs\n\n`muxlog host` / `muxlog srv` / `muxlog fe` \u2014 pipe to `grep` for filtering.\n\n### Reagent Bot\n\nAll PRs are auto-reviewed by reagent (Claude Opus). Address P1 findings before\nmerging. P2 findings should also be fixed if feasible.\n\n### Critical Rule\n\n**NEVER kill AgentMux by image name** \u2014 use PID only. Multiple instances share\nthe same binary name; killing by name kills ALL of them."
     }
   ]
 }
