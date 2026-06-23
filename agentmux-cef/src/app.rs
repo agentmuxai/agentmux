@@ -617,17 +617,13 @@ wrap_app! {
                 // GPU helper and the network service utility process. The
                 // installed app is properly signed and never hits this.
                 //
-                // For `task dev`, disable all sandboxing so subprocesses can
-                // init normally from the unsigned binary. --no-sandbox is the
-                // standard solution for unsigned CEF builds in dev/test
-                // environments; it's safe for a local dev machine. Also add
-                // --disable-gpu so that even if there are residual GPU issues,
-                // the renderer stays alive using software compositing.
+                // --no-sandbox disables all sandbox restrictions so subprocesses
+                // can init normally (Metal GPU, network stack) from the unsigned
+                // binary. Hardware GPU compositing is preserved — no --disable-gpu.
                 #[cfg(target_os = "macos")]
                 if process_type.is_none() && std::env::var("AGENTMUX_DEV").is_ok() {
-                    tracing::info!("macOS dev mode — disabling sandbox + GPU compositing (unsigned binary)");
+                    tracing::info!("macOS dev mode — disabling sandbox for unsigned binary (hardware GPU retained)");
                     cmd.append_switch(Some(&CefString::from("no-sandbox")));
-                    cmd.append_switch(Some(&CefString::from("disable-gpu")));
                 }
 
                 // Prevent empty browser on visibility change (CEF #3638).
