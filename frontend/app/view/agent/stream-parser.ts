@@ -516,6 +516,14 @@ export class ClaudeCodeStreamParser {
             case "web_search":
             case "WebSearch":
                 return params.query || "";
+            case "WebFetch":
+            case "web_fetch":
+                try {
+                    const u = new URL(params.url || "");
+                    return u.host + (u.pathname === "/" ? "" : u.pathname);
+                } catch {
+                    return params.url || "";
+                }
             default:
                 return "";
         }
