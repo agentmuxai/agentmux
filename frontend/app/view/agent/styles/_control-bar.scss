@@ -133,22 +133,17 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
-        // Don't translate. But `animation: none` alone leaves the diagonal
-        // stripe frozen mid-phase at full opacity, which reads as a stuck bar.
-        // (CEF maps reduced-motion to the Windows "Animation effects" toggle /
-        // SPI_GETCLIENTAREAANIMATION, so any machine with it off lands here.)
-        // Show a solid bar and breathe its opacity so "working" still reads,
-        // without positional motion.
+        // Keep the marching ants - this is a small (3px), looping, essential
+        // "agent is working" indicator, not large/parallax motion. Just slow
+        // the march so it's gentle when the OS asks for reduced motion, rather
+        // than swapping to a different effect (an opacity breathe reads as a
+        // glow/"aurora", and `animation: none` freezes the stripe = looks
+        // stuck). CEF maps reduced-motion to the Windows "Animation effects"
+        // toggle (SPI_GETCLIENTAREAANIMATION), so machines with it off land
+        // here. Override only the duration so the same keyframe runs slower.
         .agent-pane-progress-bar--active::before {
-            background: var(--accent-color);
-            will-change: opacity;
-            animation: agent-ant-breathe 1.6s ease-in-out infinite;
+            animation-duration: 1.5s;
         }
-    }
-
-    @keyframes agent-ant-breathe {
-        0%, 100% { opacity: 1; }
-        50%      { opacity: 0.45; }
     }
 
     // === Working Row ===
