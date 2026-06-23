@@ -180,16 +180,28 @@
     border-radius: 50%;
     flex-shrink: 0;
 
-    &--running {
+    &--working {
         background: var(--warning-color, #f5a623);
         animation: swarm-pulse 1.5s ease-in-out infinite;
     }
-    &--done {
-        background: var(--success-color, #4caf50);
+    &--tools {
+        background: #7c6af5;
+        animation: swarm-pulse 1.2s ease-in-out infinite;
+    }
+    &--stopping {
+        background: var(--warning-color, #f5a623);
+        opacity: 0.7;
     }
     &--idle {
         background: var(--secondary-text-color);
-        opacity: 0.5;
+        opacity: 0.4;
+    }
+    &--error {
+        background: var(--error-color, #e05252);
+    }
+    &--disconnected {
+        background: var(--secondary-text-color);
+        opacity: 0.25;
     }
 }
 
