@@ -27,7 +27,8 @@ export interface ActiveSubagent {
 
 export interface AgentTreeNode {
     blockId: string;
-    label: string;
+    agentName: string;
+    activitySummary: string | null;
     agentStatus: "running" | "idle";
     subagents: ActiveSubagent[];
 }
@@ -210,14 +211,16 @@ export class SwarmViewModel implements ViewModel {
         return allBlockIds.map((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
-            const label =
-                (block?.meta?.["term:activity"] as string | undefined)?.trim() ||
-                "Agent pane";
+            const agentName =
+                (block?.meta?.["agentName"] as string | undefined)?.trim() ||
+                "Agent";
+            const activitySummary =
+                (block?.meta?.["term:activity"] as string | undefined)?.trim() || null;
             const agentStatus = statuses.get(blockId) ?? "idle";
             const children = subagents
                 .filter((s) => s.parent_block_id === blockId)
                 .sort((a, b) => b.last_event_at - a.last_event_at);
-            return { blockId, label, agentStatus, subagents: children };
+            return { blockId, agentName, activitySummary, agentStatus, subagents: children };
         });
     }
 
