@@ -35,10 +35,15 @@ export interface UseAgentFailureOptions {
     onLoginAgain: () => void;
     /** Seed this agent from the user's existing global Claude login (§5.5). */
     onUseExistingLogin: () => void;
+    /** Open a real terminal window for browser-based OAuth (Claude v2.1.x). */
+    onLoginViaTerminal: () => void;
     /** Open Trust Center → Accounts. */
     onTrustCenter: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
     onNewSession: () => void;
+    /** True when the provider supports seed-from-global (Claude). Promotes
+     *  "Use existing login" to primary in the auth failure banner. */
+    canSeed?: () => boolean;
 }
 
 export interface UseAgentFailureResult {
@@ -183,11 +188,12 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         if (!f) return null;
         return failureToRow(
             f,
-            { expanded: expanded(), autoRetryIn: autoRetryIn(), retrying: retrying() },
+            { expanded: expanded(), autoRetryIn: autoRetryIn(), retrying: retrying(), canSeed: opts.canSeed?.() },
             {
                 retry: doRetry,
                 loginAgain: opts.onLoginAgain,
                 useExistingLogin: opts.onUseExistingLogin,
+                loginViaTerminal: opts.onLoginViaTerminal,
                 trustCenter: opts.onTrustCenter,
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
