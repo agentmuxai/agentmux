@@ -494,8 +494,8 @@ fn test_poller_status_unconfigured() {
     let handler = get_global_handler();
     let poller = Poller::new(
         PollerConfig {
-            agentmux_url: None,
-            agentmux_token: None,
+            muxbus_url: None,
+            muxbus_token: None,
             poll_interval_secs: 30,
         },
         handler,
@@ -511,8 +511,8 @@ fn test_poller_status_configured() {
     let handler = get_global_handler();
     let poller = Poller::new(
         PollerConfig {
-            agentmux_url: Some("https://example.com".to_string()),
-            agentmux_token: Some("token123".to_string()),
+            muxbus_url: Some("https://example.com".to_string()),
+            muxbus_token: Some("token123".to_string()),
             poll_interval_secs: 30,
         },
         handler,
@@ -528,8 +528,8 @@ fn test_poller_record_poll() {
     let handler = get_global_handler();
     let poller = Poller::new(
         PollerConfig {
-            agentmux_url: Some("https://example.com".to_string()),
-            agentmux_token: Some("token123".to_string()),
+            muxbus_url: Some("https://example.com".to_string()),
+            muxbus_token: Some("token123".to_string()),
             poll_interval_secs: 30,
         },
         handler,
@@ -550,8 +550,8 @@ fn test_poller_reconfigure() {
     let handler = get_global_handler();
     let poller = Poller::new(
         PollerConfig {
-            agentmux_url: None,
-            agentmux_token: None,
+            muxbus_url: None,
+            muxbus_token: None,
             poll_interval_secs: 30,
         },
         handler,

@@ -18,8 +18,8 @@ pub(crate) fn test_state() -> AppState {
     let reactive_handler = backend_reactive::get_global_handler();
     let poller = Arc::new(Poller::new(
         backend_reactive::PollerConfig {
-            agentmux_url: None,
-            agentmux_token: None,
+            muxbus_url: None,
+            muxbus_token: None,
             poll_interval_secs: 30,
         },
         reactive_handler,
