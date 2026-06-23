@@ -150,6 +150,11 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     ).await;
 
                     if timeout_result.is_err() {
+                        // Kill the in-container process so it doesn't linger after
+                        // timeout. Mirrors the host branch's process-group SIGKILL.
+                        // signal_exec_process runs pkill -KILL -f <pattern> inside
+                        // the container; fire-and-forget (non-match is not an error).
+                        cm.signal_exec_process(&container_name, &cmd.command, true).await.ok();
                         return Err(format!("shellexec: timed out after {TIMEOUT_SECS}s"));
                     }
                     timeout_result.unwrap()?;
