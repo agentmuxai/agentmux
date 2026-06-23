@@ -324,21 +324,40 @@ impl Store {
     /// "does the promote-target clone for this template already
     /// exist?" and either reuses it or inserts it.
     pub fn agent_def_get(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, slug, name, icon, provider, description,
-                    working_directory, shell, provider_flags, auto_start,
-                    restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_id, branch_label, updated_at,
-                    user_hidden, container_image, container_volumes, container_name
-             FROM db_agent_definitions
-             WHERE id = ?1",
-        )?;
-        let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
-        match rows.next() {
-            Some(row) => Ok(Some(row?)),
-            None => Ok(None),
+        // Try local SQLite first (conn released before global registry check).
+        let local = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare(
+                "SELECT id, slug, name, icon, provider, description,
+                        working_directory, shell, provider_flags, auto_start,
+                        restart_on_crash, idle_timeout_minutes, created_at,
+                        agent_type, environment, agent_bus_id, is_seeded,
+                        accounts, parent_id, branch_label, updated_at,
+                        user_hidden, container_image, container_volumes, container_name
+                 FROM db_agent_definitions
+                 WHERE id = ?1",
+            )?;
+            let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
+            match rows.next() {
+                Some(row) => Some(row?),
+                None => None,
+            }
+        }; // MutexGuard dropped here.
+        if local.is_some() {
+            return Ok(local);
+        }
+        // Not in local SQLite — check the global cross-channel registry.
+        // agent_def_list() already overlays this; keep agent_def_get consistent.
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(None);
+        };
+        match reg.get(id) {
+            Ok(Some(record)) => Ok(Some(super::def_registry_mirror::record_to_agent_definition(&record))),
+            Ok(None) => Ok(None),
+            Err(e) => {
+                tracing::warn!(agent_id = %id, error = %e, "agent_def_get: global registry lookup failed; returning not-found");
+                Ok(None)
+            }
         }
     }
 
