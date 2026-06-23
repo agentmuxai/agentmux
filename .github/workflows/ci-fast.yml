@@ -19,18 +19,18 @@ concurrency:
 jobs:
   rust-fast:
     name: cargo test (CEF-free crates)
-    runs-on: ubuntu-latest
+    # Windows, NOT ubuntu: AgentMux is Windows-primary (dev + the lifecycle code
+    # these tests cover). The CEF-free crates pass on Windows but have Linux-
+    # portability gaps no CI ever caught — agentmux-launcher's Linux splash pulls
+    # smithay-client-toolkit (needs Wayland build deps) AND a Linux-specific path
+    # test (registry::schema::dotdot_workdir_is_rejected) fails. Test the PRIMARY
+    # platform here; Linux-greening + a Linux leg is a tracked follow-up (spec §6.4).
+    # Still fast — these crates have ZERO cef-dll-sys deps, so no CEF build.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # agentmux-launcher's Linux splash pulls smithay-client-toolkit (Wayland)
-      # transitively; its build.rs needs the Wayland + xkbcommon dev headers,
-      # which a bare ubuntu-latest runner lacks. (The Windows nightly doesn't.)
-      - name: Install Linux windowing dev headers (smithay-client-toolkit build)
-        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev
       - uses: Swatinem/rust-cache@v2
-      # launcher / srv / common have ZERO cef-dll-sys deps, so this skips the
-      # ~200 MB CEF download + CMake/Ninja build entirely (target < ~5 min).
       # --test-threads=1: these crates have accumulated test-isolation flakes
       # (e.g. a process-shared in-memory FileStore raced across sibling tests),
       # so run serially for determinism. Follow-up: fix the isolation + drop this

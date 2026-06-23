@@ -126,6 +126,12 @@ is handled minimally + tracked; the follow-up is a "test-health" pass that remov
    (fails in isolation): a Memory selection change resets auth-ready state. This is a genuine
    regression that shipped because there was no CI. *Follow-up (highest priority of the four):
    triage product-bug-vs-stale-test and fix → un-skip.*
+5. **Rust fast lane runs on `windows-latest`, not ubuntu.** AgentMux is Windows-primary, and the
+   CEF-free crates have Linux-portability gaps no CI ever caught: `agentmux-launcher`'s Linux splash
+   pulls `smithay-client-toolkit` (needs Wayland build deps) AND `registry::schema::dotdot_workdir_is_rejected`
+   fails on Linux (OS-sensitive `..`-path handling). The fast lane tests the primary platform.
+   *Follow-up: green the suite on Linux, then add an ubuntu leg for portability coverage.* (vitest
+   stays on ubuntu — JS is platform-agnostic and it passes there.)
 
 These workarounds keep the gate meaningful (it catches NEW regressions today) without blocking the
 runner on a multi-test cleanup. Track the cleanup as its own effort.
