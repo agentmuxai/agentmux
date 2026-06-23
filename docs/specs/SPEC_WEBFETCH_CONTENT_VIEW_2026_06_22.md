@@ -159,8 +159,7 @@ import "./tool-renderers/WebFetchResult";
 | `frontend/app/view/agent/styles/_document-nodes.scss` | New fetch view styles |
 
 Also fix WebSearch while in the area:
-| `frontend/app/view/agent/components/tool-renderers/search-results.ts` | Add `tryParseJsonArray` to ARRAY_KEYS loop |
-| `frontend/app/view/agent/providers/claude-translator.ts` | Tighten `canApplyStructured` guard |
+| `frontend/app/view/agent/providers/claude-translator.ts` | Add `isTerminalShaped` guard to `canApplyStructured` — prevents terminal-style `structuredResult` from overwriting non-bash tool results (e.g. WebSearch string content) |
 
 ---
 
