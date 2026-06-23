@@ -558,9 +558,6 @@ pub fn clear_floating_redock_hover(
         "floating-redock:hover-state",
         &serde_json::json!({ "target_label": serde_json::Value::Null }),
     );
-    // Phase 4b — clear all ghost states so a stale direction from a
-    // cancelled drag can't pollute the next drop.
-    state.floating_redock_ghost.lock().clear();
     Ok(serde_json::Value::Null)
 }
 
@@ -599,11 +596,13 @@ pub fn set_floating_redock_target(
     Ok(serde_json::Value::Null)
 }
 
-/// Phase 4b — retrieve the last ghost state for a target window.
+/// Phase 4b — consume the ghost state for a target window (read + remove).
 ///
 /// Called by the FLOATER's renderer just before emitting `RedockFloatingPane`
 /// so the saga can emit a directional `SplitHorizontal`/`SplitVertical` action
-/// instead of a generic `InsertNode`.
+/// instead of a generic `InsertNode`. Consuming (rather than just reading) the
+/// entry avoids any stale ghost from a prior drag being applied to a future drop
+/// where no new ghost state was set.
 ///
 /// Args: `{ "window_label": string }`.
 /// Returns: `{ "block_id": string, "dir": number }` or `{}` if no state stored.
@@ -616,8 +615,8 @@ pub fn get_floating_redock_target(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let g = state.floating_redock_ghost.lock();
-    match g.get(&window_label) {
+    let mut g = state.floating_redock_ghost.lock();
+    match g.remove(&window_label) {
         Some(ghost) => Ok(serde_json::json!({
             "block_id": ghost.block_id,
             "dir": ghost.dir,
