@@ -21,12 +21,13 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, trustCenter: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, loginViaTerminal: 0, trustCenter: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
         loginAgain: vi.fn(() => void _calls.loginAgain++),
         useExistingLogin: vi.fn(() => void _calls.useExistingLogin++),
+        loginViaTerminal: vi.fn(() => void _calls.loginViaTerminal++),
         trustCenter: vi.fn(() => void _calls.trustCenter++),
         newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
@@ -63,7 +64,7 @@ describe("failureToRow", () => {
         expect(on._calls.dismiss).toBe(1);
     });
 
-    it("auth → 🔐 sigil with Login Again (re-auth) + Trust Center actions", () => {
+    it("auth (non-Claude) → 🔐 sigil with Login Again primary + Use existing login secondary", () => {
         const on = mkActions();
         const row = failureToRow(mkFailure({ code: "auth", title: "Not authenticated" }), mkView(), on);
         expect(row.sigil).toBe("🔐");
@@ -74,7 +75,6 @@ describe("failureToRow", () => {
         login?.onClick();
         expect(on._calls.loginAgain).toBe(1);
 
-        // Seed-from-global recovery sits alongside Login Again (not primary).
         const useExisting = action(row, "Use existing login");
         expect(useExisting).toBeTruthy();
         expect(useExisting?.primary).toBeFalsy();
@@ -85,6 +85,26 @@ describe("failureToRow", () => {
         expect(trust).toBeTruthy();
         trust?.onClick();
         expect(on._calls.trustCenter).toBe(1);
+    });
+
+    it("auth (Claude / canSeed) → Use existing login is primary, Login via terminal is secondary", () => {
+        const on = mkActions();
+        const row = failureToRow(mkFailure({ code: "auth", title: "Not authenticated" }), mkView({ canSeed: true }), on);
+        expect(row.sigil).toBe("🔐");
+
+        const useExisting = action(row, "Use existing login");
+        expect(useExisting?.primary).toBe(true);
+        useExisting?.onClick();
+        expect(on._calls.useExistingLogin).toBe(1);
+
+        const terminal = action(row, "Login via terminal");
+        expect(terminal).toBeTruthy();
+        expect(terminal?.primary).toBeFalsy();
+        terminal?.onClick();
+        expect(on._calls.loginViaTerminal).toBe(1);
+
+        // "Login Again" (PTY path) must NOT appear for Claude — it hangs headlessly.
+        expect(action(row, "Login Again")).toBeUndefined();
     });
 
     it("usage_limit → Trust Center is the primary action", () => {

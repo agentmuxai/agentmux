@@ -83,6 +83,14 @@ export interface UseAgentControllerStatus {
      * the running agent re-reads its credential per request.
      */
     useGlobalLogin: () => Promise<void>;
+    /**
+     * Open a real terminal window (CREATE_NEW_CONSOLE on Windows) running the
+     * provider's login command so the OS can open the browser — the piped/PTY
+     * paths that `runCliLogin` uses are headless and block the browser. After
+     * spawning, polls `seedGlobalLogin` every 5s for up to 5 minutes; seeds
+     * the isolated dir as soon as credentials appear.
+     */
+    loginViaTerminal: () => Promise<void>;
     cancelLogin: () => void;
 }
 
@@ -227,6 +235,60 @@ export function useAgentControllerStatus(
         }
     };
 
+    // Open a real visible terminal window so the browser OAuth flow works,
+    // then poll for credentials seeding into the isolated dir.
+    const loginViaTerminal = async () => {
+        if (reloginInFlight) return;
+        const prov = opts.provider();
+        if (!prov) {
+            opts.log("auth", "login via terminal: no active provider", "warn");
+            return;
+        }
+        const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
+        if (!cliPath) {
+            opts.log("auth", "login via terminal: CLI not resolved — running launch flow instead", "warn");
+            void startLaunchFlow();
+            return;
+        }
+        const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
+        const authEnv: Record<string, string> = {};
+        if (envMeta && typeof envMeta === "object") {
+            for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
+                if (typeof v === "string") authEnv[k] = v;
+            }
+        }
+        const configDir = prov.authConfigDirEnvVar ? authEnv[prov.authConfigDirEnvVar] : undefined;
+
+        reloginInFlight = true;
+        setLoginWaiting(true);
+        try {
+            await getApi().openLoginTerminal(cliPath, prov.authLoginCommand, authEnv);
+            opts.log("auth", "A terminal window opened — complete the login there, then come back.");
+
+            // Poll silently every 5s for up to 5 minutes; seed on first hit.
+            const POLL_MS = 5_000;
+            const TIMEOUT_MS = 5 * 60 * 1_000;
+            const deadline = performance.now() + TIMEOUT_MS;
+            const silentLog: typeof opts.log = () => {};
+            let seeded = false;
+            while (!seeded && performance.now() < deadline && !loginCancelled) {
+                await new Promise<void>((r) => setTimeout(r, POLL_MS));
+                if (loginCancelled) break;
+                seeded = await seedGlobalLogin(prov.id, silentLog, configDir);
+            }
+            if (seeded) {
+                opts.log("auth", "Login successful — your next message will use the new token.");
+            } else if (!loginCancelled) {
+                opts.log("auth", "No login detected after 5 minutes. Complete the login in the terminal, then click 'Use existing login'.", "warn");
+            }
+        } catch (err: any) {
+            opts.log("auth", `terminal login failed: ${err?.message ?? String(err)}`, "error");
+        } finally {
+            reloginInFlight = false;
+            setLoginWaiting(false);
+        }
+    };
+
     const cancelLogin = () => {
         loginCancelled = true;
         getApi().cancelCliLogin().catch(() => {});
@@ -258,6 +320,7 @@ export function useAgentControllerStatus(
         startLaunchFlow,
         relogin,
         useGlobalLogin,
+        loginViaTerminal,
         cancelLogin,
     };
 }
