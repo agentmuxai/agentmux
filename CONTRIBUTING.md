@@ -103,9 +103,10 @@ Changes here require `task build:backend` followed by restarting `task dev`.
 The portable entry-point process (~325 KB). It owns process and single-instance
 lifecycle so the host and backend can stay focused on the app:
 
-- **Single-instance enforcement** keyed on `(channel, version)` — a second launch
-  of the same instance forwards an "open new window" request to the running host
-  instead of starting a duplicate.
+- **Single-instance enforcement** keyed on `hash(data_dir + version)`
+  (`agentmux-launcher/src/hash.rs`, invariant I1) — a second launch of the same
+  instance forwards an "open new window" request to the running host instead of
+  starting a duplicate.
 - **Job Object (Windows)** — the launcher creates the job that owns the whole
   process tree (`KILL_ON_JOB_CLOSE`), so closing the app cleanly reaps the host
   and backend with no orphans.
