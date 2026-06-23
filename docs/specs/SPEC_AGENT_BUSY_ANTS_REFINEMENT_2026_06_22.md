@@ -96,38 +96,37 @@ rotate(0deg); opacity: 0.7`). #1694 deleted that, leaving only `animation: none`
 Under reduced motion the bar must still clearly communicate "agent is working"
 without positional motion, and must not look frozen mid-pattern.
 
-### Proposed fix
+### Proposed fix (revised)
 
-Replace the bare `animation: none` with a compositor-friendly, non-positional
-"breathe" (opacity only). Opacity pulsing carries no translational motion, is
-GPU-composited, and is an accepted pattern for an essential status indicator
-under `prefers-reduced-motion`. Also drop the frozen diagonal stripe in this
-mode in favor of a solid bar so there is no half-finished pattern.
+> **Update (2026-06-22):** an earlier revision swapped the march for an opacity
+> "breathe" on a solid bar under reduced motion. On a reduced-motion machine
+> that reads as a soft glow / "aurora", not the marching ants the indicator is
+> supposed to show (and it is a different effect from what motion-enabled
+> machines see). Product intent is to **always show the ants**. The breathe is
+> dropped.
+
+Keep the marching ants under reduced motion - this is a small (3px), looping,
+**essential** "agent is working" indicator, not large or parallax motion. Rather
+than change the effect, simply **slow the march** so the motion is gentle when
+the OS requests reduced motion. Override only `animation-duration` so the same
+`agent-ant-march` keyframe runs slower; the striped gradient and translation are
+unchanged.
 
 ```scss
 @media (prefers-reduced-motion: reduce) {
     .agent-pane-progress-bar--active::before {
-        // No translation under reduced motion. Show a solid bar (no frozen
-        // stripe phase) and breathe its opacity so "working" still reads.
-        animation: agent-ant-breathe 1.6s ease-in-out infinite;
-        background: var(--accent-color);
+        animation-duration: 1.5s;   // gentler march; same keyframe
     }
-}
-
-@keyframes agent-ant-breathe {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.45; }
 }
 ```
 
 Notes:
-- The breathe animates the `::before` opacity, leaving the parent's
-  show/hide `opacity` transition (on `.agent-pane-progress-bar`) intact.
-- If product prefers **zero** animation under reduced motion (strict reading),
-  the fallback degrades to a static solid full-opacity bar
-  (`animation: none; background: var(--accent-color);`). Either is acceptable;
-  the breathe is recommended because a perfectly static line is easy to mistake
-  for "hung."
+- This keeps a single effect (marching ants) on every machine, so a
+  reduced-motion box no longer shows a different-looking bar. Motion-enabled
+  machines keep the 0.5s march; reduced-motion machines get a calmer 1.5s march.
+- `animation: none` (freeze) was rejected: it reads as a stuck bar (the original
+  Windows 11 report). The opacity breathe was rejected: it reads as a glow and
+  is a different effect from the ants.
 
 ### Secondary robustness (compositor)
 
@@ -290,5 +289,4 @@ Notes:
 | Add `background: var(--main-bg-color)` to `.agent-pane-progress-bar` | Opaque base, no content bleed (Problem 2) |
 | Gap stops `…, transparent` -> `…, var(--main-bg-color)` | Opaque stripe pattern (Problem 2) |
 | Move `will-change: transform` onto `--active::before` only | Avoid permanent idle layer promotion (Problem 1 robustness) |
-| Replace reduced-motion `animation: none` with `agent-ant-breathe` (opacity) + solid background | Bar no longer freezes when OS reports reduced motion (Problem 1) |
-| Add `@keyframes agent-ant-breathe` | Non-positional reduced-motion fallback |
+| Reduced-motion: keep `agent-ant-march`, override `animation-duration: 1.5s` (slower) | Bar no longer freezes (Problem 1) and shows the same ants effect everywhere, just gentler (no "aurora" glow) |
