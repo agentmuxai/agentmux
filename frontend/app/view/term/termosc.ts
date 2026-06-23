@@ -184,7 +184,7 @@ type Osc16162Command =
     | { command: "I"; data: { inputempty?: boolean } }
     | { command: "R"; data: {} }
     | { command: "E"; data: { [key: string]: string } }
-    | { command: "X"; data: { agentmux_url?: string; agentmux_token?: string } };
+    | { command: "X"; data: { muxbus_url?: string; muxbus_token?: string } };
 
 export function handleOsc16162Command(data: string, blockId: string, loaded: boolean, terminal: Terminal): boolean {
     if (!loaded) {
@@ -299,8 +299,8 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                         method: "POST",
                         headers,
                         body: JSON.stringify({
-                            agentmux_url: cmd.data.agentmux_url || "",
-                            agentmux_token: cmd.data.agentmux_token || "",
+                            muxbus_url: cmd.data.muxbus_url || "",
+                            muxbus_token: cmd.data.muxbus_token || "",
                         }),
                     });
                     if (!response.ok) {
