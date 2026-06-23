@@ -227,6 +227,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // controlling the textarea.
     const [autocompletePrefix, setAutocompletePrefix] = createSignal<string | null>(null);
     const [autocompleteIndex, setAutocompleteIndex] = createSignal(0);
+    const [isBangCmd, setIsBangCmd] = createSignal(false);
 
     const completions = createMemo<SlashCommand[]>(() => {
         const p = autocompletePrefix();
@@ -280,6 +281,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (!textareaRef) return;
         textareaRef.value = `/${cmd.name} `;
         setAutocompletePrefix(null);
+        setIsBangCmd(false);
         textareaRef.focus();
         props.onTyping?.();
     };
@@ -293,6 +295,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (!textareaRef) return;
         textareaRef.value = text;
         textareaRef.setSelectionRange(text.length, text.length);
+        setIsBangCmd(text.startsWith("!"));
         updateAutocomplete();
         props.onTyping?.();
     };
@@ -311,6 +314,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // we measure only the synchronous handler cost.
         markStart("agent-keystroke");
         updateAutocomplete();
+        setIsBangCmd(textareaRef?.value.startsWith("!") ?? false);
         const cb = props.onTyping;
         if (!cb) {
             markEnd("agent-keystroke", "done");
@@ -406,6 +410,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             histDraft = "";
             textareaRef.value = "";
             setAutocompletePrefix(null);
+            setIsBangCmd(false);
             // Scroll the new user message into view. SolidJS flushes the
             // document signal synchronously before this point, so jumpToBottom
             // will include the just-added node in scrollHeight.
@@ -519,6 +524,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (textareaRef.value.trim().length > 0) {
                 e.preventDefault();
                 textareaRef.value = "";
+                setIsBangCmd(false);
                 // Clearing exits history navigation — park the cursor at the
                 // newest message so the next ArrowUp doesn't skip an entry.
                 // (The clear doesn't dispatch `input`, so handleInput's reset
@@ -551,7 +557,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 </Show>
                 <textarea
                     ref={textareaRef}
-                    class="agent-input"
+                    class={`agent-input${isBangCmd() ? " bang-command" : ""}`}
                     placeholder={placeholder()}
                     onKeyDown={handleKeyDown}
                     onInput={handleInput}

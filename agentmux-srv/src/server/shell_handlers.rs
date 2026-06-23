@@ -8,7 +8,7 @@ use crate::backend::rpc_types::{
     COMMAND_SHELL_EXEC, COMMAND_SHELL_STOP,
     CommandShellExecData, ShellExecResult, CommandShellStopData,
 };
-use crate::backend::base::expand_home_dir_safe;
+use crate::backend::base::{expand_home_dir_safe, msys_to_windows_path};
 
 use super::AppState;
 
@@ -68,7 +68,12 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let cwd: Option<std::path::PathBuf> = if cmd.working_dir.is_empty() {
                     None
                 } else {
-                    let expanded = expand_home_dir_safe(&cmd.working_dir);
+                    // Convert MSYS/Git-Bash paths like /c/Users/... to C:\Users\...
+                    // before expansion. Without this, canonicalize() fails on Windows
+                    // with os error 267 (ERROR_DIRECTORY) — same fix applied to the
+                    // persistent shell node in d89c1458.
+                    let native = msys_to_windows_path(&cmd.working_dir);
+                    let expanded = expand_home_dir_safe(&native);
                     // Reject non-absolute paths to prevent relative traversal
                     // (e.g. "../etc") from resolving against the sidecar's cwd.
                     // expand_home_dir_safe turns "~" into an absolute home path;
@@ -102,11 +107,10 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // blocked writing to the other.
                 const MAX_OUTPUT: u64 = 1_000_000;
 
-                let mut proc = if cfg!(windows) {
-                    let mut c = tokio::process::Command::new("cmd");
-                    c.args(["/C", &cmd.command]);
-                    c
-                } else {
+                // Use sh -c on all platforms: agents run in a bash environment
+                // (Git Bash on Windows, sh on Unix) so Unix commands like ls/pwd/grep
+                // work consistently. cmd /C would exit 1 for any non-Windows command.
+                let mut proc = {
                     let mut c = tokio::process::Command::new("sh");
                     c.args(["-c", &cmd.command]);
                     c
