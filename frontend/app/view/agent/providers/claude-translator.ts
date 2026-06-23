@@ -286,10 +286,16 @@ export class ClaudeTranslator implements OutputTranslator {
         const toolResultBlocks = content.filter(
             (b: any) => b && b.type === "tool_result",
         );
+        // Only apply the terminal-style sibling (stdout/stderr/interrupted) when it
+        // is actually terminal-shaped. Web search and other non-bash tools may carry
+        // a structuredResult sibling in a different shape; applying it would discard
+        // the real block.content (e.g. the web_search_result string/array).
+        const isTerminalShaped = (r: unknown): boolean =>
+            Boolean(r && typeof r === "object" && !Array.isArray(r)
+                && ("stdout" in (r as object) || "stderr" in (r as object) || "interrupted" in (r as object)));
         const canApplyStructured =
             toolResultBlocks.length === 1
-            && structuredResult
-            && typeof structuredResult === "object";
+            && isTerminalShaped(structuredResult);
         for (const block of content) {
             if (block.type === "tool_result") {
                 const isError = block.is_error === true;
