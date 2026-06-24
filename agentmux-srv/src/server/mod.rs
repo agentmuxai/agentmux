@@ -18,6 +18,7 @@ mod voice;
 pub(crate) mod wave_obj_bridge;
 mod websocket;
 mod drone_handlers;
+mod messaging_handlers;
 mod muxbus_handlers;
 mod native_memory_handlers;
 
@@ -297,6 +298,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tab/activate", post(handle_tab_activate))
         .route("/api/v1/tab/new", post(handle_tab_new))
         .route("/api/v1/window/focus", post(handle_window_focus))
+        .route("/api/messaging/status", get(messaging_handlers::handle_status))
+        .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
