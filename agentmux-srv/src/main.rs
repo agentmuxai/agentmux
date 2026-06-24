@@ -1390,6 +1390,17 @@ fn seed_sections_from_store(
                 }
                 if let Ok(binds) = src.bundle_identity_bindings(&bundle.id) {
                     for b in &binds {
+                        // Guard against cross-source FK mismatch: accounts and
+                        // bundles may come from different sibling DBs. Only bind
+                        // if the referenced account is already in shared.
+                        if shared.identity_get(&b.account_id).ok().flatten().is_none() {
+                            tracing::warn!(
+                                account_id = %b.account_id,
+                                bundle = %b.identity_id,
+                                "backfill: skipping bundle binding — account not in shared store"
+                            );
+                            continue;
+                        }
                         if let Err(e) = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id) {
                             tracing::warn!(bundle = %b.identity_id, error = %e, "backfill: bundle_identity_bind failed");
                         }
@@ -1435,6 +1446,16 @@ fn seed_sections_from_store(
             wrote = true;
             tracing::info!(count = v.len(), "shared store backfill: agent identity links");
             for link in &v {
+                // Guard against cross-source FK mismatch: only link if the
+                // referenced account is already in shared.
+                if shared.identity_get(&link.account_id).ok().flatten().is_none() {
+                    tracing::warn!(
+                        account_id = %link.account_id,
+                        agent = %link.agent_id,
+                        "backfill: skipping agent identity link — account not in shared store"
+                    );
+                    continue;
+                }
                 if let Err(e) = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider) {
                     tracing::warn!(agent = %link.agent_id, error = %e, "backfill: agent_identity_link failed");
                 }
