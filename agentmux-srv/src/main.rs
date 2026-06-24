@@ -618,22 +618,12 @@ async fn main() {
     // available so writes survive version upgrades; falls back to wstore otherwise.
     let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
 
-    // One-shot backfill: if the shared store was just created (empty), seed it
-    // from ALL known objects.db files (current channel + every other
-    // channel/version/dev tree under ~/.agentmux) so existing users don't lose
-    // identity accounts, bundles, drone definitions, and MuxBus credentials on
-    // the first launch after upgrade. The current channel's wstore is always
-    // tried first; on a version upgrade it is empty but sibling channels carry
-    // the prior data. Best-effort — failure is logged and does not abort startup.
-    if let Some(ref ss) = shared_store {
-        // Derive the agentmux home from the shared store path:
-        // ~/.agentmux/shared/store.db → parent → parent = ~/.agentmux
-        let home_for_backfill = registry::resolve_shared_store_path()
-            .and_then(|p| p.parent().and_then(|p| p.parent().map(|p| p.to_path_buf())));
-        if let Err(e) = backfill_shared_store_once(ss, &wstore, home_for_backfill.as_deref()) {
-            tracing::warn!(error = %e, "shared store: one-shot backfill failed (data not lost — still in objects.db)");
-        }
-    }
+    // NOTE: backfill_shared_store_once is called LATER in startup (after
+    // auto_seed_on_startup and run_default_bundle_migration) so that default
+    // seeds and OAuth-migration writes land in wstore first and are then
+    // captured in store.db in a single pass.
+    let home_for_backfill = registry::resolve_shared_store_path()
+        .and_then(|p| p.parent().and_then(|p| p.parent().map(|p| p.to_path_buf())));
 
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
@@ -873,6 +863,17 @@ async fn main() {
         Some(&broker),
         None,
     );
+
+    // One-shot backfill: seed store.db from every objects.db found under
+    // ~/.agentmux. Runs AFTER auto_seed_on_startup and
+    // run_default_bundle_migration so their wstore writes (default memory
+    // bundles, Default identity bundle) are captured in the same pass.
+    // Best-effort — failure is logged and does not abort startup.
+    if let Some(ref ss) = shared_store {
+        if let Err(e) = backfill_shared_store_once(ss, &wstore, home_for_backfill.as_deref()) {
+            tracing::warn!(error = %e, "shared store: one-shot backfill failed (data not lost — still in objects.db)");
+        }
+    }
 
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
@@ -1390,16 +1391,24 @@ fn seed_sections_from_store(
                 }
                 if let Ok(binds) = src.bundle_identity_bindings(&bundle.id) {
                     for b in &binds {
-                        // Guard against cross-source FK mismatch: accounts and
-                        // bundles may come from different sibling DBs. Only bind
-                        // if the referenced account is already in shared.
+                        // Guard against cross-source FK mismatch: if the
+                        // account came from a different sibling DB it may not
+                        // be in shared yet. Seed it from the current source
+                        // so the FK is satisfied; skip if truly absent.
                         if shared.identity_get(&b.account_id).ok().flatten().is_none() {
-                            tracing::warn!(
-                                account_id = %b.account_id,
-                                bundle = %b.identity_id,
-                                "backfill: skipping bundle binding — account not in shared store"
-                            );
-                            continue;
+                            match src.identity_get(&b.account_id) {
+                                Ok(Some(acct)) => {
+                                    let _ = shared.identity_upsert(&acct);
+                                }
+                                _ => {
+                                    tracing::warn!(
+                                        account_id = %b.account_id,
+                                        bundle = %b.identity_id,
+                                        "backfill: skipping bundle binding — account missing from source"
+                                    );
+                                    continue;
+                                }
+                            }
                         }
                         if let Err(e) = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id) {
                             tracing::warn!(bundle = %b.identity_id, error = %e, "backfill: bundle_identity_bind failed");
@@ -1446,15 +1455,22 @@ fn seed_sections_from_store(
             wrote = true;
             tracing::info!(count = v.len(), "shared store backfill: agent identity links");
             for link in &v {
-                // Guard against cross-source FK mismatch: only link if the
-                // referenced account is already in shared.
+                // Guard against cross-source FK mismatch: seed the account
+                // from the current source if it's missing from shared.
                 if shared.identity_get(&link.account_id).ok().flatten().is_none() {
-                    tracing::warn!(
-                        account_id = %link.account_id,
-                        agent = %link.agent_id,
-                        "backfill: skipping agent identity link — account not in shared store"
-                    );
-                    continue;
+                    match src.identity_get(&link.account_id) {
+                        Ok(Some(acct)) => {
+                            let _ = shared.identity_upsert(&acct);
+                        }
+                        _ => {
+                            tracing::warn!(
+                                account_id = %link.account_id,
+                                agent = %link.agent_id,
+                                "backfill: skipping agent identity link — account missing from source"
+                            );
+                            continue;
+                        }
+                    }
                 }
                 if let Err(e) = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider) {
                     tracing::warn!(agent = %link.agent_id, error = %e, "backfill: agent_identity_link failed");
