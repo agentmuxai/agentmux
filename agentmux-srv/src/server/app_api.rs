@@ -540,6 +540,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     let container_manager = state.container_manager.clone();
 
@@ -547,6 +548,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
         COMMAND_AGENT_SEND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store.clone();
             let broker = broker.clone();
             let container_manager = container_manager.clone();
             Box::pin(async move {
@@ -588,6 +590,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // (PR D — spec §4.4).
                 env_vars = crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
+                    id_store.clone(),
                     Some(broker.clone()),
                     cmd.block_id.clone(),
                     env_vars,

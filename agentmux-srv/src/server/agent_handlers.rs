@@ -3147,6 +3147,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // when it flips a token's status valid→expired etc.
                 env_vars = crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
+                    id_store.clone(),
                     Some(broker.clone()),
                     cmd.blockid.clone(),
                     env_vars,
