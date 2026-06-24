@@ -22,18 +22,35 @@ type SingleLinePlotProps = {
     intervalSecs: number;
 };
 
+// Module-level counter so each SingleLinePlot instance gets a unique gradient
+// id even if two instances with the same blockId+yval briefly coexist in the
+// DOM during dock/float transitions. Document-scoped SVG ids conflict across
+// SVGs; a per-instance suffix prevents the wrong gradient being resolved.
+let _gradientSeq = 0;
+
 function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
     let containerRef!: HTMLDivElement;
     const [plotWidth, setPlotWidth] = createSignal(0);
     const [plotHeight, setPlotHeight] = createSignal(0);
+    // Stable unique id for this component instance — set once, never changes.
+    const gradientId = `gradient-${props.blockId}-${props.yval}-${++_gradientSeq}`;
 
     onMount(() => {
         if (!containerRef) return;
-        // Debounce so dock/undock animations don't trigger a re-render on every
-        // intermediate frame, which caused overlapping SVGs sharing the same
-        // gradient id to produce a sliding line artifact across the chart.
         let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+        let hasFirstSize = false;
         const rszObs = new ResizeObserver((entries) => {
+            if (!hasFirstSize) {
+                // First event after mount: apply immediately for instant first paint.
+                // Subsequent events during dock/undock animations are debounced to
+                // prevent overlapping SVGs from sharing the same gradient id.
+                hasFirstSize = true;
+                for (const entry of entries) {
+                    setPlotWidth(entry.contentRect.width);
+                    setPlotHeight(entry.contentRect.height);
+                }
+                return;
+            }
             if (resizeTimer) clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
                 for (const entry of entries) {
@@ -69,7 +86,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
 
         marks.push(
             () => htl.svg`<defs>
-      <linearGradient id="gradient-${blockId}-${yval}" gradientTransform="rotate(90)">
+      <linearGradient id="${gradientId}" gradientTransform="rotate(90)">
         <stop offset="0%" stop-color="${color}" stop-opacity="0.7" />
         <stop offset="100%" stop-color="${color}" stop-opacity="0" />
       </linearGradient>
@@ -87,7 +104,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
 
         marks.push(
             Plot.areaY(plotData, {
-                fill: `url(#gradient-${blockId}-${yval})`,
+                fill: `url(#${gradientId})`,
                 x: "ts",
                 y: yval,
             })
