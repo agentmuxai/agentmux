@@ -619,11 +619,18 @@ async fn main() {
     let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
 
     // One-shot backfill: if the shared store was just created (empty), seed it
-    // from wstore so existing users don't lose identity accounts, bundles, drone
-    // definitions, and MuxBus credentials on the first launch after upgrade.
-    // Best-effort — failure is logged and does not abort startup.
+    // from ALL known objects.db files (current channel + every other
+    // channel/version/dev tree under ~/.agentmux) so existing users don't lose
+    // identity accounts, bundles, drone definitions, and MuxBus credentials on
+    // the first launch after upgrade. The current channel's wstore is always
+    // tried first; on a version upgrade it is empty but sibling channels carry
+    // the prior data. Best-effort — failure is logged and does not abort startup.
     if let Some(ref ss) = shared_store {
-        if let Err(e) = backfill_shared_store_once(ss, &wstore) {
+        // Derive the agentmux home from the shared store path:
+        // ~/.agentmux/shared/store.db → parent → parent = ~/.agentmux
+        let home_for_backfill = registry::resolve_shared_store_path()
+            .and_then(|p| p.parent().and_then(|p| p.parent().map(|p| p.to_path_buf())));
+        if let Err(e) = backfill_shared_store_once(ss, &wstore, home_for_backfill.as_deref()) {
             tracing::warn!(error = %e, "shared store: one-shot backfill failed (data not lost — still in objects.db)");
         }
     }
@@ -1326,51 +1333,65 @@ async fn main() {
     }
 }
 
-/// Seed a freshly-created `shared_store` (store.db) from `wstore` (objects.db) so
-/// existing users don't lose data on the first launch after upgrade.
-///
-/// Each table section is self-contained: it checks whether the shared store already
-/// has rows for that section and skips if so. This means a user with no identity
-/// accounts still gets their presets/drones/muxbus backfilled, and a user who added
-/// a new drone after the initial backfill won't see it overwritten.
-fn backfill_shared_store_once(shared: &Store, wstore: &Store) -> Result<(), String> {
+/// Tracks which backfill sections have already been seeded into the shared store.
+/// Each section is independent; once seeded it is never overwritten.
+#[derive(Default)]
+struct BackfillSections {
+    accts: bool,
+    id_bundles: bool,
+    mem_bundles: bool,
+    drones: bool,
+    links: bool,
+    muxbus: bool,
+}
+
+impl BackfillSections {
+    fn all_done(&self) -> bool {
+        self.accts && self.id_bundles && self.mem_bundles && self.drones && self.links && self.muxbus
+    }
+}
+
+/// Attempt to seed un-seeded sections of `shared` from `src`. Only sections
+/// that are marked `false` in `sections` are attempted; those that find data
+/// flip their flag to `true`. Returns whether any write occurred.
+fn seed_sections_from_store(
+    src: &Store,
+    shared: &Store,
+    sections: &mut BackfillSections,
+) -> bool {
     use crate::drone::storage::DroneStore;
+    let mut wrote = false;
 
-    let mut any = false;
-
-    // 1. Identity accounts — skip section if shared already has any.
-    let shared_accts = shared.identity_list(None).map_err(|e| e.to_string())?;
-    if shared_accts.is_empty() {
-        let src = wstore.identity_list(None).map_err(|e| e.to_string())?;
-        if !src.is_empty() {
-            any = true;
-            tracing::info!(count = src.len(), "shared store backfill: identity accounts");
-            for acct in &src {
+    if !sections.accts {
+        let v = src.identity_list(None).unwrap_or_default();
+        if !v.is_empty() {
+            sections.accts = true;
+            wrote = true;
+            tracing::info!(count = v.len(), "shared store backfill: identity accounts");
+            for acct in &v {
                 if let Err(e) = shared.identity_upsert(acct) {
-                    tracing::warn!(id = %acct.id, error = %e, "shared store backfill: identity_upsert failed");
+                    tracing::warn!(id = %acct.id, error = %e, "backfill: identity_upsert failed");
                 }
             }
         }
     }
 
-    // 2. Identity bundles (non-blank) + their bindings — skip section if shared
-    //    already has any non-blank bundle.
-    let shared_id_bundles = shared.bundle_identity_list().map_err(|e| e.to_string())?;
-    if shared_id_bundles.iter().all(|b| b.id == "blank") {
-        let src = wstore.bundle_identity_list().map_err(|e| e.to_string())?;
-        let non_blank: Vec<_> = src.iter().filter(|b| b.id != "blank").collect();
+    if !sections.id_bundles {
+        let all = src.bundle_identity_list().unwrap_or_default();
+        let non_blank: Vec<_> = all.iter().filter(|b| b.id != "blank").collect();
         if !non_blank.is_empty() {
-            any = true;
+            sections.id_bundles = true;
+            wrote = true;
             tracing::info!(count = non_blank.len(), "shared store backfill: identity bundles");
             for bundle in &non_blank {
                 if let Err(e) = shared.bundle_identity_upsert(bundle) {
-                    tracing::warn!(id = %bundle.id, error = %e, "shared store backfill: bundle_identity_upsert failed");
+                    tracing::warn!(id = %bundle.id, error = %e, "backfill: bundle_identity_upsert failed");
                     continue;
                 }
-                if let Ok(bindings) = wstore.bundle_identity_bindings(&bundle.id) {
-                    for b in &bindings {
+                if let Ok(binds) = src.bundle_identity_bindings(&bundle.id) {
+                    for b in &binds {
                         if let Err(e) = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id) {
-                            tracing::warn!(bundle = %b.identity_id, error = %e, "shared store backfill: bundle_identity_bind failed");
+                            tracing::warn!(bundle = %b.identity_id, error = %e, "backfill: bundle_identity_bind failed");
                         }
                     }
                 }
@@ -1378,66 +1399,121 @@ fn backfill_shared_store_once(shared: &Store, wstore: &Store) -> Result<(), Stri
         }
     }
 
-    // 3. Memory bundles — all non-blank rows (both global and per-agent presets).
-    //    Skip section if shared already has any non-blank bundle.
-    let shared_mem = shared.bundle_memory_list().map_err(|e| e.to_string())?;
-    if shared_mem.iter().all(|b| b.id == "blank") {
-        let src = wstore.bundle_memory_list().map_err(|e| e.to_string())?;
-        let non_blank: Vec<_> = src.iter().filter(|b| b.id != "blank").collect();
+    if !sections.mem_bundles {
+        let all = src.bundle_memory_list().unwrap_or_default();
+        let non_blank: Vec<_> = all.iter().filter(|b| b.id != "blank").collect();
         if !non_blank.is_empty() {
-            any = true;
+            sections.mem_bundles = true;
+            wrote = true;
             tracing::info!(count = non_blank.len(), "shared store backfill: memory bundles");
             for mem in &non_blank {
                 if let Err(e) = shared.bundle_memory_upsert(mem) {
-                    tracing::warn!(id = %mem.id, error = %e, "shared store backfill: bundle_memory_upsert failed");
+                    tracing::warn!(id = %mem.id, error = %e, "backfill: bundle_memory_upsert failed");
                 }
             }
         }
     }
 
-    // 4. Drone definitions — skip section if shared already has any.
-    let shared_drones = shared.drone_list().map_err(|e| e.to_string())?;
-    if shared_drones.is_empty() {
-        let src = wstore.drone_list().map_err(|e| e.to_string())?;
-        if !src.is_empty() {
-            any = true;
-            tracing::info!(count = src.len(), "shared store backfill: drone definitions");
-            for drone in &src {
+    if !sections.drones {
+        let v = src.drone_list().unwrap_or_default();
+        if !v.is_empty() {
+            sections.drones = true;
+            wrote = true;
+            tracing::info!(count = v.len(), "shared store backfill: drone definitions");
+            for drone in &v {
                 if let Err(e) = shared.drone_upsert(drone) {
-                    tracing::warn!(id = %drone.id, error = %e, "shared store backfill: drone_upsert failed");
+                    tracing::warn!(id = %drone.id, error = %e, "backfill: drone_upsert failed");
                 }
             }
         }
     }
 
-    // 5. Agent identity links — skip section if shared already has any.
-    let shared_links = shared.agent_identity_list_all().map_err(|e| e.to_string())?;
-    if shared_links.is_empty() {
-        let src = wstore.agent_identity_list_all().map_err(|e| e.to_string())?;
-        if !src.is_empty() {
-            any = true;
-            tracing::info!(count = src.len(), "shared store backfill: agent identity links");
-            for link in &src {
+    if !sections.links {
+        let v = src.agent_identity_list_all().unwrap_or_default();
+        if !v.is_empty() {
+            sections.links = true;
+            wrote = true;
+            tracing::info!(count = v.len(), "shared store backfill: agent identity links");
+            for link in &v {
                 if let Err(e) = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider) {
-                    tracing::warn!(agent = %link.agent_id, error = %e, "shared store backfill: agent_identity_link failed");
+                    tracing::warn!(agent = %link.agent_id, error = %e, "backfill: agent_identity_link failed");
                 }
             }
         }
     }
 
-    // 6. MuxBus credentials — skip if shared already has creds.
-    if shared.muxbus_load().ok().flatten().is_none() {
-        if let Ok(Some(creds)) = wstore.muxbus_load() {
-            any = true;
+    if !sections.muxbus {
+        if let Ok(Some(creds)) = src.muxbus_load() {
+            sections.muxbus = true;
+            wrote = true;
             tracing::info!("shared store backfill: muxbus credentials");
             if let Err(e) = shared.muxbus_save(&creds) {
-                tracing::warn!(error = %e, "shared store backfill: muxbus_save failed");
+                tracing::warn!(error = %e, "backfill: muxbus_save failed");
+            }
+        }
+    }
+
+    wrote
+}
+
+/// Seed a freshly-created `shared` store (store.db) from every available
+/// `objects.db` source so existing users don't lose data on first launch after
+/// an upgrade.
+///
+/// On a version upgrade the current channel's `wstore` is a fresh, empty DB;
+/// the user's identity accounts, presets, drones, and MuxBus credentials live
+/// in the prior version's objects.db. We scan ALL channel + dev `objects.db`
+/// files under `home` (same walk used by the named-agent registry migration)
+/// and merge until every section is seeded.
+///
+/// Each section is independent: once it has data in `shared` it is never
+/// overwritten. Order: wstore (cheapest, no open needed) then siblings newest-
+/// first by file-system order. `Store::open` on a sibling runs additive-only
+/// migrations (CREATE TABLE IF NOT EXISTS) — safe on old channel DBs.
+fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std::path::Path>) -> Result<(), String> {
+    // Init sections from what shared already has so we never overwrite.
+    use crate::drone::storage::DroneStore;
+    let mut sections = BackfillSections {
+        accts:      !shared.identity_list(None).map_err(|e| e.to_string())?.is_empty(),
+        id_bundles: !shared.bundle_identity_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank"),
+        mem_bundles:!shared.bundle_memory_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank"),
+        drones:     !shared.drone_list().map_err(|e| e.to_string())?.is_empty(),
+        links:      !shared.agent_identity_list_all().map_err(|e| e.to_string())?.is_empty(),
+        muxbus:     shared.muxbus_load().ok().flatten().is_some(),
+    };
+
+    if sections.all_done() {
+        return Ok(());
+    }
+
+    let mut any = false;
+
+    // Try current wstore first (already open, no overhead).
+    any |= seed_sections_from_store(wstore, shared, &mut sections);
+
+    // If still incomplete, walk all sibling objects.db files under home.
+    // This handles the upgrade case: the new version's wstore is empty, but
+    // the prior version's channel DB holds the user's data.
+    if !sections.all_done() {
+        if let Some(home) = home {
+            for path in crate::registry::enumerate_objects_dbs(home) {
+                if sections.all_done() {
+                    break;
+                }
+                match Store::open(&path) {
+                    Ok(sib) => {
+                        any |= seed_sections_from_store(&sib, shared, &mut sections);
+                    }
+                    Err(e) => {
+                        tracing::debug!(path = %path.display(), error = %e, "backfill: skip sibling");
+                    }
+                }
             }
         }
     }
 
     if any {
-        tracing::info!("shared store: one-shot backfill from objects.db complete");
+        tracing::info!("shared store: one-shot backfill complete");
     }
     Ok(())
 }
