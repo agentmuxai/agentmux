@@ -128,9 +128,9 @@ const MuxBusPopover = (props: MuxBusPopoverProps): JSX.Element => {
     const style = (): string => {
         const r = props.anchorRect;
         if (!r) return "";
-        // Anchor bottom-right of chip → top-right of popover.
         const right = window.innerWidth - r.right;
-        return `right: ${right}px; bottom: calc(100% + 4px);`;
+        const bottom = window.innerHeight - r.top;
+        return `position: fixed; right: ${right}px; bottom: ${bottom}px;`;
     };
 
     return (
