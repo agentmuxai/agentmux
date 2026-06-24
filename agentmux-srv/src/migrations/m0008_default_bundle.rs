@@ -9,10 +9,9 @@ pub struct M0008DefaultBundle;
 
 impl Migration for M0008DefaultBundle {
     fn id(&self) -> &'static str { "0008_default_bundle" }
-    // Global scope: tracked in shared store so it runs even on fresh install
-    // before objects.db exists (migrate runs before the daemon creates it).
-    // Creates the channel store if absent — seeds ambient OAuth creds before
-    // the daemon's first boot.
+    // Global scope: tracked in shared store so it runs on fresh install.
+    // The runner creates objects.db before migrations execute; this migration
+    // also creates it defensively if somehow absent.
     fn scope(&self) -> MigrationScope { MigrationScope::Global }
     fn description(&self) -> &'static str { "Seed Default OAuth identity bundle from ambient credentials" }
 
