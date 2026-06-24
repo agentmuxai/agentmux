@@ -591,7 +591,7 @@ pub fn inject_identity_env_with_broker(
                         let mut updated = account.clone();
                         updated.status = new_status.to_string();
                         updated.updated_at = now_ms;
-                        match wstore.identity_upsert(&updated) {
+                        match id_store.identity_upsert(&updated) {
                             Ok(()) => {
                                 tracing::info!(
                                     target: "identity",

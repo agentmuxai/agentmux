@@ -1410,7 +1410,22 @@ fn backfill_shared_store_once(shared: &Store, wstore: &Store) -> Result<(), Stri
         }
     }
 
-    // 5. MuxBus credentials — skip if shared already has creds.
+    // 5. Agent identity links — skip section if shared already has any.
+    let shared_links = shared.agent_identity_list_all().map_err(|e| e.to_string())?;
+    if shared_links.is_empty() {
+        let src = wstore.agent_identity_list_all().map_err(|e| e.to_string())?;
+        if !src.is_empty() {
+            any = true;
+            tracing::info!(count = src.len(), "shared store backfill: agent identity links");
+            for link in &src {
+                if let Err(e) = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider) {
+                    tracing::warn!(agent = %link.agent_id, error = %e, "shared store backfill: agent_identity_link failed");
+                }
+            }
+        }
+    }
+
+    // 6. MuxBus credentials — skip if shared already has creds.
     if shared.muxbus_load().ok().flatten().is_none() {
         if let Ok(Some(creds)) = wstore.muxbus_load() {
             any = true;
