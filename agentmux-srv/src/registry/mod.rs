@@ -30,7 +30,8 @@ mod store;
 mod tests;
 
 pub use migrate::{
-    backfill_source_bases_once, migrate_from_sqlite_once, MigrateStats, SourceBackfillStats,
+    backfill_source_bases_once, enumerate_objects_dbs, migrate_from_sqlite_once, MigrateStats,
+    SourceBackfillStats,
 };
 pub use paths::{
     resolve_shared_definitions_dir, resolve_shared_registry_dir, resolve_shared_store_path,
