@@ -3,6 +3,7 @@
 
 import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent } from "./swarm-model";
+import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -130,9 +131,11 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
 type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected";
 
-function phaseToDisplayStatus(blockId: string, fallback: "running" | "idle"): AgentDisplayStatus {
+function phaseToDisplayStatus(blockId: string, _fallback: "running" | "idle"): AgentDisplayStatus {
     const phaseAccessor = getBlockTurnPhase(blockId);
-    if (!phaseAccessor) return fallback === "running" ? "working" : "idle";
+    // shellprocstatus "running" only means the process is alive, not that it's
+    // doing LLM work. Without a registered TurnPhase, default to idle.
+    if (!phaseAccessor) return "idle";
     const phase = phaseAccessor();
     switch (phase.kind) {
         case "Submitting":    return "working";
@@ -168,7 +171,9 @@ function AgentRow({
                 onClick={() => node.blockId && void focusBlock(node.blockId)}
                 title={node.agentName}
             >
-                <span class="swarm-agent-icon">⬡</span>
+                <span class="swarm-agent-icon">
+                    <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
+                </span>
                 <span class="swarm-agent-label">{node.agentName}</span>
                 <AgentStatusChip status={displayStatus()} />
             </div>
