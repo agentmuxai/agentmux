@@ -188,17 +188,21 @@ export function seedKnownEntriesFromSnapshot(
     entries: ReadonlyArray<WindowEntry>,
 ): void {
     dispatch({ type: "ApplySeed", entries });
-    // Seed floating panes from the same snapshot (same dev-mode guard applies
-    // at the call site — only called when !launcherEventsActive()).
-    const nextFloating = new Map<string, FloatingPaneEntry>();
+    // Seed floating panes from the same snapshot. Mirrors ApplySeed semantics:
+    // additive only — skip labels already in floatingPanes so a window_opened /
+    // backend_window_id_registered event that raced the snapshot RPC is not
+    // clobbered with a stale null windowId (same race as codex P1 #603).
+    // Called unconditionally at boot; dev-mode guard lives at the call site.
+    let changed = false;
+    const next = new Map(floatingPanes);
     for (const e of entries) {
-        if (isFloatingPaneLabel(e.label)) {
-            nextFloating.set(e.label, { label: e.label, windowId: e.windowId });
+        if (isFloatingPaneLabel(e.label) && !next.has(e.label)) {
+            next.set(e.label, { label: e.label, windowId: e.windowId });
+            changed = true;
         }
     }
-    if (nextFloating.size !== floatingPanes.size ||
-        [...nextFloating.keys()].some((k) => !floatingPanes.has(k))) {
-        floatingPanes = nextFloating;
+    if (changed) {
+        floatingPanes = next;
         projectFloating();
     }
 }

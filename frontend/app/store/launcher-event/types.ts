@@ -147,7 +147,13 @@ export function isInstanceLabel(label: string): boolean {
     return label.startsWith("window-");
 }
 
-/** True for floating-pane subordinate windows (`"floating-{uuid}"` label scheme). */
+/**
+ * True for floating-pane subordinate windows (`"floating-{uuid}"` label scheme).
+ * Explicitly excludes `"floating-pool-*"` (warm pane-pool windows) — pool labels
+ * share the prefix but are never reported to the launcher until promoted, and a
+ * promoted pool floater keeps its pool label, not the user-facing floater label.
+ */
 export function isFloatingPaneLabel(label: string): boolean {
+    if (label.startsWith("floating-pool-")) return false;
     return label.startsWith("floating-");
 }
