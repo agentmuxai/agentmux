@@ -463,7 +463,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //    missing and overwrites whatever's there. Same-
                 //    name same-hour launches will share a workdir;
                 //    proper allocation is tracked as a follow-up.
-                write_agent_config_files(&wstore, &agent, routing_id, &work_dir)?;
+                write_agent_config_files(&wstore, &app_state.id_store, &agent, routing_id, &work_dir)?;
 
                 // 9. Register controller (resync)
                 let block_for_resync = wstore.must_get::<Block>(&block_id)
@@ -2564,6 +2564,7 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.
 fn write_agent_config_files(
     wstore: &Store,
+    id_store: &Store,
     agent: &crate::backend::storage::AgentDefinition,
     agent_slug: &str,
     work_dir: &str,
@@ -2612,7 +2613,7 @@ fn write_agent_config_files(
     // section carries a `# [Workspace] <name>` heading (see
     // format_global_brain_block) so the rules are attributable to the
     // workspace and ordered per the Brain tab's sort_order.
-    let global_bundles = wstore.bundle_memory_list_global().unwrap_or_default();
+    let global_bundles = id_store.bundle_memory_list_global().unwrap_or_default();
     let global_block = crate::backend::storage::format_global_brain_block(&global_bundles);
     if !global_block.is_empty() {
         content_map

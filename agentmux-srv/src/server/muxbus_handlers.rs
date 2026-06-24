@@ -48,7 +48,7 @@ struct MuxBusStatusResp {
 
 pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // muxbus.login — PKCE browser flow, returns when browser login completes
-    let wstore_login = state.wstore.clone();
+    let wstore_login = state.id_store.clone();
     let http_client_login = state.http_client.clone();
     engine.register_handler(
         COMMAND_MUXBUS_LOGIN,
@@ -96,7 +96,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // muxbus.status — return current credential state
-    let wstore_status = state.wstore.clone();
+    let wstore_status = state.id_store.clone();
     engine.register_handler(
         COMMAND_MUXBUS_STATUS,
         Box::new(move |_data, _ctx| {
@@ -131,7 +131,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // muxbus.disconnect — clear credentials
-    let wstore_disconnect = state.wstore.clone();
+    let wstore_disconnect = state.id_store.clone();
     engine.register_handler(
         COMMAND_MUXBUS_DISCONNECT,
         Box::new(move |_data, _ctx| {

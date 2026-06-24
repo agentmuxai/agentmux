@@ -585,6 +585,39 @@ async fn main() {
                 None
             }
         };
+    // GLOBAL shared store — identity accounts, memory bundles, drone
+    // definitions, MuxBus credentials. Best-effort: disabled when the shared
+    // root can't be resolved. Falls back to wstore so behavior is unchanged
+    // from today. See SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md.
+    let shared_store: Option<Arc<Store>> = match registry::resolve_shared_store_path() {
+        Some(path) => {
+            // Ensure the parent dir (shared/) exists before opening.
+            let parent = path.parent().unwrap_or_else(|| path.as_path());
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!(path = %path.display(), error = %e, "shared store: failed to create dir — disabled");
+                None
+            } else {
+                match Store::open_shared(&path) {
+                    Ok(s) => {
+                        tracing::info!(path = %path.display(), "shared store: attached");
+                        Some(Arc::new(s))
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %path.display(), error = %e, "shared store: failed to open — identity/memory/drone/muxbus stay per-channel");
+                        None
+                    }
+                }
+            }
+        }
+        None => {
+            tracing::warn!("shared store: could not resolve shared store path — disabled");
+            None
+        }
+    };
+    // id_store: routes identity/memory/drone/muxbus ops to the shared store when
+    // available so writes survive version upgrades; falls back to wstore otherwise.
+    let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
+
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
     // the store through `resync_controller` and every controller constructor.
@@ -1051,6 +1084,8 @@ async fn main() {
         version: version.clone(),
         app_path: config.app_path.clone(),
         wstore,
+        shared_store,
+        id_store,
         filestore,
         global_transcript_store,
         event_bus,
