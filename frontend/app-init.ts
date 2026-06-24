@@ -611,6 +611,10 @@ export async function initApp() {
                     const label = await getApi().getWindowLabel();
                     getApi().sendLog(`Initializing as new window: ${label}`);
                     await initHostNewWindow();
+                    const coldInitialView = new URL(window.location.href).searchParams.get("initialView");
+                    if (coldInitialView) {
+                        await TabRpcClient.rpcCall("pane.open", { view: coldInitialView, floating: false });
+                    }
                 }
             }
         } catch (error) {

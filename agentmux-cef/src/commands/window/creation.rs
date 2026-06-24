@@ -267,7 +267,7 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     }
 
     // Cold path — spin up a fresh CEF window (~2.5–3.5 s).
-    open_window_with_kind(state, crate::state::WindowKind::FullInstance, None)
+    open_window_with_kind(state, crate::state::WindowKind::FullInstance, None, initial_view.as_deref())
 }
 
 /// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
@@ -312,6 +312,7 @@ pub fn open_subwindow(
         state,
         crate::state::WindowKind::Subwindow,
         Some(parent_instance_id),
+        None,
     )
 }
 
@@ -319,6 +320,7 @@ fn open_window_with_kind(
     state: &Arc<AppState>,
     kind: crate::state::WindowKind,
     parent_instance_id: Option<String>,
+    initial_view: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
     // See `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` and the smoke retro
@@ -342,9 +344,13 @@ fn open_window_with_kind(
     let url = match resolve_frontend_base_url(ipc_port) {
         Ok(base_url) => {
             let separator = if base_url.contains('?') { "&" } else { "?" };
+            let view_param = initial_view
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("&initialView={}", v))
+                .unwrap_or_default();
             format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
-                base_url, separator, ipc_port, ipc_token, label
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}{}",
+                base_url, separator, ipc_port, ipc_token, label, view_param
             )
         }
         Err(e) => {
