@@ -234,7 +234,20 @@ sessions and agent state are in <code>~/.agentmux/</code> and are unaffected.</p
 /// second `agentmux.exe` launch). Independent top-level window, own taskbar
 /// entry, independent lifecycle. See
 /// `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md`.
-pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let initial_view = args
+        .get("initial_view")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    // Opaque JSON string carrying the full blockdef.meta; threaded through pool
+    // event payloads and cold-path URL so the new window can call pane.open
+    // with the complete meta rather than re-deriving it from the view name.
+    let initial_meta = args
+        .get("initial_meta")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     // H.7 invariant — also enforced inside open_window_with_kind (cold path).
     if state.any_browser_pane_closing() {
         tracing::warn!(
@@ -251,7 +264,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
     if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
-        state, pos_x, pos_y, win_w, win_h,
+        state, pos_x, pos_y, win_w, win_h, initial_view, initial_meta.clone(),
     ) {
         tracing::info!(
             target: "pool:new-window",
@@ -262,7 +275,13 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     }
 
     // Cold path — spin up a fresh CEF window (~2.5–3.5 s).
-    open_window_with_kind(state, crate::state::WindowKind::FullInstance, None)
+    open_window_with_kind(
+        state,
+        crate::state::WindowKind::FullInstance,
+        None,
+        initial_view.as_deref(),
+        initial_meta.as_deref(),
+    )
 }
 
 /// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
@@ -307,6 +326,8 @@ pub fn open_subwindow(
         state,
         crate::state::WindowKind::Subwindow,
         Some(parent_instance_id),
+        None,
+        None,
     )
 }
 
@@ -314,6 +335,8 @@ fn open_window_with_kind(
     state: &Arc<AppState>,
     kind: crate::state::WindowKind,
     parent_instance_id: Option<String>,
+    initial_view: Option<&str>,
+    initial_meta: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
     // See `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` and the smoke retro
@@ -337,9 +360,17 @@ fn open_window_with_kind(
     let url = match resolve_frontend_base_url(ipc_port) {
         Ok(base_url) => {
             let separator = if base_url.contains('?') { "&" } else { "?" };
+            let view_param = initial_view
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("&initialView={}", v))
+                .unwrap_or_default();
+            let meta_param = initial_meta
+                .filter(|m| !m.is_empty())
+                .map(|m| format!("&initialMeta={}", percent_encode(m)))
+                .unwrap_or_default();
             format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
-                base_url, separator, ipc_port, ipc_token, label
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}{}{}",
+                base_url, separator, ipc_port, ipc_token, label, view_param, meta_param
             )
         }
         Err(e) => {
@@ -382,6 +413,18 @@ fn open_window_with_kind(
     // atoms via the CEF JS bridge; no sync emit here.
 
     Ok(serde_json::json!(label))
+}
+
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3 / 2);
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            b => { let _ = std::fmt::Write::write_fmt(&mut out, format_args!("%{:02X}", b)); }
+        }
+    }
+    out
 }
 
 /// Get an offset position for a new window: 30px right and 30px down from the current window.

@@ -161,7 +161,7 @@ unsafe extern "C" fn should_handle_reopen(
                 tracing::info!("reopen-hook:fired proc=host — focused main window (hasVisibleWindows=YES)");
             } else {
                 // No visible windows — open a new one.
-                match crate::commands::window::open_new_window(state) {
+                match crate::commands::window::open_new_window(state, &serde_json::Value::Null) {
                     Ok(_) => tracing::info!("reopen-hook:fired proc=host — opened new window (hasVisibleWindows=NO)"),
                     Err(e) => tracing::warn!(error = %e, "reopen-hook:fired proc=host — open_new_window failed"),
                 }

@@ -394,6 +394,12 @@ export function buildCefApi(): AppApi {
         openNewWindow: async () => {
             return await invokeCommand<string>("open_new_window");
         },
+        openNewWindowWithView: async (view: string, meta?: Record<string, unknown>) => {
+            return await invokeCommand<string>("open_new_window", {
+                initial_view: view,
+                initial_meta: meta ? JSON.stringify(meta) : undefined,
+            });
+        },
         closeWindow: async (label?: string) => {
             // Callers like the close button or `Cmd+W` invoke this without an
             // arg meaning "close the window I'm in." Resolve to the current

@@ -908,6 +908,12 @@ pub struct CommandPaneOpenData {
     /// window. `split_direction` / `split_reference_block_id` are ignored when
     /// floating. See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
     pub floating: Option<bool>,
+    /// When present, used as the block meta directly instead of going through
+    /// `build_pane_meta`. Allows callers with a complete blockdef (e.g. widget
+    /// bar actions) to bypass the view-specific argument validation that
+    /// `build_pane_meta` enforces. `view` must still be set to the canonical
+    /// view string so the block is routed to the correct renderer.
+    pub meta: Option<MetaMapType>,
 }
 
 /// Response from pane.open.
