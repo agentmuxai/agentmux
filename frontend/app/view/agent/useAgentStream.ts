@@ -31,6 +31,34 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 
 const OutputFileName = "output";
 
+/** Extract the first significant argument from a tool's params for display.
+ *  File path for read/write/edit; command string for bash; query for search.
+ *  Returns undefined when no useful single-argument is present. */
+function extractToolArg(tool: string, params: Record<string, unknown> | undefined): string | undefined {
+    if (!params) return undefined;
+    const p = params as Record<string, unknown>;
+    switch (tool) {
+        case "read": case "Read": case "read_file":
+            return typeof p.file_path === "string" ? p.file_path : typeof p.path === "string" ? p.path : undefined;
+        case "write": case "Write": case "write_file":
+            return typeof p.file_path === "string" ? p.file_path : typeof p.path === "string" ? p.path : undefined;
+        case "edit": case "Edit": case "str_replace_editor": case "multiedit":
+            return typeof p.file_path === "string" ? p.file_path : typeof p.path === "string" ? p.path : undefined;
+        case "bash": case "Bash": case "computer":
+            return typeof p.command === "string" ? p.command : undefined;
+        case "glob": case "Glob":
+            return typeof p.pattern === "string" ? p.pattern : undefined;
+        case "grep": case "Grep":
+            return typeof p.pattern === "string" ? p.pattern : undefined;
+        default:
+            // Try common arg names in priority order.
+            for (const k of ["file_path", "path", "command", "query", "pattern"]) {
+                if (typeof p[k] === "string") return p[k] as string;
+            }
+            return undefined;
+    }
+}
+
 /**
  * Watchdog tick rate. Every 5s the hook dispatches a StreamWatchdogTick
  * to the pane-state reducer; the reducer compares against
@@ -771,7 +799,11 @@ export function useAgentStream({
                     // subscribe race that the per-tool model lost.
                     if (event.type === "tool_call") {
                         if (event.tool) {
-                            model.dispatchPane({ type: "ToolStart", name: event.tool });
+                            model.dispatchPane({
+                                type: "ToolStart",
+                                name: event.tool,
+                                arg: extractToolArg(event.tool, event.params),
+                            });
                         } else {
                             model.dispatchPane({ type: "ToolEnd" });
                         }

@@ -5,32 +5,29 @@
  * AgentComposerStrip — slim 28-32px status row that sits directly above
  * the textarea in the agent pane composer region.
  *
- * Replaces the prior `AgentStatusLine` (loading-bar slab + cycling
- * "Working…" phrase) AND the always-visible `AgentControlBar`
- * (permission/model/effort dropdowns + Archive/Export). Both fold
- * into:
- *   - LEFT segment:  small circular spinner + latest activity-log line
- *                    (truncated). Idle = empty. Stopping = decelerating
- *                    spinner + "Stopping…". Done-just-now = ✓ fade.
- *   - RIGHT segment: tokens (↑in ↓out) + elapsed/total + ⚙N process
- *                    badge + non-default permission pill (color-coded).
- *   - CHEVRON:       `▾` collapsed / `▴` expanded; superscript count
- *                    when unread activity-log entries accumulate while
- *                    collapsed (`▾³`).
+ * Redesigned per SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md:
+ *   - LEFT: Model <select> · Effort <select> · Shell toggle button
+ *   - RIGHT: tokens (↑in ↓out) · elapsed · ⚙N process badge ·
+ *            permission pill · context text (12.1k / 64k) · chevron
  *
- * State is reducer-owned: the chevron's expanded state and unread count
- * are both atoms projected from `AgentPaneState.detailsOpen` /
- * `composerUnreadCount`. The view dispatches `DetailsToggle` /
- * `DetailsCollapse` to flip them — no local Solid signals, no parallel
- * state machine.
+ * The prior left-zone spinner + tool name (⟳ bash) has been removed —
+ * AgentWorkingRow (rendered just above this strip) is the canonical
+ * in-flight status indicator.
  *
- * Spec: docs/specs/SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md.
+ * ARIA contract: outer strip is a layout container only (no role/tabIndex).
+ * Model/effort selects and Shell/chevron buttons own their own focus
+ * and keyboard contracts. Body click toggles details for mouse-only
+ * convenience; keyboard users use Tab → target → Enter.
  */
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
+import { getRuntimeConfig } from "../buildRuntimeArgs";
+import { applyRuntimeChange } from "../runtime-apply";
+import { getProvider } from "../providers";
+import type { AgentRuntimeConfig, EffortLevel, ModelChoice, PermissionMode, SessionStats, TurnTokens } from "../types";
 
-import type { PermissionMode, SessionStats, TurnTokens } from "../types";
-import { ContextWindowBar } from "./ContextWindowBar";
+// ── Constants ──────────────────────────────────────────────────────────────
 
 const PERMISSION_LABELS: Record<PermissionMode, string> = {
     bypass: "Bypass",
@@ -48,6 +45,22 @@ const PERMISSION_COLORS: Record<PermissionMode, string> = {
     default: "var(--main-text-color)",
 };
 
+const MODEL_OPTIONS = [
+    { value: "opus", label: "Opus" },
+    { value: "sonnet", label: "Sonnet" },
+    { value: "haiku", label: "Haiku" },
+] as const;
+
+const EFFORT_OPTIONS = [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Med" },
+    { value: "high", label: "High" },
+    { value: "xhigh", label: "X-High" },
+    { value: "max", label: "Max" },
+] as const;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
 function fmtTokens(t: TurnTokens): string {
     const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
     return `↑${fmt(t.input)} ↓${fmt(t.output)}`;
@@ -62,21 +75,42 @@ function fmtBadgeCount(n: number): string {
     return n > 9 ? "9+" : String(n);
 }
 
+function fmtK(n: number): string {
+    return `${Math.round(n / 100) / 10}k`;
+}
+
+type CtxBand = "low" | "mid" | "high" | "critical";
+
+function ctxBand(tokens: number, contextWindow: number): CtxBand {
+    const fraction = tokens / compactionThreshold(contextWindow);
+    if (fraction >= 0.9) return "critical";
+    if (fraction >= 0.75) return "high";
+    if (fraction >= 0.5) return "mid";
+    return "low";
+}
+
+function contextTitle(tokens: number, contextWindow: number | undefined): string {
+    if (contextWindow == null) {
+        return `Context: ${tokens.toLocaleString()} tokens`;
+    }
+    const pct = ((tokens / contextWindow) * 100).toFixed(1);
+    return (
+        `Context window: ${tokens.toLocaleString()} / ${contextWindow.toLocaleString()} tokens (${pct}%)\n` +
+        `This is the total conversation history sent to the model on each turn.\n` +
+        `Auto-compacts around ${compactionThreshold(contextWindow).toLocaleString()} tokens.`
+    );
+}
+
+// ── Props ──────────────────────────────────────────────────────────────────
+
 interface AgentComposerStripProps {
     /**
-     * DOM id of the details panel this strip toggles. Used for the
-     * `aria-controls` attribute on the strip and the matching `id` on
-     * the panel. Per-pane uniqueness is the caller's responsibility —
-     * a fixed id would collide when multiple agent panes are open in
-     * the same tab. Codex P2 on PR #1069.
+     * DOM id of the details panel this strip toggles. Used for
+     * `aria-controls` on the chevron button.
      */
     detailsPanelId: string;
-    /** True while a turn is in flight (Submitting / Streaming / Interrupting). */
+    /** True while a turn is in flight. */
     loading?: boolean;
-    /** True after Esc → SIGINT, until session_end arrives. */
-    stopping?: boolean;
-    /** Name of the tool currently executing (e.g. "bash", "edit"). */
-    currentTool?: string | null;
     /** Final session totals; non-null after the first TurnEnd. */
     sessionStats?: SessionStats | null;
     /** Live tokens for the in-flight turn. */
@@ -85,21 +119,7 @@ interface AgentComposerStripProps {
     processCount?: number;
     /** Fires when the user clicks the ⚙N process badge. */
     onProcessBadgeClick?: () => void;
-    /**
-     * Latest activity-log entry. Surfaced in the left segment when no
-     * `currentTool` is set so users can see what the agent's doing
-     * without expanding the details panel.
-     */
-    latestLogLine?: string;
-    /**
-     * Permission mode (`auto` / `plan` / `bypass` / `acceptEdits` /
-     * `default`). Renders an inline color-coded pill ONLY when the
-     * mode is NOT `auto` — `auto` (AI classifier) is the quiet
-     * baseline most users sit in; any other mode (including the
-     * conservative `default = prompt all`) is information worth
-     * surfacing in the strip without an expand. An unknown/legacy
-     * value also hides the pill — see `showPermissionPill`.
-     */
+    /** Permission mode — renders a color-coded pill when not `auto`. */
     permissionMode?: PermissionMode;
     /** Reducer-projected: details panel open/closed. */
     expanded: boolean;
@@ -107,16 +127,29 @@ interface AgentComposerStripProps {
     unreadCount: number;
     /** Dispatches `DetailsToggle` to the pane reducer. */
     onToggleExpanded: () => void;
-    /** Current context fill in tokens (from message_start). null = no turn yet. */
+    /** Current context fill in tokens (from message_start). */
     contextTokens?: number | null;
-    /** Provider's max context window size. undefined = unknown provider. */
+    /** Provider's max context window size. undefined = unknown. */
     contextWindow?: number;
+
+    // ── Shell panel ────────────────────────────────────────────────
+    /** Whether the shell history panel is open. */
+    shellOpen?: boolean;
+    /** Dispatches `ShellToggle` to the pane reducer. */
+    onToggleShell?: () => void;
+
+    // ── Inline model / effort controls ────────────────────────────
+    /** Block id — needed for applyRuntimeChange. */
+    blockId?: string;
+    /** Block atom — reads current model/effort from meta. */
+    blockAtom?: () => Block | undefined;
+    /** Provider id — needed for applyRuntimeChange. */
+    providerId?: string;
 }
 
+// ── Component ──────────────────────────────────────────────────────────────
+
 export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
-    // Live elapsed timer for the current turn. Resets to 0 when loading
-    // flips false → true; ticks every second while loading. Same shape
-    // as the old AgentStatusLine's elapsedMs signal.
     const [elapsedMs, setElapsedMs] = createSignal(0);
     createEffect(() => {
         if (!props.loading) return;
@@ -126,18 +159,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         onCleanup(() => clearInterval(id));
     });
 
-    // Left segment — what's the agent doing right now.
-    const leftText = createMemo((): string => {
-        if (props.stopping) return "Stopping…";
-        if (props.currentTool) return props.currentTool;
-        if (props.loading && props.latestLogLine) return props.latestLogLine;
-        if (props.loading) return "Working…";
-        if (props.latestLogLine) return props.latestLogLine;
-        return "";
-    });
-
-    // Right segment — tokens + elapsed (live during turn, session
-    // totals after).
     const rightText = createMemo((): string => {
         const parts: string[] = [];
         if (props.loading) {
@@ -155,43 +176,57 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return parts.join("  ·  ");
     });
 
-    // Permission pill only renders when:
-    //   - the mode is defined AND a known own-property of
-    //     `PERMISSION_LABELS` (defends against legacy / typo values from
-    //     block meta — an unrecognized key would render an empty pill
-    //     with `undefined` label/color), AND
-    //   - the mode is NOT `auto` (the quiet baseline; AI classifier).
-    // `default` (explicit prompt-all) DOES render the pill — users
-    // expect to see that they're in the conservative mode. Spec §3.2
-    // table row "Permission != Auto". Reagent P2 round 1 caught the
-    // doc/code mismatch + the missing validity gate; codex P2 round 4
-    // caught the `in` operator walking the prototype chain (matches
-    // `"toString"` / `"constructor"` etc.) — `hasOwnProperty.call`
-    // checks own properties only (ES2022's `Object.hasOwn` would be
-    // cleaner but the TS lib config tops out at ES2021 here).
     const hasOwn = Object.prototype.hasOwnProperty;
     const showPermissionPill = (): boolean => {
         const m = props.permissionMode;
         return m != null && m !== "auto" && hasOwn.call(PERMISSION_LABELS, m);
     };
 
-    // ARIA contract (codex P2 round 3 on PR #1069):
-    //   • The outer strip is JUST a layout container — no `role`,
-    //     no `tabIndex`, no `aria-*`. A `role="button"` div containing
-    //     a real `<button>` (the process badge) is nested-interactive-
-    //     control which assistive tech may misreport or skip.
-    //   • The CHEVRON is the canonical toggle: a real `<button>` that
-    //     owns `aria-expanded` + `aria-controls` + the keyboard
-    //     contract. Screen readers announce "expand/collapse composer
-    //     details, button" — semantically precise.
-    //   • The strip body still toggles on mouse click for sighted-
-    //     user convenience (delegated `onClick` checks the target
-    //     wasn't a nested button), but it's a pointer-only affordance
-    //     — keyboard users use Tab → chevron → Enter.
-    const eventTargetIsNestedButton = (e: MouseEvent): boolean => {
+    // Guard clicks on interactive children from triggering the strip-body toggle.
+    const eventTargetIsInteractive = (e: MouseEvent): boolean => {
         const t = e.target as HTMLElement | null;
         if (!t) return false;
-        return t.closest("button") != null;
+        return t.closest("button, select") != null;
+    };
+
+    // Model/effort — derived from blockAtom meta when available.
+    const runtime = () =>
+        props.blockAtom ? getRuntimeConfig(props.blockAtom()?.meta) : null;
+
+    const updateRuntime = async (patch: { model?: ModelChoice; effort?: EffortLevel }): Promise<void> => {
+        const r = runtime();
+        if (!r || !props.blockId || !props.providerId) return;
+        try {
+            await applyRuntimeChange(
+                props.blockId,
+                getProvider(props.providerId),
+                { ...r, ...patch } as AgentRuntimeConfig,
+            );
+        } catch {
+            // Silent — settings retry on next change.
+        }
+    };
+
+    // Show model/effort controls only for Claude agents (controls are claude-specific;
+    // non-claude providers (codex/gemini/kimi) have different model enumerations and
+    // buildRuntimeArgs silently drops effort for them — spec §1.3).
+    const showControls = () => props.blockAtom != null && props.providerId === "claude";
+
+    // Context text color based on proximity to compaction threshold.
+    const ctxClass = (): string => {
+        const t = props.contextTokens;
+        const w = props.contextWindow;
+        if (t == null || t <= 0 || w == null) return "";
+        const b = ctxBand(t, w);
+        return `agent-composer-strip-ctx--${b}`;
+    };
+
+    const ctxText = (): string | null => {
+        const t = props.contextTokens;
+        const w = props.contextWindow;
+        if (t == null || t <= 0) return null;
+        if (w == null) return `${fmtK(t)} ctx`;
+        return `${fmtK(t)} / ${fmtK(w)}`;
     };
 
     return (
@@ -199,41 +234,52 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             class="agent-composer-strip"
             classList={{ "agent-composer-strip--expanded": props.expanded }}
             onClick={(e) => {
-                // Body click expands (mouse-only convenience). Nested
-                // buttons own their own activation; don't double-fire.
-                if (!eventTargetIsNestedButton(e)) {
+                if (!eventTargetIsInteractive(e)) {
                     props.onToggleExpanded();
                 }
             }}
         >
-            <span class="agent-composer-strip-left">
-                <Show when={props.loading || props.stopping}>
-                    <span
-                        class="agent-composer-strip-spinner"
-                        classList={{ "agent-composer-strip-spinner--decelerating": props.stopping }}
-                        aria-hidden="true"
+            {/* Controls zone — model/effort selects + Shell button */}
+            <span class="agent-composer-strip-controls">
+                <Show when={showControls()}>
+                    <select
+                        class="agent-composer-strip-select"
+                        title="Model"
+                        value={runtime()?.model}
+                        onChange={(e) => void updateRuntime({ model: e.currentTarget.value as ModelChoice })}
+                        onClick={(e) => e.stopPropagation()}
                     >
-                        {/* SVG circle stroke-dasharray animation —
-                            replaces the old spinner-dot loading-bar
-                            slab. 16px diameter, 60rpm. */}
-                        <svg viewBox="0 0 16 16" width="14" height="14">
-                            <circle
-                                cx="8"
-                                cy="8"
-                                r="6"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-dasharray="9 30"
-                                stroke-linecap="round"
-                            />
-                        </svg>
-                    </span>
+                        {MODEL_OPTIONS.map((o) => (
+                            <option value={o.value}>{o.label}</option>
+                        ))}
+                    </select>
+                    <select
+                        class="agent-composer-strip-select"
+                        title="Effort"
+                        value={runtime()?.effort}
+                        onChange={(e) => void updateRuntime({ effort: e.currentTarget.value as EffortLevel })}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {EFFORT_OPTIONS.map((o) => (
+                            <option value={o.value}>{o.label}</option>
+                        ))}
+                    </select>
                 </Show>
-                <Show when={leftText()}>
-                    <span class="agent-composer-strip-left-text">{leftText()}</span>
-                </Show>
+                <button
+                    type="button"
+                    class="agent-composer-strip-shell-btn"
+                    classList={{ "agent-composer-strip-shell-btn--active": !!props.shellOpen }}
+                    title={props.shellOpen ? "Close shell history" : "Open shell history"}
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        props.onToggleShell?.();
+                    }}
+                >
+                    Shell
+                </button>
             </span>
+
+            {/* Right zone — stats + permission + context text + chevron */}
             <span class="agent-composer-strip-right">
                 <Show when={rightText()}>
                     <span class="agent-composer-strip-stats">{rightText()}</span>
@@ -262,7 +308,16 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         {PERMISSION_LABELS[props.permissionMode!]}
                     </span>
                 </Show>
-                <ContextWindowBar tokens={props.contextTokens} contextWindow={props.contextWindow} />
+                <Show when={ctxText()}>
+                    <span
+                        class={`agent-composer-strip-ctx ${ctxClass()}`}
+                        title={props.contextTokens != null
+                            ? contextTitle(props.contextTokens, props.contextWindow)
+                            : undefined}
+                    >
+                        {ctxText()}
+                    </span>
+                </Show>
                 <button
                     type="button"
                     class="agent-composer-strip-chevron"
