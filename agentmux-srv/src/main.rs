@@ -16,7 +16,6 @@ mod server;
 mod srv_ipc;
 mod state;
 mod drone;
-mod messaging;
 mod muxbus;
 #[cfg(windows)]
 mod crash_monitor;
@@ -680,32 +679,6 @@ async fn main() {
     // uses to push reactive injections instead of polling.
     // No-op until the user connects via muxbus.login.
     crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
-
-    // Discord messaging bridge — connects to Discord Gateway if configured.
-    // Set messaging:discord:enabled + messaging:discord:token in settings.json to activate.
-    {
-        let settings = config_watcher.get_settings();
-        if settings.messaging_discord_enabled {
-            match settings.messaging_discord_token.clone() {
-                Some(token) if !token.is_empty() => {
-                    messaging::discord::DiscordBridge::init_global(
-                        messaging::discord::DiscordConfig {
-                            token,
-                            channel_id: settings.messaging_discord_channel.clone(),
-                            target_agent: settings.messaging_discord_target.clone(),
-                            guild_id: settings.messaging_discord_guild.clone(),
-                        },
-                        reqwest::Client::new(),
-                    );
-                }
-                _ => {
-                    tracing::warn!(
-                        "discord bridge: enabled but messaging:discord:token is not set in settings.json"
-                    );
-                }
-            }
-        }
-    }
 
     // Set up docsite directory
     if let Some(app_path) = base::get_wave_app_path() {
