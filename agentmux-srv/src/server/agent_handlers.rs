@@ -1474,7 +1474,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ── Trust Center service OAuth (scaffold) ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
-    let oauth_wstore = state.wstore.clone();
+    let oauth_wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_OAUTH_START,
         Box::new(move |data, _ctx| {
