@@ -390,6 +390,7 @@ pub fn tear_off_pool_promote(
         tab_anchor_x,
         tab_anchor_y,
         None,
+        None,
     ) {
         Some(label) => Ok(serde_json::json!(label)),
         None => {

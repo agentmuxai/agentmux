@@ -970,8 +970,12 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
 
     tracing::info!(view = %cmd.view, "pane.open");
 
-    // Build meta for the requested view, validating required args
-    let meta = build_pane_meta(&cmd)?;
+    // Use caller-supplied meta when present (widget bar path: full blockdef.meta
+    // already known); otherwise derive from view + args via build_pane_meta.
+    let meta = match cmd.meta {
+        Some(m) => m,
+        None => build_pane_meta(&cmd)?,
+    };
 
     // Resolve tab
     let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;

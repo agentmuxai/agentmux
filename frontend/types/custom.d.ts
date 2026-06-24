@@ -123,7 +123,7 @@ declare global {
         onReinjectKey: (callback: (waveEvent: WaveKeyboardEvent) => void) => void;
         onControlShiftStateUpdate: (callback: (state: boolean) => void) => void;
         openNewWindow: () => Promise<string>;
-        openNewWindowWithView: (view: string) => Promise<string>;
+        openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
         closeWindow: (label?: string) => Promise<void>;
         minimizeWindow: () => void;
         maximizeWindow: () => void;

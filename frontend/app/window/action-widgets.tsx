@@ -312,17 +312,19 @@ const ActionWidgets = (): JSX.Element => {
         setItemMenuState({ pos, shortName: key.replace("defwidget@", "") });
     };
 
-    const resolveView = (shortName: string): string | null =>
-        (wmap()[`defwidget@${shortName}`]?.blockdef?.meta?.["view"] as string) ?? null;
+    const resolveWidgetDef = (shortName: string) =>
+        wmap()[`defwidget@${shortName}`] ?? null;
 
     const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => {
-        const view = resolveView(shortName);
+        const widgetDef = resolveWidgetDef(shortName);
+        const blockMeta = widgetDef?.blockdef?.meta as Record<string, unknown> | undefined;
+        const view = (blockMeta?.["view"] as string) ?? null;
         return [
             {
                 label: "Open in New Window",
                 click: () => {
                     closeMore();
-                    if (view) fireAndForget(async () => getApi().openNewWindowWithView(view));
+                    if (view) fireAndForget(async () => getApi().openNewWindowWithView(view, blockMeta));
                     else fireAndForget(async () => getApi().openNewWindow());
                 },
             },
@@ -330,8 +332,10 @@ const ActionWidgets = (): JSX.Element => {
                 label: "Open in Floating Pane",
                 click: () => {
                     closeMore();
-                    if (!view) return;
-                    fireAndForget(async () => TabRpcClient.rpcCall("pane.open", { view, floating: true }));
+                    if (!view || !blockMeta) return;
+                    fireAndForget(async () =>
+                        TabRpcClient.rpcCall("pane.open", { view, meta: blockMeta, floating: true })
+                    );
                 },
             },
             { type: "separator" } as PopoverMenuItem,
