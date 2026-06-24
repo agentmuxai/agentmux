@@ -163,6 +163,52 @@
     }
 }
 
+// Floating pane rows — same geometry as .instance-panel-window-row but the
+// leading icon uses secondary colour (panes are not primary windows) and
+// there is no "this" badge or opacity slider.
+.instance-panel-pane-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 0;
+    padding: var(--space-1) var(--space-1-5);
+    color: var(--main-text-color);
+    font-size: 12px;
+    text-align: left;
+    cursor: default;
+    line-height: 1.3;
+
+    &:hover {
+        background: var(--hover-bg-color);
+        border-color: var(--border-color);
+    }
+
+    .instance-panel-pane-icon {
+        flex: 0 0 auto;
+        color: var(--secondary-text-color);
+        font-size: 10px;
+        width: 10px;
+        text-align: center;
+    }
+
+    .instance-panel-pane-name {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.instance-panel-pane-empty {
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    padding: var(--space-1) var(--space-1-5);
+    font-style: italic;
+}
+
 // Per-window opacity slider (SPEC_PER_WINDOW_OPACITY_2026-05-14.md §3)
 .instance-panel-opacity-row {
     display: flex;
