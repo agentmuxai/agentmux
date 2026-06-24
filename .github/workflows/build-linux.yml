@@ -10,9 +10,9 @@ name: build-linux
 # See docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md for full design notes.
 #
 # Required repo secrets (Settings → Secrets → Actions):
-#   AGENTMUX_RELEASE_TOKEN   PAT (repo:write) to upload release assets
 #   A5AF_PACKAGES_TOKEN      npm GitHub Packages token (@a5af scope)
 #   CEF_RUNTIME_TOKEN        PAT (contents:read) for agentmuxai/cef
+#   (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
 
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ on:
     # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z", cef_runtime_tag: "" }
 
 permissions:
-  contents: read
+  contents: write   # needed to upload release assets via GITHUB_TOKEN
 
 jobs:
   build:
@@ -172,7 +172,7 @@ jobs:
       - name: Upload AppImage to GitHub Release
         if: steps.in.outputs.release_tag != ''
         env:
-          GH_TOKEN: ${{ secrets.AGENTMUX_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ steps.in.outputs.release_tag }}" \
             "${{ steps.appimage.outputs.path }}" \
