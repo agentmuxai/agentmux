@@ -925,7 +925,7 @@ async fn main() {
     // Cloud push subscriber — single WS connection per sidecar that the cloud
     // uses to push reactive injections instead of polling.
     // No-op until the user connects via muxbus.login.
-    crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(wstore.clone());
+    crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
 
     // Set up docsite directory
     if let Some(app_path) = base::get_wave_app_path() {
