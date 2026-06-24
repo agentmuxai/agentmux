@@ -1301,12 +1301,21 @@ fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
                 .ok_or_else(|| "MISSING_ARG: view=editor requires 'file'".to_string())?;
             meta.insert("view".to_string(), json!("editor"));
             meta.insert("file".to_string(), json!(file));
-            // Optional initial file-tree state. Only write when explicitly
-            // requested; absent leaves the frontend default (expanded). The
-            // frontend collapses iff this is literally `false`
-            // (EditorViewModel restore: `meta["editor:tree_expanded"] === false`).
+
+            let is_markdown = file.to_ascii_lowercase().ends_with(".md");
+
+            // Tree state: explicit caller value wins; for markdown default to
+            // collapsed so the rendered preview gets full horizontal width.
             if let Some(expanded) = cmd.tree_expanded {
                 meta.insert("editor:tree_expanded".to_string(), json!(expanded));
+            } else if is_markdown {
+                meta.insert("editor:tree_expanded".to_string(), json!(false));
+            }
+
+            // Markdown files default to preview-only (source editor hidden).
+            // Agents open .md files to surface documentation, not to edit.
+            if is_markdown {
+                meta.insert("editor:source_hidden".to_string(), json!(true));
             }
         }
         "term" => {
