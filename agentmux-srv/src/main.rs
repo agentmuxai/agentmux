@@ -1334,158 +1334,107 @@ async fn main() {
     }
 }
 
-/// Tracks which backfill sections have already been seeded into the shared store.
-/// Each section is independent; once seeded it is never overwritten.
-#[derive(Default)]
-struct BackfillSections {
-    accts: bool,
-    id_bundles: bool,
-    mem_bundles: bool,
-    drones: bool,
-    links: bool,
-    muxbus: bool,
-}
-
-impl BackfillSections {
-    fn all_done(&self) -> bool {
-        self.accts && self.id_bundles && self.mem_bundles && self.drones && self.links && self.muxbus
-    }
-}
-
-/// Attempt to seed un-seeded sections of `shared` from `src`. Only sections
-/// that are marked `false` in `sections` are attempted; those that find data
-/// flip their flag to `true`. Returns whether any write occurred.
-fn seed_sections_from_store(
+/// Merge all user data from a single source store into `shared`.
+///
+/// Called for EVERY source (wstore + all siblings) — no short-circuit per
+/// section — so that startup default seeds in wstore (auto_seed_on_startup,
+/// run_default_bundle_migration) do not mask the user's real prior-version
+/// data that sits in a sibling objects.db. `skip_*` flags are the pre-
+/// conditions read from `shared` BEFORE any writes start; they prevent re-
+/// seeding sections that were already fully populated in a prior startup pass.
+///
+/// Sibling DBs are opened read-only (SQLITE_OPEN_READ_ONLY) so source files
+/// are never modified during the backfill (spec §3.1).
+fn merge_from_source(
     src: &Store,
     shared: &Store,
-    sections: &mut BackfillSections,
+    skip_accts: bool,
+    skip_id_bundles: bool,
+    skip_mem_bundles: bool,
+    skip_drones: bool,
+    skip_links: bool,
+    skip_muxbus: bool,
 ) -> bool {
     use crate::drone::storage::DroneStore;
     let mut wrote = false;
 
-    if !sections.accts {
-        let v = src.identity_list(None).unwrap_or_default();
-        if !v.is_empty() {
-            sections.accts = true;
-            wrote = true;
-            tracing::info!(count = v.len(), "shared store backfill: identity accounts");
-            for acct in &v {
-                if let Err(e) = shared.identity_upsert(acct) {
-                    tracing::warn!(id = %acct.id, error = %e, "backfill: identity_upsert failed");
-                }
+    if !skip_accts {
+        for acct in src.identity_list(None).unwrap_or_default() {
+            if shared.identity_upsert(&acct).is_ok() {
+                wrote = true;
             }
         }
     }
 
-    if !sections.id_bundles {
+    if !skip_id_bundles {
         let all = src.bundle_identity_list().unwrap_or_default();
-        let non_blank: Vec<_> = all.iter().filter(|b| b.id != "blank").collect();
-        if !non_blank.is_empty() {
-            sections.id_bundles = true;
-            wrote = true;
-            tracing::info!(count = non_blank.len(), "shared store backfill: identity bundles");
-            for bundle in &non_blank {
-                if let Err(e) = shared.bundle_identity_upsert(bundle) {
-                    tracing::warn!(id = %bundle.id, error = %e, "backfill: bundle_identity_upsert failed");
-                    continue;
-                }
-                if let Ok(binds) = src.bundle_identity_bindings(&bundle.id) {
-                    for b in &binds {
-                        // Guard against cross-source FK mismatch: if the
-                        // account came from a different sibling DB it may not
-                        // be in shared yet. Seed it from the current source
-                        // so the FK is satisfied; skip if truly absent.
-                        if shared.identity_get(&b.account_id).ok().flatten().is_none() {
-                            match src.identity_get(&b.account_id) {
-                                Ok(Some(acct)) => {
-                                    let _ = shared.identity_upsert(&acct);
-                                }
-                                _ => {
-                                    tracing::warn!(
-                                        account_id = %b.account_id,
-                                        bundle = %b.identity_id,
-                                        "backfill: skipping bundle binding — account missing from source"
-                                    );
-                                    continue;
-                                }
-                            }
-                        }
-                        if let Err(e) = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id) {
-                            tracing::warn!(bundle = %b.identity_id, error = %e, "backfill: bundle_identity_bind failed");
-                        }
-                    }
-                }
+        for bundle in all.iter().filter(|b| b.id != "blank") {
+            if shared.bundle_identity_upsert(bundle).is_err() {
+                continue;
             }
-        }
-    }
-
-    if !sections.mem_bundles {
-        let all = src.bundle_memory_list().unwrap_or_default();
-        let non_blank: Vec<_> = all.iter().filter(|b| b.id != "blank").collect();
-        if !non_blank.is_empty() {
-            sections.mem_bundles = true;
             wrote = true;
-            tracing::info!(count = non_blank.len(), "shared store backfill: memory bundles");
-            for mem in &non_blank {
-                if let Err(e) = shared.bundle_memory_upsert(mem) {
-                    tracing::warn!(id = %mem.id, error = %e, "backfill: bundle_memory_upsert failed");
-                }
-            }
-        }
-    }
-
-    if !sections.drones {
-        let v = src.drone_list().unwrap_or_default();
-        if !v.is_empty() {
-            sections.drones = true;
-            wrote = true;
-            tracing::info!(count = v.len(), "shared store backfill: drone definitions");
-            for drone in &v {
-                if let Err(e) = shared.drone_upsert(drone) {
-                    tracing::warn!(id = %drone.id, error = %e, "backfill: drone_upsert failed");
-                }
-            }
-        }
-    }
-
-    if !sections.links {
-        let v = src.agent_identity_list_all().unwrap_or_default();
-        if !v.is_empty() {
-            sections.links = true;
-            wrote = true;
-            tracing::info!(count = v.len(), "shared store backfill: agent identity links");
-            for link in &v {
-                // Guard against cross-source FK mismatch: seed the account
-                // from the current source if it's missing from shared.
-                if shared.identity_get(&link.account_id).ok().flatten().is_none() {
-                    match src.identity_get(&link.account_id) {
-                        Ok(Some(acct)) => {
-                            let _ = shared.identity_upsert(&acct);
-                        }
+            for b in src.bundle_identity_bindings(&bundle.id).unwrap_or_default() {
+                // Ensure the referenced account is in shared before binding.
+                // It may come from a different source; seed it from this one
+                // if available, skip the binding if truly absent.
+                if shared.identity_get(&b.account_id).ok().flatten().is_none() {
+                    match src.identity_get(&b.account_id) {
+                        Ok(Some(acct)) => { let _ = shared.identity_upsert(&acct); }
                         _ => {
                             tracing::warn!(
-                                account_id = %link.account_id,
-                                agent = %link.agent_id,
-                                "backfill: skipping agent identity link — account missing from source"
+                                account_id = %b.account_id, bundle = %b.identity_id,
+                                "backfill: skipping bundle binding — account missing from source"
                             );
                             continue;
                         }
                     }
                 }
-                if let Err(e) = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider) {
-                    tracing::warn!(agent = %link.agent_id, error = %e, "backfill: agent_identity_link failed");
-                }
+                let _ = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id);
             }
         }
     }
 
-    if !sections.muxbus {
+    if !skip_mem_bundles {
+        let all = src.bundle_memory_list().unwrap_or_default();
+        for mem in all.iter().filter(|b| b.id != "blank") {
+            if shared.bundle_memory_upsert(mem).is_ok() {
+                wrote = true;
+            }
+        }
+    }
+
+    if !skip_drones {
+        for drone in src.drone_list().unwrap_or_default() {
+            if shared.drone_upsert(&drone).is_ok() {
+                wrote = true;
+            }
+        }
+    }
+
+    if !skip_links {
+        for link in src.agent_identity_list_all().unwrap_or_default() {
+            if shared.identity_get(&link.account_id).ok().flatten().is_none() {
+                match src.identity_get(&link.account_id) {
+                    Ok(Some(acct)) => { let _ = shared.identity_upsert(&acct); }
+                    _ => {
+                        tracing::warn!(
+                            account_id = %link.account_id, agent = %link.agent_id,
+                            "backfill: skipping agent link — account missing from source"
+                        );
+                        continue;
+                    }
+                }
+            }
+            if shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider).is_ok() {
+                wrote = true;
+            }
+        }
+    }
+
+    if !skip_muxbus {
         if let Ok(Some(creds)) = src.muxbus_load() {
-            sections.muxbus = true;
-            wrote = true;
-            tracing::info!("shared store backfill: muxbus credentials");
-            if let Err(e) = shared.muxbus_save(&creds) {
-                tracing::warn!(error = %e, "backfill: muxbus_save failed");
+            if shared.muxbus_save(&creds).is_ok() {
+                wrote = true;
             }
         }
     }
@@ -1494,56 +1443,50 @@ fn seed_sections_from_store(
 }
 
 /// Seed a freshly-created `shared` store (store.db) from every available
-/// `objects.db` source so existing users don't lose data on first launch after
-/// an upgrade.
+/// `objects.db` source. Merges from ALL sources (wstore + every sibling under
+/// `home`) rather than stopping at the first source with data — this ensures
+/// that startup default seeds written to wstore by `auto_seed_on_startup` /
+/// `run_default_bundle_migration` do not mask the user's real prior-version
+/// data in a sibling channel DB.
 ///
-/// On a version upgrade the current channel's `wstore` is a fresh, empty DB;
-/// the user's identity accounts, presets, drones, and MuxBus credentials live
-/// in the prior version's objects.db. We scan ALL channel + dev `objects.db`
-/// files under `home` (same walk used by the named-agent registry migration)
-/// and merge until every section is seeded.
-///
-/// Each section is independent: once it has data in `shared` it is never
-/// overwritten. Order: wstore (cheapest, no open needed) then siblings newest-
-/// first by file-system order. `Store::open` on a sibling runs additive-only
-/// migrations (CREATE TABLE IF NOT EXISTS) — safe on old channel DBs.
+/// Pre-conditions (what `shared` already had at startup) gate entire sections
+/// so a second startup (after the first successful backfill) is a fast no-op.
+/// Sibling DBs are opened read-only (spec §3.1 — source files never modified).
 fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std::path::Path>) -> Result<(), String> {
-    // Init sections from what shared already has so we never overwrite.
     use crate::drone::storage::DroneStore;
-    let mut sections = BackfillSections {
-        accts:      !shared.identity_list(None).map_err(|e| e.to_string())?.is_empty(),
-        id_bundles: !shared.bundle_identity_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank"),
-        mem_bundles:!shared.bundle_memory_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank"),
-        drones:     !shared.drone_list().map_err(|e| e.to_string())?.is_empty(),
-        links:      !shared.agent_identity_list_all().map_err(|e| e.to_string())?.is_empty(),
-        muxbus:     shared.muxbus_load().ok().flatten().is_some(),
-    };
 
-    if sections.all_done() {
+    // Pre-conditions: what shared already has. Sections already populated in a
+    // prior startup pass are skipped entirely; the rest are merged from every source.
+    let skip_accts       = !shared.identity_list(None).map_err(|e| e.to_string())?.is_empty();
+    let skip_id_bundles  = !shared.bundle_identity_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
+    let skip_mem_bundles = !shared.bundle_memory_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
+    let skip_drones      = !shared.drone_list().map_err(|e| e.to_string())?.is_empty();
+    let skip_links       = !shared.agent_identity_list_all().map_err(|e| e.to_string())?.is_empty();
+    let skip_muxbus      = shared.muxbus_load().ok().flatten().is_some();
+
+    if skip_accts && skip_id_bundles && skip_mem_bundles && skip_drones && skip_links && skip_muxbus {
         return Ok(());
     }
 
     let mut any = false;
 
-    // Try current wstore first (already open, no overhead).
-    any |= seed_sections_from_store(wstore, shared, &mut sections);
+    // Merge from wstore (already open, no overhead). Includes startup defaults.
+    any |= merge_from_source(wstore, shared,
+        skip_accts, skip_id_bundles, skip_mem_bundles, skip_drones, skip_links, skip_muxbus);
 
-    // If still incomplete, walk all sibling objects.db files under home.
-    // This handles the upgrade case: the new version's wstore is empty, but
-    // the prior version's channel DB holds the user's data.
-    if !sections.all_done() {
-        if let Some(home) = home {
-            for path in crate::registry::enumerate_objects_dbs(home) {
-                if sections.all_done() {
-                    break;
+    // Merge from every sibling objects.db. These are opened read-only so the
+    // source files are never modified. Missing tables in older schemas return
+    // empty via StoreError / unwrap_or_default — safe to ignore.
+    if let Some(home) = home {
+        for path in crate::registry::enumerate_objects_dbs(home) {
+            match Store::open_source_readonly(&path) {
+                Ok(sib) => {
+                    any |= merge_from_source(&sib, shared,
+                        skip_accts, skip_id_bundles, skip_mem_bundles,
+                        skip_drones, skip_links, skip_muxbus);
                 }
-                match Store::open(&path) {
-                    Ok(sib) => {
-                        any |= seed_sections_from_store(&sib, shared, &mut sections);
-                    }
-                    Err(e) => {
-                        tracing::debug!(path = %path.display(), error = %e, "backfill: skip sibling");
-                    }
+                Err(e) => {
+                    tracing::debug!(path = %path.display(), error = %e, "backfill: skip sibling");
                 }
             }
         }

@@ -111,6 +111,29 @@ impl Store {
         })
     }
 
+    /// Open a sibling `objects.db` file for read-only backfill access.
+    ///
+    /// Does NOT run schema migrations or stamp a version — the source DB is
+    /// never modified (spec §3.1). WAL mode is not set either: the file is
+    /// opened with `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX` so concurrent
+    /// writers on the same DB are unaffected. Tables absent in older schemas
+    /// (e.g. `db_drone_definitions`) return empty results via the normal
+    /// `StoreError` path; callers use `.unwrap_or_default()`.
+    pub fn open_source_readonly(path: &Path) -> Result<Self, StoreError> {
+        use rusqlite::OpenFlags;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_millis(500))?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            registry: Mutex::new(None),
+            def_registry: Mutex::new(None),
+            registry_agents_base: Mutex::new(None),
+        })
+    }
+
     /// Crate-internal accessor for sibling modules that maintain their
     /// own per-table CRUD via the `DroneStore` extension trait
     /// pattern (see `agentmux-srv/src/drone/storage.rs`). Outside
