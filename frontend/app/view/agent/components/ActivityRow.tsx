@@ -10,7 +10,8 @@
  */
 
 import clsx from "clsx";
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, Show, createMemo, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { KIND_SIGIL, type PinnedActivity } from "../activity/types";
@@ -39,19 +40,12 @@ interface ActivityRowProps {
 }
 
 export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
-    const [now, setNow] = createSignal(Date.now());
-
-    const isRunning = createMemo(() => props.activity()?.status === "running");
-    createEffect(() => {
-        if (!isRunning()) return;
-        const id = setInterval(() => setNow(Date.now()), 1000);
-        onCleanup(() => clearInterval(id));
-    });
+    const tick = useTick(1000);
 
     const elapsed = createMemo(() => {
         const a = props.activity();
         if (!a) return "";
-        const end = a.endedAt ?? now();
+        const end = a.endedAt ?? (tick(), Date.now());
         return formatElapsed(end - a.startedAt);
     });
 
