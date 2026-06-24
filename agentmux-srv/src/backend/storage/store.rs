@@ -495,6 +495,44 @@ impl Store {
             }
         }
     }
+
+    // ── Migration state (db_migrations — shared store only) ──────────────
+
+    pub fn migration_is_applied(&self, id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT 1 FROM db_migrations WHERE id = ?1",
+            [id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false)
+    }
+
+    pub fn migration_mark_applied(
+        &self,
+        id: &str,
+        scope: &str,
+        duration_ms: u64,
+    ) -> Result<(), StoreError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO db_migrations (id, applied_at, duration_ms, scope)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, now, duration_ms as i64, scope],
+        )?;
+        Ok(())
+    }
+
+    pub fn migrations_list_applied(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT id FROM db_migrations ORDER BY id")?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(ids)
+    }
 }
 
 /// A borrowed connection handle for use inside [`Store::with_tx`].

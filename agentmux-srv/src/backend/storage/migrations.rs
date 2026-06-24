@@ -646,6 +646,13 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             expires_at     INTEGER NOT NULL DEFAULT 0,
             user_email     TEXT NOT NULL DEFAULT '',
             user_sub       TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS db_migrations (
+            id          TEXT PRIMARY KEY,
+            applied_at  TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            scope       TEXT NOT NULL DEFAULT 'global'
         );",
     )?;
 
