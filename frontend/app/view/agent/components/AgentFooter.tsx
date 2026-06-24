@@ -185,6 +185,55 @@ interface AgentFooterProps {
     viewModel?: AgentViewModel;
 }
 
+/**
+ * Returns whether the textarea caret is on the first and/or last *visual* line.
+ *
+ * `<textarea>` wraps text both at explicit `\n` characters and at soft-wrap
+ * word-boundaries determined by CSS layout. The simple `includes("\n")` test
+ * cannot detect soft-wrap line boundaries — a long single-paragraph message
+ * with no `\n` can span many visual rows but always looks like "one line" to a
+ * character scan. This function uses a mirror div that replicates the textarea's
+ * CSS so the browser word-wraps identically, then reads the zero-width-space
+ * marker's `offsetTop` to get the actual visual row Y.
+ *
+ * Fast-path: when a physical `\n` exists before (or after) the cursor, the
+ * answer is known from character data alone — no DOM measurement needed.
+ */
+function caretVisualEdge(ta: HTMLTextAreaElement): { first: boolean; last: boolean } {
+    const pos = ta.selectionStart;
+    const val = ta.value;
+    const needsFirst = !val.slice(0, pos).includes("\n");
+    const needsLast  = !val.slice(pos).includes("\n");
+    if (!needsFirst && !needsLast) return { first: false, last: false };
+
+    const cs = window.getComputedStyle(ta);
+    const baseCss =
+        "position:absolute;visibility:hidden;overflow:hidden;top:-9999px;left:-9999px;" +
+        `width:${ta.clientWidth}px;white-space:pre-wrap;word-wrap:break-word;` +
+        `font:${cs.font};` +
+        `padding:${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft};` +
+        `box-sizing:${cs.boxSizing};`;
+
+    const measureY = (text: string): number => {
+        const div = document.createElement("div");
+        div.style.cssText = baseCss;
+        div.textContent = text;
+        const span = document.createElement("span");
+        span.textContent = "​"; // zero-width space — marks the caret position
+        div.appendChild(span);
+        document.body.appendChild(div);
+        const y = span.offsetTop;
+        document.body.removeChild(div);
+        return y;
+    };
+
+    const caretY = measureY(val.slice(0, pos));
+    return {
+        first: needsFirst && caretY <= measureY(""),   // matches baseline (first visual row)
+        last:  needsLast  && caretY >= measureY(val),  // matches Y at end of text
+    };
+}
+
 export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // Uncontrolled textarea — DOM owns the value. Reading via ref on send
     // avoids re-rendering the component tree on every keystroke.
@@ -477,8 +526,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         if (textareaRef && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
             const empty = textareaRef.value.length === 0;
             const navigating = histPos < sentHistory.length;
-            const caretOnFirstLine = !textareaRef.value.slice(0, textareaRef.selectionStart).includes("\n");
-            const caretOnLastLine = !textareaRef.value.slice(textareaRef.selectionStart).includes("\n");
+            const { first: caretOnFirstLine, last: caretOnLastLine } = caretVisualEdge(textareaRef);
 
             // Empty composer: ArrowUp un-queues a held message before history.
             if (e.key === "ArrowUp" && empty) {
