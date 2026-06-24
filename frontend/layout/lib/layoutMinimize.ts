@@ -24,17 +24,14 @@ export const HeaderHeightPx = 33;
  * pane "slips" its header to the top of the nearest adjacent column, giving its
  * full width to that column. `node.slipMinimize` stores restore context.
  *
- * ### balanceNode hazard
+ * ### balanceNode and the _slipAnchor invariant
  *
- * `_finishToggle` calls `model.updateTree()` which runs `balanceNode`. That function's
- * `beforeWalkCallback` hoists a child's grandchildren into the parent whenever the
- * child has exactly one grandchild that is itself a branch:
- *   `if (child.children?.length == 1 && child.children[0].children) return child.children[0].children`
- *
- * After a slip on a two-pane Row (A + B), removing A leaves the Row with one child (B,
- * a column with children). `balanceNode` would hoist B's children into the Row's parent,
- * scattering them and invalidating `targetColumnId`. To prevent this we hoist B ourselves
- * before `updateTree` runs and record the Row's restore context in `slipMinimize.promotedRow`.
+ * After a slip, the parentRow has exactly one child (the target Column). Normally
+ * `balanceNode` would hoist that column's children into the grandparent (single-
+ * child-branch flatMap rule), scattering them and losing `targetColumnId`. We
+ * prevent this by setting `parentRow._slipAnchor = true`, which `balanceNode`
+ * checks before applying the hoist. The Row(→Column) direction alternation is
+ * preserved, and the tree is stable through serialise/reload cycles.
  */
 export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     const node = findNode(model.treeState.rootNode, nodeId);
@@ -45,11 +42,11 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
 
     // ── Restore: slip path ────────────────────────────────────────────────────
     if (node.slipMinimize !== undefined) {
-        const { targetColumnId, originalRowSize, originalRowIndex, targetWasLeaf, promotedRow } = node.slipMinimize;
+        const { targetColumnId, originalRowSize, originalRowIndex, targetWasLeaf } = node.slipMinimize;
 
         const targetCol = findNode(model.treeState.rootNode, targetColumnId);
         if (targetCol?.children) {
-            // Remove the slipped header from the column; return its size to its neighbor.
+            // Remove the slipped header from the column; give its size back to the neighbor.
             const slipIdx = targetCol.children.findIndex((c) => c.id === nodeId);
             if (slipIdx !== -1) {
                 const reclaimUnits = node.size;
@@ -68,36 +65,17 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
                 }
             }
 
-            if (promotedRow) {
-                // The Row was hoisted during slip: targetCol is now a direct child of
-                // the grandparent. Re-wrap A and B in a new Row and replace targetCol
-                // in the grandparent.
-                const grandparent = findNode(model.treeState.rootNode, promotedRow.rowParentId);
-                if (grandparent?.children) {
-                    const bIdx = grandparent.children.findIndex((c) => c.id === targetColumnId);
-                    if (bIdx !== -1) {
-                        // Restore B's original Row-width and A's size.
-                        targetCol.size = promotedRow.originalTargetRowSize;
-                        node.size = originalRowSize;
-                        node.slipMinimize = undefined;
-                        // Re-create the Row in the original slot order.
-                        const rowChildren: LayoutNode[] =
-                            originalRowIndex === 0 ? [node, targetCol] : [targetCol, node];
-                        const newRow = newLayoutNode(FlexDirection.Row, promotedRow.rowSize, rowChildren);
-                        grandparent.children.splice(bIdx, 1, newRow);
-                    }
-                }
-            } else {
-                // Normal restore: Row still exists. Shrink B back to its original width
-                // and re-insert A at its original index.
-                targetCol.size = Math.max(targetCol.size - originalRowSize, 1);
-                const rowNode = findParent(model.treeState.rootNode, targetColumnId) ?? model.treeState.rootNode;
-                if (rowNode.children) {
-                    node.size = originalRowSize;
-                    node.slipMinimize = undefined;
-                    const idx = Math.min(originalRowIndex, rowNode.children.length);
-                    rowNode.children.splice(idx, 0, node);
-                }
+            // Shrink column back to its original width.
+            targetCol.size = Math.max(targetCol.size - originalRowSize, 1);
+
+            // Re-insert node in the Row and clear the slip anchor.
+            const rowNode = findParent(model.treeState.rootNode, targetColumnId) ?? model.treeState.rootNode;
+            if (rowNode.children) {
+                node.size = originalRowSize;
+                node.slipMinimize = undefined;
+                rowNode._slipAnchor = undefined;
+                const idx = Math.min(originalRowIndex, rowNode.children.length);
+                rowNode.children.splice(idx, 0, node);
             }
         } else {
             console.warn(`[layoutMinimize] slip restore: target column ${targetColumnId} not found; dropping slip state`);
@@ -163,10 +141,9 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
  * Slip a pane from its Row slot into the top of an adjacent column.
  * Returns true on success, false if the tree was not mutated (caller should bail).
  *
- * When the Row has exactly two children (this pane + the target), removing this pane
- * would leave a single-child Row that `balanceNode` would hoist — scattering the
- * target column's children and losing `targetColumnId`. We detect this and hoist
- * the target ourselves, recording the context in `slipMinimize.promotedRow`.
+ * Sets `_slipAnchor = true` on the parentRow so `balanceNode` skips the
+ * single-child-branch hoist rule, keeping the Row(→Column) direction alternation
+ * intact while the pane is in the slipped state.
  */
 function _slipMinimize(
     model: LayoutModel,
@@ -222,42 +199,23 @@ function _slipMinimize(
         firstChild.size = Math.max(firstChild.size - headerInColUnits, headerInColUnits);
     }
 
-    // Capture B's original Row-width before mutating sizes (needed for promotedRow restore).
-    const originalTargetRowSize = sibling.size;
-
-    // Give A's Row-width to B, then remove A from the Row.
-    sibling.size += node.size;
-    parentRow.children!.splice(nodeIdx, 1);
-
-    // Detect single-child Row and hoist B ourselves to prevent balanceNode from
-    // scattering B's children (which would invalidate targetColumnId on restore).
-    let promotedRow: NonNullable<LayoutNode["slipMinimize"]>["promotedRow"] | undefined;
-    if (parentRow.children!.length === 1) {
-        const grandparent = findParent(model.treeState.rootNode, parentRow.id);
-        if (grandparent?.children) {
-            const rowIdx = grandparent.children.findIndex((c) => c.id === parentRow.id);
-            if (rowIdx !== -1) {
-                promotedRow = {
-                    rowParentId: grandparent.id,
-                    rowIdx,
-                    rowSize: parentRow.size,
-                    originalTargetRowSize,
-                };
-                // Hoist: give B the Row's Column-slot size and replace the Row in grandparent.
-                sibling.size = parentRow.size;
-                grandparent.children.splice(rowIdx, 1, sibling);
-            }
-        }
-    }
-
     // Record slip state before modifying node.size.
     node.slipMinimize = {
         targetColumnId: sibling.id,
         originalRowSize: node.size,
         originalRowIndex: nodeIdx,
         targetWasLeaf,
-        promotedRow,
     };
+
+    // Remove from Row, give its width to the sibling.
+    sibling.size += node.size;
+    parentRow.children!.splice(nodeIdx, 1);
+
+    // Mark the Row so balanceNode skips the single-child hoist for this subtree.
+    // Without this, balanceNode's flatMap rule would see parentRow(1 child = B branch)
+    // and hoist B's children directly into grandparent, scattering them and losing
+    // targetColumnId. The Row(→Column) direction alternation stays correct.
+    parentRow._slipAnchor = true;
 
     // Insert at top of the column.
     node.size = headerInColUnits;

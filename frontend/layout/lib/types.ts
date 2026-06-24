@@ -205,24 +205,15 @@ export interface LayoutNode {
         originalRowIndex: number;
         /** True when the target was a leaf converted to a Column during slip — restore must unwrap it. */
         targetWasLeaf: boolean;
-        /**
-         * Set when the Row parent had exactly two children (this pane + the target column),
-         * so after removal it had only one child. Rather than leaving a single-child Row for
-         * balanceNode to hoist (which scatters the column's children and loses targetColumnId),
-         * we hoist the target column ourselves during slip. This field stores what's needed
-         * to re-wrap it in a fresh Row on restore.
-         */
-        promotedRow?: {
-            /** ID of the grandparent node where the Row lived. */
-            rowParentId: string;
-            /** Index of the Row in the grandparent's children array. */
-            rowIdx: number;
-            /** The Row's size in the grandparent's flex units (its Column-slot height). */
-            rowSize: number;
-            /** The target column's original size in the Row's flex units (its width share). */
-            originalTargetRowSize: number;
-        };
     };
+    /**
+     * Prevents `balanceNode` from hoisting this branch's single grandchild when the
+     * branch has exactly one child that is itself a branch. Set on the Row parent of a
+     * slipped pane so the Row(→Column) direction-alternation is preserved even though
+     * the Row only has one child during the minimized state.
+     * Cleared on restore.
+     */
+    _slipAnchor?: true;
 }
 
 export type LayoutTreeStateSetter = (value: LayoutState) => void;
