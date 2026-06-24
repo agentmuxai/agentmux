@@ -98,6 +98,6 @@ Add a note to CLAUDE.md: when running `task dev` as a background task, the launc
 
 ## Action Items
 
-- [x] Eliminate EXE lock on re-launch: `dev:serve` now uses a timestamp-stamped `dist/cef-dev-<epoch>` dir on Windows; prune loop removes old dirs best-effort (locked dirs skip silently). `clean:host` also globs `dist/cef-dev-*`. Unix keeps fixed `dist/cef-dev` for stable desktop entry. (Taskfile.yml, PR #1738)
+- [x] Eliminate EXE lock on re-launch: `dev:serve` now uses a timestamp-stamped `dist/cef-dev-<epoch>` dir on Windows so each run gets a fresh dir and never tries to overwrite the running launcher. No prune loop — `rm -rf` on a live dir partially succeeds (unlocked files deleted, locked DLLs survive), breaking tool paths in the running session; old stamped dirs accumulate until `task clean:host` wipes them. `clean:host` now globs `dist/cef-dev-*`. `exe_dir_is_dev_build` updated to `starts_with("cef-dev")` so the timestamped dir is still classified as Dev. Unix keeps fixed `dist/cef-dev` for stable desktop entry. (Taskfile.yml + agentmux-common/src/runtime_mode.rs, PR #1742)
 - [ ] Add CLAUDE.md note about orphaned dev launcher on Windows
 - [ ] Investigate why the background-task output file showed 0 bytes while the process ran successfully — possible bashwrap buffering issue
