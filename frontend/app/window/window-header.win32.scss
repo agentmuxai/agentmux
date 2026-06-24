@@ -35,10 +35,17 @@
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
+    // Layer A — recessed strip (SPEC_TAB_CONTENT_FOLDER_SURFACE §3, §10.6).
+    // Slightly lighter than --workspace-surface so the folder content advances.
+    background: var(--tab-strip-bg);
 
     .window-drag {
         height: 100%;
         width: var(--default-indent);
         flex-shrink: 0;
+        // Folder boundary (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6): the 2px left
+        // drag spacer needs its own bottom hairline to close the gap before the
+        // first tab.
+        border-bottom: 1px solid var(--border-color);
     }
 }
