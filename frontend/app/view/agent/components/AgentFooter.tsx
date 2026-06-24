@@ -221,10 +221,10 @@ function caretVisualEdge(ta: HTMLTextAreaElement): { first: boolean; last: boole
     const needsLast  = !val.slice(pos).includes("\n");
     if (!needsFirst && !needsLast) return { first: false, last: false };
 
-    const cs = window.getComputedStyle(ta);
+    const cs = window.getComputedStyle(ta); // perf:allow-layout-read — mirror-div caret detection; runs only on ArrowUp/Down when no physical \n exists, not on every keystroke
     const baseCss =
         "position:absolute;visibility:hidden;overflow:hidden;top:-9999px;left:-9999px;" +
-        `width:${ta.clientWidth}px;white-space:pre-wrap;word-wrap:break-word;` +
+        `width:${ta.clientWidth}px;white-space:pre-wrap;word-wrap:break-word;` + // perf:allow-layout-read — same as above; synchronous read required for mirror-div width match
         `font:${cs.font};` +
         `padding:${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft};` +
         `box-sizing:${cs.boxSizing};`;
@@ -237,7 +237,7 @@ function caretVisualEdge(ta: HTMLTextAreaElement): { first: boolean; last: boole
         span.textContent = "​"; // zero-width space — marks the caret position
         div.appendChild(span);
         document.body.appendChild(div);
-        const y = span.offsetTop;
+        const y = span.offsetTop; // perf:allow-layout-read — reads detached mirror div; synchronous result needed to decide ArrowUp/Down behavior
         document.body.removeChild(div);
         return y;
     };
