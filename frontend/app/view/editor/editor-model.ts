@@ -852,7 +852,12 @@ export class EditorViewModel implements ViewModel {
     async toggleSourceHidden(): Promise<void> {
         const next = !this._sourceHidden[0]();
         this._sourceHidden[1](next);
-        await this.persistMeta({ [META_SOURCE_HIDDEN]: next });
+        if (!next && !this._previewOpen[0]()) {
+            this._previewOpen[1](true);
+            await this.persistMeta({ [META_SOURCE_HIDDEN]: next, [META_PREVIEW_OPEN]: true });
+        } else {
+            await this.persistMeta({ [META_SOURCE_HIDDEN]: next });
+        }
     }
 
     setPreviewHeight(height: number): void {

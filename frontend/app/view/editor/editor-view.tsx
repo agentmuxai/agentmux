@@ -140,7 +140,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             // there's nothing editable to search. See
             // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
             if (!ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
-                if (!cmView) return;
+                if (!cmView || model.sourceHiddenAtom()) return;
                 ev.preventDefault();
                 ev.stopPropagation();
                 openSearchPanel(cmView);
@@ -844,7 +844,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         <div
                             class="editor-codemirror"
                             ref={setContainerRef}
-                            style={{ display: model.sourceHiddenAtom() ? "none" : undefined }}
+                            style={{ display: (model.sourceHiddenAtom() && isMarkdown()) ? "none" : undefined }}
                         />
                         <Show when={isMarkdown()}>
                             <Show when={model.previewOpenAtom() && !model.sourceHiddenAtom()}>
@@ -875,6 +875,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                                             type="button"
                                             class="editor-preview-source-toggle"
                                             title={model.sourceHiddenAtom() ? "Show source" : "Preview only (Mod+Shift+V)"}
+                                            aria-label={model.sourceHiddenAtom() ? "Show source" : "Preview only (Mod+Shift+V)"}
                                             onClick={() => void model.toggleSourceHidden()}
                                         >
                                             {"</>"}
