@@ -255,13 +255,6 @@ export interface AgentPaneState {
     /** Resolved model id that produced `lastContextWindow` — used to re-seed the
      *  window when the user switches models mid-session (`/model`). */
     lastContextModel: string | null;
-    /**
-     * True iff the most recently completed turn ended with the agent asking
-     * a question (heuristic: last text block's trimmed content ends with `?`).
-     * Drives the waiting-ambient-sound trigger.
-     * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §4.
-     */
-    lastTurnHadQuestion: boolean;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -280,7 +273,6 @@ export const initialState = (agentId: string): AgentPaneState => ({
     detailsOpen: false,
     shellOpen: false,
     composerUnreadCount: 0,
-    lastTurnHadQuestion: false,
 });
 
 /**
@@ -523,13 +515,7 @@ export type AgentPaneCommand =
      * open, no-op (the user sees the new entry directly).
      */
     | { type: "LogEntryArrived" }
-    /**
-     * User started typing in the composer while the pane was in the
-     * waiting-for-input state. Clears `lastTurnHadQuestion` so the
-     * store can emit `waiting-ended` with reason `"typing"`.
-     * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §6.6.
-     */
-    | { type: "WaitingTypingStarted" };
+    ;
 
 export type AgentPaneEvent =
     | { type: "init-ready" }
