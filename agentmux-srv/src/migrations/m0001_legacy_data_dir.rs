@@ -12,7 +12,10 @@ impl Migration for M0001LegacyDataDir {
     fn description(&self) -> &'static str { "Move ~/.waveterm data directory to ~/.agentmux" }
 
     fn up(&self, ctx: &MigrationContext) -> Result<(), MigrationError> {
-        if ctx.data_dir.exists() {
+        // Runner always creates data_dir/db/ before migrations run, so
+        // data_dir.exists() is always true and cannot guard against overwriting
+        // a real agentmux install. Use agents/ instead — runner never creates it.
+        if ctx.home.join("agents").exists() {
             return Ok(());
         }
         let home_dir = dirs::home_dir()
