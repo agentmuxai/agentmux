@@ -297,31 +297,6 @@ pub struct SettingsType {
     #[serde(rename = "notify:tooltones:scope", default, skip_serializing_if = "Option::is_none")]
     pub notify_tooltones_scope: Option<String>,
 
-    // -- Messaging bridge settings --
-
-    /// Master enable for the Discord messaging bridge.
-    /// When true, the bridge connects to the Discord Gateway at startup.
-    #[serde(rename = "messaging:discord:enabled", default, skip_serializing_if = "is_false")]
-    pub messaging_discord_enabled: bool,
-
-    /// Discord bot token. Treat as a secret — do not log. Obtain from
-    /// discord.com/developers/applications → Bot → Token.
-    #[serde(rename = "messaging:discord:token", default, skip_serializing_if = "Option::is_none")]
-    pub messaging_discord_token: Option<String>,
-
-    /// Channel ID to filter inbound messages and use as the default send target.
-    #[serde(rename = "messaging:discord:channel", default, skip_serializing_if = "String::is_empty")]
-    pub messaging_discord_channel: String,
-
-    /// Agent ID that receives inbound Discord messages via the reactive bus.
-    /// Absent → messages are logged but not forwarded to any agent.
-    #[serde(rename = "messaging:discord:target", default, skip_serializing_if = "Option::is_none")]
-    pub messaging_discord_target: Option<String>,
-
-    /// Guild ID for guild-scoped slash command registration (Phase 2).
-    #[serde(rename = "messaging:discord:guild", default, skip_serializing_if = "Option::is_none")]
-    pub messaging_discord_guild: Option<String>,
-
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
