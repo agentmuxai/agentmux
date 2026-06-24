@@ -1484,6 +1484,20 @@
         margin-top: var(--space-0-5);
     }
 
+    .agent-tool-write-md {
+        padding: 4px var(--space-1);
+        overflow-x: auto;
+        user-select: text;
+        cursor: text;
+
+        .markdown,
+        .markdown > .content {
+            display: block;
+            height: auto;
+            overflow: visible;
+        }
+    }
+
     .agent-tool-write-info {
         font-size: 11px;
         opacity: 0.6;
