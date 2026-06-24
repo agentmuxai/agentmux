@@ -38,6 +38,29 @@ export function resolveWindowName(opts: ResolveWindowNameOpts): string {
     return `Window ${opts.indexInOpenWindows + 1}`;
 }
 
+export interface ResolveFloatingPaneNameOpts {
+    /** Value of `workspace.name` for the workspace hosted in this pane. */
+    workspaceName?: string | null;
+    /** Human-readable label derived from the pane's block (e.g. view type or agent name). */
+    blockViewLabel?: string | null;
+    /** 0-indexed position in `openFloatingPaneEntriesAtom`; rendered as "Pane N" where N = index + 1. */
+    indexInOpenPanes: number;
+}
+
+/**
+ * Two-tier resolution for floating pane display names:
+ *   1. block view label (e.g. "Agent", "Terminal", "Browser")
+ *   2. workspace name
+ *   3. positional fallback "Pane N"
+ */
+export function resolveFloatingPaneName(opts: ResolveFloatingPaneNameOpts): string {
+    const view = (opts.blockViewLabel ?? "").trim();
+    if (view) return view;
+    const ws = (opts.workspaceName ?? "").trim();
+    if (ws) return ws;
+    return `Pane ${opts.indexInOpenPanes + 1}`;
+}
+
 /**
  * Format the OS window title. Tab name omitted (no empty middle slot) when
  * absent, since not every init path has a tab loaded yet.

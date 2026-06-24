@@ -15,7 +15,7 @@
  * Per-window token totals deferred until token-usage is per-window.
  */
 
-import { atoms, getApi, isDev, openWindowEntriesAtom, type WindowEntry } from "@/store/global";
+import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
@@ -27,6 +27,7 @@ import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-
 import {
     DISPLAY_NAME_MAX_LEN,
     DISPLAY_NAME_META_KEY,
+    resolveFloatingPaneName,
     resolveWindowName,
 } from "@/util/window-title";
 
@@ -50,6 +51,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         const d = getApi().getAboutModalDetails();
         return {
             version: d?.version ?? "unknown",
+            channel: d?.channel ?? null,
             buildLabel: (d as any)?.buildLabel ?? null,
             gitHash: d?.gitHash ?? null,
             buildTime: typeof d?.buildTime === "number" && d.buildTime > 0 ? d.buildTime : null,
@@ -73,6 +75,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     };
 
     const entries = openWindowEntriesAtom;
+    const floatingEntries = openFloatingPaneEntriesAtom;
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
 
@@ -150,6 +153,52 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         } catch (e) {
             console.error("[InstancePanel] focusWindow failed:", e);
         }
+    };
+
+    const handleFocusPane = async (label: string) => {
+        try {
+            await getApi().focusWindow(label);
+        } catch (e) {
+            console.error("[InstancePanel] focusPane failed:", e);
+        }
+    };
+
+    // Readable label for a floating pane. Resolution order:
+    //   1. block view type (title-cased, e.g. "Agent", "Terminal")
+    //   2. workspace name
+    //   3. positional fallback "Pane N"
+    const PANE_VIEW_LABELS: Record<string, string> = {
+        agent: "Agent",
+        term: "Terminal",
+        browser: "Browser",
+        editor: "Editor",
+        sysinfo: "System Info",
+        drone: "Drone",
+        swarm: "Swarm",
+        help: "Help",
+        warden: "Warden",
+    };
+
+    const resolveFloatingName = (entry: FloatingPaneEntry, idx: number): string => {
+        let blockViewLabel: string | undefined;
+        let workspaceName: string | undefined;
+        if (entry.windowId) {
+            const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
+            if (win?.workspaceid) {
+                const ws = getObjectValue<Workspace>(makeORef("workspace", win.workspaceid));
+                workspaceName = ws?.name;
+                const tab = ws?.activetabid
+                    ? getObjectValue<Tab>(makeORef("tab", ws.activetabid))
+                    : null;
+                const blockId = tab?.blockids?.[0];
+                if (blockId) {
+                    const block = getObjectValue<Block>(makeORef("block", blockId));
+                    const view = block?.meta?.view as string | undefined;
+                    if (view) blockViewLabel = PANE_VIEW_LABELS[view] ?? view;
+                }
+            }
+        }
+        return resolveFloatingPaneName({ blockViewLabel, workspaceName, indexInOpenPanes: idx });
     };
 
     // For THIS window's row, fall back to atoms.waveWindow()?.oid when
@@ -519,6 +568,41 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         );
                     }}
                 </For>
+            </div>
+            <div class="instance-panel-divider" />
+            <div class="instance-panel-section">
+                <div class="instance-panel-section-title">
+                    Floating panes — {floatingEntries().length}
+                </div>
+                <Show
+                    when={floatingEntries().length > 0}
+                    fallback={
+                        <div class="instance-panel-pane-empty">No floating panes</div>
+                    }
+                >
+                    <For each={floatingEntries()}>
+                        {(entry, i) => (
+                            <div
+                                class="instance-panel-pane-row"
+                                onClick={() => handleFocusPane(entry.label)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        handleFocusPane(entry.label);
+                                    }
+                                }}
+                                title="Click to focus"
+                                role="button"
+                                tabIndex={0}
+                            >
+                                <span class="instance-panel-pane-icon">◈</span>
+                                <span class="instance-panel-pane-name">
+                                    {resolveFloatingName(entry, i())}
+                                </span>
+                            </div>
+                        )}
+                    </For>
+                </Show>
             </div>
             <div class="instance-panel-divider" />
             <div class="instance-panel-footer">
