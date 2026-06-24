@@ -1027,6 +1027,8 @@ wrap_task! {
         y: i32,
         width: i32,
         height: i32,
+        initial_view: Option<String>,
+        initial_meta: Option<String>,
     }
 
     impl Task {
@@ -1062,7 +1064,10 @@ wrap_task! {
                 &self.state,
                 &self.label,
                 "pool:new-window",
-                &serde_json::json!({}),
+                &serde_json::json!({
+                    "initialView": self.initial_view,
+                    "initialMeta": self.initial_meta,
+                }),
             );
 
             tracing::info!(
@@ -1082,6 +1087,8 @@ pub fn post_promote_pool_window_for_new_window(
     y: i32,
     width: i32,
     height: i32,
+    initial_view: Option<String>,
+    initial_meta: Option<String>,
 ) {
     let mut task = PromotePoolWindowForNewWindowTask::new(
         state.clone(),
@@ -1090,6 +1097,8 @@ pub fn post_promote_pool_window_for_new_window(
         y,
         width,
         height,
+        initial_view,
+        initial_meta,
     );
     post_task(ThreadId::UI, Some(&mut task));
 }

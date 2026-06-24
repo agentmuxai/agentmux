@@ -583,9 +583,16 @@ export async function initApp() {
             const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote } = await import("@/app/init/pool");
             if (isPoolMode()) {
                 getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
-                await awaitPoolPromote();
+                const { initialView, initialMeta } = await awaitPoolPromote();
                 getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
                 await initHostNewWindow();
+                if (initialView) {
+                    await TabRpcClient.rpcCall("pane.open", {
+                        view: initialView,
+                        ...(initialMeta ? { meta: initialMeta } : {}),
+                        floating: false,
+                    });
+                }
             } else if (isPanePoolMode()) {
                 // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
                 // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.
@@ -608,6 +615,18 @@ export async function initApp() {
                     const label = await getApi().getWindowLabel();
                     getApi().sendLog(`Initializing as new window: ${label}`);
                     await initHostNewWindow();
+                    const coldSearchParams = new URL(window.location.href).searchParams;
+                    const coldInitialView = coldSearchParams.get("initialView");
+                    if (coldInitialView) {
+                        const coldMetaRaw = coldSearchParams.get("initialMeta");
+                        let coldMeta: Record<string, unknown> | undefined;
+                        try { coldMeta = coldMetaRaw ? JSON.parse(coldMetaRaw) : undefined; } catch { /* ignore */ }
+                        await TabRpcClient.rpcCall("pane.open", {
+                            view: coldInitialView,
+                            ...(coldMeta ? { meta: coldMeta } : {}),
+                            floating: false,
+                        });
+                    }
                 }
             }
         } catch (error) {

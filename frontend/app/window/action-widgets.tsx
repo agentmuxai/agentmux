@@ -312,31 +312,38 @@ const ActionWidgets = (): JSX.Element => {
         setItemMenuState({ pos, shortName: key.replace("defwidget@", "") });
     };
 
-    const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => [
-        {
-            label: "New Window",
-            click: () => {
-                // Item menu closes via keepOpen:false → onClose; More must be closed explicitly.
-                closeMore();
-                fireAndForget(async () => getApi().openNewWindow());
-            },
-        },
-        { type: "separator" },
-        getPinnedKeys(settings(), wmap()).includes(shortName)
-            ? {
-                label: "Unpin from bar",
+    const resolveWidgetDef = (shortName: string) =>
+        wmap()[`defwidget@${shortName}`] ?? null;
+
+    const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => {
+        const widgetDef = resolveWidgetDef(shortName);
+        const blockMeta = widgetDef?.blockdef?.meta as Record<string, unknown> | undefined;
+        const view = (blockMeta?.["view"] as string) ?? null;
+        return [
+            {
+                label: "Open in New Window",
                 click: () => {
-                    unpinWidget(shortName, settings(), wmap());
-                    // Item menu closes via keepOpen:false → onClose; More stays open.
-                },
-            }
-            : {
-                label: "Pin to bar",
-                click: () => {
-                    pinWidget(shortName, settings(), wmap());
+                    closeMore();
+                    if (view) fireAndForget(async () => getApi().openNewWindowWithView(view, blockMeta));
+                    else fireAndForget(async () => getApi().openNewWindow());
                 },
             },
-    ];
+            {
+                label: "Open in Floating Pane",
+                click: () => {
+                    closeMore();
+                    if (!view || !blockMeta) return;
+                    fireAndForget(async () =>
+                        TabRpcClient.rpcCall("pane.open", { view, meta: blockMeta, floating: true })
+                    );
+                },
+            },
+            { type: "separator" } as PopoverMenuItem,
+            getPinnedKeys(settings(), wmap()).includes(shortName)
+                ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
+                : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
+        ];
+    };
 
     // Close on outside click — ignore clicks inside button, dropdown, or any
     // open popover-menu (e.g. the item context menu rendered by handleItemContextMenu).

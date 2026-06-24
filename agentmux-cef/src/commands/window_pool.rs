@@ -660,6 +660,8 @@ pub fn promote_pool_window(
     height: Option<i32>,
     tab_anchor_x: Option<i32>,
     tab_anchor_y: Option<i32>,
+    initial_view: Option<String>,
+    initial_meta: Option<String>,
 ) -> Option<String> {
     // PR #5 H.4 — atomic pop+remove via reducer. The dispatch pops
     // the front of the pool queue, removes the label from
@@ -1064,6 +1066,8 @@ pub fn promote_pool_window(
         "pool:promote",
         &serde_json::json!({
             "workspaceId": workspace_id,
+            "initialView": initial_view,
+            "initialMeta": initial_meta,
         }),
     );
 
@@ -1162,6 +1166,8 @@ pub fn promote_pool_window(
     height: Option<i32>,
     tab_anchor_x: Option<i32>,
     tab_anchor_y: Option<i32>,
+    _initial_view: Option<String>,
+    _initial_meta: Option<String>,
 ) -> Option<String> {
     // Atomic pop from the pool queue via reducer. Returns None if empty
     // — caller falls back to cold path.
@@ -1255,6 +1261,8 @@ pub fn promote_pool_window_for_new_window(
     pos_y: i32,
     width: i32,
     height: i32,
+    initial_view: Option<String>,
+    initial_meta: Option<String>,
 ) -> Option<String> {
     #[cfg(target_os = "windows")]
     {
@@ -1272,6 +1280,8 @@ pub fn promote_pool_window_for_new_window(
             None,         // height: skip DPI conversion, use POOL_HEIGHT default
             Some(pos_x),  // tab_anchor_x: physical px placed directly in SetWindowPos
             Some(pos_y),  // tab_anchor_y
+            initial_view,
+            initial_meta,
         );
     }
 
@@ -1303,7 +1313,7 @@ pub fn promote_pool_window_for_new_window(
         }
 
         crate::ui_tasks::post_promote_pool_window_for_new_window(
-            state, &label, pos_x, pos_y, width, height,
+            state, &label, pos_x, pos_y, width, height, initial_view, initial_meta,
         );
         spawn_pool_window(state);
 
