@@ -27,7 +27,6 @@
  */
 
 import {
-    createEffect,
     createMemo,
     createSignal,
     For,
@@ -36,6 +35,7 @@ import {
     Show,
     type JSX,
 } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import {
     dispatchRecordsAtom,
     describeSource,
@@ -93,11 +93,10 @@ function toRow(idx: number, rec: DispatchRecord): DisplayRow {
 
 export function DiagPanel(): JSX.Element {
     const [visible, setVisible] = createSignal(false);
-    const [now, setNow] = createSignal(Date.now());
+    const tick = useTick(1000);
+    const now = createMemo(() => (tick(), Date.now()));
     const [sliceFilter, setSliceFilter] = createSignal<string>("");
     const [keyFilter, setKeyFilter] = createSignal<string>("");
-
-    let ageInterval: ReturnType<typeof setInterval> | null = null;
 
     const onKey = (e: KeyboardEvent) => {
         // Ctrl+Shift+D (or Meta+Shift+D on macOS where Ctrl is rare).
@@ -111,24 +110,8 @@ export function DiagPanel(): JSX.Element {
         window.addEventListener("keydown", onKey);
     });
 
-    // Tick the displayed `age` once per second while the panel is
-    // visible. The records signal already drives re-renders on new
-    // dispatches; this just refreshes the relative-time strings on
-    // existing rows. Only runs while visible — same bounded-cost
-    // discipline as the perf HUD's setInterval gating.
-    createEffect(() => {
-        if (visible()) {
-            setNow(Date.now());
-            ageInterval = setInterval(() => setNow(Date.now()), 1000);
-        } else if (ageInterval != null) {
-            clearInterval(ageInterval);
-            ageInterval = null;
-        }
-    });
-
     onCleanup(() => {
         window.removeEventListener("keydown", onKey);
-        if (ageInterval != null) clearInterval(ageInterval);
     });
 
     // Available slices for the filter dropdown — derived from the

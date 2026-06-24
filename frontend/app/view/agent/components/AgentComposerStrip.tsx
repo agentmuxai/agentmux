@@ -20,7 +20,8 @@
  * convenience; keyboard users use Tab → target → Enter.
  */
 
-import { Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { applyRuntimeChange } from "../runtime-apply";
@@ -150,13 +151,18 @@ interface AgentComposerStripProps {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
-    const [elapsedMs, setElapsedMs] = createSignal(0);
+    const tick = useTick(1000);
+    const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
     createEffect(() => {
-        if (!props.loading) return;
-        const start = Date.now();
-        setElapsedMs(0);
-        const id = setInterval(() => setElapsedMs(Date.now() - start), 1000);
-        onCleanup(() => clearInterval(id));
+        if (props.loading) {
+            setLoadStartMs((prev) => prev ?? Date.now());
+        } else {
+            setLoadStartMs(null);
+        }
+    });
+    const elapsedMs = createMemo(() => {
+        const s = loadStartMs();
+        return s != null ? (tick(), Date.now() - s) : 0;
     });
 
     const rightText = createMemo((): string => {

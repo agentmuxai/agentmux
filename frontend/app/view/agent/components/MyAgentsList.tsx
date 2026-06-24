@@ -47,6 +47,7 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -147,12 +148,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     });
     onCleanup(unsubAgents);
 
-    // The Date.now() snapshot updates every minute so "5m ago" rolls
-    // forward without the user having to re-render. createSignal ticks
-    // are cheaper than re-running the createResource.
-    const [now, setNow] = createSignal(Date.now());
-    const tick = setInterval(() => setNow(Date.now()), 60_000);
-    onCleanup(() => clearInterval(tick));
+    const minuteTick = useTick(60_000);
+    const now = createMemo(() => (minuteTick(), Date.now()));
 
     // Fork prompt state per row (keyed by definition_id)
     const [forkStates, setForkStates] = createSignal<Map<string, ForkState>>(new Map());
