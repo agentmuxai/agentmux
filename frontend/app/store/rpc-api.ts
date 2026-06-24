@@ -1392,10 +1392,6 @@ class RpcApiType {
         return client.rpcCall("agent:memory:write_file", data, opts);
     }
 
-    SessionDigestCommand(client: RpcClient, data: CommandSessionDigestData, opts?: RpcOpts): Promise<SessionDigestResult> {
-        return client.rpcCall("session:digest", data, opts);
-    }
-
     AgentActivitySummaryCommand(client: RpcClient, data: CommandActivitySummaryData, opts?: RpcOpts): Promise<ActivitySummaryResult> {
         return client.rpcCall("session:activity_summary", data, opts);
     }

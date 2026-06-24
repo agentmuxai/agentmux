@@ -2219,19 +2219,6 @@ declare global {
         content: string;
     };
 
-    // wshrpc.CommandSessionDigestData
-    type CommandSessionDigestData = {
-        block_id: string;
-        force?: boolean;
-    };
-
-    // wshrpc.SessionDigestResult
-    type SessionDigestResult = {
-        summary: string;
-        generated_at: number;
-        cached: boolean;
-    };
-
     // wshrpc.CommandActivitySummaryData
     type CommandActivitySummaryData = {
         block_id: string;

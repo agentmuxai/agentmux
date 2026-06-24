@@ -41,7 +41,6 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_blockfile_read_range(engine, state);
     register_blockfile_read_state(engine, state);
     register_blockfile_write_state(engine, state);
-    register_session_digest(engine, state);
     register_session_activity_summary(engine, state);
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
@@ -1957,214 +1956,18 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
 }
 
 // ---------------------------------------------------------------------------
-// session:digest
-// ---------------------------------------------------------------------------
-
-fn register_session_digest(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
-    let filestore = state.filestore.clone();
-    let broker = state.broker.clone();
-
-    engine.register_handler(
-        COMMAND_SESSION_DIGEST,
-        Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
-            let filestore = filestore.clone();
-            let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandSessionDigestData = serde_json::from_value(data)
-                    .map_err(|e| format!("session:digest: {e}"))?;
-
-                tracing::info!(block_id = %cmd.block_id, force = ?cmd.force, "session:digest");
-
-                let force = cmd.force.unwrap_or(false);
-
-                // Read block meta
-                let block: Block = wstore
-                    .get(&cmd.block_id)
-                    .map_err(|e| format!("session:digest: {e}"))?
-                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
-
-                // Check for a valid cached digest
-                let cached_summary = block.meta.get("session:digest_summary")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                let cached_generated_at = block.meta.get("session:digest_generated_at")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0);
-                let digest_last_line_count = block.meta.get("session:digest_last_line_count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-
-                // Current line count from meta (O(1))
-                let current_line_count = block.meta.get("session:line_count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-
-                // Serve cache if: not forced, cached digest exists, AND fewer than 20 new lines
-                // since the digest was last generated.
-                let lines_since_digest = current_line_count.saturating_sub(digest_last_line_count);
-                if !force && cached_summary.is_some() && lines_since_digest < 20 {
-                    return Ok(Some(serde_json::to_value(&SessionDigestResult {
-                        summary: cached_summary.unwrap(),
-                        generated_at: cached_generated_at,
-                        cached: true,
-                    }).unwrap()));
-                }
-
-                // --- Generate a new digest ---
-
-                // Read up to the last 200 lines from FileStore, falling back to the WPS ring buffer.
-                let all_lines: Vec<String> = {
-                    let filestore_lines = match filestore.stat(&cmd.block_id, "output") {
-                        Ok(Some(ref wf)) if wf.size > 0 => {
-                            match filestore.read_file(&cmd.block_id, "output") {
-                                Ok(Some(bytes)) => {
-                                    let text = String::from_utf8_lossy(&bytes);
-                                    let lines: Vec<String> = text.lines()
-                                        .filter(|l| !l.trim().is_empty())
-                                        .map(|l| l.to_string())
-                                        .collect();
-                                    Some(lines)
-                                }
-                                _ => None,
-                            }
-                        }
-                        _ => None,
-                    };
-
-                    if let Some(lines) = filestore_lines {
-                        lines
-                    } else {
-                        // Fallback: WPS ring buffer
-                        let scope = format!("block:{}", cmd.block_id);
-                        let events = broker.read_event_history(
-                            crate::backend::wps::EVENT_BLOCK_FILE,
-                            &scope,
-                            usize::MAX,
-                        );
-                        let mut lines: Vec<String> = Vec::new();
-                        for event in events {
-                            let Some(ref ed) = event.data else { continue };
-                            let fname = ed.get("filename").and_then(|v| v.as_str()).unwrap_or("");
-                            if fname != "output" { continue; }
-                            if let Some(d64) = ed.get("data64").and_then(|v| v.as_str()) {
-                                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(d64) {
-                                    let text = String::from_utf8_lossy(&bytes);
-                                    for line in text.lines() {
-                                        if !line.trim().is_empty() {
-                                            lines.push(line.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        lines
-                    }
-                };
-
-                // Take the last 200 lines
-                let n = all_lines.len();
-                let start = n.saturating_sub(200);
-                let window: Vec<&str> = all_lines[start..].iter().map(|s| s.as_str()).collect();
-
-                if window.is_empty() {
-                    return Ok(Some(serde_json::to_value(&SessionDigestResult {
-                        summary: String::new(),
-                        generated_at: 0,
-                        cached: false,
-                    }).unwrap()));
-                }
-
-                // Extract meaningful text (skip system events and raw stream deltas)
-                let extracted = extract_digest_text(&window);
-
-                if extracted.is_empty() {
-                    return Ok(Some(serde_json::to_value(&SessionDigestResult {
-                        summary: String::new(),
-                        generated_at: 0,
-                        cached: false,
-                    }).unwrap()));
-                }
-
-                // Locate the Claude CLI (stored in block meta as "cmd" by runLaunchFlow)
-                let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
-                if cli_path.is_empty() {
-                    tracing::warn!(block_id = %cmd.block_id, "session:digest: no CLI path in meta");
-                    return Ok(Some(serde_json::to_value(&SessionDigestResult {
-                        summary: String::new(),
-                        generated_at: 0,
-                        cached: false,
-                    }).unwrap()));
-                }
-
-                // Build the summarization prompt
-                let prompt = format!(
-                    "Summarize this AI coding session in 10 words or fewer. Be direct and specific. \
-                     Example: \"Fixed auth bug, added dark mode, tests passing.\"\n\n\
-                     Session content (last 200 events):\n\n{}",
-                    extracted
-                );
-
-                // Invoke the Claude CLI and extract the summary text
-                let summary = match invoke_cli_for_digest(&cli_path, &prompt, &block.meta).await {
-                    Ok(text) => text,
-                    Err(e) => {
-                        tracing::warn!(block_id = %cmd.block_id, error = %e, "session:digest: CLI invocation failed");
-                        String::new()
-                    }
-                };
-
-                if summary.is_empty() {
-                    return Ok(Some(serde_json::to_value(&SessionDigestResult {
-                        summary: String::new(),
-                        generated_at: 0,
-                        cached: false,
-                    }).unwrap()));
-                }
-
-                // Cache in block meta
-                let generated_at = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
-
-                let mut meta_update = obj::MetaMapType::new();
-                meta_update.insert("session:digest_summary".to_string(), json!(summary.clone()));
-                meta_update.insert("session:digest_generated_at".to_string(), json!(generated_at));
-                meta_update.insert("session:digest_last_line_count".to_string(), json!(current_line_count));
-
-                if let Err(e) = crate::server::service::update_object_meta(
-                    &wstore,
-                    &format!("block:{}", cmd.block_id),
-                    &meta_update,
-                ) {
-                    tracing::warn!(block_id = %cmd.block_id, error = %e, "session:digest: failed to cache in meta");
-                }
-
-                Ok(Some(serde_json::to_value(&SessionDigestResult {
-                    summary,
-                    generated_at,
-                    cached: false,
-                }).unwrap()))
-            })
-        }),
-    );
-}
-
-// ---------------------------------------------------------------------------
 // session:activity_summary — per-turn live mini-summary via Haiku
 // ---------------------------------------------------------------------------
 
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
-    let broker = state.broker.clone();
+    let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_SESSION_ACTIVITY_SUMMARY,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
-            let broker = broker.clone();
+            let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandActivitySummaryData = serde_json::from_value(data)
                     .map_err(|e| format!("session:activity_summary: {e}"))?;
@@ -2176,32 +1979,18 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map_err(|e| format!("session:activity_summary: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                // Read only the most recent ring buffer events — we need the last ~30
-                // lines, so 50 events is a generous upper bound without touching the
-                // full buffer (which can be large on long sessions).
-                let all_lines: Vec<String> = {
-                    let scope = format!("block:{}", cmd.block_id);
-                    let events = broker.read_event_history(
-                        crate::backend::wps::EVENT_BLOCK_FILE,
-                        &scope,
-                        50,
-                    );
-                    let mut lines: Vec<String> = Vec::new();
-                    for event in events {
-                        let Some(ref ed) = event.data else { continue };
-                        if ed.get("filename").and_then(|v| v.as_str()).unwrap_or("") != "output" { continue; }
-                        if let Some(d64) = ed.get("data64").and_then(|v| v.as_str()) {
-                            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(d64) {
-                                let text = String::from_utf8_lossy(&bytes);
-                                for line in text.lines() {
-                                    if !line.trim().is_empty() {
-                                        lines.push(line.to_string());
-                                    }
-                                }
-                            }
-                        }
+                // Read the agent output from FileStore. EVENT_BLOCK_FILE events have
+                // persist: 0 (transient), so the ring buffer is always empty — the
+                // FileStore is the only reliable source of agent output.
+                let all_lines: Vec<String> = match filestore.read_file(&cmd.block_id, "output") {
+                    Ok(Some(bytes)) => {
+                        let text = String::from_utf8_lossy(&bytes);
+                        text.lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .map(|l| l.to_string())
+                            .collect()
                     }
-                    lines
+                    _ => Vec::new(),
                 };
 
                 let n = all_lines.len();
@@ -2399,91 +2188,6 @@ fn extract_digest_text(lines: &[&str]) -> String {
     }
 
     parts.join("\n")
-}
-
-/// Invoke the Claude CLI with a prompt and extract the text response.
-/// Uses `-p --output-format stream-json --verbose` (non-interactive mode).
-async fn invoke_cli_for_digest(
-    cli_path: &str,
-    prompt: &str,
-    meta: &obj::MetaMapType,
-) -> Result<String, String> {
-    // Inherit auth env from block meta (CLAUDE_CONFIG_DIR, etc.)
-    let auth_env: std::collections::HashMap<String, String> = match meta.get("cmd:env") {
-        Some(serde_json::Value::Object(obj_map)) => obj_map
-            .iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-            .collect(),
-        _ => std::collections::HashMap::new(),
-    };
-
-    // Pipe the prompt via stdin rather than passing it as a CLI arg — Linux
-    // caps individual argv entries at MAX_ARG_STRLEN (~128 KB), and a digest
-    // over 200 lines of session content can easily exceed that.
-    // `kill_on_drop(true)` ensures the child is terminated if the timeout
-    // future below is dropped — tokio `Child` does NOT kill on drop by default.
-    let mut child = crate::server::cli_handlers::make_cli_cmd(cli_path)
-        .args(["-p", "--output-format", "stream-json", "--verbose"])
-        .envs(&auth_env)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("failed to spawn digest CLI: {e}"))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        stdin
-            .write_all(prompt.as_bytes())
-            .await
-            .map_err(|e| format!("digest CLI stdin write: {e}"))?;
-        stdin
-            .shutdown()
-            .await
-            .map_err(|e| format!("digest CLI stdin shutdown: {e}"))?;
-    }
-
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        child.wait_with_output(),
-    )
-    .await
-    .map_err(|_| "digest CLI timed out after 60s".to_string())?
-    .map_err(|e| format!("digest CLI wait: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!("digest CLI exited with status {}", output.status));
-    }
-
-    // Parse stream-json output — capture the last assistant text block
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut last_text = String::new();
-
-    for line in stdout.lines() {
-        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else { continue };
-        let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if msg_type == "assistant" {
-            if let Some(content) = val.get("message")
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_array())
-            {
-                for block in content {
-                    if block.get("type").and_then(|v| v.as_str()) == Some("text") {
-                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                            last_text = text.trim().to_string();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if last_text.is_empty() {
-        return Err("no text content in digest CLI response".to_string());
-    }
-
-    Ok(last_text)
 }
 
 // ---------------------------------------------------------------------------
