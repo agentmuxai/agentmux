@@ -480,6 +480,18 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
 
+    // Channel-scoped migration tracking (parallel to the global db_migrations
+    // in store.db). MigrationScope::Channel migrations record completion here
+    // so each channel tracks its own migration state independently.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_migrations (
+            id          TEXT PRIMARY KEY,
+            applied_at  TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            scope       TEXT NOT NULL DEFAULT 'channel'
+        );",
+    )?;
+
     Ok(())
 }
 

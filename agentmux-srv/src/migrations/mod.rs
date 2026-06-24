@@ -47,6 +47,8 @@ pub struct MigrationContext {
     pub data_dir: PathBuf,
     /// Path to the shared store (`~/.agentmux/shared/store.db`).
     pub shared_store_path: PathBuf,
+    /// Path to the channel store (`<data_dir>/db/objects.db`).
+    pub channel_store_path: PathBuf,
 }
 
 #[derive(Debug)]
