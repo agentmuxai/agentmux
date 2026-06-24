@@ -125,11 +125,16 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # --no-validate skips the live Apple credential check so a pending
+          # Developer Program agreement doesn't block credential storage.
+          # package-macos.sh handles a 403 from notarytool submit gracefully
+          # and emits a signed-but-un-notarized DMG with a warning.
           xcrun notarytool store-credentials "notarytool" \
-            --apple-id  "$APPLE_ID" \
-            --password  "$APPLE_PASSWORD" \
-            --team-id   "$APPLE_TEAM_ID" \
-            --keychain  "$KEYCHAIN_PATH"
+            --apple-id   "$APPLE_ID" \
+            --password   "$APPLE_PASSWORD" \
+            --team-id    "$APPLE_TEAM_ID" \
+            --keychain   "$KEYCHAIN_PATH" \
+            --no-validate
 
       # ── Build + sign + notarize ────────────────────────────────────────────
       - name: Build, sign, and notarize DMG (task package:macos)
