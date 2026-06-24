@@ -18,6 +18,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
+import { Markdown } from "@/app/element/markdown";
 import { BashOutputViewer } from "./BashOutputViewer";
 import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
@@ -302,6 +303,7 @@ function renderWrite(node: ToolNode): JSX.Element {
     const content: string | undefined = (node.params as any).content;
     const bytes: number | undefined = (node.result as any)?.bytesWritten;
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-write">
             <div class="agent-tool-file-path-row">
@@ -311,11 +313,20 @@ function renderWrite(node: ToolNode): JSX.Element {
                 </Show>
             </div>
             <Show when={capped} fallback={<div class="agent-tool-write-info">No content written.</div>}>
-                <HighlightedCode
-                    code={capped!.text}
-                    lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
-                    class="agent-tool-write-content"
-                />
+                <Show
+                    when={isMarkdown}
+                    fallback={
+                        <HighlightedCode
+                            code={capped!.text}
+                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
+                            class="agent-tool-write-content"
+                        />
+                    }
+                >
+                    <div class="agent-tool-write-content agent-tool-write-md">
+                        <Markdown text={capped!.text} />
+                    </div>
+                </Show>
                 <Show when={capped!.hiddenLines > 0}>
                     <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
                 </Show>
