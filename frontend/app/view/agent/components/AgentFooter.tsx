@@ -37,10 +37,23 @@ function fmtTokens(t: TurnTokens): string {
 // Returns null when neither loading nor has stats — no idle placeholder.
 // Stays visible as a turn delimiter until the user sends the next message.
 
+/** Truncate tool arg to `max` chars, left-truncating file paths to preserve filename. */
+function abbreviateArg(s: string, max: number): string {
+    if (s.length <= max) return s;
+    // For paths (contain / or \), keep the tail (filename) end.
+    if (s.includes("/") || s.includes("\\")) {
+        return "…" + s.slice(-(max - 1));
+    }
+    return s.slice(0, max - 1) + "…";
+}
+
 interface AgentWorkingRowProps {
     loading: boolean;
     stopping?: boolean;
     currentTool?: string | null;
+    /** First significant argument of the active tool (file path, command, etc.).
+     *  When set alongside currentTool, shown as "tool · arg" in the left zone. */
+    currentToolArg?: string | null;
     sessionStats?: SessionStats | null;
     turnTokens?: TurnTokens | null;
 }
@@ -127,7 +140,9 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                     {props.stopping
                         ? "Stopping…"
                         : props.currentTool
-                            ? props.currentTool
+                            ? props.currentToolArg
+                                ? `${props.currentTool}  ·  ${abbreviateArg(props.currentToolArg, 40)}`
+                                : props.currentTool
                             : `${phrase()}…`}
                 </span>
                 <span class="agent-working-row-right">{rightText()}</span>

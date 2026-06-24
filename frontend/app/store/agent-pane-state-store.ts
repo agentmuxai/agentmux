@@ -62,10 +62,21 @@ export interface AgentPaneProjections {
      */
     detailsOpen?: (next: boolean) => void;
     /**
+     * Shell history panel — open/closed. Mutually exclusive with
+     * `detailsOpen`. Spec: SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §4.
+     */
+    shellOpen?: (next: boolean) => void;
+    /**
      * Activity-log entries that arrived while the panel was closed.
      * Reducer-owned (PR #1068). Drives the chevron's unread badge.
      */
     composerUnreadCount?: (next: number) => void;
+    /**
+     * First significant argument of the active tool call (file path for
+     * read/write, command string for bash, etc.). Cleared on ToolEnd.
+     * Drives enriched AgentWorkingRow display.
+     */
+    currentToolArg?: (next: string | null) => void;
     /**
      * Current input-token count as of the last message_start — equals the
      * total context fill (all conversation history) sent to the model.
@@ -216,7 +227,9 @@ export function dispatch(
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
     proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
     proj("detailsOpen", prev.detailsOpen, slot.state.detailsOpen, slot.proj.detailsOpen);
+    proj("shellOpen", prev.shellOpen, slot.state.shellOpen, slot.proj.shellOpen);
     proj("composerUnreadCount", prev.composerUnreadCount, slot.state.composerUnreadCount, slot.proj.composerUnreadCount);
+    proj("currentToolArg", prev.currentToolArg, slot.state.currentToolArg, slot.proj.currentToolArg);
 
     if (cascadeSetter != null) {
         console.warn(
