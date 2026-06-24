@@ -41,18 +41,18 @@ export function isPanePoolMode(): boolean {
  * app start and the user's first action. A timeout would block later promotes
  * from ever bootstrapping. Lifetime is governed host-side.
  */
-export async function awaitPoolPromote(): Promise<void> {
+export async function awaitPoolPromote(): Promise<{ initialView: string | null }> {
     const { listenEvent } = await import("@/app/platform/ipc");
     const { invokeCommand } = await import("@/app/platform/ipc");
     const { getApi } = await import("@/store/global");
 
-    return new Promise<void>(async (resolve, reject) => {
+    return new Promise<{ initialView: string | null }>(async (resolve, reject) => {
         let unsub1: (() => void) | undefined;
         let unsub2: (() => void) | undefined;
         const cleanup = () => { unsub1?.(); unsub2?.(); };
 
         // tear-off promote: push workspaceId so initHostNewWindow reattaches.
-        unsub1 = await listenEvent<{ workspaceId: string }>(
+        unsub1 = await listenEvent<{ workspaceId: string; initialView?: string | null }>(
             "pool:promote",
             (payload) => {
                 cleanup();
@@ -60,19 +60,21 @@ export async function awaitPoolPromote(): Promise<void> {
                 url.searchParams.set("workspaceId", payload.workspaceId);
                 url.searchParams.delete("pool");
                 window.history.replaceState({}, "", url.toString());
-                resolve();
+                const initialView = payload.initialView ?? null;
+                resolve({ initialView });
             },
         );
 
         // new-window promote: no workspaceId → initHostNewWindow creates fresh workspace.
-        unsub2 = await listenEvent<Record<string, never>>(
+        unsub2 = await listenEvent<{ initialView?: string | null }>(
             "pool:new-window",
-            () => {
+            (payload) => {
                 cleanup();
                 const url = new URL(window.location.href);
                 url.searchParams.delete("pool");
                 window.history.replaceState({}, "", url.toString());
-                resolve();
+                const initialView = payload.initialView ?? null;
+                resolve({ initialView });
             },
         );
 

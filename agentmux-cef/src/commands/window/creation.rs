@@ -234,7 +234,12 @@ sessions and agent state are in <code>~/.agentmux/</code> and are unaffected.</p
 /// second `agentmux.exe` launch). Independent top-level window, own taskbar
 /// entry, independent lifecycle. See
 /// `docs/specs/SPEC_MULTIWINDOW_TASKBAR_GROUPING.md`.
-pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let initial_view = args
+        .get("initial_view")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     // H.7 invariant — also enforced inside open_window_with_kind (cold path).
     if state.any_browser_pane_closing() {
         tracing::warn!(
@@ -251,7 +256,7 @@ pub fn open_new_window(state: &Arc<AppState>) -> Result<serde_json::Value, Strin
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
     if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
-        state, pos_x, pos_y, win_w, win_h,
+        state, pos_x, pos_y, win_w, win_h, initial_view,
     ) {
         tracing::info!(
             target: "pool:new-window",

@@ -312,31 +312,34 @@ const ActionWidgets = (): JSX.Element => {
         setItemMenuState({ pos, shortName: key.replace("defwidget@", "") });
     };
 
-    const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => [
-        {
-            label: "New Window",
-            click: () => {
-                // Item menu closes via keepOpen:false → onClose; More must be closed explicitly.
-                closeMore();
-                fireAndForget(async () => getApi().openNewWindow());
-            },
-        },
-        { type: "separator" },
-        getPinnedKeys(settings(), wmap()).includes(shortName)
-            ? {
-                label: "Unpin from bar",
+    const resolveView = (shortName: string): string | null =>
+        (wmap()[`defwidget@${shortName}`]?.blockdef?.meta?.["view"] as string) ?? null;
+
+    const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => {
+        const view = resolveView(shortName);
+        return [
+            {
+                label: "Open in New Window",
                 click: () => {
-                    unpinWidget(shortName, settings(), wmap());
-                    // Item menu closes via keepOpen:false → onClose; More stays open.
-                },
-            }
-            : {
-                label: "Pin to bar",
-                click: () => {
-                    pinWidget(shortName, settings(), wmap());
+                    closeMore();
+                    if (view) fireAndForget(async () => getApi().openNewWindowWithView(view));
+                    else fireAndForget(async () => getApi().openNewWindow());
                 },
             },
-    ];
+            {
+                label: "Open in Floating Pane",
+                click: () => {
+                    closeMore();
+                    if (!view) return;
+                    fireAndForget(async () => TabRpcClient.rpcCall("pane.open", { view, floating: true }));
+                },
+            },
+            { type: "separator" } as PopoverMenuItem,
+            getPinnedKeys(settings(), wmap()).includes(shortName)
+                ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
+                : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
+        ];
+    };
 
     // Close on outside click — ignore clicks inside button, dropdown, or any
     // open popover-menu (e.g. the item context menu rendered by handleItemContextMenu).

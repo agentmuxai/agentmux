@@ -583,9 +583,12 @@ export async function initApp() {
             const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote } = await import("@/app/init/pool");
             if (isPoolMode()) {
                 getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
-                await awaitPoolPromote();
+                const { initialView } = await awaitPoolPromote();
                 getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
                 await initHostNewWindow();
+                if (initialView) {
+                    await TabRpcClient.rpcCall("pane.open", { view: initialView, floating: false });
+                }
             } else if (isPanePoolMode()) {
                 // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
                 // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.
