@@ -96,9 +96,9 @@
     }
 
     .swarm-agent-icon {
-        font-size: 14px;
         flex-shrink: 0;
-        opacity: 0.6;
+        display: inline-flex;
+        align-items: center;
     }
 
     .swarm-agent-label {
