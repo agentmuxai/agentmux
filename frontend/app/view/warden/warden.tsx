@@ -10,7 +10,8 @@
 //
 // Spec: specs/SPEC_WARDEN_WIDGET_2026-05-25.md
 
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 
 import { getApi } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
@@ -134,7 +135,8 @@ const HostSection = (): JSX.Element => {
     const [audit, setAudit] = createSignal<AuditEntry[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(true);
-    const [now, setNow] = createSignal(Date.now());
+    const tick = useTick(1000);
+    const now = createMemo(() => (tick(), Date.now()));
 
     const refresh = async () => {
         try {
@@ -168,13 +170,7 @@ const HostSection = (): JSX.Element => {
     onMount(() => {
         void refresh();
         const dataTimer = window.setInterval(() => void refresh(), HOST_REFRESH_MS);
-        // Tick `now` once per second so age columns update without a fresh
-        // fetch. Cheap — just re-renders the existing rows.
-        const clockTimer = window.setInterval(() => setNow(Date.now()), 1000);
-        onCleanup(() => {
-            window.clearInterval(dataTimer);
-            window.clearInterval(clockTimer);
-        });
+        onCleanup(() => window.clearInterval(dataTimer));
     });
 
     return (
@@ -304,7 +300,8 @@ const LanSection = (): JSX.Element => {
     const [peers, setPeers] = createSignal<LanPeer[]>([]);
     const [loading, setLoading] = createSignal(true);
     const [error, setError] = createSignal<string | null>(null);
-    const [now, setNow] = createSignal(Date.now());
+    const tick = useTick(1000);
+    const now = createMemo(() => (tick(), Date.now()));
 
     const refresh = async () => {
         try {
@@ -321,14 +318,7 @@ const LanSection = (): JSX.Element => {
     onMount(() => {
         void refresh();
         const dataTimer = window.setInterval(() => void refresh(), HOST_REFRESH_MS);
-        // `last_seen` is in unix *seconds* on the LAN endpoint (not ms like
-        // ReactiveHandler) — see lan_discovery.rs:135. The clock tick keeps
-        // the relative "Xs ago" column fresh between fetches.
-        const clockTimer = window.setInterval(() => setNow(Date.now()), 1000);
-        onCleanup(() => {
-            window.clearInterval(dataTimer);
-            window.clearInterval(clockTimer);
-        });
+        onCleanup(() => window.clearInterval(dataTimer));
     });
 
     return (

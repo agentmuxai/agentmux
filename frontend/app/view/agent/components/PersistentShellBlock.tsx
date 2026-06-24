@@ -12,7 +12,8 @@
  */
 
 import clsx from "clsx";
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import { capChars, collapseSpinnerChunks, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
@@ -40,19 +41,10 @@ function formatElapsed(ms: number): string {
 }
 
 export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Element => {
-    const [now, setNow] = createSignal(Date.now());
-
-    // Gate the interval on the status memo, not props.node, so chunk appends
-    // don't tear down and recreate the timer on every streamed line.
-    const isRunning = createMemo(() => props.node.status === "running");
-    createEffect(() => {
-        if (!isRunning()) return;
-        const id = setInterval(() => setNow(Date.now()), 1000);
-        onCleanup(() => clearInterval(id));
-    });
+    const tick = useTick(1000);
 
     const elapsed = createMemo(() => {
-        const end = props.node.exitedAt ?? now();
+        const end = props.node.exitedAt ?? (tick(), Date.now());
         return formatElapsed(end - props.node.spawnedAt);
     });
 

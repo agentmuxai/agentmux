@@ -3,7 +3,8 @@
 
 import { atoms, getApi, setNotifications } from "@/store/global";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createSignal, onCleanup } from "solid-js";
+import { createEffect, createSignal } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 
 const notificationActions: { [key: string]: () => void } = {
     installUpdate: () => {
@@ -63,27 +64,15 @@ export function useNotification() {
         }
     };
 
-    // Expiration interval
+    const tick = useTick(1000);
     createEffect(() => {
-        if (notificationPopoverMode()) {
-            return;
-        }
-
-        const hasExpiringNotifications = notifications().some((notif) => notif.expiration);
-        if (!hasExpiringNotifications) {
-            return;
-        }
-
-        const intervalId = setInterval(() => {
-            const now = Date.now();
-            setNotifications((prevNotifications) =>
-                prevNotifications.filter(
-                    (notif) => !notif.expiration || notif.expiration > now || notif.id === hoveredId()
-                )
-            );
-        }, 1000);
-
-        onCleanup(() => clearInterval(intervalId));
+        tick();
+        if (notificationPopoverMode()) return;
+        if (!notifications().some((notif) => notif.expiration)) return;
+        const now = Date.now();
+        setNotifications((prev) =>
+            prev.filter((notif) => !notif.expiration || notif.expiration > now || notif.id === hoveredId())
+        );
     });
 
     const formatTimestamp = (timestamp: string): string => {
