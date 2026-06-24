@@ -97,10 +97,12 @@ impl Migration for M0000Bootstrap {
             stamp_channel("0007_agents_consolidate");
         }
 
-        // ── Channel: default OAuth bundle ────────────────────────────────────
-        // No marker; stamp if objects.db exists (migration already ran).
+        // ── Global: default OAuth bundle ─────────────────────────────────────
+        // m0008 scope changed to Global (tracked in shared store) so it runs
+        // on fresh install before objects.db exists. Stamp globally here.
+        // No marker; presence of objects.db is sufficient proxy.
         if objects_db.exists() {
-            stamp_channel("0008_default_bundle");
+            stamp_global("0008_default_bundle");
         }
 
         // ── Global: transcript backfill ──────────────────────────────────────
