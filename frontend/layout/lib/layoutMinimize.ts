@@ -5,7 +5,7 @@
 import { newLayoutNode } from "./layoutNode";
 import { findNode, findParent } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
-import { DefaultNodeSize, FlexDirection, type LayoutNodeAdditionalProps } from "./types";
+import { DefaultNodeSize, FlexDirection, type LayoutNodeAdditionalProps, type LayoutNode } from "./types";
 
 /** Height of the block header in CSS pixels (matches --header-height in theme.scss). */
 export const HeaderHeightPx = 33;
@@ -23,6 +23,18 @@ export const HeaderHeightPx = 33;
  * horizontally narrow (thin strip) rather than vertically collapsed. Instead the
  * pane "slips" its header to the top of the nearest adjacent column, giving its
  * full width to that column. `node.slipMinimize` stores restore context.
+ *
+ * ### balanceNode hazard
+ *
+ * `_finishToggle` calls `model.updateTree()` which runs `balanceNode`. That function's
+ * `beforeWalkCallback` hoists a child's grandchildren into the parent whenever the
+ * child has exactly one grandchild that is itself a branch:
+ *   `if (child.children?.length == 1 && child.children[0].children) return child.children[0].children`
+ *
+ * After a slip on a two-pane Row (A + B), removing A leaves the Row with one child (B,
+ * a column with children). `balanceNode` would hoist B's children into the Row's parent,
+ * scattering them and invalidating `targetColumnId`. To prevent this we hoist B ourselves
+ * before `updateTree` runs and record the Row's restore context in `slipMinimize.promotedRow`.
  */
 export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     const node = findNode(model.treeState.rootNode, nodeId);
@@ -33,11 +45,11 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
 
     // ── Restore: slip path ────────────────────────────────────────────────────
     if (node.slipMinimize !== undefined) {
-        const { targetColumnId, originalRowSize, originalRowIndex, targetWasLeaf } = node.slipMinimize;
+        const { targetColumnId, originalRowSize, originalRowIndex, targetWasLeaf, promotedRow } = node.slipMinimize;
 
         const targetCol = findNode(model.treeState.rootNode, targetColumnId);
         if (targetCol?.children) {
-            // Remove slipped header from column; give its size back to the next sibling.
+            // Remove the slipped header from the column; return its size to its neighbor.
             const slipIdx = targetCol.children.findIndex((c) => c.id === nodeId);
             if (slipIdx !== -1) {
                 const reclaimUnits = node.size;
@@ -56,20 +68,40 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
                 }
             }
 
-            // Shrink column back to its original width.
-            targetCol.size = Math.max(targetCol.size - originalRowSize, 1);
+            if (promotedRow) {
+                // The Row was hoisted during slip: targetCol is now a direct child of
+                // the grandparent. Re-wrap A and B in a new Row and replace targetCol
+                // in the grandparent.
+                const grandparent = findNode(model.treeState.rootNode, promotedRow.rowParentId);
+                if (grandparent?.children) {
+                    const bIdx = grandparent.children.findIndex((c) => c.id === targetColumnId);
+                    if (bIdx !== -1) {
+                        // Restore B's original Row-width and A's size.
+                        targetCol.size = promotedRow.originalTargetRowSize;
+                        node.size = originalRowSize;
+                        node.slipMinimize = undefined;
+                        // Re-create the Row in the original slot order.
+                        const rowChildren: LayoutNode[] =
+                            originalRowIndex === 0 ? [node, targetCol] : [targetCol, node];
+                        const newRow = newLayoutNode(FlexDirection.Row, promotedRow.rowSize, rowChildren);
+                        grandparent.children.splice(bIdx, 1, newRow);
+                    }
+                }
+            } else {
+                // Normal restore: Row still exists. Shrink B back to its original width
+                // and re-insert A at its original index.
+                targetCol.size = Math.max(targetCol.size - originalRowSize, 1);
+                const rowNode = findParent(model.treeState.rootNode, targetColumnId) ?? model.treeState.rootNode;
+                if (rowNode.children) {
+                    node.size = originalRowSize;
+                    node.slipMinimize = undefined;
+                    const idx = Math.min(originalRowIndex, rowNode.children.length);
+                    rowNode.children.splice(idx, 0, node);
+                }
+            }
         } else {
             console.warn(`[layoutMinimize] slip restore: target column ${targetColumnId} not found; dropping slip state`);
-        }
-
-        // Re-insert the pane in its original Row position.
-        // The Row is the parent of the target column (or grandparent of the target column's content).
-        const rowNode = findParent(model.treeState.rootNode, targetColumnId) ?? model.treeState.rootNode;
-        if (rowNode.children) {
-            node.size = originalRowSize;
             node.slipMinimize = undefined;
-            const idx = Math.min(originalRowIndex, rowNode.children.length);
-            rowNode.children.splice(idx, 0, node);
         }
 
         _finishToggle(model, nodeId, false);
@@ -129,16 +161,19 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
 
 /**
  * Slip a pane from its Row slot into the top of an adjacent column.
- * Handles both the case where the sibling is already a Column branch and the
- * case where it is a plain leaf (converted to a Column in-place).
+ * Returns true on success, false if the tree was not mutated (caller should bail).
+ *
+ * When the Row has exactly two children (this pane + the target), removing this pane
+ * would leave a single-child Row that `balanceNode` would hoist — scattering the
+ * target column's children and losing `targetColumnId`. We detect this and hoist
+ * the target ourselves, recording the context in `slipMinimize.promotedRow`.
  */
-/** Returns true on success, false if the tree was not mutated (caller should bail). */
 function _slipMinimize(
     model: LayoutModel,
-    node: import("./types").LayoutNode,
+    node: LayoutNode,
     nodeIdx: number,
-    parentRow: import("./types").LayoutNode,
-    sibling: import("./types").LayoutNode,
+    parentRow: LayoutNode,
+    sibling: LayoutNode,
     addlProps: Record<string, LayoutNodeAdditionalProps>,
     gapSizePx: number,
 ): boolean {
@@ -149,20 +184,15 @@ function _slipMinimize(
     if (!sibling.children) {
         targetWasLeaf = true;
         const heightPx = siblingProps?.rect?.height;
-        // Choose a content size that keeps total = DefaultNodeSize so the ratio is computable.
         const totalUnits = DefaultNodeSize;
         const headerUnitsEst = heightPx
             ? ((HeaderHeightPx + gapSizePx) * totalUnits) / heightPx
-            : totalUnits * 0.05; // fallback: ~5% for header if height unknown
+            : totalUnits * 0.05;
         const contentUnits = Math.max(totalUnits - headerUnitsEst, headerUnitsEst);
-
         const contentNode = newLayoutNode(FlexDirection.Row, contentUnits, undefined, sibling.data);
         sibling.data = undefined;
         sibling.flexDirection = FlexDirection.Column;
         sibling.children = [contentNode];
-        // We'll set the slipped node's size = headerUnitsEst; total = headerUnitsEst + contentUnits.
-        // The layout engine recomputes the ratio on the next frame, so the exact values just
-        // need to be in the right proportion.
     }
 
     // Compute header height in the column's flex-units.
@@ -172,10 +202,8 @@ function _slipMinimize(
             : undefined);
 
     if (colRatio == null) {
-        // Can't determine column ratio — bail without mutating the tree.
         console.warn("[layoutMinimize] slip: cannot determine column ratio, skipping");
         if (targetWasLeaf) {
-            // Undo the leaf-to-column conversion.
             const only = sibling.children?.[0];
             if (only?.data) {
                 sibling.data = only.data;
@@ -194,17 +222,42 @@ function _slipMinimize(
         firstChild.size = Math.max(firstChild.size - headerInColUnits, headerInColUnits);
     }
 
+    // Capture B's original Row-width before mutating sizes (needed for promotedRow restore).
+    const originalTargetRowSize = sibling.size;
+
+    // Give A's Row-width to B, then remove A from the Row.
+    sibling.size += node.size;
+    parentRow.children!.splice(nodeIdx, 1);
+
+    // Detect single-child Row and hoist B ourselves to prevent balanceNode from
+    // scattering B's children (which would invalidate targetColumnId on restore).
+    let promotedRow: NonNullable<LayoutNode["slipMinimize"]>["promotedRow"] | undefined;
+    if (parentRow.children!.length === 1) {
+        const grandparent = findParent(model.treeState.rootNode, parentRow.id);
+        if (grandparent?.children) {
+            const rowIdx = grandparent.children.findIndex((c) => c.id === parentRow.id);
+            if (rowIdx !== -1) {
+                promotedRow = {
+                    rowParentId: grandparent.id,
+                    rowIdx,
+                    rowSize: parentRow.size,
+                    originalTargetRowSize,
+                };
+                // Hoist: give B the Row's Column-slot size and replace the Row in grandparent.
+                sibling.size = parentRow.size;
+                grandparent.children.splice(rowIdx, 1, sibling);
+            }
+        }
+    }
+
     // Record slip state before modifying node.size.
     node.slipMinimize = {
         targetColumnId: sibling.id,
         originalRowSize: node.size,
         originalRowIndex: nodeIdx,
         targetWasLeaf,
+        promotedRow,
     };
-
-    // Remove from Row, give its width to the sibling.
-    sibling.size += node.size;
-    parentRow.children!.splice(nodeIdx, 1);
 
     // Insert at top of the column.
     node.size = headerInColUnits;
