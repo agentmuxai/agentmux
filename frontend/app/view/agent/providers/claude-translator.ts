@@ -190,8 +190,10 @@ export class ClaudeTranslator implements OutputTranslator {
         if (!message || !Array.isArray(message.content)) return [];
 
         const events: StreamEvent[] = [];
+        let hasToolUse = false;
         for (const block of message.content) {
             if (block.type === "tool_use") {
+                hasToolUse = true;
                 this.currentToolCallId = block.id;
                 this.currentToolName = block.name;
                 if (block.id && block.name) {
@@ -206,6 +208,16 @@ export class ClaudeTranslator implements OutputTranslator {
                         : {},
                 });
             }
+        }
+        // In persistent/interactive mode the process never exits between turns,
+        // so "result" is only emitted at session teardown. Detect per-turn
+        // completion here: a non-partial assistant message with no tool_use
+        // blocks is always the final text response of a turn. Emit session_end
+        // so TurnPhase transitions to Done → idle. In subprocess (--print) mode
+        // the "result" event fires a duplicate TurnEnd, which is a no-op
+        // (first-done-wins in the reducer).
+        if (!hasToolUse) {
+            events.push({ type: "session_end", stats: {} });
         }
         return events;
     }
