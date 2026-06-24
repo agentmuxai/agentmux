@@ -731,8 +731,24 @@ tasks:
                 #
                 # Either way the staging dir (dist/cef/) is never locked by
                 # the running process, so the next build can overwrite it.
-                DEV_DIR="dist/cef-dev"
-                rm -rf "$DEV_DIR" 2>/dev/null || true
+                #
+                # Windows: use a timestamp-stamped dir so a re-run never tries to
+                # wipe agentmux-launcher.exe while it is still running. Windows
+                # locks the EXE image for the process lifetime, so rm -rf on a
+                # running dir exits non-zero and the subsequent cp fails (exit 201).
+                # Old cef-dev-* dirs accumulate but are small; run `task clean:host`
+                # after stopping a dev session to wipe them all. No prune loop here:
+                # rm -rf on a live dir partially succeeds (unlocked files like
+                # agentmux-mcp are deleted while locked DLLs/EXE survive), leaving
+                # the running session with broken tool paths on the next shell call.
+                # Unix keeps a fixed "dist/cef-dev" name so install-linux-desktop.sh
+                # writes a stable Exec= path that survives across dev sessions.
+                if [ "{{OS}}" = "windows" ]; then
+                  DEV_DIR="dist/cef-dev-$(date +%s 2>/dev/null || echo dev)"
+                else
+                  DEV_DIR="dist/cef-dev"
+                  rm -rf "$DEV_DIR" 2>/dev/null || true
+                fi
                 if [ "{{OS}}" = "windows" ]; then
                   mkdir -p "$DEV_DIR/runtime"
                   cp target/release/agentmux-launcher.exe "$DEV_DIR/agentmux-launcher.exe"
@@ -929,9 +945,11 @@ tasks:
                 # writes Exec=$DEV_DIR/agentmux-cef into the user's
                 # ~/.local/share/applications/agentmux.desktop, and that path
                 # has to stay valid between dev sessions for dock-clicks to
-                # work. Each new `dev:serve` start wipes + recreates $DEV_DIR
-                # at the top of this command, so leaving it around is safe
-                # (no stale binaries leak across versions).
+                # work. Unix: each `dev:serve` start wipes + recreates the
+                # fixed $DEV_DIR, so leaving it around is safe (no stale
+                # binaries leak across versions). Windows: each run creates a
+                # fresh dist/cef-dev-<epoch> dir and never wipes it; old dirs
+                # accumulate until `task clean:host` removes them.
                 #
                 # --strictPort closes the TOCTOU window: if something binds
                 # our port between the pre-check and Vite startup, Vite
@@ -1090,6 +1108,8 @@ tasks:
             - cmd: '{{.RMRF}} "dist/cef"'
               ignore_error: true
             - cmd: '{{.RMRF}} "dist/cef-dev"'
+              ignore_error: true
+            - cmd: bash -c 'rm -rf dist/cef-dev-* 2>/dev/null || true'
               ignore_error: true
 
     clean:cef:
