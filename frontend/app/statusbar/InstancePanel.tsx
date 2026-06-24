@@ -175,6 +175,8 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         sysinfo: "System Info",
         drone: "Drone",
         swarm: "Swarm",
+        help: "Help",
+        warden: "Warden",
     };
 
     const resolveFloatingName = (entry: FloatingPaneEntry, idx: number): string => {
