@@ -489,6 +489,10 @@ declare global {
         version: string;
         gitHash?: string;
         buildTime: number;
+        buildLabel?: string;
+        channel?: string;
+        platform?: string;
+        arch?: string;
     }
 
     type BlockComponentModel = {
