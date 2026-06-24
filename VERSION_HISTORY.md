@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.49.1 — 2026-06-23
+
+- fix(container-agent): force subprocess controller type at block creation; guard resync
+- perf(layout): remove 50ms debounce on container resize — HWND stays in sync during window resize
+- refactor(reactive): rename MuxBus poller wire keys agentmux_* -> muxbus_* (ARCH-001)
+- feat(agent-pane): composer strip redesign — model/effort selects, shell history, enriched working row, context text, complementary user-input color
+- fix(auth): inline agent_error Login Again uses seedGlobalLogin for Claude (not relogin PTY)
+- fix(composer): use mirror-div for visual line detection in ArrowUp/Down history nav
+- fix(dev): timestamp-stamp cef-dev dir on Windows to avoid EXE lock on re-launch
+- feat(agent-pane): right-click header to set 2-tone hue color theme
+- feat(statusbar): add copy button to Build row and replace Label with Channel in instance panel
+- fix(dev): update exe_dir_is_dev_build to match cef-dev-<epoch> timestamp-stamped dirs
+- fix(agent-pane): guard Done→Streaming promotion to outcome=completed only
+- feat(agent-pane): render .md file content as markdown in Write tool overlay
+- fix(editor): guard sourceHidden display behind isMarkdown(), fix Mod+F in preview-only, add aria-label to </> toggle, restore previewOpen on exit
+
+
 ## 0.49.0 — 2026-06-23
 
 - fix(sysinfo): robust CPU chart — ZOH gap fill, debounced resize, no blank-on-reload
