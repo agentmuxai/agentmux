@@ -3,7 +3,7 @@
 
 import { atoms, getApi, setNotifications } from "@/store/global";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createSignal } from "solid-js";
+import { createEffect, createSignal, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 const notificationActions: { [key: string]: () => void } = {
@@ -65,13 +65,17 @@ export function useNotification() {
     };
 
     const tick = useTick(1000);
+    // All reads inside are untracked — tick() is the only reactive source.
+    // Without untrack, reading notifications() here and then writing via
+    // setNotifications() creates a self-dependency that loops unboundedly.
     createEffect(() => {
         tick();
-        if (notificationPopoverMode()) return;
-        if (!notifications().some((notif) => notif.expiration)) return;
+        if (untrack(notificationPopoverMode)) return;
+        const notifs = untrack(notifications);
+        if (!notifs.some((n) => n.expiration)) return;
         const now = Date.now();
         setNotifications((prev) =>
-            prev.filter((notif) => !notif.expiration || notif.expiration > now || notif.id === hoveredId())
+            prev.filter((n) => !n.expiration || n.expiration > now || n.id === untrack(hoveredId))
         );
     });
 

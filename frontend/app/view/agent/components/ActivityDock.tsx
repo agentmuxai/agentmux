@@ -48,7 +48,6 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     const [nodes] = props.documentAtom;
     const [docState, setDocState] = props.documentStateAtom;
     const tick = useTick(1000);
-    const now = createMemo(() => (tick(), Date.now()));
     const [dismissed, setDismissed] = createSignal<Set<string>>(new Set());
     const [overflowOpen, setOverflowOpen] = createSignal(false);
 
@@ -60,21 +59,20 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         return m;
     });
 
-    const hasExpiring = createMemo(() => {
-        const t = now();
-        return allActivities().some(
-            (a) =>
-                a.status !== "running" &&
-                RETENTION_MS[a.status] !== Infinity &&
-                a.endedAt != null &&
-                t - a.endedAt < RETENTION_MS[a.status],
-        );
-    });
+    // Time-independent: are there any non-running, finite-retention rows?
+    // Re-evaluates only when allActivities() changes — no tick dependency.
+    // Gates tick subscription in `visible` so the dock doesn't re-filter
+    // every second after all rows age out (reagent #1428 redux).
+    const hasCandidates = createMemo(() =>
+        allActivities().some(
+            (a) => a.status !== "running" && RETENTION_MS[a.status] !== Infinity && a.endedAt != null,
+        )
+    );
 
     // D4 — running always; terminal within its retention window; never dismissed.
     const visible = createMemo(() => {
         const dm = dismissed();
-        const t = now();
+        const t = hasCandidates() ? (tick(), Date.now()) : Date.now();
         return allActivities().filter((a) => {
             if (dm.has(a.id)) return false;
             if (a.status === "running") return true;
