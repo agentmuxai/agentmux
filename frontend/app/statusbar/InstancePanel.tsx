@@ -312,20 +312,15 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         ⧉
                     </button>
                 </div>
-                {/* Local-build label — the exact string in this portable's
-                    folder/ZIP name. Only present for `task package` builds;
-                    copyable so it can be pasted to match the on-disk artifact. */}
-                <Show when={about().buildLabel}>
+                <Show when={about().channel}>
                     <div class="instance-panel-row instance-panel-row-meta">
-                        <span class="instance-panel-label">Label</span>
-                        <span class="instance-panel-value instance-panel-mono">{about().buildLabel}</span>
+                        <span class="instance-panel-label">Channel</span>
+                        <span class="instance-panel-value instance-panel-mono">{about().channel}</span>
                         <button
                             type="button"
                             class="instance-panel-copy"
-                            title="Copy build label"
-                            // Raw label (no "label: " prefix) so it pastes
-                            // straight into a folder-name match / grep.
-                            onClick={() => clipboardWriteText(about().buildLabel!)}
+                            title="Copy channel"
+                            onClick={() => clipboardWriteText(about().channel!)}
                         >
                             ⧉
                         </button>
@@ -335,6 +330,14 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                     <div class="instance-panel-row instance-panel-row-meta">
                         <span class="instance-panel-label">Build</span>
                         <span class="instance-panel-value instance-panel-mono">{about().gitHash}</span>
+                        <button
+                            type="button"
+                            class="instance-panel-copy"
+                            title="Copy build hash"
+                            onClick={() => clipboardWriteText(about().gitHash!)}
+                        >
+                            ⧉
+                        </button>
                     </div>
                 </Show>
                 <Show when={about().buildTime}>

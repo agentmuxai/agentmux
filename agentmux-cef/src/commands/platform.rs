@@ -195,10 +195,18 @@ fn read_build_label() -> Option<String> {
     None
 }
 
+const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
+    Some(s) => s,
+    None => "stable",
+};
+
 /// Get details for the About modal.
 pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
     let endpoints = state.backend_endpoints.lock();
+    let channel = agentmux_common::DataPaths::from_env()
+        .map(|p| p.channel)
+        .unwrap_or_else(|| BUILD_CHANNEL_DEFAULT.to_string());
 
     serde_json::json!({
         "version": version,
@@ -208,6 +216,7 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
         "buildLabel": read_build_label(),
         "gitHash": env!("AGENTMUX_GIT_HASH"),
         "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
+        "channel": channel,
         "platform": match std::env::consts::OS {
             "macos" => "darwin",
             "windows" => "win32",
