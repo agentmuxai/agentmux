@@ -86,6 +86,27 @@ impl Store {
 
     /// Upsert a content blob for an agent.
     pub fn agent_content_set(&self, content: &AgentContent) -> Result<(), StoreError> {
+        // Cross-channel agents have no local `db_agent_definitions` row; the FK
+        // constraint on `db_agent_content` would reject the INSERT. Route those
+        // writes directly to the global registry instead so content (e.g. ui:zoom)
+        // persists and is readable via the cross-channel fallback in
+        // `agent_content_get`. (#1700 zoom persistence P0.)
+        let is_local = {
+            let conn = self.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
+                params![&content.agent_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false)
+        };
+        if !is_local {
+            return self.registry_def_update_content_field(
+                &content.agent_id,
+                &content.content_type,
+                Some(&content.content),
+            );
+        }
         {
             let conn = self.conn.lock().unwrap();
             conn.execute(
@@ -175,6 +196,29 @@ impl Store {
         agent_id: &str,
         content_type: &str,
     ) -> Result<bool, StoreError> {
+        // Cross-channel agents: remove the field from the global registry
+        // record directly; there is no local SQLite row to delete. (#1700.)
+        let is_local = {
+            let conn = self.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
+                params![agent_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false)
+        };
+        if !is_local {
+            return self
+                .registry_def_update_content_field(agent_id, content_type, None)
+                .map(|_| true)
+                .or_else(|e| {
+                    tracing::debug!(
+                        agent_id, content_type, error = %e,
+                        "[content] cross-channel delete: field absent or registry unavailable"
+                    );
+                    Ok(false)
+                });
+        }
         let rows = {
             let conn = self.conn.lock().unwrap();
             conn.execute(
