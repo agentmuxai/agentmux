@@ -25,8 +25,19 @@ impl Migration for M0011SharedStoreBackfill {
         let skip_links       = !shared.agent_identity_list_all().map_err(|e| e.to_string()).map_err(MigrationError)?.is_empty();
         let skip_muxbus      = shared.muxbus_load().ok().flatten().is_some();
 
+        // Always include the current channel's objects.db first.
+        // enumerate_objects_dbs scans home/channels/<ch>/… and misses paths
+        // outside that tree (e.g. custom AGENTMUX_DATA_HOME). Upserts are
+        // idempotent, so a duplicate via the sibling scan is harmless.
         let mut sibling_stores: Vec<Store> = Vec::new();
+        if ctx.channel_store_path.exists() {
+            match Store::open_source_readonly(&ctx.channel_store_path) {
+                Ok(s) => sibling_stores.push(s),
+                Err(e) => tracing::debug!(path = %ctx.channel_store_path.display(), error = %e, "shared_store_backfill: skip current channel store"),
+            }
+        }
         for path in registry::enumerate_objects_dbs(&ctx.home) {
+            if path == ctx.channel_store_path { continue; } // already added above
             match Store::open_source_readonly(&path) {
                 Ok(s) => sibling_stores.push(s),
                 Err(e) => tracing::debug!(path = %path.display(), error = %e, "shared_store_backfill: skip sibling"),
