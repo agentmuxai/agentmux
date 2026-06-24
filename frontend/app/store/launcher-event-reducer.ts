@@ -32,13 +32,16 @@ import { getApi } from "@/store/app-api";
 import {
     setOpenWindowEntriesAtom,
     setOpenWindowLabelsAtom,
+    setOpenFloatingPaneEntriesAtom,
     setWindowCountAtom,
+    type FloatingPaneEntry,
     type WindowEntry,
 } from "@/app/store/global";
 
 import { update } from "./launcher-event/reducer";
 import {
     initialState,
+    isFloatingPaneLabel,
     isInstanceLabel as isInstanceLabelFromTypes,
     LauncherEventCommand,
     LauncherEventReducerEvent,
@@ -55,6 +58,61 @@ export const isInstanceLabel = isInstanceLabelFromTypes;
 // ── State cell ─────────────────────────────────────────────────────────
 
 let state: LauncherEventState = initialState();
+
+// ── Floating pane state cell ───────────────────────────────────────────
+//
+// Tracked separately from the window reducer — floating panes don't need
+// the tombstone / seed-race machinery (they can't arrive before their own
+// window_opened event and the pre-seed close race doesn't apply to them).
+// Same event stream, different label filter: `isFloatingPaneLabel`.
+
+let floatingPanes: Map<string, FloatingPaneEntry> = new Map();
+
+function handleFloatingPaneEvent(evt: { event: string; label?: unknown; window_id?: unknown }): boolean {
+    const label = String(evt.label ?? "");
+    if (!label || !isFloatingPaneLabel(label)) return false;
+
+    switch (evt.event) {
+        case "window_opened":
+        case "window_instance_assigned": {
+            if (floatingPanes.has(label)) return false;
+            floatingPanes = new Map(floatingPanes);
+            floatingPanes.set(label, { label, windowId: null });
+            return true;
+        }
+        case "window_closed":
+        case "window_instance_released": {
+            if (!floatingPanes.has(label)) return false;
+            floatingPanes = new Map(floatingPanes);
+            floatingPanes.delete(label);
+            return true;
+        }
+        case "backend_window_id_registered": {
+            const windowId = typeof evt.window_id === "string" ? evt.window_id : null;
+            const existing = floatingPanes.get(label);
+            if (existing?.windowId === windowId) return false;
+            floatingPanes = new Map(floatingPanes);
+            // Ensure an entry exists even if window_opened was missed.
+            floatingPanes.set(label, { label, windowId });
+            return true;
+        }
+        case "backend_window_id_unregistered": {
+            const existing = floatingPanes.get(label);
+            if (!existing || existing.windowId === null) return false;
+            floatingPanes = new Map(floatingPanes);
+            floatingPanes.set(label, { label, windowId: null });
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+function projectFloating(): void {
+    setOpenFloatingPaneEntriesAtom(
+        [...floatingPanes.values()].sort((a, b) => a.label.localeCompare(b.label)),
+    );
+}
 
 // ── Echo-loop guard ────────────────────────────────────────────────────
 
@@ -130,6 +188,19 @@ export function seedKnownEntriesFromSnapshot(
     entries: ReadonlyArray<WindowEntry>,
 ): void {
     dispatch({ type: "ApplySeed", entries });
+    // Seed floating panes from the same snapshot (same dev-mode guard applies
+    // at the call site — only called when !launcherEventsActive()).
+    const nextFloating = new Map<string, FloatingPaneEntry>();
+    for (const e of entries) {
+        if (isFloatingPaneLabel(e.label)) {
+            nextFloating.set(e.label, { label: e.label, windowId: e.windowId });
+        }
+    }
+    if (nextFloating.size !== floatingPanes.size ||
+        [...nextFloating.keys()].some((k) => !floatingPanes.has(k))) {
+        floatingPanes = nextFloating;
+        projectFloating();
+    }
 }
 
 /**
@@ -148,6 +219,15 @@ export function reconcileKnownEntriesFromSnapshot(
     entries: ReadonlyArray<WindowEntry>,
 ): void {
     dispatch({ type: "ReconcileFromSnapshot", entries });
+    // Wholesale replace the floating panes map with the fresh snapshot.
+    const nextFloating = new Map<string, FloatingPaneEntry>();
+    for (const e of entries) {
+        if (isFloatingPaneLabel(e.label)) {
+            nextFloating.set(e.label, { label: e.label, windowId: e.windowId });
+        }
+    }
+    floatingPanes = nextFloating;
+    projectFloating();
 }
 
 /**
@@ -202,6 +282,7 @@ export function startLauncherEventReducer(): void {
         applyingRemote = true;
         try {
             dispatch({ type: "ApplyEvent", event: evt });
+            if (handleFloatingPaneEvent(evt)) projectFloating();
         } finally {
             applyingRemote = false;
         }
@@ -232,5 +313,6 @@ export function __snapshot(): LauncherEventState {
 /** Test-only: reset the state cell. Never call in production. */
 export function __resetState(): void {
     state = initialState();
+    floatingPanes = new Map();
     started = false;
 }

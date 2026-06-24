@@ -146,3 +146,8 @@ export function isInstanceLabel(label: string): boolean {
     if (label.startsWith("browser-pane-")) return false;
     return label.startsWith("window-");
 }
+
+/** True for floating-pane subordinate windows (`"floating-{uuid}"` label scheme). */
+export function isFloatingPaneLabel(label: string): boolean {
+    return label.startsWith("floating-");
+}

@@ -170,6 +170,15 @@ export const [openWindowLabelsAtom, setOpenWindowLabelsAtom] = createSignal<stri
 export type WindowEntry = { label: string; windowId: string | null };
 export const [openWindowEntriesAtom, setOpenWindowEntriesAtom] = createSignal<WindowEntry[]>([]);
 
+// Open floating panes in this process. Floating panes are process-scoped
+// (shared across all windows) so they live in a separate atom from the
+// per-window `openWindowEntriesAtom`. Updated by the launcher event reducer
+// and seeded from `listWindowInstances()` at boot.
+// See docs/specs/SPEC_INSTANCE_PANEL_FLOATING_PANES_SECTION_2026_06_24.md.
+export type FloatingPaneEntry = { label: string; windowId: string | null };
+export const [openFloatingPaneEntriesAtom, setOpenFloatingPaneEntriesAtom] =
+    createSignal<FloatingPaneEntry[]>([]);
+
 // ---------------------------------------------------------------------------
 // GlobalAtomsType-compatible export (used in wos.ts callBackendService)
 // ---------------------------------------------------------------------------
