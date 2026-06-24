@@ -14,7 +14,8 @@
  *   (D1 dock vs swarm · D3 ordering · D4 retention · D6 cap/overflow)
  */
 
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ActivityRow } from "./ActivityRow";
@@ -46,7 +47,8 @@ interface ActivityDockProps {
 export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     const [nodes] = props.documentAtom;
     const [docState, setDocState] = props.documentStateAtom;
-    const [now, setNow] = createSignal(Date.now());
+    const tick = useTick(1000);
+    const now = createMemo(() => (tick(), Date.now()));
     const [dismissed, setDismissed] = createSignal<Set<string>>(new Set());
     const [overflowOpen, setOverflowOpen] = createSignal(false);
 
@@ -58,13 +60,6 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         return m;
     });
 
-    // Tick once a second only while a terminal row is STILL within its retention
-    // window. The `now() - endedAt < retention` check is what lets this go false:
-    // ShellNodes linger in the document forever, so without it the guard stayed
-    // true permanently and the 1Hz setInterval never cleared — a perpetual
-    // re-render loop per pane after the first shell exited (reagent #1428 P2).
-    // Depending on now() means each tick re-evaluates; once every lingering row
-    // has aged past its retention the effect re-runs and clears the interval.
     const hasExpiring = createMemo(() => {
         const t = now();
         return allActivities().some(
@@ -74,11 +69,6 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
                 a.endedAt != null &&
                 t - a.endedAt < RETENTION_MS[a.status],
         );
-    });
-    createEffect(() => {
-        if (!hasExpiring()) return;
-        const id = setInterval(() => setNow(Date.now()), 1000);
-        onCleanup(() => clearInterval(id));
     });
 
     // D4 — running always; terminal within its retention window; never dismissed.

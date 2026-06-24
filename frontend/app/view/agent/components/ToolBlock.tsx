@@ -34,22 +34,16 @@
  */
 
 import clsx from "clsx";
-import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from "../types";
 import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 
-// Ticks every second while a tool is running with no output yet.
 function ToolElapsedTicker(props: { startMs: number }): JSX.Element {
-    const [elapsed, setElapsed] = createSignal(
-        Math.floor((Date.now() - props.startMs) / 1000)
-    );
-    const interval = setInterval(
-        () => setElapsed(Math.floor((Date.now() - props.startMs) / 1000)),
-        1000
-    );
-    onCleanup(() => clearInterval(interval));
+    const tick = useTick(1000);
+    const elapsed = createMemo(() => (tick(), Math.floor((Date.now() - props.startMs) / 1000)));
     return <>{elapsed()}s…</>;
 }
 

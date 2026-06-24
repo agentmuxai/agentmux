@@ -6,6 +6,7 @@
  */
 
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
 import type { AgentViewModel } from "../agent-model";
@@ -61,7 +62,12 @@ interface AgentWorkingRowProps {
 export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const [phrase, setPhrase] = createSignal(pickThinkingPhrase());
     const [lastPhrase, setLastPhrase] = createSignal(pickThinkingPhrase());
-    const [elapsedMs, setElapsedMs] = createSignal(0);
+    const tick = useTick(1000);
+    const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
+    const elapsedMs = createMemo(() => {
+        const s = loadStartMs();
+        return s != null ? (tick(), Date.now() - s) : 0;
+    });
 
     createEffect(() => {
         if (!props.loading || props.currentTool) return;
@@ -77,11 +83,11 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (!props.loading) return;
-        const start = Date.now();
-        setElapsedMs(0);
-        const id = setInterval(() => setElapsedMs(Date.now() - start), 1000);
-        onCleanup(() => clearInterval(id));
+        if (props.loading) {
+            setLoadStartMs((prev) => prev ?? Date.now());
+        } else {
+            setLoadStartMs(null);
+        }
     });
 
     createEffect(() => {
