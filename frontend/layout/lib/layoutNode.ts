@@ -210,7 +210,7 @@ export function balanceNode(
                 if (child.flexDirection === node.flexDirection) {
                     child.flexDirection = reverseFlexDirection(node.flexDirection);
                 }
-                if (child.children?.length == 1 && child.children[0].children) {
+                if (child.children?.length == 1 && child.children[0].children && !child._slipAnchor) {
                     return child.children[0].children;
                 }
                 if (child.children?.length === 0) return;
