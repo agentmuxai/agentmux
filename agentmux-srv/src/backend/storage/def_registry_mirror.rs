@@ -20,6 +20,7 @@ use crate::registry::{
 
 use super::agents::AgentDefinition;
 use super::content::AgentContent;
+use super::error::StoreError;
 use super::skills::AgentSkill;
 use super::store::Store;
 
@@ -197,6 +198,55 @@ impl Store {
             return false;
         }
         true
+    }
+
+    /// Update a single content blob in the global registry record for a
+    /// cross-channel agent, preserving all other definition fields, content, and
+    /// skills. Used when the local channel has no `db_agent_definitions` row for
+    /// the agent (FK would prevent a local SQLite write).
+    ///
+    /// `value = Some(s)` upserts the blob; `value = None` removes it.
+    /// Returns `Err` if the global registry is unavailable or the agent is absent.
+    pub(super) fn registry_def_update_content_field(
+        &self,
+        agent_id: &str,
+        content_type: &str,
+        value: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Err(StoreError::Other("no global registry available".into()));
+        };
+        let mut rec = match reg.get(agent_id) {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                return Err(StoreError::Other(format!(
+                    "agent {agent_id} not in global registry"
+                )))
+            }
+            Err(e) => {
+                return Err(StoreError::Other(format!(
+                    "global registry read failed: {e}"
+                )))
+            }
+        };
+        match value {
+            Some(v) => {
+                if let Some(blob) = rec.data.content.iter_mut().find(|b| b.content_type == content_type) {
+                    blob.content = v.to_string();
+                } else {
+                    rec.data.content.push(DefContentBlob {
+                        content_type: content_type.to_string(),
+                        content: v.to_string(),
+                    });
+                }
+            }
+            None => {
+                rec.data.content.retain(|b| b.content_type != content_type);
+            }
+        }
+        reg.upsert(&rec)
+            .map_err(|e| StoreError::Other(format!("global registry write failed: {e}")))?;
+        Ok(())
     }
 }
 
@@ -444,5 +494,79 @@ mod tests {
             .unwrap()
             .iter()
             .any(|d| d.id == "remote-1" && d.name == "Renamed"));
+    }
+
+    #[test]
+    fn cross_channel_content_set_writes_to_global_registry() {
+        // Regression test for #1700: agent_content_set for a cross-channel agent
+        // (one absent from local db_agent_definitions) must write directly to the
+        // global registry rather than failing with an FK violation.
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        def_store
+            .upsert(&global_user_agent("remote-1", "Remote"))
+            .unwrap();
+        store.set_def_registry(def_store.clone());
+
+        // Write ui:zoom for the cross-channel agent — must not fail.
+        store
+            .agent_content_set(&AgentContent {
+                agent_id: "remote-1".into(),
+                content_type: "ui:zoom".into(),
+                content: "1.4".into(),
+                updated_at: 100,
+            })
+            .unwrap();
+
+        // The global record must now carry the zoom (other content preserved).
+        let rec = def_store.get("remote-1").unwrap().unwrap();
+        let zoom_blob = rec.data.content.iter().find(|c| c.content_type == "ui:zoom");
+        assert!(zoom_blob.is_some(), "ui:zoom must be in the global record");
+        assert_eq!(zoom_blob.unwrap().content, "1.4");
+        let agentmd_blob = rec.data.content.iter().find(|c| c.content_type == "agentmd");
+        assert!(agentmd_blob.is_some(), "existing agentmd content must be preserved");
+
+        // agent_content_get must surface it via the cross-channel fallback.
+        let got = store.agent_content_get("remote-1", "ui:zoom").unwrap();
+        assert!(got.is_some(), "agent_content_get must find the zoom via registry fallback");
+        assert_eq!(got.unwrap().content, "1.4");
+    }
+
+    #[test]
+    fn cross_channel_content_delete_removes_from_global_registry() {
+        // Regression test for #1700: agent_content_delete for a cross-channel agent
+        // must remove the field from the global registry without corrupting other content.
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        // Start with a global record that already has ui:zoom set.
+        let mut rec = global_user_agent("remote-1", "Remote");
+        rec.data.content.push(DefContentBlob {
+            content_type: "ui:zoom".into(),
+            content: "1.4".into(),
+        });
+        def_store.upsert(&rec).unwrap();
+        store.set_def_registry(def_store.clone());
+
+        // Delete the zoom (reset-to-default path).
+        store.agent_content_delete("remote-1", "ui:zoom").unwrap();
+
+        // The zoom blob must be gone, other content intact.
+        let after = def_store.get("remote-1").unwrap().unwrap();
+        assert!(
+            after.data.content.iter().all(|c| c.content_type != "ui:zoom"),
+            "ui:zoom must be removed from global record"
+        );
+        assert!(
+            after.data.content.iter().any(|c| c.content_type == "agentmd"),
+            "agentmd content must be preserved"
+        );
+
+        // agent_content_get must return None now.
+        assert!(
+            store.agent_content_get("remote-1", "ui:zoom").unwrap().is_none(),
+            "deleted zoom must not reappear"
+        );
     }
 }
