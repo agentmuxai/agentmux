@@ -21,6 +21,12 @@ use tracing::warn;
 
 use super::error::StoreError;
 
+/// `user_version` stamped into `~/.agentmux/shared/store.db` after
+/// `run_shared_store_schema`. Versioned independently from `objects.db`.
+///   v1 — initial: identity accounts/bundles/bindings/links, memory
+///         bundles, drone definitions, muxbus credentials
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 1;
+
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
 /// `user_version`, so legacy files read 0). Bumped per additive migration:
@@ -474,6 +480,18 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
 
+    // Channel-scoped migration tracking (parallel to the global db_migrations
+    // in store.db). MigrationScope::Channel migrations record completion here
+    // so each channel tracks its own migration state independently.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_migrations (
+            id          TEXT PRIMARY KEY,
+            applied_at  TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            scope       TEXT NOT NULL DEFAULT 'channel'
+        );",
+    )?;
+
     Ok(())
 }
 
@@ -533,6 +551,134 @@ fn adopt_legacy_table_names(conn: &Connection) -> Result<(), StoreError> {
     for table in DEAD_TABLE_DROPS {
         conn.execute_batch(&format!("DROP TABLE IF EXISTS {table};"))?;
     }
+
+    Ok(())
+}
+
+/// Initialize (or re-validate) the `~/.agentmux/shared/store.db` schema.
+///
+/// Contains only the durable user content that must survive across
+/// channels/versions: identity accounts, identity bundles, identity bindings,
+/// agent→account links, memory bundles, drone definitions, and muxbus
+/// credentials. Session state (`db_block`, `db_tab`, etc.) and drone run
+/// history stay in the per-channel `objects.db`.
+///
+/// `db_agent_identity_links` drops the FK to `db_agent_definitions` here
+/// (cross-DB FK enforcement is impossible in SQLite); application code
+/// enforces referential integrity instead.
+///
+/// Idempotent — safe to call on every startup.
+pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_identity_accounts (
+            id           TEXT PRIMARY KEY,
+            name         TEXT NOT NULL,
+            provider     TEXT NOT NULL,
+            kind         TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            secret_ref   TEXT NOT NULL,
+            context      TEXT NOT NULL DEFAULT '{}',
+            status       TEXT NOT NULL DEFAULT 'unknown',
+            created_at   INTEGER NOT NULL DEFAULT 0,
+            updated_at   INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_identity_accounts_provider
+            ON db_identity_accounts(provider);
+
+        CREATE TABLE IF NOT EXISTS db_agent_identity_links (
+            agent_id   TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            provider   TEXT NOT NULL,
+            PRIMARY KEY (agent_id, provider),
+            FOREIGN KEY (account_id) REFERENCES db_identity_accounts(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_agent_identity_links_account
+            ON db_agent_identity_links(account_id);
+
+        CREATE TABLE IF NOT EXISTS db_identity_bundles (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            is_blank    INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            updated_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_identity_bundles_is_blank
+            ON db_identity_bundles(is_blank);
+
+        CREATE TABLE IF NOT EXISTS db_identity_bindings (
+            identity_id TEXT NOT NULL,
+            provider    TEXT NOT NULL,
+            account_id  TEXT NOT NULL,
+            PRIMARY KEY (identity_id, provider),
+            FOREIGN KEY (identity_id) REFERENCES db_identity_bundles(id)  ON DELETE CASCADE,
+            FOREIGN KEY (account_id)  REFERENCES db_identity_accounts(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_identity_bindings_account
+            ON db_identity_bindings(account_id);
+
+        CREATE TABLE IF NOT EXISTS db_memory_bundles (
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL UNIQUE,
+            description   TEXT NOT NULL DEFAULT '',
+            is_blank      INTEGER NOT NULL DEFAULT 0,
+            is_global     INTEGER NOT NULL DEFAULT 0,
+            provider      TEXT NOT NULL DEFAULT '',
+            model         TEXT NOT NULL DEFAULT '',
+            instructions  TEXT NOT NULL DEFAULT '',
+            context_files TEXT NOT NULL DEFAULT '[]',
+            mcp_servers   TEXT NOT NULL DEFAULT '[]',
+            skills        TEXT NOT NULL DEFAULT '[]',
+            sort_order    INTEGER NOT NULL DEFAULT 0,
+            created_at    INTEGER NOT NULL DEFAULT 0,
+            updated_at    INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_memory_bundles_is_blank
+            ON db_memory_bundles(is_blank);
+
+        CREATE TABLE IF NOT EXISTS db_drone_definitions (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            graph       TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}',
+            viewport    TEXT NOT NULL DEFAULT '{\"x\":0,\"y\":0,\"zoom\":1}',
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            updated_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_drone_definitions_updated
+            ON db_drone_definitions(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
+            id             TEXT PRIMARY KEY DEFAULT 'global',
+            cognito_domain TEXT NOT NULL DEFAULT '',
+            client_id      TEXT NOT NULL DEFAULT '',
+            access_token   TEXT NOT NULL DEFAULT '',
+            refresh_token  TEXT NOT NULL DEFAULT '',
+            id_token       TEXT NOT NULL DEFAULT '',
+            expires_at     INTEGER NOT NULL DEFAULT 0,
+            user_email     TEXT NOT NULL DEFAULT '',
+            user_sub       TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS db_migrations (
+            id          TEXT PRIMARY KEY,
+            applied_at  TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            scope       TEXT NOT NULL DEFAULT 'global'
+        );",
+    )?;
+
+    // Seed the blank Identity / Memory singletons — same fixed ids as objects.db
+    // so cross-version reads never see a missing blank row.
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO db_identity_bundles
+            (id, name, description, is_blank, created_at, updated_at)
+         VALUES ('blank', '__blank__', 'No credentials — use ambient', 1, 0, 0);
+
+         INSERT OR IGNORE INTO db_memory_bundles
+            (id, name, description, is_blank, created_at, updated_at)
+         VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
+    )?;
 
     Ok(())
 }

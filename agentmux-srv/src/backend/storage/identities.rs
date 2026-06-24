@@ -320,6 +320,27 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// List every (agent_id, account_id, provider) row in the table.
+    /// Used by the startup backfill to seed the shared store.
+    pub fn agent_identity_list_all(&self) -> Result<Vec<AgentIdentityLink>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT agent_id, account_id, provider FROM db_agent_identity_links ORDER BY agent_id, provider",
+        )?;
+        let iter = stmt.query_map([], |row| {
+            Ok(AgentIdentityLink {
+                agent_id: row.get(0)?,
+                account_id: row.get(1)?,
+                provider: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// List all (agent_id, account_id, provider) triples for an agent.
     pub fn agent_identity_list_for_agent(
         &self,

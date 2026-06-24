@@ -63,6 +63,16 @@ pub struct AppState {
     pub version: String,
     pub app_path: String,
     pub wstore: Arc<Store>,
+    /// GLOBAL shared store (`~/.agentmux/shared/store.db`). Holds durable
+    /// user content that must survive version upgrades: identity accounts,
+    /// memory bundles, drone definitions, and MuxBus credentials.
+    /// `None` when the shared root can't be resolved (CI / unusual envs).
+    /// See `docs/specs/SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md`.
+    pub shared_store: Option<Arc<Store>>,
+    /// Effective identity/memory/drone/muxbus store — `shared_store` when
+    /// available, otherwise `wstore`. Handlers capture this instead of
+    /// `wstore` for any operation that must survive across version upgrades.
+    pub id_store: Arc<Store>,
     pub filestore: Arc<FileStore>,
     /// GLOBAL, channel-independent transcript store backing the
     /// `agent:<defId>:current` zone. `None` when the shared root can't be

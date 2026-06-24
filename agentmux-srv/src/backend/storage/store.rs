@@ -18,7 +18,10 @@ use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, StoreObj};
 use crate::registry::{DefinitionStore, Registry};
 
 use super::error::StoreError;
-use super::migrations::{check_schema_compat, run_object_schema, stamp_version, OBJECT_SCHEMA_VERSION};
+use super::migrations::{
+    check_schema_compat, run_object_schema, run_shared_store_schema, stamp_version,
+    OBJECT_SCHEMA_VERSION, SHARED_STORE_SCHEMA_VERSION,
+};
 
 /// SQLite-backed object store for StoreObj types.
 pub struct Store {
@@ -77,6 +80,58 @@ impl Store {
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
         Self::configure_and_migrate(conn)
+    }
+
+    /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
+    ///
+    /// Uses the same WAL + busy-timeout config as `open()` but runs
+    /// `run_shared_store_schema` instead of `run_object_schema` so only
+    /// the durable-user-content tables are created (identity, memory, drone
+    /// definitions, muxbus creds). Per-channel session tables are intentionally
+    /// absent — calling per-channel CRUD methods on this store will error.
+    pub fn open_shared(path: &Path) -> Result<Self, StoreError> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA busy_timeout=5000;
+             PRAGMA foreign_keys=ON;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA cache_size=-8000;
+             PRAGMA mmap_size=268435456;
+             PRAGMA temp_store=MEMORY;",
+        )?;
+        check_schema_compat(&conn, SHARED_STORE_SCHEMA_VERSION, "store.db")?;
+        run_shared_store_schema(&conn)?;
+        stamp_version(&conn, SHARED_STORE_SCHEMA_VERSION)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            registry: Mutex::new(None),
+            def_registry: Mutex::new(None),
+            registry_agents_base: Mutex::new(None),
+        })
+    }
+
+    /// Open a sibling `objects.db` file for read-only backfill access.
+    ///
+    /// Does NOT run schema migrations or stamp a version — the source DB is
+    /// never modified (spec §3.1). WAL mode is not set either: the file is
+    /// opened with `SQLITE_OPEN_READ_ONLY | SQLITE_OPEN_NO_MUTEX` so concurrent
+    /// writers on the same DB are unaffected. Tables absent in older schemas
+    /// (e.g. `db_drone_definitions`) return empty results via the normal
+    /// `StoreError` path; callers use `.unwrap_or_default()`.
+    pub fn open_source_readonly(path: &Path) -> Result<Self, StoreError> {
+        use rusqlite::OpenFlags;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_millis(500))?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            registry: Mutex::new(None),
+            def_registry: Mutex::new(None),
+            registry_agents_base: Mutex::new(None),
+        })
     }
 
     /// Crate-internal accessor for sibling modules that maintain their
@@ -439,6 +494,44 @@ impl Store {
                 Err(e)
             }
         }
+    }
+
+    // ── Migration state (db_migrations — shared store only) ──────────────
+
+    pub fn migration_is_applied(&self, id: &str) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT 1 FROM db_migrations WHERE id = ?1",
+            [id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false)
+    }
+
+    pub fn migration_mark_applied(
+        &self,
+        id: &str,
+        scope: &str,
+        duration_ms: u64,
+    ) -> Result<(), StoreError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO db_migrations (id, applied_at, duration_ms, scope)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, now, duration_ms as i64, scope],
+        )?;
+        Ok(())
+    }
+
+    pub fn migrations_list_applied(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT id FROM db_migrations ORDER BY id")?;
+        let ids = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(ids)
     }
 }
 

@@ -81,6 +81,71 @@ impl std::fmt::Display for SrvSpawnError {
     }
 }
 
+/// Run `agentmux-srv migrate` synchronously before spawning the daemon.
+///
+/// The migration runner exits 0 (success / nothing to do) or 1 (failure).
+/// On failure the launcher should surface an error and not start the daemon.
+/// stdout lines are newline-delimited JSON progress events; stderr is plain text.
+pub async fn run_migrate(
+    launcher_exe_dir: &Path,
+    paths: &DataPaths,
+) -> Result<(), SrvSpawnError> {
+    let backend_path = resolve_srv_binary(launcher_exe_dir)?;
+
+    let mut cmd = tokio::process::Command::new(&backend_path);
+    cmd.args([
+        "--wavedata",
+        &paths.data_dir.to_string_lossy(),
+        "migrate",
+    ])
+    .envs(paths.common.to_env_vars())
+    // Auth key is not needed for migrate but the binary may check for it
+    // before dispatching. Provide a placeholder so argument parsing passes.
+    .env("AGENTMUX_AUTH_KEY", "migrate-placeholder")
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped())
+    .kill_on_drop(true);
+
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate spawn: {}", e)))?;
+
+    // Forward stdout (progress JSON) and stderr to launcher log.
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(async move {
+            let mut reader = tokio::io::BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                crate::log(&format!("[migrate] {}", line));
+            }
+        });
+    }
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            let mut reader = tokio::io::BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                crate::log(&format!("[migrate stderr] {}", line));
+            }
+        });
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate wait: {}", e)))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(SrvSpawnError::SpawnFailed(format!(
+            "agentmux-srv migrate exited with status {}; see ~/.agentmux/logs/migration-error.log",
+            status.code().unwrap_or(-1)
+        )))
+    }
+}
+
 /// Spawn srv as a child of the launcher, assigned to launcher's
 /// Job Object J0 so it dies cleanly with the launcher tree.
 ///

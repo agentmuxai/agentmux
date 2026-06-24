@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "agentmux-srv", about = "AgentMux Rust backend server")]
@@ -15,6 +15,22 @@ pub struct CliArgs {
     #[arg(long = "instance", default_value = "default")]
     pub instance: String,
 
+    #[command(subcommand)]
+    pub command: Option<SrvCommand>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SrvCommand {
+    /// Run pending data migrations and exit. Invoked by the launcher before
+    /// starting the daemon so the srv always starts with clean migrated state.
+    Migrate {
+        /// Print pending migrations without applying them.
+        #[arg(long)]
+        dry_run: bool,
+        /// List all migrations and their applied/pending status.
+        #[arg(long)]
+        list: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
