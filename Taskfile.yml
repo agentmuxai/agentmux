@@ -731,8 +731,25 @@ tasks:
                 #
                 # Either way the staging dir (dist/cef/) is never locked by
                 # the running process, so the next build can overwrite it.
-                DEV_DIR="dist/cef-dev"
-                rm -rf "$DEV_DIR" 2>/dev/null || true
+                #
+                # Windows: use a timestamp-stamped dir so a re-run never tries to
+                # wipe agentmux-launcher.exe while it is still running. Windows
+                # locks the EXE image for the process lifetime, so rm -rf on a
+                # running dir exits non-zero and the subsequent cp fails (exit 201).
+                # Prune old cef-dev-* dirs best-effort; a still-running launcher
+                # holds its dir open and the rm silently no-ops for that one.
+                # Unix keeps a fixed "dist/cef-dev" name so install-linux-desktop.sh
+                # writes a stable Exec= path that survives across dev sessions.
+                if [ "{{OS}}" = "windows" ]; then
+                  DEV_DIR="dist/cef-dev-$(date +%s 2>/dev/null || echo dev)"
+                  for _d in dist/cef-dev-*/; do
+                    [ -d "$_d" ] || continue
+                    rm -rf "$_d" 2>/dev/null || true
+                  done
+                else
+                  DEV_DIR="dist/cef-dev"
+                  rm -rf "$DEV_DIR" 2>/dev/null || true
+                fi
                 if [ "{{OS}}" = "windows" ]; then
                   mkdir -p "$DEV_DIR/runtime"
                   cp target/release/agentmux-launcher.exe "$DEV_DIR/agentmux-launcher.exe"
@@ -1090,6 +1107,8 @@ tasks:
             - cmd: '{{.RMRF}} "dist/cef"'
               ignore_error: true
             - cmd: '{{.RMRF}} "dist/cef-dev"'
+              ignore_error: true
+            - cmd: bash -c 'rm -rf dist/cef-dev-* 2>/dev/null || true'
               ignore_error: true
 
     clean:cef:
