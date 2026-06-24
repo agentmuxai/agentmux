@@ -45,10 +45,18 @@
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
+    // Layer A — recessed strip (SPEC_TAB_CONTENT_FOLDER_SURFACE §3, §10.6).
+    background: var(--tab-strip-bg);
 
     .window-drag {
         height: 100%;
         width: var(--default-indent);
         flex-shrink: 0;
+        // Folder boundary (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6): closes the
+        // gap between the traffic-light cluster and the first tab.
+        // Note: .traffic-lights uses align-self: center so a gap remains
+        // under the ~68px traffic-light area on the far left — tracked as
+        // follow-up in §10.5.
+        border-bottom: 1px solid var(--border-color);
     }
 }

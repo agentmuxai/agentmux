@@ -168,6 +168,10 @@
         min-width: 0;
         height: 100%;
         align-self: stretch;
+        // Folder boundary continuation (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6):
+        // extends the 1px hairline that .tab:not(.active) draws across the fill
+        // area so the full-width line is unbroken except under the active tab.
+        border-bottom: 1px solid var(--border-color);
     }
 
 }

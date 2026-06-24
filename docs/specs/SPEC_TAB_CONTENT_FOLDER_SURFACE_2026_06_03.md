@@ -171,3 +171,79 @@ negative-margin boundary-break) is deferred.
 
 Deferred: recessed strip (Layer A), gap-only surface, the negative-margin
 boundary-break, editor-strip token unification (§7 Q4).
+
+---
+
+## 10. Online triangulation — 2026-06-23
+
+Research against browser source + CSS community (CSS-Tricks, MDN, GitHub VSCode issues)
+before implementing Phase 2 + 3.
+
+### 10.1 Canonical CSS folder-tab technique
+
+Confirmed: the universal technique is `border-bottom` on the strip container +
+`margin-bottom: -1px` on the active tab + matching `border-bottom-color` (or no
+`border-bottom`) on the active tab. This is identical to §5 Phase 2.
+
+**Constraint discovered:** CSS forbids `overflow-x: auto` + `overflow-y: visible` on
+the same element — the browser coerces `overflow-y` to `auto`. Since `.tab-bar-scroll`
+has `overflow-x: auto` (horizontal tab scrolling), `overflow-y` cannot be `visible`,
+so `margin-bottom: -1px` on a child tab is *always clipped* by the scroll container
+regardless of `.tab-bar`'s own overflow setting. The negative-margin approach as written
+in §5 Phase 2 does not work without restructuring the scroll container.
+
+**Revised Phase 2 approach:** apply `border-bottom: 1px solid var(--border-color)` to
+each non-tab element in the strip individually: `.tab-bar-fill`, `.system-status`,
+`.window-drag`. Combined with the existing `.tab:not(.active) { border-bottom }`, the
+boundary line is complete across the full header width — absent only under the active
+tab. No negative margins, no overflow changes, no layout shift.
+
+One adjustment required for Win32+Linux: `.window-action-buttons` uses
+`height: calc(100% + var(--space-1-5))` to reach the full header height including the
+6px `padding-top`. When `.system-status` gains `border-bottom: 1px`, the containing
+block shrinks by 1px and the formula must become
+`calc(100% + var(--space-1-5) + 1px)` to keep buttons flush to the bottom edge.
+
+### 10.2 VSCode reference model
+
+VSCode (verified via GitHub issues #29333, #130394, #146421) achieves folder continuity
+via **colour-match only**: `tab.activeBackground === editorGroupHeader.background`. There
+is no negative-margin geometric overlap in VSCode. The spec's §5 Phase 2 negative-margin
+was aspirational beyond VSCode's model; the per-element border approach lands the same
+visual result with zero layout risk.
+
+### 10.3 Win32 DWM 1px border
+
+The 1px window edge the user perceives is drawn by DWM (Desktop Window Manager), not CSS.
+AgentMux uses `enable_standard_title_bar=false` which gives a frameless client area, but
+DWM still renders a system-drawn 1px border around the window on Win11. This border is
+non-addressable from the frontend. Ensuring `DWMWA_USE_IMMERSIVE_DARK_MODE` is set
+(host-side Rust, already in place) makes the DWM border render dark on dark theme, which
+is the only lever available.
+
+### 10.4 Subpixel / zoom
+
+The `--snap-chrome: calc(1px / (var(--dpr) * var(--zoomfactor, 1)))` token already exists
+for device-pixel-accurate sizing inside the zoomed `.window-header`. If a future revision
+adds the negative-margin approach (post scroll-container restructure), use
+`margin-bottom: calc(-1 * var(--snap-chrome))` instead of `-1px`.
+
+### 10.5 macOS gap
+
+On macOS, `.traffic-lights { align-self: center }` and `.hamburger-btn.--right { align-self: center }`
+place both elements at mid-height, not bottom-aligned. Their `border-bottom` would land at
+the wrong y-position. The boundary line therefore has a gap under the ~68px traffic-light
+cluster (left) and ~36px hamburger (right) on macOS. Acceptable for now; a follow-up can
+change both to `align-self: stretch` with `align-items: center` to make them full-height
+containers while keeping content centered.
+
+### 10.6 Shipped (Phase 2 + Layer A) — 2026-06-23
+
+- **Boundary line (Phase 2 — revised):** `border-bottom: 1px solid var(--border-color)` on
+  `.tab-bar-fill`, `.system-status`, and `.window-drag`. Win32+Linux button height formula
+  updated to `calc(100% + var(--space-1-5) + 1px)`. Full-width line absent only under the
+  active tab.
+- **Recessed strip (Layer A):** `background: var(--tab-strip-bg)` on `.window-header`
+  (all platforms). The `--tab-strip-bg: rgba(255,255,255,0.03)` value is intentionally
+  subtle — a near-transparent white tint that makes the strip slightly lighter than Layer B
+  (`--workspace-surface = rgba(0,0,0,0.5)`), so the folder content advances visually.
