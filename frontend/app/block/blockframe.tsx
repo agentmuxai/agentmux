@@ -32,6 +32,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
+import { buildPaneColorSubmenu, hueToHeaderBg, hueToActiveBorder } from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -60,6 +61,11 @@ function handleHeaderContextMenu(
     // Header-only: view-specific settings (font size, theme, etc.)
     const extraItems = viewModel?.getSettingsMenuItems?.();
     if (extraItems && extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
+
+    // Agent panes: Pane Color hue picker
+    if (blockData?.meta?.view === "agent") {
+        menu.push({ type: "separator" }, buildPaneColorSubmenu(blockData, blockData.oid));
+    }
 
     // Header-only: title management + Copy BlockId
     menu.push(
@@ -445,10 +451,16 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     }
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
-        const ac = agentColor();
-        const atc = agentTextColor();
-        if (ac) style["background-color"] = ac;
-        if (atc) style.color = atc;
+        const hue = blockData()?.meta?.["frame:hue"];
+        if (typeof hue === "number") {
+            // User-chosen hue overrides the env-var agent color.
+            style["background-color"] = hueToHeaderBg(hue);
+        } else {
+            const ac = agentColor();
+            const atc = agentTextColor();
+            if (ac) style["background-color"] = ac;
+            if (atc) style.color = atc;
+        }
         return style;
     });
 
@@ -675,6 +687,10 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
             const tabActiveBorderColor = tabData?.meta?.["bg:activebordercolor"];
             if (tabActiveBorderColor) {
                 style["border-color"] = tabActiveBorderColor;
+            }
+            const hue = bd?.meta?.["frame:hue"];
+            if (typeof hue === "number") {
+                style["border-color"] = hueToActiveBorder(hue);
             }
             if (bd?.meta?.["frame:activebordercolor"]) {
                 style["border-color"] = bd.meta["frame:activebordercolor"];
