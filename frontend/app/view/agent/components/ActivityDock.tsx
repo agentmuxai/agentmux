@@ -14,7 +14,7 @@
  *   (D1 dock vs swarm · D3 ordering · D4 retention · D6 cap/overflow)
  */
 
-import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -59,26 +59,40 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         return m;
     });
 
-    // Are there any terminal rows still within their retention window?
-    // Subscribes to tick() so it flips false once all candidates age out, which
-    // stops `visible` from re-filtering every second (reagent #1428 fix).
-    // Exited ShellNodes linger in the document forever, so without the time-bound
-    // this memo would stay permanently true after the first shell exit.
-    const hasCandidates = createMemo(() => {
-        const t = (tick(), Date.now());
-        return allActivities().some(
-            (a) =>
-                a.status !== "running" &&
-                RETENTION_MS[a.status] !== Infinity &&
-                a.endedAt != null &&
-                t - a.endedAt < RETENTION_MS[a.status],
-        );
+    // Gate: true while at least one terminal row is still within its retention
+    // window. Managed by createEffect + setTimeout — the effect subscribes only
+    // to allActivities() (no tick dependency), computes the latest expiry, and
+    // schedules a timer to flip the gate off. When activities change the effect
+    // re-runs, cancels the stale timer via onCleanup, and reschedules.
+    //
+    // A tick-dependent memo for this gate (the previous `hasCandidates`) cannot
+    // work: once any shell exits, exited ShellNodes linger in allActivities()
+    // forever (shell-adapter returns every node), so `status !== "running" &&
+    // endedAt != null` stays true permanently and the memo never resets —
+    // reintroducing the per-second recompute reagent #1428 was added to prevent.
+    const [hasExpiring, setHasExpiring] = createSignal(false);
+    createEffect(() => {
+        const activities = allActivities();
+        let maxExpiry = 0;
+        for (const a of activities) {
+            if (a.status !== "running" && RETENTION_MS[a.status] !== Infinity && a.endedAt != null) {
+                maxExpiry = Math.max(maxExpiry, a.endedAt + RETENTION_MS[a.status]);
+            }
+        }
+        const remaining = maxExpiry - Date.now();
+        if (remaining <= 0) {
+            setHasExpiring(false);
+            return;
+        }
+        setHasExpiring(true);
+        const timer = setTimeout(() => setHasExpiring(false), remaining + 100);
+        onCleanup(() => clearTimeout(timer));
     });
 
     // D4 — running always; terminal within its retention window; never dismissed.
     const visible = createMemo(() => {
         const dm = dismissed();
-        const t = hasCandidates() ? (tick(), Date.now()) : Date.now();
+        const t = hasExpiring() ? (tick(), Date.now()) : Date.now();
         return allActivities().filter((a) => {
             if (dm.has(a.id)) return false;
             if (a.status === "running") return true;
