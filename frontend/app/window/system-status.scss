@@ -10,10 +10,6 @@
     justify-content: flex-end;
     margin-left: auto;
     margin-right: var(--space-1-5);
-    // Folder boundary continuation (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6):
-    // the right-side chrome needs the same 1px bottom hairline as the tab
-    // strip so the boundary line is unbroken across the full header width.
-    border-bottom: 1px solid var(--border-color);
 
     .config-error-button {
         color: black;

@@ -38,14 +38,15 @@
     // Layer A — recessed strip (SPEC_TAB_CONTENT_FOLDER_SURFACE §3, §10.6).
     // Slightly lighter than --workspace-surface so the folder content advances.
     background: var(--tab-strip-bg);
+    // Folder boundary — single rule on the container so the full-width 1px line
+    // has no gaps (hamburger, separators, right margin were all missed by the
+    // per-element approach). Active tab uses --block-bg-color to color-match the
+    // content surface below, maintaining the visual connection.
+    border-bottom: var(--snap-chrome) solid var(--border-color);
 
     .window-drag {
         height: 100%;
         width: var(--default-indent);
         flex-shrink: 0;
-        // Folder boundary (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6): the 2px left
-        // drag spacer needs its own bottom hairline to close the gap before the
-        // first tab.
-        border-bottom: 1px solid var(--border-color);
     }
 }

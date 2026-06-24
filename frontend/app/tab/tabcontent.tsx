@@ -93,7 +93,6 @@ function TabContent(props: { tabId: string }): JSX.Element {
     const isEmpty = createMemo(() => (tabData()?.blockids?.length ?? 0) === 0);
 
     const rootStyle = (): JSX.CSSProperties => ({
-        "padding-top": "1px",
         background: "var(--workspace-surface)",
     });
 
