@@ -264,7 +264,7 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     let (pos_x, pos_y) = get_offset_position();
     let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
     if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
-        state, pos_x, pos_y, win_w, win_h, initial_view, initial_meta.clone(),
+        state, pos_x, pos_y, win_w, win_h, initial_view.clone(), initial_meta.clone(),
     ) {
         tracing::info!(
             target: "pool:new-window",
