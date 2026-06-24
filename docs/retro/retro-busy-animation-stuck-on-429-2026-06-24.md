@@ -145,9 +145,10 @@ show a status annotation below the progress bar: `"Rate limited — retrying in 
 | File | Relevance |
 |------|-----------|
 | `frontend/app/view/agent/providers/claude-translator.ts` | Missing `rate_limit_event` case — **primary fix site** |
-| `frontend/app/view/agent/useAgentStream.ts:63–68` | `STUCK_THRESHOLD_MS = 45_000`, `WATCHDOG_INTERVAL_MS = 5_000` |
+| `frontend/app/view/agent/useAgentStream.ts:68` | `WATCHDOG_INTERVAL_MS = 5_000` |
+| `frontend/app/store/agent-pane-state/types.ts:649` | `STUCK_THRESHOLD_MS = 45_000` |
 | `frontend/app/store/agent-pane-state/reducer.ts:255–276` | `StreamWatchdogTick` — diagnostic only, no visible transition |
-| `frontend/app/store/agent-pane-state/types.ts:326–329` | `workingFromPhase()` — drives animation |
+| `frontend/app/store/agent-pane-state/types.ts:318` | `workingFromPhase()` — drives animation |
 | `agentmux-srv/src/backend/blockcontroller/health.rs:353` | Backend correctly classifies `rate_limit_event` |
 | `docs/specs/SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md` | Broader error-surface framework; `rate_limited` class is defined here |
 

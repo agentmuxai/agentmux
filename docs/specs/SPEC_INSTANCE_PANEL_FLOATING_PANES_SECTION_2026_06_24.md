@@ -209,6 +209,7 @@ Add alongside `isInstanceLabel` in `frontend/app/store/launcher-event/types.ts`:
 
 ```ts
 export function isFloatingPaneLabel(label: string): boolean {
+    if (label.startsWith("floating-pool-")) return false;
     return label.startsWith("floating-");
 }
 ```
