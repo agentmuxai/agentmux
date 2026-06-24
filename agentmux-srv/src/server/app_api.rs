@@ -1979,16 +1979,24 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map_err(|e| format!("session:activity_summary: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                // Read the agent output from FileStore. EVENT_BLOCK_FILE events have
-                // persist: 0 (transient), so the ring buffer is always empty — the
-                // FileStore is the only reliable source of agent output.
-                let all_lines: Vec<String> = match filestore.read_file(&cmd.block_id, "output") {
-                    Ok(Some(bytes)) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        text.lines()
-                            .filter(|l| !l.trim().is_empty())
-                            .map(|l| l.to_string())
-                            .collect()
+                // Read the last 32 KB of agent output from FileStore. EVENT_BLOCK_FILE
+                // events have persist: 0 so the ring buffer is always empty — FileStore
+                // is the only reliable source. We tail-read to avoid loading multi-MB
+                // output files on every turn; 32 KB comfortably covers 30 stream-json lines.
+                const TAIL_BYTES: i64 = 32 * 1024;
+                let all_lines: Vec<String> = match filestore.stat(&cmd.block_id, "output") {
+                    Ok(Some(ref wf)) if wf.size > 0 => {
+                        let tail_offset = (wf.size - TAIL_BYTES).max(0);
+                        match filestore.read_at(&cmd.block_id, "output", tail_offset, TAIL_BYTES) {
+                            Ok((_, bytes)) => {
+                                let text = String::from_utf8_lossy(&bytes);
+                                text.lines()
+                                    .filter(|l| !l.trim().is_empty())
+                                    .map(|l| l.to_string())
+                                    .collect()
+                            }
+                            _ => Vec::new(),
+                        }
                     }
                     _ => Vec::new(),
                 };
