@@ -452,23 +452,7 @@ export function useAgentStream({
             // in one shot: merges live tokens into stats, clears
             // tool/tokens, and transitions the phase to Done.
             const wasStopping = getTurnPhase().kind === "Interrupting";
-            // Extract last assistant text for the waiting-sound heuristic.
-            // We scan backward through the current document nodes for the
-            // last markdown/text node with non-empty content.
-            const lastAssistantText = (() => {
-                const nodes = documentAtom[0]();
-                for (let i = nodes.length - 1; i >= 0; i--) {
-                    const n = nodes[i];
-                    if (
-                        n.type === "markdown" &&
-                        typeof n.content === "string"
-                    ) {
-                        return n.content;
-                    }
-                }
-                return undefined;
-            })();
-            model.dispatchPane({ type: "TurnEnd", stats, lastAssistantText });
+            model.dispatchPane({ type: "TurnEnd", stats });
             if (wasStopping) {
                 const interruptedNode: DocumentNode = {
                     type: "markdown",
