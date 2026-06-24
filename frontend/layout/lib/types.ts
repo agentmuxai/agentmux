@@ -190,6 +190,30 @@ export interface LayoutNode {
     size: number;
     /** Original size before minimization. Presence indicates the node is minimized. */
     minimizedSize?: number;
+    /**
+     * Set when a pane was minimized from a solo Row slot (parent flex-direction = Row).
+     * Instead of shrinking horizontally, the pane slips its header into the adjacent
+     * column. Stores restore context so the operation is fully reversible.
+     * Never coexists with `minimizedSize`.
+     */
+    slipMinimize?: {
+        /** Node ID of the Column the pane slipped into. */
+        targetColumnId: string;
+        /** Original width (row-slot size) before the slip. */
+        originalRowSize: number;
+        /** Original index in the Row's children array. */
+        originalRowIndex: number;
+        /** True when the target was a leaf converted to a Column during slip — restore must unwrap it. */
+        targetWasLeaf: boolean;
+    };
+    /**
+     * Prevents `balanceNode` from hoisting this branch's single grandchild when the
+     * branch has exactly one child that is itself a branch. Set on the Row parent of a
+     * slipped pane so the Row(→Column) direction-alternation is preserved even though
+     * the Row only has one child during the minimized state.
+     * Cleared on restore.
+     */
+    _slipAnchor?: true;
 }
 
 export type LayoutTreeStateSetter = (value: LayoutState) => void;
