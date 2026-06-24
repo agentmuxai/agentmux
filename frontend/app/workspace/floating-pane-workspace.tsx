@@ -839,6 +839,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         // immediately after the ghost appears.
                         const prevTarget = dwellLastArmedTarget;
                         dwellLastArmedTarget = newTarget;
+                        dwellCurrentHoverTarget = newTarget; // Phase 4b: mirror for ghost capture in onMouseUp (Windows sets this via event; macOS must set it here)
                         dwellCurrentConfirmedAt = newTarget !== null ? performance.now() : null;
                         if (prevTarget !== null) dwellSlowSince = null;
                         if (hoverArmed || indicatorShowing) {
