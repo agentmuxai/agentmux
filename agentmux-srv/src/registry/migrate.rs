@@ -364,7 +364,7 @@ pub fn backfill_source_bases_once(
 }
 
 /// Public variant of `enumerate_sources` that returns only the `objects.db` paths,
-/// without the per-source agents-root pairing. Used by `backfill_shared_store_once`
+/// without the per-source agents-root pairing. Used by `m0011_shared_store_backfill`
 /// to seed `store.db` from all channels rather than just the current instance's DB.
 pub fn enumerate_objects_dbs(home: &Path) -> Vec<PathBuf> {
     let (sources, _) = enumerate_sources(home);

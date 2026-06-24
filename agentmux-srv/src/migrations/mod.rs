@@ -14,6 +14,17 @@
 //! origin version — the `db_migrations` row stays as a permanent record.
 
 mod m0000_bootstrap;
+mod m0001_legacy_data_dir;
+mod m0002_block_zones_v1;
+mod m0003_template_sessions_v1;
+mod m0004_registry_from_sqlite;
+mod m0005_registry_source_bases;
+mod m0006_definitions_global;
+mod m0007_agents_consolidate;
+mod m0008_default_bundle;
+mod m0009_transcript_backfill;
+mod m0010_session_ids;
+mod m0011_shared_store_backfill;
 mod runner;
 
 pub use runner::run_migrate_command;
@@ -88,6 +99,15 @@ pub trait Migration: Send + Sync {
 
 static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0000_bootstrap::M0000Bootstrap,
-    // m0001–m0011 are ported in Phase 2 (separate PR).
-    // Placeholder comment so the registry structure is visible for review.
+    &m0001_legacy_data_dir::M0001LegacyDataDir,
+    &m0002_block_zones_v1::M0002BlockZonesV1,
+    &m0003_template_sessions_v1::M0003TemplateSessionsV1,
+    &m0004_registry_from_sqlite::M0004RegistryFromSqlite,
+    &m0005_registry_source_bases::M0005RegistrySourceBases,
+    &m0006_definitions_global::M0006DefinitionsGlobal,
+    &m0007_agents_consolidate::M0007AgentsConsolidate,
+    &m0008_default_bundle::M0008DefaultBundle,
+    &m0009_transcript_backfill::M0009TranscriptBackfill,
+    &m0010_session_ids::M0010SessionIds,
+    &m0011_shared_store_backfill::M0011SharedStoreBackfill,
 ];

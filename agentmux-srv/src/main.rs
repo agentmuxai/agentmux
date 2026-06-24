@@ -315,9 +315,6 @@ async fn main() {
     base::set_version(&version);
     base::set_build_time(&build_time);
 
-    // Migrate ~/.waveterm → ~/.agentmux if needed (one-time, non-destructive)
-    base::migrate_legacy_data_dir();
-
     // Set up data directory (uses AGENTMUX_DATA_HOME or default)
     if !config.data_home.is_empty() {
         std::env::set_var("AGENTMUX_DATA_HOME", &config.data_home);
@@ -397,113 +394,12 @@ async fn main() {
     if let Some(root) = registry::resolve_shared_registry_dir() {
         match registry::Registry::open(root.clone()) {
             Ok(reg) => {
-                // One-shot backfill from every channel/version + dev objects.db
-                // into the registry. Idempotent via the marker file in the
-                // registry root. Read-only on SQLite.
-                //
-                // Attach policy: the registry is attached whenever the migration
-                // RUNS (returns Ok), and intentionally serves the partial set of
-                // readable records — a corrupt/locked DB in an unrelated channel
-                // must not disable cross-channel My Agents (see the Ok arm below,
-                // codex P1 on #1389). On Err (e.g. the registry itself failed) or
-                // when the home can't be resolved, the registry stays detached and
-                // SQLite remains authoritative; the next launch retries.
-                // The generalized migration scans EVERY channel +dev tree under
-                // the true home, so derive ~/.agentmux from the now-global
-                // registry root: registry → agents → shared → <home>.
-                let home_dir = root.ancestors().nth(3).map(|p| p.to_path_buf());
-                let migration_ok = match home_dir {
-                    Some(home) => match registry::migrate_from_sqlite_once(&home, &reg) {
-                        Ok(stats) => {
-                            if stats.dbs_scanned > 0
-                                || stats.records_written > 0
-                                || stats.dbs_skipped > 0
-                            {
-                                tracing::info!(
-                                    dbs_scanned = stats.dbs_scanned,
-                                    dbs_skipped = stats.dbs_skipped,
-                                    rows_seen = stats.rows_seen,
-                                    records_written = stats.records_written,
-                                    records_skipped_existing = stats.records_skipped_existing,
-                                    records_skipped_unmappable = stats.records_skipped_unmappable,
-                                    complete = stats.complete,
-                                    "registry: cross-channel SQLite migration finished"
-                                );
-                            }
-                            // Attach the registry whenever the migration ran —
-                            // do NOT gate on `complete`. The scan now spans every
-                            // channel + dev tree, so a single corrupt/locked
-                            // objects.db in an unrelated channel must not disable
-                            // cross-channel My Agents for everyone (codex P1 on
-                            // #1389). The records that DID read are served now,
-                            // and the live mirror backfills the current channel's
-                            // named agents regardless of migration. On any skipped
-                            // DB the migration leaves the marker deferred, so a
-                            // future launch retries that source (idempotent via
-                            // exists_anywhere).
-                            //
-                            // P0.4 backfill: records written by the P0.3b
-                            // migration (or any pre-v3 mirror) lack
-                            // source_agents_base, so a cross-channel read would
-                            // re-join their working_dir under the wrong channel.
-                            // Re-derive each one's source channel from SQLite and
-                            // set just that field, preserving session_id etc. Own
-                            // marker; runs once even though the migration marker
-                            // is already present.
-                            match registry::backfill_source_bases_once(&home, &reg) {
-                                Ok(bf)
-                                    if bf.records_updated > 0
-                                        || bf.records_unresolved > 0 =>
-                                {
-                                    tracing::info!(
-                                        records_updated = bf.records_updated,
-                                        records_unresolved = bf.records_unresolved,
-                                        complete = bf.complete,
-                                        "registry: source-base backfill finished"
-                                    );
-                                }
-                                Ok(_) => {}
-                                Err(e) => tracing::warn!(
-                                    error = %e,
-                                    "registry: source-base backfill errored (continuing; live mirror backfills on relaunch)"
-                                ),
-                            }
-                            true
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e,
-                                "registry: SQLite migration errored — leaving registry detached; SQLite stays authoritative, next launch retries"
-                            );
-                            false
-                        }
-                    },
-                    None => {
-                        tracing::warn!(
-                            root = %root.display(),
-                            "registry: cannot resolve home (root has fewer than 3 ancestors) — leaving registry detached"
-                        );
-                        false
-                    }
-                };
-                if migration_ok {
-                    tracing::info!(root = %root.display(), "registry: shared agent registry attached");
-                    wstore_raw.set_registry(Arc::new(reg));
-                    // Now that the registry is GLOBAL for every mode, anchor the
-                    // mirror/read working_directory base on the CURRENT channel's
-                    // agents dir (AGENTMUX_AGENTS_DIR) — NOT the registry's parent
-                    // (shared/agents), which no longer contains any instance. In
-                    // dev this is ~/.agentmux/dev/<branch>/agents, in installed/
-                    // portable it is channels/<ch>/agents; either way it is the
-                    // correct per-channel anchor. This base is the fallback for
-                    // legacy v1/v2 records only; v3 records carry their own
-                    // source_agents_base (P0.4) and reconstruct against that,
-                    // so cross-channel rows resolve to their real workspace.
-                    if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
-                        if !base.is_empty() {
-                            wstore_raw
-                                .set_registry_agents_base(std::path::PathBuf::from(base));
-                        }
+                tracing::info!(root = %root.display(), "registry: shared agent registry attached");
+                wstore_raw.set_registry(Arc::new(reg));
+                if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
+                    if !base.is_empty() {
+                        wstore_raw
+                            .set_registry_agents_base(std::path::PathBuf::from(base));
                     }
                 }
             }
@@ -527,24 +423,6 @@ async fn main() {
     if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
         match registry::DefinitionStore::open(def_dir.clone()) {
             Ok(def_store) => {
-                // P0.2d: one-shot backfill of EXISTING user agents from every
-                // channel's per-version objects.db into the global store, so
-                // agents created before this shipped become cross-channel
-                // without waiting for an edit. Idempotent; read-only on SQLite.
-                // home = def_dir/../../.. (definitions -> agents -> shared -> home).
-                if let Some(home) = def_dir.ancestors().nth(3) {
-                    match registry::migrate_definitions_global_once(home, &def_store) {
-                        Ok(stats) if stats.dbs_scanned > 0 => tracing::info!(
-                            dbs_scanned = stats.dbs_scanned,
-                            dbs_skipped = stats.dbs_skipped,
-                            rows_seen = stats.rows_seen,
-                            records_written = stats.records_written,
-                            "def registry: global definition migration finished"
-                        ),
-                        Ok(_) => {}
-                        Err(e) => tracing::warn!(error = %e, "def registry: global migration errored (continuing; live mirror backfills on edit)"),
-                    }
-                }
                 // Capture user-agent ids for the transcript backfill (below).
                 backfill_def_ids = def_store
                     .list_active()
@@ -632,43 +510,11 @@ async fn main() {
     // available so writes survive version upgrades; falls back to wstore otherwise.
     let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
 
-    // NOTE: backfill_shared_store_once is called LATER in startup (after
-    // auto_seed_on_startup and run_default_bundle_migration) so that default
-    // seeds and OAuth-migration writes land in wstore first and are then
-    // captured in store.db in a single pass.
-    let home_for_backfill = registry::resolve_shared_store_path()
-        .and_then(|p| p.parent().and_then(|p| p.parent().map(|p| p.to_path_buf())));
-
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
     // the store through `resync_controller` and every controller constructor.
     if let Some(ref fs) = global_transcript_store {
         crate::backend::agent_session::set_global_transcript_store(fs.clone());
-        // One-shot: seed pre-existing agents' conversations into the global zone
-        // so the 9 cross-channel agents (and any created before #1399) load
-        // their history when opened from a fresh channel. Runs before the
-        // frontend connects / controllers auto-start, so it seeds before any new
-        // turn writes. Marker-gated; best-effort. See transcript_backfill.rs.
-        if let Some(tdir) = registry::resolve_shared_transcripts_dir() {
-            if let Some(home) = tdir.ancestors().nth(3) {
-                let s = backend::transcript_backfill::backfill_transcripts_once(
-                    home,
-                    &tdir,
-                    &backfill_def_ids,
-                    fs,
-                );
-                if s.data_dirs_scanned > 0 || s.seeded > 0 {
-                    tracing::info!(
-                        agents = s.agents_seen,
-                        data_dirs_scanned = s.data_dirs_scanned,
-                        seeded = s.seeded,
-                        skipped_no_source = s.skipped_no_source,
-                        skipped_global_richer = s.skipped_global_richer,
-                        "transcript backfill finished"
-                    );
-                }
-            }
-        }
         // Heal global snapshots poisoned before the normalize-on-mirror fix: a
         // channel-local `sourceBlockId` mirrored into the global zone makes a
         // cross-channel open render empty (the read fallback can't anchor a block
@@ -678,31 +524,6 @@ async fn main() {
             backend::agent_session::heal_global_snapshot_source_block_ids(fs, &backfill_def_ids);
         if healed > 0 {
             tracing::info!(healed, "global transcripts: healed poisoned snapshot sourceBlockIds");
-        }
-    }
-
-    // Backfill the registry `session_id` from each agent's largest provider
-    // session, so a cross-channel / fresh-build open `--resume`s the ORIGINAL
-    // conversation instead of starting a new session that shadows it. The id is
-    // read on launch (picker → `--resume <sid>`) but was never written, so it was
-    // always null. Idempotent; once set, `--resume` keeps it stable across turns.
-    // See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md.
-    if let (Some(reg_root), Some(tdir)) = (
-        registry::resolve_shared_registry_dir(),
-        registry::resolve_shared_transcripts_dir(),
-    ) {
-        if let Some(shared) = tdir.ancestors().nth(2) {
-            if let Ok(reg) = registry::Registry::open(reg_root) {
-                // Pass the shared dir; the backfill resolves both the default
-                // `providers/claude/projects` and per-identity bundle roots.
-                let n = backend::session_backfill::backfill_session_ids(&reg, shared);
-                if n > 0 {
-                    tracing::info!(
-                        backfilled = n,
-                        "registry: session_id backfill for cross-channel resume"
-                    );
-                }
-            }
         }
     }
 
@@ -763,35 +584,6 @@ async fn main() {
     // Runs on every startup to catch any corruption from prior sessions.
     heal_all_layouts(&wstore);
 
-    // Option E (PR 1 of 2) — one-shot migration of per-block agent
-    // session zones into per-agent zones. Gated by a marker file under
-    // the data dir; a second startup is a no-op. Failures on
-    // individual blocks are logged but do not abort startup; the
-    // marker file is written even on partial failure so we don't
-    // retry indefinitely (operators can delete the marker to force a
-    // re-run). See
-    // docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
-    let _agent_zones_migration_stats = backend::agent_session::migrate_block_zones_v1(
-        &wstore,
-        &filestore,
-        &base::get_wave_data_dir(),
-    );
-
-    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
-    // Mandatory companion to the picker UI split: any seeded template
-    // that currently carries a session zone (e.g. `agent:claude:current`
-    // with Maks's conversation) is promoted to a new user-owned
-    // definition with a sensible default name, and its zones +
-    // referencing instances are moved over. Without this step the
-    // freshly-introduced "Templates" section of the picker would
-    // silently reattach into pre-existing user sessions. Marker-file
-    // gated; second start is a no-op.
-    let _template_promote_stats = backend::agent_session::migrate_promote_template_sessions_v1(
-        &wstore,
-        &filestore,
-        &base::get_wave_data_dir(),
-    );
-
     // Session recovery (Phase 4.2): scan for agent blocks that still have
     // `session:active_pid` from a previous run — those sessions were killed
     // by a crash/reboot. Transfer to `session:was_interrupted` so the
@@ -807,37 +599,6 @@ async fn main() {
 
     // Auto-seed agent definitions on first launch (or empty DB)
     backend::agent_seed::auto_seed_on_startup(&wstore);
-
-    // Phase 3a — `db_agents` consolidation backfill. Marker-file gated
-    // under the data dir; idempotent across restarts. WRITE-ONLY in
-    // Phase 3a: dual-write keeps `db_agents` fresh; reads still hit
-    // `db_agent_definitions` / `db_agent_instances`. Phase 3b will
-    // flip readers over. Failures here are logged + tolerated — the
-    // old tables remain authoritative; a future startup retries.
-    // See docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md.
-    match wstore.run_agents_consolidate(Some(&base::get_wave_data_dir())) {
-        Ok(stats) if stats.already_done => {
-            tracing::debug!("agents_consolidate: marker present; backfill already done");
-        }
-        Ok(stats) => {
-            tracing::info!(
-                templates_inserted = stats.templates_inserted,
-                user_defs_inserted = stats.user_defs_inserted,
-                instances_as_clone_inserted = stats.instances_as_clone_inserted,
-                instances_folded_into_def = stats.instances_folded_into_def,
-                instances_skipped_continuation = stats.instances_skipped_continuation,
-                instances_skipped_no_definition = stats.instances_skipped_no_definition,
-                instances_collision_warned = stats.instances_collision_warned,
-                "agents_consolidate: Phase 3a backfill done",
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "agents_consolidate: backfill failed; old tables remain authoritative",
-            );
-        }
-    }
 
     // Gap-repair: backfill definitions written after the Phase 3a marker
     // but before Phase 3b dual-write (they exist in db_agent_definitions
@@ -859,35 +620,6 @@ async fn main() {
     // Bridge WPS events to WebSocket clients via EventBus
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
-
-    // OAuth-bundles startup migration (PR E, spec §5):
-    // on first launch after an upgrade, detect ambient OAuth
-    // credentials in `<HOME>/.<auth_dir_name>/.credentials.json` for
-    // each oauth-class provider (claude / codex / openclaw) and seed a
-    // "Default" identity bundle whose binding points at the ambient
-    // dir via `SecretRef::OAuthConfigDir`. Idempotent across restarts —
-    // a second invocation sees the existing binding and exits early
-    // for each already-covered provider. Legacy empty / "blank"
-    // identity_id rows on `db_agent_instances` are back-filled to the
-    // Default bundle in the same pass. Pure no-op when no ambient
-    // creds exist (fresh install) or every oauth-class provider is
-    // already bound by a user-driven flow.
-    let _oauth_migration_stats = identity::migration::run_default_bundle_migration(
-        &wstore,
-        Some(&broker),
-        None,
-    );
-
-    // One-shot backfill: seed store.db from every objects.db found under
-    // ~/.agentmux. Runs AFTER auto_seed_on_startup and
-    // run_default_bundle_migration so their wstore writes (default memory
-    // bundles, Default identity bundle) are captured in the same pass.
-    // Best-effort — failure is logged and does not abort startup.
-    if let Some(ref ss) = shared_store {
-        if let Err(e) = backfill_shared_store_once(ss, &wstore, home_for_backfill.as_deref()) {
-            tracing::warn!(error = %e, "shared store: one-shot backfill failed (data not lost — still in objects.db)");
-        }
-    }
 
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
@@ -1372,151 +1104,6 @@ async fn main() {
         tracing::info!(count = live, "shutdown: stopping persistent shells");
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     }
-}
-
-/// Merge all user data from a single source store into `shared`.
-///
-/// Called for EVERY source (wstore + all siblings) — no short-circuit per
-/// section — so that startup default seeds in wstore (auto_seed_on_startup,
-/// run_default_bundle_migration) do not mask the user's real prior-version
-/// data that sits in a sibling objects.db. `skip_*` flags are the pre-
-/// conditions read from `shared` BEFORE any writes start; they prevent re-
-/// seeding sections that were already fully populated in a prior startup pass.
-///
-/// Sibling DBs are opened read-only (SQLITE_OPEN_READ_ONLY) so source files
-/// are never modified during the backfill (spec §3.1).
-/// Seed a freshly-created `shared` store (store.db) from every available
-/// `objects.db` source using a two-pass algorithm:
-///
-/// Pass 1 — accounts only (all sources): seeds every identity account from
-///   every source before any binding or link is written, guaranteeing that FK
-///   constraints are satisfied regardless of which source a binding's account
-///   comes from.
-///
-/// Pass 2 — everything else (all sources): bundles+bindings, memory presets,
-///   drone definitions, agent-identity links. All accounts are already in
-///   shared, so no per-binding account lookup is needed.
-///
-/// Muxbus — picks the source with the highest `expires_at` so a stale token
-///   from an old channel never overwrites a valid one (spec §4).
-///
-/// Completion is recorded in `db_migrations` under the ID
-/// `"0011_shared_store_backfill"` so the scan is guaranteed to run exactly
-/// once — even for users who never log into MuxBus or create a drone (for
-/// whom the per-section skip flags would stay false forever, causing
-/// repeated full sibling scans on every startup). Siblings open read-only
-/// (spec §3.1).
-fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std::path::Path>) -> Result<(), String> {
-    use crate::backend::storage::muxbus::MuxBusCredentials;
-    use crate::drone::storage::DroneStore;
-
-    const MARKER_ID: &str = "0011_shared_store_backfill";
-
-    // Fast path: already ran on a prior startup.
-    if shared.migration_is_applied(MARKER_ID) {
-        return Ok(());
-    }
-
-    // Per-section skip flags optimise within this run (avoid writing rows that
-    // already exist from a partial prior run or from startup seeding). They are
-    // NOT the primary idempotency guard — db_migrations is.
-    let skip_accts       = !shared.identity_list(None).map_err(|e| e.to_string())?.is_empty();
-    let skip_id_bundles  = !shared.bundle_identity_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
-    let skip_mem_bundles = !shared.bundle_memory_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
-    let skip_drones      = !shared.drone_list().map_err(|e| e.to_string())?.is_empty();
-    let skip_links       = !shared.agent_identity_list_all().map_err(|e| e.to_string())?.is_empty();
-    let skip_muxbus      = shared.muxbus_load().ok().flatten().is_some();
-
-    // Open all sibling DBs read-only up front so both passes can iterate them.
-    let mut sibling_stores: Vec<Store> = Vec::new();
-    if let Some(home) = home {
-        for path in crate::registry::enumerate_objects_dbs(home) {
-            match Store::open_source_readonly(&path) {
-                Ok(s) => sibling_stores.push(s),
-                Err(e) => tracing::debug!(path = %path.display(), error = %e, "backfill: skip sibling"),
-            }
-        }
-    }
-    let all_sources: Vec<&Store> = std::iter::once(wstore as &Store)
-        .chain(sibling_stores.iter().map(|s| s as &Store))
-        .collect();
-
-    // ── Pass 1: accounts (all sources) ───────────────────────────────────
-    // Must complete before pass 2 so every account referenced by a binding or
-    // link is already in shared when we try to insert the FK-dependent row.
-    if !skip_accts {
-        for src in &all_sources {
-            for acct in src.identity_list(None).unwrap_or_default() {
-                let _ = shared.identity_upsert(&acct);
-            }
-        }
-        tracing::info!("shared store backfill: accounts");
-    }
-
-    // ── Pass 2: bundles, presets, drones, links (all sources) ────────────
-    // All accounts are guaranteed to be in shared from pass 1, so FK
-    // constraints on bindings and agent-identity links are always satisfied.
-    if !skip_id_bundles {
-        for src in &all_sources {
-            for bundle in src.bundle_identity_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
-                if shared.bundle_identity_upsert(bundle).is_err() { continue; }
-                for b in src.bundle_identity_bindings(&bundle.id).unwrap_or_default() {
-                    let _ = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id);
-                }
-            }
-        }
-        tracing::info!("shared store backfill: identity bundles");
-    }
-
-    if !skip_mem_bundles {
-        for src in &all_sources {
-            for mem in src.bundle_memory_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
-                let _ = shared.bundle_memory_upsert(mem);
-            }
-        }
-        tracing::info!("shared store backfill: memory bundles");
-    }
-
-    if !skip_drones {
-        for src in &all_sources {
-            for drone in src.drone_list().unwrap_or_default() {
-                let _ = shared.drone_upsert(&drone);
-            }
-        }
-        tracing::info!("shared store backfill: drones");
-    }
-
-    if !skip_links {
-        for src in &all_sources {
-            for link in src.agent_identity_list_all().unwrap_or_default() {
-                let _ = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider);
-            }
-        }
-        tracing::info!("shared store backfill: agent identity links");
-    }
-
-    // ── Muxbus: pick source with highest expires_at (spec §4) ────────────
-    // Iterating in enumeration order and using INSERT OR REPLACE would let a
-    // stale token from an old channel overwrite a valid one. Instead collect
-    // all candidates and pick the one with the latest expiry.
-    if !skip_muxbus {
-        let best: Option<MuxBusCredentials> = all_sources.iter()
-            .filter_map(|src| src.muxbus_load().ok().flatten())
-            .max_by_key(|c| c.expires_at);
-        if let Some(creds) = best {
-            if let Err(e) = shared.muxbus_save(&creds) {
-                tracing::warn!(error = %e, "backfill: muxbus_save failed");
-            } else {
-                tracing::info!("shared store backfill: muxbus credentials");
-            }
-        }
-    }
-
-    // Stamp completion so subsequent startups skip the sibling scan entirely,
-    // even for users who have no MuxBus creds or drone definitions.
-    let _ = shared.migration_mark_applied(MARKER_ID, "global", 0);
-    tracing::info!("shared store: one-shot backfill complete");
-    Ok(())
 }
 
 /// Initialize tracing with dual output: JSON rolling file + human-readable stderr.

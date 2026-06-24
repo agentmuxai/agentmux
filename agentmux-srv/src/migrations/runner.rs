@@ -78,17 +78,23 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
 
     // Channel store (objects.db) tracks channel-scoped migrations independently
     // per channel — MigrationScope::Channel migrations record here, not in shared.
+    // Always create the directory and open/create the store so that seed migrations
+    // (e.g. m0008_default_bundle) run on fresh install. Data-transformation
+    // migrations guard themselves with `if !ctx.channel_store_path.exists()` and
+    // are no-ops when called on a newly-created empty database.
     let channel_store_path = data_dir.join("db").join("objects.db");
-    let channel_store = if channel_store_path.exists() {
-        match Store::open(&channel_store_path) {
-            Ok(s) => Some(s),
-            Err(e) => {
-                eprintln!("migration: failed to open channel store: {}", e);
-                return 1;
-            }
+    if let Some(parent) = channel_store_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("migration: failed to create channel db dir {}: {}", parent.display(), e);
+            return 1;
         }
-    } else {
-        None
+    }
+    let channel_store = match Store::open(&channel_store_path) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("migration: failed to open channel store: {}", e);
+            return 1;
+        }
     };
 
     let ctx = MigrationContext {
@@ -107,7 +113,7 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
         .iter()
         .filter(|m| {
             let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
-            !tracking.map(|s| s.migration_is_applied(m.id())).unwrap_or(false)
+            tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
         })
         .collect();
 
@@ -167,8 +173,6 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
 
 /// Return the store that tracks applied state for a migration of the given scope.
 /// Global migrations → shared store; Channel migrations → channel store.
-/// Returns None only when a Channel migration is requested but no channel store
-/// is open (fresh install with no objects.db yet — migration is a no-op).
 fn tracking_store<'a>(
     scope: super::MigrationScope,
     shared: &'a Store,
