@@ -544,18 +544,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Play the waiting-ambient tone when an AskUserQuestion panel is active
     // (agent blocked waiting for the user to pick an option). Stop it when
     // all questions are answered or the pane closes.
+    let waitingToneActive = false;
     createEffect(on(pendingQuestions, (qs, prevQs) => {
         const hadAny = (prevQs?.length ?? 0) > 0;
         const hasAny = qs.length > 0;
         if (hasAny && !hadAny) {
+            waitingToneActive = true;
             firePaneEvent(model.blockId, { type: "waiting-for-input" });
         } else if (!hasAny && hadAny) {
+            waitingToneActive = false;
             firePaneEvent(model.blockId, { type: "waiting-ended", reason: "submitted" });
         }
-        onCleanup(() => {
-            if (hasAny) firePaneEvent(model.blockId, { type: "waiting-ended", reason: "closed" });
-        });
     }));
+    onCleanup(() => {
+        if (waitingToneActive) {
+            firePaneEvent(model.blockId, { type: "waiting-ended", reason: "closed" });
+            waitingToneActive = false;
+        }
+    });
 
     // Root element ref — declared before useAgentControllerStatus so its
     // getInitialTermSize closure can read the laid-out pane width when the

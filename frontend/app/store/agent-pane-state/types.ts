@@ -396,15 +396,6 @@ export type AgentPaneCommand =
     | {
           type: "TurnEnd";
           stats: SessionStats | null;
-          /**
-           * The trimmed text of the last assistant message block, if the
-           * caller can supply it cheaply. Used to set `lastTurnHadQuestion`
-           * via the trailing-`?` heuristic. Optional — absence conservatively
-           * clears `lastTurnHadQuestion` (treated as no question) so a
-           * tool-only or empty final block never re-triggers the waiting tone.
-           * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §4.
-           */
-          lastAssistantText?: string;
       }
     /**
      * Truncate path: the doc was reset (or whatever caused the local
