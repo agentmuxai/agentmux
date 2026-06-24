@@ -1373,23 +1373,32 @@ async fn main() {
 /// Muxbus — picks the source with the highest `expires_at` so a stale token
 ///   from an old channel never overwrites a valid one (spec §4).
 ///
-/// Pre-conditions (what `shared` already had at startup) gate entire sections
-/// so a second startup is a fast no-op. Siblings open read-only (spec §3.1).
+/// Completion is recorded in `db_migrations` under the ID
+/// `"0011_shared_store_backfill"` so the scan is guaranteed to run exactly
+/// once — even for users who never log into MuxBus or create a drone (for
+/// whom the per-section skip flags would stay false forever, causing
+/// repeated full sibling scans on every startup). Siblings open read-only
+/// (spec §3.1).
 fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std::path::Path>) -> Result<(), String> {
     use crate::backend::storage::muxbus::MuxBusCredentials;
     use crate::drone::storage::DroneStore;
 
-    // Pre-conditions: skip sections already populated in a prior startup pass.
+    const MARKER_ID: &str = "0011_shared_store_backfill";
+
+    // Fast path: already ran on a prior startup.
+    if shared.migration_is_applied(MARKER_ID) {
+        return Ok(());
+    }
+
+    // Per-section skip flags optimise within this run (avoid writing rows that
+    // already exist from a partial prior run or from startup seeding). They are
+    // NOT the primary idempotency guard — db_migrations is.
     let skip_accts       = !shared.identity_list(None).map_err(|e| e.to_string())?.is_empty();
     let skip_id_bundles  = !shared.bundle_identity_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
     let skip_mem_bundles = !shared.bundle_memory_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
     let skip_drones      = !shared.drone_list().map_err(|e| e.to_string())?.is_empty();
     let skip_links       = !shared.agent_identity_list_all().map_err(|e| e.to_string())?.is_empty();
     let skip_muxbus      = shared.muxbus_load().ok().flatten().is_some();
-
-    if skip_accts && skip_id_bundles && skip_mem_bundles && skip_drones && skip_links && skip_muxbus {
-        return Ok(());
-    }
 
     // Open all sibling DBs read-only up front so both passes can iterate them.
     let mut sibling_stores: Vec<Store> = Vec::new();
@@ -1476,6 +1485,9 @@ fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std:
         }
     }
 
+    // Stamp completion so subsequent startups skip the sibling scan entirely,
+    // even for users who have no MuxBus creds or drone definitions.
+    let _ = shared.migration_mark_applied(MARKER_ID, "global", 0);
     tracing::info!("shared store: one-shot backfill complete");
     Ok(())
 }
