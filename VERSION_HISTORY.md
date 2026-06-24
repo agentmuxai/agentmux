@@ -1,5 +1,30 @@
 # AgentMux Version History
 
+## 0.49.2 — 2026-06-24
+
+- feat(agent-pane): right-click header to set 2-tone hue color theme
+- fix(sysinfo): instant first paint on dock/float + fix gradient id collision causing crossing-line artifact
+- fix(editor): guard sourceHidden display behind isMarkdown(), fix Mod+F in preview-only, add aria-label to </> toggle, restore previewOpen on exit
+- fix(agent-footer): exempt caretVisualEdge mirror-div reads from layout-read lint gate
+- feat(storage): global store.db for identity, memory bundles, drone definitions, and MuxBus credentials
+- refactor(frontend): useTick shared interval — 11 1s/60s sites → 1 interval per period
+- fix(swarm): show provider logo instead of hexagon; fix persistent agents always showing "working" when idle
+- fix(storage): agent_content_set/delete now route cross-channel agents to global registry, fixing zoom persistence for agents absent from local db_agent_definitions
+- fix(layout): floating-pane redock ghost direction missing on macOS — set dwellCurrentHoverTarget from IPC response
+- fix(sound): waiting-ambient tone now triggers only on AskUserQuestion panel, not on any turn ending with ?
+- fix(sound): fire waiting-ended only on component unmount, not on every pendingQuestions change
+- fix(claude-translator): emit session_end for per-turn completion in persistent mode
+- fix(layout): solo-column pane slips header into adjacent column on minimize instead of going thin
+- feat(migrations): launcher-driven migration framework replaces startup-embedded one-shot migrations
+- feat(tab-chrome): Phase 2+3 folder boundary line and recessed strip
+- fix(statusbar): channel row missing from instance panel — about() memo omitted channel field
+- feat(statusbar): floating panes section in instance panel — click version chip to see and focus open floating panes
+- feat(widget-bar): "Open in New Window" and "Open in Floating Pane" context menu actions
+- refactor(migrations): port all 11 one-time startup migrations to framework, remove from main.rs
+- feat: messaging bridge framework + discord integration
+- fix(ActivityDock): replace hasCandidates memo with createEffect+setTimeout gate
+
+
 ## 0.49.1 — 2026-06-23
 
 - fix(container-agent): force subprocess controller type at block creation; guard resync
