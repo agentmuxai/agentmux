@@ -3,7 +3,7 @@
 **Date:** 2026-06-23  
 **Discovered by:** Manual test — agents opening `.md` files via `pane.open` App API  
 **PRs involved:** #1522 (styled markdown preview + toggle), #1655 (collapsible split panel)  
-**Status:** Not yet fixed
+**Status:** Fixed in PR #1743
 
 ---
 
