@@ -63,19 +63,39 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
         }
     };
 
+    // Channel store (objects.db) tracks channel-scoped migrations independently
+    // per channel — MigrationScope::Channel migrations record here, not in shared.
+    let channel_store_path = data_dir.join("db").join("objects.db");
+    let channel_store = if channel_store_path.exists() {
+        match Store::open(&channel_store_path) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("migration: failed to open channel store: {}", e);
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
+
     let ctx = MigrationContext {
         home: home.clone(),
         data_dir: data_dir.to_path_buf(),
         shared_store_path: shared_store_path.clone(),
+        channel_store_path: channel_store_path.clone(),
     };
 
     if list {
-        return cmd_list(&shared_store);
+        return cmd_list(&shared_store, channel_store.as_ref());
     }
 
+    // A migration is pending if its tracking store does not record it applied.
     let pending: Vec<_> = REGISTRY
         .iter()
-        .filter(|m| !shared_store.migration_is_applied(m.id()))
+        .filter(|m| {
+            let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+            !tracking.map(|s| s.migration_is_applied(m.id())).unwrap_or(false)
+        })
         .collect();
 
     if pending.is_empty() {
@@ -91,7 +111,7 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
     }
 
     // Back up before any writes.
-    if let Err(e) = backup_stores(&home, &shared_store_path, &ctx.data_dir) {
+    if let Err(e) = backup_stores(&home, &shared_store_path, data_dir) {
         eprintln!("migration: backup failed: {}", e);
         return 1;
     }
@@ -106,7 +126,11 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
             Ok(()) => {
                 let ms = t.elapsed().as_millis() as u64;
                 let scope = m.scope().as_str();
-                if let Err(e) = shared_store.migration_mark_applied(m.id(), scope, ms) {
+                let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+                let mark_result = tracking
+                    .ok_or_else(|| format!("no tracking store for {} (channel store missing)", m.id()))
+                    .and_then(|s| s.migration_mark_applied(m.id(), scope, ms).map_err(|e| e.to_string()));
+                if let Err(e) = mark_result {
                     let msg = format!("migration: failed to record {} as applied: {}", m.id(), e);
                     write_error_log(&home, &msg);
                     eprintln!("{}", msg);
@@ -128,11 +152,33 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
     0
 }
 
-fn cmd_list(shared_store: &Store) -> i32 {
-    let applied = shared_store.migrations_list_applied().unwrap_or_default();
+/// Return the store that tracks applied state for a migration of the given scope.
+/// Global migrations → shared store; Channel migrations → channel store.
+/// Returns None only when a Channel migration is requested but no channel store
+/// is open (fresh install with no objects.db yet — migration is a no-op).
+fn tracking_store<'a>(
+    scope: super::MigrationScope,
+    shared: &'a Store,
+    channel: Option<&'a Store>,
+) -> Option<&'a Store> {
+    match scope {
+        super::MigrationScope::Global => Some(shared),
+        super::MigrationScope::Channel => channel,
+    }
+}
+
+fn cmd_list(shared_store: &Store, channel_store: Option<&Store>) -> i32 {
+    let shared_applied = shared_store.migrations_list_applied().unwrap_or_default();
+    let channel_applied = channel_store
+        .and_then(|s| s.migrations_list_applied().ok())
+        .unwrap_or_default();
     for m in REGISTRY.iter() {
-        let status = if applied.contains(&m.id().to_string()) { "applied" } else { "pending" };
-        println!("{} [{}] — {}", m.id(), status, m.description());
+        let applied_ids = match m.scope() {
+            super::MigrationScope::Global => &shared_applied,
+            super::MigrationScope::Channel => &channel_applied,
+        };
+        let status = if applied_ids.contains(&m.id().to_string()) { "applied" } else { "pending" };
+        println!("{} [{}] [{}] — {}", m.id(), m.scope().as_str(), status, m.description());
     }
     0
 }
