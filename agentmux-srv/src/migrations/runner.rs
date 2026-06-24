@@ -103,11 +103,18 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
     }
 
     // A migration is pending if its tracking store does not record it applied.
+    // When channel_store is None (fresh install — objects.db not yet created),
+    // channel-scoped migrations are skipped rather than treated as pending: there
+    // is nothing to migrate for a brand-new channel, and the mark-applied step
+    // would error with "no tracking store". They will run on the next migrate
+    // invocation once the daemon has created objects.db.
     let pending: Vec<_> = REGISTRY
         .iter()
         .filter(|m| {
-            let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
-            !tracking.map(|s| s.migration_is_applied(m.id())).unwrap_or(false)
+            match tracking_store(m.scope(), &shared_store, channel_store.as_ref()) {
+                None => false, // no channel store yet — skip channel migrations
+                Some(tracking) => !tracking.migration_is_applied(m.id()),
+            }
         })
         .collect();
 
