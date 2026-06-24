@@ -118,7 +118,7 @@ struct AckResp {
 
 pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mgr = state.auth_session_manager.clone();
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_AUTH_START,

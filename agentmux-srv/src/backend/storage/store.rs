@@ -18,7 +18,10 @@ use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, StoreObj};
 use crate::registry::{DefinitionStore, Registry};
 
 use super::error::StoreError;
-use super::migrations::{check_schema_compat, run_object_schema, stamp_version, OBJECT_SCHEMA_VERSION};
+use super::migrations::{
+    check_schema_compat, run_object_schema, run_shared_store_schema, stamp_version,
+    OBJECT_SCHEMA_VERSION, SHARED_STORE_SCHEMA_VERSION,
+};
 
 /// SQLite-backed object store for StoreObj types.
 pub struct Store {
@@ -77,6 +80,35 @@ impl Store {
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
         Self::configure_and_migrate(conn)
+    }
+
+    /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
+    ///
+    /// Uses the same WAL + busy-timeout config as `open()` but runs
+    /// `run_shared_store_schema` instead of `run_object_schema` so only
+    /// the durable-user-content tables are created (identity, memory, drone
+    /// definitions, muxbus creds). Per-channel session tables are intentionally
+    /// absent — calling per-channel CRUD methods on this store will error.
+    pub fn open_shared(path: &Path) -> Result<Self, StoreError> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA busy_timeout=5000;
+             PRAGMA foreign_keys=ON;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA cache_size=-8000;
+             PRAGMA mmap_size=268435456;
+             PRAGMA temp_store=MEMORY;",
+        )?;
+        check_schema_compat(&conn, SHARED_STORE_SCHEMA_VERSION, "store.db")?;
+        run_shared_store_schema(&conn)?;
+        stamp_version(&conn, SHARED_STORE_SCHEMA_VERSION)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            registry: Mutex::new(None),
+            def_registry: Mutex::new(None),
+            registry_agents_base: Mutex::new(None),
+        })
     }
 
     /// Crate-internal accessor for sibling modules that maintain their

@@ -80,8 +80,8 @@ fn list_drives() -> Vec<serde_json::Value> {
 /// CLAUDE.md string, mirroring the injection done by `write_agent_config_files`
 /// in the `agent.open` RPC path.  If the file has no `# Memory` section, a new
 /// one is inserted before `# Available Skills` (or at the end of the file).
-fn inject_global_bundles(claude_md: &str, wstore: &Arc<Store>) -> String {
-    let bundles = wstore.bundle_memory_list_global().unwrap_or_default();
+fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
+    let bundles = id_store.bundle_memory_list_global().unwrap_or_default();
     let bundle_block = crate::backend::storage::format_global_brain_block(&bundles);
     if bundle_block.is_empty() {
         return claude_md.to_string();
@@ -105,13 +105,13 @@ fn inject_global_bundles(claude_md: &str, wstore: &Arc<Store>) -> String {
 }
 
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
 
     // writeagentconfig → write config files atomically to agent working directory
     engine.register_handler(
         COMMAND_WRITE_AGENT_CONFIG,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let id_store = id_store.clone();
             Box::pin(async move {
                 let cmd: CommandWriteAgentConfigData = serde_json::from_value(data)
                     .map_err(|e| format!("writeagentconfig: {e}"))?;
@@ -169,7 +169,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // launched from the picker receive the same workspace rules
                     // as agents launched via the agent.open RPC.
                     let content = if file.path == "CLAUDE.md" {
-                        inject_global_bundles(&file.content, &wstore)
+                        inject_global_bundles(&file.content, &id_store)
                     } else {
                         file.content.clone()
                     };
