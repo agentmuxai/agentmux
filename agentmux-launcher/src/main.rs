@@ -959,7 +959,14 @@ async fn run_unix(
     );
     log(&format!("IPC server started on {}", socket_path));
 
-    // 2. Spawn srv. The srv pipe path is the launcher-owned socket
+    // 2a. Run data migrations before starting the daemon.
+    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths).await {
+        log(&format!("FATAL: migration failed: {}", e));
+        eprintln!("Failed to migrate data: {}\nSee ~/.agentmux/logs/migration-error.log", e);
+        std::process::exit(1);
+    }
+
+    // 2b. Spawn srv. The srv pipe path is the launcher-owned socket
     //    path scope (srv will gain its own Unix-socket bind in a
     //    follow-up; for now we still pass an empty string so srv's
     //    Windows-only IPC code stays disabled).
@@ -1578,7 +1585,15 @@ async fn run_windows(
     );
     log(&format!("IPC server started on {}", pipe_path));
 
-    // 3. Spawn srv first. Host needs srv's endpoints to skip its own
+    // 3. Run data migrations before starting the daemon.
+    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths).await {
+        log(&format!("FATAL: migration failed: {}", e));
+        eprintln!("Failed to migrate data: {}\nSee ~/.agentmux/logs/migration-error.log", e);
+        drop(job);
+        std::process::exit(1);
+    }
+
+    // 3b. Spawn srv first. Host needs srv's endpoints to skip its own
     // spawn_backend path. Srv signals readiness via AGENTMUXSRV-ESTART on
     // stderr; the spawner returns once we see that line (or after a
     // 30s timeout).
