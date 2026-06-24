@@ -10,8 +10,8 @@ name: build-macos
 #   APPLE_ID                     Apple ID email for notarytool
 #   APPLE_PASSWORD               App-specific password (appleid.apple.com)
 #   APPLE_TEAM_ID                10-char Team ID
-#   AGENTMUX_RELEASE_TOKEN       PAT (repo:write) to upload release assets
 #   A5AF_PACKAGES_TOKEN          npm GitHub Packages token (@a5af scope)
+#   (release upload uses GITHUB_TOKEN with contents:write — no extra PAT needed)
 #
 # See docs/specs/SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md for full design notes.
 
@@ -31,7 +31,7 @@ on:
     # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z" }
 
 permissions:
-  contents: read
+  contents: write   # needed to upload release assets via GITHUB_TOKEN
 
 jobs:
   build:
@@ -152,7 +152,7 @@ jobs:
       - name: Upload DMG to GitHub Release
         if: steps.in.outputs.release_tag != ''
         env:
-          GH_TOKEN: ${{ secrets.AGENTMUX_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ steps.in.outputs.release_tag }}" \
             "${{ steps.dmg.outputs.path }}" \
