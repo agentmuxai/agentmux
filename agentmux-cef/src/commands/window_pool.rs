@@ -1167,6 +1167,7 @@ pub fn promote_pool_window(
     tab_anchor_x: Option<i32>,
     tab_anchor_y: Option<i32>,
     _initial_view: Option<String>,
+    _initial_meta: Option<String>,
 ) -> Option<String> {
     // Atomic pop from the pool queue via reducer. Returns None if empty
     // — caller falls back to cold path.
