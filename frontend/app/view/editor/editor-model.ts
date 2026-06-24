@@ -41,6 +41,7 @@ const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
 const META_PREVIEW_OPEN = "editor:preview_open";
 const META_PREVIEW_HEIGHT = "editor:preview_height";
+const META_SOURCE_HIDDEN = "editor:source_hidden";
 const META_LEGACY_FILE = "file";
 const META_SCRATCH = "editor:scratch";
 const TREE_WIDTH_DEFAULT = 240;
@@ -143,6 +144,10 @@ export class EditorViewModel implements ViewModel {
 
     private _previewHeight = createSignal<number>(PREVIEW_HEIGHT_DEFAULT);
     previewHeightAtom: Accessor<number> = this._previewHeight[0];
+
+    /** When true the CodeMirror editor is hidden and the preview fills the full pane. */
+    private _sourceHidden = createSignal<boolean>(false);
+    sourceHiddenAtom: Accessor<boolean> = this._sourceHidden[0];
 
     treeModel = new FileTreeModel();
 
@@ -295,6 +300,9 @@ export class EditorViewModel implements ViewModel {
         }
         if (meta?.[META_PREVIEW_OPEN] === false) {
             this._previewOpen[1](false);
+        }
+        if (meta?.[META_SOURCE_HIDDEN] === true) {
+            this._sourceHidden[1](true);
         }
         const persistedPreviewH = meta?.[META_PREVIEW_HEIGHT];
         if (typeof persistedPreviewH === "number") {
@@ -839,6 +847,12 @@ export class EditorViewModel implements ViewModel {
         const next = !this._previewOpen[0]();
         this._previewOpen[1](next);
         await this.persistMeta({ [META_PREVIEW_OPEN]: next });
+    }
+
+    async toggleSourceHidden(): Promise<void> {
+        const next = !this._sourceHidden[0]();
+        this._sourceHidden[1](next);
+        await this.persistMeta({ [META_SOURCE_HIDDEN]: next });
     }
 
     setPreviewHeight(height: number): void {
