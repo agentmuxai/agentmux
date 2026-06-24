@@ -395,6 +395,114 @@
     }
 }
 
+// ── MuxBus Cloud login chip ─────────────────────────────────────────────────
+
+.muxbus-login-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    height: 100%;
+    font-size: 11px;
+    font-family: inherit;
+    color: inherit;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    cursor: default;
+    white-space: nowrap;
+    line-height: 1;
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: default;
+    }
+
+    // "Sign in" / expired states — muted, accent on hover.
+    &.muxbus-login-chip-signin {
+        opacity: 0.5;
+
+        &:hover:not(:disabled) {
+            opacity: 1;
+            background: var(--hover-bg-color);
+            color: var(--accent-color);
+        }
+    }
+
+    // Signed-in state — slightly more prominent than version chip.
+    &.muxbus-login-chip-connected {
+        opacity: 0.55;
+
+        &:hover {
+            opacity: 1;
+            background: var(--hover-bg-color);
+        }
+    }
+
+    // Green dot indicating live cloud connection.
+    .muxbus-login-chip-dot {
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--success-color, #4caf50);
+        flex-shrink: 0;
+    }
+
+    // Truncate long emails gracefully.
+    .muxbus-login-chip-email {
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+// Inline error indicator (! badge) shown beside the chip when connect/disconnect fails.
+.muxbus-login-chip-error {
+    color: var(--error-color);
+    font-size: 11px;
+    cursor: default;
+    padding: 0 2px;
+}
+
+// Disconnect popover — inherits .status-bar-popover layout.
+.muxbus-login-popover {
+    min-width: 220px;
+
+    .muxbus-popover-email {
+        font-size: 0.95em;
+        max-width: 160px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+}
+
+.muxbus-popover-disconnect-btn {
+    width: 100%;
+    padding: var(--space-1) var(--space-2);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    color: inherit;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: default;
+    text-align: left;
+
+    &:hover:not(:disabled) {
+        background: var(--hover-bg-color);
+        color: var(--error-color);
+        border-color: var(--error-color);
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: default;
+    }
+}
+
 @keyframes status-icon-spin {
     from {
         transform: rotate(0deg);
