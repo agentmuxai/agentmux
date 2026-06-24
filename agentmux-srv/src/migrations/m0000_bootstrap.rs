@@ -97,13 +97,12 @@ impl Migration for M0000Bootstrap {
             stamp_channel("0007_agents_consolidate");
         }
 
-        // ── Global: default OAuth bundle ─────────────────────────────────────
-        // m0008 scope changed to Global (tracked in shared store) so it runs
-        // on fresh install before objects.db exists. Stamp globally here.
-        // No marker; presence of objects.db is sufficient proxy.
-        if objects_db.exists() {
-            stamp_global("0008_default_bundle");
-        }
+        // NOTE: 0008_default_bundle is intentionally NOT stamped here.
+        // run_default_bundle_migration is idempotent (checks existing bindings
+        // before writing), so re-running it on users who already have a Default
+        // bundle is a no-op. Omitting the stamp avoids a race where bootstrap
+        // stamps m0008 before it actually runs (the runner creates objects.db
+        // before m0000, making any objects_db.exists() proxy unreliable).
 
         // ── Global: transcript backfill ──────────────────────────────────────
         if let Some(transcripts_dir) = resolve_shared_transcripts_dir() {
