@@ -1358,118 +1358,28 @@ async fn main() {
 ///
 /// Sibling DBs are opened read-only (SQLITE_OPEN_READ_ONLY) so source files
 /// are never modified during the backfill (spec §3.1).
-fn merge_from_source(
-    src: &Store,
-    shared: &Store,
-    skip_accts: bool,
-    skip_id_bundles: bool,
-    skip_mem_bundles: bool,
-    skip_drones: bool,
-    skip_links: bool,
-    skip_muxbus: bool,
-) -> bool {
-    use crate::drone::storage::DroneStore;
-    let mut wrote = false;
-
-    if !skip_accts {
-        for acct in src.identity_list(None).unwrap_or_default() {
-            if shared.identity_upsert(&acct).is_ok() {
-                wrote = true;
-            }
-        }
-    }
-
-    if !skip_id_bundles {
-        let all = src.bundle_identity_list().unwrap_or_default();
-        for bundle in all.iter().filter(|b| b.id != "blank") {
-            if shared.bundle_identity_upsert(bundle).is_err() {
-                continue;
-            }
-            wrote = true;
-            for b in src.bundle_identity_bindings(&bundle.id).unwrap_or_default() {
-                // Ensure the referenced account is in shared before binding.
-                // It may come from a different source; seed it from this one
-                // if available, skip the binding if truly absent.
-                if shared.identity_get(&b.account_id).ok().flatten().is_none() {
-                    match src.identity_get(&b.account_id) {
-                        Ok(Some(acct)) => { let _ = shared.identity_upsert(&acct); }
-                        _ => {
-                            tracing::warn!(
-                                account_id = %b.account_id, bundle = %b.identity_id,
-                                "backfill: skipping bundle binding — account missing from source"
-                            );
-                            continue;
-                        }
-                    }
-                }
-                let _ = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id);
-            }
-        }
-    }
-
-    if !skip_mem_bundles {
-        let all = src.bundle_memory_list().unwrap_or_default();
-        for mem in all.iter().filter(|b| b.id != "blank") {
-            if shared.bundle_memory_upsert(mem).is_ok() {
-                wrote = true;
-            }
-        }
-    }
-
-    if !skip_drones {
-        for drone in src.drone_list().unwrap_or_default() {
-            if shared.drone_upsert(&drone).is_ok() {
-                wrote = true;
-            }
-        }
-    }
-
-    if !skip_links {
-        for link in src.agent_identity_list_all().unwrap_or_default() {
-            if shared.identity_get(&link.account_id).ok().flatten().is_none() {
-                match src.identity_get(&link.account_id) {
-                    Ok(Some(acct)) => { let _ = shared.identity_upsert(&acct); }
-                    _ => {
-                        tracing::warn!(
-                            account_id = %link.account_id, agent = %link.agent_id,
-                            "backfill: skipping agent link — account missing from source"
-                        );
-                        continue;
-                    }
-                }
-            }
-            if shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider).is_ok() {
-                wrote = true;
-            }
-        }
-    }
-
-    if !skip_muxbus {
-        if let Ok(Some(creds)) = src.muxbus_load() {
-            if shared.muxbus_save(&creds).is_ok() {
-                wrote = true;
-            }
-        }
-    }
-
-    wrote
-}
-
 /// Seed a freshly-created `shared` store (store.db) from every available
-/// `objects.db` source. Merges from ALL sources (wstore + every sibling under
-/// `home`) rather than stopping at the first source with data — this ensures
-/// that startup default seeds written to wstore by `auto_seed_on_startup` /
-/// `run_default_bundle_migration` do not mask the user's real prior-version
-/// data in a sibling channel DB.
+/// `objects.db` source using a two-pass algorithm:
+///
+/// Pass 1 — accounts only (all sources): seeds every identity account from
+///   every source before any binding or link is written, guaranteeing that FK
+///   constraints are satisfied regardless of which source a binding's account
+///   comes from.
+///
+/// Pass 2 — everything else (all sources): bundles+bindings, memory presets,
+///   drone definitions, agent-identity links. All accounts are already in
+///   shared, so no per-binding account lookup is needed.
+///
+/// Muxbus — picks the source with the highest `expires_at` so a stale token
+///   from an old channel never overwrites a valid one (spec §4).
 ///
 /// Pre-conditions (what `shared` already had at startup) gate entire sections
-/// so a second startup (after the first successful backfill) is a fast no-op.
-/// Sibling DBs are opened read-only (spec §3.1 — source files never modified).
+/// so a second startup is a fast no-op. Siblings open read-only (spec §3.1).
 fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std::path::Path>) -> Result<(), String> {
+    use crate::backend::storage::muxbus::MuxBusCredentials;
     use crate::drone::storage::DroneStore;
 
-    // Pre-conditions: what shared already has. Sections already populated in a
-    // prior startup pass are skipped entirely; the rest are merged from every source.
+    // Pre-conditions: skip sections already populated in a prior startup pass.
     let skip_accts       = !shared.identity_list(None).map_err(|e| e.to_string())?.is_empty();
     let skip_id_bundles  = !shared.bundle_identity_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
     let skip_mem_bundles = !shared.bundle_memory_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
@@ -1481,33 +1391,92 @@ fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std:
         return Ok(());
     }
 
-    let mut any = false;
-
-    // Merge from wstore (already open, no overhead). Includes startup defaults.
-    any |= merge_from_source(wstore, shared,
-        skip_accts, skip_id_bundles, skip_mem_bundles, skip_drones, skip_links, skip_muxbus);
-
-    // Merge from every sibling objects.db. These are opened read-only so the
-    // source files are never modified. Missing tables in older schemas return
-    // empty via StoreError / unwrap_or_default — safe to ignore.
+    // Open all sibling DBs read-only up front so both passes can iterate them.
+    let mut sibling_stores: Vec<Store> = Vec::new();
     if let Some(home) = home {
         for path in crate::registry::enumerate_objects_dbs(home) {
             match Store::open_source_readonly(&path) {
-                Ok(sib) => {
-                    any |= merge_from_source(&sib, shared,
-                        skip_accts, skip_id_bundles, skip_mem_bundles,
-                        skip_drones, skip_links, skip_muxbus);
+                Ok(s) => sibling_stores.push(s),
+                Err(e) => tracing::debug!(path = %path.display(), error = %e, "backfill: skip sibling"),
+            }
+        }
+    }
+    let all_sources: Vec<&Store> = std::iter::once(wstore as &Store)
+        .chain(sibling_stores.iter().map(|s| s as &Store))
+        .collect();
+
+    // ── Pass 1: accounts (all sources) ───────────────────────────────────
+    // Must complete before pass 2 so every account referenced by a binding or
+    // link is already in shared when we try to insert the FK-dependent row.
+    if !skip_accts {
+        for src in &all_sources {
+            for acct in src.identity_list(None).unwrap_or_default() {
+                let _ = shared.identity_upsert(&acct);
+            }
+        }
+        tracing::info!("shared store backfill: accounts");
+    }
+
+    // ── Pass 2: bundles, presets, drones, links (all sources) ────────────
+    // All accounts are guaranteed to be in shared from pass 1, so FK
+    // constraints on bindings and agent-identity links are always satisfied.
+    if !skip_id_bundles {
+        for src in &all_sources {
+            for bundle in src.bundle_identity_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
+                if shared.bundle_identity_upsert(bundle).is_err() { continue; }
+                for b in src.bundle_identity_bindings(&bundle.id).unwrap_or_default() {
+                    let _ = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id);
                 }
-                Err(e) => {
-                    tracing::debug!(path = %path.display(), error = %e, "backfill: skip sibling");
-                }
+            }
+        }
+        tracing::info!("shared store backfill: identity bundles");
+    }
+
+    if !skip_mem_bundles {
+        for src in &all_sources {
+            for mem in src.bundle_memory_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
+                let _ = shared.bundle_memory_upsert(mem);
+            }
+        }
+        tracing::info!("shared store backfill: memory bundles");
+    }
+
+    if !skip_drones {
+        for src in &all_sources {
+            for drone in src.drone_list().unwrap_or_default() {
+                let _ = shared.drone_upsert(&drone);
+            }
+        }
+        tracing::info!("shared store backfill: drones");
+    }
+
+    if !skip_links {
+        for src in &all_sources {
+            for link in src.agent_identity_list_all().unwrap_or_default() {
+                let _ = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider);
+            }
+        }
+        tracing::info!("shared store backfill: agent identity links");
+    }
+
+    // ── Muxbus: pick source with highest expires_at (spec §4) ────────────
+    // Iterating in enumeration order and using INSERT OR REPLACE would let a
+    // stale token from an old channel overwrite a valid one. Instead collect
+    // all candidates and pick the one with the latest expiry.
+    if !skip_muxbus {
+        let best: Option<MuxBusCredentials> = all_sources.iter()
+            .filter_map(|src| src.muxbus_load().ok().flatten())
+            .max_by_key(|c| c.expires_at);
+        if let Some(creds) = best {
+            if let Err(e) = shared.muxbus_save(&creds) {
+                tracing::warn!(error = %e, "backfill: muxbus_save failed");
+            } else {
+                tracing::info!("shared store backfill: muxbus credentials");
             }
         }
     }
 
-    if any {
-        tracing::info!("shared store: one-shot backfill complete");
-    }
+    tracing::info!("shared store: one-shot backfill complete");
     Ok(())
 }
 
