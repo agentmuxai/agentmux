@@ -117,5 +117,75 @@
                 "view": "warden"
             }
         }
+    },
+    "defwidget@discord": {
+        "display:order": 10,
+        "display:pinned": false,
+        "icon": "message-circle",
+        "color": "#5865f2",
+        "label": "Discord",
+        "description": "Discord — real interface, agent-connected via background bridge",
+        "blockdef": {
+            "meta": {
+                "view": "browser",
+                "url": "https://discord.com/app"
+            }
+        }
+    },
+    "defwidget@slack": {
+        "display:order": 11,
+        "display:pinned": false,
+        "icon": "hash",
+        "color": "#4a154b",
+        "label": "Slack",
+        "description": "Slack — real interface, agent-connected (bridge Phase 2)",
+        "blockdef": {
+            "meta": {
+                "view": "browser",
+                "url": "https://app.slack.com/"
+            }
+        }
+    },
+    "defwidget@telegram": {
+        "display:order": 12,
+        "display:pinned": false,
+        "icon": "send",
+        "color": "#229ed9",
+        "label": "Telegram",
+        "description": "Telegram Web — real interface, agent-connected (bridge Phase 2)",
+        "blockdef": {
+            "meta": {
+                "view": "browser",
+                "url": "https://web.telegram.org/"
+            }
+        }
+    },
+    "defwidget@whatsapp": {
+        "display:order": 13,
+        "display:pinned": false,
+        "icon": "message-square",
+        "color": "#25d366",
+        "label": "WhatsApp",
+        "description": "WhatsApp Web — real interface, agent-connected (bridge Phase 3)",
+        "blockdef": {
+            "meta": {
+                "view": "browser",
+                "url": "https://web.whatsapp.com/"
+            }
+        }
+    },
+    "defwidget@teams": {
+        "display:order": 14,
+        "display:pinned": false,
+        "icon": "users",
+        "color": "#6264a7",
+        "label": "Teams",
+        "description": "Microsoft Teams Web — real interface, agent-connected (bridge Phase 3)",
+        "blockdef": {
+            "meta": {
+                "view": "browser",
+                "url": "https://teams.microsoft.com/"
+            }
+        }
     }
 }
