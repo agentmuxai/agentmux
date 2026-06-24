@@ -59,15 +59,21 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         return m;
     });
 
-    // Time-independent: are there any non-running, finite-retention rows?
-    // Re-evaluates only when allActivities() changes — no tick dependency.
-    // Gates tick subscription in `visible` so the dock doesn't re-filter
-    // every second after all rows age out (reagent #1428 redux).
-    const hasCandidates = createMemo(() =>
-        allActivities().some(
-            (a) => a.status !== "running" && RETENTION_MS[a.status] !== Infinity && a.endedAt != null,
-        )
-    );
+    // Are there any terminal rows still within their retention window?
+    // Subscribes to tick() so it flips false once all candidates age out, which
+    // stops `visible` from re-filtering every second (reagent #1428 fix).
+    // Exited ShellNodes linger in the document forever, so without the time-bound
+    // this memo would stay permanently true after the first shell exit.
+    const hasCandidates = createMemo(() => {
+        const t = (tick(), Date.now());
+        return allActivities().some(
+            (a) =>
+                a.status !== "running" &&
+                RETENTION_MS[a.status] !== Infinity &&
+                a.endedAt != null &&
+                t - a.endedAt < RETENTION_MS[a.status],
+        );
+    });
 
     // D4 — running always; terminal within its retention window; never dismissed.
     const visible = createMemo(() => {
