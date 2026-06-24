@@ -68,8 +68,6 @@ import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellHistoryPanel } from "./components/AgentShellHistoryPanel";
 import { getShellHistory, clearShellHistory } from "@/app/store/shell-history";
-import { getRuntimeConfig } from "./buildRuntimeArgs";
-import { applyRuntimeChange } from "./runtime-apply";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
