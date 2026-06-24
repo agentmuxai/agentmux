@@ -1242,8 +1242,10 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 3.
 fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Identity account CRUD ----
+    // id_store: routes to shared/store.db when available so accounts survive
+    // version upgrades. Falls back to wstore transparently.
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_IDENTITY_ACCOUNTS,
         Box::new(move |data, _ctx| {
@@ -1259,7 +1261,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_GET_IDENTITY_ACCOUNT,
         Box::new(move |data, _ctx| {
@@ -1278,7 +1280,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_IDENTITY_ACCOUNT,
@@ -1321,7 +1323,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // The plaintext goes to the OS keychain; the DB row keeps only the
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
     // See specs/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_KEY_VERIFY,
@@ -1472,7 +1474,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ── Trust Center service OAuth (scaffold) ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
-    let oauth_wstore = state.wstore.clone();
+    let oauth_wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_OAUTH_START,
         Box::new(move |data, _ctx| {
@@ -1525,7 +1527,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_DELETE_IDENTITY_ACCOUNT,
@@ -1570,7 +1572,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Agent ↔ Identity junction ----
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_LINK_AGENT_IDENTITY,
@@ -1595,7 +1597,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UNLINK_AGENT_IDENTITY,
@@ -1622,7 +1624,7 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_IDENTITIES,
         Box::new(move |data, _ctx| {
@@ -1845,10 +1847,12 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // dropdown. Joins instance rows with the definition / identity /
     // memory bundle names so the frontend renders without follow-ups.
     let wstore = state.wstore.clone();
+    let id_store_lna = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_NAMED_AGENTS,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store_lna.clone();
             Box::pin(async move {
                 let cmd: CommandListNamedAgentsData =
                     serde_json::from_value(data).unwrap_or_default();
@@ -1864,10 +1868,10 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let defs = wstore
                     .agent_def_list()
                     .map_err(|e| format!("listnamedagents: agent_def_list: {e}"))?;
-                let identities = wstore
+                let identities = id_store
                     .bundle_identity_list()
                     .map_err(|e| format!("listnamedagents: bundle_identity_list: {e}"))?;
-                let memories = wstore
+                let memories = id_store
                     .bundle_memory_list()
                     .map_err(|e| format!("listnamedagents: bundle_memory_list: {e}"))?;
 
@@ -2119,11 +2123,13 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // is a more discoverable surface for finding sessions to continue
     // — particularly orphaned ones whose pane crashed.
     let wstore = state.wstore.clone();
+    let id_store_lrs = state.id_store.clone();
     let filestore = state.filestore.clone();
     engine.register_handler(
         COMMAND_LIST_RECENT_SESSIONS,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store_lrs.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandListRecentSessionsData =
@@ -2281,10 +2287,10 @@ fn register_v6_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let defs = wstore
                     .agent_def_list()
                     .map_err(|e| format!("listrecentsessions: defs: {e}"))?;
-                let identities = wstore
+                let identities = id_store
                     .bundle_identity_list()
                     .map_err(|e| format!("listrecentsessions: identities: {e}"))?;
-                let memories = wstore
+                let memories = id_store
                     .bundle_memory_list()
                     .map_err(|e| format!("listrecentsessions: memories: {e}"))?;
 
@@ -2693,7 +2699,7 @@ fn register_agent_session_handlers(engine: &Arc<WshRpcEngine>, state: &AppState)
 fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Identity bundle CRUD ----
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_IDENTITY_BUNDLES,
         Box::new(move |_data, _ctx| {
@@ -2707,7 +2713,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_GET_IDENTITY_BUNDLE,
         Box::new(move |data, _ctx| {
@@ -2726,7 +2732,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_IDENTITY_BUNDLE,
@@ -2772,7 +2778,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_DELETE_IDENTITY_BUNDLE,
@@ -2801,7 +2807,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Identity bundle bindings (junction with accounts) ----
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_BIND_IDENTITY_ACCOUNT,
@@ -2826,7 +2832,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UNBIND_IDENTITY_ACCOUNT,
@@ -2853,7 +2859,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_IDENTITY_BINDINGS,
         Box::new(move |data, _ctx| {
@@ -2871,7 +2877,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Memory bundle CRUD ----
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_MEMORIES,
         Box::new(move |_data, _ctx| {
@@ -2885,7 +2891,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_GET_MEMORY,
         Box::new(move |data, _ctx| {
@@ -2904,7 +2910,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_MEMORY,
@@ -2946,7 +2952,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_DELETE_MEMORY,
@@ -2973,7 +2979,7 @@ fn register_v7_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_REORDER_GLOBAL_BRAIN,
@@ -3070,6 +3076,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
 
     // agentinput → send message to agent (persistent or per-turn subprocess)
     let wstore_ai = state.wstore.clone();
+    let id_store_ai = state.id_store.clone();
     // Streaming-bash wrapper auth — clone the per-launch auth_key into the
     // handler's closure so each spawn can inject it into Claude's env.
     // See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7.
@@ -3085,6 +3092,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ai.clone();
+            let id_store = id_store_ai.clone();
             let auth_key = auth_key_ai.clone();
             let broker = broker_ai.clone();
             let container_manager = container_manager_ai.clone();
@@ -3139,6 +3147,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // when it flips a token's status valid→expired etc.
                 env_vars = crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
+                    id_store.clone(),
                     Some(broker.clone()),
                     cmd.blockid.clone(),
                     env_vars,
@@ -3147,7 +3156,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // MuxBus cloud token — injects MUXBUS_TOKEN + MUXBUS_COGNITO_DOMAIN
                 // if the user has authenticated via muxbus.login. No-op if no
                 // credentials are stored. Auto-refreshes if token is nearly expired.
-                crate::server::muxbus_handlers::inject_muxbus_env(&wstore, &mut env_vars);
+                crate::server::muxbus_handlers::inject_muxbus_env(&id_store, &mut env_vars);
                 // Streaming-bash wrapper auth + discovery
                 // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
                 //

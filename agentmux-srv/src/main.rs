@@ -6,6 +6,7 @@ mod backend;
 mod config;
 mod event_log;
 mod identity;
+mod migrations;
 mod persist;
 mod persist_subscriber;
 mod reducer;
@@ -281,6 +282,18 @@ async fn main() {
 
     // 2. Parse CLI args and build config
     let args = CliArgs::parse();
+
+    // Dispatch migrate subcommand before loading config (no AUTH_KEY needed).
+    if let Some(config::SrvCommand::Migrate { dry_run, list }) = &args.command {
+        let data_dir: std::path::PathBuf = args.wavedata
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var("AGENTMUX_DATA_HOME").ok().map(std::path::PathBuf::from))
+            .unwrap_or_else(|| std::path::PathBuf::from(base::get_wave_data_dir()));
+        let code = migrations::run_migrate_command(&data_dir, *dry_run, *list);
+        std::process::exit(code);
+    }
+
     let config = config::Config::from_env_and_args(&args).unwrap_or_else(|e| {
         tracing::error!("Failed to load config: {}", e);
         std::process::exit(1);
@@ -585,6 +598,46 @@ async fn main() {
                 None
             }
         };
+    // GLOBAL shared store — identity accounts, memory bundles, drone
+    // definitions, MuxBus credentials. Best-effort: disabled when the shared
+    // root can't be resolved. Falls back to wstore so behavior is unchanged
+    // from today. See SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md.
+    let shared_store: Option<Arc<Store>> = match registry::resolve_shared_store_path() {
+        Some(path) => {
+            // Ensure the parent dir (shared/) exists before opening.
+            let parent = path.parent().unwrap_or_else(|| path.as_path());
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!(path = %path.display(), error = %e, "shared store: failed to create dir — disabled");
+                None
+            } else {
+                match Store::open_shared(&path) {
+                    Ok(s) => {
+                        tracing::info!(path = %path.display(), "shared store: attached");
+                        Some(Arc::new(s))
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %path.display(), error = %e, "shared store: failed to open — identity/memory/drone/muxbus stay per-channel");
+                        None
+                    }
+                }
+            }
+        }
+        None => {
+            tracing::warn!("shared store: could not resolve shared store path — disabled");
+            None
+        }
+    };
+    // id_store: routes identity/memory/drone/muxbus ops to the shared store when
+    // available so writes survive version upgrades; falls back to wstore otherwise.
+    let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
+
+    // NOTE: backfill_shared_store_once is called LATER in startup (after
+    // auto_seed_on_startup and run_default_bundle_migration) so that default
+    // seeds and OAuth-migration writes land in wstore first and are then
+    // captured in store.db in a single pass.
+    let home_for_backfill = registry::resolve_shared_store_path()
+        .and_then(|p| p.parent().and_then(|p| p.parent().map(|p| p.to_path_buf())));
+
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
     // the store through `resync_controller` and every controller constructor.
@@ -824,6 +877,17 @@ async fn main() {
         None,
     );
 
+    // One-shot backfill: seed store.db from every objects.db found under
+    // ~/.agentmux. Runs AFTER auto_seed_on_startup and
+    // run_default_bundle_migration so their wstore writes (default memory
+    // bundles, Default identity bundle) are captured in the same pass.
+    // Best-effort — failure is logged and does not abort startup.
+    if let Some(ref ss) = shared_store {
+        if let Err(e) = backfill_shared_store_once(ss, &wstore, home_for_backfill.as_deref()) {
+            tracing::warn!(error = %e, "shared store: one-shot backfill failed (data not lost — still in objects.db)");
+        }
+    }
+
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
 
@@ -882,7 +946,7 @@ async fn main() {
     // Cloud push subscriber — single WS connection per sidecar that the cloud
     // uses to push reactive injections instead of polling.
     // No-op until the user connects via muxbus.login.
-    crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(wstore.clone());
+    crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
 
     // Set up docsite directory
     if let Some(app_path) = base::get_wave_app_path() {
@@ -1051,6 +1115,8 @@ async fn main() {
         version: version.clone(),
         app_path: config.app_path.clone(),
         wstore,
+        shared_store,
+        id_store,
         filestore,
         global_transcript_store,
         event_bus,
@@ -1279,6 +1345,151 @@ async fn main() {
         tracing::info!(count = live, "shutdown: stopping persistent shells");
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     }
+}
+
+/// Merge all user data from a single source store into `shared`.
+///
+/// Called for EVERY source (wstore + all siblings) — no short-circuit per
+/// section — so that startup default seeds in wstore (auto_seed_on_startup,
+/// run_default_bundle_migration) do not mask the user's real prior-version
+/// data that sits in a sibling objects.db. `skip_*` flags are the pre-
+/// conditions read from `shared` BEFORE any writes start; they prevent re-
+/// seeding sections that were already fully populated in a prior startup pass.
+///
+/// Sibling DBs are opened read-only (SQLITE_OPEN_READ_ONLY) so source files
+/// are never modified during the backfill (spec §3.1).
+/// Seed a freshly-created `shared` store (store.db) from every available
+/// `objects.db` source using a two-pass algorithm:
+///
+/// Pass 1 — accounts only (all sources): seeds every identity account from
+///   every source before any binding or link is written, guaranteeing that FK
+///   constraints are satisfied regardless of which source a binding's account
+///   comes from.
+///
+/// Pass 2 — everything else (all sources): bundles+bindings, memory presets,
+///   drone definitions, agent-identity links. All accounts are already in
+///   shared, so no per-binding account lookup is needed.
+///
+/// Muxbus — picks the source with the highest `expires_at` so a stale token
+///   from an old channel never overwrites a valid one (spec §4).
+///
+/// Completion is recorded in `db_migrations` under the ID
+/// `"0011_shared_store_backfill"` so the scan is guaranteed to run exactly
+/// once — even for users who never log into MuxBus or create a drone (for
+/// whom the per-section skip flags would stay false forever, causing
+/// repeated full sibling scans on every startup). Siblings open read-only
+/// (spec §3.1).
+fn backfill_shared_store_once(shared: &Store, wstore: &Store, home: Option<&std::path::Path>) -> Result<(), String> {
+    use crate::backend::storage::muxbus::MuxBusCredentials;
+    use crate::drone::storage::DroneStore;
+
+    const MARKER_ID: &str = "0011_shared_store_backfill";
+
+    // Fast path: already ran on a prior startup.
+    if shared.migration_is_applied(MARKER_ID) {
+        return Ok(());
+    }
+
+    // Per-section skip flags optimise within this run (avoid writing rows that
+    // already exist from a partial prior run or from startup seeding). They are
+    // NOT the primary idempotency guard — db_migrations is.
+    let skip_accts       = !shared.identity_list(None).map_err(|e| e.to_string())?.is_empty();
+    let skip_id_bundles  = !shared.bundle_identity_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
+    let skip_mem_bundles = !shared.bundle_memory_list().map_err(|e| e.to_string())?.iter().all(|b| b.id == "blank");
+    let skip_drones      = !shared.drone_list().map_err(|e| e.to_string())?.is_empty();
+    let skip_links       = !shared.agent_identity_list_all().map_err(|e| e.to_string())?.is_empty();
+    let skip_muxbus      = shared.muxbus_load().ok().flatten().is_some();
+
+    // Open all sibling DBs read-only up front so both passes can iterate them.
+    let mut sibling_stores: Vec<Store> = Vec::new();
+    if let Some(home) = home {
+        for path in crate::registry::enumerate_objects_dbs(home) {
+            match Store::open_source_readonly(&path) {
+                Ok(s) => sibling_stores.push(s),
+                Err(e) => tracing::debug!(path = %path.display(), error = %e, "backfill: skip sibling"),
+            }
+        }
+    }
+    let all_sources: Vec<&Store> = std::iter::once(wstore as &Store)
+        .chain(sibling_stores.iter().map(|s| s as &Store))
+        .collect();
+
+    // ── Pass 1: accounts (all sources) ───────────────────────────────────
+    // Must complete before pass 2 so every account referenced by a binding or
+    // link is already in shared when we try to insert the FK-dependent row.
+    if !skip_accts {
+        for src in &all_sources {
+            for acct in src.identity_list(None).unwrap_or_default() {
+                let _ = shared.identity_upsert(&acct);
+            }
+        }
+        tracing::info!("shared store backfill: accounts");
+    }
+
+    // ── Pass 2: bundles, presets, drones, links (all sources) ────────────
+    // All accounts are guaranteed to be in shared from pass 1, so FK
+    // constraints on bindings and agent-identity links are always satisfied.
+    if !skip_id_bundles {
+        for src in &all_sources {
+            for bundle in src.bundle_identity_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
+                if shared.bundle_identity_upsert(bundle).is_err() { continue; }
+                for b in src.bundle_identity_bindings(&bundle.id).unwrap_or_default() {
+                    let _ = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id);
+                }
+            }
+        }
+        tracing::info!("shared store backfill: identity bundles");
+    }
+
+    if !skip_mem_bundles {
+        for src in &all_sources {
+            for mem in src.bundle_memory_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
+                let _ = shared.bundle_memory_upsert(mem);
+            }
+        }
+        tracing::info!("shared store backfill: memory bundles");
+    }
+
+    if !skip_drones {
+        for src in &all_sources {
+            for drone in src.drone_list().unwrap_or_default() {
+                let _ = shared.drone_upsert(&drone);
+            }
+        }
+        tracing::info!("shared store backfill: drones");
+    }
+
+    if !skip_links {
+        for src in &all_sources {
+            for link in src.agent_identity_list_all().unwrap_or_default() {
+                let _ = shared.agent_identity_link(&link.agent_id, &link.account_id, &link.provider);
+            }
+        }
+        tracing::info!("shared store backfill: agent identity links");
+    }
+
+    // ── Muxbus: pick source with highest expires_at (spec §4) ────────────
+    // Iterating in enumeration order and using INSERT OR REPLACE would let a
+    // stale token from an old channel overwrite a valid one. Instead collect
+    // all candidates and pick the one with the latest expiry.
+    if !skip_muxbus {
+        let best: Option<MuxBusCredentials> = all_sources.iter()
+            .filter_map(|src| src.muxbus_load().ok().flatten())
+            .max_by_key(|c| c.expires_at);
+        if let Some(creds) = best {
+            if let Err(e) = shared.muxbus_save(&creds) {
+                tracing::warn!(error = %e, "backfill: muxbus_save failed");
+            } else {
+                tracing::info!("shared store backfill: muxbus credentials");
+            }
+        }
+    }
+
+    // Stamp completion so subsequent startups skip the sibling scan entirely,
+    // even for users who have no MuxBus creds or drone definitions.
+    let _ = shared.migration_mark_applied(MARKER_ID, "global", 0);
+    tracing::info!("shared store: one-shot backfill complete");
+    Ok(())
 }
 
 /// Initialize tracing with dual output: JSON rolling file + human-readable stderr.

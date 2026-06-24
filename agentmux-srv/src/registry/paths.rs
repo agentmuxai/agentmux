@@ -38,6 +38,16 @@ pub fn resolve_shared_definitions_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("agents").join("definitions"))
 }
 
+/// Resolve `~/.agentmux/shared/store.db` — the global store for identity
+/// accounts, memory bundles, drone definitions, and MuxBus credentials.
+///
+/// Uses the same root as the agent registry/definitions so
+/// `AGENTMUX_HOME_OVERRIDE` and `AGENTMUX_SHARED_DIR` work consistently.
+/// Returns `None` only when the shared root itself can't be resolved.
+pub fn resolve_shared_store_path() -> Option<std::path::PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("store.db"))
+}
+
 /// Resolve the GLOBAL `<home>/shared/agents/transcripts/` directory.
 ///
 /// Sibling of [`resolve_shared_registry_dir`] / [`resolve_shared_definitions_dir`]:
