@@ -39,21 +39,34 @@ fn emit_summary(applied: usize, skipped: usize) {
 /// Called from `main.rs` when the `migrate` subcommand is active.
 /// Returns the exit code (0 = success, 1 = failure).
 pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
+    // Unresolvable shared store path means we're in CI or an unusual env that
+    // has no AGENTMUX_SHARED_DIR. Mirror the daemon's behaviour: treat as a
+    // no-op and exit 0 so the launcher proceeds normally.
     let shared_store_path = match resolve_shared_store_path() {
         Some(p) => p,
         None => {
-            eprintln!("migration: cannot resolve shared store path");
-            return 1;
+            emit_summary(0, 0);
+            return 0;
         }
     };
 
     let home = match shared_store_path.parent().and_then(|p| p.parent()) {
         Some(p) => p.to_path_buf(),
         None => {
-            eprintln!("migration: cannot resolve home from shared store path");
-            return 1;
+            emit_summary(0, 0);
+            return 0;
         }
     };
+
+    // Ensure the shared/ directory exists — on a fresh install it has not been
+    // created yet (the daemon does create_dir_all at startup, but migrate runs
+    // before the daemon). SQLite cannot create parent directories itself.
+    if let Some(parent) = shared_store_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("migration: failed to create shared dir {}: {}", parent.display(), e);
+            return 1;
+        }
+    }
 
     let shared_store = match Store::open_shared(&shared_store_path) {
         Ok(s) => s,
