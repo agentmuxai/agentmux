@@ -620,7 +620,14 @@
     letter-spacing: 0.05em;
 }
 
-.editor-preview-chevron {
+.editor-preview-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.editor-preview-chevron,
+.editor-preview-source-toggle {
     background: none;
     border: none;
     color: var(--main-text-color);
@@ -632,6 +639,12 @@
     &:hover {
         opacity: 1;
     }
+}
+
+.editor-preview-source-toggle {
+    font-family: var(--fixed-font, monospace);
+    font-size: 9px;
+    letter-spacing: -0.02em;
 }
 
 .editor-preview-content {
