@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -13,6 +13,7 @@ import {
 import {
     dispatch as dispatchPane,
     dispatchIfRegistered as dispatchPaneIfRegistered,
+    fireEvent as firePaneEvent,
     snapshot as paneSnapshot,
 } from "@/app/store/agent-pane-state-store";
 import {
@@ -539,6 +540,28 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         }
         return out;
     };
+
+    // Play the waiting-ambient tone when an AskUserQuestion panel is active
+    // (agent blocked waiting for the user to pick an option). Stop it when
+    // all questions are answered or the pane closes.
+    let waitingToneActive = false;
+    createEffect(on(pendingQuestions, (qs, prevQs) => {
+        const hadAny = (prevQs?.length ?? 0) > 0;
+        const hasAny = qs.length > 0;
+        if (hasAny && !hadAny) {
+            waitingToneActive = true;
+            firePaneEvent(model.blockId, { type: "waiting-for-input" });
+        } else if (!hasAny && hadAny) {
+            waitingToneActive = false;
+            firePaneEvent(model.blockId, { type: "waiting-ended", reason: "submitted" });
+        }
+    }));
+    onCleanup(() => {
+        if (waitingToneActive) {
+            firePaneEvent(model.blockId, { type: "waiting-ended", reason: "closed" });
+            waitingToneActive = false;
+        }
+    });
 
     // Root element ref — declared before useAgentControllerStatus so its
     // getInitialTermSize closure can read the laid-out pane width when the
@@ -1324,21 +1347,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onSendMessage={handleSendMessage}
                     onTyping={() => {
                         scrollToBottomFn?.();
-                        // Guard: only dispatch while a waiting tone is active.
-                        // WaitingTypingStarted is gated on lastTurnHadQuestion in
-                        // the reducer, but dispatching on every RAF-debounced frame
-                        // would still flood recordDispatch with no-op records.
-                        const s = paneSnapshot(model.blockId);
-                        if (
-                            s != null &&
-                            s.lastTurnHadQuestion &&
-                            s.turnPhase.kind === "Done" &&
-                            s.turnPhase.outcome === "completed"
-                        ) {
-                            dispatchPaneIfRegistered(model.blockId, {
-                                type: "WaitingTypingStarted",
-                            });
-                        }
                     }}
                     onStopAgent={commands.stopAgent}
                     onRecallLatestQueued={commands.recallLatestHeld}

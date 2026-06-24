@@ -4,12 +4,13 @@
 /**
  * Policy tests for the waiting-ambient-sound subsystem:
  *   • sound-service startWaiting / stopWaiting gating
- *   • reducer endsWithQuestion heuristic (via lastTurnHadQuestion)
  *
- * Spec: SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md §4, §6, §9.
+ * The tone is now triggered by AskUserQuestion panel visibility
+ * (agent-view fires waiting-for-input / waiting-ended via fireEvent
+ * when pendingQuestions changes), not by the text-ends-with-? heuristic.
  */
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── Module mocks ─────────────────────────────────────────────────────
 
@@ -168,58 +169,3 @@ describe("waiting-sound-service: startWaiting gating", () => {
     });
 });
 
-// ─── Reducer endsWithQuestion heuristic ───────────────────────────────
-
-describe("endsWithQuestion heuristic (via reducer)", () => {
-    // We test endsWithQuestion indirectly by importing the reducer and
-    // checking the state it produces, so no mocks needed beyond imports.
-    let update: typeof import("@/app/store/agent-pane-state/reducer").update;
-    let initialState: typeof import("@/app/store/agent-pane-state/types").initialState;
-
-    beforeAll(async () => {
-        ({ update } = await import("@/app/store/agent-pane-state/reducer"));
-        ({ initialState } = await import("@/app/store/agent-pane-state/types"));
-    });
-
-    function completedTurn(lastAssistantText?: string) {
-        const state = initialState("agent-1");
-        // Fake a streaming state so TurnEnd is valid
-        const streaming = { ...state, turnPhase: { kind: "Streaming", bufferSize: 0, toolsActive: 0, lastEventMs: 0 } } as typeof state;
-        return update(streaming, { type: "TurnEnd", stats: null, lastAssistantText });
-    }
-
-    it("sets lastTurnHadQuestion=true when text ends with ?", () => {
-        expect(completedTurn("What would you like to do?").state.lastTurnHadQuestion).toBe(true);
-    });
-
-    it("sets lastTurnHadQuestion=false when text does not end with ?", () => {
-        expect(completedTurn("I've finished the task.").state.lastTurnHadQuestion).toBe(false);
-    });
-
-    it("sets lastTurnHadQuestion=false when lastAssistantText is absent", () => {
-        expect(completedTurn(undefined).state.lastTurnHadQuestion).toBe(false);
-    });
-
-    it("handles trailing quotes before the question mark", () => {
-        expect(completedTurn("Is this correct?\"").state.lastTurnHadQuestion).toBe(true);
-    });
-
-    it("handles trailing closing parens before the question mark", () => {
-        expect(completedTurn("Ready to proceed?)").state.lastTurnHadQuestion).toBe(true);
-    });
-
-    it("sets lastTurnHadQuestion=false for non-completed outcome even with ?", () => {
-        const state = initialState("agent-1");
-        const interrupting = { ...state, turnPhase: { kind: "Interrupting", reason: "user", sigintSentAt: 0 } } as typeof state;
-        const result = update(interrupting, { type: "TurnEnd", stats: null, lastAssistantText: "Do you want me to stop?" });
-        // outcome is "stopped" → flag should be false
-        expect(result.state.lastTurnHadQuestion).toBe(false);
-    });
-
-    it("TurnReset clears lastTurnHadQuestion", () => {
-        const withQuestion = completedTurn("Should I continue?").state;
-        expect(withQuestion.lastTurnHadQuestion).toBe(true);
-        const reset = update(withQuestion, { type: "TurnReset" });
-        expect(reset.state.lastTurnHadQuestion).toBe(false);
-    });
-});
