@@ -46,14 +46,12 @@ const PERMISSION_COLORS: Record<PermissionMode, string> = {
 };
 
 const MODEL_OPTIONS = [
-    { value: "", label: "Default" },
     { value: "opus", label: "Opus" },
     { value: "sonnet", label: "Sonnet" },
     { value: "haiku", label: "Haiku" },
 ] as const;
 
 const EFFORT_OPTIONS = [
-    { value: "", label: "Default" },
     { value: "low", label: "Low" },
     { value: "medium", label: "Med" },
     { value: "high", label: "High" },
@@ -195,7 +193,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     const runtime = () =>
         props.blockAtom ? getRuntimeConfig(props.blockAtom()?.meta) : null;
 
-    const updateRuntime = async (patch: { model?: ModelChoice | ""; effort?: EffortLevel | "" }): Promise<void> => {
+    const updateRuntime = async (patch: { model?: ModelChoice; effort?: EffortLevel }): Promise<void> => {
         const r = runtime();
         if (!r || !props.blockId || !props.providerId) return;
         try {
@@ -209,8 +207,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         }
     };
 
-    // Show model/effort controls only when blockAtom is wired up.
-    const showControls = () => props.blockAtom != null;
+    // Show model/effort controls only for Claude agents (controls are claude-specific;
+    // non-claude providers (codex/gemini/kimi) have different model enumerations and
+    // buildRuntimeArgs silently drops effort for them — spec §1.3).
+    const showControls = () => props.blockAtom != null && props.providerId === "claude";
 
     // Context text color based on proximity to compaction threshold.
     const ctxClass = (): string => {
@@ -245,8 +245,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     <select
                         class="agent-composer-strip-select"
                         title="Model"
-                        value={runtime()?.model ?? ""}
-                        onChange={(e) => void updateRuntime({ model: e.currentTarget.value as ModelChoice | "" })}
+                        value={runtime()?.model}
+                        onChange={(e) => void updateRuntime({ model: e.currentTarget.value as ModelChoice })}
                         onClick={(e) => e.stopPropagation()}
                     >
                         {MODEL_OPTIONS.map((o) => (
@@ -256,8 +256,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     <select
                         class="agent-composer-strip-select"
                         title="Effort"
-                        value={runtime()?.effort ?? ""}
-                        onChange={(e) => void updateRuntime({ effort: e.currentTarget.value as EffortLevel | "" })}
+                        value={runtime()?.effort}
+                        onChange={(e) => void updateRuntime({ effort: e.currentTarget.value as EffortLevel })}
                         onClick={(e) => e.stopPropagation()}
                     >
                         {EFFORT_OPTIONS.map((o) => (
