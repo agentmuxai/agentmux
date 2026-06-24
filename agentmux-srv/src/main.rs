@@ -618,6 +618,16 @@ async fn main() {
     // available so writes survive version upgrades; falls back to wstore otherwise.
     let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
 
+    // One-shot backfill: if the shared store was just created (empty), seed it
+    // from wstore so existing users don't lose identity accounts, bundles, drone
+    // definitions, and MuxBus credentials on the first launch after upgrade.
+    // Best-effort — failure is logged and does not abort startup.
+    if let Some(ref ss) = shared_store {
+        if let Err(e) = backfill_shared_store_once(ss, &wstore) {
+            tracing::warn!(error = %e, "shared store: one-shot backfill failed (data not lost — still in objects.db)");
+        }
+    }
+
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
     // the store through `resync_controller` and every controller constructor.
@@ -1314,6 +1324,85 @@ async fn main() {
         tracing::info!(count = live, "shutdown: stopping persistent shells");
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     }
+}
+
+/// Seed a freshly-created `shared_store` (store.db) from `wstore` (objects.db) so
+/// existing users don't lose identity accounts, memory bundles, drone definitions,
+/// or MuxBus credentials on the first launch after upgrade.
+///
+/// Detection: if `db_identity_accounts` is empty in the shared store, we treat
+/// this as a first-run and copy everything. Idempotent once data exists.
+fn backfill_shared_store_once(shared: &Store, wstore: &Store) -> Result<(), String> {
+    use crate::drone::storage::DroneStore;
+
+    // Detect first-run: identity_accounts empty in shared store.
+    let shared_accts = shared.identity_list(None).map_err(|e| e.to_string())?;
+    if !shared_accts.is_empty() {
+        return Ok(()); // already seeded
+    }
+
+    let src_accts = wstore.identity_list(None).map_err(|e| e.to_string())?;
+    if src_accts.is_empty() {
+        return Ok(()); // nothing to backfill
+    }
+
+    tracing::info!(count = src_accts.len(), "shared store: backfilling identity accounts from objects.db");
+
+    // 1. Identity accounts
+    for acct in &src_accts {
+        if let Err(e) = shared.identity_upsert(acct) {
+            tracing::warn!(id = %acct.id, error = %e, "shared store backfill: identity_upsert failed");
+        }
+    }
+
+    // 2. Identity bundles (non-blank) + their bindings
+    let src_bundles = wstore.bundle_identity_list().map_err(|e| e.to_string())?;
+    for bundle in &src_bundles {
+        if bundle.id == "blank" {
+            continue;
+        }
+        if let Err(e) = shared.bundle_identity_upsert(bundle) {
+            tracing::warn!(id = %bundle.id, error = %e, "shared store backfill: bundle_identity_upsert failed");
+            continue;
+        }
+        // Copy bindings for this bundle
+        if let Ok(bindings) = wstore.bundle_identity_bindings(&bundle.id) {
+            for b in &bindings {
+                if let Err(e) = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id) {
+                    tracing::warn!(bundle = %b.identity_id, error = %e, "shared store backfill: bundle_identity_bind failed");
+                }
+            }
+        }
+    }
+
+    // 3. Memory bundles (non-blank)
+    let src_mem = wstore.bundle_memory_list_global().map_err(|e| e.to_string())?;
+    for mem in &src_mem {
+        if mem.id == "blank" {
+            continue;
+        }
+        if let Err(e) = shared.bundle_memory_upsert(mem) {
+            tracing::warn!(id = %mem.id, error = %e, "shared store backfill: bundle_memory_upsert failed");
+        }
+    }
+
+    // 4. Drone definitions
+    let src_drones = wstore.drone_list().map_err(|e| e.to_string())?;
+    for drone in &src_drones {
+        if let Err(e) = shared.drone_upsert(drone) {
+            tracing::warn!(id = %drone.id, error = %e, "shared store backfill: drone_upsert failed");
+        }
+    }
+
+    // 5. MuxBus credentials
+    if let Ok(Some(creds)) = wstore.muxbus_load() {
+        if let Err(e) = shared.muxbus_save(&creds) {
+            tracing::warn!(error = %e, "shared store backfill: muxbus_save failed");
+        }
+    }
+
+    tracing::info!("shared store: one-shot backfill from objects.db complete");
+    Ok(())
 }
 
 /// Initialize tracing with dual output: JSON rolling file + human-readable stderr.

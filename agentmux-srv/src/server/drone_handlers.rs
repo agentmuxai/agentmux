@@ -79,13 +79,14 @@ struct RunResp {
 }
 
 pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    // Drone definition CRUD — routed to id_store (global shared store).
+    let id_store = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_DRONES,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore.clone();
+            let id_store = id_store.clone();
             Box::pin(async move {
-                let list = wstore
+                let list = id_store
                     .drone_list()
                     .map_err(|e| format!("listdrones: {e}"))?;
                 Ok(Some(serde_json::to_value(&list).unwrap_or_default()))
@@ -93,15 +94,15 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     engine.register_handler(
         COMMAND_GET_DRONE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let id_store = id_store.clone();
             Box::pin(async move {
                 let cmd: GetDroneReq = serde_json::from_value(data)
                     .map_err(|e| format!("getdrone: {e}"))?;
-                let row = wstore
+                let row = id_store
                     .drone_get(&cmd.id)
                     .map_err(|e| format!("getdrone: {e}"))?;
                 Ok(Some(serde_json::to_value(&row).unwrap_or_default()))
@@ -109,12 +110,12 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_DRONE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let mut cmd: DroneDefinition = serde_json::from_value(data)
@@ -127,7 +128,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if cmd.id.is_empty() {
                     cmd.id = uuid::Uuid::new_v4().to_string();
                 }
-                wstore
+                id_store
                     .drone_upsert(&cmd)
                     .map_err(|e| format!("upsertdrone: {e}"))?;
                 broker.publish(WaveEvent {
@@ -142,17 +143,17 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_DELETE_DRONE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: DeleteDroneReq = serde_json::from_value(data)
                     .map_err(|e| format!("deletedrone: {e}"))?;
-                let deleted = wstore
+                let deleted = id_store
                     .drone_delete(&cmd.id)
                     .map_err(|e| format!("deletedrone: {e}"))?;
                 if deleted {
@@ -169,17 +170,21 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+    // COMMAND_RUN_DRONE: reads drone definition from id_store (global),
+    // writes drone run rows to wstore (per-channel).
+    let id_store = state.id_store.clone();
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_RUN_DRONE,
         Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
             let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: RunDroneReq = serde_json::from_value(data)
                     .map_err(|e| format!("rundrone: {e}"))?;
-                let wf = wstore
+                let wf = id_store
                     .drone_get(&cmd.drone_id)
                     .map_err(|e| format!("rundrone: {e}"))?
                     .ok_or_else(|| {
