@@ -57,7 +57,10 @@ impl Migration for M0000Bootstrap {
         };
 
         // ── Global: legacy data dir migration ────────────────────────────────
-        if ctx.home.exists() {
+        // Proxy: agents/ exists only for real prior-usage installs.
+        // Runner creates home/shared/ (making home exist) before m0000 runs,
+        // so ctx.home.exists() is no longer a reliable proxy.
+        if ctx.home.join("agents").exists() {
             stamp_global("0001_legacy_data_dir");
         }
 
@@ -68,9 +71,10 @@ impl Migration for M0000Bootstrap {
         }
 
         // ── Channel: template promotion ──────────────────────────────────────
-        // No reliable marker; use objects.db existence as proxy.
-        let objects_db = &ctx.channel_store_path;
-        if objects_db.exists() {
+        // Proxy: agents/ exists only for real prior-usage installs.
+        // Runner always creates objects.db before m0000 runs, so
+        // objects_db.exists() is no longer a reliable proxy.
+        if ctx.home.join("agents").exists() {
             stamp_channel("0003_template_sessions_v1");
         }
 
