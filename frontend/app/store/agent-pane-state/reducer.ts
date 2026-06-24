@@ -207,11 +207,14 @@ export function update(
             // set. After a stream drop + resubscribe (e.g. an agent kill+respawn
             // during a long upstream stall) the phase lands in Idle/Disconnected,
             // and without this promotion the "in progress" indicator stays OFF
-            // while output streams in. Done is now included: session_end fires
-            // after every model API round, so Done can mean "first round of a
-            // multi-round tool-continuation turn finished" — live flush content
-            // arriving while Done is proof the agent picked up another round.
-            // Interrupting (user is stopping) is intentionally kept excluded.
+            // while output streams in. Done.completed is included: session_end
+            // fires after every model API round, so Done.completed can mean
+            // "first round of a multi-round tool-continuation finished" — live
+            // flush content arriving in that state is proof the agent picked up
+            // another round. Done.errored / Done.stopped / Done.interrupted are
+            // excluded: a submit-timeout or user-stop followed by a late stray
+            // flush must not re-activate the busy indicator on a failed turn.
+            // Interrupting (user is stopping) is also intentionally excluded.
             const nextPhase: TurnPhase =
                 state.turnPhase.kind === "Streaming"
                     ? {
@@ -222,7 +225,7 @@ export function update(
                     : state.turnPhase.kind === "Submitting"
                         || state.turnPhase.kind === "Idle"
                         || state.turnPhase.kind === "Disconnected"
-                        || state.turnPhase.kind === "Done"
+                        || (state.turnPhase.kind === "Done" && state.turnPhase.outcome === "completed")
                         ? {
                               kind: "Streaming",
                               bufferSize: newBuf,
@@ -869,7 +872,7 @@ function bumpEvent(
         next.turnPhase.kind === "Submitting" ||
         next.turnPhase.kind === "Idle" ||
         next.turnPhase.kind === "Disconnected" ||
-        next.turnPhase.kind === "Done"
+        (next.turnPhase.kind === "Done" && next.turnPhase.outcome === "completed")
     ) {
         // codex P1 on #987: `StreamSubscribe` fires once at mount, so
         // subsequent turns enter Submitting and then no transition
@@ -883,10 +886,11 @@ function bumpEvent(
         // (agent kill+respawn during a long upstream stall) the phase lands
         // in Idle/Disconnected; without this the working indicator stays off
         // while output streams.
-        // Done is now included: session_end fires after every model API round,
-        // so Done can mean "first round of a multi-round tool-continuation
-        // finished." Live tool/token activity arriving while Done means the
-        // backend picked up a continuation round — re-enter Streaming.
+        // Done.completed is included: session_end fires after every model API
+        // round, so Done.completed can mean "first round of a multi-round
+        // tool-continuation finished" — re-enter Streaming on next activity.
+        // Done.errored/stopped/interrupted excluded: a late stray event must
+        // not revive the indicator on a failed/aborted turn.
         // Interrupting is intentionally excluded (user is stopping).
         next.turnPhase = {
             kind: "Streaming",
