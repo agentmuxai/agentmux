@@ -25,7 +25,7 @@
 //!    the host/srv run from `runtime/`), and two levels up for macOS .app
 //!    bundles.
 //! 3. Path-based dev detection: exe is under a known dev-build dir
-//!    (`dist/cef-dev/`, `target/debug/`, `target/release/`).
+//!    (`dist/cef-dev*/`, `target/debug/`, `target/release/`).
 //! 4. `AGENTMUX_DEV_BRANCH` env override (CI override for dev mode).
 //! 5. Default: `Installed`.
 
@@ -208,7 +208,7 @@ impl RuntimeMode {
 }
 
 /// True when this binary is running from one of our known dev-build
-/// output directories (`dist/cef-dev/`, `target/debug/`, `target/release/`).
+/// output directories (`dist/cef-dev*/`, `target/debug/`, `target/release/`).
 /// Walks ancestors to handle nested cases (CEF subprocesses run from a
 /// `runtime/` subdir even in dev). Path-only — does not read env.
 pub fn is_dev_build_exe(exe_dir: &Path) -> bool {
@@ -387,7 +387,7 @@ fn exe_dir_is_dev_build(exe_dir: &Path) -> bool {
             .and_then(|n| n.to_str())
             .unwrap_or("");
 
-        if (parent_name == "dist" && name == "cef-dev")
+        if (parent_name == "dist" && name.starts_with("cef-dev"))
             || (parent_name == "target" && (name == "debug" || name == "release"))
         {
             return true;
@@ -574,9 +574,16 @@ mod tests {
 
     #[test]
     fn dev_build_path_pattern() {
-        // Match dist/cef-dev/...
+        // Match dist/cef-dev/... (fixed name)
         assert!(exe_dir_is_dev_build(&PathBuf::from(
             "/c/Systems/agentmux/dist/cef-dev"
+        )));
+        // Match dist/cef-dev-<epoch>/... (timestamp-stamped, Windows re-launch fix)
+        assert!(exe_dir_is_dev_build(&PathBuf::from(
+            "/c/Systems/agentmux/dist/cef-dev-1719100000"
+        )));
+        assert!(exe_dir_is_dev_build(&PathBuf::from(
+            "/c/Systems/agentmux/dist/cef-dev-1719100000/runtime"
         )));
         // Match target/debug/...
         assert!(exe_dir_is_dev_build(&PathBuf::from(

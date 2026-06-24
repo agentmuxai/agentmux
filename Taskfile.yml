@@ -736,16 +736,15 @@ tasks:
                 # wipe agentmux-launcher.exe while it is still running. Windows
                 # locks the EXE image for the process lifetime, so rm -rf on a
                 # running dir exits non-zero and the subsequent cp fails (exit 201).
-                # Prune old cef-dev-* dirs best-effort; a still-running launcher
-                # holds its dir open and the rm silently no-ops for that one.
+                # Old cef-dev-* dirs accumulate but are small; run `task clean:host`
+                # after stopping a dev session to wipe them all. No prune loop here:
+                # rm -rf on a live dir partially succeeds (unlocked files like
+                # agentmux-mcp are deleted while locked DLLs/EXE survive), leaving
+                # the running session with broken tool paths on the next shell call.
                 # Unix keeps a fixed "dist/cef-dev" name so install-linux-desktop.sh
                 # writes a stable Exec= path that survives across dev sessions.
                 if [ "{{OS}}" = "windows" ]; then
                   DEV_DIR="dist/cef-dev-$(date +%s 2>/dev/null || echo dev)"
-                  for _d in dist/cef-dev-*/; do
-                    [ -d "$_d" ] || continue
-                    rm -rf "$_d" 2>/dev/null || true
-                  done
                 else
                   DEV_DIR="dist/cef-dev"
                   rm -rf "$DEV_DIR" 2>/dev/null || true
