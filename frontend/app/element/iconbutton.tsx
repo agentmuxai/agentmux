@@ -9,29 +9,33 @@ import "./iconbutton.scss";
 
 type IconButtonProps = { decl: IconButtonDecl; className?: string };
 
-export function IconButton({ decl, className }: IconButtonProps): JSX.Element {
+export function IconButton(props: IconButtonProps): JSX.Element {
     let btnRef!: HTMLButtonElement;
-    const spin = decl.iconSpin ?? false;
     useLongClick(
         () => btnRef,
-        decl.click,
-        decl.longClick,
-        decl.disabled
+        (e) => props.decl.click?.(e),
+        // Read longClick once at mount to preserve the null-guard inside
+        // useLongClick. A lambda wrapper would always be truthy, arming
+        // the 300ms timer on every mousedown and swallowing clicks on
+        // buttons that have no long-click handler.
+        props.decl.longClick ? (e) => props.decl.longClick!(e) : undefined,
+        () => props.decl.disabled ?? false
     );
-    const disabled = decl.disabled ?? false;
     return (
         <button
             ref={btnRef}
-            class={clsx("wave-iconbutton", className, decl.className, {
-                disabled,
-                "no-action": decl.noAction,
+            class={clsx("wave-iconbutton", props.className, props.decl.className, {
+                disabled: props.decl.disabled ?? false,
+                "no-action": props.decl.noAction,
             })}
-            title={decl.title}
-            aria-label={decl.title}
-            style={{ color: decl.iconColor ?? "inherit" }}
-            disabled={disabled}
+            title={props.decl.title}
+            aria-label={props.decl.title}
+            style={{ color: props.decl.iconColor ?? "inherit" }}
+            disabled={props.decl.disabled ?? false}
         >
-            {typeof decl.icon === "string" ? <i class={makeIconClass(decl.icon, true, { spin })} /> : decl.icon}
+            {typeof props.decl.icon === "string"
+                ? <i class={makeIconClass(props.decl.icon, true, { spin: props.decl.iconSpin ?? false })} />
+                : props.decl.icon}
         </button>
     );
 }
