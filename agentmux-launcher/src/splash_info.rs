@@ -34,7 +34,7 @@ impl SplashInfo {
     pub fn footer_lines(&self, max_chars: usize) -> Vec<String> {
         let l1 = ellipsize(&format!("{}@{}", self.user, self.host), max_chars);
         let l2 = match &self.dev_label {
-            Some(d) => format!("v{} ({})", self.version, d),
+            Some(d) => format!("v{} {}", self.version, d.to_uppercase()),
             None => format!("v{}", self.version),
         };
         vec![l1, ellipsize(&l2, max_chars)]
