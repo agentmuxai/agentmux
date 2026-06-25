@@ -218,7 +218,6 @@ export class BrowserViewModel implements ViewModel {
         this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
 
         const ctorMetaUrl = (this.blockAtom()?.meta?.["url"] as string | undefined) ?? "";
-        this.showControlsAtom = createMemo(() => (this.blockAtom()?.meta?.["browser:show_controls"] as boolean | undefined) ?? true);
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);
 
         // Register the pane in the slice's slot store SYNCHRONOUSLY before
@@ -305,6 +304,7 @@ export class BrowserViewModel implements ViewModel {
                 this.diag(`vm-favicon-memo-eval value=${JSON.stringify(v)}`);
                 return v;
             });
+            this.showControlsAtom = createMemo(() => (this.blockAtom()?.meta?.["browser:show_controls"] as boolean | undefined) ?? true);
             return dispose;
         });
 
