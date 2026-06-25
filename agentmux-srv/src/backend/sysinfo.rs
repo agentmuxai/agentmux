@@ -154,11 +154,16 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
             tracing::info!("sysinfo interval changed to {}s", current_interval);
         }
 
-        // Refresh all metrics
-        sys.refresh_cpu_usage();
-        sys.refresh_memory();
-        networks.refresh(true);
-        disks.refresh(true);
+        // Refresh all metrics. All sysinfo refresh calls are synchronous
+        // /proc reads; block_in_place signals the Tokio runtime to keep
+        // other tasks (including terminal echo) running on other threads
+        // while this thread is occupied — preventing 1Hz echo starvation.
+        tokio::task::block_in_place(|| {
+            sys.refresh_cpu_usage();
+            sys.refresh_memory();
+            networks.refresh(true);
+            disks.refresh(true);
+        });
 
         let now_instant = Instant::now();
         let elapsed_secs = now_instant.duration_since(last_tick).as_secs_f64();
@@ -192,13 +197,16 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
         let block_pids = pidregistry::get_all();
         if !block_pids.is_empty() {
             // Pass 1: cheap minimal refresh of all processes to populate parent()
-            // links. ProcessRefreshKind::new() skips CPU accounting and memory
-            // queries — just PID/PPID/name. ~0.5ms on a typical desktop.
-            sys.refresh_processes_specifics(
-                ProcessesToUpdate::All,
-                false, // keep stale entries — pass 2 removes dead ones
-                ProcessRefreshKind::nothing(),
-            );
+            // links. ProcessRefreshKind::nothing() skips CPU/mem — just PID/PPID.
+            // On a VM with many Chromium/CEF helper processes this can take 5–20ms;
+            // block_in_place keeps the Tokio runtime unblocked during the scan.
+            tokio::task::block_in_place(|| {
+                sys.refresh_processes_specifics(
+                    ProcessesToUpdate::All,
+                    false, // keep stale entries — pass 2 removes dead ones
+                    ProcessRefreshKind::nothing(),
+                );
+            });
 
             // For each block, BFS the process tree from the shell PID.
             let mut block_trees: Vec<(String, Vec<Pid>)> = block_pids
@@ -222,11 +230,13 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
                 .collect();
             all_pids.sort_unstable();
             all_pids.dedup();
-            sys.refresh_processes_specifics(
-                ProcessesToUpdate::Some(&all_pids),
-                true, // remove dead processes on this authoritative pass
-                ProcessRefreshKind::everything(),
-            );
+            tokio::task::block_in_place(|| {
+                sys.refresh_processes_specifics(
+                    ProcessesToUpdate::Some(&all_pids),
+                    true, // remove dead processes on this authoritative pass
+                    ProcessRefreshKind::everything(),
+                );
+            });
 
             // Aggregate per block and publish.
             // After Pass 2 (remove_dead=true), sys.process() returns None for any

@@ -124,7 +124,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(10));
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    loop {
+    'ws: loop {
         tokio::select! {
             // Biased: poll branches top-to-bottom so interactive terminal I/O
             // always wins over droppable perf telemetry. Order = incoming
@@ -211,13 +211,20 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             // ingress is low-rate (sysinfo ~1/s) and a flood also saturates the
             // socket writes — during which the priority lanes do drain, so this
             // lane gets serviced — making true never-empty starvation the rare
-            // worst case. Phase 2 bounds it properly by coalescing this lane to
-            // the latest reading per (event, scope), so it cannot grow and the
-            // post-flood flush is one current frame, not a backlog. See
-            // SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md §4.2.
-            Some(event) = background_rx.recv() => {
-                if forward_event(&mut socket, event).await {
-                    break;
+            // Phase 2: coalesce all immediately-available background events to the
+            // latest reading per (event-name:scope) key before forwarding. During
+            // sustained priority-lane activity, sysinfo/blockstats queue here; without
+            // coalescing they flush as a burst of stale frames that the browser
+            // processes back-to-back, delaying queued keypress events. Coalescing
+            // bounds the flush to O(distinct event×scope pairs) — at most 1 sysinfo +
+            // 1 blockstats per open block — regardless of how long the lane was starved.
+            // See SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md §4.2.
+            Some(first_bg) = background_rx.recv() => {
+                let coalesced = coalesce_background(first_bg, &mut background_rx);
+                for ev in coalesced {
+                    if forward_event(&mut socket, ev).await {
+                        break 'ws;
+                    }
                 }
             }
 
@@ -275,6 +282,48 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
         serde_json::to_string(&wrapped).unwrap_or_default()
     };
     socket.send(Message::Text(msg.into())).await.is_err()
+}
+
+/// Extract a coalescing key from a background-lane event.
+/// Background events are RPC-wrapped WPS events:
+///   { "eventtype": "rpc", "data": { "command": "eventrecv", "data": { "event": "sysinfo", "scopes": ["local"] } } }
+/// Key = "<event-name>:<first-scope>", e.g. "sysinfo:local" or "blockstats:block:abc123".
+/// Falls back to "_:_" for events that don't match the expected shape (safe: they coalesce
+/// to one slot, which is acceptable because non-sysinfo/blockstats never reach this lane).
+fn background_event_key(event: &serde_json::Value) -> String {
+    let inner = event.get("data").and_then(|d| d.get("data"));
+    let event_name = inner
+        .and_then(|d| d.get("event"))
+        .and_then(|e| e.as_str())
+        .unwrap_or("_");
+    let scope = inner
+        .and_then(|d| d.get("scopes"))
+        .and_then(|s| s.get(0))
+        .and_then(|s| s.as_str())
+        .unwrap_or("_");
+    format!("{event_name}:{scope}")
+}
+
+/// Drain all immediately-available events from `rx` (including `first`) and
+/// coalesce them to the latest reading per (event-name:scope) key. Iteration
+/// order in the returned Vec is first-seen (stable across coalescing rounds).
+fn coalesce_background(
+    first: serde_json::Value,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let mut order: Vec<String> = Vec::new();
+    let mut map: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let key = background_event_key(&first);
+    order.push(key.clone());
+    map.insert(key, first);
+    while let Ok(next) = rx.try_recv() {
+        let k = background_event_key(&next);
+        if !map.contains_key(&k) {
+            order.push(k.clone());
+        }
+        map.insert(k, next);
+    }
+    order.into_iter().filter_map(|k| map.remove(&k)).collect()
 }
 
 /// Handle an incoming text message.
