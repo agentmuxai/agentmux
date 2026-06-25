@@ -574,6 +574,7 @@ fn bind_socket_with_recovery(
     socket_path: &str,
     data_dir: &std::path::Path,
     dir_hash: &str,
+    channel: &str,
 ) -> tokio::net::UnixListener {
     use std::os::unix::io::AsRawFd as _;
 
@@ -658,10 +659,19 @@ fn bind_socket_with_recovery(
             // Real second-instance. Forward an `open_new_window` request to the
             // already-running launcher's host (Windows-parity — main.rs:1292),
             // then exit cleanly. SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
-            eprintln!(
-                "AgentMux is already running for this data directory.\n\nSocket: {}",
-                socket_path
-            );
+            if channel.starts_with("dev-") {
+                eprintln!(
+                    "AgentMux dev instance already running (channel: {}).\n\
+                     Use `task dev:local` to launch a second isolated session.\n\
+                     Socket: {}",
+                    channel, socket_path
+                );
+            } else {
+                eprintln!(
+                    "AgentMux is already running for this data directory.\n\nSocket: {}",
+                    socket_path
+                );
+            }
             forward_open_new_window_or_log(data_dir, dir_hash);
             log(&format!(
                 "[ipc] second-instance detected — existing launcher owns {}",
@@ -691,10 +701,19 @@ fn bind_socket_with_recovery(
             match ipc::server::bind_first_unix_socket(socket_path) {
                 Ok(l) => l,
                 Err(retry_e) if retry_e.kind() == std::io::ErrorKind::AddrInUse => {
-                    eprintln!(
-                        "AgentMux is already running for this data directory.\n\nSocket: {}",
-                        socket_path
-                    );
+                    if channel.starts_with("dev-") {
+                        eprintln!(
+                            "AgentMux dev instance already running (channel: {}).\n\
+                             Use `task dev:local` to launch a second isolated session.\n\
+                             Socket: {}",
+                            channel, socket_path
+                        );
+                    } else {
+                        eprintln!(
+                            "AgentMux is already running for this data directory.\n\nSocket: {}",
+                            socket_path
+                        );
+                    }
                     forward_open_new_window_or_log(data_dir, dir_hash);
                     log(&format!(
                         "[ipc] post-recovery bind lost the race to a fresh launcher on {} — exiting as second instance",
@@ -853,7 +872,7 @@ async fn run_unix(
     // tiny, and leaving it lets the next launcher reuse it without a
     // create-race. (Stale-lock-file scenarios are bounded: flock(2)
     // is auto-released on process exit even for SIGKILL.)
-    let first_socket = bind_socket_with_recovery(&socket_path, &paths.data_dir, &dir_hash);
+    let first_socket = bind_socket_with_recovery(&socket_path, &paths.data_dir, &dir_hash, &paths.common.channel);
 
     // macOS: we are the first instance (second-instance launches exit inside
     // bind_socket_with_recovery). Publish this instance's bound-socket identity
