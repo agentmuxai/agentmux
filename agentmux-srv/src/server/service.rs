@@ -2835,7 +2835,7 @@ fn zoom_mirror_gen() -> &'static std::sync::Mutex<std::collections::HashMap<Stri
 /// Debounced trailing mirror of an agent block's `term:zoom` into the per-agent
 /// `ui:zoom` content blob. `zoom = Some(z)` upserts; `zoom = None` (term:zoom
 /// reset to null / 1.0) deletes the row so a default agent persists nothing.
-fn schedule_agent_zoom_mirror(
+pub(crate) fn schedule_agent_zoom_mirror(
     store: std::sync::Arc<crate::backend::storage::store::Store>,
     agent_id: String,
     zoom: Option<f64>,
