@@ -121,9 +121,10 @@ cp /path/to/agentmux/scripts/cef-build/args.gn out/Release_GN_x64/args.gn
 >    `cef/libcef_dll/ctocpp/views/window_ctocpp.cc` "missing and no known rule":
 >    `cd cef && python3 tools/translator.py --root-dir .` (the tree stays clean —
 >    identical API rewrite — so no `version_manager.py` needed).
-> 2. **Copy the new `snapshot_blob.bin` + `v8_context_snapshot.bin`** alongside
->    `libcef.so` — `is_official_build` rebuilds V8, and stale snapshots crash the
->    host on a checksum mismatch.
+> 2. **Copy the new `v8_context_snapshot.bin`** alongside `libcef.so` —
+>    `is_official_build` rebuilds V8, and a stale snapshot crashes the host on a
+>    checksum mismatch. (`snapshot_blob.bin` was removed in CEF 133+ — only
+>    `v8_context_snapshot.bin` and `icudtl.dat` remain.)
 
 ### 5. Build (use the OOM-resistant wrapper)
 
@@ -188,6 +189,47 @@ The symbol it keys on (`window_begin_window_drag_<apiver>`) lives in `.symtab` �
 in the unstripped build, gone after `strip` — so the gate must (and does) run **before**
 the packaging strip. Override the gate with `AGENTMUX_SKIP_CEF_PATCH_CHECK=1` (emergency only).
 
+### 8. Package + upload as a GitHub release (for CI)
+
+Local AgentMux builds resolve the libcef from `~/cef-build/.../Release_GN_x64` directly
+(`scripts/resolve-cef-runtime.sh`), so this step is **only for CI** — which has no build
+tree and pulls the patched runtime from a release in `agentmuxai/cef`.
+
+**Do NOT strip first.** `scripts/build-appimage-linux.sh` strips at bundle time, and the
+patch-verification gate keys on `.symtab` symbols that `strip` removes — upload the
+**unstripped** `libcef.so`.
+
+```bash
+CEF_OUT=~/cef-build/chromium_git/chromium/src/out/Release_GN_x64
+# CEF API version from cef_version.h's CEF_VERSION (e.g. 148.0.20), NOT the chromium build number.
+CEF_VERSION="148.0.20"
+
+bash ~/agentmux/scripts/verify-cef-patch.sh "$CEF_OUT"   # must exit 0
+
+cd "$CEF_OUT"
+tar -czf "cef-linux-x86_64-${CEF_VERSION}.tar.gz" \
+  libcef.so libEGL.so libGLESv2.so \
+  libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json \
+  chrome_crashpad_handler \
+  icudtl.dat v8_context_snapshot.bin \
+  chrome_100_percent.pak chrome_200_percent.pak resources.pak \
+  headless_command_resources.pak locales/
+
+gh release create "cef-linux-x86_64-${CEF_VERSION}" --repo agentmuxai/cef \
+  --title "Patched libcef.so — Linux x86_64 CEF ${CEF_VERSION}" \
+  --notes "BeginWindowDrag + right-click passthrough. Branch: agentmux/7778-drag-rightclick-and-transparency @ c87bca4" \
+  "cef-linux-x86_64-${CEF_VERSION}.tar.gz"
+```
+
+> **`chrome-sandbox` is intentionally omitted** from the tarball. AgentMux's Linux sandbox
+> (the `agentmux-cef` `sandbox` Cargo feature, **default-on** — `default = ["sandbox"]`)
+> uses Chromium's **kernel namespace sandbox**, not the setuid `chrome-sandbox` helper:
+> `app.rs` appends `disable-setuid-sandbox`. The `chrome_sandbox` ninja target isn't built
+> and isn't needed (the bundle copies it best-effort, `|| true`, and ships fine without it).
+> **The sandbox requires no special libcef build** — namespace-sandbox support is compiled
+> into any default Chromium build (`args.gn` carries no sandbox flags), so the same
+> `BeginWindowDrag`-patched libcef serves both the drag patch and the sandbox.
+
 ---
 
 ## Using the built libcef in AgentMux
@@ -219,7 +261,7 @@ If you see a `WARNING: libcef.so at ... is 1272 MB (>1 GB) — likely unpatched 
 
 ## Re-building after patch changes
 
-You don't need to re-run `patcher.py` if you're modifying within the already-patched tree. Just edit, mirror, ninja:
+You don't need to re-run `patcher.py` if you're modifying within the already-patched tree. Just edit, mirror, **regenerate the api file**, ninja:
 
 ```bash
 # Edit in the cef checkout (where you actually develop)
@@ -229,13 +271,31 @@ cd ~/cef-build/chromium_git/cef
 # Mirror to the chromium-side
 rsync -a --delete --exclude=.git ~/cef-build/chromium_git/cef/ ~/cef-build/chromium_git/chromium/src/cef/
 
-# Re-build (incremental; usually 5-30 min)
-systemd-run --user --scope --collect --unit=cef-build.scope \
-  ~/cef-build/ninja-with-retry.sh
+# GOTCHA 1: `rsync --delete` deletes the gitignored generated file
+# `cef_api_untracked.json` (the dev checkout doesn't have it). Without it the
+# build dies: "cef_api_untracked.json … needed by gen/cef/include/cef_api_versions.h,
+# missing and no known rule to make it". Regenerate it (also re-emits the
+# translator wrappers; leaves the *versioned* cef_api_versions.json untouched as
+# long as you didn't change the public API struct layout):
+( cd ~/cef-build/chromium_git/chromium/src/cef && python3 tools/version_manager.py -u )
 
-# Re-strip
+# Re-build (incremental; usually 5-30 min for a few files + the thinLTO relink).
+# GOTCHA 2: target `libcef.so` directly. The `ninja-with-retry.sh` wrapper builds
+# the **phony `cef`** meta-target, which does NOT relink libcef.so after a
+# source-only change (it "succeeds" doing nothing). Build the library output:
+systemd-run --user --scope --collect --unit=cef-build.scope \
+  ~/cef-build/chromium_git/chromium/src/third_party/ninja/ninja \
+  -j 12 -l 16 -C ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64 libcef.so
+
+# Verify the patch survived, then re-strip
+bash ~/agentmux/scripts/verify-cef-patch.sh ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64   # exit 0
 strip --strip-debug ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/libcef.so
 ```
+
+> Note: editing a widely-included **header** (e.g. `libcef/browser/context.h`)
+> cascades the recompile to everything that includes it (~400+ files here), so a
+> "small" comment/logic change can still be a 20–60 min rebuild dominated by the
+> compiles + the final thinLTO link.
 
 ---
 
