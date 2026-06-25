@@ -260,7 +260,7 @@ If you see a `WARNING: libcef.so at ... is 1272 MB (>1 GB) — likely unpatched 
 
 ## Re-building after patch changes
 
-You don't need to re-run `patcher.py` if you're modifying within the already-patched tree. Just edit, mirror, ninja:
+You don't need to re-run `patcher.py` if you're modifying within the already-patched tree. Just edit, mirror, **regenerate the api file**, ninja:
 
 ```bash
 # Edit in the cef checkout (where you actually develop)
@@ -270,13 +270,31 @@ cd ~/cef-build/chromium_git/cef
 # Mirror to the chromium-side
 rsync -a --delete --exclude=.git ~/cef-build/chromium_git/cef/ ~/cef-build/chromium_git/chromium/src/cef/
 
-# Re-build (incremental; usually 5-30 min)
-systemd-run --user --scope --collect --unit=cef-build.scope \
-  ~/cef-build/ninja-with-retry.sh
+# GOTCHA 1: `rsync --delete` deletes the gitignored generated file
+# `cef_api_untracked.json` (the dev checkout doesn't have it). Without it the
+# build dies: "cef_api_untracked.json … needed by gen/cef/include/cef_api_versions.h,
+# missing and no known rule to make it". Regenerate it (also re-emits the
+# translator wrappers; leaves the *versioned* cef_api_versions.json untouched as
+# long as you didn't change the public API struct layout):
+( cd ~/cef-build/chromium_git/chromium/src/cef && python3 tools/version_manager.py -u )
 
-# Re-strip
+# Re-build (incremental; usually 5-30 min for a few files + the thinLTO relink).
+# GOTCHA 2: target `libcef.so` directly. The `ninja-with-retry.sh` wrapper builds
+# the **phony `cef`** meta-target, which does NOT relink libcef.so after a
+# source-only change (it "succeeds" doing nothing). Build the library output:
+systemd-run --user --scope --collect --unit=cef-build.scope \
+  ~/cef-build/chromium_git/chromium/src/third_party/ninja/ninja \
+  -j 12 -l 16 -C ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64 libcef.so
+
+# Verify the patch survived, then re-strip
+bash ~/agentmux/scripts/verify-cef-patch.sh ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64   # exit 0
 strip --strip-debug ~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/libcef.so
 ```
+
+> Note: editing a widely-included **header** (e.g. `libcef/browser/context.h`)
+> cascades the recompile to everything that includes it (~400+ files here), so a
+> "small" comment/logic change can still be a 20–60 min rebuild dominated by the
+> compiles + the final thinLTO link.
 
 ---
 
