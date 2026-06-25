@@ -210,24 +210,6 @@ export interface AgentPaneState {
      */
     detailsOpen: boolean;
     /**
-     * Number of activity-log entries that arrived while
-     * `detailsOpen === false`. Resets to 0 on every transition
-     * `detailsOpen: false → true`. Drives the chevron's unread badge
-     * (`▾³`) in the composer strip.
-     *
-     * The activity-log slice (`agentActivity`) owns the entries
-     * themselves; this counter is a lightweight projection so the
-     * strip can render its badge without subscribing to both slices.
-     * The view dispatches `LogEntryArrived` after every log-line
-     * append, and the reducer here ignores the command when
-     * `detailsOpen === true` (the user can already see the new
-     * entry).
-     *
-     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
-     */
-    composerUnreadCount: number;
-
-    /**
      * Input-token count from the most recent message_start — the full
      * context fill sent to the model on that turn. Unlike `turnTokens`,
      * this field is NOT cleared at TurnEnd so the context-window bar
@@ -263,7 +245,6 @@ export const initialState = (agentId: string): AgentPaneState => ({
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
     detailsOpen: false,
-    composerUnreadCount: 0,
 });
 
 /**
@@ -457,34 +438,12 @@ export type AgentPaneCommand =
     | { type: "PendingMessageExpired"; id: string }
 
     // ── Composer details / Log panel ─────────────────────────────
-    /**
-     * User clicked the chevron or the strip body — toggle the details
-     * panel. On flip-to-open, resets `composerUnreadCount` to 0.
-     *
-     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
-     */
+    /** Toggle the log panel open/closed. */
     | { type: "DetailsToggle" }
-    /**
-     * Explicit expand (keyboard shortcut, programmatic open). Sets
-     * `detailsOpen → true` and `composerUnreadCount → 0`. Idempotent
-     * if already open.
-     */
+    /** Explicitly open the log panel. Idempotent if already open. */
     | { type: "DetailsExpand" }
-    /**
-     * Explicit collapse. Fired by the outside-click handler in the
-     * view and by the `TurnStart` auto-collapse cross-arm.
-     * `composerUnreadCount` is intentionally NOT reset — it
-     * accumulates fresh from this point forward.
-     */
+    /** Explicitly close the log panel. Idempotent if already closed. */
     | { type: "DetailsCollapse" }
-    /**
-     * A new activity-log entry just landed. The activity-log hook
-     * dispatches this AFTER its own slice's append. When
-     * `detailsOpen === false`, increments `composerUnreadCount` so
-     * the strip's chevron badge updates. When the panel is already
-     * open, no-op (the user sees the new entry directly).
-     */
-    | { type: "LogEntryArrived" }
     ;
 
 export type AgentPaneEvent =

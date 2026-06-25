@@ -750,59 +750,24 @@ export function update(
             };
         }
 
-        // ── Composer details panel ─────────────────────────────────
-        // The chevron/strip toggle, explicit expand, explicit collapse,
-        // and activity-log unread-counter arms. The view dispatches all
-        // four; sagas are uninterested (no scheduled side effects).
-        // Spec: SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+        // ── Composer details / Log panel ──────────────────────────
         case "DetailsToggle": {
-            const opening = !state.detailsOpen;
             return {
-                state: {
-                    ...state,
-                    detailsOpen: opening,
-                    composerUnreadCount: opening ? 0 : state.composerUnreadCount,
-                },
+                state: { ...state, detailsOpen: !state.detailsOpen },
                 events: [],
             };
         }
         case "DetailsExpand": {
-            if (state.detailsOpen && state.composerUnreadCount === 0) {
-                return { state, events: [] };
-            }
+            if (state.detailsOpen) return { state, events: [] };
             return {
-                state: {
-                    ...state,
-                    detailsOpen: true,
-                    composerUnreadCount: 0,
-                },
+                state: { ...state, detailsOpen: true },
                 events: [],
             };
         }
         case "DetailsCollapse": {
-            // Idempotent if already closed. Unread counter is NOT reset
-            // — it tracks entries arriving while collapsed, so a re-open
-            // a moment later should see only what arrived in between.
-            if (!state.detailsOpen) {
-                return { state, events: [] };
-            }
+            if (!state.detailsOpen) return { state, events: [] };
             return {
                 state: { ...state, detailsOpen: false },
-                events: [],
-            };
-        }
-        case "LogEntryArrived": {
-            // No-op when the panel is open (user already sees the
-            // entry). Increments the unread counter when closed so
-            // the chevron badge updates.
-            if (state.detailsOpen) {
-                return { state, events: [] };
-            }
-            return {
-                state: {
-                    ...state,
-                    composerUnreadCount: state.composerUnreadCount + 1,
-                },
                 events: [],
             };
         }
