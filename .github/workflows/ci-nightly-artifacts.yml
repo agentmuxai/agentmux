@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       # Ninja: CEF's C wrapper (cef-dll-sys) needs CMake + Ninja; CMake ships
       # with VS on this runner. go-task: scripts/package.sh delegates build
@@ -95,7 +95,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Auth npm for @a5af GitHub Packages
         run: |
           {
@@ -163,7 +163,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Auth npm for @a5af GitHub Packages
         run: |
           {
