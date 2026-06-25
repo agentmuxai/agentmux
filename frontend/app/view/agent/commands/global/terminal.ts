@@ -15,6 +15,7 @@ export const terminalCommand: SlashCommand = {
         const blockDef = {
             meta: {
                 view: "term",
+                controller: "shell",
                 ...(cwd ? { "cmd:cwd": cwd } : {}),
             },
         };
