@@ -149,5 +149,6 @@ export default defineConfig({
         stripKatexLegacyFonts(),
     ],
 
+    envDir: path.resolve(__dirname, "frontend"),
     envPrefix: ["VITE_"],
 });
