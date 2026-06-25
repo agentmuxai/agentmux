@@ -8,7 +8,6 @@ import { ConfigStatus } from "./ConfigStatus";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
-import { MuxBusLoginChip } from "./MuxBusLoginChip";
 import { SystemStats } from "./SystemStats";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { UpdateStatus } from "./UpdateStatus";
@@ -67,7 +66,6 @@ const StatusBar = (): JSX.Element => {
                 <ConfigStatus />
                 <UpdateStatus />
                 <HostPopover />
-                <MuxBusLoginChip />
                 <Show when={version}>
                     <Show
                         when={backendStatusAtom() !== "crashed"}
