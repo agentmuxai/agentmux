@@ -67,6 +67,10 @@
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
 
+    // Brighter amber for midnight — complement of the blue accent (~218° → ~38°).
+    // The default #e07832 is too dark on pure-black to distinguish from brown.
+    --user-input-color: #ffaa33;
+
     .agent-view,
     .agent-view .agent-document {
         background: #000;
