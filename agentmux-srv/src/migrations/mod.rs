@@ -25,6 +25,7 @@ mod m0008_default_bundle;
 mod m0009_transcript_backfill;
 mod m0010_session_ids;
 mod m0011_shared_store_backfill;
+mod m0012_dedup_identity_accounts;
 mod runner;
 
 pub use runner::run_migrate_command;
@@ -110,4 +111,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0009_transcript_backfill::M0009TranscriptBackfill,
     &m0010_session_ids::M0010SessionIds,
     &m0011_shared_store_backfill::M0011SharedStoreBackfill,
+    &m0012_dedup_identity_accounts::M0012DedupIdentityAccounts,
 ];

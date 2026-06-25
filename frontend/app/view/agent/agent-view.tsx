@@ -38,7 +38,6 @@ import { getRecentDispatches } from "@/app/store/command-source";
 import { getTrail } from "@/log/render-trail";
 import { useAgentStream } from "./useAgentStream";
 import { useActivityLog } from "./hooks/useActivityLog";
-import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
 // SNAPSHOT_SCHEMA_VERSION re-exported from useHistoryPagination; imported here for the write path.
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
@@ -74,7 +73,6 @@ import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
-import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, getApi, WOS } from "@/app/store/global";
@@ -354,9 +352,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
         log,
     });
-
-    // Session digest banner state + auto-trigger.
-    const digest = useSessionDigest({ blockId: model.blockId, block, log });
 
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
@@ -1075,19 +1070,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 matchCount={search.matchCount}
             />
 
-            <SessionDigestBanner
-                accessory={digest.accessory}
-                onDismiss={digest.dismiss}
-                onRegenerate={() => digest.fetch(true)}
-            />
-
-            {/* Pinned activity dock — long-running shells (and later crons /
-                subagents) stay glanceable at the top while the conversation
-                scrolls under it. SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15. */}
-            <ActivityDock
-                documentAtom={agentAtoms().documentAtom}
-                documentStateAtom={agentAtoms().documentStateAtom}
-            />
 
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
@@ -1256,6 +1238,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         "user",
                     );
                 }}
+            />
+
+            {/* Pinned activity dock — long-running shells (and later crons /
+                subagents) sit just above the composer so task status is adjacent
+                to where the user's attention already is. Moved from the top per
+                SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
+            <ActivityDock
+                documentAtom={agentAtoms().documentAtom}
+                documentStateAtom={agentAtoms().documentStateAtom}
             />
 
             {/* Slim composer status strip — single 28-32px row replacing

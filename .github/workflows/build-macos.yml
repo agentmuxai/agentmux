@@ -63,7 +63,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Auth npm for @a5af GitHub Packages
         shell: bash
@@ -74,7 +74,7 @@ jobs:
           } >> .npmrc
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install go-task
         run: brew install go-task

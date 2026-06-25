@@ -389,9 +389,6 @@ pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
 pub const COMMAND_SESSION_RESTORE: &str = "session:restore";
 pub const COMMAND_SESSION_EXPORT: &str = "session:export";
 
-// Session digest
-pub const COMMAND_SESSION_DIGEST: &str = "session:digest";
-
 // Per-turn live activity summary (Haiku-powered, writes term:activity)
 pub const COMMAND_SESSION_ACTIVITY_SUMMARY: &str = "session:activity_summary";
 
@@ -1119,29 +1116,6 @@ pub struct CommandBlockfileWriteStateData {
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileWriteStateResult {
     pub bytes_written: u64,
-}
-
-// ---- Session digest types ----
-
-/// Request for session:digest — generate or return a cached AI summary of the session.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub struct CommandSessionDigestData {
-    pub block_id: String,
-    /// If true, regenerate even if a cached digest exists.
-    pub force: Option<bool>,
-}
-
-/// Response from session:digest.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct SessionDigestResult {
-    /// AI-generated summary text (Markdown).
-    pub summary: String,
-    /// Unix milliseconds when this digest was generated.
-    pub generated_at: i64,
-    /// true if we returned a previously-cached result (no new activity since last run).
-    pub cached: bool,
 }
 
 // ---- Session activity summary types ----
