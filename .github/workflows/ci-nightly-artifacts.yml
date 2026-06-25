@@ -202,12 +202,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
         run: |
-          mkdir -p "$CEF_RUNTIME_DIR"
+          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR"
           gh release download "${{ steps.cef.outputs.tag }}" \
             --repo agentmuxai/cef --pattern "*.tar.gz" \
-            --dir "$CEF_RUNTIME_DIR" --clobber
-          tar -xzf "$CEF_RUNTIME_DIR"/*.tar.gz -C "$CEF_RUNTIME_DIR" --strip-components=1
-          rm -f "$CEF_RUNTIME_DIR"/*.tar.gz
+            --dir /tmp/cef-extract --clobber
+          tar -xzf /tmp/cef-extract/*.tar.gz -C /tmp/cef-extract
+          LIBCEF=$(find /tmp/cef-extract -name "libcef.so" | head -1)
+          if [ -z "$LIBCEF" ]; then echo "ERROR: libcef.so not found in tarball"; exit 1; fi
+          cp -r "$(dirname "$LIBCEF")/." "$CEF_RUNTIME_DIR/"
+          rm -rf /tmp/cef-extract
       - name: Set AGENTMUX_CEF_RUNTIME_DIR
         run: echo "AGENTMUX_CEF_RUNTIME_DIR=$CEF_RUNTIME_DIR" >> "$GITHUB_ENV"
       - name: Install appimagetool
