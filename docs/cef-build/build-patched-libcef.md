@@ -121,9 +121,10 @@ cp /path/to/agentmux/scripts/cef-build/args.gn out/Release_GN_x64/args.gn
 >    `cef/libcef_dll/ctocpp/views/window_ctocpp.cc` "missing and no known rule":
 >    `cd cef && python3 tools/translator.py --root-dir .` (the tree stays clean —
 >    identical API rewrite — so no `version_manager.py` needed).
-> 2. **Copy the new `snapshot_blob.bin` + `v8_context_snapshot.bin`** alongside
->    `libcef.so` — `is_official_build` rebuilds V8, and stale snapshots crash the
->    host on a checksum mismatch.
+> 2. **Copy the new `v8_context_snapshot.bin`** alongside `libcef.so` —
+>    `is_official_build` rebuilds V8, and a stale snapshot crashes the host on a
+>    checksum mismatch. (`snapshot_blob.bin` was removed in CEF 133+ — only
+>    `v8_context_snapshot.bin` and `icudtl.dat` remain.)
 
 ### 5. Build (use the OOM-resistant wrapper)
 
@@ -210,7 +211,7 @@ tar -czf "cef-linux-x86_64-${CEF_VERSION}.tar.gz" \
   libcef.so libEGL.so libGLESv2.so \
   libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json \
   chrome_crashpad_handler \
-  icudtl.dat snapshot_blob.bin v8_context_snapshot.bin \
+  icudtl.dat v8_context_snapshot.bin \
   chrome_100_percent.pak chrome_200_percent.pak resources.pak \
   headless_command_resources.pak locales/
 
