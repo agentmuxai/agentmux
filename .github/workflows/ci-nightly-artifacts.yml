@@ -224,7 +224,7 @@ jobs:
       - name: Build AppImage
         run: |
           mkdir -p "$OUT"
-          task package:linux -- "$OUT"
+          RELEASE_CHANNEL=stable bash scripts/package-linux.sh "$OUT"
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:

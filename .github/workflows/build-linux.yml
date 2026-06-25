@@ -157,10 +157,10 @@ jobs:
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
 
       # ── Build AppImage ────────────────────────────────────────────────────
-      - name: Build AppImage (task package:linux)
+      - name: Build AppImage
         run: |
           mkdir -p "$OUT"
-          task package:linux -- "$OUT"
+          RELEASE_CHANNEL=stable bash scripts/package-linux.sh "$OUT"
 
       - name: Locate AppImage
         id: appimage
