@@ -102,7 +102,7 @@ jobs:
             echo "@a5af:registry=https://npm.pkg.github.com"
             echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
           } >> .npmrc
-      - run: npm ci
+      - run: npm install
       - name: Install go-task
         run: brew install go-task
       - name: Import Developer ID certificate into temp keychain
@@ -170,7 +170,7 @@ jobs:
             echo "@a5af:registry=https://npm.pkg.github.com"
             echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
           } >> .npmrc
-      - run: npm ci
+      - run: npm install
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq

@@ -74,7 +74,7 @@ jobs:
           } >> .npmrc
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install go-task
         run: brew install go-task
