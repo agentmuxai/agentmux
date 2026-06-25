@@ -70,7 +70,40 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (state, browser);
+        // On macOS/Linux, the focus redirect subclass used on Windows doesn't
+        // exist. CEF's on_after_created fires from inside add_overlay_view
+        // (when the BrowserView is added to the widget hierarchy) and gives
+        // focus to the new pane browser. creation_views::create_browser_pane_view
+        // immediately returns focus to the main window after add_overlay_view
+        // returns — this callback is an additional safety net for any navigation-
+        // driven focus steals that bypass that initial return (e.g. cross-origin
+        // redirects that recreate the renderer, hitting on_after_created again).
+        //
+        // Only refocus if we can identify the parent window; don't do a blanket
+        // "focus main" that would disrupt multi-window setups.
+        if let Some(block_id) = resolve_pane_block_id(state, browser) {
+            let parent_window_label = state
+                .browser_pane_overlays
+                .lock()
+                .iter()
+                .find(|(lbl, _)| {
+                    // label format: browser-pane-<block_id>-<seq>
+                    lbl.starts_with(&format!("browser-pane-{}-", block_id))
+                })
+                .map(|(_, (win_lbl, _))| win_lbl.clone());
+
+            if let Some(win_label) = parent_window_label {
+                if let Some(main_browser) = state.get_browser(&win_label) {
+                    if let Some(mut host) = main_browser.host() {
+                        host.set_focus(1);
+                        tracing::info!(
+                            block_id = %block_id, window_label = %win_label,
+                            "[browser-pane] macOS/Linux on_after_created: returned focus to main window"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
