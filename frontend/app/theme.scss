@@ -57,17 +57,14 @@
     --widget-icon-hover-color: var(--main-text-color);
     --widget-icon-active-color: var(--accent-color);
 
-    // User-input highlight — complementary to --accent-color (blue hue ~210°)
-    // so that user messages read as visually distinct from agent content and
-    // link-blue UI chrome. Hue ~28° (warm amber) is the colour-wheel complement
-    // of the accent; contrast ~6:1 on dark surfaces (WCAG AA). Per-theme
-    // overrides land in `frontend/app/themes/*.scss`.
-    // See docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §7.
+    // User-input highlight — complementary to --accent-color (blue hue ~210°).
+    // Hue ~28° (warm amber) is the colour-wheel complement of the accent.
+    // Used as the solid border and as the INPUT to color-mix() in
+    // _document-nodes.scss, which blends it with --block-bg-solid-color in
+    // oklab space (NOT with transparent). oklab mixing preserves hue identity
+    // so the result is always visibly amber on any dark surface — no alpha
+    // compositing, no brown-on-black degradation.
     --user-input-color: #e07832;
-    // Background tint alpha for user-message bubbles (used in color-mix()).
-    // Themes with darker/pure-black backgrounds should increase this so the
-    // tint reads as amber rather than brown at low opacity over black.
-    --user-input-bg-alpha: 14%;
 
     --panel-bg-color: rgba(31, 33, 31, 0.5);
     --highlight-bg-color: rgba(255, 255, 255, 0.2);
