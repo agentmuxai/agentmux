@@ -67,6 +67,12 @@
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
 
+    // On pure-black agent pane, the default amber (#e07832) at 14% alpha
+    // composites to dark brown. Brighter amber + higher alpha stays amber.
+    // Hue ~38° is the complement of midnight's blue accent (~218°).
+    --user-input-color: #ffaa33;
+    --user-input-bg-alpha: 25%;
+
     .agent-view,
     .agent-view .agent-document {
         background: #000;
