@@ -1358,7 +1358,40 @@ unsafe fn set_macos_app_display_name() {
                 let k_disp = make(cls_str, sel_with, b"CFBundleDisplayName\0".as_ptr() as _);
                 set_obj(info, sel_set_obj, ns_name, k_name);
                 set_obj(info, sel_set_obj, ns_name, k_disp);
-                tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle");
+
+                // Set CFBundleIdentifier so LaunchServices treats each channel
+                // as a distinct app. Without this the dev build has no
+                // identifier and macOS may coalesce it with the packaged stable
+                // .app under the same Dock tile, letting a click on either
+                // focus whichever was most recently active.
+                //
+                // AGENTMUX_CHANNEL is set by the launcher before the host
+                // starts (stable/dev/portable all write it via to_env_vars()).
+                // Fall back to "dev" only for unmanaged direct invocations.
+                let channel = std::env::var("AGENTMUX_CHANNEL")
+                    .unwrap_or_else(|_| "dev".to_string());
+                // Sanitize channel to match the normalization applied by
+                // scripts/package-macos.sh (lines 67-68):
+                //   tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]'
+                // Replace any char not in [A-Za-z0-9.-] with '-', then lowercase,
+                // so runtime and build-time CFBundleIdentifiers always match.
+                let channel_sanitized: String = channel
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '-' })
+                    .collect::<String>()
+                    .to_lowercase();
+                let bundle_id = format!("ai.agentmux.{}.{}", channel_sanitized, env!("CARGO_PKG_VERSION"));
+                if let Ok(c_id) = std::ffi::CString::new(bundle_id.as_str()) {
+                    let ns_id = make(cls_str, sel_with, c_id.as_ptr());
+                    if !ns_id.is_null() {
+                        let k_id = make(cls_str, sel_with, b"CFBundleIdentifier\0".as_ptr() as _);
+                        set_obj(info, sel_set_obj, ns_id, k_id);
+                    }
+                }
+                tracing::info!(
+                    bundle_id = %bundle_id,
+                    "macOS: set CFBundleName/CFBundleDisplayName/CFBundleIdentifier on main bundle"
+                );
             } else {
                 tracing::warn!("macOS: main bundle info dict not mutable; app name unchanged");
             }
