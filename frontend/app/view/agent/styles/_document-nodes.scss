@@ -828,7 +828,7 @@
     // `components/UserMessageBlock.tsx` for the JSX side.
     .agent-user-message {
         padding: 3px var(--space-1);
-        background: color-mix(in srgb, var(--user-input-color) 14%, transparent);
+        background: color-mix(in oklab, var(--user-input-color) 30%, var(--block-bg-solid-color));
         border-left: 3px solid var(--user-input-color);
         border-radius: 0;
         user-select: text;
@@ -1040,7 +1040,7 @@
 
                     &:hover {
                         opacity: 1;
-                        background: color-mix(in srgb, var(--user-input-color) 15%, transparent);
+                        background: color-mix(in oklab, var(--user-input-color) 35%, var(--block-bg-solid-color));
                     }
                     &:focus-visible {
                         outline: 2px solid var(--user-input-color);
@@ -1055,7 +1055,7 @@
         // a slightly deeper background so the user knows this is a
         // hover-preview, not a permanent expansion.
         &--expanded.agent-user-message--startup {
-            background: color-mix(in srgb, var(--user-input-color) 18%, transparent);
+            background: color-mix(in oklab, var(--user-input-color) 38%, var(--block-bg-solid-color));
         }
 
         // Pinned state — thicker left border mirrors ToolBlock.pinned.
