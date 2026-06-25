@@ -221,15 +221,42 @@ pub fn create_browser_pane_view(
     // 7. Position the overlay. We tried `set_bounds(rect)` directly: silently
     //    ignored — readback shows 0,0,0,0. Trying separate set_size + set_position
     //    and explicit window.layout() to force a layout pass.
+    //
+    // set_visible(1) is intentionally called AFTER layout() so the overlay is
+    // at the correct position/size before it becomes visible and can intercept
+    // input. Calling it before layout() caused a brief window where the overlay
+    // was visible at the wrong position (or 0×0), which on macOS allowed CEF's
+    // new-browser focus steal (from add_overlay_view above) to intercept clicks
+    // for the whole window before the layout pass corrected the bounds.
     overlay_controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
     overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
-    overlay_controller.set_visible(1);
     parent_window.layout();
+    overlay_controller.set_visible(1);
     tracing::info!(
         block_id = %block_id, label = %label,
         x = rect.x, y = rect.y, w = rect.width, h = rect.height,
-        "[browser-pane] views: overlay set_size + set_position + set_visible + layout() applied"
+        "[browser-pane] views: overlay set_size + set_position + layout() + set_visible applied"
     );
+
+    // 7b. Return focus to the main window's BrowserView. CEF's default
+    //     on_after_created behaviour (fired from add_overlay_view above when
+    //     the BrowserView is added to the widget hierarchy) gives focus to the
+    //     new pane browser. On Windows, AgentMuxHandler::on_after_created_browser_pane
+    //     installs a WM_SETFOCUS redirect subclass that catches this steal.
+    //     On macOS/Linux there is no equivalent subclass, so the OverlayController
+    //     holds focus after creation and its BrowserView intercepts all keyboard
+    //     (and, depending on CEF hit-test state, mouse) events for the parent window —
+    //     causing the "black pane + frozen UI" bug. Explicitly refocus the main
+    //     window browser here; the user can then click inside the pane to focus it.
+    if let Some(main_browser) = state.get_browser(&window_label) {
+        if let Some(mut host) = main_browser.host() {
+            host.set_focus(1);
+            tracing::info!(
+                window_label = %window_label,
+                "[browser-pane] views: returned focus to main window after pane creation"
+            );
+        }
+    }
 
     // 8. Diagnostic: read back what CEF thinks of the overlay state.
     //    If is_drawn=0 or is_visible=0 with our settings, something below
