@@ -1,5 +1,26 @@
 # AgentMux Version History
 
+## 0.49.3 — 2026-06-25
+
+- feat(tab-chrome): full-width boundary line below tab strip via container border-bottom
+- fix(agent): move activity dock from top to above composer
+- feat(statusbar): MuxBus Cloud login chip — sign-in button when not connected, email chip + disconnect popover when signed in
+- fix(agent): remove session digest, fix per-turn Haiku summary in pane header
+- fix(cef): clone initial_view before move into promote_pool_window_for_new_window
+- docs(cef): add the package + upload-to-release step + sandbox/chrome-sandbox notes to the libcef build guide
+- fix(identity): deduplicate identity accounts sharing the same credential in shared store
+- fix(transparency): gate transparent CEF flags on window:transparent setting, fix startup opacity flash for opaque windows
+- fix(iconbutton): stop destructuring decl prop — caret flips on minimize, clicks no longer swallowed
+- fix(widgets): use FontAwesome brand icons for messaging widgets (Discord, Slack, Telegram, WhatsApp, Teams)
+- fix(midnight): user-input color reads amber not brown on pure-black agent pane
+- fix(agent): rename Shell→Log button, wire to activity log, remove chevron/strip-click expand, add RuntimeBadge to HostPopover
+- fix(term): eliminate 1Hz typing jerk caused by sysinfo blocking Tokio worker threads
+- feat(agent): /terminal slash command opens agent CWD in a new terminal pane below
+- feat(dev): task dev TITLE= sets OS window title for dev sessions
+- fix(linux): per-build channel isolation for AppImage — local builds no longer collide with stable install
+- fix(agent): zoom persistence broken — mirror term:zoom via WebSocket setmeta path
+
+
 ## 0.49.2 — 2026-06-24
 
 - feat(agent-pane): right-click header to set 2-tone hue color theme
