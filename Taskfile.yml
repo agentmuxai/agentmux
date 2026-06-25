@@ -144,16 +144,16 @@ tasks:
             - bash scripts/package-macos.sh {{.CLI_ARGS}}
 
     package:linux:
-        desc: Package the application as a portable AppImage (Linux). Output to ~/Desktop by default.
+        desc: 'Build + package a LOCAL portable AppImage to ~/Desktop with an ephemeral, traceable label and a per-build data-dir channel (local-<branch>-<hash>-<build-id>) so the build runs as its own AgentMux instance alongside a release install. Does NOT bump the version. Pass `-- <dir>` for an alternate output dir. See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'
         platforms: [linux]
-        deps:
-            - build:host
-            - build:backend
-            - build:frontend
-            - copy:schema
         cmds:
-            - task: bundle
-            - bash scripts/build-appimage-linux.sh
+            - bash scripts/package-linux.sh {{.CLI_ARGS}}
+
+    package:release:linux:
+        desc: 'Like `task package:linux` but bakes the "stable" channel so the artifact opens the user''s real data dir. Use this for GitHub release artifacts. See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'
+        platforms: [linux]
+        cmds:
+            - bash -c 'RELEASE_CHANNEL=stable bash scripts/package-linux.sh {{.CLI_ARGS}}'
 
     check:menu-positioning:
         desc: >-
