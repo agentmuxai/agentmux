@@ -555,6 +555,24 @@ export function refocusNode(blockId: string) {
     }
 }
 
+/**
+ * Open or focus a pane by view type.
+ * If a block with the given viewType already exists in the current tab's layout,
+ * focus it. Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
+ */
+export async function openOrFocusPaneByView(viewType: string, blockDef?: BlockDef): Promise<void> {
+    for (const bcm of blockComponentModelMap.values()) {
+        if (bcm.viewModel?.viewType === viewType) {
+            const blockId = (bcm.viewModel as any).blockId as string | undefined;
+            if (blockId) {
+                refocusNode(blockId);
+                return;
+            }
+        }
+    }
+    await createBlock(blockDef ?? { meta: { view: viewType } });
+}
+
 // ---------------------------------------------------------------------------
 // Counters (dev tooling)
 // ---------------------------------------------------------------------------
