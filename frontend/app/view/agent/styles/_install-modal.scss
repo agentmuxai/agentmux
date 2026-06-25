@@ -30,6 +30,21 @@
     margin-right: var(--space-2);
 }
 
+.agent-install-modal-version {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    background: color-mix(in oklab, var(--accent-color) 15%, var(--block-bg-solid-color));
+    color: var(--accent-color);
+    vertical-align: middle;
+    margin-left: 8px;
+    user-select: none;
+}
+
 .agent-install-modal-spinner {
     display: inline-block;
     color: var(--warning-color, #e9b800);
