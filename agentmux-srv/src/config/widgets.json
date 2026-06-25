@@ -128,7 +128,8 @@
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://discord.com/app"
+                "url": "https://discord.com/app",
+                "browser:show_controls": false
             }
         }
     },
@@ -142,7 +143,8 @@
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://app.slack.com/"
+                "url": "https://app.slack.com/",
+                "browser:show_controls": false
             }
         }
     },
@@ -156,7 +158,8 @@
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://web.telegram.org/"
+                "url": "https://web.telegram.org/",
+                "browser:show_controls": false
             }
         }
     },
@@ -170,7 +173,8 @@
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://web.whatsapp.com/"
+                "url": "https://web.whatsapp.com/",
+                "browser:show_controls": false
             }
         }
     },
@@ -184,7 +188,8 @@
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://teams.microsoft.com/"
+                "url": "https://teams.microsoft.com/",
+                "browser:show_controls": false
             }
         }
     }

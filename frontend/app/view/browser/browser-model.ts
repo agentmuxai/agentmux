@@ -153,6 +153,7 @@ export class BrowserViewModel implements ViewModel {
     private _faviconUnsub: (() => void) | null = null;
 
     blockAtom: Accessor<Block | undefined>;
+    showControlsAtom: Accessor<boolean>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -217,6 +218,7 @@ export class BrowserViewModel implements ViewModel {
         this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
 
         const ctorMetaUrl = (this.blockAtom()?.meta?.["url"] as string | undefined) ?? "";
+        this.showControlsAtom = createMemo(() => (this.blockAtom()?.meta?.["browser:show_controls"] as boolean | undefined) ?? true);
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);
 
         // Register the pane in the slice's slot store SYNCHRONOUSLY before
