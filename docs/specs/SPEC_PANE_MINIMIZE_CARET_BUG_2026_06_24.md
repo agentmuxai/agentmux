@@ -109,8 +109,8 @@ export function IconButton(props: IconButtonProps): JSX.Element {
     useLongClick(
         () => btnRef,
         (e) => props.decl.click?.(e),
-        (e) => props.decl.longClick?.(e),
-        props.decl.disabled ?? false
+        props.decl.longClick ? (e) => props.decl.longClick!(e) : undefined,
+        () => props.decl.disabled ?? false
     );
     return (
         <button
@@ -136,15 +136,18 @@ export function IconButton(props: IconButtonProps): JSX.Element {
 
 **`useLongClick` handler wrapping:** The click/longClick callbacks are now lambdas that read `props.decl.click` at call time rather than at mount time. This picks up the current handler if `decl` changes between mount and click — correct behavior in general.
 
-**`disabled` in `useLongClick`:** `props.decl.disabled ?? false` is still evaluated once at mount (passed by value to `useLongClick`). For the minimize button, `disabled` is always `false`. Fully reactive `disabled` gating in `useLongClick` would require changing its signature — out of scope here.
+**`longClick` null guard:** `onLongClick` is passed as `undefined` (not a lambda wrapper) when `props.decl.longClick` is absent. This preserves `useLongClick`'s `if (onLongClick == null) return` guard in `startPress`, preventing the 300 ms timer from arming on every mousedown for buttons with no long-click handler.
+
+**`disabled` in `useLongClick`:** `useLongClick` accepts `getDisabled: () => boolean` (a getter) rather than a plain boolean. The getter is read inside `createEffect`, so SolidJS tracks it reactively. An `IconButton` that transitions from disabled to enabled will have its listeners attached on the next effect run — both the native `disabled` attribute and the event listeners stay consistent.
 
 ---
 
-## Files to change
+## Files changed
 
-| File | Line | Change |
-|---|---|---|
-| `frontend/app/element/iconbutton.tsx` | 12–36 | Remove destructuring; use `props.decl` in JSX |
+| File | Change |
+|---|---|
+| `frontend/app/element/iconbutton.tsx` | Remove destructuring; use `props.decl` in JSX; preserve longClick null guard; pass `disabled` as getter |
+| `frontend/app/hook/useLongClick.tsx` | Change `disabled` param to `getDisabled: () => boolean`; read inside `createEffect` for reactivity |
 
 No changes needed in:
 - `blockframe.tsx` — reactive chain above `IconButton` is correct
