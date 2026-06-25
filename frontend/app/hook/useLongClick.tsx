@@ -7,7 +7,7 @@ export const useLongClick = (
     getRef: () => HTMLElement | null | undefined,
     onClick?: (e: MouseEvent) => void,
     onLongClick?: (e: MouseEvent) => void,
-    disabled = false,
+    getDisabled: () => boolean = () => false,
     ms = 300
 ) => {
     let timerRef: ReturnType<typeof setTimeout> | null = null;
@@ -43,7 +43,7 @@ export const useLongClick = (
     createEffect(() => {
         const element = getRef();
 
-        if (!element || disabled) return;
+        if (!element || getDisabled()) return;
 
         element.addEventListener("mousedown", startPress);
         element.addEventListener("mouseup", stopPress);
