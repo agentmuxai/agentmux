@@ -64,6 +64,10 @@
     // overrides land in `frontend/app/themes/*.scss`.
     // See docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §7.
     --user-input-color: #e07832;
+    // Background tint alpha for user-message bubbles (used in color-mix()).
+    // Themes with darker/pure-black backgrounds should increase this so the
+    // tint reads as amber rather than brown at low opacity over black.
+    --user-input-bg-alpha: 14%;
 
     --panel-bg-color: rgba(31, 33, 31, 0.5);
     --highlight-bg-color: rgba(255, 255, 255, 0.2);
