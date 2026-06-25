@@ -12,8 +12,8 @@
  *
  * This is the §5.1 region model of
  * `docs/specs/SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md`, and the shared
- * dependency the session-digest accessory and the forthcoming fork bar both
- * register into. Presentational only — it owns no state.
+ * dependency the forthcoming fork bar and other accessories register into.
+ * Presentational only — it owns no state.
  */
 
 import { For, Show, type JSX } from "solid-js";
@@ -23,7 +23,7 @@ import "./PaneRegions.scss";
  *  pane's *real* layers — focused panel, pane-scoped modals); everything else
  *  is in the flex column. `stream` is the single flex-grow region. */
 export type PaneRegionName =
-    | "top-fixed" // transient banners (progress, search, digest)
+    | "top-fixed" // transient banners (progress, search)
     | "dock" // pinned long-running processes (ActivityDock)
     | "stream" // the conversation (flex: 1, scrolls)
     | "alert" // working-row · decision · question · disconnected

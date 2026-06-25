@@ -38,7 +38,6 @@ import { getRecentDispatches } from "@/app/store/command-source";
 import { getTrail } from "@/log/render-trail";
 import { useAgentStream } from "./useAgentStream";
 import { useActivityLog } from "./hooks/useActivityLog";
-import { useSessionDigest } from "./hooks/useSessionDigest";
 import { useHistoryPagination, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
 // SNAPSHOT_SCHEMA_VERSION re-exported from useHistoryPagination; imported here for the write path.
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
@@ -74,7 +73,6 @@ import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
-import { SessionDigestBanner } from "./components/SessionDigestBanner";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, getApi, WOS } from "@/app/store/global";
@@ -354,9 +352,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
         log,
     });
-
-    // Session digest banner state + auto-trigger.
-    const digest = useSessionDigest({ blockId: model.blockId, block, log });
 
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
@@ -1075,11 +1070,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 matchCount={search.matchCount}
             />
 
-            <SessionDigestBanner
-                accessory={digest.accessory}
-                onDismiss={digest.dismiss}
-                onRegenerate={() => digest.fetch(true)}
-            />
 
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
