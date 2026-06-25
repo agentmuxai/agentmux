@@ -56,6 +56,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     const catalog = () => getCliCatalogEntry(props.agent.provider);
     const provider = () => getProvider(props.agent.provider);
     const displayName = () => catalog()?.displayName ?? props.agent.name;
+    const version = () => provider()?.pinnedVersion;
 
     const [phase, setPhase] = createSignal<"idle" | "installing" | "done" | "failed">("idle");
     // `unknown` — accepts plain strings (legacy) AND the wire-format
@@ -350,6 +351,11 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         {catalog()?.icon ?? "📦"}
                     </span>
                     Install {displayName()}
+                    <Show when={version()}>
+                        <span class="agent-install-modal-version">
+                            {version() === "latest" ? "latest" : `v${version()}`}
+                        </span>
+                    </Show>
                 </h2>
                 <p class="modal-panel-description">
                     <Show when={phase() === "idle"}>not installed — click below to install</Show>
