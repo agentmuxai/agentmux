@@ -218,24 +218,29 @@ pub fn create_browser_pane_view(
         "[browser-pane] views: add_overlay_view returned OverlayController"
     );
 
-    // 7. Position the overlay. We tried `set_bounds(rect)` directly: silently
-    //    ignored — readback shows 0,0,0,0. Trying separate set_size + set_position
-    //    and explicit window.layout() to force a layout pass.
+    // 7. Position the overlay.
     //
-    // set_visible(1) is intentionally called AFTER layout() so the overlay is
-    // at the correct position/size before it becomes visible and can intercept
-    // input. Calling it before layout() caused a brief window where the overlay
-    // was visible at the wrong position (or 0×0), which on macOS allowed CEF's
-    // new-browser focus steal (from add_overlay_view above) to intercept clicks
-    // for the whole window before the layout pass corrected the bounds.
+    // On macOS, the overlay's native NSView is not yet created at this point —
+    // `add_overlay_view` posts native view creation asynchronously. Calling
+    // `set_size` / `set_position` / `layout()` here is a best-effort attempt
+    // that MAY commit the bounds on Linux but silently does nothing on macOS
+    // (readback: oc_w=0 oc_h=0). Without committed bounds the overlay defaults
+    // to filling the entire parent window, which (a) covers the UI with the
+    // pane's opaque-black background_color and (b) intercepts all mouse events
+    // for the window — the "black screen + UI freeze" bug.
+    //
+    // SetPaneBoundsViewsTask (posted after the stash below) re-applies the
+    // bounds on the next UI event-loop tick, after the native NSView has been
+    // fully initialised. The overlay is kept hidden (set_visible(0)) until
+    // that task fires so the user never sees a transient wrong-size overlay.
     overlay_controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
     overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
     parent_window.layout();
-    overlay_controller.set_visible(1);
+    overlay_controller.set_visible(0); // deferred task will show after bounds commit
     tracing::info!(
         block_id = %block_id, label = %label,
         x = rect.x, y = rect.y, w = rect.width, h = rect.height,
-        "[browser-pane] views: overlay set_size + set_position + layout() + set_visible applied"
+        "[browser-pane] views: overlay set_size + set_position + layout() applied (visible=0; deferred show pending)"
     );
 
     // 7b. Return focus to the main window's BrowserView. CEF's default
@@ -290,6 +295,23 @@ pub fn create_browser_pane_view(
     tracing::info!(
         block_id = %block_id, label = %label, window_label = %window_label,
         "[browser-pane] views: OverlayController stashed in state.browser_pane_overlays"
+    );
+
+    // 10. Deferred bounds + show: re-apply set_size / set_position / layout() / set_visible(1)
+    //     on the next UI event-loop tick. On macOS the overlay's native NSView is
+    //     created asynchronously during add_overlay_view; the first-tick sizing
+    //     (step 7 above) is silently ignored because the native layer doesn't exist
+    //     yet. Posting a task ensures the bounds land AFTER CEF has initialised the
+    //     NSView. The task also re-issues set_focus(1) on the main browser in case
+    //     a focus steal happened during the event-loop tick.
+    crate::ui_tasks::post_set_pane_bounds_views(
+        &state,
+        &label,
+        &window_label,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
     );
 }
 
