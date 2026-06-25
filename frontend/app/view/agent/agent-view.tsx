@@ -1081,14 +1081,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onRegenerate={() => digest.fetch(true)}
             />
 
-            {/* Pinned activity dock — long-running shells (and later crons /
-                subagents) stay glanceable at the top while the conversation
-                scrolls under it. SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15. */}
-            <ActivityDock
-                documentAtom={agentAtoms().documentAtom}
-                documentStateAtom={agentAtoms().documentStateAtom}
-            />
-
             <AgentDocumentView
                 documentAtom={agentAtoms().documentAtom}
                 documentStateAtom={agentAtoms().documentStateAtom}
@@ -1256,6 +1248,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                         "user",
                     );
                 }}
+            />
+
+            {/* Pinned activity dock — long-running shells (and later crons /
+                subagents) sit just above the composer so task status is adjacent
+                to where the user's attention already is. Moved from the top per
+                SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
+            <ActivityDock
+                documentAtom={agentAtoms().documentAtom}
+                documentStateAtom={agentAtoms().documentStateAtom}
             />
 
             {/* Slim composer status strip — single 28-32px row replacing

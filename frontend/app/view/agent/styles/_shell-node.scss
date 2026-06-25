@@ -192,13 +192,13 @@
     flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    // Stronger separation from the pane content below: a slightly elevated
-    // surface + a 2px accent-tinted divider make the pinned region read as a
-    // distinct "dock" rather than blending into the transcript.
-    border-bottom: 2px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+    // Sits above the composer — border-top separates it from whatever is above
+    // (queue, working row, conversation). Moved from top per
+    // SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20.
+    border-top: 2px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
     background: var(--elevated-bg-color, #1d1d20);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
-    max-height: 45%;            // never let the dock eat the whole pane
+    box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.28);
+    max-height: 30%;            // tighter cap — at bottom, tall docks feel more intrusive
     overflow-y: auto;
     z-index: 2;
 }
