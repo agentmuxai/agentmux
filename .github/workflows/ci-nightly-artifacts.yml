@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       # Ninja: CEF's C wrapper (cef-dll-sys) needs CMake + Ninja; CMake ships
       # with VS on this runner. go-task: scripts/package.sh delegates build
@@ -95,14 +95,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Auth npm for @a5af GitHub Packages
         run: |
           {
             echo "@a5af:registry=https://npm.pkg.github.com"
             echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
           } >> .npmrc
-      - run: npm ci
+      - run: npm install
       - name: Install go-task
         run: brew install go-task
       - name: Import Developer ID certificate into temp keychain
@@ -163,14 +163,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - name: Auth npm for @a5af GitHub Packages
         run: |
           {
             echo "@a5af:registry=https://npm.pkg.github.com"
             echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
           } >> .npmrc
-      - run: npm ci
+      - run: npm install
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
