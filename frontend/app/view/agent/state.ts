@@ -99,12 +99,6 @@ export interface AgentAtoms {
      */
     detailsOpenAtom: SignalPair<boolean>;
     /**
-     * Shell history panel — open/closed. Reducer-owned. Mutually
-     * exclusive with `detailsOpenAtom`.
-     * Spec: SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §4.
-     */
-    shellOpenAtom: SignalPair<boolean>;
-    /**
      * Activity-log entries that arrived while the panel was closed.
      * Reducer-owned (see `AgentPaneState.composerUnreadCount`,
      * added in #1068). Drives the chevron's unread badge in the
@@ -180,7 +174,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         // Composer details panel — reducer-owned.
         // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
         detailsOpenAtom: createSignal<boolean>(false),
-        shellOpenAtom: createSignal<boolean>(false),
         composerUnreadCountAtom: createSignal<number>(0),
         currentToolArgAtom: createSignal<string | null>(null),
     };

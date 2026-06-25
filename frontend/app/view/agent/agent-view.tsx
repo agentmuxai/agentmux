@@ -66,8 +66,6 @@ import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
-import { AgentShellHistoryPanel } from "./components/AgentShellHistoryPanel";
-import { getShellHistory, clearShellHistory } from "@/app/store/shell-history";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
@@ -222,7 +220,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 initPhase: a.initPhaseAtom[1],
                 turnPhase: a.turnPhaseAtom[1],
                 detailsOpen: a.detailsOpenAtom[1],
-                shellOpen: a.shellOpenAtom[1],
                 composerUnreadCount: a.composerUnreadCountAtom[1],
                 currentToolArg: a.currentToolArgAtom[1],
             },
@@ -261,7 +258,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
             handleAgentIdChange(model.blockId, undefined);
-            clearShellHistory(model.blockId);
         });
     }
 
@@ -749,7 +745,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
-        getShellHistory(model.blockId).push(message);
         return commands.sendMessage(message, wasAlreadyWorking);
     };
 
@@ -1258,7 +1253,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 `composerUnreadCount`, added in #1068).
                 SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md. */}
             <AgentComposerStrip
-                detailsPanelId={`agent-composer-details-${model.blockId}`}
                 loading={
                     status.isLoading()
                     || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
@@ -1273,17 +1267,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     (block()?.meta?.["agent:runtime"]?.permissionMode) as
                         import("./types").PermissionMode | undefined
                 }
-                expanded={agentAtoms().detailsOpenAtom[0]()}
-                unreadCount={agentAtoms().composerUnreadCountAtom[0]()}
-                onToggleExpanded={() =>
+                logOpen={agentAtoms().detailsOpenAtom[0]()}
+                onToggleLog={() =>
                     dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")
                 }
                 contextTokens={agentAtoms().contextTokensAtom[0]()}
                 contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
-                shellOpen={agentAtoms().shellOpenAtom[0]()}
-                onToggleShell={() =>
-                    dispatchPane(model.blockId, { type: "ShellToggle" }, "user")
-                }
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}
@@ -1300,19 +1289,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                             providerId={provider()?.id ?? ""}
                         />
                     </div>
-                </Show>
-                {/* Shell history panel — sent-message recall. */}
-                <Show when={agentAtoms().shellOpenAtom[0]()}>
-                    <AgentShellHistoryPanel
-                        history={getShellHistory(model.blockId).get}
-                        onResend={(msg) => {
-                            dispatchPane(model.blockId, { type: "ShellClose" }, "user");
-                            void handleSendMessage(msg);
-                        }}
-                        onClose={() =>
-                            dispatchPane(model.blockId, { type: "ShellClose" }, "user")
-                        }
-                    />
                 </Show>
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel

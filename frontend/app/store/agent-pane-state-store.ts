@@ -212,7 +212,6 @@ export function dispatch(
     proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
     proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
     proj("detailsOpen", prev.detailsOpen, slot.state.detailsOpen, slot.proj.detailsOpen);
-    proj("shellOpen", prev.shellOpen, slot.state.shellOpen, slot.proj.shellOpen);
     proj("composerUnreadCount", prev.composerUnreadCount, slot.state.composerUnreadCount, slot.proj.composerUnreadCount);
     proj("currentToolArg", prev.currentToolArg, slot.state.currentToolArg, slot.proj.currentToolArg);
 

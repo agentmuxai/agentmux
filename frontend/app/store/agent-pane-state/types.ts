@@ -210,14 +210,6 @@ export interface AgentPaneState {
      */
     detailsOpen: boolean;
     /**
-     * Whether the shell history panel (list of sent messages) is open.
-     * Mutually exclusive with `detailsOpen` — opening one closes the other.
-     * Auto-closes on `TurnStart`.
-     * Spec: docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §4.
-     */
-    shellOpen: boolean;
-
-    /**
      * Number of activity-log entries that arrived while
      * `detailsOpen === false`. Resets to 0 on every transition
      * `detailsOpen: false → true`. Drives the chevron's unread badge
@@ -271,7 +263,6 @@ export const initialState = (agentId: string): AgentPaneState => ({
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
     detailsOpen: false,
-    shellOpen: false,
     composerUnreadCount: 0,
 });
 
@@ -465,19 +456,7 @@ export type AgentPaneCommand =
      */
     | { type: "PendingMessageExpired"; id: string }
 
-    // ── Shell history panel ───────────────────────────────────────
-    /**
-     * Toggle the shell history panel. Mutually exclusive with
-     * `detailsOpen` — opening shell closes details, and vice versa.
-     * Spec: docs/specs/SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §4.
-     */
-    | { type: "ShellToggle" }
-    /** Idempotent open — also closes `detailsOpen`. */
-    | { type: "ShellExpand" }
-    /** Idempotent close. */
-    | { type: "ShellClose" }
-
-    // ── Composer details panel ────────────────────────────────────
+    // ── Composer details / Log panel ─────────────────────────────
     /**
      * User clicked the chevron or the strip body — toggle the details
      * panel. On flip-to-open, resets `composerUnreadCount` to 0.

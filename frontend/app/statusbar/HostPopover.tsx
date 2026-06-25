@@ -7,6 +7,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { RuntimeBadge } from "@/app/view/agent/components/RuntimeBadge";
 
 type HostInfo = {
     hostname: string;
@@ -123,7 +124,7 @@ const HostPopover = (): JSX.Element => {
                             </div>
                             <div class="status-bar-popover-row">
                                 <span class="status-bar-popover-label">Host</span>
-                                <span>{hostInfo()!.hostType}</span>
+                                <RuntimeBadge runtime={hostInfo()!.hostType} size="sm" />
                             </div>
                             <div class="status-bar-popover-row">
                                 <span class="status-bar-popover-label">PID</span>

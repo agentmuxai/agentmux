@@ -337,11 +337,8 @@ export function update(
                         submittedAt: command.at,
                         pendingContent: "",
                     },
-                    // Auto-collapse the composer details panel and shell
-                    // history panel on send — don't obscure the turn start.
-                    // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+                    // Auto-collapse the log panel on send — don't obscure the turn start.
                     detailsOpen: false,
-                    shellOpen: false,
                 },
                 events,
             };
@@ -764,56 +761,21 @@ export function update(
                 state: {
                     ...state,
                     detailsOpen: opening,
-                    // Mutual exclusion: opening details closes shell.
-                    shellOpen: opening ? false : state.shellOpen,
                     composerUnreadCount: opening ? 0 : state.composerUnreadCount,
                 },
                 events: [],
             };
         }
         case "DetailsExpand": {
-            if (state.detailsOpen && state.composerUnreadCount === 0 && !state.shellOpen) {
+            if (state.detailsOpen && state.composerUnreadCount === 0) {
                 return { state, events: [] };
             }
             return {
                 state: {
                     ...state,
                     detailsOpen: true,
-                    shellOpen: false,
                     composerUnreadCount: 0,
                 },
-                events: [],
-            };
-        }
-
-        // ── Shell history panel ────────────────────────────────────
-        case "ShellToggle": {
-            const opening = !state.shellOpen;
-            return {
-                state: {
-                    ...state,
-                    shellOpen: opening,
-                    // Mutual exclusion: opening shell closes details.
-                    detailsOpen: opening ? false : state.detailsOpen,
-                },
-                events: [],
-            };
-        }
-        case "ShellExpand": {
-            if (state.shellOpen && !state.detailsOpen) {
-                return { state, events: [] };
-            }
-            return {
-                state: { ...state, shellOpen: true, detailsOpen: false },
-                events: [],
-            };
-        }
-        case "ShellClose": {
-            if (!state.shellOpen) {
-                return { state, events: [] };
-            }
-            return {
-                state: { ...state, shellOpen: false },
                 events: [],
             };
         }
