@@ -9,7 +9,7 @@ import {
     registerGlobalKeys,
 } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
-import { ClientService, WindowService, WorkspaceService } from "@/app/store/services";
+import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
 import { getLayoutModelForStaticTab } from "@/layout/index";
@@ -35,6 +35,7 @@ import {
 import * as WOS from "@/app/store/wos";
 import { createEffect, createRoot, createSignal } from "solid-js";
 import {
+    DISPLAY_NAME_MAX_LEN,
     DISPLAY_NAME_META_KEY,
     formatWindowTitle,
     resolveWindowName,
@@ -388,6 +389,16 @@ async function initHostWave(): Promise<void> {
         await initWaveWrap(initOpts);
         tlog("initWaveWrap", t);
         tlog("TOTAL initTauriWave", t0);
+
+        // Apply dev window title — task dev TITLE="agentx: PR #1780"
+        // Only runs in Vite dev mode; VITE_DEV_TITLE is empty string in prod builds.
+        const devTitle = import.meta.env.VITE_DEV_TITLE;
+        if (import.meta.env.DEV && devTitle) {
+            void ObjectService.UpdateObjectMeta(
+                WOS.makeORef("window", initOpts.windowId),
+                { [DISPLAY_NAME_META_KEY]: devTitle.slice(0, DISPLAY_NAME_MAX_LEN) } as MetaType,
+            );
+        }
 
         // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();

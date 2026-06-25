@@ -5,19 +5,13 @@
  * AgentComposerStrip — slim 28-32px status row that sits directly above
  * the textarea in the agent pane composer region.
  *
- * Redesigned per SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md:
- *   - LEFT: Model <select> · Effort <select> · Shell toggle button
- *   - RIGHT: tokens (↑in ↓out) · elapsed · ⚙N process badge ·
- *            permission pill · context text (12.1k / 64k) · chevron
+ * LEFT:  Model <select> · Effort <select> · Log toggle button
+ * RIGHT: tokens (↑in ↓out) · elapsed · ⚙N process badge ·
+ *        permission pill · context text (12.1k / 64k)
  *
- * The prior left-zone spinner + tool name (⟳ bash) has been removed —
- * AgentWorkingRow (rendered just above this strip) is the canonical
- * in-flight status indicator.
- *
- * ARIA contract: outer strip is a layout container only (no role/tabIndex).
- * Model/effort selects and Shell/chevron buttons own their own focus
- * and keyboard contracts. Body click toggles details for mouse-only
- * convenience; keyboard users use Tab → target → Enter.
+ * The strip bar itself is not clickable. "Log" is the sole toggle for
+ * the ActivityLogPanel. Chevron and shell history panel removed per
+ * SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md.
  */
 
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
@@ -72,10 +66,6 @@ function fmtElapsed(ms: number): string {
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function fmtBadgeCount(n: number): string {
-    return n > 9 ? "9+" : String(n);
-}
-
 function fmtK(n: number): string {
     return `${Math.round(n / 100) / 10}k`;
 }
@@ -105,11 +95,6 @@ function contextTitle(tokens: number, contextWindow: number | undefined): string
 // ── Props ──────────────────────────────────────────────────────────────────
 
 interface AgentComposerStripProps {
-    /**
-     * DOM id of the details panel this strip toggles. Used for
-     * `aria-controls` on the chevron button.
-     */
-    detailsPanelId: string;
     /** True while a turn is in flight. */
     loading?: boolean;
     /** Final session totals; non-null after the first TurnEnd. */
@@ -122,22 +107,14 @@ interface AgentComposerStripProps {
     onProcessBadgeClick?: () => void;
     /** Permission mode — renders a color-coded pill when not `auto`. */
     permissionMode?: PermissionMode;
-    /** Reducer-projected: details panel open/closed. */
-    expanded: boolean;
-    /** Reducer-projected: unread activity-log entries while collapsed. */
-    unreadCount: number;
+    /** Reducer-projected: activity log panel open/closed. */
+    logOpen: boolean;
     /** Dispatches `DetailsToggle` to the pane reducer. */
-    onToggleExpanded: () => void;
+    onToggleLog: () => void;
     /** Current context fill in tokens (from message_start). */
     contextTokens?: number | null;
     /** Provider's max context window size. undefined = unknown. */
     contextWindow?: number;
-
-    // ── Shell panel ────────────────────────────────────────────────
-    /** Whether the shell history panel is open. */
-    shellOpen?: boolean;
-    /** Dispatches `ShellToggle` to the pane reducer. */
-    onToggleShell?: () => void;
 
     // ── Inline model / effort controls ────────────────────────────
     /** Block id — needed for applyRuntimeChange. */
@@ -188,13 +165,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return m != null && m !== "auto" && hasOwn.call(PERMISSION_LABELS, m);
     };
 
-    // Guard clicks on interactive children from triggering the strip-body toggle.
-    const eventTargetIsInteractive = (e: MouseEvent): boolean => {
-        const t = e.target as HTMLElement | null;
-        if (!t) return false;
-        return t.closest("button, select") != null;
-    };
-
     // Model/effort — derived from blockAtom meta when available.
     const runtime = () =>
         props.blockAtom ? getRuntimeConfig(props.blockAtom()?.meta) : null;
@@ -238,14 +208,9 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     return (
         <div
             class="agent-composer-strip"
-            classList={{ "agent-composer-strip--expanded": props.expanded }}
-            onClick={(e) => {
-                if (!eventTargetIsInteractive(e)) {
-                    props.onToggleExpanded();
-                }
-            }}
+            classList={{ "agent-composer-strip--expanded": props.logOpen }}
         >
-            {/* Controls zone — model/effort selects + Shell button */}
+            {/* Controls zone — model/effort selects + Log button */}
             <span class="agent-composer-strip-controls">
                 <Show when={showControls()}>
                     <select
@@ -253,7 +218,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         title="Model"
                         value={runtime()?.model}
                         onChange={(e) => void updateRuntime({ model: e.currentTarget.value as ModelChoice })}
-                        onClick={(e) => e.stopPropagation()}
                     >
                         {MODEL_OPTIONS.map((o) => (
                             <option value={o.value}>{o.label}</option>
@@ -264,7 +228,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         title="Effort"
                         value={runtime()?.effort}
                         onChange={(e) => void updateRuntime({ effort: e.currentTarget.value as EffortLevel })}
-                        onClick={(e) => e.stopPropagation()}
                     >
                         {EFFORT_OPTIONS.map((o) => (
                             <option value={o.value}>{o.label}</option>
@@ -273,19 +236,16 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
                 <button
                     type="button"
-                    class="agent-composer-strip-shell-btn"
-                    classList={{ "agent-composer-strip-shell-btn--active": !!props.shellOpen }}
-                    title={props.shellOpen ? "Close shell history" : "Open shell history"}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        props.onToggleShell?.();
-                    }}
+                    class="agent-composer-strip-log-btn"
+                    classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
+                    title={props.logOpen ? "Close activity log" : "Open activity log"}
+                    onClick={() => props.onToggleLog()}
                 >
-                    Shell
+                    Log
                 </button>
             </span>
 
-            {/* Right zone — stats + permission + context text + chevron */}
+            {/* Right zone — stats + permission + context text */}
             <span class="agent-composer-strip-right">
                 <Show when={rightText()}>
                     <span class="agent-composer-strip-stats">{rightText()}</span>
@@ -296,10 +256,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         class="agent-composer-strip-process-badge"
                         data-strip-button
                         title={`${props.processCount} tracked ${props.processCount === 1 ? "process" : "processes"} — click to open swarm`}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            props.onProcessBadgeClick?.();
-                        }}
+                        onClick={() => props.onProcessBadgeClick?.()}
                     >
                         <span aria-hidden="true">⚙</span>
                         <span>{props.processCount}</span>
@@ -324,29 +281,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         {ctxText()}
                     </span>
                 </Show>
-                <button
-                    type="button"
-                    class="agent-composer-strip-chevron"
-                    classList={{ "agent-composer-strip-chevron--expanded": props.expanded }}
-                    aria-expanded={props.expanded}
-                    aria-controls={props.detailsPanelId}
-                    aria-label={
-                        props.expanded
-                            ? `Collapse composer details${props.unreadCount > 0 ? ` (${props.unreadCount} unread)` : ""}`
-                            : `Expand composer details${props.unreadCount > 0 ? ` (${props.unreadCount} unread)` : ""}`
-                    }
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        props.onToggleExpanded();
-                    }}
-                >
-                    <span aria-hidden="true">{props.expanded ? "▴" : "▾"}</span>
-                    <Show when={!props.expanded && props.unreadCount > 0}>
-                        <sup class="agent-composer-strip-chevron-badge" aria-hidden="true">
-                            {fmtBadgeCount(props.unreadCount)}
-                        </sup>
-                    </Show>
-                </button>
             </span>
         </div>
     );
