@@ -14,7 +14,11 @@ export function IconButton(props: IconButtonProps): JSX.Element {
     useLongClick(
         () => btnRef,
         (e) => props.decl.click?.(e),
-        (e) => props.decl.longClick?.(e),
+        // Read longClick once at mount to preserve the null-guard inside
+        // useLongClick. A lambda wrapper would always be truthy, arming
+        // the 300ms timer on every mousedown and swallowing clicks on
+        // buttons that have no long-click handler.
+        props.decl.longClick ? (e) => props.decl.longClick!(e) : undefined,
         props.decl.disabled ?? false
     );
     return (
