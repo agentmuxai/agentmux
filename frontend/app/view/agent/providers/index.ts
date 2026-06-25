@@ -226,7 +226,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // muxcode — AgentMux's first-party agentic coding CLI.
     // Supports local GGUF inference via llama-server, Anthropic, OpenAI, and
     // OpenAI-compatible backends. Emits claude-stream-json NDJSON output.
-    // npm: @a5af/muxcode
+    // npm: @agentmuxai/muxcode
     muxcode: {
         id: "muxcode",
         displayName: "Mux Code",
@@ -243,11 +243,11 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         // `auth login` pulls a default local model when no backend is configured.
         authLoginCommand: ["auth", "login"],
-        npmPackage: "@a5af/muxcode",
-        pinnedVersion: "latest",
+        npmPackage: "@agentmuxai/muxcode",
+        pinnedVersion: "0.1.0",
         docsUrl: "https://github.com/agentmuxai/muxcode",
-        windowsInstallCommand: "npm install -g @a5af/muxcode",
-        unixInstallCommand: "npm install -g @a5af/muxcode",
+        windowsInstallCommand: "npm install -g @agentmuxai/muxcode",
+        unixInstallCommand: "npm install -g @agentmuxai/muxcode",
         icon: "brain",
         authConfigDirEnvVar: "MUXCODE_CONFIG_DIR",
         authDirName: "muxcode",
@@ -310,7 +310,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth"],
         npmPackage: "@qwen-code/qwen-code",
-        pinnedVersion: "latest",
+        pinnedVersion: "0.19.2",
         docsUrl: "https://qwenlm.github.io/qwen-code-docs",
         windowsInstallCommand: "npm install -g @qwen-code/qwen-code",
         unixInstallCommand: "npm install -g @qwen-code/qwen-code",
@@ -363,7 +363,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // only the args here. Kimi's `["login"]` is the convention.
         authLoginCommand: ["models", "auth", "login", "--provider", "openai-codex"],
         npmPackage: "openclaw",
-        pinnedVersion: "latest",
+        pinnedVersion: "2026.6.10",
         docsUrl: "https://docs.openclaw.ai",
         windowsInstallCommand: "npm install -g openclaw",
         unixInstallCommand: "npm install -g openclaw",
@@ -428,7 +428,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth", "login"],
         npmPackage: "@github/copilot",
-        pinnedVersion: "latest",
+        pinnedVersion: "1.0.65",
         docsUrl: "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
         windowsInstallCommand: "npm install -g @github/copilot",
         unixInstallCommand: "npm install -g @github/copilot",
@@ -456,7 +456,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["config", "get", "provider"],
         authLoginCommand: ["config"],
         npmPackage: "@mariozechner/pi-coding-agent",
-        pinnedVersion: "latest",
+        pinnedVersion: "0.73.1",
         docsUrl: "https://github.com/badlogic/pi-mono",
         windowsInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
         unixInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
