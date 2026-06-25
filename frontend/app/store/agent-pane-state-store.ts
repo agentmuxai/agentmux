@@ -62,11 +62,6 @@ export interface AgentPaneProjections {
      */
     detailsOpen?: (next: boolean) => void;
     /**
-     * Shell history panel — open/closed. Mutually exclusive with
-     * `detailsOpen`. Spec: SPEC_AGENT_COMPOSER_STRIP_REDESIGN_2026_06_23.md §4.
-     */
-    shellOpen?: (next: boolean) => void;
-    /**
      * Activity-log entries that arrived while the panel was closed.
      * Reducer-owned (PR #1068). Drives the chevron's unread badge.
      */
