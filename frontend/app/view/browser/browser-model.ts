@@ -153,6 +153,7 @@ export class BrowserViewModel implements ViewModel {
     private _faviconUnsub: (() => void) | null = null;
 
     blockAtom: Accessor<Block | undefined>;
+    showControlsAtom: Accessor<boolean>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -303,6 +304,7 @@ export class BrowserViewModel implements ViewModel {
                 this.diag(`vm-favicon-memo-eval value=${JSON.stringify(v)}`);
                 return v;
             });
+            this.showControlsAtom = createMemo(() => (this.blockAtom()?.meta?.["browser:show_controls"] as boolean | undefined) ?? true);
             return dispose;
         });
 
