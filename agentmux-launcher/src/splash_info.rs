@@ -30,7 +30,7 @@ impl SplashInfo {
     }
 
     /// The footer lines to render (each clamped to `max_chars`):
-    /// line 1 = `user@host`, line 2 = `v<version>` (+ ` (<dev_label>)`).
+    /// line 1 = `user@host`, line 2 = `v<version>` (+ ` DEV` on dev builds).
     pub fn footer_lines(&self, max_chars: usize) -> Vec<String> {
         let l1 = ellipsize(&format!("{}@{}", self.user, self.host), max_chars);
         let l2 = match &self.dev_label {
