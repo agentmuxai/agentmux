@@ -36,8 +36,6 @@
     cursor: default;
     // Layer A — recessed strip (SPEC_TAB_CONTENT_FOLDER_SURFACE §3, §10.6).
     background: var(--tab-strip-bg);
-    // Folder boundary — single rule on the container for a full-width gap-free line.
-    border-bottom: var(--snap-chrome) solid var(--border-color);
     // Window drag is JS-driven (NOT -webkit-app-region: drag). Chromium
     // architecturally suppresses ALL events on drag regions before they
     // enter the renderer (verified 2026-05-02 via document capture-phase
@@ -56,5 +54,8 @@
         height: 100%;
         width: var(--default-indent);
         flex-shrink: 0;
+        // Folder boundary (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6): 0px wide
+        // on Linux so this is a no-op visually, but kept for parity.
+        border-bottom: var(--snap-chrome) solid var(--border-color);
     }
 }

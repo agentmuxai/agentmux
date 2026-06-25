@@ -68,6 +68,13 @@
             left: unset;
             transform: none;
             -webkit-app-region: no-drag;
+
+            // Folder boundary on inactive tabs only — cheap `:not(.active)`
+            // (NOT `:has()`, which retrips the tab-switch long-task gate). The
+            // active tab omits the line so it opens into the surface below.
+            &:not(.active) {
+                border-bottom: var(--snap-chrome) solid var(--border-color);
+            }
         }
 
         // Constant inter-tab separator. Uses the v-separator mixin which
@@ -161,6 +168,10 @@
         min-width: 0;
         height: 100%;
         align-self: stretch;
+        // Folder boundary continuation (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6):
+        // extends the hairline that .tab:not(.active) draws across the fill
+        // area so the full-width line is unbroken except under the active tab.
+        border-bottom: var(--snap-chrome) solid var(--border-color);
     }
 
 }

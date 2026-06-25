@@ -10,6 +10,10 @@
     justify-content: flex-end;
     margin-left: auto;
     margin-right: var(--space-1-5);
+    // Folder boundary continuation (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6):
+    // the right-side chrome needs the same bottom hairline as the tab strip
+    // so the boundary line is unbroken across the full header width.
+    border-bottom: var(--snap-chrome) solid var(--border-color);
 
     .config-error-button {
         color: black;
