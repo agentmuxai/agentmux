@@ -6,6 +6,7 @@ import { invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
 
 type HostInfo = {
     hostname: string;
@@ -29,6 +30,7 @@ const HostPopover = (): JSX.Element => {
     const [popoverOpen, setPopoverOpen] = createSignal(false);
     const [hostInfo, setHostInfo] = createSignal<HostInfo | null>(null);
     let popoverRef!: HTMLDivElement;
+    const muxbus = useMuxBusStatus();
 
     const lanInstances = lanInstancesAtom;
     const lanCount = () => lanInstances().length;
@@ -64,6 +66,7 @@ const HostPopover = (): JSX.Element => {
             // Fallback for Tauri (doesn't have get_host_info yet)
             setHostInfo(null);
         }
+        void muxbus.refresh();
         setPopoverOpen(true);
     };
 
@@ -186,6 +189,48 @@ const HostPopover = (): JSX.Element => {
                                     <span>Searching for peers…</span>
                                 </div>
                             </Show>
+
+                            {/* MuxBus Cloud */}
+                            <Show when={muxbus.isConfigured()}>
+                                <div class="status-bar-popover-divider" />
+                                <div class="status-bar-popover-row">
+                                    <span class="status-bar-popover-label">MuxBus Cloud</span>
+                                    <Show
+                                        when={muxbus.status()?.connected && muxbus.status()?.valid}
+                                        fallback={
+                                            <button
+                                                type="button"
+                                                class="muxbus-login-chip muxbus-login-chip-signin"
+                                                style={{ "margin-left": "auto", height: "auto", padding: "1px 8px" }}
+                                                disabled={muxbus.loading()}
+                                                onClick={() => void muxbus.connect()}
+                                            >
+                                                {muxbus.loading() ? "●···" : muxbus.status()?.connected ? "Expired — re-login" : "Sign in"}
+                                            </button>
+                                        }
+                                    >
+                                        <span class="status-bar-popover-mono" style={{ "font-size": "0.85em" }}>{muxbus.status()?.email}</span>
+                                    </Show>
+                                </div>
+                                <Show when={muxbus.status()?.connected && muxbus.status()?.valid}>
+                                    <div class="status-bar-popover-row" style={{ "justify-content": "flex-end" }}>
+                                        <button
+                                            type="button"
+                                            class="muxbus-popover-disconnect-btn"
+                                            disabled={muxbus.loading()}
+                                            onClick={() => void muxbus.disconnect()}
+                                        >
+                                            {muxbus.loading() ? "Disconnecting…" : "Disconnect"}
+                                        </button>
+                                    </div>
+                                </Show>
+                                <Show when={muxbus.error()}>
+                                    <div class="status-bar-popover-row" style={{ "font-size": "0.85em", color: "var(--warning-color, #d97706)" }}>
+                                        <span>⚠ {muxbus.error()}</span>
+                                    </div>
+                                </Show>
+                            </Show>
+
                             <div class="status-bar-popover-divider" />
 
                             {/* Ports */}
