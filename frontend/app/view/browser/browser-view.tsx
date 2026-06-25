@@ -410,6 +410,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
 
     return (
         <div class="browser-view">
+            <Show when={model.showControlsAtom()}>
             <div class="browser-nav-bar">
                 <button
                     class="browser-nav-btn"
@@ -482,6 +483,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 />
                 <button class="browser-nav-btn browser-go-btn" onClick={handleNavigate}>Go</button>
             </div>
+            </Show>
 
             <Show when={model.errorAtom()}>
                 <div class="browser-error">{model.errorAtom()}</div>

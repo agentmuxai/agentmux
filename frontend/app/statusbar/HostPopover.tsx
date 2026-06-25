@@ -224,6 +224,11 @@ const HostPopover = (): JSX.Element => {
                                         </button>
                                     </div>
                                 </Show>
+                                <Show when={muxbus.error()}>
+                                    <div class="status-bar-popover-row" style={{ "font-size": "0.85em", color: "var(--warning-color, #d97706)" }}>
+                                        <span>⚠ {muxbus.error()}</span>
+                                    </div>
+                                </Show>
                             </Show>
 
                             <div class="status-bar-popover-divider" />

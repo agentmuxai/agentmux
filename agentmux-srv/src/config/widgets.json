@@ -121,70 +121,75 @@
     "defwidget@discord": {
         "display:order": 10,
         "display:pinned": false,
-        "icon": "message-circle",
+        "icon": "brands@discord",
         "color": "#5865f2",
         "label": "Discord",
         "description": "Discord — real interface, agent-connected via background bridge",
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://discord.com/app"
+                "url": "https://discord.com/app",
+                "browser:show_controls": false
             }
         }
     },
     "defwidget@slack": {
         "display:order": 11,
         "display:pinned": false,
-        "icon": "hash",
+        "icon": "brands@slack",
         "color": "#4a154b",
         "label": "Slack",
         "description": "Slack — real interface, agent-connected (bridge Phase 2)",
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://app.slack.com/"
+                "url": "https://app.slack.com/",
+                "browser:show_controls": false
             }
         }
     },
     "defwidget@telegram": {
         "display:order": 12,
         "display:pinned": false,
-        "icon": "send",
+        "icon": "brands@telegram",
         "color": "#229ed9",
         "label": "Telegram",
         "description": "Telegram Web — real interface, agent-connected (bridge Phase 2)",
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://web.telegram.org/"
+                "url": "https://web.telegram.org/",
+                "browser:show_controls": false
             }
         }
     },
     "defwidget@whatsapp": {
         "display:order": 13,
         "display:pinned": false,
-        "icon": "message-square",
+        "icon": "brands@whatsapp",
         "color": "#25d366",
         "label": "WhatsApp",
         "description": "WhatsApp Web — real interface, agent-connected (bridge Phase 3)",
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://web.whatsapp.com/"
+                "url": "https://web.whatsapp.com/",
+                "browser:show_controls": false
             }
         }
     },
     "defwidget@teams": {
         "display:order": 14,
         "display:pinned": false,
-        "icon": "users",
+        "icon": "brands@microsoft",
         "color": "#6264a7",
         "label": "Teams",
         "description": "Microsoft Teams Web — real interface, agent-connected (bridge Phase 3)",
         "blockdef": {
             "meta": {
                 "view": "browser",
-                "url": "https://teams.microsoft.com/"
+                "url": "https://teams.microsoft.com/",
+                "browser:show_controls": false
             }
         }
     }
