@@ -53,9 +53,13 @@ tasks:
             - bash scripts/dev-local.sh {{.CLI_ARGS}}
 
     dev:
-        desc: Run AgentMux in development mode (Vite hot reload).
+        desc: 'Run AgentMux in development mode (Vite hot reload). Optional: task dev TITLE="agentx: PR #1780" sets the OS window title so you can tell parallel dev sessions apart.'
+        vars:
+            TITLE: ''
         cmds:
             - task: dev:serve
+              vars:
+                  TITLE: '{{.TITLE}}'
         deps:
             - npm:install
             - build:backend
@@ -698,6 +702,10 @@ tasks:
     dev:serve:
         internal: true
         desc: Start Vite dev server and the app concurrently, via the launcher (launcher → srv + host on all platforms; Windows uses the runtime/ layout, macOS/Linux a flat layout).
+        vars:
+            TITLE: ''
+        env:
+            VITE_DEV_TITLE: '{{.TITLE}}'
         cmds:
             - task: build:host
             - task: bundle

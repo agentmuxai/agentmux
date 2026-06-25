@@ -10,18 +10,18 @@ interface RuntimeBadgeProps {
     size?: "sm" | "md";
 }
 
-export const RuntimeBadge = (props: RuntimeBadgeProps): JSX.Element | null => {
-    if (props.runtime !== "host" && props.runtime !== "container") return null;
-
+export const RuntimeBadge = (props: RuntimeBadgeProps): JSX.Element => {
     const isContainer = () => props.runtime === "container";
+    const isHost = () => props.runtime === "host";
+    const isKnown = () => isContainer() || isHost();
 
     return (
         <span
-            class={`runtime-badge runtime-badge--${props.runtime} runtime-badge--${props.size ?? "sm"}`}
-            title={isContainer() ? "Runs in an isolated Docker container" : "Runs directly on your machine with full system access"}
+            class={`runtime-badge runtime-badge--${isKnown() ? props.runtime : "unknown"} runtime-badge--${props.size ?? "sm"}`}
+            title={isContainer() ? "Runs in an isolated Docker container" : isHost() ? "Runs directly on your machine with full system access" : props.runtime}
         >
-            <i class={`fa-solid ${isContainer() ? "fa-box" : "fa-server"}`} aria-hidden="true" />
-            {isContainer() ? "Container" : "Host"}
+            <i class={`fa-solid ${isContainer() ? "fa-box" : isHost() ? "fa-server" : "fa-circle-question"}`} aria-hidden="true" />
+            {isContainer() ? "Container" : isHost() ? "Host" : props.runtime}
         </span>
     );
 };

@@ -32,6 +32,12 @@
         border: 1px solid color-mix(in srgb, var(--warning-color, #f59e0b) 30%, transparent);
     }
 
+    &--unknown {
+        background: color-mix(in srgb, var(--main-text-color, #9ca3af) 10%, transparent);
+        color: var(--secondary-text-color, #6b7280);
+        border: 1px solid color-mix(in srgb, var(--main-text-color, #9ca3af) 20%, transparent);
+    }
+
     i {
         font-size: 0.85em;
     }

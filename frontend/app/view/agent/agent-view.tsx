@@ -66,8 +66,6 @@ import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
-import { AgentShellHistoryPanel } from "./components/AgentShellHistoryPanel";
-import { getShellHistory, clearShellHistory } from "@/app/store/shell-history";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
@@ -222,8 +220,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 initPhase: a.initPhaseAtom[1],
                 turnPhase: a.turnPhaseAtom[1],
                 detailsOpen: a.detailsOpenAtom[1],
-                shellOpen: a.shellOpenAtom[1],
-                composerUnreadCount: a.composerUnreadCountAtom[1],
                 currentToolArg: a.currentToolArgAtom[1],
             },
         });
@@ -261,7 +257,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
             handleAgentIdChange(model.blockId, undefined);
-            clearShellHistory(model.blockId);
         });
     }
 
@@ -289,25 +284,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // in the collapsible `<ActivityLogPanel>` above the composer.
     // `log` is passed down to every hook whose signature takes a `LogFn`.
     const { lines: logLines, append: log } = useActivityLog();
-
-    // Cross-slice projection: dispatch `LogEntryArrived` to the pane
-    // reducer on each new log line, so it can increment
-    // `composerUnreadCount` while the composer details panel is closed.
-    // Tracked via prev-length to detect strict growth (`clear()` shrinks
-    // the array; we don't want to count that). Reducer-side gating means
-    // entries arriving while the panel is open are no-ops, so this is
-    // safe to dispatch unconditionally on growth.
-    // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
-    createEffect((prevLen: number) => {
-        const cur = logLines().length;
-        if (cur > prevLen) {
-            const grown = cur - prevLen;
-            for (let i = 0; i < grown; i++) {
-                dispatchPaneIfRegistered(model.blockId, { type: "LogEntryArrived" }, "system");
-            }
-        }
-        return cur;
-    }, 0);
 
     // Startup sequence callback ref — assigned after commands + handleSendMessage
     // are defined (below), so the onReady callback can reference them.
@@ -749,7 +725,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
-        getShellHistory(model.blockId).push(message);
         return commands.sendMessage(message, wasAlreadyWorking);
     };
 
@@ -1249,16 +1224,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 documentStateAtom={agentAtoms().documentStateAtom}
             />
 
-            {/* Slim composer status strip — single 28-32px row replacing
-                the prior AgentStatusLine. Surfaces the latest activity-
-                log entry as a live ticker on the left, tokens/elapsed/
-                process-count on the right, and a chevron with unread
-                badge that toggles the details panel. State is reducer-
-                owned (`AgentPaneState.detailsOpen` /
-                `composerUnreadCount`, added in #1068).
-                SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md. */}
+            {/* Composer status strip — single 28-32px row with live
+                activity ticker and Log button that toggles the log panel.
+                State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
-                detailsPanelId={`agent-composer-details-${model.blockId}`}
                 loading={
                     status.isLoading()
                     || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
@@ -1273,17 +1242,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     (block()?.meta?.["agent:runtime"]?.permissionMode) as
                         import("./types").PermissionMode | undefined
                 }
-                expanded={agentAtoms().detailsOpenAtom[0]()}
-                unreadCount={agentAtoms().composerUnreadCountAtom[0]()}
-                onToggleExpanded={() =>
+                logOpen={agentAtoms().detailsOpenAtom[0]()}
+                onToggleLog={() =>
                     dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")
                 }
                 contextTokens={agentAtoms().contextTokensAtom[0]()}
                 contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
-                shellOpen={agentAtoms().shellOpenAtom[0]()}
-                onToggleShell={() =>
-                    dispatchPane(model.blockId, { type: "ShellToggle" }, "user")
-                }
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}
@@ -1300,19 +1264,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                             providerId={provider()?.id ?? ""}
                         />
                     </div>
-                </Show>
-                {/* Shell history panel — sent-message recall. */}
-                <Show when={agentAtoms().shellOpenAtom[0]()}>
-                    <AgentShellHistoryPanel
-                        history={getShellHistory(model.blockId).get}
-                        onResend={(msg) => {
-                            dispatchPane(model.blockId, { type: "ShellClose" }, "user");
-                            void handleSendMessage(msg);
-                        }}
-                        onClose={() =>
-                            dispatchPane(model.blockId, { type: "ShellClose" }, "user")
-                        }
-                    />
                 </Show>
                 <Show when={commands.helpVisible()}>
                     <SlashHelpPanel

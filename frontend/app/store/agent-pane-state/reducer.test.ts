@@ -1756,51 +1756,38 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
-    // ── Composer details panel (PR composer-slim-status) ────────────
-    // Spec: SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+    // ── Composer details / Log panel ────────────────────────────────
     describe("Composer details panel", () => {
-        it("initial state: detailsOpen false, composerUnreadCount 0", () => {
+        it("initial state: detailsOpen false", () => {
             const s = mk();
             expect(s.detailsOpen).toBe(false);
-            expect(s.composerUnreadCount).toBe(0);
         });
 
-        it("DetailsToggle: closed → open resets unread counter", () => {
+        it("DetailsToggle: closed → open", () => {
             let s = mk();
-            // Seed the counter as if entries arrived while closed.
-            s = { ...s, composerUnreadCount: 5 };
             const r = update(s, { type: "DetailsToggle" });
             expect(r.state.detailsOpen).toBe(true);
-            expect(r.state.composerUnreadCount).toBe(0);
             expect(r.events).toEqual([]);
         });
 
-        it("DetailsToggle: open → closed preserves unread counter", () => {
-            // After toggle-closed, the counter starts accumulating from
-            // its previous value (which DetailsToggle's open->true reset
-            // moments earlier — so it's 0 at this point).
+        it("DetailsToggle: open → closed", () => {
             let s = mk();
-            s = update(s, { type: "DetailsToggle" }).state; // open
-            s = update(s, { type: "DetailsToggle" }).state; // close
+            s = update(s, { type: "DetailsToggle" }).state;
+            s = update(s, { type: "DetailsToggle" }).state;
             expect(s.detailsOpen).toBe(false);
-            expect(s.composerUnreadCount).toBe(0);
         });
 
-        it("DetailsExpand: idempotent when already open with 0 unread", () => {
+        it("DetailsExpand: idempotent when already open", () => {
             let s = mk();
             s = update(s, { type: "DetailsExpand" }).state;
             const r = update(s, { type: "DetailsExpand" });
-            // Same reference proves the no-op path.
             expect(r.state).toBe(s);
         });
 
-        it("DetailsExpand: clears unread counter if open and counter non-zero", () => {
-            // Edge case: DetailsToggle should have zeroed unread on
-            // open, but defence in depth — DetailsExpand also zeroes.
-            let s = mk();
-            s = { ...s, detailsOpen: true, composerUnreadCount: 3 };
+        it("DetailsExpand: opens when closed", () => {
+            const s = mk();
             const r = update(s, { type: "DetailsExpand" });
-            expect(r.state.composerUnreadCount).toBe(0);
+            expect(r.state.detailsOpen).toBe(true);
         });
 
         it("DetailsCollapse: idempotent when already closed", () => {
@@ -1809,46 +1796,11 @@ describe("agent-pane-state reducer", () => {
             expect(r.state).toBe(s);
         });
 
-        it("DetailsCollapse: closes an open panel without resetting unread", () => {
+        it("DetailsCollapse: closes an open panel", () => {
             let s = mk();
             s = update(s, { type: "DetailsExpand" }).state;
-            // Simulate a stale counter value to confirm collapse leaves it alone.
-            s = { ...s, composerUnreadCount: 2 };
             const r = update(s, { type: "DetailsCollapse" });
             expect(r.state.detailsOpen).toBe(false);
-            expect(r.state.composerUnreadCount).toBe(2);
-        });
-
-        it("LogEntryArrived: increments unread while panel closed", () => {
-            let s = mk();
-            s = update(s, { type: "LogEntryArrived" }).state;
-            s = update(s, { type: "LogEntryArrived" }).state;
-            s = update(s, { type: "LogEntryArrived" }).state;
-            expect(s.composerUnreadCount).toBe(3);
-        });
-
-        it("LogEntryArrived: no-op while panel open", () => {
-            let s = mk();
-            s = update(s, { type: "DetailsExpand" }).state;
-            const before = s;
-            s = update(s, { type: "LogEntryArrived" }).state;
-            // Same-ref preserves reactive identity — the strip's
-            // badge memo doesn't tick for no reason.
-            expect(s).toBe(before);
-            expect(s.composerUnreadCount).toBe(0);
-        });
-
-        it("expand sequence: unread accumulates → toggle clears", () => {
-            let s = mk();
-            s = update(s, { type: "LogEntryArrived" }).state;
-            s = update(s, { type: "LogEntryArrived" }).state;
-            expect(s.composerUnreadCount).toBe(2);
-            s = update(s, { type: "DetailsToggle" }).state;
-            expect(s.detailsOpen).toBe(true);
-            expect(s.composerUnreadCount).toBe(0);
-            s = update(s, { type: "DetailsToggle" }).state; // close
-            s = update(s, { type: "LogEntryArrived" }).state;
-            expect(s.composerUnreadCount).toBe(1);
         });
 
         it("TurnStart auto-collapses an open details panel", () => {
@@ -1859,18 +1811,7 @@ describe("agent-pane-state reducer", () => {
             expect(s.detailsOpen).toBe(true);
             const r = update(s, { type: "TurnStart", at: 200 });
             expect(r.state.detailsOpen).toBe(false);
-            // And the turn still actually started — no side-effects
-            // on the existing TurnStart contract.
             expect(r.state.turnPhase.kind).toBe("Submitting");
-        });
-
-        it("TurnStart preserves composerUnreadCount", () => {
-            let s = ready(100);
-            s = { ...s, composerUnreadCount: 4 };
-            const r = update(s, { type: "TurnStart", at: 200 });
-            // Counter survives the turn start — entries that arrived
-            // while closed are still unread when the panel re-opens.
-            expect(r.state.composerUnreadCount).toBe(4);
         });
     });
 });
