@@ -29,7 +29,7 @@ use crate::backend::rpc_types::{
     CommandAgentAnswerData,
 };
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
-use super::service::update_object_meta;
+use super::service::{update_object_meta, schedule_agent_zoom_mirror};
 
 use super::AppState;
 
@@ -626,6 +626,22 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 let meta_keys: Vec<&String> = cmd.meta.keys().collect();
                 tracing::info!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
                 update_object_meta(&wstore, &oref_str, &cmd.meta)?;
+                // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): the
+                // frontend writes term:zoom via this WebSocket path, not the HTTP
+                // UpdateObjectMeta handler where the mirror was originally placed.
+                // Mirror term:zoom → ui:zoom here so the zoom survives pane close.
+                let oref_parsed = crate::backend::ORef::parse(&oref_str)
+                    .map_err(|e| e.to_string())?;
+                if oref_parsed.otype == "block" && cmd.meta.contains_key("term:zoom") {
+                    if let Ok(block) = wstore.must_get::<Block>(&oref_parsed.oid) {
+                        let agent_id = block.meta.get("agentId")
+                            .and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        if !agent_id.is_empty() {
+                            let zoom = cmd.meta.get("term:zoom").and_then(|v| v.as_f64());
+                            schedule_agent_zoom_mirror(wstore.clone(), agent_id, zoom);
+                        }
+                    }
+                }
                 // Read the updated object and broadcast a proper WaveObjUpdate
                 // so all WS clients refresh their atoms with the new data.
                 let oref = crate::backend::ORef::parse(&oref_str)
