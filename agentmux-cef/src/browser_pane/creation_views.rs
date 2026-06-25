@@ -312,6 +312,7 @@ pub fn create_browser_pane_view(
         rect.y,
         rect.width,
         rect.height,
+        0, // retry counter — task self-retries on macOS if overlay NSWindow not yet visible
     );
 }
 
