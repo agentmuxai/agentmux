@@ -66,6 +66,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Isolate this cache from ubuntu-latest (glibc 2.39) runs — the runner
+          # OS key is just "Linux" for both, so without a prefix a cache entry
+          # built on ubuntu-24.04 gets restored here and fails (GLIBC_2.39 not found).
+          prefix-key: "v1-ubuntu22"
 
       - uses: actions/setup-node@v4
         with:
