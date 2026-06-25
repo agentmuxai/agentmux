@@ -143,7 +143,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &["CLAUDECODE"],
     npm_package: "@anthropic-ai/claude-code",
-    pinned_version: "latest",
+    pinned_version: "2.1.185",
     icon: "sparkles",
     docs_url: "https://docs.anthropic.com/claude-code",
 };
@@ -224,7 +224,7 @@ static QWEN: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
-    pinned_version: "latest",
+    pinned_version: "0.19.2",
     icon: "feather",
     docs_url: "https://qwenlm.github.io/qwen-code-docs",
 };
@@ -283,7 +283,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "openclaw",
-    pinned_version: "latest",
+    pinned_version: "2026.6.10",
     icon: "lobster",
     docs_url: "https://docs.openclaw.ai",
 };
@@ -303,7 +303,7 @@ static PI: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@mariozechner/pi-coding-agent",
-    pinned_version: "latest",
+    pinned_version: "0.73.1",
     icon: "terminal",
     docs_url: "https://github.com/badlogic/pi-mono",
 };
@@ -313,7 +313,7 @@ static PI: ProviderConfig = ProviderConfig {
 // OpenAI, OpenAI-compat). Emits claude-compatible stream-json NDJSON
 // (same `session_id` field, same event envelope), so ClaudeTranslator
 // handles it without modification.  `--resume <id>` resumes a prior
-// session.  npm: `@a5af/muxcode`.
+// session.  npm: `@agentmuxai/muxcode`.
 static MUX_CODE: ProviderConfig = ProviderConfig {
     id: "muxcode",
     display_name: "Mux Code",
@@ -332,8 +332,8 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     auth_dir_name: "muxcode",
     auth_extra_env: &[],
     unset_env: &[],
-    npm_package: "@a5af/muxcode",
-    pinned_version: "latest",
+    npm_package: "@agentmuxai/muxcode",
+    pinned_version: "0.1.0",
     icon: "brain",
     docs_url: "https://github.com/agentmuxai/muxcode",
 };
@@ -357,7 +357,7 @@ static COPILOT: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@github/copilot",
-    pinned_version: "latest",
+    pinned_version: "1.0.65",
     icon: "github",
     docs_url: "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
 };
@@ -464,7 +464,7 @@ mod tests {
         assert_eq!(p.cli_command, "muxcode");
         assert_eq!(p.session_id_field, "session_id");
         assert_eq!(p.resume_flag, Some("--resume"));
-        assert_eq!(p.npm_package, "@a5af/muxcode");
+        assert_eq!(p.npm_package, "@agentmuxai/muxcode");
         assert_eq!(p.launch_args, &["run", "-p"]);
         assert!(p.persistent_launch_args.is_none());
     }
