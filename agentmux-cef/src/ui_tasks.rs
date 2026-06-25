@@ -1891,3 +1891,90 @@ pub fn post_resize_mother_window_win32(state: &Arc<AppState>, hwnd: isize, new_w
     let mut task = ResizeMotherWindowWin32Task::new(state.clone(), hwnd, new_w_dip);
     post_task(ThreadId::UI, Some(&mut task));
 }
+
+// ── Deferred overlay bounds + show (non-Windows / CEF Views panes) ──────────
+//
+// On macOS, add_overlay_view creates the overlay's native NSView asynchronously.
+// set_size / set_position / layout() called synchronously after add_overlay_view
+// silently no-op because the native layer doesn't exist yet — the readback shows
+// oc_w=0, oc_h=0. Without committed bounds the overlay defaults to filling the
+// entire parent window, covering the UI with the pane's opaque-black background
+// and intercepting all mouse events (the "black screen + UI freeze" bug).
+//
+// This task runs on the next UI event-loop tick, after CEF has completed native
+// view creation, and re-applies the desired bounds before making the overlay
+// visible. It also re-issues set_focus(1) on the main browser to handle any
+// focus steal that may have occurred during the intervening tick.
+#[cfg(not(target_os = "windows"))]
+wrap_task! {
+    pub struct SetPaneBoundsViewsTask {
+        state: Arc<AppState>,
+        label: String,
+        window_label: String,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let entry = self.state.browser_pane_overlays.lock().get(&self.label).cloned();
+            let Some((_, controller)) = entry else {
+                tracing::warn!(
+                    label = %self.label,
+                    "[browser-pane] views: SetPaneBoundsViewsTask: no OverlayController — pane already closed?"
+                );
+                return;
+            };
+
+            controller.set_size(Some(&Size { width: self.width, height: self.height }));
+            controller.set_position(Some(&Point { x: self.x, y: self.y }));
+
+            if let Some(window) = self.state.windows.lock().get(&self.window_label).cloned() {
+                window.layout();
+            }
+
+            controller.set_visible(1);
+
+            // Return focus to the main window. Focus may have been stolen during
+            // the tick between pane creation and this task.
+            if let Some(main_browser) = self.state.get_browser(&self.window_label) {
+                if let Some(mut host) = main_browser.host() {
+                    host.set_focus(1);
+                }
+            }
+
+            let b = controller.bounds();
+            tracing::info!(
+                label = %self.label,
+                window_label = %self.window_label,
+                req_x = self.x, req_y = self.y, req_w = self.width, req_h = self.height,
+                got_x = b.x, got_y = b.y, got_w = b.width, got_h = b.height,
+                "[browser-pane] views: SetPaneBoundsViewsTask: bounds after deferred apply"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn post_set_pane_bounds_views(
+    state: &Arc<AppState>,
+    label: &str,
+    window_label: &str,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) {
+    let mut task = SetPaneBoundsViewsTask::new(
+        state.clone(),
+        label.to_string(),
+        window_label.to_string(),
+        x,
+        y,
+        width,
+        height,
+    );
+    post_task(ThreadId::UI, Some(&mut task));
+}
