@@ -57,6 +57,6 @@
         // Note: .traffic-lights uses align-self: center so a gap remains
         // under the ~68px traffic-light area on the far left — tracked as
         // follow-up in §10.5.
-        border-bottom: 1px solid var(--border-color);
+        border-bottom: var(--snap-chrome) solid var(--border-color);
     }
 }

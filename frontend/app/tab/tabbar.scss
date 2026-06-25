@@ -73,7 +73,7 @@
             // (NOT `:has()`, which retrips the tab-switch long-task gate). The
             // active tab omits the line so it opens into the surface below.
             &:not(.active) {
-                border-bottom: 1px solid var(--border-color);
+                border-bottom: var(--snap-chrome) solid var(--border-color);
             }
         }
 
@@ -169,9 +169,9 @@
         height: 100%;
         align-self: stretch;
         // Folder boundary continuation (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6):
-        // extends the 1px hairline that .tab:not(.active) draws across the fill
+        // extends the hairline that .tab:not(.active) draws across the fill
         // area so the full-width line is unbroken except under the active tab.
-        border-bottom: 1px solid var(--border-color);
+        border-bottom: var(--snap-chrome) solid var(--border-color);
     }
 
 }

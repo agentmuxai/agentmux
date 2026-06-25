@@ -56,6 +56,6 @@
         flex-shrink: 0;
         // Folder boundary (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6): 0px wide
         // on Linux so this is a no-op visually, but kept for parity.
-        border-bottom: 1px solid var(--border-color);
+        border-bottom: var(--snap-chrome) solid var(--border-color);
     }
 }
