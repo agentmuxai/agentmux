@@ -848,6 +848,12 @@ pub struct AppState {
     /// Cleared by `clear_floating_redock_hover` (drag cancel/end).
     pub floating_redock_ghost: Mutex<HashMap<String, FloatingRedockGhostState>>,
 
+    /// `window:transparent` setting read synchronously from settings.json before
+    /// CefInitialize. Set once in `on_before_command_line_processing`; read in
+    /// `on_context_initialized` to gate the transparent CEF command-line flags
+    /// and to pass the value to the frontend via the URL query string.
+    pub window_transparent: std::sync::atomic::AtomicBool,
+
 }
 
 impl Default for AppState {
@@ -909,6 +915,7 @@ impl Default for AppState {
             #[cfg(target_os = "windows")]
             window_hwnds: Mutex::new(HashMap::new()),
             floating_redock_ghost: Mutex::new(HashMap::new()),
+            window_transparent: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }

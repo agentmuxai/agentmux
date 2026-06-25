@@ -1,7 +1,7 @@
 # SPEC: Terminal I/O Has Complete Priority Over Perf Monitoring
 
 **Date:** 2026-06-16
-**Status:** Phase 1 implemented (priority/background egress lanes + biased select); Phases 2–4 proposed
+**Status:** Phase 1 implemented (priority/background egress lanes + biased select); Phase 2 implemented (egress-side coalesce to latest-only per event×scope); Phases 3–4 proposed
 **Author:** smike (agent)
 **Area:** `agentmux-srv` WebSocket egress · sysinfo collector · terminal echo path
 **Related history:** PR #926 (`fix(term): remove writeInFlight guard from echo fast path`), `SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.md`, `docs/terminal-input-latency-report.md`, `SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md`

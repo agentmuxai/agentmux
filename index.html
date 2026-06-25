@@ -65,6 +65,17 @@
     <link rel="stylesheet" href="/fontawesome/css/sharp-solid.min.css" />
     <link rel="stylesheet" href="/fontawesome/css/sharp-regular.min.css" />
     <link rel="stylesheet" href="/fontawesome/css/custom-icons.min.css" />
+    <script>
+      // Set --window-opacity before first paint so the translucent SCSS default
+      // (0.45) doesn't flash for window:transparent=false users.
+      // The host appends window_transparent=0|1 to the URL at launch time.
+      (function() {
+        var t = new URLSearchParams(location.search).get('window_transparent');
+        if (t === '0') {
+          document.documentElement.style.setProperty('--window-opacity', '1');
+        }
+      })();
+    </script>
     <script type="module" src="frontend/bootstrap.ts"></script>
   </head>
   <body class="init" data-colorscheme="dark">

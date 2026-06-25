@@ -572,6 +572,22 @@ unsafe fn ensure_macos_native_window_buttons(nsview: *mut std::ffi::c_void) {
 // CefApp + BrowserProcessHandler
 // ---------------------------------------------------------------------------
 
+/// Read `window:transparent` from the user's settings.json before CefInitialize.
+/// Gates the transparent-compositing command-line flags so non-transparent
+/// windows don't pay the LCD-text and opacity-flash penalties. Returns false
+/// if the file is absent or the key is missing (default = opaque).
+fn read_window_transparent_setting() -> bool {
+    fn inner() -> Option<bool> {
+        let config_dir = std::env::var_os("AGENTMUX_CONFIG_DIR")
+            .map(std::path::PathBuf::from)
+            .or_else(|| agentmux_common::DataPaths::from_env().map(|p| p.config_dir))?;
+        let text = std::fs::read_to_string(config_dir.join("settings.json")).ok()?;
+        let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+        v.get("window:transparent").and_then(|v| v.as_bool())
+    }
+    inner().unwrap_or(false)
+}
+
 wrap_app! {
     pub struct AgentMuxApp {
         state: Arc<AppState>,
@@ -823,30 +839,42 @@ wrap_app! {
                 let vempty = CefString::from("");
                 cmd.append_switch_with_value(Some(&vurl), Some(&vempty));
 
+                // Read window:transparent from settings.json before CefInitialize
+                // so we can gate the transparent-compositing flags below.
+                // Stored in AppState so on_context_initialized can pass it to
+                // the frontend via the URL query string (early opacity hint).
+                // Only runs in the browser process (process_type == None).
+                let is_transparent = if process_type.is_none() {
+                    let t = read_window_transparent_setting();
+                    self.state.window_transparent.store(t, std::sync::atomic::Ordering::Relaxed);
+                    tracing::info!("window:transparent={}", t);
+                    t
+                } else {
+                    false
+                };
+
+                if is_transparent {
                 // Initial background color, ARGB hex. alpha=00 → fully
                 // transparent → first-frame paint is alpha-aware so the
                 // CSS body background's rgba() composes with the desktop
-                // wallpaper. ff222222 here would clobber the alpha=0 we set
-                // via CefSettings.background_color in main.rs and force the
-                // first frame opaque (visible as a brief flash even after
-                // the renderer flips to ARGB on the first commit).
-                // Pair with: main.rs CefSettings.background_color = 0,
-                // app.rs BrowserSettings.background_color = 0, and the
+                // wallpaper. Only applied when window:transparent=true;
+                // opaque windows keep the default (ff) background so
+                // Chromium can use opaque compositing and LCD text.
+                // Pair with: BrowserSettings.background_color = 0, and the
                 // is_frameless main window delegate.
                 let bg_key = CefString::from("background-color");
                 let bg_val = CefString::from("00000000");
                 cmd.append_switch_with_value(Some(&bg_key), Some(&bg_val));
 
-                // Disable LCD text rendering — LCD subpixel anti-aliasing
-                // requires opaque backgrounds, so Chromium force-sets
-                // contents_opaque=true on every compositor layer that contains
-                // LCD-rendered text. With opaque layers, even CSS alpha<1
-                // backgrounds get rasterized as fully opaque, defeating the
-                // whole transparency cascade. Grayscale text AA on a
-                // translucent UI is the standard tradeoff for window
-                // transparency.
+                // Disable LCD text rendering — required for transparent
+                // compositing. LCD subpixel AA requires opaque backgrounds;
+                // Chromium force-sets contents_opaque=true on LCD-rendered
+                // layers, defeating the alpha cascade. Grayscale AA on a
+                // translucent UI is the standard tradeoff. Skipped for opaque
+                // windows to preserve subpixel rendering quality.
                 let lcd_key = CefString::from("disable-lcd-text");
                 cmd.append_switch(Some(&lcd_key));
+                } // end if is_transparent
 
                 // Allow the DevTools inspector page (served from the remote
                 // debugging server) to open its own WebSocket connection back
@@ -998,15 +1026,14 @@ wrap_browser_process_handler! {
             }
 
             // Browser settings.
+            let is_transparent = self.state.window_transparent.load(std::sync::atomic::Ordering::Relaxed);
             let settings = BrowserSettings {
                 windowless_frame_rate: 60,
                 // ARGB: alpha=0 → SK_AlphaTRANSPARENT → enables Views-framework
-                // transparency in the patched libcef.so. Pair with the
-                // CefSettings::background_color flip in main.rs and the
-                // is_frameless=true main window delegate. See
-                // docs/research/cef-transparency-research-2026-05-10.md and
-                // docs/retro/cef-transparency-empirical-2026-05-11.md.
-                background_color: 0x00000000,
+                // transparency. Only set when window:transparent=true; opaque
+                // windows use 0xFF000000 so Chromium's compositor treats layers as
+                // opaque (better performance, subpixel LCD text, no opacity flash).
+                background_color: if is_transparent { 0x00000000 } else { 0xFF000000 },
                 ..Default::default()
             };
 
@@ -1054,17 +1081,19 @@ wrap_browser_process_handler! {
                 base_url
             };
 
-            // Append IPC port and token as URL query parameters so the frontend
-            // can detect CEF mode and connect to the IPC server immediately,
-            // before on_load_end fires.
+            // Append IPC port, token, and transparency hint as URL query parameters
+            // so the frontend can detect CEF mode and set the initial --window-opacity
+            // CSS variable before first paint (avoiding the translucent-default flash
+            // for window:transparent=false users).
             let separator = if base_url.contains('?') { "&" } else { "?" };
             let url_with_ipc = format!(
-                "{}{}ipc_port={}&ipc_token={}",
-                base_url, separator, self.ipc_port, self.state.ipc_token
+                "{}{}ipc_port={}&ipc_token={}&window_transparent={}",
+                base_url, separator, self.ipc_port, self.state.ipc_token,
+                if is_transparent { "1" } else { "0" }
             );
             let url = CefString::from(url_with_ipc.as_str());
 
-            tracing::info!("Loading URL: {}{}ipc_port={}&ipc_token=<redacted>", base_url, separator, self.ipc_port);
+            tracing::info!("Loading URL: {}{}ipc_port={}&ipc_token=<redacted>&window_transparent={}", base_url, separator, self.ipc_port, if is_transparent { "1" } else { "0" });
 
             // CEF Views mode — window NOT shown until on_load_end.
             // No DwmExtendFrameIntoClientArea (causes white flash).

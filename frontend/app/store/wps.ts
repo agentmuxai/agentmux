@@ -123,24 +123,35 @@ function getFileSubject(zoneId: string, fileName: string): SubjectWithRef<WSFile
     return subject;
 }
 
-function handleWaveEvent(event: WaveEvent) {
-    // console.log("handleWaveEvent", event);
+// Sysinfo and blockstats are droppable 1Hz telemetry. Dispatching them
+// synchronously in the WebSocket onmessage task competes with xterm.js's
+// rAF-scheduled canvas render in the same paint pass, causing a 1Hz jerk
+// when backspace (or any held key) is generating rapid terminal echo.
+// Deferring to a new macrotask lets the current frame's rAF + paint complete
+// first; sysinfo DOM updates land in their own subsequent render pass.
+const DEFERRED_EVENTS = new Set(["sysinfo", "blockstats"]);
+
+function dispatchToSubjects(event: WaveEvent) {
     const subjects = waveEventSubjects.get(event.event);
-    if (subjects == null) {
-        return;
-    }
+    if (subjects == null) return;
     for (const scont of subjects) {
         if (isBlank(scont.scope)) {
             scont.handler(event);
             continue;
         }
-        if (event.scopes == null) {
-            continue;
-        }
+        if (event.scopes == null) continue;
         if (event.scopes.includes(scont.scope)) {
             scont.handler(event);
         }
     }
+}
+
+function handleWaveEvent(event: WaveEvent) {
+    if (DEFERRED_EVENTS.has(event.event)) {
+        setTimeout(() => dispatchToSubjects(event), 0);
+        return;
+    }
+    dispatchToSubjects(event);
 }
 
 export { getFileSubject, handleWaveEvent, waveEventSubscribe, waveEventUnsubscribe, wpsReconnectHandler };
