@@ -1370,7 +1370,17 @@ unsafe fn set_macos_app_display_name() {
                 // Fall back to "dev" only for unmanaged direct invocations.
                 let channel = std::env::var("AGENTMUX_CHANNEL")
                     .unwrap_or_else(|_| "dev".to_string());
-                let bundle_id = format!("ai.agentmux.{}.{}", channel, env!("CARGO_PKG_VERSION"));
+                // Sanitize channel to match the normalization applied by
+                // scripts/package-macos.sh (lines 67-68):
+                //   tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]'
+                // Replace any char not in [A-Za-z0-9.-] with '-', then lowercase,
+                // so runtime and build-time CFBundleIdentifiers always match.
+                let channel_sanitized: String = channel
+                    .chars()
+                    .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '-' })
+                    .collect::<String>()
+                    .to_lowercase();
+                let bundle_id = format!("ai.agentmux.{}.{}", channel_sanitized, env!("CARGO_PKG_VERSION"));
                 if let Ok(c_id) = std::ffi::CString::new(bundle_id.as_str()) {
                     let ns_id = make(cls_str, sel_with, c_id.as_ptr());
                     if !ns_id.is_null() {
