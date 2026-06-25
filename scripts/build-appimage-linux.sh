@@ -39,7 +39,14 @@ cd "$REPO_ROOT"
 VERSION="$(node -p "require('./package.json').version")"
 OUTDIR="${1:-$HOME/Desktop}"
 APPDIR="$REPO_ROOT/build/AgentMux.AppDir"
-OUTPUT="$OUTDIR/AgentMux_${VERSION}_amd64.AppImage"
+# Local builds use the label (e.g. 0.49.2+g3f1a2bc.dirty.20260625T1040.12345)
+# so each AppImage has a unique filename and is identifiable. Release builds
+# (RELEASE_CHANNEL=stable, no AGENTMUX_BUILD_LABEL) use just the version.
+if [ -n "${AGENTMUX_BUILD_LABEL:-}" ]; then
+    OUTPUT="$OUTDIR/AgentMux_${AGENTMUX_BUILD_LABEL}_amd64.AppImage"
+else
+    OUTPUT="$OUTDIR/AgentMux_${VERSION}_amd64.AppImage"
+fi
 
 # Resolve appimagetool
 APPIMAGETOOL="${APPIMAGETOOL:-}"
