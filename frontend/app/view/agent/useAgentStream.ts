@@ -479,8 +479,8 @@ export function useAgentStream({
         // phase in Done before the timer fires → no-op.
         // Persistent mode: the process never exits between turns, so
         // `ControllerStatus: done` only fires on crash or session teardown.
-        // Auto-retry: the new process fires `ControllerStatus: running` →
-        // file truncate → TurnReset → phase is Idle when the timer fires → no-op.
+        // Auto-retry: `ControllerStatus: running` (new process) cancels the
+        // timer immediately — it never fires against the new turn's phase.
         let procExitGraceTimer: number | null = null;
         const procExitUnsub = waveEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
