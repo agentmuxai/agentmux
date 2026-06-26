@@ -129,8 +129,12 @@ pub async fn run_migrate(
     }
 
     // Read stdout inline so sub-events arrive before stage_end is sent.
+    // We break as soon as we see the "complete" event — the process may hang
+    // in Tokio shutdown (crash-monitor task) after flushing its last line,
+    // so waiting for stdout EOF would block forever.
     let mut applied = 0u32;
     let mut skipped = 0u32;
+    let mut migration_complete = false;
     if let Some(stdout) = child.stdout.take() {
         let mut reader = tokio::io::BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
@@ -151,10 +155,19 @@ pub async fn run_migrate(
                 Some(MigrationLine::Complete { applied: a, skipped: s }) => {
                     applied = a;
                     skipped = s;
+                    migration_complete = true;
+                    break; // Don't wait for EOF — kill below.
                 }
                 None => {}
             }
         }
+    }
+
+    // If the process signalled complete via stdout we know it succeeded.
+    // Kill it now so we don't hang on wait() if its Tokio runtime shutdown
+    // stalls (crash-monitor interaction, background tasks with long timeouts).
+    if migration_complete {
+        let _ = child.start_kill();
     }
 
     let status = child
@@ -163,7 +176,11 @@ pub async fn run_migrate(
         .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate wait: {}", e)))?;
 
     let duration_ms = t.elapsed().as_millis() as u64;
-    if status.success() {
+    // migration_complete means the process emitted {"event":"complete"} on
+    // stdout before we killed it — that is the authoritative success signal.
+    // status.success() may be false when we force-killed the process after
+    // seeing complete (crash-monitor Tokio shutdown hung).
+    if migration_complete || status.success() {
         let detail = if applied > 0 {
             Some(format!("{} applied, {} current", applied, skipped))
         } else if skipped > 0 {
