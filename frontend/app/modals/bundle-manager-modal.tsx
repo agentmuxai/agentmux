@@ -34,7 +34,7 @@
 
 import { createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
-import { getApi } from "@/store/global";
+import { getApi, openOrFocusPaneByView } from "@/store/global";
 import { openWindowEntriesAtom } from "@/app/store/global";
 import { resolveWindowName } from "@/util/window-title";
 import { Modal } from "@/element/modal";
@@ -263,17 +263,8 @@ BundleManagerElsewhereBanner.displayName = "BundleManagerElsewhereBanner";
  * Returns `true` if the modal was opened here, `false` if the singleton
  * was held elsewhere (the banner stays the persistent affordance).
  */
+/** Shim — Trust Center is now a widget pane. Kept for call-site compatibility. */
 export function openBundleManager(): boolean {
-    if (acquireSingleton(SINGLETON_KIND_BUNDLE_MANAGER)) {
-        openModal(BundleManagerModal);
-        return true;
-    }
-    // Held elsewhere — focus that window directly so the click is useful.
-    const holder = singletonHolder(SINGLETON_KIND_BUNDLE_MANAGER)();
-    if (holder) {
-        getApi()
-            .focusWindow(holder)
-            .catch((e) => console.error("[bundle-manager] focusWindow failed:", e));
-    }
-    return false;
+    void openOrFocusPaneByView("trust");
+    return true;
 }

@@ -24,7 +24,7 @@ import { Modal } from "@/element/modal";
 import { openModal, type ModalCloseProps } from "@/app/store/modalmodel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getApi, createBlock } from "@/store/global";
+import { getApi, createBlock, openOrFocusPaneByView } from "@/store/global";
 
 function loadWidgetPorts(): Record<string, number> {
     try {
@@ -514,7 +514,7 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
     );
 };
 
-/** Hamburger entry point. */
+/** Shim — Toolchain is now a widget pane. Kept for call-site compatibility. */
 export function openToolchainModal(): void {
-    openModal(ToolchainModal);
+    void openOrFocusPaneByView("toolchain");
 }
