@@ -108,11 +108,10 @@ impl CronScheduler {
         let job_id = job.id.clone();
         let job_prompt = job.prompt.clone();
         let job_target = job.target.clone();
+        let job_max_fires = job.max_fires;
 
         let handle = tokio::spawn(async move {
-            // Iterate over upcoming fire times. `schedule.upcoming(Utc)` is an
-            // infinite iterator; each `.next()` call computes the next UTC
-            // datetime after `Utc::now()`.
+            let mut fires: i64 = 0;
             loop {
                 let next = match schedule.upcoming(Utc).next() {
                     Some(t) => t,
@@ -121,6 +120,19 @@ impl CronScheduler {
                 let delay = (next - Utc::now()).to_std().unwrap_or_default();
                 tokio::time::sleep(delay).await;
                 sched.fire(&job_id, &job_prompt, &job_target).await;
+                fires += 1;
+                // Enforce max_fires in the live task — don't rely on the DB
+                // flag alone, which only takes effect on the next srv restart.
+                if let Some(max) = job_max_fires {
+                    if fires >= max {
+                        tracing::info!(id = %job_id, fires, "cron: max_fires reached — disabling job");
+                        if let Some(store) = &sched.shared_store {
+                            let _ = store.cron_set_enabled(&job_id, false);
+                        }
+                        sched.handles.lock().unwrap().remove(&job_id);
+                        break;
+                    }
+                }
             }
         });
 

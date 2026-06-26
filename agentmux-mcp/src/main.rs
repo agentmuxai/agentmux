@@ -241,7 +241,7 @@ const CRON_CREATE_TOOL: &str = r#"{
       "expression": { "type": "string",  "description": "5-field UTC cron expression: 'min hour dom month dow' (e.g. '0 9 * * 1-5' = 9am weekdays). Standard cron syntax; ranges, lists, and step values are supported." },
       "prompt":     { "type": "string",  "description": "The prompt or slash command to inject at each scheduled fire" },
       "to":         { "type": "string",  "description": "Target agent id to inject into. Required." },
-      "max_fires":  { "type": "integer", "description": "Auto-delete after this many fires. Omit for unlimited." }
+      "max_fires":  { "type": "integer", "description": "Auto-disable after this many fires (the job row stays in DB for audit; use CronDelete to remove it). Omit for unlimited." }
     },
     "required": ["name", "expression", "prompt", "to"]
   }
