@@ -32,24 +32,25 @@ async function focusBlock(blockId: string): Promise<void> {
         }
     }
     // Slow path: agent is in a different window — query all workspaces.
+    // Layout models for other-window tabs may be empty if never visited, so use
+    // Tab.blockids from WOS cache (populated for any tab the other window has fetched,
+    // including its active tab).  focusNode is intentionally omitted: a layout model
+    // in another renderer process cannot be driven from this side.
     const allWorkspaces = await RpcApi.WorkspaceListCommand(TabRpcClient);
     for (const wsInfo of allWorkspaces) {
         if (wsInfo.workspacedata.oid === ws?.oid) continue;
         const wsData = wsInfo.workspacedata;
         const allTabIds = [...(wsData.pinnedtabids ?? []), ...(wsData.tabids ?? [])];
         for (const tabId of allTabIds) {
-            const layoutModel = getLayoutModelForTabById(tabId);
-            const node = layoutModel?.getNodeByBlockId(blockId);
-            if (node?.id != null) {
-                await WorkspaceService.SetActiveTab(wsData.oid, tabId);
-                const instances = await getApi().listWindowInstances();
-                const instance = instances.find((i) => i.windowId === wsInfo.windowid);
-                if (instance?.label) {
-                    await getApi().focusWindow(instance.label);
-                }
-                layoutModel.focusNode(node.id);
-                return;
+            const tab = WOS.getObjectValue<Tab>(WOS.makeORef("tab", tabId));
+            if (!tab?.blockids?.includes(blockId)) continue;
+            await WorkspaceService.SetActiveTab(wsData.oid, tabId);
+            const instances = await getApi().listWindowInstances();
+            const instance = instances.find((i) => i.windowId === wsInfo.windowid);
+            if (instance?.label) {
+                await getApi().focusWindow(instance.label);
             }
+            return;
         }
     }
 }
