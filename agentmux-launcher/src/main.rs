@@ -1280,6 +1280,11 @@ async fn run_unix(
         }
     };
 
+    // Close any open saga brackets before tearing down children so the
+    // durable log doesn't carry dangling SagaStarted entries into the
+    // next startup's LSD-3 compensation pass.
+    saga_coord.cancel_all_in_flight("launcher shutting down").await;
+
     // 6. Cleanup. SIGTERM both children so the host reaps its render
     //    subprocesses (and srv shuts down cleanly), wait a short grace
     //    window, then SIGKILL any survivor. Dropping the stdin keepalive
@@ -1914,6 +1919,10 @@ async fn run_windows(
             }
         }
     };
+
+    // Close any open saga brackets before J0 is dropped — same reason
+    // as the Unix path above (prevent spurious LSD-3 compensation).
+    saga_coord.cancel_all_in_flight("launcher shutting down").await;
 
     // 8. Cleanup. Happy path: drop(job) → KILL_ON_JOB_CLOSE reaps
     // the surviving child + CEF renderers. Degraded path (job is

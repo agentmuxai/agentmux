@@ -13,6 +13,8 @@ type SysStats = {
     gpu: number | null;
     memUsed: number;
     memTotal: number;
+    commitUsed: number;
+    commitTotal: number;
     diskRead: number;
     diskWrite: number;
     netSent: number;
@@ -36,6 +38,14 @@ function formatRate(mbps: number): string {
 function memColor(used: number, total: number): string {
     if (total <= 0) return "var(--secondary-text-color)";
     if (used / total > 0.9) return "var(--warning-color)";
+    return "var(--secondary-text-color)";
+}
+
+function commitColor(used: number, total: number): string {
+    if (total <= 0) return "var(--secondary-text-color)";
+    const ratio = used / total;
+    if (ratio > 0.95) return "var(--error-color)";
+    if (ratio > 0.85) return "var(--warning-color)";
     return "var(--secondary-text-color)";
 }
 
@@ -92,6 +102,8 @@ const SystemStats = (): JSX.Element => {
                     gpu: vals["gpu"] != null ? vals["gpu"] : null,
                     memUsed: vals["mem:used"] ?? 0,
                     memTotal: vals["mem:total"] ?? 0,
+                    commitUsed: vals["mem:commit:used"] ?? 0,
+                    commitTotal: vals["mem:commit:total"] ?? 0,
                     diskRead: vals["disk:read"] ?? 0,
                     diskWrite: vals["disk:write"] ?? 0,
                     netSent: vals["net:bytessent"] ?? 0,
@@ -147,6 +159,17 @@ const SystemStats = (): JSX.Element => {
                     >
                         Mem {formatMemBytes(s().memUsed)}/{formatMemBytes(s().memTotal)}
                     </span>
+                    <Show when={s().commitTotal > 0}>
+                        <span class="stat-separator">|</span>
+                        <span
+                            class="stat-mono stat-commit"
+                            style={{ color: commitColor(s().commitUsed, s().commitTotal) }}
+                            data-tip="Commit charge used and total (RAM + page file budget). High commit causes OOM kills."
+                            aria-label="Commit charge"
+                        >
+                            PF {formatMemBytes(s().commitUsed)}/{formatMemBytes(s().commitTotal)}
+                        </span>
+                    </Show>
                     {/* Network indicator stays mounted even at 0/0 so the user
                         can glance at the bar and see "nothing going in or out",
                         instead of wondering whether the widget broke. Zero

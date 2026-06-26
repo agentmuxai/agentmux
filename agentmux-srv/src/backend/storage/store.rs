@@ -156,6 +156,19 @@ impl Store {
     /// Backfill any `db_agent_definitions` rows that are missing from
     /// `db_agents`.  Not marker-gated — runs cheaply on every startup.
     /// See `agents_consolidate::repair_def_gaps` for details.
+    /// Run `PRAGMA wal_checkpoint(TRUNCATE)` to fold the WAL back into the
+    /// main DB file. Called periodically when agents are idle and on clean
+    /// shutdown. The 5s `busy_timeout` set at open handles transient reader
+    /// contention — if it can't fully truncate it returns partial progress
+    /// (safe; the remainder is picked up on the next idle pass).
+    pub fn checkpoint(&self) -> Result<(), StoreError> {
+        self.conn()
+            .lock()
+            .unwrap()
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
     pub fn repair_agent_def_gaps(&self) -> Result<usize, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         super::agents_consolidate::repair_def_gaps(&mut *conn)
