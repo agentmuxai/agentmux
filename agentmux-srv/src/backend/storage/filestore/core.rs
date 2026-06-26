@@ -66,6 +66,17 @@ impl FileStore {
         Ok(store)
     }
 
+    /// Run `PRAGMA wal_checkpoint(TRUNCATE)` on the filestore connection.
+    /// Same semantics as `Store::checkpoint` — 5s busy_timeout, partial
+    /// truncate on contention is safe.
+    pub fn checkpoint(&self) -> Result<(), StoreError> {
+        self.conn
+            .lock()
+            .unwrap()
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
     fn configure_and_migrate(conn: Connection) -> Result<Self, StoreError> {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;

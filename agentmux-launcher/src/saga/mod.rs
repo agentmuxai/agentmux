@@ -377,6 +377,37 @@ impl SagaCoordinator {
         });
     }
 
+    /// Emit `SagaFailed` for every in-flight saga and clear the registry.
+    /// Called on clean launcher shutdown so no saga bracket is left open
+    /// in the durable log (open brackets would otherwise trigger spurious
+    /// LSD-3 compensation on next startup).
+    ///
+    /// Writes directly to the durable log when installed — more reliable
+    /// than relying on bus-subscriber delivery during shutdown teardown.
+    pub async fn cancel_all_in_flight(&self, reason: &str) {
+        let ids: Vec<u64> = {
+            let mut registry = self.in_flight.lock().await;
+            registry.drain().map(|(id, _)| id).collect()
+        };
+        for saga_id in ids {
+            // Cancel any pending host-pipe frames so a reconnecting host
+            // doesn't drain them as orphan side-effects.
+            if let Some(pipe) = self.host_pipe.as_ref() {
+                pipe.cancel_saga(saga_id).await;
+            }
+            // Emit on the broadcast bus for live subscribers.
+            self.emit_failed(saga_id, reason.to_string()).await;
+            // Write directly to the durable log — bypasses task scheduling
+            // and is guaranteed to reach SQLite even during shutdown.
+            if let Some(log) = self.log.as_ref() {
+                let _ = log.terminate_saga(
+                    saga_id,
+                    crate::saga::log::SagaOutcome::Failed { reason: reason.to_string() },
+                );
+            }
+        }
+    }
+
     /// Apply a `SagaAction` returned by `start` or `on_event`. Returns
     /// an `ApplyOutcome` carrying:
     ///   - `in_flight`: true → caller keeps the saga in `in_flight`,

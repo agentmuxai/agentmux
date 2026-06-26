@@ -52,6 +52,24 @@ fn get_mem_data(sys: &sysinfo::System, values: &mut HashMap<String, f64>) {
     values.insert("mem:free".to_string(), free);
 }
 
+/// Read the Windows commit budget via `GlobalMemoryStatusEx`.
+/// Emits `mem:commit:used` and `mem:commit:total` (in GB).
+/// No-op on non-Windows — keys are simply absent from the payload.
+fn get_commit_data(_values: &mut HashMap<String, f64>) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut mem: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        mem.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if unsafe { GlobalMemoryStatusEx(&mut mem) } != 0 {
+            let total_gb = mem.ullTotalPageFile as f64 / BYTES_PER_GB;
+            let avail_gb = mem.ullAvailPageFile as f64 / BYTES_PER_GB;
+            _values.insert("mem:commit:used".to_string(), total_gb - avail_gb);
+            _values.insert("mem:commit:total".to_string(), total_gb);
+        }
+    }
+}
+
 /// Network I/O tracking state for rate calculations.
 struct NetState {
     prev_sent: u64,
@@ -172,6 +190,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
         let mut values = HashMap::new();
         get_cpu_data(&sys, &mut values);
         get_mem_data(&sys, &mut values);
+        get_commit_data(&mut values);
         net_state.get_net_data(&networks, &mut values);
         get_disk_data(&disks, elapsed_secs, &mut values);
 
