@@ -42,6 +42,7 @@ pub mod wps;
 pub mod osc_extractor;
 pub mod tool_store;
 pub mod container;
+pub mod cron;
 pub mod shell_node;
 
 pub use oref::ORef;
