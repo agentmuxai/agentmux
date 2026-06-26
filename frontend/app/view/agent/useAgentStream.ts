@@ -479,12 +479,8 @@ export function useAgentStream({
         // phase in Done before the timer fires → no-op.
         // Persistent mode: the process never exits between turns, so
         // `ControllerStatus: done` only fires on crash or session teardown.
-        // Auto-retry: `ControllerStatus: running` cancels any pending timer;
-        // if the timer already fired (procGraceDidFire), re-dispatch
-        // StreamSubscribe to restore lastEventMs so TurnStart and
-        // StreamFlushObserved are not silently gated for the new turn.
+        // Auto-retry: `ControllerStatus: running` cancels any pending timer.
         let procExitGraceTimer: number | null = null;
-        let procGraceDidFire = false;
         const procExitUnsub = waveEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", blockId),
@@ -495,13 +491,6 @@ export function useAgentStream({
                         clearTimeout(procExitGraceTimer);
                         procExitGraceTimer = null;
                     }
-                    if (procGraceDidFire) {
-                        // Our StreamUnsubscribe nulled lastEventMs in the reducer.
-                        // Re-dispatch StreamSubscribe so the new process's turn
-                        // can start (TurnStart) and output can land (StreamFlushObserved).
-                        procGraceDidFire = false;
-                        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() });
-                    }
                     return;
                 }
                 if (status !== "done") return;
@@ -510,8 +499,17 @@ export function useAgentStream({
                     procExitGraceTimer = null;
                     const phase = paneSnapshot(blockId)?.turnPhase?.kind;
                     if (phase === "Streaming" || phase === "Submitting") {
-                        procGraceDidFire = true;
-                        model.dispatchPane({ type: "StreamUnsubscribe", at: Date.now() });
+                        const at = Date.now();
+                        // StreamUnsubscribe transitions Streaming → Disconnected,
+                        // clearing "Working...", but also nulls lastEventMs in the
+                        // reducer — which would gate TurnStart and StreamFlushObserved
+                        // for any recovery turn (failure-banner Retry or auto-retry).
+                        // Immediately re-dispatch StreamSubscribe to restore lastEventMs
+                        // while keeping the file subscription live. Net phase: Idle
+                        // (Disconnected → Idle via StreamSubscribe). The AgentFailure
+                        // banner drives the crash UX independently of turn phase.
+                        model.dispatchPane({ type: "StreamUnsubscribe", at });
+                        model.dispatchPane({ type: "StreamSubscribe", at });
                     }
                 }, 1500);
             },
@@ -524,14 +522,15 @@ export function useAgentStream({
             }
         });
 
-        // Cancel the crash-recovery timer whenever the phase re-enters
-        // Submitting or Streaming — covers the fast-followup case where the
-        // user sends a message (or a queued turn drains) within the 1.5s
-        // window before ControllerStatus:running arrives. Without this,
-        // the stale done-timer would fire against the healthy new turn.
+        // Cancel the crash-recovery timer when a new turn is submitted.
+        // Gated on Submitting only — NOT Streaming — because StreamFlushObserved
+        // replaces the Streaming phase object with a fresh reference even for the
+        // dying turn's buffered output, which would spuriously cancel the timer
+        // before it can fire. Submitting is only entered via TurnStart (a real
+        // new turn), so it is safe to cancel here.
         createEffect(() => {
             const kind = getTurnPhase().kind;
-            if ((kind === "Submitting" || kind === "Streaming") && procExitGraceTimer != null) {
+            if (kind === "Submitting" && procExitGraceTimer != null) {
                 clearTimeout(procExitGraceTimer);
                 procExitGraceTimer = null;
             }
