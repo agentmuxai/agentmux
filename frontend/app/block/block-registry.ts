@@ -12,6 +12,7 @@ import { EditorViewModel } from "@/app/view/editor/editor";
 import { IdentityPaneViewModel } from "@/app/view/identity/identity-pane";
 import { LauncherViewModel } from "@/app/view/launcher/launcher";
 import { MemoryViewModel } from "@/app/view/memory/memory";
+import { SettingsViewModel } from "@/app/view/settings/settings";
 import { SubagentViewModel } from "@/app/view/subagent/subagent";
 import { SwarmViewModel } from "@/app/view/swarm/swarm";
 import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
@@ -39,6 +40,7 @@ blockViewRegistry.set("drone", DroneViewModel as any);
 blockViewRegistry.set("warden", WardenViewModel as any);
 blockViewRegistry.set("toolchain", ToolchainViewModel as any);
 blockViewRegistry.set("trust", TrustViewModel as any);
+blockViewRegistry.set("settings", SettingsViewModel as any);
 
 export function registerBlockView(viewType: string, cls: ViewModelClass): void {
     blockViewRegistry.set(viewType, cls);

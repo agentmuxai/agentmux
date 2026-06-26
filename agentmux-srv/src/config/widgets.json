@@ -216,5 +216,17 @@
                 "view": "trust"
             }
         }
+    },
+    "defwidget@settings": {
+        "display:order": 99,
+        "display:pinned": false,
+        "icon": "cog",
+        "label": "Settings",
+        "description": "App settings — appearance, terminal, agent, sounds, and more",
+        "blockdef": {
+            "meta": {
+                "view": "settings"
+            }
+        }
     }
 }
