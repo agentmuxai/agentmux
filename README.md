@@ -257,6 +257,7 @@ See [BUILD.md](./BUILD.md) and [.changesets/README.md](./.changesets/README.md) 
 | 🐧 Linux x86_64 | `AgentMux_*_amd64.AppImage` |
 | 🪟 Windows x64 (installer) | `AgentMux-*-x64-setup.exe` |
 | 🪟 Windows x64 (portable) | `agentmux-*-x64-portable.zip` |
+| 🪟 Windows x64 (MSIX / Store) | `AgentMux_*_x64.msix` |
 
 > Downloads require a GitHub account. Click the badge → latest passing run → **Artifacts** at the bottom.
 
@@ -271,6 +272,7 @@ Builds run in parallel on `ubuntu-22.04`, `macos-latest`, and `windows-latest`. 
 | macOS Apple Silicon | `AgentMux_*_arm64.dmg` |
 | Windows x64 (installer) | `AgentMux-*-x64-setup.exe` |
 | Windows x64 (portable) | `agentmux-*-x64-portable.zip` |
+| Windows x64 (MSIX / Store) | `AgentMux_*_x64.msix` |
 | Linux x64 (AppImage) | `AgentMux_*_amd64.AppImage` |
 
 ### Release checklist

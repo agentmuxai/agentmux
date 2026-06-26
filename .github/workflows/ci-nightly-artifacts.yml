@@ -66,6 +66,25 @@ jobs:
             -PortableDir $portableDir `
             -OutputDir $artifacts
 
+      # MSIX for Microsoft Store submission. makeappx.exe ships with the
+      # Windows 10 SDK pre-installed on windows-latest. Microsoft re-signs
+      # on ingest so no cert is needed here (-Sign omitted).
+      - name: Build MSIX (Store package)
+        shell: pwsh
+        run: |
+          $artifacts = Join-Path $env:GITHUB_WORKSPACE "artifacts"
+          $msixOut   = Join-Path $artifacts "msix"
+          New-Item -ItemType Directory -Force -Path $msixOut | Out-Null
+          $portableDir = Get-ChildItem $artifacts -Directory -Filter "agentmux-*-x64-portable" |
+                         Sort-Object LastWriteTime -Descending |
+                         Select-Object -First 1 -ExpandProperty FullName
+          if (-not $portableDir) { throw "portable dir not found in $artifacts" }
+          Write-Host "Portable: $portableDir"
+          & (Join-Path $env:GITHUB_WORKSPACE "scripts\package-msix.ps1") `
+            -PortableDir $portableDir `
+            -OutputDir   $msixOut `
+            -SkipBuild
+
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
@@ -79,6 +98,14 @@ jobs:
         with:
           name: windows-installer
           path: ${{ github.workspace }}/artifacts/AgentMux-*-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload MSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msix
+          path: ${{ github.workspace }}/artifacts/msix/AgentMux_*_x64.msix
           if-no-files-found: error
           retention-days: 7
 
