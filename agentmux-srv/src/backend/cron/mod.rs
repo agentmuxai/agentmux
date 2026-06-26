@@ -7,9 +7,9 @@
 //! next scheduled fire time (computed from the 5-field UTC cron expression),
 //! POSTs to `/agentmux/reactive/inject`, and records the fire in the DB.
 //!
-//! On startup, runs one catch-up fire for any job whose `last_fired` is
-//! more than one interval behind (FIRE_ONCE_NOW misfire policy — never
-//! replay all missed fires, never cause a cron storm).
+//! On startup, runs one catch-up fire for any job whose next scheduled time
+//! after `last_fired` is already in the past (FIRE_ONCE_NOW misfire policy —
+//! never replay all missed fires, never cause a cron storm).
 //!
 //! See `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
 
@@ -125,6 +125,20 @@ impl CronScheduler {
             // is enforced across restarts, not per process run.
             let mut fires: i64 = initial_fires;
             loop {
+                // Guard at top of loop: if fires was seeded at or above max_fires
+                // (e.g. a catch-up fire brought the persisted count to the cap),
+                // don't fire again before sleeping — this prevents one extra fire
+                // on restart when the catch-up itself hits the limit.
+                if let Some(max) = job_max_fires {
+                    if fires >= max {
+                        tracing::info!(id = %job_id, fires, "cron: max_fires reached — disabling job");
+                        if let Some(store) = &sched.shared_store {
+                            let _ = store.cron_set_enabled(&job_id, false);
+                        }
+                        sched.handles.lock().unwrap().remove(&job_id);
+                        break;
+                    }
+                }
                 let next = match schedule.upcoming(Utc).next() {
                     Some(t) => t,
                     None => break,
@@ -133,8 +147,9 @@ impl CronScheduler {
                 tokio::time::sleep(delay).await;
                 sched.fire(&job_id, &job_prompt, &job_target).await;
                 fires += 1;
-                // Enforce max_fires in the live task — don't rely on the DB
-                // flag alone, which only takes effect on the next srv restart.
+                // Post-fire check: enforce max_fires. The top-of-loop guard
+                // handles the restart/seeded-at-cap case; this handles the
+                // normal live-run case.
                 if let Some(max) = job_max_fires {
                     if fires >= max {
                         tracing::info!(id = %job_id, fires, "cron: max_fires reached — disabling job");
