@@ -93,8 +93,8 @@ function ConfigErrorsBanner(): JSX.Element {
                         <div class="settings-config-error">
                             <i class="fa-solid fa-circle-exclamation" />
                             {" "}{e.err}
-                            <Show when={e.filename}>
-                                {" "}<span class="mono">{e.filename}{e.linenum ? `:${e.linenum}` : ""}</span>
+                            <Show when={e.file}>
+                                {" "}<span class="mono">{e.file}</span>
                             </Show>
                         </div>
                     )}
@@ -198,7 +198,8 @@ function AppearanceSection(): JSX.Element {
 
 function TerminalSection(): JSX.Element {
     const s = () => settingsAtom() ?? ({} as any);
-    const termThemes = () => (fullConfigAtom()?.termthemes as Record<string, unknown>[] | undefined) ?? [];
+    const termThemes = () => Object.entries((fullConfigAtom()?.termthemes as Record<string, any>) ?? {})
+        .sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
 
     return (
         <div class="settings-section-body">
@@ -236,12 +237,12 @@ function TerminalSection(): JSX.Element {
                     control={
                         <select
                             class="setting-select"
-                            value={(s()["term:theme"] as string) ?? "default"}
-                            onChange={(e) => set("term:theme", e.currentTarget.value)}
+                            value={(s()["term:theme"] as string) ?? ""}
+                            onChange={(e) => set("term:theme", e.currentTarget.value || null)}
                         >
-                            <option value="default">Default</option>
+                            <option value="">Default</option>
                             <For each={termThemes()}>
-                                {(t: any) => <option value={t.name}>{t.label ?? t.name}</option>}
+                                {([key, theme]) => <option value={key}>{theme["display:name"] ?? key}</option>}
                             </For>
                         </select>
                     }
