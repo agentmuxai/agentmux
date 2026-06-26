@@ -266,6 +266,23 @@ The release flow internally uses [`@a5af/bump-cli`](https://github.com/a5af/bump
 
 ## Releases
 
+### Download
+
+**Stable release** — see [GitHub Releases](https://github.com/agentmuxai/agentmux/releases/latest) for the latest published build.
+
+**Nightly builds** — built daily from `main`. Artifacts are retained for 7 days. Click a badge to open that platform's latest run and download the artifact.
+
+| Platform | Nightly artifact | Status |
+|----------|-----------------|--------|
+| 🍎 macOS Apple Silicon | `AgentMux_*_arm64.dmg` | [![macOS nightly](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg?job=macos)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml) |
+| 🐧 Linux x86_64 | `AgentMux_*_amd64.AppImage` | [![Linux nightly](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg?job=linux)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml) |
+| 🪟 Windows x64 (installer) | `AgentMux-*-x64-setup.exe` | [![Windows nightly](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg?job=windows)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml) |
+| 🪟 Windows x64 (portable) | `agentmux-*-x64-portable.zip` | ↑ same run |
+
+> Nightly artifact downloads require a GitHub account. Click the badge → latest passing run → **Artifacts** section at the bottom of the run page.
+
+---
+
 Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmuxai/agentmux-builder) — a private repo that holds CI/CD workflows and signing secrets separate from the public source.
 
 ### How it works
