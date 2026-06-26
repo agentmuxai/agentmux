@@ -34,7 +34,7 @@
  */
 
 import clsx from "clsx";
-import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from "../types";
 import { createBlock } from "@/store/global";
@@ -76,7 +76,31 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
     canceled: "⏹",
 };
 
+const PREVIEW_ZOOM_STEP = 0.05;
+const PREVIEW_ZOOM_MIN = 0.7;
+const PREVIEW_ZOOM_MAX = 2.0;
+
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
+    // Independent font-scale for the tool preview panel. Ctrl+Scroll inside the
+    // panel zooms only the preview; the pane-level zoom (block.meta["term:zoom"])
+    // is unaffected. Ephemeral — not persisted to block meta.
+    const [previewFontScale, setPreviewFontScale] = createSignal(1.0);
+    let panelRef: HTMLDivElement | undefined;
+    onMount(() => {
+        if (!panelRef) return;
+        const onWheel = (e: WheelEvent) => {
+            if (!e.ctrlKey) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const delta = e.deltaY < 0 ? PREVIEW_ZOOM_STEP : -PREVIEW_ZOOM_STEP;
+            setPreviewFontScale(prev =>
+                Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, prev + delta))
+            );
+        };
+        panelRef.addEventListener("wheel", onWheel, { passive: false });
+        onCleanup(() => panelRef?.removeEventListener("wheel", onWheel));
+    });
+
     // A tool stays expanded after completing live until its row scrolls off the
     // top — the "post-completion hold" now lives in `documentState.expandedTools`
     // (read via props.heldOpen) instead of a 3 s timer. Here we just detect the
@@ -299,6 +323,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
              * remove it from the focus/a11y tree when hidden.
              */}
             <div
+                ref={panelRef}
                 class={clsx("agent-tool-panel", {
                     "agent-tool-panel--hidden": panelMode() === "hidden",
                     "agent-tool-panel--flow": panelMode() === "flow",
@@ -317,6 +342,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 <ToolBlockOverlay
                     node={props.node}
                     onOpenInPane={props.onOpenInPane}
+                    previewFontScale={previewFontScale}
                 />
             </div>
         </div>
