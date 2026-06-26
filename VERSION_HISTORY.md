@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.49.4 — 2026-06-25
+
+- fix(agent-stream): force StreamUnsubscribe after process crash so Working clears immediately
+- fix(providers): pin all CLI providers to specific versions; move muxcode to agentmuxai scope
+- feat(install-modal): show pinned CLI version badge in install modal header
+- feat(ui): migrate Toolchain Manager and Trust Center from modals to widget pane views
+- feat(ui): Settings pane — reactive in-app form replacing raw JSON editor
+- fix(swarm): cross-window agent focus and full selection box
+- feat(splash): live startup telemetry panel with stage timings and 3s summary hold
+
+
 ## 0.49.3 — 2026-06-25
 
 - feat(tab-chrome): full-width boundary line below tab strip via container border-bottom
