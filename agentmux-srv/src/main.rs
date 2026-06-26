@@ -746,17 +746,39 @@ async fn main() {
         tracing::warn!("session archiver: home dir unavailable, archiver disabled");
     }
 
-    // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
-    let web_listener = TcpListener::bind("127.0.0.1:0")
+    // 5. Bind 2 TCP listeners (web + ws — separate ports matching Go).
+    // When LAN discovery is enabled the user has explicitly opted in to network
+    // visibility. Bind to 0.0.0.0 so devices on the same network can reach the
+    // port that mDNS advertises. The auth_key (X-AuthKey header, broadcast in
+    // the mDNS TXT record) gates every API route.
+    //
+    // Known limitation: `bind_addr` is resolved once at startup. The toggle is
+    // therefore only fully effective before launch (settings.json) or after a
+    // sidecar restart. Both directions are affected:
+    //   OFF→ON: mDNS re-advertises the LAN IP but listeners stay on 127.0.0.1,
+    //           so remote devices cannot connect until restart.
+    //   ON→OFF: mDNS is stopped but listeners remain on 0.0.0.0 and are still
+    //           reachable on the LAN until restart (auth_key still gates routes).
+    // A future improvement would re-bind listeners on toggle; deferred because
+    // rebinding an active axum server is non-trivial.
+    let bind_addr = if config_watcher.get_settings().network_lan_discovery {
+        "0.0.0.0:0"
+    } else {
+        "127.0.0.1:0"
+    };
+    let web_listener = TcpListener::bind(bind_addr)
         .await
         .expect("failed to bind web listener");
-    let ws_listener = TcpListener::bind("127.0.0.1:0")
+    let ws_listener = TcpListener::bind(bind_addr)
         .await
         .expect("failed to bind ws listener");
 
     let web_addr = web_listener.local_addr().unwrap();
     let ws_addr = ws_listener.local_addr().unwrap();
-    let local_web_url = format!("http://{}", web_addr);
+    // Always use 127.0.0.1 for the local URL regardless of bind address.
+    // When bound to 0.0.0.0, local_addr() returns 0.0.0.0:PORT which is not a
+    // valid connect destination (fails on Windows and some Linux configs).
+    let local_web_url = format!("http://127.0.0.1:{}", web_addr.port());
 
     // Make local backend URL available to child processes (PTY shells).
     // the muxbus client (agentbus-client package) reads AGENTMUX_LOCAL_URL for local PTY delivery
@@ -1014,8 +1036,8 @@ async fn main() {
 
     // 6. Emit AGENTMUXSRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
     eprintln!(
-        "AGENTMUXSRV-ESTART ws:{} web:{} version:{} buildtime:{} instance:{}",
-        ws_addr, web_addr, version, build_time, config.instance_id
+        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{}",
+        ws_addr.port(), web_addr.port(), version, build_time, config.instance_id
     );
 
     // 7. Build router and serve on both listeners
