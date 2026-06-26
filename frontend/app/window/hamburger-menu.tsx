@@ -12,7 +12,7 @@
 // Every menu action resolves to a module-level store/RPC primitive, so the
 // component is fully self-contained (no TabBar state coupling).
 
-import { createTab, getApi, settingsAtom } from "@/store/global";
+import { createTab, getApi, openOrFocusPaneByView, settingsAtom } from "@/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
@@ -21,8 +21,6 @@ import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
-import { openBundleManager } from "@/app/modals/bundle-manager-modal";
-import { openToolchainModal } from "@/app/modals/toolchain-modal";
 import { isMacOS } from "@/util/platformutil";
 import { createMemo, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
@@ -122,23 +120,14 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 onClick: () => openModal(CommandPaletteModal),
             },
             {
-                // Trust Center — the app-wide hub for Accounts, Identity,
-                // and Memory. Opens the manager modal here when the app-wide
-                // singleton is free; when it is held in another window,
-                // focuses that window instead (the persistent "open
-                // elsewhere" banner stays the durable affordance).
-                // See SPEC_BUNDLE_MANAGEMENT §3, SPEC_TRUST_CENTER_2026_06_15.
                 label: "Trust Center",
-                icon: "shield-halved",
-                onClick: () => openBundleManager(),
+                icon: "id-card",
+                onClick: () => fireAndForget(() => openOrFocusPaneByView("trust")),
             },
             {
-                // Toolchain — visibility + control over the dev tools AgentMux
-                // runs CLIs in (node/npm/git/docker + provider CLIs), incl. the
-                // effective PATH. See SPEC_TOOLCHAIN_MANAGER_2026-06-15.
-                label: "Toolchain Manager",
+                label: "Toolchain",
                 icon: "wrench",
-                onClick: () => openToolchainModal(),
+                onClick: () => fireAndForget(() => openOrFocusPaneByView("toolchain")),
             },
             {
                 label: "DevTools",

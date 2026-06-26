@@ -11,6 +11,7 @@ import {
     createBlockSplitVertically,
     createTab,
     getApi,
+    openOrFocusPaneByView,
     setActiveTab,
 } from "@/app/store/global";
 import { WorkspaceService } from "@/app/store/services";
@@ -19,7 +20,6 @@ import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
-import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
 
 // ---------------------------------------------------------------------------
@@ -372,9 +372,7 @@ export function registerDefaultCommands(): void {
         label: "Identity & Memory",
         category: "App",
         icon: "id-card",
-        execute: () => {
-            openBundleManager();
-        },
+        execute: () => void openOrFocusPaneByView("trust"),
     });
     commandRegistry.register({
         id: "help:docs",
