@@ -117,6 +117,10 @@
         min-width: 14ch; // fits "Mem 99.9G/99.9G"
     }
 
+    .stat-commit {
+        min-width: 16ch; // fits "PF 99.9G/99.9G"
+    }
+
     .stat-disk {
         min-width: 12ch; // fits "R999M W999M"
     }
