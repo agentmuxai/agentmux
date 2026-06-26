@@ -7,6 +7,7 @@
 pub mod agents;
 pub mod agents_consolidate;
 pub mod content;
+pub mod cron;
 pub mod def_registry_mirror;
 pub mod dual_write;
 pub mod error;
@@ -23,6 +24,7 @@ pub mod store;
 
 pub use agents::{AgentDefinition, AgentInstance, InstanceStatus, InstanceUpdate};
 pub use content::AgentContent;
+pub use cron::CronJob;
 pub use error::StoreError;
 #[allow(unused_imports)]
 pub use history::AgentHistory;

@@ -25,7 +25,8 @@ use super::error::StoreError;
 /// `run_shared_store_schema`. Versioned independently from `objects.db`.
 ///   v1 — initial: identity accounts/bundles/bindings/links, memory
 ///         bundles, drone definitions, muxbus credentials
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 1;
+///   v2 — db_cron_jobs: persistent scheduled injection jobs
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 2;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -665,7 +666,23 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             applied_at  TEXT NOT NULL,
             duration_ms INTEGER NOT NULL DEFAULT 0,
             scope       TEXT NOT NULL DEFAULT 'global'
-        );",
+        );
+
+        CREATE TABLE IF NOT EXISTS db_cron_jobs (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            expression  TEXT NOT NULL,
+            prompt      TEXT NOT NULL,
+            target      TEXT NOT NULL,
+            created_by  TEXT NOT NULL DEFAULT '',
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            last_fired  INTEGER,
+            fire_count  INTEGER NOT NULL DEFAULT 0,
+            max_fires   INTEGER,
+            created_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_cron_jobs_enabled
+            ON db_cron_jobs(enabled);",
     )?;
 
     // Seed the blank Identity / Memory singletons — same fixed ids as objects.db

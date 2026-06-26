@@ -869,6 +869,9 @@ async fn main() {
         }
     });
 
+    // Clone before move into AppState for cron_scheduler construction.
+    let shared_store_for_cron = shared_store.clone();
+
     let state = AppState {
         auth_key: config.auth_key.clone(),
         version: version.clone(),
@@ -929,7 +932,17 @@ async fn main() {
             }
         },
         shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
+        cron_scheduler: crate::backend::cron::CronScheduler::new(
+            shared_store_for_cron,
+            reqwest::Client::new(),
+            local_web_url.clone(),
+            config.auth_key.clone(),
+        ),
     };
+
+    // Start persistent cron scheduler — load enabled jobs from DB, fire any
+    // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
+    state.cron_scheduler.start().await;
 
     // Saga durability PR 2 — resume-on-startup. Walk any sagas the
     // durable log says are unresolved (running / compensating /

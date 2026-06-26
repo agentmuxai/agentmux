@@ -18,6 +18,7 @@ mod voice;
 pub(crate) mod wave_obj_bridge;
 mod websocket;
 mod drone_handlers;
+mod cron;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod native_memory_handlers;
@@ -33,7 +34,7 @@ use axum::{
     http::{header, Method, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Json, Response},
-    routing::{get, post},
+    routing::{delete, get, patch, post},
     Router,
 };
 use serde_json::json;
@@ -156,6 +157,11 @@ pub struct AppState {
     /// stop button can tree-kill a running persistent shell node. See
     /// `docs/specs/SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md`.
     pub shell_sessions: std::sync::Arc<crate::backend::shell_node::ShellSessionRegistry>,
+    /// Persistent cron scheduler — loaded from `db_cron_jobs` at startup.
+    /// Creates/cancels tokio tasks that fire on the specified UTC schedule and
+    /// POST to `/agentmux/reactive/inject`. See
+    /// `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
+    pub cron_scheduler: std::sync::Arc<crate::backend::cron::CronScheduler>,
 }
 
 /// Build the Axum router with all routes, auth middleware, and CORS.
@@ -300,6 +306,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/window/focus", post(handle_window_focus))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
+        // Persistent cron scheduler (SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2.4).
+        // Auth-gated like reactive routes.
+        .route("/agentmux/cron", post(cron::handle_cron_create))
+        .route("/agentmux/cron", get(cron::handle_cron_list))
+        .route("/agentmux/cron/:id", delete(cron::handle_cron_delete))
+        .route("/agentmux/cron/:id", patch(cron::handle_cron_patch))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(
