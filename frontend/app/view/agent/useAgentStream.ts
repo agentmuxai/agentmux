@@ -487,6 +487,16 @@ export function useAgentStream({
             scope: WOS.makeORef("block", blockId),
             handler: (event) => {
                 const status = (event as any)?.data?.shellprocstatus;
+                if (status === "running") {
+                    // New process started (auto-retry) — cancel any pending
+                    // crash-recovery timer so it doesn't fire against the
+                    // new turn's phase and spuriously disconnect it.
+                    if (procExitGraceTimer != null) {
+                        clearTimeout(procExitGraceTimer);
+                        procExitGraceTimer = null;
+                    }
+                    return;
+                }
                 if (status !== "done") return;
                 if (procExitGraceTimer != null) return; // already armed
                 procExitGraceTimer = window.setTimeout(() => {
