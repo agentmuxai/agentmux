@@ -516,6 +516,19 @@ export function useAgentStream({
             }
         });
 
+        // Cancel the crash-recovery timer whenever the phase re-enters
+        // Submitting or Streaming — covers the fast-followup case where the
+        // user sends a message (or a queued turn drains) within the 1.5s
+        // window before ControllerStatus:running arrives. Without this,
+        // the stale done-timer would fire against the healthy new turn.
+        createEffect(() => {
+            const kind = getTurnPhase().kind;
+            if ((kind === "Submitting" || kind === "Streaming") && procExitGraceTimer != null) {
+                clearTimeout(procExitGraceTimer);
+                procExitGraceTimer = null;
+            }
+        });
+
         // Fallback timer: if the user presses Esc and the CLI doesn't
         // emit `session_end` within 1.5s (normal for a killed subprocess
         // — TerminateProcess skips any final output), run the same
