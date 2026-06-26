@@ -257,17 +257,30 @@ fn prune_old_backups(home: &Path) {
 
 /// Return the number of REGISTRY migrations that have not yet been applied.
 /// Opens stores read-only; returns 0 on any error so startup is never blocked.
+/// `data_dir` must be the wave data dir (parent of `db/`) not the db dir itself.
 pub fn count_pending_migrations(data_dir: &Path) -> usize {
     let shared_store_path = match resolve_shared_store_path() {
         Some(p) => p,
-        None => return 0,
+        None => {
+            tracing::warn!("count_pending_migrations: could not resolve shared store path — reporting 0");
+            return 0;
+        }
     };
     let shared_store = match Store::open_shared(&shared_store_path) {
         Ok(s) => s,
-        Err(_) => return 0,
+        Err(e) => {
+            tracing::warn!("count_pending_migrations: failed to open shared store at {}: {} — reporting 0", shared_store_path.display(), e);
+            return 0;
+        }
     };
     let channel_store_path = data_dir.join("db").join("objects.db");
-    let channel_store = Store::open(&channel_store_path).ok();
+    let channel_store = match Store::open(&channel_store_path) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!("count_pending_migrations: failed to open channel store at {}: {} — channel-scoped migrations will not be counted", channel_store_path.display(), e);
+            None
+        }
+    };
     REGISTRY
         .iter()
         .filter(|m| {
