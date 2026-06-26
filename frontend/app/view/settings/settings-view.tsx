@@ -294,12 +294,12 @@ function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
-                label="Terminal opacity"
-                description="Terminal background opacity (0–1)"
+                label="Terminal transparency"
+                description="Terminal background transparency (0 = opaque, 1 = fully transparent)"
                 control={
                     <SliderControl
                         min={0} max={1} step={0.05}
-                        value={(s()["term:transparency"] as number) ?? 1}
+                        value={(s()["term:transparency"] as number) ?? 0}
                         onChange={(v) => set("term:transparency", v)}
                     />
                 }
