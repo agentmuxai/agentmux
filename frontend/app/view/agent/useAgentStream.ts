@@ -468,6 +468,44 @@ export function useAgentStream({
             }
         };
 
+        // Process-exit grace-period: when the backend subprocess exits
+        // (`ControllerStatus: done`), give 1.5 s for any buffered
+        // `session_end` to drain through the IPC. If the phase is still
+        // working after that window, the process crashed without emitting
+        // `session_end` — force StreamUnsubscribe so "Working…" clears
+        // and the Disconnected state surfaces the AgentFailure banner.
+        //
+        // Clean exit: `session_end` → `finalizeTurn` → `TurnEnd` puts the
+        // phase in Done before the timer fires → no-op.
+        // Persistent mode: the process never exits between turns, so
+        // `ControllerStatus: done` only fires on crash or session teardown.
+        // Auto-retry: the new process fires `ControllerStatus: running` →
+        // file truncate → TurnReset → phase is Idle when the timer fires → no-op.
+        let procExitGraceTimer: number | null = null;
+        const procExitUnsub = waveEventSubscribe({
+            eventType: WpsEvent.ControllerStatus,
+            scope: WOS.makeORef("block", blockId),
+            handler: (event) => {
+                const status = (event as any)?.data?.shellprocstatus;
+                if (status !== "done") return;
+                if (procExitGraceTimer != null) return; // already armed
+                procExitGraceTimer = window.setTimeout(() => {
+                    procExitGraceTimer = null;
+                    const phase = paneSnapshot(blockId)?.turnPhase?.kind;
+                    if (phase === "Streaming" || phase === "Submitting") {
+                        model.dispatchPane({ type: "StreamUnsubscribe", at: Date.now() });
+                    }
+                }, 1500);
+            },
+        });
+        onCleanup(() => {
+            procExitUnsub();
+            if (procExitGraceTimer != null) {
+                clearTimeout(procExitGraceTimer);
+                procExitGraceTimer = null;
+            }
+        });
+
         // Fallback timer: if the user presses Esc and the CLI doesn't
         // emit `session_end` within 1.5s (normal for a killed subprocess
         // — TerminateProcess skips any final output), run the same
