@@ -8,7 +8,7 @@ export class TrustViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel;
 
-    viewIcon = () => "shield-halved";
+    viewIcon = () => "id-card";
     viewName = () => "Trust Center";
     // wired in trust.tsx to avoid circular import
     declare viewComponent: ViewComponent<TrustViewModel>;

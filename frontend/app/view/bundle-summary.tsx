@@ -27,7 +27,7 @@
 
 import { type JSX } from "solid-js";
 
-import { openBundleManager } from "@/app/modals/bundle-manager-modal";
+import { openOrFocusPaneByView } from "@/app/store/global";
 
 import "./bundle-summary.scss";
 
@@ -59,7 +59,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 <button
                     type="button"
                     class="bundle-summary-btn"
-                    onClick={() => openBundleManager()}
+                    onClick={() => void openOrFocusPaneByView("trust")}
                 >
                     Manage in Identity &amp; Memory
                 </button>
