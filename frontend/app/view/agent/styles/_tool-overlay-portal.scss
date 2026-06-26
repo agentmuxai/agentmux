@@ -34,6 +34,7 @@
 .agent-tool-overlay-log {
     flex: 1 1 auto;
     min-height: 0;
+    overflow-x: auto;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--space-1-5) 10px var(--space-1-5) var(--space-2);
@@ -44,8 +45,8 @@
         font-family: var(--fixed-font, monospace);
         font-size: 12px;
         line-height: 1.4;
-        white-space: pre-wrap;
-        word-break: break-word;
+        white-space: pre;
+        overflow-wrap: normal;
 
         &--stdout {
             color: var(--term-foreground, #d3d7cf);

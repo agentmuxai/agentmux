@@ -39,6 +39,7 @@ import "./tool-renderers/RecordTable";
 
 interface ToolOverlayLogProps {
     node: ToolNode;
+    fontScale?: () => number;
 }
 
 const KIND_CLASS: Record<string, string> = {
@@ -162,7 +163,12 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
      * rendering the matched one — no shared DOM between branches.
      */
     return (
-        <div class="agent-tool-overlay-log" ref={scrollRef} onScroll={onScroll}>
+        <div
+            class="agent-tool-overlay-log"
+            ref={scrollRef}
+            onScroll={onScroll}
+            style={props.fontScale ? { "font-size": `${props.fontScale() * 100}%` } : undefined}
+        >
             <Switch>
                 <Match when={isStreaming() && hasChunks()}>
                     <ChunkList chunks={chunks()} />
