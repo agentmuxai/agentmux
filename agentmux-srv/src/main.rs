@@ -1041,9 +1041,10 @@ async fn main() {
     );
 
     // 7. Build router and serve on both listeners
-    // Keep a handle to the shell registry for shutdown cleanup — `state` is
-    // moved into the router below. [reagent #1422 P2]
+    // Clone Arcs that are needed after `state` is moved into build_router.
     let shell_sessions_shutdown = state.shell_sessions.clone();
+    let wal_wstore = Arc::clone(&state.wstore);
+    let wal_filestore = Arc::clone(&state.filestore);
     let router = build_router(state);
 
     let web_server = axum::serve(web_listener, router.clone());
@@ -1097,6 +1098,34 @@ async fn main() {
         }
         signal_token.cancel();
     });
+
+    // Periodic WAL checkpoint — prevents unbounded WAL file growth during
+    // long-running sessions. Runs every 30 minutes while the srv is up.
+    // busy_timeout=5000 (set at DB open) handles transient reader contention;
+    // partial truncate on contention is safe — the remainder is picked up on
+    // the next pass. (SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26 §4.E)
+    {
+        let wal_shutdown = stdin_token.clone();
+        tokio::spawn(async move {
+            const INTERVAL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(INTERVAL) => {}
+                    _ = wal_shutdown.cancelled() => break,
+                }
+                if let Err(e) = wal_wstore.checkpoint() {
+                    tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on objects.db failed");
+                } else {
+                    tracing::debug!("wal_checkpoint(TRUNCATE): objects.db ok");
+                }
+                if let Err(e) = wal_filestore.checkpoint() {
+                    tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on filestore.db failed");
+                } else {
+                    tracing::debug!("wal_checkpoint(TRUNCATE): filestore.db ok");
+                }
+            }
+        });
+    }
 
     // Run both servers until shutdown
     tokio::select! {
