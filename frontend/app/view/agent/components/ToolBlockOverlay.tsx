@@ -33,6 +33,7 @@ export interface ToolBlockOverlayProps {
     onOpenInPane?: () => void;
     onOpenInWindow?: () => void;
     onNewAgentHere?: () => void;
+    previewFontScale?: () => number;
 }
 
 const STATUS_LABEL: Record<ToolNode["status"], string> = {
@@ -60,7 +61,7 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
                 {STATUS_LABEL[props.node.status]}
             </span>
         </div>
-        <ToolOverlayLog node={props.node} />
+        <ToolOverlayLog node={props.node} fontScale={props.previewFontScale} />
         <ToolOverlayActions
             node={props.node}
             onOpenInPane={props.onOpenInPane}
