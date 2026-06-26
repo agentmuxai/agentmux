@@ -468,6 +468,74 @@ export function useAgentStream({
             }
         };
 
+        // Process-exit grace-period: when the backend subprocess exits
+        // (`ControllerStatus: done`), give 1.5 s for any buffered
+        // `session_end` to drain through the IPC. If the phase is still
+        // working after that window, the process crashed without emitting
+        // `session_end` — force StreamUnsubscribe so "Working…" clears
+        // and the Disconnected state surfaces the AgentFailure banner.
+        //
+        // Clean exit: `session_end` → `finalizeTurn` → `TurnEnd` puts the
+        // phase in Done before the timer fires → no-op.
+        // Persistent mode: the process never exits between turns, so
+        // `ControllerStatus: done` only fires on crash or session teardown.
+        // Auto-retry: `ControllerStatus: running` cancels any pending timer.
+        let procExitGraceTimer: number | null = null;
+        const procExitUnsub = waveEventSubscribe({
+            eventType: WpsEvent.ControllerStatus,
+            scope: WOS.makeORef("block", blockId),
+            handler: (event) => {
+                const status = (event as any)?.data?.shellprocstatus;
+                if (status === "running") {
+                    if (procExitGraceTimer != null) {
+                        clearTimeout(procExitGraceTimer);
+                        procExitGraceTimer = null;
+                    }
+                    return;
+                }
+                if (status !== "done") return;
+                if (procExitGraceTimer != null) return; // already armed
+                procExitGraceTimer = window.setTimeout(() => {
+                    procExitGraceTimer = null;
+                    const phase = paneSnapshot(blockId)?.turnPhase?.kind;
+                    if (phase === "Streaming" || phase === "Submitting") {
+                        const at = Date.now();
+                        // StreamUnsubscribe transitions Streaming → Disconnected,
+                        // clearing "Working...", but also nulls lastEventMs in the
+                        // reducer — which would gate TurnStart and StreamFlushObserved
+                        // for any recovery turn (failure-banner Retry or auto-retry).
+                        // Immediately re-dispatch StreamSubscribe to restore lastEventMs
+                        // while keeping the file subscription live. Net phase: Idle
+                        // (Disconnected → Idle via StreamSubscribe). The AgentFailure
+                        // banner drives the crash UX independently of turn phase.
+                        model.dispatchPane({ type: "StreamUnsubscribe", at });
+                        model.dispatchPane({ type: "StreamSubscribe", at });
+                    }
+                }, 1500);
+            },
+        });
+        onCleanup(() => {
+            procExitUnsub();
+            if (procExitGraceTimer != null) {
+                clearTimeout(procExitGraceTimer);
+                procExitGraceTimer = null;
+            }
+        });
+
+        // Cancel the crash-recovery timer when a new turn is submitted.
+        // Gated on Submitting only — NOT Streaming — because StreamFlushObserved
+        // replaces the Streaming phase object with a fresh reference even for the
+        // dying turn's buffered output, which would spuriously cancel the timer
+        // before it can fire. Submitting is only entered via TurnStart (a real
+        // new turn), so it is safe to cancel here.
+        createEffect(() => {
+            const kind = getTurnPhase().kind;
+            if (kind === "Submitting" && procExitGraceTimer != null) {
+                clearTimeout(procExitGraceTimer);
+                procExitGraceTimer = null;
+            }
+        });
+
         // Fallback timer: if the user presses Esc and the CLI doesn't
         // emit `session_end` within 1.5s (normal for a killed subprocess
         // — TerminateProcess skips any final output), run the same
