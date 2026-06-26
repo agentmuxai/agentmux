@@ -85,11 +85,16 @@ impl std::fmt::Display for SrvSpawnError {
 ///
 /// The migration runner exits 0 (success / nothing to do) or 1 (failure).
 /// On failure the launcher should surface an error and not start the daemon.
-/// stdout lines are newline-delimited JSON progress events; stderr is plain text.
+/// stdout lines are newline-delimited JSON progress events — consumed inline
+/// so sub-events are delivered to the splash before `stage_end` is sent.
 pub async fn run_migrate(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
+    sink: &crate::startup_events::StartupEventSink,
 ) -> Result<(), SrvSpawnError> {
+    sink.stage_begin("migrations", "Migrations");
+    let t = std::time::Instant::now();
+
     let backend_path = resolve_srv_binary(launcher_exe_dir)?;
 
     let mut cmd = tokio::process::Command::new(&backend_path);
@@ -113,15 +118,7 @@ pub async fn run_migrate(
         .spawn()
         .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate spawn: {}", e)))?;
 
-    // Forward stdout (progress JSON) and stderr to launcher log.
-    if let Some(stdout) = child.stdout.take() {
-        tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                crate::log(&format!("[migrate] {}", line));
-            }
-        });
-    }
+    // Stderr to log only (non-blocking task).
     if let Some(stderr) = child.stderr.take() {
         tokio::spawn(async move {
             let mut reader = tokio::io::BufReader::new(stderr).lines();
@@ -131,19 +128,108 @@ pub async fn run_migrate(
         });
     }
 
+    // Read stdout inline so sub-events arrive before stage_end is sent.
+    let mut applied = 0u32;
+    let mut skipped = 0u32;
+    if let Some(stdout) = child.stdout.take() {
+        let mut reader = tokio::io::BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            crate::log(&format!("[migrate] {}", line));
+            match parse_migration_line(&line) {
+                Some(MigrationLine::Start { id, label }) => {
+                    sink.sub_begin("migrations", id, label);
+                }
+                Some(MigrationLine::Done { id, duration_ms }) => {
+                    sink.sub_end(
+                        "migrations",
+                        id,
+                        duration_ms,
+                        crate::startup_events::StartupStatus::Ok,
+                        None,
+                    );
+                }
+                Some(MigrationLine::Complete { applied: a, skipped: s }) => {
+                    applied = a;
+                    skipped = s;
+                }
+                None => {}
+            }
+        }
+    }
+
     let status = child
         .wait()
         .await
         .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate wait: {}", e)))?;
 
+    let duration_ms = t.elapsed().as_millis() as u64;
     if status.success() {
+        let detail = if applied > 0 {
+            Some(format!("{} applied, {} current", applied, skipped))
+        } else if skipped > 0 {
+            Some(format!("all {} current", skipped))
+        } else {
+            None
+        };
+        sink.stage_end("migrations", duration_ms, crate::startup_events::StartupStatus::Ok, detail);
         Ok(())
     } else {
+        sink.stage_end(
+            "migrations",
+            duration_ms,
+            crate::startup_events::StartupStatus::Error,
+            Some("failed; see migration-error.log".into()),
+        );
         Err(SrvSpawnError::SpawnFailed(format!(
             "agentmux-srv migrate exited with status {}; see ~/.agentmux/logs/migration-error.log",
             status.code().unwrap_or(-1)
         )))
     }
+}
+
+// ── Migration JSON parser ────────────────────────────────────────────────────
+
+enum MigrationLine {
+    Start { id: String, label: String },
+    Done { id: String, duration_ms: u64 },
+    Complete { applied: u32, skipped: u32 },
+}
+
+fn parse_migration_line(s: &str) -> Option<MigrationLine> {
+    let event = json_str(s, "event")?;
+    match event.as_str() {
+        "migration_start" => Some(MigrationLine::Start {
+            id: json_str(s, "id")?,
+            label: json_str(s, "description")
+                .unwrap_or_else(|| json_str(s, "id").unwrap_or_default()),
+        }),
+        "migration_done" => Some(MigrationLine::Done {
+            id: json_str(s, "id")?,
+            duration_ms: json_u64(s, "duration_ms").unwrap_or(0),
+        }),
+        "complete" => Some(MigrationLine::Complete {
+            applied: json_u64(s, "applied").unwrap_or(0) as u32,
+            skipped: json_u64(s, "skipped").unwrap_or(0) as u32,
+        }),
+        _ => None,
+    }
+}
+
+fn json_str(s: &str, key: &str) -> Option<String> {
+    let prefix = format!("\"{}\":\"", key);
+    let start = s.find(&prefix)? + prefix.len();
+    let rest = &s[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn json_u64(s: &str, key: &str) -> Option<u64> {
+    let prefix = format!("\"{}\":", key);
+    let start = s.find(&prefix)? + prefix.len();
+    let rest = s[start..].trim_start();
+    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    if end == 0 { return None; }
+    rest[..end].parse().ok()
 }
 
 /// Spawn srv as a child of the launcher, assigned to launcher's
@@ -168,7 +254,10 @@ pub async fn spawn_srv(
     paths: &DataPaths,
     srv_pipe_path: &str,
     #[cfg(target_os = "windows")] job_handle: windows_sys::Win32::Foundation::HANDLE,
+    sink: &crate::startup_events::StartupEventSink,
 ) -> Result<(SrvSpawnResult, Child), SrvSpawnError> {
+    sink.stage_begin("backend", "Backend startup");
+    let srv_t = std::time::Instant::now();
     let backend_path = resolve_srv_binary(launcher_exe_dir)?;
 
     // Generate a fresh auth_key per run (UUID v4 — same as host did).
@@ -340,13 +429,33 @@ pub async fn spawn_srv(
     match recv {
         Err(_) => {
             let _ = child.start_kill();
+            sink.stage_end(
+                "backend",
+                srv_t.elapsed().as_millis() as u64,
+                crate::startup_events::StartupStatus::Error,
+                Some("timeout (30s)".into()),
+            );
             Err(SrvSpawnError::EstartTimeout)
         }
         Ok(None) => {
             let _ = child.start_kill();
+            sink.stage_end(
+                "backend",
+                srv_t.elapsed().as_millis() as u64,
+                crate::startup_events::StartupStatus::Error,
+                None,
+            );
             Err(SrvSpawnError::EstartChannelClosed)
         }
-        Ok(Some(result)) => Ok((result, child)),
+        Ok(Some(result)) => {
+            sink.stage_end(
+                "backend",
+                srv_t.elapsed().as_millis() as u64,
+                crate::startup_events::StartupStatus::Ok,
+                None,
+            );
+            Ok((result, child))
+        }
     }
 }
 

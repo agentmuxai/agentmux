@@ -47,6 +47,7 @@ mod splash_font;
 mod splash_text;
 mod splash_config;
 mod splash_info;
+mod startup_events;
 mod srv_spawner;
 mod state;
 mod wrr;
@@ -177,7 +178,8 @@ fn splash_selftest() {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = splash::spawn_splash("selftest");
+        let (_sink, rx) = startup_events::StartupEventSink::new();
+        let _ = splash::spawn_splash("selftest", rx);
         std::thread::sleep(hold);
     }
 }
@@ -914,9 +916,16 @@ async fn run_unix(
         }
     };
 
+    // Startup telemetry bus (Unix/macOS — receiver dropped immediately since
+    // the native splash on this platform doesn't yet consume typed events).
+    let (startup_sink, startup_rx_unix) = startup_events::StartupEventSink::new();
+    drop(startup_rx_unix);
+
     // Startup recovery walker: mark any saga left running from a prior
     // crashed run as failed_compensation. Must run BEFORE coordinator
     // spawn (LSD-3).
+    startup_sink.stage_begin("saga", "Saga recovery");
+    let saga_t = std::time::Instant::now();
     if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
         log(&format!(
             "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn",
@@ -927,13 +936,29 @@ async fn run_unix(
     // Startup retention vacuum (LSD-4).
     let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-    match saga_log.vacuum_older_than(cutoff) {
-        Ok(removed) => log(&format!(
-            "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
-            removed, cutoff, retention_days
-        )),
-        Err(e) => log(&format!("[saga-log] WARN: vacuum failed: {}", e)),
-    }
+    let saga_vacuumed_unix = match saga_log.vacuum_older_than(cutoff) {
+        Ok(removed) => {
+            log(&format!(
+                "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
+                removed, cutoff, retention_days
+            ));
+            removed
+        }
+        Err(e) => {
+            log(&format!("[saga-log] WARN: vacuum failed: {}", e));
+            0
+        }
+    };
+    startup_sink.stage_end(
+        "saga",
+        saga_t.elapsed().as_millis() as u64,
+        startup_events::StartupStatus::Ok,
+        if saga_vacuumed_unix > 0 {
+            Some(format!("{} old sagas pruned", saga_vacuumed_unix))
+        } else {
+            None
+        },
+    );
 
     // Host pipe wrapper for saga-issued Commands → host. The IPC
     // server's per-connection handler installs the host's writer once
@@ -979,7 +1004,7 @@ async fn run_unix(
     log(&format!("IPC server started on {}", socket_path));
 
     // 2a. Run data migrations before starting the daemon.
-    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths).await {
+    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths, &startup_sink).await {
         log(&format!("FATAL: migration failed: {}", e));
         eprintln!("Failed to migrate data: {}\nSee ~/.agentmux/logs/migration-error.log", e);
         std::process::exit(1);
@@ -991,7 +1016,7 @@ async fn run_unix(
     //    Windows-only IPC code stays disabled).
     let srv_pipe_path = String::new();
     let (srv_result, mut srv_child) =
-        match srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path).await {
+        match srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink).await {
             Ok(pair) => pair,
             Err(e) => {
                 log(&format!("FATAL: srv spawn failed: {}", e));
@@ -1449,18 +1474,22 @@ async fn run_windows(
             std::process::exit(2);
         }
     };
+    // Startup telemetry bus: events flow from each startup stage to the splash.
+    let (startup_sink, startup_rx) = startup_events::StartupEventSink::new();
+
     // Spawn the native pre-splash immediately after claiming the
     // single-instance pipe — before srv spawn and CEF init.
     // The event name is forwarded to the CEF host as
     // AGENTMUX_SPLASH_EVENT so it can signal dismiss from on_load_end.
     #[cfg(target_os = "windows")]
     let splash_event_name = if splash_config::splash_disabled() {
+        drop(startup_rx); // no splash — let senders fail silently
         None // splash:disabled / AGENTMUX_SPLASH=0 — no event, no window (SPEC §6)
     } else {
-        splash::spawn_splash(&dir_hash)
+        splash::spawn_splash(&dir_hash, startup_rx)
     };
     #[cfg(not(target_os = "windows"))]
-    let splash_event_name: Option<String> = None;
+    let splash_event_name: Option<String> = { drop(startup_rx); None };
 
     // Phase B.8 — broadcast bus for reducer-emitted events. Capacity
     // 1024 is comfortable headroom for the launcher's event volume
@@ -1518,6 +1547,8 @@ async fn run_windows(
     // failed_compensation state for the operator to see — vacuum
     // honors the 7-day retention window and won't immediately purge.
     // Spec `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.5.
+    startup_sink.stage_begin("saga", "Saga recovery");
+    let saga_t = std::time::Instant::now();
     if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
         log(&format!(
             "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn; prior crashed sagas remain unresolved until next restart",
@@ -1535,13 +1566,30 @@ async fn run_windows(
     let retention_days =
         config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-    match saga_log.vacuum_older_than(cutoff) {
-        Ok(removed) => log(&format!(
-            "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
-            removed, cutoff, retention_days
-        )),
-        Err(e) => log(&format!("[saga-log] WARN: vacuum failed: {}", e)),
-    }
+    let saga_vacuumed = match saga_log.vacuum_older_than(cutoff) {
+        Ok(removed) => {
+            log(&format!(
+                "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
+                removed, cutoff, retention_days
+            ));
+            removed
+        }
+        Err(e) => {
+            log(&format!("[saga-log] WARN: vacuum failed: {}", e));
+            0
+        }
+    };
+    let saga_detail = if saga_vacuumed > 0 {
+        Some(format!("{} old sagas pruned", saga_vacuumed))
+    } else {
+        None
+    };
+    startup_sink.stage_end(
+        "saga",
+        saga_t.elapsed().as_millis() as u64,
+        startup_events::StartupStatus::Ok,
+        saga_detail,
+    );
 
     // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
     // the host's IPC connection (installed by the per-connection
@@ -1605,7 +1653,7 @@ async fn run_windows(
     log(&format!("IPC server started on {}", pipe_path));
 
     // 3. Run data migrations before starting the daemon.
-    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths).await {
+    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths, &startup_sink).await {
         log(&format!("FATAL: migration failed: {}", e));
         eprintln!("Failed to migrate data: {}\nSee ~/.agentmux/logs/migration-error.log", e);
         drop(job);
@@ -1627,6 +1675,7 @@ async fn run_windows(
         &paths,
         &srv_pipe_path,
         job_handle,
+        &startup_sink,
     )
     .await
     {
