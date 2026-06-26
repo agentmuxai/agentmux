@@ -1,30 +1,20 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * ToolchainModal — the hamburger ▸ "Toolchain" surface.
- *
- * Gives users visibility + control over the toolchain AgentMux runs CLIs in:
- *  - **Environment** — the effective PATH the srv resolves tools in, how it was
- *    derived (login-shell / fallback-dirs / inherited), and OS/arch. Makes the
- *    GUI-launch PATH problem (the "NPM failed" bug) diagnosable rather than
- *    mysterious.
- *  - **Core tools** — Node.js, npm, Git, Docker (versions + paths + status).
- *  - **Agent CLIs** — every provider, detected version + source.
- *
- * P1 (this file) is read-only: detection + install *links*. Install/repair in
- * place (reusing `install.start`) is P2. See
- * docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md.
- */
-
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { createStore } from "solid-js/store";
 
-import { Modal } from "@/element/modal";
-import { openModal, type ModalCloseProps } from "@/app/store/modalmodel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi, createBlock } from "@/store/global";
+import { getPlatform } from "@/util/platformutil";
+import { CORE_TOOLS, cliCommandForPlatform, type Platform } from "@/app/view/agent/providers/toolchain-catalog";
+import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
+import { getProviderList } from "@/app/view/agent/providers";
+import type { ToolchainViewModel } from "./toolchain-model";
+import "./toolchain-view.scss";
+
+// ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
 
 function loadWidgetPorts(): Record<string, number> {
     try {
@@ -44,11 +34,8 @@ function saveWidgetPort(widgetId: string, port: number | undefined): void {
     }
     localStorage.setItem("agentmux:widget-ports", JSON.stringify(saved));
 }
-import { getPlatform } from "@/util/platformutil";
-import { CORE_TOOLS, cliCommandForPlatform, type Platform } from "@/app/view/agent/providers/toolchain-catalog";
-import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
-import { getProviderList } from "@/app/view/agent/providers";
-import "./toolchain-modal.scss";
+
+// ── Types (unchanged from modal) ─────────────────────────────────────────────
 
 interface ToolRow {
     id: string;
@@ -59,7 +46,6 @@ interface ToolRow {
     found: boolean;
     version?: string;
     path?: string;
-    /** "local_install" | "system_path" — where resolvecli found it. */
     source?: string;
     optional?: boolean;
     minVersion?: string;
@@ -79,12 +65,9 @@ interface WidgetRow {
     docsUrl: string;
     installKind: "pip" | "npm" | "manual";
     installPkg?: string;
-    /** CLI detection */
     cliLoading: boolean;
     cliFound: boolean;
-    /** User-overridden port; falls back to defaultPort when undefined */
     customPort?: number;
-    /** Health check (only run after cliFound or for manual installs) */
     healthLoading: boolean;
     running: boolean;
     statusCode?: number;
@@ -99,96 +82,61 @@ interface ToolEnv {
 
 function platformKey(): Platform {
     switch (getPlatform()) {
-        case "win32":
-            return "windows";
-        case "darwin":
-            return "macos";
-        default:
-            return "linux";
+        case "win32": return "windows";
+        case "darwin": return "macos";
+        default:       return "linux";
     }
 }
 
-/** Human label for the PATH-source badge. */
 function pathSourceLabel(src: string): string {
     switch (src) {
-        case "login-shell":
-            return "from your login shell";
-        case "fallback-dirs":
-            return "from well-known dirs (login shell unavailable)";
-        default:
-            return "inherited from the launching process";
+        case "login-shell":   return "from your login shell";
+        case "fallback-dirs": return "from well-known dirs (login shell unavailable)";
+        default:              return "inherited from the launching process";
     }
 }
 
-export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
+// ── View component ────────────────────────────────────────────────────────────
+
+export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): JSX.Element {
     const plat = platformKey();
     const [env, setEnv] = createSignal<ToolEnv | null>(null);
     const [showPath, setShowPath] = createSignal(false);
 
-    // Build the initial (loading) row list: core tools, then provider CLIs.
     const coreRows: ToolRow[] = CORE_TOOLS.map((t) => ({
-        id: t.id,
-        label: t.label,
-        icon: t.icon,
-        kind: "core",
-        loading: true,
-        found: false,
-        optional: t.optional,
-        minVersion: t.minVersion,
-        docsUrl: t.docsUrl,
-        installUrl: t.installUrls[plat],
+        id: t.id, label: t.label, icon: t.icon, kind: "core",
+        loading: true, found: false,
+        optional: t.optional, minVersion: t.minVersion,
+        docsUrl: t.docsUrl, installUrl: t.installUrls[plat],
         installCommand: t.installCommand?.[plat],
     }));
     const providerRows: ToolRow[] = getProviderList().map((p) => ({
-        id: p.id,
-        label: p.displayName,
-        icon: p.icon,
-        kind: "provider",
-        loading: true,
-        found: false,
-        docsUrl: p.docsUrl,
-        installUrl: p.docsUrl,
+        id: p.id, label: p.displayName, icon: p.icon, kind: "provider",
+        loading: true, found: false, docsUrl: p.docsUrl, installUrl: p.docsUrl,
     }));
-
     const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...providerRows]);
 
     const savedPorts = loadWidgetPorts();
-    const widgetRows0: WidgetRow[] = EXTERNAL_WIDGETS.map((w) => ({
-        id: w.id,
-        label: w.label,
-        icon: w.icon,
-        description: w.description,
-        defaultPort: w.defaultPort,
-        embedPath: w.embedPath,
-        healthCheckPath: w.healthCheckPath,
-        docsUrl: w.docsUrl,
-        installKind: w.install.kind,
-        installPkg: w.install.kind !== "manual" ? w.install.package : undefined,
-        customPort: savedPorts[w.id],
-        cliLoading: true,
-        cliFound: false,
-        healthLoading: false,
-        running: false,
-    }));
-    const [wrows, setWrows] = createStore<WidgetRow[]>(widgetRows0);
+    const [wrows, setWrows] = createStore<WidgetRow[]>(
+        EXTERNAL_WIDGETS.map((w) => ({
+            id: w.id, label: w.label, icon: w.icon,
+            description: w.description, defaultPort: w.defaultPort,
+            embedPath: w.embedPath, healthCheckPath: w.healthCheckPath,
+            docsUrl: w.docsUrl, installKind: w.install.kind,
+            installPkg: w.install.kind !== "manual" ? w.install.package : undefined,
+            customPort: savedPorts[w.id],
+            cliLoading: true, cliFound: false, healthLoading: false, running: false,
+        }))
+    );
 
     const probeWidget = async (idx: number) => {
         const w = EXTERNAL_WIDGETS[idx];
         const effectivePort = wrows[idx].customPort ?? w.defaultPort;
         const cliCmd = widgetCliCommandForPlatform(w, plat);
-        // For manual-install tools without a CLI command, skip CLI check and go
-        // straight to health so the Running pill still lights up when they're live.
         if (!cliCmd) {
             setWrows(idx, { cliLoading: false, cliFound: false, healthLoading: true });
         } else {
-            const data = {
-                provider_id: w.id,
-                cli_command: cliCmd,
-                npm_package: "",
-                pinned_version: "",
-                windows_install_command: "",
-                unix_install_command: "",
-            };
+            const data = { provider_id: w.id, cli_command: cliCmd, npm_package: "", pinned_version: "", windows_install_command: "", unix_install_command: "" };
             try {
                 await RpcApi.ResolveCliCommand(TabRpcClient, data, { timeout: 10000 });
                 setWrows(idx, { cliLoading: false, cliFound: true, healthLoading: true });
@@ -196,18 +144,8 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                 setWrows(idx, { cliLoading: false, cliFound: false, healthLoading: true });
             }
         }
-        // Always run the health check regardless of CLI result — user may have
-        // started the server manually even without the CLI on PATH.
         try {
-            const h = await RpcApi.WidgetHealthCommand(
-                TabRpcClient,
-                {
-                    port: effectivePort,
-                    health_check_path: w.healthCheckPath,
-                    health_check_body_contains: w.healthCheckBodyContains,
-                },
-                { timeout: 5000 }
-            );
+            const h = await RpcApi.WidgetHealthCommand(TabRpcClient, { port: effectivePort, health_check_path: w.healthCheckPath, health_check_body_contains: w.healthCheckBodyContains }, { timeout: 5000 });
             setWrows(idx, { healthLoading: false, running: h.healthy, statusCode: h.status_code ?? undefined });
         } catch {
             setWrows(idx, { healthLoading: false, running: false });
@@ -216,51 +154,20 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
 
     const probe = async (idx: number) => {
         const row = rows[idx];
-        const def =
-            row.kind === "core"
-                ? CORE_TOOLS.find((t) => t.id === row.id)
-                : getProviderList().find((p) => p.id === row.id);
-        if (!def) {
-            setRows(idx, { loading: false, found: false });
-            return;
-        }
-        // Detection MUST be pure — `resolvecli` is resolve-OR-install: with a
-        // non-empty `npm_package` it `npm install`s any provider not found in
-        // the versioned dir. We pass an EMPTY npm_package so it only probes the
-        // versioned install dir then the system PATH (never installs). Install
-        // is an explicit, user-initiated action (P2). See SPEC_TOOLCHAIN_MANAGER.
-        const cliCmd =
-            row.kind === "core"
-                ? cliCommandForPlatform(def as any, plat)
-                : (def as any).cliCommand;
-        const data = {
-            provider_id: row.id,
-            cli_command: cliCmd,
-            npm_package: "",
-            pinned_version: "",
-            windows_install_command: "",
-            unix_install_command: "",
-        };
+        const def = row.kind === "core" ? CORE_TOOLS.find((t) => t.id === row.id) : getProviderList().find((p) => p.id === row.id);
+        if (!def) { setRows(idx, { loading: false, found: false }); return; }
+        const cliCmd = row.kind === "core" ? cliCommandForPlatform(def as any, plat) : (def as any).cliCommand;
+        const data = { provider_id: row.id, cli_command: cliCmd, npm_package: "", pinned_version: "", windows_install_command: "", unix_install_command: "" };
         try {
             const r = await RpcApi.ResolveCliCommand(TabRpcClient, data, { timeout: 12000 });
-            setRows(idx, {
-                loading: false,
-                found: true,
-                version: r.version && r.version !== "unknown" ? r.version : undefined,
-                path: r.cli_path,
-                source: r.source,
-            });
+            setRows(idx, { loading: false, found: true, version: r.version && r.version !== "unknown" ? r.version : undefined, path: r.cli_path, source: r.source });
         } catch {
-            // resolvecli throws when the tool is found nowhere.
             setRows(idx, { loading: false, found: false });
         }
     };
 
     onMount(() => {
-        RpcApi.ToolchainEnvCommand(TabRpcClient, { timeout: 8000 })
-            .then(setEnv)
-            .catch(() => setEnv(null));
-        // Probe every row in parallel — each updates its own store entry.
+        RpcApi.ToolchainEnvCommand(TabRpcClient, { timeout: 8000 }).then(setEnv).catch(() => setEnv(null));
         rows.forEach((_, i) => void probe(i));
         wrows.forEach((_, i) => void probeWidget(i));
     });
@@ -268,18 +175,12 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
     const refresh = () => {
         rows.forEach((_, i) => setRows(i, { loading: true, found: false, version: undefined }));
         rows.forEach((_, i) => void probe(i));
-        wrows.forEach((_, i) =>
-            setWrows(i, { cliLoading: true, cliFound: false, healthLoading: false, running: false, statusCode: undefined })
-        );
+        wrows.forEach((_, i) => setWrows(i, { cliLoading: true, cliFound: false, healthLoading: false, running: false, statusCode: undefined }));
         wrows.forEach((_, i) => void probeWidget(i));
     };
 
-    const open = (url?: string) => {
-        if (url) getApi().openExternal(url);
-    };
-    const copy = (cmd?: string) => {
-        if (cmd) void navigator.clipboard?.writeText(cmd);
-    };
+    const open = (url?: string) => { if (url) getApi().openExternal(url); };
+    const copy = (cmd?: string) => { if (cmd) void navigator.clipboard?.writeText(cmd); };
 
     const renderRow = (row: ToolRow): JSX.Element => (
         <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>
@@ -299,21 +200,13 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                         </Show>
                     </Show>
                     <Show when={!row.loading && !row.found}>
-                        <span
-                            class="toolchain-pill"
-                            classList={{
-                                "toolchain-pill--warn": !row.optional,
-                                "toolchain-pill--muted": row.optional,
-                            }}
-                        >
+                        <span class="toolchain-pill" classList={{ "toolchain-pill--warn": !row.optional, "toolchain-pill--muted": row.optional }}>
                             {row.optional ? "Not installed (optional)" : "Not found"}
                         </span>
                     </Show>
                 </div>
                 <Show when={row.found && row.path}>
-                    <div class="toolchain-row-path" title={row.path}>
-                        {row.path}
-                    </div>
+                    <div class="toolchain-row-path" title={row.path}>{row.path}</div>
                 </Show>
                 <Show when={!row.loading && !row.found && row.installCommand}>
                     <div class="toolchain-row-cmd">
@@ -340,17 +233,13 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
     );
 
     return (
-        <Modal open={true} onClose={props.close} scope="window" size="lg">
-            <div class="modal-panel-header toolchain-header">
-                <div class="modal-panel-title">
-                    <i class="fa-solid fa-wrench" /> Toolchain
-                </div>
+        <div class="toolchain-view">
+            <div class="toolchain-view-header">
                 <button class="toolchain-btn toolchain-btn--ghost" onClick={refresh}>
                     <i class="fa-solid fa-rotate" /> Refresh
                 </button>
             </div>
-            <div class="modal-panel-body toolchain-body">
-                {/* Environment */}
+            <div class="toolchain-body">
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">Environment</h3>
                     <Show when={env()} fallback={<div class="toolchain-env-line">Loading…</div>}>
@@ -358,38 +247,24 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                             <>
                                 <div class="toolchain-env-line">
                                     <span class="toolchain-env-key">Platform</span>
-                                    <span>
-                                        {e().os} · {e().arch}
-                                    </span>
+                                    <span>{e().os} · {e().arch}</span>
                                 </div>
                                 <div class="toolchain-env-line">
                                     <span class="toolchain-env-key">PATH source</span>
-                                    <span
-                                        class="toolchain-pill"
-                                        classList={{
-                                            "toolchain-pill--ok": e().pathSource === "login-shell",
-                                            "toolchain-pill--warn":
-                                                e().pathSource === "inherited" &&
-                                                plat !== "windows",
-                                            "toolchain-pill--muted":
-                                                e().pathSource === "fallback-dirs" ||
-                                                plat === "windows",
-                                        }}
-                                    >
+                                    <span class="toolchain-pill" classList={{
+                                        "toolchain-pill--ok": e().pathSource === "login-shell",
+                                        "toolchain-pill--warn": e().pathSource === "inherited" && plat !== "windows",
+                                        "toolchain-pill--muted": e().pathSource === "fallback-dirs" || plat === "windows",
+                                    }}>
                                         {pathSourceLabel(e().pathSource)}
                                     </span>
                                 </div>
-                                <button
-                                    class="toolchain-link-btn toolchain-path-toggle"
-                                    onClick={() => setShowPath((v) => !v)}
-                                >
+                                <button class="toolchain-link-btn toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
                                     {showPath() ? "Hide" : "Show"} effective PATH
                                 </button>
                                 <Show when={showPath()}>
                                     <pre class="toolchain-path-dump">
-                                        {e()
-                                            .path.split(e().os === "windows" ? ";" : ":")
-                                            .join("\n")}
+                                        {e().path.split(e().os === "windows" ? ";" : ":").join("\n")}
                                     </pre>
                                 </Show>
                             </>
@@ -397,19 +272,16 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                     </Show>
                 </section>
 
-                {/* Core tools */}
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">Core tools</h3>
                     <For each={rows.filter((r) => r.kind === "core")}>{renderRow}</For>
                 </section>
 
-                {/* Agent CLIs */}
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">Agent CLIs</h3>
                     <For each={rows.filter((r) => r.kind === "provider")}>{renderRow}</For>
                 </section>
 
-                {/* External Widgets */}
                 <section class="toolchain-section">
                     <h3 class="toolchain-section-title">External Widgets</h3>
                     <For each={wrows}>
@@ -419,21 +291,17 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                 <div class="toolchain-row-main">
                                     <div class="toolchain-row-title">
                                         <span class="toolchain-row-name">{row.label}</span>
-                                        {/* Running pill — shown first when healthy */}
                                         <Show when={row.running}>
                                             <span class="toolchain-pill toolchain-pill--ok">
                                                 <i class="fa-solid fa-circle" style="font-size:0.5em;vertical-align:middle" /> Running
                                             </span>
                                         </Show>
-                                        {/* CLI detected pill */}
                                         <Show when={!row.cliLoading && row.cliFound && !row.running}>
                                             <span class="toolchain-pill toolchain-pill--muted">Installed</span>
                                         </Show>
-                                        {/* Loading state */}
                                         <Show when={row.cliLoading || row.healthLoading}>
                                             <span class="toolchain-pill toolchain-pill--muted">Checking…</span>
                                         </Show>
-                                        {/* Not found */}
                                         <Show when={!row.cliLoading && !row.healthLoading && !row.cliFound && !row.running}>
                                             <span class="toolchain-pill toolchain-pill--muted">
                                                 {row.installKind === "manual" ? "Not detected" : "Not installed"}
@@ -445,16 +313,11 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                         <span class="toolchain-widget-port-label">Port</span>
                                         <input
                                             class="toolchain-widget-port-input"
-                                            type="number"
-                                            min="1"
-                                            max="65535"
+                                            type="number" min="1" max="65535"
                                             value={row.customPort ?? row.defaultPort}
                                             onBlur={(e) => {
                                                 const val = parseInt(e.currentTarget.value, 10);
-                                                if (isNaN(val) || val <= 0 || val > 65535) {
-                                                    e.currentTarget.value = String(row.customPort ?? row.defaultPort);
-                                                    return;
-                                                }
+                                                if (isNaN(val) || val <= 0 || val > 65535) { e.currentTarget.value = String(row.customPort ?? row.defaultPort); return; }
                                                 const newPort = val === row.defaultPort ? undefined : val;
                                                 setWrows(i(), { customPort: newPort, cliLoading: true, cliFound: false, healthLoading: false, running: false });
                                                 saveWidgetPort(row.id, newPort);
@@ -462,15 +325,8 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                             }}
                                         />
                                         <Show when={row.customPort !== undefined}>
-                                            <button
-                                                class="toolchain-link-btn"
-                                                onClick={() => {
-                                                    setWrows(i(), { customPort: undefined, cliLoading: true, cliFound: false, healthLoading: false, running: false });
-                                                    saveWidgetPort(row.id, undefined);
-                                                    void probeWidget(i());
-                                                }}
-                                                title="Reset to default port"
-                                            >
+                                            <button class="toolchain-link-btn" title="Reset to default port"
+                                                onClick={() => { setWrows(i(), { customPort: undefined, cliLoading: true, cliFound: false, healthLoading: false, running: false }); saveWidgetPort(row.id, undefined); void probeWidget(i()); }}>
                                                 <i class="fa-solid fa-rotate-left" />
                                             </button>
                                         </Show>
@@ -478,19 +334,8 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                                 </div>
                                 <div class="toolchain-row-actions">
                                     <Show when={row.running}>
-                                        <button
-                                            class="toolchain-btn"
-                                            onClick={() => {
-                                                void createBlock({
-                                                    meta: {
-                                                        view: "browser",
-                                                        url: `http://127.0.0.1:${row.customPort ?? row.defaultPort}${row.embedPath}`,
-                                                        "frame:title": row.label,
-                                                    },
-                                                });
-                                                props.close();
-                                            }}
-                                        >
+                                        <button class="toolchain-btn"
+                                            onClick={() => void createBlock({ meta: { view: "browser", url: `http://127.0.0.1:${row.customPort ?? row.defaultPort}${row.embedPath}`, "frame:title": row.label } })}>
                                             Open Pane <i class="fa-solid fa-arrow-up-right-from-square" />
                                         </button>
                                     </Show>
@@ -505,16 +350,6 @@ export const ToolchainModal = (props: ModalCloseProps): JSX.Element => {
                     </For>
                 </section>
             </div>
-            <div class="modal-panel-footer">
-                <button class="modal-btn modal-btn--confirm" data-modal-dismiss onClick={() => props.close()}>
-                    Close
-                </button>
-            </div>
-        </Modal>
+        </div>
     );
-};
-
-/** Hamburger entry point. */
-export function openToolchainModal(): void {
-    openModal(ToolchainModal);
 }

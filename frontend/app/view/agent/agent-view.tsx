@@ -53,7 +53,6 @@ import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
-import { openBundleManager } from "@/app/modals/bundle-manager-modal";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -73,7 +72,7 @@ import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createBlock, getApi, WOS } from "@/app/store/global";
+import { createBlock, getApi, openOrFocusPaneByView, WOS } from "@/app/store/global";
 import { ConfirmModal } from "@/element/modal";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
@@ -746,7 +745,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const failureUI = useAgentFailure({
         blockId: model.blockId,
         onRetry: retryLastTurn,
-        onTrustCenter: () => openBundleManager(),
+        onTrustCenter: () => void openOrFocusPaneByView("trust"),
         canSeed: () => provider()?.id === "claude",
         // context_exceeded recovery — drop the over-full session and return to
         // the picker for a clean relaunch (resuming would only re-fail).

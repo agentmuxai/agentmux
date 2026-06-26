@@ -192,5 +192,29 @@
                 "browser:show_controls": false
             }
         }
+    },
+    "defwidget@toolchain": {
+        "display:order": 20,
+        "display:pinned": false,
+        "icon": "wrench",
+        "label": "Toolchain",
+        "description": "Inspect and manage dev tools — Node, npm, Git, Docker, provider CLIs, and external widgets",
+        "blockdef": {
+            "meta": {
+                "view": "toolchain"
+            }
+        }
+    },
+    "defwidget@trust": {
+        "display:order": 21,
+        "display:pinned": false,
+        "icon": "id-card",
+        "label": "Trust Center",
+        "description": "Manage accounts, identities, brain, and presets",
+        "blockdef": {
+            "meta": {
+                "view": "trust"
+            }
+        }
     }
 }

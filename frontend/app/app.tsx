@@ -31,7 +31,6 @@ import { DiagPanel } from "./devtools/diag-panel";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 import { MemoryPressureBanner } from "./notification/memory-pressure-banner";
-import { BundleManagerElsewhereBanner } from "./modals/bundle-manager-modal";
 
 import "./app.scss";
 
@@ -406,15 +405,7 @@ const AppInner = () => {
                 <AppZoomHandler />
                 <AppFocusHandler />
                 <AppSettingsUpdater />
-                {/* Bundle-management PR 4 — the persistent "open
-                    elsewhere" banner for the app-wide Identity & Memory
-                    manager. Shows "open in <Window N> — click to focus"
-                    in non-holding windows; renders nothing otherwise.
-                    See SPEC_BUNDLE_MANAGEMENT §3 + §5 decision 6.
-                    Hidden in floating-pane mode — floaters don't own
-                    bundles. */}
                 <Show when={!IS_FLOATING_PANE}>
-                    <BundleManagerElsewhereBanner />
                     {/* Low-memory warning banner — app-wide, non-modal,
                         dismissible. Driven by the host's mem_pressure level
                         (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F). */}
