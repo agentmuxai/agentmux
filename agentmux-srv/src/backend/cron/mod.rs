@@ -18,7 +18,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use agentmux_common::api_types::InjectRequest;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use cron::Schedule;
 
 use crate::backend::storage::store::Store;
@@ -69,13 +69,16 @@ impl CronScheduler {
             }
         };
 
-        let now_secs = Utc::now().timestamp();
+        let now_dt = Utc::now();
         let count = jobs.len();
 
         for job in jobs {
-            // FIRE_ONCE_NOW: if the job missed its window (last_fired is more
-            // than one interval ago), fire once immediately as catch-up.
-            if should_catchup(&job, now_secs) {
+            // FIRE_ONCE_NOW: if the job missed its window, fire once immediately
+            // as catch-up. did_catchup is passed to schedule_job so the live
+            // task's fires counter is seeded at fire_count+1 and the catch-up
+            // fire counts toward max_fires.
+            let did_catchup = should_catchup(&job, now_dt);
+            if did_catchup {
                 let sched = self.clone();
                 let job_id = job.id.clone();
                 let job_prompt = job.prompt.clone();
@@ -85,15 +88,21 @@ impl CronScheduler {
                 });
             }
 
-            self.schedule_job(&job);
+            let initial_fires = job.fire_count + if did_catchup { 1 } else { 0 };
+            self.schedule_job_with_fires(&job, initial_fires);
         }
 
         tracing::info!(count, "cron: scheduled {} job(s) from DB", count);
     }
 
     /// Schedule a single job (or reschedule it after a DB change). Replaces
-    /// any existing task for the same `job.id`.
+    /// any existing task for the same `job.id`. Call sites that don't need to
+    /// account for a simultaneous catch-up fire should pass `job.fire_count`.
     pub fn schedule_job(self: &Arc<Self>, job: &CronJob) {
+        self.schedule_job_with_fires(job, job.fire_count);
+    }
+
+    fn schedule_job_with_fires(self: &Arc<Self>, job: &CronJob, initial_fires: i64) {
         self.cancel_job(&job.id);
 
         let schedule = match Schedule::from_str(&format!("0 {}", job.expression)) {
@@ -109,12 +118,12 @@ impl CronScheduler {
         let job_prompt = job.prompt.clone();
         let job_target = job.target.clone();
         let job_max_fires = job.max_fires;
-        // Seed from persisted fire_count so a srv restart doesn't reset the
-        // per-lifetime counter and allow a capped job to over-fire.
-        let job_fire_count = job.fire_count;
 
         let handle = tokio::spawn(async move {
-            let mut fires: i64 = job_fire_count;
+            // `initial_fires` is seeded from the persisted fire_count (plus 1
+            // if a catch-up fire was also dispatched at startup) so max_fires
+            // is enforced across restarts, not per process run.
+            let mut fires: i64 = initial_fires;
             loop {
                 let next = match schedule.upcoming(Utc).next() {
                     Some(t) => t,
@@ -184,18 +193,29 @@ impl CronScheduler {
     }
 }
 
-/// Determine if a job needs a catch-up fire on startup. True when the job
-/// has never fired or missed its most recent window by more than the expected
-/// cycle (approximated as 60s minimum — any job that was due more than a
-/// minute ago and hasn't fired yet gets one immediate catch-up run).
-fn should_catchup(job: &CronJob, now_secs: i64) -> bool {
-    let Some(last) = job.last_fired else {
-        // Never fired before — check if it was scheduled to fire before now.
-        // We don't have a "created_at as first expected fire" without parsing
-        // the expression, so we skip the catch-up for brand-new jobs. They'll
-        // fire at the next scheduled time naturally.
+/// Determine if a job needs a catch-up fire on startup.
+///
+/// True when there is a scheduled fire time that falls strictly between
+/// `last_fired` and `now` — i.e., the first occurrence of the cron expression
+/// after `last_fired` is already in the past. This is correct regardless of
+/// schedule granularity: a daily job that ran at 09:00 and is restarted at
+/// 09:05 yields a next-after-last of TOMORROW 09:00, which is NOT < now, so
+/// no spurious catch-up fires.
+///
+/// Jobs that have never fired are skipped (they'll fire at the next naturally
+/// scheduled time without any missed-window concept).
+fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
+    let Some(last) = job.last_fired else { return false; };
+    let last_dt = match DateTime::from_timestamp(last, 0) {
+        Some(dt) => dt,
+        None => return false,
+    };
+    let Ok(schedule) = Schedule::from_str(&format!("0 {}", job.expression)) else {
         return false;
     };
-    let elapsed = now_secs.saturating_sub(last);
-    elapsed > 120 // missed by more than 2 minutes → one catch-up
+    // First scheduled time after last_fired — if it's already past, a fire was missed.
+    match schedule.after(&last_dt).next() {
+        Some(next_after_last) => next_after_last < now_dt,
+        None => false,
+    }
 }
