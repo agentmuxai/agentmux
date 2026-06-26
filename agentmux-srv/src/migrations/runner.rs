@@ -253,6 +253,30 @@ fn prune_old_backups(home: &Path) {
     }
 }
 
+// ── Pending count (no-op query used by srv startup to populate ESTART) ──────
+
+/// Return the number of REGISTRY migrations that have not yet been applied.
+/// Opens stores read-only; returns 0 on any error so startup is never blocked.
+pub fn count_pending_migrations(data_dir: &Path) -> usize {
+    let shared_store_path = match resolve_shared_store_path() {
+        Some(p) => p,
+        None => return 0,
+    };
+    let shared_store = match Store::open_shared(&shared_store_path) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let channel_store_path = data_dir.join("db").join("objects.db");
+    let channel_store = Store::open(&channel_store_path).ok();
+    REGISTRY
+        .iter()
+        .filter(|m| {
+            let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+            tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
+        })
+        .count()
+}
+
 // ── Error log ─────────────────────────────────────────────────────────────────
 
 fn write_error_log(home: &Path, msg: &str) {

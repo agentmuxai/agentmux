@@ -45,6 +45,9 @@ pub struct SrvSpawnResult {
     pub web_endpoint: String,
     pub instance_id: String,
     pub auth_key: String,
+    /// Number of data migrations that have not yet been applied.
+    /// Non-zero means the upgrade panel should show a dot indicator.
+    pub pending_migrations: usize,
     /// RFC3339 timestamp captured when ESTART arrived. Carried on the
     /// result for `--diag` / debug observability; not currently
     /// propagated into env. F.7 cleanup audit: keep with allow + this
@@ -417,11 +420,13 @@ pub async fn spawn_srv(
                     web_endpoint: parsed.web_endpoint,
                     instance_id: parsed.instance_id,
                     auth_key: auth_key_for_estart.clone(),
+                    pending_migrations: parsed.pending_migrations,
                     started_at: started_at_for_estart.clone(),
                 };
                 crate::log(&format!(
-                    "srv {} ready: ws={} web={} instance={}",
-                    result.pid, result.ws_endpoint, result.web_endpoint, result.instance_id
+                    "srv {} ready: ws={} web={} instance={} pending_migrations={}",
+                    result.pid, result.ws_endpoint, result.web_endpoint, result.instance_id,
+                    result.pending_migrations
                 ));
                 let _ = tx.send(result).await;
                 estart_sent = true;
@@ -539,6 +544,7 @@ struct EstartFields {
     ws_endpoint: String,
     web_endpoint: String,
     instance_id: String,
+    pending_migrations: usize,
 }
 
 fn parse_estart(line: &str) -> EstartFields {
@@ -550,10 +556,16 @@ fn parse_estart(line: &str) -> EstartFields {
             .unwrap_or_default()
             .to_string()
     };
+    let pending_migrations = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("pending_migrations:"))
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0);
     EstartFields {
         ws_endpoint: get("ws:"),
         web_endpoint: get("web:"),
         instance_id: get("instance:"),
+        pending_migrations,
     }
 }
 
