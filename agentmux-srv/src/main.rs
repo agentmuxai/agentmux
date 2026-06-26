@@ -1041,9 +1041,10 @@ async fn main() {
     );
 
     // 7. Build router and serve on both listeners
-    // Keep a handle to the shell registry for shutdown cleanup — `state` is
-    // moved into the router below. [reagent #1422 P2]
+    // Clone Arcs that are needed after `state` is moved into build_router.
     let shell_sessions_shutdown = state.shell_sessions.clone();
+    let wal_wstore = Arc::clone(&state.wstore);
+    let wal_filestore = Arc::clone(&state.filestore);
     let router = build_router(state);
 
     let web_server = axum::serve(web_listener, router.clone());
@@ -1104,8 +1105,6 @@ async fn main() {
     // partial truncate on contention is safe — the remainder is picked up on
     // the next pass. (SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26 §4.E)
     {
-        let wal_wstore = Arc::clone(&state.wstore);
-        let wal_filestore = Arc::clone(&state.filestore);
         let wal_shutdown = stdin_token.clone();
         tokio::spawn(async move {
             const INTERVAL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
