@@ -91,7 +91,10 @@
 
     &--active {
         background: var(--highlight-bg);
-        outline: 1px solid var(--accent-color, #5b8dd9);
+        // inset box-shadow draws on all four sides inside the element and is
+        // never clipped by ancestor overflow:hidden (unlike outline which
+        // renders outside the box and is cut at the swarm-view edge).
+        box-shadow: inset 0 0 0 1px var(--accent-color, #5b8dd9);
         border-radius: 0;
     }
 
