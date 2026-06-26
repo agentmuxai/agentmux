@@ -774,7 +774,10 @@ async fn main() {
 
     let web_addr = web_listener.local_addr().unwrap();
     let ws_addr = ws_listener.local_addr().unwrap();
-    let local_web_url = format!("http://{}", web_addr);
+    // Always use 127.0.0.1 for the local URL regardless of bind address.
+    // When bound to 0.0.0.0, local_addr() returns 0.0.0.0:PORT which is not a
+    // valid connect destination (fails on Windows and some Linux configs).
+    let local_web_url = format!("http://127.0.0.1:{}", web_addr.port());
 
     // Make local backend URL available to child processes (PTY shells).
     // the muxbus client (agentbus-client package) reads AGENTMUX_LOCAL_URL for local PTY delivery
