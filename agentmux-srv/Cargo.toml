@@ -56,6 +56,8 @@ tempfile = "3"
 bollard = { version = "0.18", features = ["chrono"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# Cron expression parsing for the persistent cron scheduler
+cron = "0.12"
 
 [target.'cfg(windows)'.dependencies]
 # Out-of-process crash dump capture via VEH + named-pipe IPC.

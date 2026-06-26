@@ -24,8 +24,8 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agentmux_common::api_types::{
     InjectRequest, PaneOpenRequest, PaneOpenResponse, ShellCreateRequest, ShellCreateResponse,
@@ -37,10 +37,21 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::task::JoinHandle;
 
-/// In-process registry of running loops (loop_id → task handle), used by
-/// `Loop` (insert) and `LoopStop` (remove + abort). Loops live in this MCP
-/// process, so they stop automatically when the agent pane / session ends.
-type LoopRegistry = Mutex<HashMap<String, JoinHandle<()>>>;
+/// Metadata kept alongside each running loop's task handle.
+struct LoopEntry {
+    handle: JoinHandle<()>,
+    prompt: String,
+    target: String,
+    interval_secs: u64,
+    max_iterations: Option<u64>,
+    fire_count: Arc<AtomicU64>,
+    started_at: u64,
+}
+
+/// In-process registry of running loops, keyed by loop_id. Lives for this MCP
+/// process's lifetime (== the agent session), so loops are reaped automatically
+/// when the agent pane closes.
+type LoopRegistry = Mutex<HashMap<String, LoopEntry>>;
 
 const SHELL_TOOL: &str = r#"{
   "name": "Shell",
@@ -185,14 +196,15 @@ const OPEN_EDITOR_TOOL: &str = r#"{
 
 const LOOP_TOOL: &str = r#"{
   "name": "Loop",
-  "description": "Run a prompt or slash command on a recurring interval by re-injecting it into a conversation. AgentMux's analogue of Claude's /loop. Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you stop it with LoopStop(loop_id). Use for polling/babysitting tasks ('check the deploy every 5m', 'keep running /babysit-prs'). Loops stop automatically when the agent pane closes. Do NOT use for one-off tasks.",
+  "description": "Run a prompt or slash command on a recurring interval by re-injecting it into a conversation. AgentMux's analogue of Claude's /loop. Returns immediately with a loop_id; the prompt is injected on a fixed schedule until you call LoopStop(loop_id) or it exhausts max_iterations. Use for polling/babysitting tasks ('check the deploy every 5m', 'keep running /babysit-prs'). Loops stop automatically when the agent pane closes. Do NOT use for one-off tasks — use ScheduleWakeup for that.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "prompt":    { "type": "string", "description": "The prompt or slash command to inject each interval (e.g. 'check the PR status' or '/babysit-prs')" },
-      "interval":  { "type": "string", "description": "How often to run: a number with optional unit s/m/h (e.g. '30s', '5m', '1h'). A bare number is minutes. Default '10m'. Minimum 10s." },
-      "to":        { "type": "string", "description": "Target agent name (its AGENTMUX_AGENT_ID) to inject into. Defaults to this agent itself (a self-loop)." },
-      "immediate": { "type": "boolean", "description": "Run once immediately on start in addition to every interval. Default false (first run after one interval)." }
+      "prompt":         { "type": "string",  "description": "The prompt or slash command to inject each interval (e.g. 'check the PR status' or '/babysit-prs')" },
+      "interval":       { "type": "string",  "description": "How often to run: a number with optional unit s/m/h (e.g. '30s', '5m', '1h'). A bare number is minutes. Default '10m'. Minimum 10s." },
+      "to":             { "type": "string",  "description": "Target agent name (its AGENTMUX_AGENT_ID) to inject into. Defaults to this agent itself (a self-loop)." },
+      "immediate":      { "type": "boolean", "description": "Run once immediately on start in addition to every interval. Default false (first run after one interval)." },
+      "max_iterations": { "type": "integer", "description": "Stop automatically after this many fires. Omit or set to 0 for unlimited." }
     },
     "required": ["prompt"]
   }
@@ -200,13 +212,83 @@ const LOOP_TOOL: &str = r#"{
 
 const LOOP_STOP_TOOL: &str = r#"{
   "name": "LoopStop",
-  "description": "Stop a recurring loop started by Loop(). Pass the loop_id it returned. Loops also stop automatically when the agent pane closes.",
+  "description": "Stop a recurring loop started by Loop(). Pass the loop_id it returned. Loops also stop automatically when the agent pane closes or max_iterations is reached.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "loop_id": { "type": "string", "description": "The loop_id returned by a prior Loop() call" }
     },
     "required": ["loop_id"]
+  }
+}"#;
+
+const LOOP_LIST_TOOL: &str = r#"{
+  "name": "LoopList",
+  "description": "List all currently running loops in this agent session. Returns each loop's id, prompt, target, interval, fire count, and remaining iterations (if capped). Like 'ps' for loops.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const CRON_CREATE_TOOL: &str = r#"{
+  "name": "CronCreate",
+  "description": "Create a persistent scheduled cron job that survives agent pane restarts. Fires the prompt on a UTC cron schedule by injecting it into the target agent. Unlike Loop, cron jobs persist as long as agentmux-srv is running. Returns a job id and the next scheduled fire time.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name":       { "type": "string",  "description": "Human-readable label for the job (e.g. 'daily-standup-check')" },
+      "expression": { "type": "string",  "description": "5-field UTC cron expression: 'min hour dom month dow' (e.g. '0 9 * * 1-5' = 9am weekdays). Standard cron syntax; ranges, lists, and step values are supported." },
+      "prompt":     { "type": "string",  "description": "The prompt or slash command to inject at each scheduled fire" },
+      "to":         { "type": "string",  "description": "Target agent id to inject into. Required." },
+      "max_fires":  { "type": "integer", "description": "Auto-disable after this many fires (the job row stays in DB for audit; use CronDelete to remove it). Omit for unlimited." }
+    },
+    "required": ["name", "expression", "prompt", "to"]
+  }
+}"#;
+
+const CRON_DELETE_TOOL: &str = r#"{
+  "name": "CronDelete",
+  "description": "Delete a persistent cron job by id. Stops all future fires immediately.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The job id returned by CronCreate or CronList" }
+    },
+    "required": ["id"]
+  }
+}"#;
+
+const CRON_LIST_TOOL: &str = r#"{
+  "name": "CronList",
+  "description": "List all persistent cron jobs (enabled and disabled). Returns each job's id, name, expression, next fire time, fire count, and enabled state.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const CRON_PAUSE_TOOL: &str = r#"{
+  "name": "CronPause",
+  "description": "Pause a persistent cron job. The job definition is kept in the DB but no fires occur until CronResume is called.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The job id to pause" }
+    },
+    "required": ["id"]
+  }
+}"#;
+
+const CRON_RESUME_TOOL: &str = r#"{
+  "name": "CronResume",
+  "description": "Resume a paused cron job. The job will fire at its next scheduled UTC time.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The job id to resume" }
+    },
+    "required": ["id"]
   }
 }"#;
 
@@ -305,10 +387,16 @@ async fn main() {
                     serde_json::from_str(FOCUS_WINDOW_TOOL).expect("static json");
                 let loop_tool: Value = serde_json::from_str(LOOP_TOOL).expect("static json");
                 let loop_stop: Value = serde_json::from_str(LOOP_STOP_TOOL).expect("static json");
+                let loop_list: Value = serde_json::from_str(LOOP_LIST_TOOL).expect("static json");
+                let cron_create: Value = serde_json::from_str(CRON_CREATE_TOOL).expect("static json");
+                let cron_delete: Value = serde_json::from_str(CRON_DELETE_TOOL).expect("static json");
+                let cron_list: Value = serde_json::from_str(CRON_LIST_TOOL).expect("static json");
+                let cron_pause: Value = serde_json::from_str(CRON_PAUSE_TOOL).expect("static json");
+                let cron_resume: Value = serde_json::from_str(CRON_RESUME_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume] }
                 })
             }
             "tools/call" => {
@@ -894,7 +982,6 @@ async fn call_tool(
                 );
             }
 
-            // Target: explicit `to`, else self (this agent's AGENTMUX_AGENT_ID).
             let self_id = std::env::var("AGENTMUX_AGENT_ID")
                 .ok()
                 .filter(|s| !s.is_empty());
@@ -920,19 +1007,25 @@ async fn call_tool(
                 .get("immediate")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let max_iterations: Option<u64> = arguments
+                .get("max_iterations")
+                .and_then(|v| v.as_u64())
+                .filter(|&n| n > 0);
 
             let n = loop_counter.fetch_add(1, Ordering::Relaxed) + 1;
             let loop_id = format!("loop-{n}");
 
-            // Each loop is an independent task that re-injects the prompt on the
-            // fixed interval (fire-and-forget; no idle-wait — InjectionRequest
-            // .wait_for_idle is dead scaffolding that srv never reads).
             let interval_display = format_duration(interval);
             let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
             let task_client = client.clone();
             let task_auth = auth_key.to_string();
             let task_target = target.clone();
             let task_source = self_id;
+            let task_prompt = prompt.clone();
+            let fire_count = Arc::new(AtomicU64::new(0));
+            let task_fire_count = Arc::clone(&fire_count);
+            let task_max = max_iterations;
+
             let handle = tokio::spawn(async move {
                 if !immediate {
                     tokio::time::sleep(interval).await;
@@ -940,7 +1033,7 @@ async fn call_tool(
                 loop {
                     let req = InjectRequest {
                         target_agent: task_target.clone(),
-                        message: prompt.clone(),
+                        message: task_prompt.clone(),
                         source_agent: task_source.clone(),
                     };
                     let _ = task_client
@@ -949,19 +1042,39 @@ async fn call_tool(
                         .json(&req)
                         .send()
                         .await;
+                    let fired = task_fire_count.fetch_add(1, Ordering::Relaxed) + 1;
+                    if let Some(max) = task_max {
+                        if fired >= max {
+                            break;
+                        }
+                    }
                     tokio::time::sleep(interval).await;
                 }
             });
 
-            loops
-                .lock()
-                .unwrap()
-                .insert(loop_id.clone(), handle);
+            let started_at = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
 
+            loops.lock().unwrap().insert(loop_id.clone(), LoopEntry {
+                handle,
+                prompt,
+                target: target.clone(),
+                interval_secs: interval.as_secs(),
+                max_iterations,
+                fire_count,
+                started_at,
+            });
+
+            let cap_note = match max_iterations {
+                Some(n) => format!(", auto-stops after {n} fires"),
+                None => String::new(),
+            };
             Ok(format!(
-                "Started {loop_id}: injecting to '{target}' every {interval_display}\
-                 {}. Stop with LoopStop({loop_id}).",
-                if immediate { " (first run now)" } else { "" }
+                "Started {loop_id}: injecting to '{target}' every {interval_display}{cap_note}\
+                 {}. Stop with LoopStop({loop_id}) or use LoopList() to see all running loops.",
+                if immediate { ", first run now" } else { "" }
             ))
         }
         "LoopStop" => {
@@ -973,15 +1086,164 @@ async fn call_tool(
 
             let removed = loops.lock().unwrap().remove(loop_id);
             match removed {
-                Some(handle) => {
-                    handle.abort();
-                    Ok(format!("stopped {loop_id}"))
+                Some(entry) => {
+                    entry.handle.abort();
+                    Ok(format!(
+                        "stopped {loop_id} (fired {} time(s))",
+                        entry.fire_count.load(Ordering::Relaxed)
+                    ))
                 }
                 None => Ok(format!("{loop_id} was not running (unknown or already stopped)")),
             }
         }
+        "LoopList" => {
+            let reg = loops.lock().unwrap();
+            if reg.is_empty() {
+                return Ok("No loops running in this session.".to_string());
+            }
+            let mut lines = vec![format!("{} loop(s) in this session:", reg.len())];
+            for (id, entry) in reg.iter() {
+                let fired = entry.fire_count.load(Ordering::Relaxed);
+                let status = match entry.max_iterations {
+                    Some(max) if fired >= max => format!("DONE ({fired}/{max})"),
+                    Some(max) => format!("running ({fired}/{max})"),
+                    None => format!("running ({fired} fired, unlimited)"),
+                };
+                let interval = format_duration(Duration::from_secs(entry.interval_secs));
+                let prompt_preview: String = entry.prompt.chars().take(60).collect();
+                let age_secs = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+                    .saturating_sub(entry.started_at);
+                lines.push(format!(
+                    "  {id}  every={interval}  to='{}'  status={status}  age={age_secs}s  prompt='{prompt_preview}'",
+                    entry.target,
+                ));
+            }
+            Ok(lines.join("\n"))
+        }
+        "CronCreate" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let name = arguments.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
+            let expression = arguments.get("expression").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: expression"))?;
+            let prompt = arguments.get("prompt").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: prompt"))?;
+            let target = arguments.get("to").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: to (target agent id)"))?;
+            let max_fires = arguments.get("max_fires").and_then(|v| v.as_i64()).filter(|&n| n > 0);
+            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
+
+            let url = format!("{}/agentmux/cron", local_url.trim_end_matches('/'));
+            let body = serde_json::json!({
+                "name": name, "expression": expression, "prompt": prompt,
+                "target": target, "created_by": self_id, "max_fires": max_fires,
+            });
+            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("cron create request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!("CronCreate failed: HTTP {status} — {text}");
+            }
+            let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            let job = &v["job"];
+            Ok(format!(
+                "Created cron job '{}' (id={})\nExpression: {} UTC\nNext fire: {}\nTarget: {}",
+                job["name"].as_str().unwrap_or(name),
+                job["id"].as_str().unwrap_or("?"),
+                expression,
+                job["next_fire"].as_str().unwrap_or("unknown"),
+                target,
+            ))
+        }
+        "CronDelete" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let url = format!("{}/agentmux/cron/{}", local_url.trim_end_matches('/'), id);
+            let resp = client.delete(&url).header("X-AuthKey", auth_key).send().await
+                .map_err(|e| anyhow::anyhow!("cron delete request failed: {e}"))?;
+            let status = resp.status();
+            if status.as_u16() == 404 {
+                return Ok(format!("Job '{id}' not found (already deleted or wrong id)"));
+            }
+            if !status.is_success() {
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("CronDelete failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Deleted cron job {id}"))
+        }
+        "CronList" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/agentmux/cron", local_url.trim_end_matches('/'));
+            let resp = client.get(&url).header("X-AuthKey", auth_key).send().await
+                .map_err(|e| anyhow::anyhow!("cron list request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!("CronList failed: HTTP {status} — {text}");
+            }
+            let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            let jobs = v["jobs"].as_array().cloned().unwrap_or_default();
+            if jobs.is_empty() {
+                return Ok("No cron jobs configured.".to_string());
+            }
+            let mut lines = vec![format!("{} cron job(s):", jobs.len())];
+            for j in &jobs {
+                let status_str = if j["enabled"].as_bool().unwrap_or(false) { "enabled" } else { "paused" };
+                let next = j["next_fire"].as_str().unwrap_or("—");
+                let fires = j["fire_count"].as_i64().unwrap_or(0);
+                let max = j["max_fires"].as_i64().map(|n| format!("/{n}")).unwrap_or_default();
+                lines.push(format!(
+                    "  {}  {}  [{}]  fires={fires}{max}  next={}  expr='{}'",
+                    j["id"].as_str().unwrap_or("?"),
+                    j["name"].as_str().unwrap_or("?"),
+                    status_str,
+                    next,
+                    j["expression"].as_str().unwrap_or("?"),
+                ));
+            }
+            Ok(lines.join("\n"))
+        }
+        "CronPause" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            cron_set_enabled(client, local_url, auth_key, id, "pause").await
+        }
+        "CronResume" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            cron_set_enabled(client, local_url, auth_key, id, "resume").await
+        }
         _ => anyhow::bail!("unknown tool: {name}"),
     }
+}
+
+async fn cron_set_enabled(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+    id: &str,
+    action: &str,
+) -> Result<String> {
+    let url = format!("{}/agentmux/cron/{}", local_url.trim_end_matches('/'), id);
+    let body = serde_json::json!({"action": action});
+    let resp = client.patch(&url).header("X-AuthKey", auth_key).json(&body).send().await
+        .map_err(|e| anyhow::anyhow!("cron {action} request failed: {e}"))?;
+    let status = resp.status();
+    if status.as_u16() == 404 {
+        return Ok(format!("Job '{id}' not found"));
+    }
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Cron{} failed: HTTP {status} — {text}", if action == "pause" { "Pause" } else { "Resume" });
+    }
+    Ok(format!("Cron job {id} {}", if action == "pause" { "paused" } else { "resumed" }))
 }
 
 /// Parse a loop interval string into a `Duration`. Accepts a number with an
@@ -1050,8 +1312,14 @@ mod tests {
             FOCUS_WINDOW_TOOL,
             LOOP_TOOL,
             LOOP_STOP_TOOL,
+            LOOP_LIST_TOOL,
+            CRON_CREATE_TOOL,
+            CRON_DELETE_TOOL,
+            CRON_LIST_TOOL,
+            CRON_PAUSE_TOOL,
+            CRON_RESUME_TOOL,
         ];
-        assert_eq!(defs.len(), 13, "tools/list advertises 13 tools (11 original + Loop + LoopStop)");
+        assert_eq!(defs.len(), 19, "tools/list advertises 19 tools (11 original + 3 Loop + 5 Cron)");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
