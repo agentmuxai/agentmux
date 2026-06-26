@@ -1035,9 +1035,12 @@ async fn main() {
     }
 
     // 6. Emit AGENTMUXSRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
+    // pending_migrations is informational — the launcher no longer blocks startup
+    // on migrations; the upgrade panel drives them on demand.
+    let pending_migrations = migrations::count_pending_migrations(&db_dir);
     eprintln!(
-        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{}",
-        ws_addr.port(), web_addr.port(), version, build_time, config.instance_id
+        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{} pending_migrations:{}",
+        ws_addr.port(), web_addr.port(), version, build_time, config.instance_id, pending_migrations
     );
 
     // 7. Build router and serve on both listeners

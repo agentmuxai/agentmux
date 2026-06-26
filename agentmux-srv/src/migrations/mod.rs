@@ -28,6 +28,7 @@ mod m0011_shared_store_backfill;
 mod m0012_dedup_identity_accounts;
 mod runner;
 
+pub use runner::count_pending_migrations;
 pub use runner::run_migrate_command;
 
 use std::path::PathBuf;
