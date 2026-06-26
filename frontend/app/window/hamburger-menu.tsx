@@ -17,6 +17,8 @@ import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { openBundleManager } from "@/app/modals/bundle-manager-modal";
+import { openToolchainModal } from "@/app/modals/toolchain-modal";
 import { isMacOS } from "@/util/platformutil";
 import { createMemo, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
@@ -64,12 +66,12 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             {
                 label: "Trust Center",
                 icon: "id-card",
-                onClick: () => fireAndForget(() => openOrFocusPaneByView("trust")),
+                onClick: () => openBundleManager(),
             },
             {
-                label: "Toolchain",
+                label: "Toolchain Manager",
                 icon: "wrench",
-                onClick: () => fireAndForget(() => openOrFocusPaneByView("toolchain")),
+                onClick: () => openToolchainModal(),
             },
             {
                 label: "DevTools",

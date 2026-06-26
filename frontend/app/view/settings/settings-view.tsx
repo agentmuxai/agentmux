@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, For, Match, Show, Switch, type JSX } from "solid-js";
+import { createEffect, createSignal, For, Match, onCleanup, Show, Switch, type JSX } from "solid-js";
 
 import { fullConfigAtom, settingsAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -16,16 +16,6 @@ import "./settings.scss";
 function set(key: string, value: unknown): void {
     void RpcApi.SetConfigCommand(TabRpcClient, { [key]: value } as any);
 }
-
-function makeDebounce(ms: number) {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    return (fn: () => void) => {
-        if (timer != null) clearTimeout(timer);
-        timer = setTimeout(() => { timer = null; fn(); }, ms);
-    };
-}
-
-const sliderDebounce = makeDebounce(180);
 
 // ── SettingRow primitive ──────────────────────────────────────────────────────
 
@@ -60,6 +50,9 @@ function ToggleControl(p: { checked: boolean; onChange: (v: boolean) => void }):
 
 function SliderControl(p: { min: number; max: number; step: number; value: number; onChange: (v: number) => void }): JSX.Element {
     const [local, setLocal] = createSignal(p.value);
+    createEffect(() => setLocal(p.value));
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    onCleanup(() => { if (timer != null) clearTimeout(timer); });
     return (
         <div class="setting-slider">
             <input
@@ -69,7 +62,8 @@ function SliderControl(p: { min: number; max: number; step: number; value: numbe
                 onInput={(e) => {
                     const v = parseFloat(e.currentTarget.value);
                     setLocal(v);
-                    sliderDebounce(() => p.onChange(v));
+                    if (timer != null) clearTimeout(timer);
+                    timer = setTimeout(() => { timer = null; p.onChange(v); }, 180);
                 }}
             />
             <span class="setting-slider-val">{Math.round(local() * 100) / 100}</span>
@@ -299,7 +293,7 @@ function TerminalSection(): JSX.Element {
                 control={
                     <SliderControl
                         min={0} max={1} step={0.05}
-                        value={(s()["term:transparency"] as number) ?? 0}
+                        value={(s()["term:transparency"] as number) ?? 0.5}
                         onChange={(v) => set("term:transparency", v)}
                     />
                 }
