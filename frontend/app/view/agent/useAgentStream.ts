@@ -479,21 +479,28 @@ export function useAgentStream({
         // phase in Done before the timer fires → no-op.
         // Persistent mode: the process never exits between turns, so
         // `ControllerStatus: done` only fires on crash or session teardown.
-        // Auto-retry: `ControllerStatus: running` (new process) cancels the
-        // timer immediately — it never fires against the new turn's phase.
+        // Auto-retry: `ControllerStatus: running` cancels any pending timer;
+        // if the timer already fired (procGraceDidFire), re-dispatch
+        // StreamSubscribe to restore lastEventMs so TurnStart and
+        // StreamFlushObserved are not silently gated for the new turn.
         let procExitGraceTimer: number | null = null;
+        let procGraceDidFire = false;
         const procExitUnsub = waveEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", blockId),
             handler: (event) => {
                 const status = (event as any)?.data?.shellprocstatus;
                 if (status === "running") {
-                    // New process started (auto-retry) — cancel any pending
-                    // crash-recovery timer so it doesn't fire against the
-                    // new turn's phase and spuriously disconnect it.
                     if (procExitGraceTimer != null) {
                         clearTimeout(procExitGraceTimer);
                         procExitGraceTimer = null;
+                    }
+                    if (procGraceDidFire) {
+                        // Our StreamUnsubscribe nulled lastEventMs in the reducer.
+                        // Re-dispatch StreamSubscribe so the new process's turn
+                        // can start (TurnStart) and output can land (StreamFlushObserved).
+                        procGraceDidFire = false;
+                        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() });
                     }
                     return;
                 }
@@ -503,6 +510,7 @@ export function useAgentStream({
                     procExitGraceTimer = null;
                     const phase = paneSnapshot(blockId)?.turnPhase?.kind;
                     if (phase === "Streaming" || phase === "Submitting") {
+                        procGraceDidFire = true;
                         model.dispatchPane({ type: "StreamUnsubscribe", at: Date.now() });
                     }
                 }, 1500);
