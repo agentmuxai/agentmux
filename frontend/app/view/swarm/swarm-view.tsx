@@ -7,25 +7,49 @@ import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, workspace, setActiveTab, atoms } from "@/app/store/global";
+import { WOS, workspace, setActiveTab, atoms, getApi } from "@/app/store/global";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
+import { WorkspaceService } from "@/app/store/services";
 import "./swarm-view.scss";
 
-// Navigate to the pane for a given block ID, switching tabs if needed.
-// Uses layout models (always cached for visited tabs) rather than Tab.blockids
-// (which requires the Tab object to be in the WOS cache).
+// Navigate to the pane for a given block ID, switching tabs and windows as needed.
+// Tries the current window first (fast path), then searches all other workspaces
+// and brings the containing window to focus.
 async function focusBlock(blockId: string): Promise<void> {
+    // Fast path: search the current window's workspace.
     const ws = workspace();
-    if (!ws) return;
-    const allTabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
-    for (const tabId of allTabIds) {
-        const layoutModel = getLayoutModelForTabById(tabId);
-        const node = layoutModel?.getNodeByBlockId(blockId);
-        if (node?.id != null) {
-            await setActiveTab(tabId);
-            layoutModel.focusNode(node.id);
-            return;
+    if (ws) {
+        const allTabIds = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
+        for (const tabId of allTabIds) {
+            const layoutModel = getLayoutModelForTabById(tabId);
+            const node = layoutModel?.getNodeByBlockId(blockId);
+            if (node?.id != null) {
+                await setActiveTab(tabId);
+                layoutModel.focusNode(node.id);
+                return;
+            }
+        }
+    }
+    // Slow path: agent is in a different window — query all workspaces.
+    const allWorkspaces = await RpcApi.WorkspaceListCommand(TabRpcClient);
+    for (const wsInfo of allWorkspaces) {
+        if (wsInfo.workspacedata.oid === ws?.oid) continue;
+        const wsData = wsInfo.workspacedata;
+        const allTabIds = [...(wsData.pinnedtabids ?? []), ...(wsData.tabids ?? [])];
+        for (const tabId of allTabIds) {
+            const layoutModel = getLayoutModelForTabById(tabId);
+            const node = layoutModel?.getNodeByBlockId(blockId);
+            if (node?.id != null) {
+                await WorkspaceService.SetActiveTab(wsData.oid, tabId);
+                const instances = await getApi().listWindowInstances();
+                const instance = instances.find((i) => i.windowId === wsInfo.windowid);
+                if (instance?.label) {
+                    await getApi().focusWindow(instance.label);
+                }
+                layoutModel.focusNode(node.id);
+                return;
+            }
         }
     }
 }
