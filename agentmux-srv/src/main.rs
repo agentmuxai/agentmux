@@ -746,11 +746,20 @@ async fn main() {
         tracing::warn!("session archiver: home dir unavailable, archiver disabled");
     }
 
-    // 5. Bind 2 TCP listeners on 127.0.0.1:0 (web + ws — separate ports matching Go)
-    let web_listener = TcpListener::bind("127.0.0.1:0")
+    // 5. Bind 2 TCP listeners (web + ws — separate ports matching Go).
+    // When LAN discovery is enabled the user has explicitly opted in to network
+    // visibility. Bind to 0.0.0.0 so devices on the same network can reach the
+    // port that mDNS advertises. The auth_key (X-AuthKey header, broadcast in
+    // the mDNS TXT record) gates every API route.
+    let bind_addr = if config_watcher.get_settings().network_lan_discovery {
+        "0.0.0.0:0"
+    } else {
+        "127.0.0.1:0"
+    };
+    let web_listener = TcpListener::bind(bind_addr)
         .await
         .expect("failed to bind web listener");
-    let ws_listener = TcpListener::bind("127.0.0.1:0")
+    let ws_listener = TcpListener::bind(bind_addr)
         .await
         .expect("failed to bind ws listener");
 
