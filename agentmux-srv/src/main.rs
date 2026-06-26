@@ -1035,8 +1035,8 @@ async fn main() {
 
     // 6. Emit AGENTMUXSRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
     eprintln!(
-        "AGENTMUXSRV-ESTART ws:{} web:{} version:{} buildtime:{} instance:{}",
-        ws_addr, web_addr, version, build_time, config.instance_id
+        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{}",
+        ws_addr.port(), web_addr.port(), version, build_time, config.instance_id
     );
 
     // 7. Build router and serve on both listeners
