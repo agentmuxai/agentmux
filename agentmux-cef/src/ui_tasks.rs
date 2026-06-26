@@ -1947,8 +1947,27 @@ wrap_task! {
             };
 
             // CEF Views sizing — no-ops on macOS, functional on Linux.
-            controller.set_size(Some(&Size { width: self.width, height: self.height }));
-            controller.set_position(Some(&Point { x: self.x, y: self.y }));
+            // On macOS at retry=0, skip re-applying creation-time bounds: a resize
+            // queued between creation and this task would already have called
+            // set_size/set_position with the correct new values, and overwriting
+            // them here would roll that back. At retry>=1 the controller bounds
+            // reflect any intervening resize and we read them back for the ObjC
+            // frame reaffirm instead of using the stale creation-time self.x/y/w/h.
+            #[cfg(not(target_os = "macos"))]
+            {
+                controller.set_size(Some(&Size { width: self.width, height: self.height }));
+                controller.set_position(Some(&Point { x: self.x, y: self.y }));
+            }
+            #[cfg(target_os = "macos")]
+            if self.retry == 0 {
+                // retry=0: only set_size/set_position if controller bounds are
+                // still 0×0 (no resize has happened yet); otherwise leave them alone.
+                let cb = controller.bounds();
+                if cb.width == 0 && cb.height == 0 {
+                    controller.set_size(Some(&Size { width: self.width, height: self.height }));
+                    controller.set_position(Some(&Point { x: self.x, y: self.y }));
+                }
+            }
             // Skip window.layout() on macOS: it schedules a deferred CEF Views layout
             // pass that calls NativeWidgetMac::SetBoundsRect(0,0,0,0) AFTER our ObjC
             // setFrame, resetting the overlay to off-screen and re-engaging its event
@@ -2040,14 +2059,15 @@ wrap_task! {
                 let make_key_front: extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                 let order_front:    extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
 
-                // Step 1: show the overlay on the first run only.
-                // On retry >= 1, the overlay is already visible; we just reaffirm the
-                // frame AFTER CEF's deferred Widget layout (triggered by Widget::Show()
-                // during retry=0) has had a chance to run and reset the NSWindow bounds
-                // to 0×0. The delayed retry fires 50ms later, after all pending layout
-                // passes have completed.
+                // Step 1: show the overlay on the first run only, but only if
+                // compute_pane_visible agrees — an overlay-clip or zero-area rect
+                // queued between creation and this task (e.g. a modal appeared, or
+                // an inactive-tab resize sent a 0×0 rect) must not be overridden.
                 if self.retry == 0 {
-                    controller.set_visible(1);
+                    let pane_rect = (self.x, self.y, self.width, self.height);
+                    if crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, pane_rect) {
+                        controller.set_visible(1);
+                    }
                 }
 
                 // Step 2: rescan [NSApp windows] to find the overlay and main window.
@@ -2127,20 +2147,39 @@ wrap_task! {
 
                 // Step 3: reaffirm the frame (set_visible(1) may have triggered a CEF
                 // layout pass that reset the native frame to the pre-creation default).
-                let main_frame = if !main_win.is_null() {
-                    get_frame(main_win, sel_frame)
-                } else {
-                    NSRect { origin: NSPoint { x: 0.0, y: 0.0 }, size: NSSize { w: 0.0, h: 0.0 } }
-                };
-                let scale = if !main_win.is_null() {
+                // Bail if main_win is null — we need it to compute screen_x/screen_y
+                // (pane coords are relative to the main window's origin). Placing with
+                // a 0×0 main_frame would put the overlay at (0,0) on the screen, which
+                // is visually wrong and may cover unrelated windows.
+                if main_win.is_null() {
+                    tracing::warn!(
+                        label = %self.label, retry = self.retry,
+                        "[browser-pane] ObjC task: main CefNSWindow not found — cannot compute screen coords, skipping frame commit"
+                    );
+                    return;
+                }
+                let main_frame = get_frame(main_win, sel_frame);
+                let scale = {
                     let s = get_f64(main_win, sel_backing_scale);
                     if s > 0.0 { s } else { 1.0 }
-                } else { 1.0 };
+                };
 
-                let pane_x = self.x as f64 / scale;
-                let pane_y = self.y as f64 / scale;
-                let pane_w = self.width  as f64 / scale;
-                let pane_h = self.height as f64 / scale;
+                // At retry>=1 prefer the controller's current CEF bounds (which
+                // reflect any resize queued between creation and this task) over
+                // the stale creation-time self.x/y/width/height. Fall back to
+                // creation-time values only if the controller still reports 0×0.
+                let (src_x, src_y, src_w, src_h) = {
+                    let cb = controller.bounds();
+                    if cb.width > 0 && cb.height > 0 && self.retry >= 1 {
+                        (cb.x, cb.y, cb.width, cb.height)
+                    } else {
+                        (self.x, self.y, self.width, self.height)
+                    }
+                };
+                let pane_x = src_x as f64 / scale;
+                let pane_y = src_y as f64 / scale;
+                let pane_w = src_w as f64 / scale;
+                let pane_h = src_h as f64 / scale;
                 let screen_x = main_frame.origin.x + pane_x;
                 let screen_y = main_frame.origin.y + main_frame.size.h - pane_y - pane_h;
 
