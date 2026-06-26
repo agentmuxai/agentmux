@@ -1926,6 +1926,9 @@ wrap_task! {
         width: i32,
         height: i32,
         retry: u32,
+        // macOS: windowNumber of the overlay NativeWidgetMacNSWindow, captured
+        // before set_visible(0) removed it from [NSApp windows]. 0 = unknown.
+        overlay_wnum: isize,
     }
 
     impl Task {
@@ -1946,6 +1949,11 @@ wrap_task! {
             // CEF Views sizing — no-ops on macOS, functional on Linux.
             controller.set_size(Some(&Size { width: self.width, height: self.height }));
             controller.set_position(Some(&Point { x: self.x, y: self.y }));
+            // Skip window.layout() on macOS: it schedules a deferred CEF Views layout
+            // pass that calls NativeWidgetMac::SetBoundsRect(0,0,0,0) AFTER our ObjC
+            // setFrame, resetting the overlay to off-screen and re-engaging its event
+            // capture. On macOS, we rely entirely on the ObjC NSWindow resize below.
+            #[cfg(not(target_os = "macos"))]
             if let Some(window) = self.state.windows.lock().get(&self.window_label).cloned() {
                 window.layout();
             }
@@ -1969,8 +1977,27 @@ wrap_task! {
                 return;
             }
 
-            // macOS: resize the NativeWidgetMacNSWindow directly via ObjC.
-            // set_visible(1) is called only after frame is committed below.
+            // macOS: [NSWindow windowWithWindowNumber:] was removed in macOS 26 Tahoe.
+            // After the ObjC block, we also call controller.set_bounds() with DIP
+            // coordinates. The root cause of the 0×0 reset is overlay_view_host.cc
+            // SetOverlayBounds() doing Intersect(window_view_->bounds()). At creation
+            // time the parent CefWindowView bounds may be empty, causing the intersection
+            // to produce 0×0. From this deferred task the parent window IS fully laid out,
+            // so set_bounds() should succeed and commit the bounds in CEF's Views layer.
+            // The ObjC block additionally sets the NSWindow frame directly.
+            #[cfg(target_os = "macos")]
+            let (mut task_dip_x, mut task_dip_y, mut task_dip_w, mut task_dip_h) = (0i32, 0i32, 0i32, 0i32);
+            #[cfg(target_os = "macos")]
+            let mut task_main_win:    *mut std::ffi::c_void = std::ptr::null_mut();
+            #[cfg(target_os = "macos")]
+            let mut task_overlay_win: *mut std::ffi::c_void = std::ptr::null_mut();
+            #[cfg(target_os = "macos")]
+            let mut task_sel_make_key_front: *const std::ffi::c_void = std::ptr::null();
+            #[cfg(target_os = "macos")]
+            let mut task_sel_order_front:    *const std::ffi::c_void = std::ptr::null();
+            #[cfg(target_os = "macos")]
+            let mut task_sel_key_window:     *const std::ffi::c_void = std::ptr::null();
+
             #[cfg(target_os = "macos")]
             unsafe {
                 use std::ffi::c_char;
@@ -1993,25 +2020,37 @@ wrap_task! {
                 let sel_count         = sel_registerName(b"count\0".as_ptr() as _);
                 let sel_obj_at        = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
                 let sel_frame         = sel_registerName(b"frame\0".as_ptr() as _);
-                let sel_is_key        = sel_registerName(b"isKeyWindow\0".as_ptr() as _);
                 let sel_is_main       = sel_registerName(b"isMainWindow\0".as_ptr() as _);
+                let sel_is_key        = sel_registerName(b"isKeyWindow\0".as_ptr() as _);
+                let sel_key_window    = sel_registerName(b"keyWindow\0".as_ptr() as _);
                 let sel_backing_scale = sel_registerName(b"backingScaleFactor\0".as_ptr() as _);
-                // setFrame:display: — NSRect (4 doubles HFA → d0-d3) + BOOL (u8 → x2)
                 let sel_set_frame_d   = sel_registerName(b"setFrame:display:\0".as_ptr() as _);
-                let sel_order_front   = sel_registerName(b"orderFront:\0".as_ptr() as _);
+                let sel_make_key_front = sel_registerName(b"makeKeyAndOrderFront:\0".as_ptr() as _);
+                let sel_order_front    = sel_registerName(b"orderFront:\0".as_ptr() as _);
+                let sel_win_number     = sel_registerName(b"windowNumber\0".as_ptr() as _);
 
-                let get_id:     extern "C" fn(Id, Sel) -> Id        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let get_usize:  extern "C" fn(Id, Sel) -> usize     = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let get_bool:   extern "C" fn(Id, Sel) -> u8        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let get_f64:    extern "C" fn(Id, Sel) -> f64       = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let obj_at:     extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let get_frame:  extern "C" fn(Id, Sel) -> NSRect    = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let set_frame_d: extern "C" fn(Id, Sel, NSRect, u8) = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                let order_front: extern "C" fn(Id, Sel, Id)         = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let get_id:         extern "C" fn(Id, Sel) -> Id        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let get_usize:      extern "C" fn(Id, Sel) -> usize     = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let get_isize:      extern "C" fn(Id, Sel) -> isize     = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let get_bool:       extern "C" fn(Id, Sel) -> u8        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let get_f64:        extern "C" fn(Id, Sel) -> f64       = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let obj_at:         extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let get_frame:      extern "C" fn(Id, Sel) -> NSRect    = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let set_frame_d:    extern "C" fn(Id, Sel, NSRect, u8)  = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let make_key_front: extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let order_front:    extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
 
-                // [BridgedContentView window] returns nil (CEF doesn't use the
-                // standard Cocoa contentView hierarchy), so enumerate all NSWindows
-                // in the process via NSApp.
+                // Step 1: show the overlay on the first run only.
+                // On retry >= 1, the overlay is already visible; we just reaffirm the
+                // frame AFTER CEF's deferred Widget layout (triggered by Widget::Show()
+                // during retry=0) has had a chance to run and reset the NSWindow bounds
+                // to 0×0. The delayed retry fires 50ms later, after all pending layout
+                // passes have completed.
+                if self.retry == 0 {
+                    controller.set_visible(1);
+                }
+
+                // Step 2: rescan [NSApp windows] to find the overlay and main window.
                 let ns_app_class: Id = objc_getClass(b"NSApplication\0".as_ptr() as _);
                 let ns_app: Id       = get_id(ns_app_class, sel_shared_app);
                 let all_wins: Id     = get_id(ns_app, sel_windows_arr);
@@ -2019,57 +2058,80 @@ wrap_task! {
                                        else { get_usize(all_wins, sel_count) };
 
                 let mut overlay_win: Id = std::ptr::null_mut();
-                let mut main_win: Id    = std::ptr::null_mut();
+                let mut main_win:    Id = std::ptr::null_mut();
+                // Highest windowNumber among NativeWidgetMacNSWindows (for fallback
+                // when overlay_wnum is unknown — newest window = highest number).
+                let mut highest_native_wnum: isize = 0;
+                let mut highest_native_win: Id = std::ptr::null_mut();
 
                 for i in 0..win_count {
                     let win = obj_at(all_wins, sel_obj_at, i);
                     if win.is_null() { continue; }
-                    let is_key  = get_bool(win, sel_is_key);
+                    let cls_ptr = object_getClassName(win);
+                    let cls = if !cls_ptr.is_null() {
+                        std::ffi::CStr::from_ptr(cls_ptr).to_str().unwrap_or("?")
+                    } else { "?" };
+                    let wn      = get_isize(win, sel_win_number);
                     let is_main = get_bool(win, sel_is_main);
-                    if self.retry == 0 {
-                        let cls_ptr = object_getClassName(win);
-                        let cls = if !cls_ptr.is_null() {
-                            std::ffi::CStr::from_ptr(cls_ptr).to_str().unwrap_or("?")
-                        } else { "?" };
-                        let fr = get_frame(win, sel_frame);
-                        tracing::info!(
-                            i, win_count, class = cls, retry = self.retry,
-                            x = fr.origin.x, y = fr.origin.y,
-                            w = fr.size.w, h = fr.size.h, is_key, is_main,
-                            "[browser-pane] ObjC NSApp window"
-                        );
+                    let is_key  = get_bool(win, sel_is_key);
+                    let fr      = get_frame(win, sel_frame);
+                    tracing::info!(
+                        i, win_count, class = cls, retry = self.retry,
+                        x = fr.origin.x, y = fr.origin.y, w = fr.size.w, h = fr.size.h,
+                        is_main, is_key, wn, want_wnum = self.overlay_wnum,
+                        "[browser-pane] ObjC task NSApp window"
+                    );
+                    if cls.contains("CefNSWindow") && is_main != 0 {
+                        main_win = win;
                     }
-                    if is_main != 0 || is_key != 0 { main_win = win; }
-                    else { overlay_win = win; }
+                    if cls.contains("NativeWidgetMacNSWindow") {
+                        if self.overlay_wnum > 0 && wn == self.overlay_wnum {
+                            overlay_win = win;
+                        }
+                        if wn > highest_native_wnum {
+                            highest_native_wnum = wn;
+                            highest_native_win = win;
+                        }
+                    }
+                }
+
+                // Fallback: if wnum-based lookup missed (e.g. overlay_wnum==0 because
+                // the pre-hide scan ran before the NSWindow existed), use the newest
+                // NativeWidgetMacNSWindow (highest windowNumber = most recently created).
+                if overlay_win.is_null() && !highest_native_win.is_null() {
+                    overlay_win = highest_native_win;
+                    tracing::info!(
+                        label = %self.label, retry = self.retry,
+                        overlay_wnum = self.overlay_wnum, highest_native_wnum,
+                        "[browser-pane] ObjC task: falling back to highest-wnum NativeWidgetMacNSWindow"
+                    );
                 }
 
                 if overlay_win.is_null() {
                     if self.retry < 5 {
                         tracing::info!(
-                            label = %self.label, retry = self.retry, win_count,
-                            "[browser-pane] ObjC: overlay NSWindow not yet visible, retrying"
+                            label = %self.label, retry = self.retry,
+                            "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found after set_visible(1), retrying"
                         );
                         post_set_pane_bounds_views(
                             &self.state, &self.label, &self.window_label,
                             self.x, self.y, self.width, self.height,
-                            self.retry + 1,
+                            self.retry + 1, self.overlay_wnum,
                         );
                     } else {
-                        tracing::warn!(
-                            label = %self.label,
-                            "[browser-pane] ObjC: overlay NSWindow never appeared"
-                        );
+                        tracing::warn!(label = %self.label,
+                            "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found after 5 retries");
                     }
                     return;
                 }
 
+                // Step 3: reaffirm the frame (set_visible(1) may have triggered a CEF
+                // layout pass that reset the native frame to the pre-creation default).
                 let main_frame = if !main_win.is_null() {
                     get_frame(main_win, sel_frame)
                 } else {
                     NSRect { origin: NSPoint { x: 0.0, y: 0.0 }, size: NSSize { w: 0.0, h: 0.0 } }
                 };
-
-                // Pane rect is in physical pixels; NSWindow uses points.
                 let scale = if !main_win.is_null() {
                     let s = get_f64(main_win, sel_backing_scale);
                     if s > 0.0 { s } else { 1.0 }
@@ -2079,9 +2141,6 @@ wrap_task! {
                 let pane_y = self.y as f64 / scale;
                 let pane_w = self.width  as f64 / scale;
                 let pane_h = self.height as f64 / scale;
-
-                // Window-client (top-left) → screen (bottom-left).
-                // agentmux is borderless so content rect == frame rect.
                 let screen_x = main_frame.origin.x + pane_x;
                 let screen_y = main_frame.origin.y + main_frame.size.h - pane_y - pane_h;
 
@@ -2089,27 +2148,101 @@ wrap_task! {
                     origin: NSPoint { x: screen_x, y: screen_y },
                     size:   NSSize  { w: pane_w, h: pane_h },
                 };
+
                 set_frame_d(overlay_win, sel_set_frame_d, target, 1u8);
-                order_front(overlay_win, sel_order_front, std::ptr::null_mut());
-
-                // Frame is committed — safe to show via CEF.
-                controller.set_visible(1);
-
                 let new_fr = get_frame(overlay_win, sel_frame);
                 tracing::info!(
                     label = %self.label, retry = self.retry, scale,
                     pane_x, pane_y, pane_w, pane_h, screen_x, screen_y,
                     main_x = main_frame.origin.x, main_y = main_frame.origin.y,
-                    main_w = main_frame.size.w,   main_h = main_frame.size.h,
+                    main_w = main_frame.size.w, main_h = main_frame.size.h,
                     req_w = self.width, req_h = self.height,
                     got_x = new_fr.origin.x, got_y = new_fr.origin.y,
-                    got_w = new_fr.size.w,   got_h = new_fr.size.h,
-                    "[browser-pane] ObjC overlay setFrame applied"
+                    got_w = new_fr.size.w, got_h = new_fr.size.h,
+                    "[browser-pane] ObjC task overlay setFrame reaffirmed"
                 );
+                // Export DIP coordinates for the set_bounds call after this block.
+                task_dip_x = pane_x as i32;
+                task_dip_y = pane_y as i32;
+                task_dip_w = pane_w as i32;
+                task_dip_h = pane_h as i32;
+                // Export window refs for post-set_bounds key restoration.
+                task_main_win    = main_win;
+                task_overlay_win = overlay_win;
+                task_sel_make_key_front = sel_make_key_front;
+                task_sel_order_front    = sel_order_front;
+                task_sel_key_window     = sel_key_window;
+            }
 
-                if let Some(main_browser) = self.state.get_browser(&self.window_label) {
-                    if let Some(mut host) = main_browser.host() { host.set_focus(1); }
+            #[cfg(target_os = "macos")]
+            if let Some(main_browser) = self.state.get_browser(&self.window_label) {
+                if let Some(mut host) = main_browser.host() { host.set_focus(1); }
+            }
+
+            // macOS: call controller.set_bounds() with DIP coordinates computed above.
+            // The root cause of the 0×0 reset is CEF's overlay_view_host.cc
+            // SetOverlayBounds() doing Intersect(window_view_->bounds()). At creation
+            // time the parent CefWindowView may have empty bounds, but by this deferred
+            // task the parent window IS fully laid out so the Intersect should preserve
+            // our desired rect. This commits the size in CEF's Views layer so subsequent
+            // layout passes no longer reset the NSWindow to 0×0.
+            #[cfg(target_os = "macos")]
+            if task_dip_w > 0 && task_dip_h > 0 {
+                use cef::Rect as CefRect;
+                let dip = CefRect { x: task_dip_x, y: task_dip_y, width: task_dip_w, height: task_dip_h };
+                controller.set_bounds(Some(&dip));
+                let b = controller.bounds();
+                tracing::info!(
+                    label = %self.label, retry = self.retry,
+                    dip_x = task_dip_x, dip_y = task_dip_y,
+                    dip_w = task_dip_w, dip_h = task_dip_h,
+                    readback_x = b.x, readback_y = b.y,
+                    readback_w = b.width, readback_h = b.height,
+                    "[browser-pane] controller.set_bounds (post-ObjC) and readback"
+                );
+            }
+
+            // macOS: after set_bounds(), restore key to the main window so sidebar
+            // clicks work, then bring the overlay to front so the pane is visible.
+            // Known limitation: this leaves the overlay NSWindow non-KEY, which
+            // means Chromium's renderer in the pane does not receive mouseDown
+            // events (only scroll wheel, which bypasses key-window checks). Fixing
+            // pane click routing requires either acceptsFirstMouse:YES on the
+            // overlay's content view or a different focus strategy — tracked as a
+            // follow-up after this PR.
+            #[cfg(target_os = "macos")]
+            if !task_main_win.is_null() || !task_overlay_win.is_null() {
+                unsafe {
+                    type Id  = *mut std::ffi::c_void;
+                    type Sel = *const std::ffi::c_void;
+                    extern "C" { fn objc_msgSend(); }
+                    let make_key_front: extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                    let order_front:    extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                    if !task_main_win.is_null() && !task_sel_make_key_front.is_null() {
+                        make_key_front(task_main_win, task_sel_make_key_front, std::ptr::null_mut());
+                    }
+                    if !task_overlay_win.is_null() && !task_sel_order_front.is_null() {
+                        order_front(task_overlay_win, task_sel_order_front, std::ptr::null_mut());
+                    }
                 }
+            }
+
+            // macOS: post a delayed reaffirm on the first run. CEF's Widget::Show()
+            // (called inside set_visible(1) above) schedules a deferred Views layout
+            // that fires AFTER this task and resets the NSWindow frame to 0×0. The
+            // 50ms delayed retry runs after all pending layouts have completed and
+            // re-applies the correct frame — at that point it stays permanently.
+            #[cfg(target_os = "macos")]
+            if self.retry == 0 {
+                let mut reaffirm = SetPaneBoundsViewsTask::new(
+                    self.state.clone(),
+                    self.label.clone(),
+                    self.window_label.clone(),
+                    self.x, self.y, self.width, self.height,
+                    1, // retry=1: skip set_visible(1), just reaffirm frame
+                    self.overlay_wnum,
+                );
+                post_delayed_task(ThreadId::UI, Some(&mut reaffirm), 50);
             }
         }
     }
@@ -2125,6 +2258,7 @@ pub fn post_set_pane_bounds_views(
     width: i32,
     height: i32,
     retry: u32,
+    overlay_wnum: isize,
 ) {
     let mut task = SetPaneBoundsViewsTask::new(
         state.clone(),
@@ -2135,6 +2269,7 @@ pub fn post_set_pane_bounds_views(
         width,
         height,
         retry,
+        overlay_wnum,
     );
     post_task(ThreadId::UI, Some(&mut task));
 }
