@@ -55,7 +55,7 @@ fn get_mem_data(sys: &sysinfo::System, values: &mut HashMap<String, f64>) {
 /// Read the Windows commit budget via `GlobalMemoryStatusEx`.
 /// Emits `mem:commit:used` and `mem:commit:total` (in GB).
 /// No-op on non-Windows — keys are simply absent from the payload.
-fn get_commit_data(values: &mut HashMap<String, f64>) {
+fn get_commit_data(_values: &mut HashMap<String, f64>) {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
@@ -64,8 +64,8 @@ fn get_commit_data(values: &mut HashMap<String, f64>) {
         if unsafe { GlobalMemoryStatusEx(&mut mem) } != 0 {
             let total_gb = mem.ullTotalPageFile as f64 / BYTES_PER_GB;
             let avail_gb = mem.ullAvailPageFile as f64 / BYTES_PER_GB;
-            values.insert("mem:commit:used".to_string(), total_gb - avail_gb);
-            values.insert("mem:commit:total".to_string(), total_gb);
+            _values.insert("mem:commit:used".to_string(), total_gb - avail_gb);
+            _values.insert("mem:commit:total".to_string(), total_gb);
         }
     }
 }
