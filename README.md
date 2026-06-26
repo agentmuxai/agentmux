@@ -92,13 +92,10 @@ task dev           # CEF host + Vite hot reload
 
 ```bash
 task package            # Portable ZIP for the host platform
-task package -- --fresh # …with a throwaway data dir (clean-slate session)
 task package:linux      # Linux AppImage (writes to ~/Desktop)
 ```
 
-`task package` builds a **local** portable with an ephemeral, traceable label — it does **not** bump the version and does **not** touch git. Each build lands in a uniquely-stamped folder (`agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable`) so builds never collide on disk, and shares a per-branch data dir so your test session survives rebuilds. The committed version moves only via `task release` (changesets). See [docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md](./docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md).
-
-`task package:macos` and `task package:msix` are TODO stubs in `Taskfile.yml`. The full release artifact set is produced by `agentmuxai/agentmux-builder` — see §Releases below.
+`task package` builds a local portable with a unique build label — no version bump, no git changes. See [CLAUDE.md](./CLAUDE.md) for the full build labeling and data-isolation details.
 
 ### Logs
 
@@ -227,7 +224,7 @@ Local build outputs from `task package` on the host platform:
 | **Windows** | `task package` | `~/Desktop/agentmux-<version>+g<sha>[.dirty].<stamp>-x64-portable/` and `.zip` |
 | **Linux** | `task package:linux` | `~/Desktop/AgentMux_*_amd64.AppImage` |
 
-Other platform tasks (`task package:macos`, `task package:msix`) are TODO stubs in `Taskfile.yml`. The full release artifact set (macOS DMG, Windows installer, Windows MSIX, Linux .deb) is produced by [`agentmuxai/agentmux-builder`](https://github.com/agentmuxai/agentmux-builder) — see [§Releases](#releases) for the artifact catalog.
+Release artifacts (macOS DMG, Windows installer, Linux AppImage) are built by CI workflows in this repo. See [§Releases](#releases).
 
 ## Version Management (Changesets)
 
@@ -240,29 +237,11 @@ task changeset -- patch "fix(scope): short description"
 
 This creates a uniquely-named `.changesets/<id>.md` you commit with your code. Parallel-agent PRs never conflict on version files because they each have their own changeset filename.
 
-A separate **release PR** consumes pending changesets. The bump type is auto-detected from the highest changeset type present (`major > minor > patch`). To force a specific type, use the explicit task variants:
+A separate **release PR** consumes pending changesets. `task release` auto-detects the bump type (`major > minor > patch`); `task release:patch` / `task release:minor` let you force a specific type. All 5 version files are staged automatically.
 
-```bash
-# Auto-detect bump type (recommended for normal releases):
-task release
+Release PRs must contain **only**: changeset deletions, `VERSION_HISTORY.md` entry, and version bumps (`package.json`, `Cargo.toml`, `Cargo.lock`, `package-lock.json`).
 
-# Force a specific type regardless of changeset contents:
-task release:patch   # force patch even if feat changesets are present
-task release:minor   # force minor even if only fix changesets are present
-
-# Preview what would land without touching anything:
-task release -- --dry-run
-
-# After any of the above — all 5 version files are staged automatically:
-git commit -m "chore: release v<X.Y.Z>"
-git push -u origin <branch>
-```
-
-> **Do not** use `task release --as patch` — `task` parses `--as` as its own flag and exits with an error. Use `task release:patch` instead.
-
-Release PRs must contain **only**: changeset deletions, `VERSION_HISTORY.md` entry, and version bumps in `package.json`, `Cargo.toml`, `Cargo.lock`, `package-lock.json`. No feature code, cleanup, or analysis docs.
-
-The release flow internally uses [`@a5af/bump-cli`](https://github.com/a5af/bump-cli) via `scripts/bump-wrapper.sh`. Config lives in `.bump.json`. See [BUILD.md](./BUILD.md), [.changesets/README.md](./.changesets/README.md), and [docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md](./docs/specs/SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md) for the full workflow.
+See [BUILD.md](./BUILD.md) and [.changesets/README.md](./.changesets/README.md) for the full workflow.
 
 ## Releases
 
@@ -270,76 +249,43 @@ The release flow internally uses [`@a5af/bump-cli`](https://github.com/a5af/bump
 
 **Stable release** — see [GitHub Releases](https://github.com/agentmuxai/agentmux/releases/latest) for the latest published build.
 
-**Nightly builds** — built daily from `main`. Artifacts are retained for 7 days. Click a badge to open that platform's latest run and download the artifact.
+**Nightly builds** — built daily from `main`, retained for 7 days. [![Nightly builds](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml)
 
-| Platform | Nightly artifact | Status |
-|----------|-----------------|--------|
-| 🍎 macOS Apple Silicon | `AgentMux_*_arm64.dmg` | [![macOS nightly](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg?job=macos)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml) |
-| 🐧 Linux x86_64 | `AgentMux_*_amd64.AppImage` | [![Linux nightly](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg?job=linux)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml) |
-| 🪟 Windows x64 (installer) | `AgentMux-*-x64-setup.exe` | [![Windows nightly](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml/badge.svg?job=windows)](https://github.com/agentmuxai/agentmux/actions/workflows/ci-nightly-artifacts.yml) |
-| 🪟 Windows x64 (portable) | `agentmux-*-x64-portable.zip` | ↑ same run |
+| Platform | Nightly artifact |
+|----------|-----------------|
+| 🍎 macOS Apple Silicon | `AgentMux_*_arm64.dmg` |
+| 🐧 Linux x86_64 | `AgentMux_*_amd64.AppImage` |
+| 🪟 Windows x64 (installer) | `AgentMux-*-x64-setup.exe` |
+| 🪟 Windows x64 (portable) | `agentmux-*-x64-portable.zip` |
 
-> Nightly artifact downloads require a GitHub account. Click the badge → latest passing run → **Artifacts** section at the bottom of the run page.
+> Downloads require a GitHub account. Click the badge → latest passing run → **Artifacts** at the bottom.
 
 ---
 
-Releases are built by [`agentmuxai/agentmux-builder`](https://github.com/agentmuxai/agentmux-builder) — a private repo that holds CI/CD workflows and signing secrets separate from the public source.
-
-### How it works
-
-1. The builder's workflow checks out this repo at the given ref
-2. Builds run in parallel on `ubuntu-latest`, `macos-latest`, and `windows-latest`
-3. Each job builds the Rust backend binary (agentmux-srv), then builds the CEF host
-4. macOS builds are code-signed and notarized via Apple Developer credentials
-5. Windows builds include both an NSIS installer and a portable ZIP
-6. A final `create-release` job collects all artifacts and creates a GitHub Release on this repo
-
-### Triggering a release
-
-```bash
-# Manual workflow dispatch (pass a tag, branch, or SHA)
-gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.33.0
-```
-
 ### Release artifacts
+
+Builds run in parallel on `ubuntu-22.04`, `macos-latest`, and `windows-latest`. macOS builds are code-signed and notarized. Windows builds produce both an Inno Setup installer and a portable ZIP.
 
 | Platform | Artifact |
 |----------|----------|
-| macOS Apple Silicon | `AgentMux_*_aarch64.dmg` |
-| Windows x64 (installer) | `AgentMux_*_x64-setup.exe` |
+| macOS Apple Silicon | `AgentMux_*_arm64.dmg` |
+| Windows x64 (installer) | `AgentMux-*-x64-setup.exe` |
 | Windows x64 (portable) | `agentmux-*-x64-portable.zip` |
 | Linux x64 (AppImage) | `AgentMux_*_amd64.AppImage` |
-| Linux x64 (deb) | `AgentMux_*_amd64.deb` |
 
-### Full release checklist
+### Release checklist
 
 ```bash
-# 1. Consume pending changesets, bump version, update VERSION_HISTORY
-#    All 5 version files are staged automatically — no manual git add.
+# 1. Consume changesets, bump version, update VERSION_HISTORY
 task release              # auto-detect bump type from changesets
-task release:patch        # or force patch / minor regardless of changeset types
-git diff --staged         # review: should contain ONLY changeset deletions + version bumps
+git diff --staged         # should contain ONLY changeset deletions + version bumps
 git commit -m "chore: release v0.X.Y"
-git push -u origin <agent>/release-v0.X.Y
-# ... open release PR, merge to main after review
+git push -u origin <branch>/release-v0.X.Y
+# open PR, merge to main after review
 
-# 2. Tag once merged on main
+# 2. Tag once merged
 git checkout main && git pull
 git tag v0.X.Y && git push origin v0.X.Y
-
-# 3. Trigger the builder (builds all platforms, creates GitHub Release)
-gh workflow run tauri-build.yml -R agentmuxai/agentmux-builder -f ref=v0.X.Y
-
-# 4. Wait for build to complete (~15-20 min)
-gh run list -R agentmuxai/agentmux-builder --limit 1
-
-# 5. Deploy landing site (fetches new release, updates download links)
-cd /workspace/agentmux-landing
-deploy run --env prod
-
-# 6. Verify
-gh release view v0.X.Y --repo agentmuxai/agentmux    # release exists with assets
-curl -sf https://agentmux.ai/release.json | jq .version  # landing shows new version
 ```
 
 ## Contact Us
