@@ -918,7 +918,8 @@ async fn run_unix(
 
     // Startup telemetry bus (Unix/macOS — receiver dropped immediately since
     // the native splash on this platform doesn't yet consume typed events).
-    let (startup_sink, _startup_rx_unix) = startup_events::StartupEventSink::new();
+    let (startup_sink, startup_rx_unix) = startup_events::StartupEventSink::new();
+    drop(startup_rx_unix);
 
     // Startup recovery walker: mark any saga left running from a prior
     // crashed run as failed_compensation. Must run BEFORE coordinator
