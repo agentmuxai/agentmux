@@ -109,9 +109,12 @@ impl CronScheduler {
         let job_prompt = job.prompt.clone();
         let job_target = job.target.clone();
         let job_max_fires = job.max_fires;
+        // Seed from persisted fire_count so a srv restart doesn't reset the
+        // per-lifetime counter and allow a capped job to over-fire.
+        let job_fire_count = job.fire_count;
 
         let handle = tokio::spawn(async move {
-            let mut fires: i64 = 0;
+            let mut fires: i64 = job_fire_count;
             loop {
                 let next = match schedule.upcoming(Utc).next() {
                     Some(t) => t,
