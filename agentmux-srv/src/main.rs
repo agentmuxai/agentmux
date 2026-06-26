@@ -752,14 +752,15 @@ async fn main() {
     // port that mDNS advertises. The auth_key (X-AuthKey header, broadcast in
     // the mDNS TXT record) gates every API route.
     //
-    // Known limitation: `bind_addr` is resolved once at startup. If the user
-    // enables LAN discovery via the settings toggle AFTER the sidecar has
-    // started (server/websocket.rs `setconfig` handler calls `lan.apply()`),
-    // the mDNS daemon re-advertises the host's LAN IP but the TCP listeners
-    // remain on 127.0.0.1 until the next restart. The toggle is therefore
-    // fully effective only when set before launch (settings.json) or after
-    // a sidecar restart. A future improvement would re-bind the listeners on
-    // toggle; deferred because rebinding an active axum server is non-trivial.
+    // Known limitation: `bind_addr` is resolved once at startup. The toggle is
+    // therefore only fully effective before launch (settings.json) or after a
+    // sidecar restart. Both directions are affected:
+    //   OFF→ON: mDNS re-advertises the LAN IP but listeners stay on 127.0.0.1,
+    //           so remote devices cannot connect until restart.
+    //   ON→OFF: mDNS is stopped but listeners remain on 0.0.0.0 and are still
+    //           reachable on the LAN until restart (auth_key still gates routes).
+    // A future improvement would re-bind listeners on toggle; deferred because
+    // rebinding an active axum server is non-trivial.
     let bind_addr = if config_watcher.get_settings().network_lan_discovery {
         "0.0.0.0:0"
     } else {
