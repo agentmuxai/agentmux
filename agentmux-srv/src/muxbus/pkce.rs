@@ -79,54 +79,72 @@ pub async fn run_pkce_login(
         "muxbus: PKCE login started, awaiting browser callback"
     );
 
-    // 7. Accept one connection (with timeout)
-    let (mut stream, _) = tokio::time::timeout(
+    // 7. Accept connections until the valid Cognito callback arrives (5-min overall timeout).
+    //    On a fixed well-known port, stray requests (browser prefetch, health probes) can
+    //    arrive before Cognito's redirect; loop until /callback with matching state+code.
+    let code = tokio::time::timeout(
         std::time::Duration::from_secs(LOGIN_TIMEOUT_SECS),
-        listener.accept(),
+        async {
+            loop {
+                let (mut stream, _) = listener
+                    .accept()
+                    .await
+                    .map_err(|e| format!("callback accept failed: {e}"))?;
+
+                let mut buf = [0u8; 4096];
+                let n = match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    stream.read(&mut buf),
+                )
+                .await
+                {
+                    Ok(Ok(n)) => n,
+                    _ => continue, // stray connection with read timeout/error — keep waiting
+                };
+                let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+
+                let first_line = request.lines().next().unwrap_or("");
+                let raw_path = first_line.split_whitespace().nth(1).unwrap_or("");
+                let (path_only, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
+
+                if path_only != "/callback" {
+                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n").await;
+                    continue;
+                }
+
+                let returned_state = query_param(query, "state").unwrap_or_default();
+                if returned_state != state {
+                    // Wrong state — could be a replayed or unrelated request; keep waiting
+                    let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+                    continue;
+                }
+
+                let html: &[u8] = if query_param(query, "code").is_some() {
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+                      <html><body><h2>Connected to AgentMux Cloud.</h2>\
+                      <p>You can close this tab.</p></body></html>"
+                } else {
+                    b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
+                      <html><body><h2>Login failed.</h2><p>Please retry from AgentMux.</p></body></html>"
+                };
+                let _ = stream.write_all(html).await;
+
+                match query_param(query, "code") {
+                    Some(c) => return Ok::<_, String>(c),
+                    None => {
+                        let err = query_param(query, "error")
+                            .unwrap_or_else(|| "unknown".to_string());
+                        return Err(format!("Cognito returned error: {err}"));
+                    }
+                }
+            }
+        },
     )
     .await
-    .map_err(|_| "login timed out (5 min) — please try again")?
-    .map_err(|e| format!("callback accept failed: {e}"))?;
+    .map_err(|_| "login timed out (5 min) — please try again".to_string())?
+    .map_err(|e| e)?;
 
-    // 8. Read HTTP request and extract code + state
-    let mut buf = [0u8; 4096];
-    let n = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        stream.read(&mut buf),
-    )
-    .await
-    .map_err(|_| "callback read timed out")?
-    .map_err(|e| format!("callback read failed: {e}"))?;
-    let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
-
-    // Respond to the browser immediately
-    let html = if request.contains("code=") {
-        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-          <html><body><h2>Connected to AgentMux Cloud.</h2>\
-          <p>You can close this tab.</p></body></html>" as &[u8]
-    } else {
-        b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-          <html><body><h2>Login failed.</h2><p>Please retry from AgentMux.</p></body></html>"
-    };
-    let _ = stream.write_all(html).await;
-
-    // Parse query from first line: GET /callback?code=xxx&state=yyy HTTP/1.1
-    let query = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|path| path.split_once('?').map(|(_, q)| q))
-        .unwrap_or("");
-
-    let code = query_param(query, "code")
-        .ok_or_else(|| "callback missing 'code' parameter")?;
-    let returned_state = query_param(query, "state").unwrap_or_default();
-
-    if returned_state != state {
-        return Err("CSRF mismatch — state parameter did not match".to_string());
-    }
-
-    // 9. Exchange code for tokens
+    // 8. Exchange code for tokens
     let token_url = format!("{cognito_domain}/oauth2/token");
     let params = [
         ("grant_type", "authorization_code"),
@@ -169,7 +187,7 @@ pub async fn run_pkce_login(
         .as_secs() as i64)
         + expires_in;
 
-    // 10. Extract email + sub from id_token payload (no re-verification needed)
+    // 9. Extract email + sub from id_token payload (no re-verification needed)
     let (user_email, user_sub) = extract_jwt_claims(&id_token);
 
     tracing::info!(
