@@ -349,23 +349,24 @@ async fn main() {
     // have run before id_store binds to the shared store — avoiding apparent data
     // loss on first boot after an upgrade. Fast-path: no-op when already current.
     //
-    // migration_ok is threaded to the id_store binding below: if migration fails,
-    // id_store falls back to the per-channel store so that (a) data stays visible
-    // and (b) writes don't land in the un-backfilled shared store and trigger
-    // m0011's non-empty skip-guards on the next boot (permanent data loss).
+    // id_store binding below checks shared_store.migration_is_applied("0011_shared_store_backfill")
+    // directly rather than a coarse migration_ok flag: if an early migration (e.g.
+    // 0011) succeeds but a later one fails, the shared store is already backfilled
+    // and safe to use — falling back to per-channel would strand writes made this
+    // session when the later migration succeeds on next boot.
     let wave_data_dir = base::get_wave_data_dir();
-    // Notify the launcher BEFORE running migrations so it can extend its ESTART
-    // deadline. Without this signal the launcher's fixed 30s timeout would kill
-    // srv if a large-dataset migration takes longer to apply.
+    // Notify the launcher / host-spawned paths BEFORE running migrations so they
+    // can extend their ESTART deadline. Without this signal the fixed 30s timeout
+    // would kill srv if a large-dataset migration takes longer to apply.
     let pre_migration_count = migrations::count_pending_migrations(&wave_data_dir);
     if pre_migration_count > 0 {
         eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
     }
-    let migration_ok = match migrations::run_pending_migrations(&wave_data_dir) {
-        Ok(0) => true,
-        Ok(n) => { tracing::info!(applied = n, "startup: applied pending migrations"); true }
-        Err(e) => { tracing::warn!("startup: migration error — id_store will use per-channel store: {}", e); false }
-    };
+    match migrations::run_pending_migrations(&wave_data_dir) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
+        Err(e) => tracing::warn!("startup: migration error (continuing): {}", e),
+    }
 
     // Open databases
     let db_dir = base::get_wave_db_dir();
@@ -530,14 +531,18 @@ async fn main() {
         }
     };
     // id_store: routes identity/memory/drone/muxbus ops to the shared store when
-    // available AND migrations completed successfully so the shared store is
-    // backfilled. If migration failed, fall back to the per-channel store so data
-    // stays visible and no writes land in the un-backfilled shared store.
-    let id_store: Arc<Store> = if migration_ok {
-        shared_store.clone().unwrap_or_else(|| wstore.clone())
-    } else {
-        tracing::warn!("id_store: using per-channel store because migration did not complete");
-        wstore.clone()
+    // available AND the shared-store backfill migration has been applied.
+    // Checking the specific migration (not a coarse migration_ok flag) avoids
+    // a split-brain when 0011 succeeded but a later migration failed: the shared
+    // store is already backfilled, so using per-channel would strand writes made
+    // this session once the later migration succeeds on next boot.
+    let id_store: Arc<Store> = match shared_store.as_ref() {
+        Some(ss) if ss.migration_is_applied("0011_shared_store_backfill") => ss.clone(),
+        Some(_) => {
+            tracing::warn!("id_store: 0011_shared_store_backfill not yet applied — using per-channel store");
+            wstore.clone()
+        }
+        None => wstore.clone(),
     };
 
     // Install the process-global handle so the block-controller stdout-reader
