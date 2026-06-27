@@ -21,8 +21,7 @@
 // non-blocking sync APIs (UnboundedSender → drain task) so this
 // callback returns quickly even under burst load.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 
 use windows_sys::Win32::Foundation::{HWND, RECT};
@@ -53,18 +52,6 @@ use crate::wrr::{classify, position_debounce};
 fn app_state() -> &'static OnceLock<Arc<AppState>> {
     static S: OnceLock<Arc<AppState>> = OnceLock::new();
     &S
-}
-
-/// Pending OS-close debounce map: label → cancel flag.
-///
-/// When `EVENT_OBJECT_HIDE` fires for an on-screen non-minimised app window we
-/// defer `report_window_closed` by 200ms instead of firing it immediately. If
-/// `EVENT_OBJECT_SHOW` fires for the same label within that window (virtual
-/// desktop switch, opacity flicker, etc.) we set the cancel flag and the
-/// deferred thread no-ops. If no SHOW arrives the close fires after the delay.
-fn pending_os_closes() -> &'static std::sync::Mutex<HashMap<String, Arc<AtomicBool>>> {
-    static P: OnceLock<std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
-    P.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
 /// Phase B.9.1 — handles to the installed hooks. Held in a
@@ -466,96 +453,11 @@ unsafe extern "system" fn win_event_callback(
             launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, true);
             // B1: a user-visible window was shown — arm the last-window quit.
             HAD_VISIBLE_USER_WINDOW.store(true, Ordering::SeqCst);
-
-            // Cancel any pending OS-close debounce for this label — the window
-            // re-appeared before the 200ms delay fired, so the HIDE was a
-            // virtual-desktop switch (or similar transient hide), not a real close.
-            if let Some(state) = app_state().get() {
-                if let Some(label) = state.label_for_hwnd(hwnd) {
-                    if let Ok(mut map) = pending_os_closes().lock() {
-                        if let Some(cancel) = map.remove(&label) {
-                            cancel.store(true, Ordering::Release);
-                            tracing::debug!(
-                                target: "wrr",
-                                "[wrr] SHOW cancelled pending OS-close for label={}",
-                                label
-                            );
-                        }
-                    }
-                }
-            }
         }
         EVENT_OBJECT_HIDE => {
             let class = read_class_name(hwnd);
             if classify::is_app_class(&class) {
                 launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, false);
-
-                // Gap A: CEF Views recycle-on-close hides the window without
-                // destroying the browser, so `on_before_close` never fires.
-                // `close_window()` RPC added a report site (PR #1701 Part 1) but
-                // OS-level closes (Alt+F4, taskbar "Close window") bypass the RPC
-                // entirely. Detect them here: an on-screen, non-minimized,
-                // non-pool app window hiding is a real user-close regardless of
-                // which path triggered it. Double-report is harmless — the launcher
-                // silently no-ops already-removed labels.
-                // Ref: docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap A.
-                if IsIconic(hwnd) == 0 {
-                    if let Some(rect) = read_window_rect(hwnd) {
-                        if rect.left >= OFFSCREEN_POOL_THRESHOLD_X {
-                            // On-screen and not minimised → candidate user-close hide.
-                            // Defer by 200ms: virtual-desktop switches fire a matching
-                            // SHOW within ~50ms; the SHOW arm cancels the flag so no
-                            // report fires. Real closes (Alt+F4, taskbar) have no
-                            // paired SHOW, so the deferred thread fires.
-                            // Ref: reagentx review of PR #1803 (P2 — vdesktop false-positive).
-                            if let Some(state) = app_state().get() {
-                                if let Some(label) = state.label_for_hwnd(hwnd) {
-                                    if !label.starts_with("browser-pane-") {
-                                        tracing::debug!(
-                                            target: "wrr",
-                                            "[wrr] HIDE on on-screen app window → debouncing OS-close label={}",
-                                            label
-                                        );
-                                        let cancel = Arc::new(AtomicBool::new(false));
-                                        {
-                                            let mut map = pending_os_closes()
-                                                .lock()
-                                                .unwrap_or_else(|p| p.into_inner());
-                                            map.insert(label.clone(), cancel.clone());
-                                        }
-                                        let label_clone = label.clone();
-                                        let cancel_clone = cancel.clone();
-                                        std::thread::spawn(move || {
-                                            std::thread::sleep(
-                                                std::time::Duration::from_millis(200),
-                                            );
-                                            if !cancel_clone.load(Ordering::Acquire) {
-                                                tracing::debug!(
-                                                    target: "wrr",
-                                                    "[wrr] OS-close debounce fired → report_window_closed label={}",
-                                                    label_clone
-                                                );
-                                                crate::launcher_ipc::report_window_closed(
-                                                    label_clone.clone(),
-                                                );
-                                            }
-                                            // Clean up — skip if already removed by SHOW.
-                                            if let Ok(mut map) = pending_os_closes().lock() {
-                                                if map
-                                                    .get(&label_clone)
-                                                    .map(|c| Arc::ptr_eq(c, &cancel_clone))
-                                                    .unwrap_or(false)
-                                                {
-                                                    map.remove(&label_clone);
-                                                }
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
             // B1: a HIDE may mean the last user window is gone. Do NOT gate this
             // on is_app_class — closing a window fires HIDE for its CHILD render
@@ -588,15 +490,48 @@ unsafe extern "system" fn win_event_callback(
             launcher_ipc::report_hwnd_iconic_changed(raw_hwnd, false);
         }
         EVENT_OBJECT_LOCATIONCHANGE => {
-            // Heavy event during drags — debounce per HWND.
-            if !position_debounce::should_emit(raw_hwnd) {
-                return;
-            }
             let class = read_class_name(hwnd);
             if !classify::is_app_class(&class) {
                 return;
             }
-            if let Some(rect) = read_window_rect(hwnd) {
+            let Some(rect) = read_window_rect(hwnd) else {
+                return;
+            };
+
+            // Gap A — pool-move detection: CEF Views recycle-on-close moves the
+            // HWND to x < OFFSCREEN_POOL_THRESHOLD_X immediately after the HIDE.
+            // Virtual-desktop switches do NOT move the rect (the window stays at
+            // its on-screen coordinates, only its visibility changes), so this
+            // check correctly distinguishes a real close from a desktop switch
+            // without any debounce heuristic or paired-SHOW cancellation.
+            //
+            // We bypass the position debounce here (unconditional rect read) so a
+            // close that follows a drag within the 50ms debounce window is still
+            // detected. LOCATIONCHANGE fires once per WM_WINDOWPOSCHANGED, so a
+            // stationary pool window never re-fires — no duplicate-report risk.
+            //
+            // Ref: docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap A
+            //      reagentx P1+P2 on PR #1803.
+            if rect.left < OFFSCREEN_POOL_THRESHOLD_X {
+                if let Some(state) = app_state().get() {
+                    if let Some(label) = state.label_for_hwnd(hwnd) {
+                        if !label.starts_with("browser-pane-") {
+                            tracing::debug!(
+                                target: "wrr",
+                                "[wrr] LOCATIONCHANGE pool-move → report_window_closed label={}",
+                                label
+                            );
+                            crate::launcher_ipc::report_window_closed(label);
+                        }
+                    }
+                }
+                // Pool-position window: suppress position IPC — the launcher
+                // WRR mirror treats negative-x positions as off-monitor noise.
+                return;
+            }
+
+            // Normal on-screen position reporting, debounced to ~20 Hz.
+            if position_debounce::should_emit(raw_hwnd) {
                 launcher_ipc::report_hwnd_position_changed(raw_hwnd, rect);
             }
         }
