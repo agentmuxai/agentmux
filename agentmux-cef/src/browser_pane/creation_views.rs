@@ -560,10 +560,10 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
         return;
     };
 
-    // Remove this pane's per-window statics entry.  clear_pane_swizzle_statics
-    // deactivates the sendEvent: gate only when no pane entries remain, so
-    // surviving panes in other windows continue to intercept correctly.
-    crate::ui_tasks::clear_pane_swizzle_statics(&window_label);
+    // Remove this pane's per-window statics entry.  Keyed by pane label so two
+    // panes on the same window each hold an independent entry; the sendEvent:
+    // gate is deactivated only when all pane entries are gone.
+    crate::ui_tasks::clear_pane_swizzle_statics(label);
 
     // Whether to defer destroy depends on whether there's a live Browser.
     //   - Live Browser + host: close_browser(force=1) fires; on_before_close

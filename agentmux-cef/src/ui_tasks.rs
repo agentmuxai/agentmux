@@ -145,29 +145,37 @@ static RWHVC_CACHE_WIN: std::sync::atomic::AtomicUsize = std::sync::atomic::Atom
 static MAIN_RWHVC_PTR:  std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Called by `detach_browser_pane_view` each time any pane closes.
-/// Removes the per-window entry from PANE_WIN_TO_HOST / PANE_LABEL_TO_WIN;
-/// deactivates the sendEvent: gate (PANE_LOCAL_W → 0) only when no panes remain.
+///
+/// Keyed by *pane* label (unique per overlay), not window label, so two panes
+/// that share a window each hold an independent entry.  The PANE_WIN_TO_HOST
+/// entry for the window is removed only when no pane labels remain mapped to
+/// that window pointer; PANE_LOCAL_W is cleared only when the host map empties.
 #[cfg(target_os = "macos")]
-pub(crate) fn clear_pane_swizzle_statics(window_label: &str) {
+pub(crate) fn clear_pane_swizzle_statics(pane_label: &str) {
     use std::sync::atomic::Ordering::Relaxed;
     let win_ptr = PANE_LABEL_TO_WIN.try_lock().ok()
-        .and_then(|mut m| m.remove(window_label));
+        .and_then(|mut m| m.remove(pane_label));
     if let Some(ptr) = win_ptr {
-        if let Ok(mut m) = PANE_WIN_TO_HOST.try_lock() {
-            m.remove(&ptr);
-            if m.is_empty() {
-                PANE_LOCAL_W.store(0, Relaxed);
+        // Only evict the host entry if no other pane on the same window remains.
+        let still_live = PANE_LABEL_TO_WIN.try_lock()
+            .map_or(true, |m| m.values().any(|&w| w == ptr));
+        if !still_live {
+            if let Ok(mut m) = PANE_WIN_TO_HOST.try_lock() {
+                m.remove(&ptr);
+                if m.is_empty() {
+                    PANE_LOCAL_W.store(0, Relaxed);
+                }
             }
-        }
-        // Evict RWHVC cache if it was for this window.
-        if RWHVC_CACHE_WIN.load(Relaxed) == ptr {
-            RWHVC_CACHE_WIN.store(0, Relaxed);
-            MAIN_RWHVC_PTR.store(0, Relaxed);
+            // Evict RWHVC cache if it was for this window.
+            if RWHVC_CACHE_WIN.load(Relaxed) == ptr {
+                RWHVC_CACHE_WIN.store(0, Relaxed);
+                MAIN_RWHVC_PTR.store(0, Relaxed);
+            }
         }
     }
 }
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn clear_pane_swizzle_statics(_window_label: &str) {}
+pub(crate) fn clear_pane_swizzle_statics(_pane_label: &str) {}
 
 /// Swizzled NSApplication::sendEvent: — for mouse events on the main window
 /// while the browser pane is open, bypasses NSWindow.sendEvent: and dispatches
@@ -178,8 +186,7 @@ pub(crate) fn clear_pane_swizzle_statics(_window_label: &str) {}
 ///   NSWindow.sendEvent: has "activate-only" semantics for non-key windows:
 ///   it activates the window but may not forward the event to the hit view.
 ///   Directly calling [rwhvc mouseDown:/rightMouseDown:/etc. event] bypasses
-///   this — confirmed working ([AMX-DIAG-MD] hasFocus=true fires for every
-///   dispatched event).
+///   this.
 ///
 ///   set_focus(1) must be called before dispatch so Blink's
 ///   RenderWidgetHostImpl does not drop the event (CEF calls set_focus(0) on
@@ -2828,7 +2835,7 @@ wrap_task! {
                                             m.insert(win_ptr, host);
                                         }
                                         if let Ok(mut lm) = crate::ui_tasks::PANE_LABEL_TO_WIN.try_lock() {
-                                            lm.insert(self.window_label.clone(), win_ptr);
+                                            lm.insert(self.label.clone(), win_ptr);
                                         }
                                     }
                                 }
