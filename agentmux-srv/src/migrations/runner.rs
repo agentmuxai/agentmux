@@ -257,16 +257,16 @@ fn prune_old_backups(home: &Path) {
 
 /// Apply all pending migrations in-process before srv opens its stores.
 ///
-/// Called at srv startup when `AGENTMUX_PENDING_MIGRATIONS > 0` so the shared
-/// store is fully backfilled before `id_store` binds to it. This prevents
-/// apparent data loss (empty shared store) on first boot after an upgrade.
+/// Called unconditionally at srv startup so the shared store is fully backfilled
+/// before `id_store` binds to it. This prevents apparent data loss (empty shared
+/// store) on first boot after an upgrade. Fast-path: returns `Ok(0)` immediately
+/// when all migrations are already applied.
 ///
 /// Unlike `run_migrate_command` this writes progress via `tracing` rather than
 /// stdout JSON and is meant to be called from within the daemon process rather
-/// than a subprocess. Returns the number of migrations applied (0 = already
-/// current). On error, logs a warning and returns Err — callers should warn and
-/// continue rather than aborting startup, since a partially-migrated state is
-/// better than refusing to start.
+/// than a subprocess. Returns the number of migrations applied. On error, returns
+/// `Err` — callers should fall back to the per-channel store rather than binding
+/// `id_store` to an un-backfilled shared store.
 ///
 /// `data_dir` must be the wave data dir (parent of `db/`), not the db dir.
 pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {

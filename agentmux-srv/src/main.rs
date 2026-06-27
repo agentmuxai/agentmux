@@ -347,13 +347,17 @@ async fn main() {
     // Apply any pending migrations in-process before opening stores.
     // This ensures 0011_shared_store_backfill (and any future Global migrations)
     // have run before id_store binds to the shared store — avoiding apparent data
-    // loss on first boot after an upgrade when the user hasn't yet clicked
-    // "Run Migrations" in the UI. Fast-path: no-op when count is zero.
-    match migrations::run_pending_migrations(&base::get_wave_data_dir()) {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
-        Err(e) => tracing::warn!("startup: migration error (continuing): {}", e),
-    }
+    // loss on first boot after an upgrade. Fast-path: no-op when already current.
+    //
+    // migration_ok is threaded to the id_store binding below: if migration fails,
+    // id_store falls back to the per-channel store so that (a) data stays visible
+    // and (b) writes don't land in the un-backfilled shared store and trigger
+    // m0011's non-empty skip-guards on the next boot (permanent data loss).
+    let migration_ok = match migrations::run_pending_migrations(&base::get_wave_data_dir()) {
+        Ok(0) => true,
+        Ok(n) => { tracing::info!(applied = n, "startup: applied pending migrations"); true }
+        Err(e) => { tracing::warn!("startup: migration error — id_store will use per-channel store: {}", e); false }
+    };
 
     // Open databases
     let db_dir = base::get_wave_db_dir();
@@ -518,8 +522,15 @@ async fn main() {
         }
     };
     // id_store: routes identity/memory/drone/muxbus ops to the shared store when
-    // available so writes survive version upgrades; falls back to wstore otherwise.
-    let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
+    // available AND migrations completed successfully so the shared store is
+    // backfilled. If migration failed, fall back to the per-channel store so data
+    // stays visible and no writes land in the un-backfilled shared store.
+    let id_store: Arc<Store> = if migration_ok {
+        shared_store.clone().unwrap_or_else(|| wstore.clone())
+    } else {
+        tracing::warn!("id_store: using per-channel store because migration did not complete");
+        wstore.clone()
+    };
 
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
