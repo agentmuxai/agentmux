@@ -45,8 +45,8 @@ pub struct SrvSpawnResult {
     pub web_endpoint: String,
     pub instance_id: String,
     pub auth_key: String,
-    /// Number of data migrations that have not yet been applied.
-    /// Non-zero means the upgrade panel should show a dot indicator.
+    /// Number of data migrations still pending after the in-process startup run.
+    /// Non-zero means run_pending_migrations failed; status-bar shows a retry message.
     pub pending_migrations: usize,
     /// RFC3339 timestamp captured when ESTART arrived. Carried on the
     /// result for `--diag` / debug observability; not currently
@@ -482,7 +482,7 @@ pub async fn spawn_srv(
                 if new_deadline > deadline {
                     deadline = new_deadline;
                     sleep.as_mut().reset(deadline);
-                    crate::log("srv: migration in progress — ESTART deadline extended to 5 minutes");
+                    crate::log("srv: migration in progress — ESTART deadline extended to 30 minutes");
                 }
             }
         }

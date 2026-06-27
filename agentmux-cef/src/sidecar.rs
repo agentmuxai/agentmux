@@ -395,7 +395,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                 if new_deadline > deadline {
                     deadline = new_deadline;
                     sleep.as_mut().reset(deadline);
-                    tracing::info!("spawn_backend: migration in progress — ESTART deadline extended to 5 minutes");
+                    tracing::info!("spawn_backend: migration in progress — ESTART deadline extended to 30 minutes");
                 }
             }
         }
