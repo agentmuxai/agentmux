@@ -6,7 +6,8 @@
  * Shows the per-pane activity log (launch flow, subprocess lifecycle,
  * slash command outcomes, errors). Collapsed by default; a one-line
  * summary (most recent entry + total count) is shown in the header.
- * Expansion is purely user-driven — clicking the header toggles it.
+ * Auto-expands when new entries arrive, unless the user has explicitly
+ * collapsed it — in that case it stays closed until the user reopens it.
  *
  * Replaces the old `.agent-status-log` block that lived at the top of
  * the conversation scroll area and grew unbounded over the session —
@@ -23,12 +24,17 @@ interface ActivityLogPanelProps {
 export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
     const [isOpen, setIsOpen] = createSignal(false);
     const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
+    // True after the user explicitly clicks to close — suppresses auto-expand
+    // until they reopen the panel themselves, preventing non-bang log entries
+    // (subprocess lifecycle, slash outcomes) from fighting the user's intent.
+    let userCollapsed = false;
 
-    // Auto-expand when new entries arrive so bang command output is immediately visible.
+    // Auto-expand when new entries arrive, but only if the user hasn't
+    // explicitly collapsed the panel since the last open.
     let prevLength = props.entries().length;
     createEffect(() => {
         const len = props.entries().length;
-        if (len > prevLength) {
+        if (len > prevLength && !userCollapsed) {
             setIsOpen(true);
         }
         prevLength = len;
@@ -61,7 +67,11 @@ export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
                 <button
                     type="button"
                     class="agent-activity-log-header"
-                    onClick={() => setIsOpen(!isOpen())}
+                    onClick={() => {
+                        const next = !isOpen();
+                        userCollapsed = !next; // track explicit close to suppress auto-expand
+                        setIsOpen(next);
+                    }}
                     title={isOpen() ? "Collapse shell log" : "Expand shell log"}
                     aria-expanded={isOpen()}
                 >
