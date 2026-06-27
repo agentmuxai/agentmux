@@ -518,7 +518,13 @@ unsafe extern "system" fn win_event_callback(
             if rect.left < OFFSCREEN_POOL_THRESHOLD_X && IsIconic(hwnd) == 0 {
                 if let Some(state) = app_state().get() {
                     if let Some(label) = state.label_for_hwnd(hwnd) {
-                        if !label.starts_with("browser-pane-") {
+                        // Exclude browser-pane-* (floating browser panes that park
+                        // at x=-20000 by design) and window-pool-* (warm-pool HWNDs
+                        // that move to x=-20000 when created/parked — not a real close).
+                        // Only full-instance user windows should trigger a close report.
+                        if !label.starts_with("browser-pane-")
+                            && !label.starts_with("window-pool-")
+                        {
                             tracing::debug!(
                                 target: "wrr",
                                 "[wrr] LOCATIONCHANGE pool-move → report_window_closed label={}",
