@@ -333,7 +333,7 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     };
 
     if let Err(e) = backup_stores(&home, &shared_store_path, data_dir) {
-        tracing::warn!("run_pending_migrations: backup failed (continuing): {}", e);
+        return Err(format!("run_pending_migrations: backup failed: {}", e));
     }
 
     let mut applied = 0;

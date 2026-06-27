@@ -410,6 +410,11 @@ pub async fn spawn_srv(
         .take()
         .ok_or_else(|| SrvSpawnError::SpawnFailed("no stderr handle".to_string()))?;
     let (tx, mut rx) = mpsc::channel::<SrvSpawnResult>(1);
+    // Separate channel so the stderr reader can signal that migrations are running.
+    // The ESTART waiter extends its deadline when it receives this ping so that a
+    // large-dataset migration that takes longer than the normal 30s boot window
+    // doesn't cause the launcher to kill srv prematurely.
+    let (migration_tx, mut migration_rx) = mpsc::channel::<()>(4);
     let auth_key_for_estart = auth_key.clone();
     let started_at_for_estart = started_at.clone();
     let pid_for_log = pid;
@@ -435,6 +440,9 @@ pub async fn spawn_srv(
                 ));
                 let _ = tx.send(result).await;
                 estart_sent = true;
+            } else if line.starts_with("AGENTMUXSRV-MIGRATING") {
+                crate::log(&format!("[srv {} migrating] {}", pid_for_log, line));
+                let _ = migration_tx.send(()).await;
             } else if line.starts_with("AGENTMUXSRV-EVENT:") {
                 crate::log(&format!("[srv {} event] {}", pid_for_log, line));
                 // Phase B.2 will forward these to subscribers.
@@ -452,9 +460,32 @@ pub async fn spawn_srv(
     // 30s timeout in degraded mode (J0 absent) would leak a fully-
     // running srv that keeps the data dir lockfile, blocking the
     // next launch. (codex P2 @ srv_spawner.rs:240, PR #571 round-4.)
-    let recv = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv()).await;
+    //
+    // If srv emits AGENTMUXSRV-MIGRATING before ESTART, the deadline is
+    // extended to 5 minutes to accommodate large-dataset migrations.
+    let normal_timeout = std::time::Duration::from_secs(30);
+    let migration_timeout = std::time::Duration::from_secs(300);
+    let mut deadline = tokio::time::Instant::now() + normal_timeout;
+    let mut sleep = tokio::time::sleep_until(deadline);
+    tokio::pin!(sleep);
+
+    let recv: Result<Option<SrvSpawnResult>, ()> = loop {
+        tokio::select! {
+            result = rx.recv() => break Ok(result),
+            _ = &mut sleep => break Err(()),
+            Some(()) = migration_rx.recv() => {
+                // Migrations are running — extend the deadline generously.
+                let new_deadline = tokio::time::Instant::now() + migration_timeout;
+                if new_deadline > deadline {
+                    deadline = new_deadline;
+                    sleep.as_mut().reset(deadline);
+                    crate::log("srv: migration in progress — ESTART deadline extended to 5 minutes");
+                }
+            }
+        }
+    };
     match recv {
-        Err(_) => {
+        Err(()) => {
             let _ = child.start_kill();
             sink.stage_end(
                 "backend",
