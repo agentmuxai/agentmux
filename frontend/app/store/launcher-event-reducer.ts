@@ -251,12 +251,20 @@ export function reconcileKnownEntriesFromSnapshot(
  * unconditionally, so this never fights the normal event flow.
  * See `docs/specs/SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md` §9.
  */
-async function resyncFromAuthorityAfterGap(): Promise<void> {
+async function resyncFromAuthorityAfterGap(attempt = 0): Promise<void> {
     const versionAtRequest = launcherEventVersion();
     try {
         const snapshot = await getApi().listWindowInstances();
         if (!Array.isArray(snapshot)) return;
-        if (launcherEventVersion() !== versionAtRequest) return; // raced a newer event — skip
+        if (launcherEventVersion() !== versionAtRequest) {
+            // A newer event arrived while the RPC was in flight — state advanced past
+            // the snapshot. Retry once after a short delay: a busy event stream can
+            // race every attempt indefinitely without this, leaving a stale count
+            // permanently. One retry is sufficient for the common case.
+            // See docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap C.
+            if (attempt === 0) setTimeout(() => void resyncFromAuthorityAfterGap(1), 500);
+            return;
+        }
         reconcileKnownEntriesFromSnapshot(snapshot);
     } catch (e) {
         console.error("[launcher-event] gap resync failed", e);
@@ -302,6 +310,15 @@ export function startLauncherEventReducer(): void {
         if (seq > prevSeq) void resyncFromAuthorityAfterGap();
         return seq;
     }, 0);
+
+    // Safety-net: periodic reconcile every 30s against the authoritative
+    // list_window_instances to catch any gap that went undetected (e.g. no
+    // subsequent events arrived after a missed WindowClosed, so gapSeq never
+    // bumped). Low cost — one RPC per 30s per renderer. Complements the
+    // gap-triggered reconcile; does not replace it.
+    // See docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap C.
+    // Reducer lives for the renderer's lifetime; interval is reclaimed on unload.
+    setInterval(() => void resyncFromAuthorityAfterGap(), 30_000);
 }
 
 // ── Test/diagnostics helpers ───────────────────────────────────────────
