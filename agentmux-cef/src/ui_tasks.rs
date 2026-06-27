@@ -2233,12 +2233,11 @@ wrap_task! {
                         label = %self.label, retry = self.retry,
                         "[browser-pane] ObjC task: main CefNSWindow not found — cannot compute screen coords, skipping frame commit"
                     );
-                    // Roll back set_visible so the overlay doesn't sit visible
-                    // but unpositioned. Post a retry so placement completes once
-                    // the main window appears.
-                    if self.retry == 0 {
-                        controller.set_visible(0);
-                    }
+                    // Roll back the unconditional set_visible(1) issued at
+                    // Step 2 so the overlay doesn't sit visible but unpositioned.
+                    // Apply at all retries — not just retry=0 — because Step 2
+                    // now calls set_visible(1) unconditionally.
+                    controller.set_visible(0);
                     if self.retry < 5 {
                         post_set_pane_bounds_views(
                             &self.state, &self.label, &self.window_label,
