@@ -337,6 +337,7 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
     };
 
     return (
+        <div class="settings-view-container">
         <div class="settings-view">
             <nav class="settings-rail" aria-label="Settings section">
                 <For each={RAIL}>
@@ -400,6 +401,7 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                     )}
                 </For>
             </nav>
+        </div>
         </div>
     );
 }
