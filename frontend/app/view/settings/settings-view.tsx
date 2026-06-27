@@ -390,6 +390,7 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                     {(item) => (
                         <button
                             type="button"
+                            aria-label={item.label}
                             classList={{ "is-active": section() === item.id }}
                             aria-pressed={section() === item.id}
                             onClick={() => setSection(item.id)}
