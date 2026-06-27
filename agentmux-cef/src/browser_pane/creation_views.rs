@@ -552,7 +552,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
-    let Some((_window_label, controller)) = entry else {
+    let Some((window_label, controller)) = entry else {
         tracing::debug!(
             label = %label,
             "[browser-pane] views: detach requested but no OverlayController found"
@@ -560,12 +560,10 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
         return;
     };
 
-    // Clear the sendEvent: swizzle statics only when the last pane is closing.
-    // If another pane is still alive its bounds are still in the statics; clearing
-    // them early would disable the redirect for the surviving pane.
-    if state.browser_pane_overlays.lock().is_empty() {
-        crate::ui_tasks::clear_pane_swizzle_statics();
-    }
+    // Remove this pane's per-window statics entry.  clear_pane_swizzle_statics
+    // deactivates the sendEvent: gate only when no pane entries remain, so
+    // surviving panes in other windows continue to intercept correctly.
+    crate::ui_tasks::clear_pane_swizzle_statics(&window_label);
 
     // Whether to defer destroy depends on whether there's a live Browser.
     //   - Live Browser + host: close_browser(force=1) fires; on_before_close

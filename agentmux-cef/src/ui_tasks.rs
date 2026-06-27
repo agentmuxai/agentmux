@@ -29,12 +29,23 @@ static ORIG_IS_MAIN_WINDOW: std::sync::atomic::AtomicUsize =
 static ORIG_IS_KEY_WINDOW: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
-// Stores the main browser's CefBrowserHost so swizzled_nsapp_send_event can call
-// set_focus(1) right before dispatching a click, ensuring Blink isn't in a
-// defocused state that drops events.
+// Per-window browser host map.  Key = NSWindow* (as usize), value = CefBrowserHost
+// for that window's main browser.  One entry per open pane overlay; used by
+// swizzled_nsapp_send_event both as the routing gate (only intercept windows that
+// appear here) and to call set_focus(1) on the correct host before dispatching.
+// Updated by SetPaneBoundsViewsTask on every open/re-open; entries are removed
+// individually by clear_pane_swizzle_statics when the corresponding pane closes.
 #[cfg(target_os = "macos")]
-static MAIN_BROWSER_HOST_FOR_FOCUS: std::sync::Mutex<Option<cef::BrowserHost>> =
-    std::sync::Mutex::new(None);
+static PANE_WIN_TO_HOST: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, cef::BrowserHost>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+// Maps AgentMux window_label → NSWindow* so clear_pane_swizzle_statics can find
+// the right entry in PANE_WIN_TO_HOST without walking ObjC at close time.
+#[cfg(target_os = "macos")]
+static PANE_LABEL_TO_WIN: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 // Unique static address used as the objc_setAssociatedObject key for the overlay tag.
 #[cfg(target_os = "macos")]
@@ -122,30 +133,41 @@ extern "C" fn swizzled_should_ignore_mouse_event(
 static ORIG_NSAPP_SEND_EVENT: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
-// Cached NSWindow* and RenderWidgetHostViewCocoa* for the main browser window.
-// Discovered at leftMouseDown time, reused for drag/up/right-click events so we
-// don't re-walk the subview tree on every event. Cleared by clear_pane_swizzle_statics.
+// RWHVC walk cache: the last NSWindow* we walked (RWHVC_CACHE_WIN) and the
+// RenderWidgetHostViewCocoa* we found (MAIN_RWHVC_PTR).  Reused for drag/up/
+// right-click events so we don't re-walk the subview tree on every event.
+// NOT used for routing decisions (PANE_WIN_TO_HOST is the gate).
+// Cleared per-window by clear_pane_swizzle_statics.
 // Raw pointer: safe because RWHVC lives for the browser lifetime.
 #[cfg(target_os = "macos")]
-static MAIN_WIN_PTR:  std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static RWHVC_CACHE_WIN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 #[cfg(target_os = "macos")]
-static MAIN_RWHVC_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static MAIN_RWHVC_PTR:  std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// Called by `detach_browser_pane_view` when a pane closes.
-/// Resets all statics that gate the sendEvent: swizzle so it stops intercepting
-/// main-window mouse events after the pane is gone.
+/// Called by `detach_browser_pane_view` each time any pane closes.
+/// Removes the per-window entry from PANE_WIN_TO_HOST / PANE_LABEL_TO_WIN;
+/// deactivates the sendEvent: gate (PANE_LOCAL_W → 0) only when no panes remain.
 #[cfg(target_os = "macos")]
-pub(crate) fn clear_pane_swizzle_statics() {
+pub(crate) fn clear_pane_swizzle_statics(window_label: &str) {
     use std::sync::atomic::Ordering::Relaxed;
-    PANE_LOCAL_W.store(0, Relaxed);
-    MAIN_WIN_PTR.store(0, Relaxed);
-    MAIN_RWHVC_PTR.store(0, Relaxed);
-    if let Ok(mut guard) = MAIN_BROWSER_HOST_FOR_FOCUS.try_lock() {
-        *guard = None;
+    let win_ptr = PANE_LABEL_TO_WIN.try_lock().ok()
+        .and_then(|mut m| m.remove(window_label));
+    if let Some(ptr) = win_ptr {
+        if let Ok(mut m) = PANE_WIN_TO_HOST.try_lock() {
+            m.remove(&ptr);
+            if m.is_empty() {
+                PANE_LOCAL_W.store(0, Relaxed);
+            }
+        }
+        // Evict RWHVC cache if it was for this window.
+        if RWHVC_CACHE_WIN.load(Relaxed) == ptr {
+            RWHVC_CACHE_WIN.store(0, Relaxed);
+            MAIN_RWHVC_PTR.store(0, Relaxed);
+        }
     }
 }
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn clear_pane_swizzle_statics() {}
+pub(crate) fn clear_pane_swizzle_statics(_window_label: &str) {}
 
 /// Swizzled NSApplication::sendEvent: — for mouse events on the main window
 /// while the browser pane is open, bypasses NSWindow.sendEvent: and dispatches
@@ -229,14 +251,15 @@ extern "C" fn swizzled_nsapp_send_event(
                     std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap_or("").contains("NativeWidgetMacNSWindow");
 
                 if !is_overlay {
-                    // Only intercept events for the window that owns the pane.
-                    // On the first leftMouseDown MAIN_WIN_PTR is 0 (unknown); we
-                    // learn it during the subview walk and store it. Once set,
-                    // events for any other window (which has no pane and its own
-                    // focus semantics) fall through to the original sendEvent:.
-                    let known_pane_win = MAIN_WIN_PTR.load(std::sync::atomic::Ordering::Relaxed);
-                    if known_pane_win != 0 && win as usize != known_pane_win {
-                        // Different window — pass through without touching focus.
+                    // Only intercept events for windows that have an open pane.
+                    // PANE_WIN_TO_HOST maps win_ptr → CefBrowserHost for each such
+                    // window; a missing entry means this window owns no pane and
+                    // its events must fall through to the original sendEvent:.
+                    let win_usize = win as usize;
+                    let in_pane_map = crate::ui_tasks::PANE_WIN_TO_HOST
+                        .try_lock()
+                        .map_or(false, |m| m.contains_key(&win_usize));
+                    if !in_pane_map {
                         let orig = ORIG_NSAPP_SEND_EVENT.load(std::sync::atomic::Ordering::SeqCst);
                         if orig != 0 {
                             let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) =
@@ -251,10 +274,10 @@ extern "C" fn swizzled_nsapp_send_event(
                     // the subview tree fresh (window may have been recreated).
                     // For all other types we reuse the cached pointer as long as
                     // the window pointer matches, to avoid walking on every drag.
-                    let cached_win  = MAIN_WIN_PTR.load(std::sync::atomic::Ordering::Relaxed);
+                    let cached_win  = RWHVC_CACHE_WIN.load(std::sync::atomic::Ordering::Relaxed);
                     let cached_rwhvc = MAIN_RWHVC_PTR.load(std::sync::atomic::Ordering::Relaxed);
 
-                    let rwhvc: Id = if ev_type == 1 || cached_win != win as usize || cached_rwhvc == 0 {
+                    let rwhvc: Id = if ev_type == 1 || cached_win != win_usize || cached_rwhvc == 0 {
                         // Walk tree.
                         let sel_cv     = sel_registerName(b"contentView\0".as_ptr() as _);
                         let sel_subs   = sel_registerName(b"subviews\0".as_ptr() as _);
@@ -281,7 +304,7 @@ extern "C" fn swizzled_nsapp_send_event(
                             }
                         }
                         if !found.is_null() {
-                            MAIN_WIN_PTR.store(win as usize, std::sync::atomic::Ordering::Relaxed);
+                            RWHVC_CACHE_WIN.store(win_usize, std::sync::atomic::Ordering::Relaxed);
                             MAIN_RWHVC_PTR.store(found as usize, std::sync::atomic::Ordering::Relaxed);
                         }
                         found
@@ -293,8 +316,8 @@ extern "C" fn swizzled_nsapp_send_event(
                         // Restore main browser focus so Blink doesn't drop the
                         // event (CEF calls set_focus(0) on the main browser
                         // whenever the overlay gains focus).
-                        if let Ok(mut guard) = crate::ui_tasks::MAIN_BROWSER_HOST_FOR_FOCUS.try_lock() {
-                            if let Some(ref mut h) = *guard {
+                        if let Ok(mut m) = crate::ui_tasks::PANE_WIN_TO_HOST.try_lock() {
+                            if let Some(h) = m.get_mut(&win_usize) {
                                 h.set_focus(1);
                             }
                         }
@@ -2791,13 +2814,23 @@ wrap_task! {
                                 }
                                 let rwhvc_cls = objc_getClass(b"RenderWidgetHostViewCocoa\0".as_ptr() as _);
                                 if !rwhvc_cls.is_null() {
-                                // Activate swizzle: store the pane-owning window pointer
-                                // BEFORE setting PANE_LOCAL_W so that swizzled_nsapp_send_event
-                                // sees a non-zero MAIN_WIN_PTR on the very first click and
-                                // never intercepts events from other windows.
+                                // Register this window in PANE_WIN_TO_HOST BEFORE setting
+                                // PANE_LOCAL_W so swizzled_nsapp_send_event can route
+                                // correctly from the very first click on any window.
+                                // PANE_LABEL_TO_WIN allows clear_pane_swizzle_statics to
+                                // remove the right entry when this specific pane closes.
                                 if !task_main_win.is_null() {
-                                    crate::ui_tasks::MAIN_WIN_PTR.store(
-                                        task_main_win as usize, std::sync::atomic::Ordering::SeqCst);
+                                    let win_ptr = task_main_win as usize;
+                                    if let Some(host) = self.state.get_browser(&self.window_label)
+                                        .and_then(|b| b.host())
+                                    {
+                                        if let Ok(mut m) = crate::ui_tasks::PANE_WIN_TO_HOST.try_lock() {
+                                            m.insert(win_ptr, host);
+                                        }
+                                        if let Ok(mut lm) = crate::ui_tasks::PANE_LABEL_TO_WIN.try_lock() {
+                                            lm.insert(self.window_label.clone(), win_ptr);
+                                        }
+                                    }
                                 }
                                 crate::ui_tasks::PANE_LOCAL_W.store(
                                     task_dip_w, std::sync::atomic::Ordering::SeqCst);
@@ -2836,22 +2869,8 @@ wrap_task! {
                 }
             }
 
-            // Store main browser host for use in sendEvent: swizzle (set_focus before dispatch).
-            // Also inject a JS mousedown listener into the main browser for diagnostics.
-            #[cfg(target_os = "macos")]
-            {
-                let win_label_for_focus = self.window_label.clone();
-                if let Some(main_browser) = self.state.get_browser(&win_label_for_focus) {
-                    if let Some(host) = main_browser.host() {
-                        // Store host so swizzled_nsapp_send_event can call set_focus(1).
-                        *crate::ui_tasks::MAIN_BROWSER_HOST_FOR_FOCUS.lock().unwrap() = Some(host);
-                        tracing::info!(
-                            retry = self.retry,
-                            "[browser-pane] stored main browser host for sendEvent focus restore"
-                        );
-                    }
-                }
-            }
+            // Main browser host is now stored into PANE_WIN_TO_HOST inside the
+            // rwhvc_cls block above, keyed by the NSWindow pointer for this pane.
 
             // Diagnostic: swizzle NSApp::sendEvent: once to log all leftMouseDown
             // events with their target window number. This lets us see where
