@@ -525,6 +525,11 @@ pub struct AppState {
     /// Backend process start time as ISO 8601 string
     pub backend_started_at: Mutex<Option<String>>,
 
+    /// Number of data migrations not yet applied, as reported in ESTART and
+    /// forwarded by the launcher via AGENTMUX_PENDING_MIGRATIONS. Non-zero
+    /// means the upgrade panel should surface a "run migrations" prompt.
+    pub pending_migrations: Mutex<usize>,
+
     /// Current zoom factor
     pub zoom_factor: Mutex<f64>,
 
@@ -864,6 +869,12 @@ impl Default for AppState {
             sidecar_child: Mutex::new(None),
             backend_pid: Mutex::new(None),
             backend_started_at: Mutex::new(None),
+            pending_migrations: Mutex::new(
+                std::env::var("AGENTMUX_PENDING_MIGRATIONS")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(0)
+            ),
             zoom_factor: Mutex::new(1.0),
             client_id: Mutex::new(None),
             window_id: Mutex::new(None),

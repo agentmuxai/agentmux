@@ -379,6 +379,14 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     Ok(result)
 }
 
+/// Public wrapper around `resolve_backend_binary` for use by the `run_migrations`
+/// IPC command and any other callers that need to locate the srv binary without
+/// going through the full spawn_backend flow.
+pub fn resolve_srv_binary() -> Result<std::path::PathBuf, String> {
+    let exe_suffix = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    resolve_backend_binary("agentmux-srv", exe_suffix)
+}
+
 /// Resolve the backend binary path.
 ///
 /// The CEF host lives in `runtime/` alongside the backend binary in portable builds,

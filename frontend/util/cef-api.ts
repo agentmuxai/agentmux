@@ -284,12 +284,15 @@ export function buildCefApi(): AppApi {
             return cachedValues!.aboutDetails;
         },
         getBackendInfo: async () => {
-            return await invokeCommand<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>(
+            return await invokeCommand<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>(
                 "get_backend_info"
             );
         },
         restartBackend: async () => {
             await invokeCommand("restart_backend");
+        },
+        runMigrations: async () => {
+            return await invokeCommand<{ applied: number; already_current: boolean }>("run_migrations");
         },
 
         // --- Context menu (JS overlay for CEF — no native menu API) ---

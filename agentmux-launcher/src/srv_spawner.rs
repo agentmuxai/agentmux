@@ -94,6 +94,7 @@ impl std::fmt::Display for SrvSpawnError {
 /// Not called during normal startup (migrations are deferred to the upgrade
 /// panel). Preserved here for the upgrade-panel IPC path that will invoke it
 /// on demand once the panel is wired up.
+#[allow(dead_code)]
 pub async fn run_migrate(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
