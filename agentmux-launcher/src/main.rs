@@ -935,6 +935,18 @@ async fn run_unix(
         ));
     }
 
+    // Vacuum terminal saga rows older than the configured retention window.
+    // Runs after crash recovery so in-flight sagas are never vacuumed by accident.
+    {
+        let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+        match saga_log.vacuum_older_than(cutoff) {
+            Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
+            Ok(_) => {}
+            Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
+        }
+    }
+
     startup_sink.stage_end(
         "saga",
         saga_t.elapsed().as_millis() as u64,
@@ -1531,6 +1543,17 @@ async fn run_windows(
             "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn; prior crashed sagas remain unresolved until next restart",
             e
         ));
+    }
+
+    // Vacuum terminal saga rows older than the configured retention window.
+    {
+        let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+        match saga_log.vacuum_older_than(cutoff) {
+            Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
+            Ok(_) => {}
+            Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
+        }
     }
 
     startup_sink.stage_end(
