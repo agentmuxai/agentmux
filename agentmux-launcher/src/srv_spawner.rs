@@ -91,9 +91,10 @@ impl std::fmt::Display for SrvSpawnError {
 /// stdout lines are newline-delimited JSON progress events — consumed inline
 /// so sub-events are delivered to the splash before `stage_end` is sent.
 ///
-/// Not called during normal startup (migrations are deferred to the upgrade
-/// panel). Preserved here for the upgrade-panel IPC path that will invoke it
-/// on demand once the panel is wired up.
+/// Not called during normal startup — migrations now run in-process inside srv
+/// via `run_pending_migrations` before ESTART is emitted. Preserved here as a
+/// fallback subprocess path (e.g. for a future recovery flow) but has no active
+/// callers.
 #[allow(dead_code)]
 pub async fn run_migrate(
     launcher_exe_dir: &Path,
