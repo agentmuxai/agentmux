@@ -51,6 +51,21 @@ const BackendStatus = (): JSX.Element => {
             setRestarting(false);
         });
     };
+
+    const handleRunMigrations = () => {
+        setMigrating(true);
+        setMigrateError(null);
+        getApi().runMigrations().then((result) => {
+            setBackendInfo((prev) => prev ? { ...prev, pending_migrations: 0 } : prev);
+            console.info("[BackendStatus] migrations applied:", result.applied);
+        }).catch((e: unknown) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            setMigrateError(msg);
+            console.error("[BackendStatus] migration failed:", e);
+        }).finally(() => {
+            setMigrating(false);
+        });
+    };
     const [startedAt, setStartedAt] = createSignal<number | null>(null);
     const [uptimeSecs, setUptimeSecs] = createSignal(0);
     const [backendInfo, setBackendInfo] = createSignal<{
@@ -58,7 +73,10 @@ const BackendStatus = (): JSX.Element => {
         started_at?: string;
         web_endpoint?: string;
         version: string;
+        pending_migrations?: number;
     } | null>(null);
+    const [migrating, setMigrating] = createSignal(false);
+    const [migrateError, setMigrateError] = createSignal<string | null>(null);
     let popoverRef!: HTMLDivElement;
     const gpu = getGpuInfo(); // WebGL/GPU capability — static for the renderer process
 
@@ -191,6 +209,33 @@ const BackendStatus = (): JSX.Element => {
                             <div class="status-bar-popover-row">
                                 <span class="status-bar-popover-label">Version</span>
                                 <span>{backendInfo().version}</span>
+                            </div>
+                        </Show>
+                        <Show when={(backendInfo()?.pending_migrations ?? 0) > 0}>
+                            <div class="status-bar-popover-divider" />
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label" style={{ color: "var(--warning-color)" }}>
+                                    Migrations
+                                </span>
+                                <span style={{ color: "var(--warning-color)" }}>
+                                    {backendInfo()!.pending_migrations} pending
+                                </span>
+                            </div>
+                            <Show when={migrateError()}>
+                                <div class="status-bar-popover-row">
+                                    <span class="status-bar-popover-mono" style={{ color: "var(--error-color)", "font-size": "0.8em" }}>
+                                        {migrateError()}
+                                    </span>
+                                </div>
+                            </Show>
+                            <div class="status-bar-popover-row">
+                                <button
+                                    class="status-bar-restart-btn"
+                                    disabled={migrating()}
+                                    onClick={handleRunMigrations}
+                                >
+                                    {migrating() ? "Running…" : "Run Migrations"}
+                                </button>
                             </div>
                         </Show>
                         {/* GPU / WebGL rendering — enabled/disabled + driver info.

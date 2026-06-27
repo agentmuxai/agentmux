@@ -100,8 +100,9 @@ declare global {
         getConfigDir: () => string;
         getUserHomeDir: () => string;
         getAboutModalDetails: () => AboutModalDetails;
-        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>;
+        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>;
         restartBackend: () => Promise<void>;
+        runMigrations: () => Promise<{ applied: number; already_current: boolean }>;
         getDocsiteUrl: () => string;
         getZoomFactor: () => number;
         showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => void;
