@@ -385,6 +385,20 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                     </button>
                 </footer>
             </div>
+            <nav class="settings-tab-bar" aria-label="Settings section">
+                <For each={RAIL}>
+                    {(item) => (
+                        <button
+                            type="button"
+                            classList={{ "is-active": section() === item.id }}
+                            aria-pressed={section() === item.id}
+                            onClick={() => setSection(item.id)}
+                        >
+                            <i class={`fa-solid fa-${item.icon}`} aria-hidden="true" />
+                        </button>
+                    )}
+                </For>
+            </nav>
         </div>
     );
 }

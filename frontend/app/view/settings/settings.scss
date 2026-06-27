@@ -6,6 +6,8 @@
     flex-direction: row;
     height: 100%;
     overflow: hidden;
+    container-type: inline-size;
+    container-name: settings;
 }
 
 // ── Left rail ─────────────────────────────────────────────────────────────────
@@ -297,5 +299,119 @@
     &:hover {
         opacity: 1;
         background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
+    }
+}
+
+// ── Bottom tab bar (xs only) ──────────────────────────────────────────────────
+
+.settings-tab-bar {
+    display: none;
+    flex-direction: row;
+    align-items: stretch;
+    border-top: 1px solid var(--border-color);
+    background: var(--panel-bg-color, var(--main-bg-color));
+    flex-shrink: 0;
+    overflow-x: auto;
+
+    button {
+        flex: 1;
+        min-width: 40px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 2px;
+        border: none;
+        border-top: 2px solid transparent;
+        background: transparent;
+        color: var(--main-text-color);
+        cursor: default;
+        opacity: 0.6;
+
+        i { font-size: 14px; }
+
+        &.is-active {
+            opacity: 1;
+            color: var(--accent-color);
+            border-top-color: var(--accent-color);
+        }
+
+        &:hover:not(.is-active) {
+            opacity: 0.85;
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        }
+    }
+}
+
+// ── Responsive container queries ──────────────────────────────────────────────
+
+// lg: cap section body width for comfortable reading
+@container settings (min-width: 1024px) {
+    .settings-section-body {
+        max-width: 720px;
+    }
+}
+
+// sm: icon-only left rail (48px)
+@container settings (max-width: 767px) {
+    .settings-rail {
+        flex: 0 0 48px;
+        padding: 8px 4px;
+
+        span { display: none; }
+    }
+
+    .settings-rail-item {
+        justify-content: center;
+        padding: 10px 0;
+
+        i { width: auto; }
+    }
+}
+
+// xs: bottom tab bar, stacked rows, full-width controls
+@container settings (max-width: 479px) {
+    .settings-view {
+        flex-direction: column;
+    }
+
+    .settings-rail {
+        display: none;
+    }
+
+    .settings-tab-bar {
+        display: flex;
+    }
+
+    // Stack label above control
+    .setting-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    .setting-row-control {
+        align-self: stretch;
+    }
+
+    // Full-width controls
+    .setting-select {
+        width: 100%;
+        min-width: unset;
+    }
+
+    .setting-text {
+        width: 100%;
+    }
+
+    // Slider stretches to fill available space
+    .setting-slider {
+        width: 100%;
+
+        input[type="range"] {
+            flex: 1 1 auto;
+            width: auto;
+            min-width: 80px;
+        }
     }
 }
