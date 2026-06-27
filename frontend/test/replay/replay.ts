@@ -34,7 +34,6 @@
  */
 
 import { ClaudeCodeStreamParser } from "@/app/view/agent/stream-parser";
-import type { ProviderDefinition } from "@/app/view/agent/providers";
 import { update as updateDoc } from "@/app/store/agent-document/reducer";
 import {
     initialState as initialDocState,
@@ -77,9 +76,6 @@ export interface ReplayOptions {
     /** Frozen wall clock for deterministic `nowMs` injection.
      *  Defaults to the fixture's header time. */
     nowMs?: number;
-    /** Provider for the parser. Defaults to a minimal stub —
-     *  override when testing provider-specific paths. */
-    provider?: ProviderDefinition;
 }
 
 /**
@@ -90,7 +86,6 @@ export function replayInstant(
     options: ReplayOptions = {},
 ): ReplayResult {
     const nowMs = options.nowMs ?? (Date.parse(fixture.header.recorded_at) || 0);
-    const provider = options.provider ?? minimalProvider(fixture.header.provider);
 
     const blockId = fixture.header.block_id;
     const agentId = `replay-${blockId}`;
@@ -107,7 +102,7 @@ export function replayInstant(
         eventsDropped: 0,
     };
 
-    const parser = new ClaudeCodeStreamParser(provider);
+    const parser = new ClaudeCodeStreamParser();
     const nodeIds = new Set<string>();
 
     const applyDoc = (cmd: AgentDocumentCommand): void => {
@@ -249,15 +244,3 @@ function handleDispatch(
     }
 }
 
-/** Lightweight stub provider — enough for the parser to emit basic
- *  nodes. Replace via `options.provider` for provider-specific tests. */
-function minimalProvider(name: string): ProviderDefinition {
-    return {
-        id: name,
-        displayName: name,
-        styledOutputFormat: "stream-json",
-        sessionIdField: "session_id",
-        resumeFlag: "",
-        controllerType: "subprocess",
-    } as unknown as ProviderDefinition;
-}

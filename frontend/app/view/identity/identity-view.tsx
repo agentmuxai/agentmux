@@ -547,7 +547,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                 accountId: isEdit() ? editing()!.id : undefined,
                 // Carry the user-entered context so the backend merges (not
                 // drops) github_username/scopes/notes on a key change.
-                context: buildContext(),
+                context: buildContext() as unknown as Record<string, unknown>,
             });
             // Drop the plaintext from the form immediately.
             setKeychainKey("");

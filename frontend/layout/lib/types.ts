@@ -104,8 +104,8 @@ export interface LayoutTreeSwapNodeAction extends LayoutTreeAction {
 
 interface InsertNodeOperation {
     node: LayoutNode;
-    magnified: boolean;
-    focused: boolean;
+    magnified?: boolean;
+    focused?: boolean;
 }
 
 export interface LayoutTreeInsertNodeAction extends LayoutTreeAction, InsertNodeOperation {

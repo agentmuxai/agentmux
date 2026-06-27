@@ -21,7 +21,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted because vi.mock factories run before module imports.
-const invokeCommandMock = vi.fn(() => Promise.resolve());
+const invokeCommandMock = vi.fn<(cmd: string, args: Record<string, unknown>) => Promise<void>>(() => Promise.resolve());
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: invokeCommandMock,
 }));
@@ -161,7 +161,7 @@ describe("BlockErrorBoundary — logging side effect", () => {
             error_name: "Error",
             error_message: "logged",
         });
-        expect(typeof args.data.error_stack === "string").toBe(true);
+        expect(typeof (args.data as Record<string, unknown>).error_stack === "string").toBe(true);
         expect(args.message).toMatch(/block-error-boundary/);
     });
 

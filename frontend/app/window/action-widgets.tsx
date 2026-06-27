@@ -334,7 +334,7 @@ const ActionWidgets = (): JSX.Element => {
                     closeMore();
                     if (!view || !blockMeta) return;
                     fireAndForget(async () =>
-                        TabRpcClient.rpcCall("pane.open", { view, meta: blockMeta, floating: true })
+                        TabRpcClient.rpcCall("pane.open", { view, meta: blockMeta, floating: true }, {})
                     );
                 },
             },
