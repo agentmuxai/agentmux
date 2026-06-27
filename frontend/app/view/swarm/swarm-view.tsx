@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, createEffect, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
@@ -193,6 +193,16 @@ function AgentRow({
         phaseToDisplayStatus(node.blockId, node.agentStatus)
     );
 
+    const [summaryFlash, setSummaryFlash] = createSignal(false);
+    let flashTimer: ReturnType<typeof setTimeout> | undefined;
+    createEffect(() => {
+        if (node.activitySummary) {
+            clearTimeout(flashTimer);
+            setSummaryFlash(true);
+            flashTimer = setTimeout(() => setSummaryFlash(false), 600);
+        }
+    });
+
     return (
         <div class="swarm-agent-group">
             <div
@@ -215,7 +225,9 @@ function AgentRow({
                     <AgentStatusChip status={displayStatus()} />
                 </div>
                 <Show when={node.activitySummary}>
-                    <div class="swarm-activity-summary">{node.activitySummary}</div>
+                    <div classList={{ "swarm-activity-summary": true, "swarm-activity-summary--flash": summaryFlash() }}>
+                        {node.activitySummary}
+                    </div>
                 </Show>
             </div>
             <div class="swarm-children">

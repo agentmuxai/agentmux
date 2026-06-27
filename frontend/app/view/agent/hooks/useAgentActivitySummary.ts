@@ -12,9 +12,9 @@
  * Word target is derived from pane width so narrow panes get ~5 words and wide
  * panes can accommodate up to 12.
  *
- * On turn start (Submitting phase) the stale label is cleared. A turn counter
- * ensures a slow Haiku response from a superseded turn cannot overwrite the
- * cleared header once a new turn has already started.
+ * The summary is never cleared — it persists across turns so the header always
+ * shows the last known activity. A turn counter ensures a slow Haiku response
+ * from a superseded turn cannot overwrite a newer summary.
  */
 
 import { createEffect, on, type Accessor } from "solid-js";
@@ -42,11 +42,6 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
     createEffect(on(turnPhase, (phase) => {
         if (phase.kind === "Submitting") {
             activeTurnId++;
-            fireAndForget(() =>
-                ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-                    "term:activity": null,
-                } as any)
-            );
             return;
         }
 
