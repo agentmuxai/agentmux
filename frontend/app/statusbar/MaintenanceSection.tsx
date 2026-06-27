@@ -97,17 +97,6 @@ export const MaintenanceSection = (): JSX.Element => {
                     const steps = prev.kind === "running" ? prev.steps : [];
                     return { kind: "complete", steps, applied };
                 });
-            } else if (kind === "error") {
-                const error: string = payload.error ?? "Unknown error";
-                const failedId: string | null = payload.id ?? null;
-                setMigState((prev) => {
-                    const steps = prev.kind === "running"
-                        ? prev.steps.map((s) =>
-                            s.id === failedId ? { ...s, status: "done" as const } : s
-                          )
-                        : [];
-                    return { kind: "failed", steps, error, failedId };
-                });
             }
         }).then((fn) => { unlisten = fn; });
 

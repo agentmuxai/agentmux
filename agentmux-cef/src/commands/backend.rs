@@ -178,7 +178,7 @@ pub async fn run_migrations(state: Arc<AppState>) -> Result<serde_json::Value, S
     tokio::spawn(async move {
         if let Err(e) = run_migrations_inner(state.clone(), srv_path, data_dir).await {
             tracing::error!("[run_migrations] subprocess error: {}", e);
-            crate::events::emit_event_from_state(
+            crate::events::emit_event_to_top_level_windows(
                 &state,
                 "upgrade:migrations-failed",
                 &serde_json::json!({ "error": e, "failedId": null }),
@@ -241,7 +241,7 @@ async fn run_migrations_inner(
         match event_kind {
             "migration_start" => {
                 current_migration_id = val.get("id").and_then(|v| v.as_str()).map(str::to_owned);
-                crate::events::emit_event_from_state(
+                crate::events::emit_event_to_top_level_windows(
                     &state,
                     "upgrade:migration-event",
                     &serde_json::json!({
@@ -253,7 +253,7 @@ async fn run_migrations_inner(
             }
             "migration_done" => {
                 current_migration_id = None;
-                crate::events::emit_event_from_state(
+                crate::events::emit_event_to_top_level_windows(
                     &state,
                     "upgrade:migration-event",
                     &serde_json::json!({
@@ -267,7 +267,7 @@ async fn run_migrations_inner(
             "complete" => {
                 let a = val.get("applied").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 applied = a;
-                crate::events::emit_event_from_state(
+                crate::events::emit_event_to_top_level_windows(
                     &state,
                     "upgrade:migration-event",
                     &serde_json::json!({
@@ -286,11 +286,15 @@ async fn run_migrations_inner(
 
     if status.success() {
         *state.pending_migrations.lock() = 0;
-        crate::events::emit_event_from_state(
+        crate::events::emit_event_to_top_level_windows(
             &state,
             "upgrade:migrations-complete",
             &serde_json::json!({ "applied": applied }),
         );
+        // Restart srv so id_store rebinds from per-channel fallback to shared store.
+        if let Err(e) = restart_backend(state.clone()).await {
+            tracing::warn!("[run_migrations] srv restart after migrations failed: {}", e);
+        }
         Ok(())
     } else {
         let err = if !stderr_output.is_empty() {
@@ -299,7 +303,7 @@ async fn run_migrations_inner(
             format!("agentmux-srv migrate exited with code {:?}", status.code())
         };
         let failed_id = current_migration_id;
-        crate::events::emit_event_from_state(
+        crate::events::emit_event_to_top_level_windows(
             &state,
             "upgrade:migrations-failed",
             &serde_json::json!({ "error": err, "failedId": failed_id }),
@@ -316,7 +320,7 @@ async fn run_migrations_inner(
 pub async fn run_saga_vacuum(state: Arc<AppState>) -> Result<serde_json::Value, String> {
     // TODO: spawn `agentmux-srv --wavedata <path> saga-vacuum` once the subcommand exists.
     tracing::info!("[run_saga_vacuum] stub — returning rows_deleted=0");
-    crate::events::emit_event_from_state(
+    crate::events::emit_event_to_top_level_windows(
         &state,
         "upgrade:saga-vacuum-done",
         &serde_json::json!({ "rows_deleted": 0 }),
