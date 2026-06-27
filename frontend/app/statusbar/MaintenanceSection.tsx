@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi } from "@/store/global";
-import { WpsEvent } from "@/store/wps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 
@@ -50,17 +49,12 @@ export const MaintenanceSection = (): JSX.Element => {
     const [migState, setMigState] = createSignal<MigState>({ kind: "idle", pendingCount: 0 });
     const [vacState, setVacState] = createSignal<VacState>({ kind: "idle", lastRunMs: null });
     const [nowMs, setNowMs] = createSignal(Date.now());
-    const [srvRestartRequired, setSrvRestartRequired] = createSignal(false);
 
-    // Fetch pending_migrations count and persisted srv_restart_required flag from backend info on mount.
-    // srv_restart_required is stored in AppState so it survives panel close/reopen.
+    // Fetch pending_migrations count from backend info on mount
     onMount(() => {
         getApi().getBackendInfo().then((info) => {
             const pending = info?.pending_migrations ?? 0;
             setMigState({ kind: "idle", pendingCount: pending });
-            if (info?.srv_restart_required) {
-                setSrvRestartRequired(true);
-            }
         }).catch(() => {});
     });
 
@@ -133,15 +127,6 @@ export const MaintenanceSection = (): JSX.Element => {
                 const steps = prev.kind === "running" ? prev.steps : [];
                 return { kind: "failed", steps, error, failedId };
             });
-        }).then((fn) => { unlisten = fn; });
-
-        onCleanup(() => unlisten?.());
-    });
-
-    onMount(() => {
-        let unlisten: (() => void) | null = null;
-        getApi().listen(WpsEvent.UpgradeSrvRestartRequired, (_payload: any) => {
-            setSrvRestartRequired(true);
         }).then((fn) => { unlisten = fn; });
 
         onCleanup(() => unlisten?.());
@@ -328,17 +313,6 @@ export const MaintenanceSection = (): JSX.Element => {
                             Retry
                         </button>
                     </Show>
-                </div>
-            </Show>
-
-            {/* ── srv-restart-required notice ────────────────────────────── */}
-            {/* Shown independently of migState so it persists after panel close/reopen. */}
-            <Show when={srvRestartRequired()}>
-                <div class="maintenance-alert-row maintenance-restart-notice">
-                    <span class="maintenance-icon maintenance-icon--warn">↺</span>
-                    <span class="maintenance-row-text maintenance-row-text--warn">
-                        Restart AgentMux to complete identity store rebind
-                    </span>
                 </div>
             </Show>
 

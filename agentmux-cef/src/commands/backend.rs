@@ -50,7 +50,6 @@ pub fn get_backend_info(state: &Arc<AppState>) -> serde_json::Value {
     let pid = *state.backend_pid.lock();
     let started_at = state.backend_started_at.lock().clone();
     let pending_migrations = *state.pending_migrations.lock();
-    let srv_restart_required = *state.srv_restart_required.lock();
 
     serde_json::json!({
         "pid": pid,
@@ -58,7 +57,6 @@ pub fn get_backend_info(state: &Arc<AppState>) -> serde_json::Value {
         "web_endpoint": endpoints.web_endpoint,
         "version": current_version,
         "pending_migrations": pending_migrations,
-        "srv_restart_required": srv_restart_required,
     })
 }
 
