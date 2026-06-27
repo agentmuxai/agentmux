@@ -1955,8 +1955,14 @@ wrap_task! {
             // frame reaffirm instead of using the stale creation-time self.x/y/w/h.
             #[cfg(not(target_os = "macos"))]
             {
-                controller.set_size(Some(&Size { width: self.width, height: self.height }));
-                controller.set_position(Some(&Point { x: self.x, y: self.y }));
+                // Only apply creation-time bounds if no resize has occurred yet.
+                // A browser_pane_resize queued between creation and this task
+                // already updated the controller; overwriting it would roll back.
+                let cb = controller.bounds();
+                if cb.width == 0 && cb.height == 0 {
+                    controller.set_size(Some(&Size { width: self.width, height: self.height }));
+                    controller.set_position(Some(&Point { x: self.x, y: self.y }));
+                }
             }
             #[cfg(target_os = "macos")]
             if self.retry == 0 {
@@ -1986,10 +1992,13 @@ wrap_task! {
                 "[browser-pane] views: SetPaneBoundsViewsTask: CEF bounds (macos)"
             );
 
-            // Linux: CEF Views sizing works; show immediately.
+            // Linux: CEF Views sizing works; show immediately if pane is visible.
             #[cfg(not(target_os = "macos"))]
             {
-                controller.set_visible(1);
+                let pane_rect = (self.x, self.y, self.width, self.height);
+                if crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, pane_rect) {
+                    controller.set_visible(1);
+                }
                 if let Some(main_browser) = self.state.get_browser(&self.window_label) {
                     if let Some(mut host) = main_browser.host() { host.set_focus(1); }
                 }
@@ -2006,16 +2015,6 @@ wrap_task! {
             // The ObjC block additionally sets the NSWindow frame directly.
             #[cfg(target_os = "macos")]
             let (mut task_dip_x, mut task_dip_y, mut task_dip_w, mut task_dip_h) = (0i32, 0i32, 0i32, 0i32);
-            #[cfg(target_os = "macos")]
-            let mut task_main_win:    *mut std::ffi::c_void = std::ptr::null_mut();
-            #[cfg(target_os = "macos")]
-            let mut task_overlay_win: *mut std::ffi::c_void = std::ptr::null_mut();
-            #[cfg(target_os = "macos")]
-            let mut task_sel_make_key_front: *const std::ffi::c_void = std::ptr::null();
-            #[cfg(target_os = "macos")]
-            let mut task_sel_order_front:    *const std::ffi::c_void = std::ptr::null();
-            #[cfg(target_os = "macos")]
-            let mut task_sel_key_window:     *const std::ffi::c_void = std::ptr::null();
 
             #[cfg(target_os = "macos")]
             unsafe {
@@ -2041,7 +2040,6 @@ wrap_task! {
                 let sel_frame         = sel_registerName(b"frame\0".as_ptr() as _);
                 let sel_is_main       = sel_registerName(b"isMainWindow\0".as_ptr() as _);
                 let sel_is_key        = sel_registerName(b"isKeyWindow\0".as_ptr() as _);
-                let sel_key_window    = sel_registerName(b"keyWindow\0".as_ptr() as _);
                 let sel_backing_scale = sel_registerName(b"backingScaleFactor\0".as_ptr() as _);
                 let sel_set_frame_d   = sel_registerName(b"setFrame:display:\0".as_ptr() as _);
                 let sel_make_key_front = sel_registerName(b"makeKeyAndOrderFront:\0".as_ptr() as _);
@@ -2156,6 +2154,19 @@ wrap_task! {
                         label = %self.label, retry = self.retry,
                         "[browser-pane] ObjC task: main CefNSWindow not found — cannot compute screen coords, skipping frame commit"
                     );
+                    // Roll back set_visible so the overlay doesn't sit visible
+                    // but unpositioned. Post a retry so placement completes once
+                    // the main window appears.
+                    if self.retry == 0 {
+                        controller.set_visible(0);
+                    }
+                    if self.retry < 5 {
+                        post_set_pane_bounds_views(
+                            &self.state, &self.label, &self.window_label,
+                            self.x, self.y, self.width, self.height,
+                            self.retry + 1, self.overlay_wnum,
+                        );
+                    }
                     return;
                 }
                 let main_frame = get_frame(main_win, sel_frame);
@@ -2205,12 +2216,14 @@ wrap_task! {
                 task_dip_y = pane_y as i32;
                 task_dip_w = pane_w as i32;
                 task_dip_h = pane_h as i32;
-                // Export window refs for post-set_bounds key restoration.
-                task_main_win    = main_win;
-                task_overlay_win = overlay_win;
-                task_sel_make_key_front = sel_make_key_front;
-                task_sel_order_front    = sel_order_front;
-                task_sel_key_window     = sel_key_window;
+                // Restore key to main window then bring overlay to front so the
+                // pane is visible and sidebar clicks continue to work.
+                if !main_win.is_null() {
+                    make_key_front(main_win, sel_make_key_front, std::ptr::null_mut());
+                }
+                if !overlay_win.is_null() {
+                    order_front(overlay_win, sel_order_front, std::ptr::null_mut());
+                }
             }
 
             #[cfg(target_os = "macos")]
@@ -2239,31 +2252,6 @@ wrap_task! {
                     readback_w = b.width, readback_h = b.height,
                     "[browser-pane] controller.set_bounds (post-ObjC) and readback"
                 );
-            }
-
-            // macOS: after set_bounds(), restore key to the main window so sidebar
-            // clicks work, then bring the overlay to front so the pane is visible.
-            // Known limitation: this leaves the overlay NSWindow non-KEY, which
-            // means Chromium's renderer in the pane does not receive mouseDown
-            // events (only scroll wheel, which bypasses key-window checks). Fixing
-            // pane click routing requires either acceptsFirstMouse:YES on the
-            // overlay's content view or a different focus strategy — tracked as a
-            // follow-up after this PR.
-            #[cfg(target_os = "macos")]
-            if !task_main_win.is_null() || !task_overlay_win.is_null() {
-                unsafe {
-                    type Id  = *mut std::ffi::c_void;
-                    type Sel = *const std::ffi::c_void;
-                    extern "C" { fn objc_msgSend(); }
-                    let make_key_front: extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                    let order_front:    extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-                    if !task_main_win.is_null() && !task_sel_make_key_front.is_null() {
-                        make_key_front(task_main_win, task_sel_make_key_front, std::ptr::null_mut());
-                    }
-                    if !task_overlay_win.is_null() && !task_sel_order_front.is_null() {
-                        order_front(task_overlay_win, task_sel_order_front, std::ptr::null_mut());
-                    }
-                }
             }
 
             // macOS: post a delayed reaffirm on the first run. CEF's Widget::Show()
