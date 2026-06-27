@@ -9,6 +9,8 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
+    container-type: inline-size;
+    container-name: trust-center;
 }
 
 // Rail and section styles reuse the bundle-manager- prefix so the
@@ -73,5 +75,88 @@
 
     &.is-hidden {
         display: none;
+    }
+}
+
+// ── Bottom tab bar (xs only) ─────────────────────────────────────────────────
+
+.bundle-manager-tab-bar {
+    display: none;
+    flex-direction: row;
+    align-items: stretch;
+    border-top: 1px solid var(--border-color);
+    background: var(--panel-bg-color, var(--main-bg-color));
+    flex-shrink: 0;
+    overflow-x: auto;
+
+    button {
+        flex: 1;
+        min-width: 44px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        padding: 6px 2px;
+        border: none;
+        background: transparent;
+        color: var(--main-text-color);
+        font-size: 10px;
+        cursor: default;
+        opacity: 0.6;
+
+        i { font-size: 16px; }
+
+        span { font-size: 10px; }
+
+        &.is-active {
+            opacity: 1;
+            color: var(--accent-color);
+            border-top: 2px solid var(--accent-color);
+        }
+
+        &:hover:not(.is-active) {
+            opacity: 0.85;
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        }
+    }
+}
+
+// ── Responsive container queries ─────────────────────────────────────────────
+
+// sm: compress outer rail to icon-only (48px)
+@container trust-center (max-width: 767px) {
+    .bundle-manager-rail {
+        flex: 0 0 48px;
+        padding: 8px 4px;
+
+        span { display: none; }
+    }
+
+    .bundle-manager-rail-item {
+        justify-content: center;
+        padding: 10px 0;
+
+        i { width: auto; }
+    }
+}
+
+// xs: hide rail, show bottom tab bar, stack column
+@container trust-center (max-width: 479px) {
+    .trust-view {
+        flex-direction: column;
+    }
+
+    .bundle-manager-rail {
+        display: none;
+    }
+
+    .bundle-manager-tab-bar {
+        display: flex;
+    }
+
+    .bundle-manager-section {
+        flex: 1 1 auto;
+        min-height: 0;
     }
 }

@@ -11,6 +11,8 @@
     background: var(--main-bg-color);
     font-size: 13px;
     overflow: auto;
+    container-type: inline-size;
+    container-name: warden;
 }
 
 .warden-header {
@@ -264,4 +266,44 @@
     font-size: 0.8em;
     opacity: 0.5;
     line-height: 1.5;
+}
+
+// ── Responsive container queries ─────────────────────────────────────────────
+
+// sm: drop bytes + error columns from audit grid (3-col layout)
+@container warden (max-width: 767px) {
+    .warden-audit-row {
+        grid-template-columns: 60px 1fr 36px;
+    }
+
+    .warden-audit-bytes,
+    .warden-audit-error {
+        display: none;
+    }
+}
+
+// xs: audit rows become stacked two-line cards; section subtitle hidden
+@container warden (max-width: 479px) {
+    .warden-audit-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 4px var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .warden-audit-bytes,
+    .warden-audit-error {
+        display: block;
+    }
+
+    .warden-audit-flow {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: unset;
+    }
+
+    .warden-section-summary {
+        display: none;
+    }
 }
