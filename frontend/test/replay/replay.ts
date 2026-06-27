@@ -90,7 +90,6 @@ export function replayInstant(
     options: ReplayOptions = {},
 ): ReplayResult {
     const nowMs = options.nowMs ?? (Date.parse(fixture.header.recorded_at) || 0);
-    const provider = options.provider ?? minimalProvider(fixture.header.provider);
 
     const blockId = fixture.header.block_id;
     const agentId = `replay-${blockId}`;
@@ -107,7 +106,7 @@ export function replayInstant(
         eventsDropped: 0,
     };
 
-    const parser = new ClaudeCodeStreamParser(provider);
+    const parser = new ClaudeCodeStreamParser();
     const nodeIds = new Set<string>();
 
     const applyDoc = (cmd: AgentDocumentCommand): void => {

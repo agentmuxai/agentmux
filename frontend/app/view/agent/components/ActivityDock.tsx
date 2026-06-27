@@ -134,13 +134,14 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         return list.map((a) => a.id);
     });
 
-    const togglePin = (id: string): void =>
+    const togglePin = (id: string): void => {
         setDocState((prev) => {
             const pinned = new Set(prev.pinnedNodes);
             if (pinned.has(id)) pinned.delete(id);
             else pinned.add(id);
             return { ...prev, pinnedNodes: pinned };
         });
+    };
 
     const stop = (id: string): void => {
         const a = activityById().get(id);
@@ -151,12 +152,13 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         }
     };
 
-    const dismiss = (id: string): void =>
+    const dismiss = (id: string): void => {
         setDismissed((prev) => {
             const next = new Set(prev);
             next.add(id);
             return next;
         });
+    };
 
     return (
         <Show when={ordered().length > 0}>

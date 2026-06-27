@@ -20,8 +20,8 @@ function getKeyUtilPlatform(): NodeJS.Platform {
 
 function keydownWrapper(
     fn: (waveEvent: WaveKeyboardEvent) => boolean
-): (event: KeyboardEvent | React.KeyboardEvent) => void {
-    return (event: KeyboardEvent | React.KeyboardEvent) => {
+): (event: KeyboardEvent) => void {
+    return (event: KeyboardEvent) => {
         const waveEvent = adaptFromReactOrNativeKeyEvent(event);
         const rtnVal = fn(waveEvent);
         if (rtnVal) {
@@ -228,7 +228,7 @@ function checkKeyPressed(event: WaveKeyboardEvent, keyDescription: string): bool
     return true;
 }
 
-function adaptFromReactOrNativeKeyEvent(event: React.KeyboardEvent | KeyboardEvent): WaveKeyboardEvent {
+function adaptFromReactOrNativeKeyEvent(event: KeyboardEvent): WaveKeyboardEvent {
     let rtn: WaveKeyboardEvent = {} as WaveKeyboardEvent;
     rtn.control = event.ctrlKey;
     rtn.shift = event.shiftKey;
