@@ -292,8 +292,11 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         });
     }
 
-    // Parse ESTART from stderr
+    // Parse ESTART from stderr. A second channel carries AGENTMUXSRV-MIGRATING
+    // pings so the async ESTART waiter can extend its deadline when migrations are
+    // running (same pattern as agentmux-launcher/src/srv_spawner.rs).
     let (tx, mut rx) = tokio::sync::mpsc::channel::<BackendSpawnResult>(1);
+    let (migration_tx, mut migration_rx) = tokio::sync::mpsc::channel::<()>(4);
     let state_for_monitor = state.clone();
 
     std::thread::spawn(move || {
@@ -313,6 +316,9 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                         );
                         estart_received = true;
                         let _ = tx.blocking_send(result);
+                    } else if l.starts_with("AGENTMUXSRV-MIGRATING") {
+                        tracing::info!("[agentmux-srv] {}", l);
+                        let _ = migration_tx.blocking_send(());
                     } else if let Some(event_data) = l.strip_prefix("AGENTMUXSRV-EVENT:") {
                         tracing::debug!("Backend event: {}", event_data);
                         // Forward events to the frontend
@@ -362,10 +368,30 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         );
     });
 
-    // Wait for ESTART with 30s timeout
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv())
-        .await
-        .map_err(|_| "Timeout waiting for agentmux-srv to start (30s)".to_string())?
+    // Wait for ESTART. On receiving AGENTMUXSRV-MIGRATING, extend the deadline
+    // from 30s to 5 minutes to accommodate large-dataset migrations.
+    let normal_timeout = std::time::Duration::from_secs(30);
+    let migration_timeout = std::time::Duration::from_secs(300);
+    let mut deadline = tokio::time::Instant::now() + normal_timeout;
+    let mut sleep = tokio::time::sleep_until(deadline);
+    tokio::pin!(sleep);
+
+    let recv: Result<Option<BackendSpawnResult>, ()> = loop {
+        tokio::select! {
+            result = rx.recv() => break Ok(result),
+            _ = &mut sleep => break Err(()),
+            Some(()) = migration_rx.recv() => {
+                let new_deadline = tokio::time::Instant::now() + migration_timeout;
+                if new_deadline > deadline {
+                    deadline = new_deadline;
+                    sleep.as_mut().reset(deadline);
+                    tracing::info!("spawn_backend: migration in progress — ESTART deadline extended to 5 minutes");
+                }
+            }
+        }
+    };
+    let result = recv
+        .map_err(|()| "Timeout waiting for agentmux-srv to start (30s)".to_string())?
         .ok_or_else(|| "agentmux-srv channel closed before sending endpoints".to_string())?;
 
     tracing::info!(
