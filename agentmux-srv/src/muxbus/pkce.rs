@@ -54,7 +54,7 @@ pub async fn run_pkce_login(
     let redirect_uri = format!("http://127.0.0.1:{CALLBACK_PORT}/callback");
     let listener = TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}"))
         .await
-        .map_err(|e| format!("failed to bind callback port {CALLBACK_PORT}: {e} — is another muxbus login in progress?"))?;
+        .map_err(|e| format!("failed to bind callback port {CALLBACK_PORT}: {e} — another process may be holding the port"))?;
 
     // 5. Build auth URL
     let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
