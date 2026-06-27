@@ -2313,12 +2313,6 @@ wrap_task! {
             let mut task_sel_make_key_front: *const std::ffi::c_void = std::ptr::null();
             #[cfg(target_os = "macos")]
             let mut task_sel_order_front:    *const std::ffi::c_void = std::ptr::null();
-            #[cfg(target_os = "macos")]
-            let mut task_sel_key_window:     *const std::ffi::c_void = std::ptr::null();
-            // Main window height in Cocoa points — used to convert DIP y-from-top to
-            // Cocoa y-from-bottom for the hitTest: bounds stored in PANE_LOCAL_Y_BOTTOM.
-            #[cfg(target_os = "macos")]
-            let mut task_main_h: i32 = 0;
 
             #[cfg(target_os = "macos")]
             unsafe {
@@ -2344,7 +2338,6 @@ wrap_task! {
                 let sel_frame         = sel_registerName(b"frame\0".as_ptr() as _);
                 let sel_is_main       = sel_registerName(b"isMainWindow\0".as_ptr() as _);
                 let sel_is_key        = sel_registerName(b"isKeyWindow\0".as_ptr() as _);
-                let sel_key_window    = sel_registerName(b"keyWindow\0".as_ptr() as _);
                 let sel_backing_scale = sel_registerName(b"backingScaleFactor\0".as_ptr() as _);
                 let sel_set_frame_d   = sel_registerName(b"setFrame:display:\0".as_ptr() as _);
                 let sel_make_key_front = sel_registerName(b"makeKeyAndOrderFront:\0".as_ptr() as _);
@@ -2530,15 +2523,11 @@ wrap_task! {
                 task_dip_y = pane_y as i32;
                 task_dip_w = pane_w as i32;
                 task_dip_h = pane_h as i32;
-                // Main window height in Cocoa points (needed for Cocoa y-from-bottom
-                // conversion in the hitTest: swizzle bounds check).
-                task_main_h = main_frame.size.h as i32;
                 // Export window refs for post-set_bounds key restoration.
                 task_main_win    = main_win;
                 task_overlay_win = overlay_win;
                 task_sel_make_key_front = sel_make_key_front;
                 task_sel_order_front    = sel_order_front;
-                task_sel_key_window     = sel_key_window;
             }
 
             #[cfg(target_os = "macos")]
@@ -2802,13 +2791,21 @@ wrap_task! {
                                 }
                                 let rwhvc_cls = objc_getClass(b"RenderWidgetHostViewCocoa\0".as_ptr() as _);
                                 if !rwhvc_cls.is_null() {
-                                // Mark pane as open so swizzled_nsapp_send_event activates.
+                                // Activate swizzle: store the pane-owning window pointer
+                                // BEFORE setting PANE_LOCAL_W so that swizzled_nsapp_send_event
+                                // sees a non-zero MAIN_WIN_PTR on the very first click and
+                                // never intercepts events from other windows.
+                                if !task_main_win.is_null() {
+                                    crate::ui_tasks::MAIN_WIN_PTR.store(
+                                        task_main_win as usize, std::sync::atomic::Ordering::SeqCst);
+                                }
                                 crate::ui_tasks::PANE_LOCAL_W.store(
                                     task_dip_w, std::sync::atomic::Ordering::SeqCst);
                                 tracing::info!(
                                     retry = self.retry,
                                     pw = task_dip_w,
-                                    "[browser-pane] sendEvent swizzle activated (PANE_LOCAL_W set)"
+                                    main_win = task_main_win as usize,
+                                    "[browser-pane] sendEvent swizzle activated"
                                 );
 
                                 // Swizzle shouldIgnoreMouseEvent: → always NO so the main
@@ -2852,15 +2849,6 @@ wrap_task! {
                             retry = self.retry,
                             "[browser-pane] stored main browser host for sendEvent focus restore"
                         );
-                    }
-                    // Inject mousedown diagnostic: tells us if clicks reach JS at all.
-                    if self.retry == 1 {
-                        if let Some(frame) = main_browser.main_frame() {
-                            let js = "if (!window.__amxMdDiag) { window.__amxMdDiag = true; document.addEventListener('mousedown', function(e) { console.log('[AMX-DIAG-MD] mousedown x=' + e.clientX + ' y=' + e.clientY + ' tgt=' + (e.target ? e.target.tagName : 'null') + ' hasFocus=' + document.hasFocus()); }, true); console.log('[AMX-DIAG-MD] listener installed'); }";
-                            let code = CefString::from(js);
-                            let url  = CefString::from("");
-                            frame.execute_java_script(Some(&code), Some(&url), 0);
-                        }
                     }
                 }
             }
