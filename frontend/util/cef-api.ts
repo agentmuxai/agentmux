@@ -291,9 +291,6 @@ export function buildCefApi(): AppApi {
         restartBackend: async () => {
             await invokeCommand("restart_backend");
         },
-        runMigrations: async () => {
-            return await invokeCommand<{ applied: number; already_current: boolean }>("run_migrations");
-        },
 
         // --- Context menu (JS overlay for CEF — no native menu API) ---
         showContextMenu: (_workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => {
