@@ -205,7 +205,7 @@ export const MaintenanceSection = (): JSX.Element => {
             <div class="instance-panel-section-title">
                 Maintenance
                 <Show when={badge() != null}>
-                    <span class="maintenance-badge">{badge()}</span>
+                    <span class={`maintenance-badge${migState().kind === "failed" ? " maintenance-badge--error" : ""}`}>{badge()}</span>
                 </Show>
             </div>
 

@@ -203,15 +203,30 @@ async fn run_migrations_inner(
         .arg(&data_dir)
         .arg("migrate")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to spawn agentmux-srv migrate: {}", e))?;
 
     let stdout = child.stdout.take().ok_or("no stdout")?;
+    let stderr = child.stderr.take().ok_or("no stderr")?;
+
+    // Drain stderr concurrently; failure reasons are written there only.
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        let mut buf = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if !buf.is_empty() {
+                buf.push('\n');
+            }
+            buf.push_str(&line);
+        }
+        buf
+    });
+
     let mut lines = BufReader::new(stdout).lines();
     let mut applied = 0usize;
-    let mut last_error: Option<String> = None;
-    let mut failed_id: Option<String> = None;
+    // Tracks the migration currently in flight; becomes failed_id if the process exits non-zero.
+    let mut current_migration_id: Option<String> = None;
 
     while let Ok(Some(line)) = lines.next_line().await {
         let trimmed = line.trim();
@@ -225,6 +240,7 @@ async fn run_migrations_inner(
         let event_kind = val.get("event").and_then(|v| v.as_str()).unwrap_or("");
         match event_kind {
             "migration_start" => {
+                current_migration_id = val.get("id").and_then(|v| v.as_str()).map(str::to_owned);
                 crate::events::emit_event_from_state(
                     &state,
                     "upgrade:migration-event",
@@ -236,6 +252,7 @@ async fn run_migrations_inner(
                 );
             }
             "migration_done" => {
+                current_migration_id = None;
                 crate::events::emit_event_from_state(
                     &state,
                     "upgrade:migration-event",
@@ -265,8 +282,9 @@ async fn run_migrations_inner(
     }
 
     let status = child.wait().await.map_err(|e| format!("wait failed: {}", e))?;
+    let stderr_output = stderr_task.await.unwrap_or_default();
 
-    if status.success() && last_error.is_none() {
+    if status.success() {
         *state.pending_migrations.lock() = 0;
         crate::events::emit_event_from_state(
             &state,
@@ -275,9 +293,12 @@ async fn run_migrations_inner(
         );
         Ok(())
     } else {
-        let err = last_error.unwrap_or_else(|| {
+        let err = if !stderr_output.is_empty() {
+            stderr_output
+        } else {
             format!("agentmux-srv migrate exited with code {:?}", status.code())
-        });
+        };
+        let failed_id = current_migration_id;
         crate::events::emit_event_from_state(
             &state,
             "upgrade:migrations-failed",
