@@ -257,6 +257,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             unregisterAgentActivity(model.blockId);
             handleAgentIdChange(model.blockId, undefined);
         });
+
+        // Mirror context token count to block meta so the Swarm view can read
+        // it without needing access to per-pane in-memory signals. Fires at
+        // most once per turn (TokensIn at message_start).
+        createEffect(() => {
+            const tokens = a.contextTokensAtom[0]();
+            void RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", model.blockId),
+                meta: { "term:ctx-tokens": tokens ?? null } as any,
+            });
+        });
     }
 
     // ── Layout slice lifecycle. The slice is FED from

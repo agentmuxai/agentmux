@@ -423,32 +423,22 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         ? <IconButton decl={preIconButton} className="block-frame-preicon-button" />
         : null;
 
-    const headerTextElems: JSX.Element[] = [];
-    const htu = headerTextUnion();
-    if (typeof htu === "string") {
-        if (!util.isBlank(htu)) {
-            headerTextElems.push(
-                <div class="block-frame-text ellipsis">
-                    &lrm;{htu}
-                </div>
-            );
+    const headerTextElems = createMemo(() => {
+        const elems: JSX.Element[] = [];
+        const htu = headerTextUnion();
+        if (typeof htu === "string") {
+            if (!util.isBlank(htu)) {
+                elems.push(
+                    <div class="block-frame-text ellipsis">
+                        &lrm;{htu}
+                    </div>
+                );
+            }
+        } else if (Array.isArray(htu)) {
+            elems.push(...renderHeaderElements(htu, props.preview));
         }
-    } else if (Array.isArray(htu)) {
-        headerTextElems.push(...renderHeaderElements(htu, props.preview));
-    }
-    if (props.error != null) {
-        const copyHeaderErr = () => {
-            clipboardWriteText(props.error.message + "\n" + props.error.stack);
-        };
-        headerTextElems.push(
-            <div class="iconbutton disabled" onClick={copyHeaderErr}>
-                <i
-                    class="fa-sharp fa-solid fa-triangle-exclamation"
-                    title={"Error Rendering View Header: " + props.error.message}
-                />
-            </div>
-        );
-    }
+        return elems;
+    });
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
         const hue = blockData()?.meta?.["frame:hue"];
@@ -494,7 +484,20 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     changeConnModalAtom={props.changeConnModalAtom}
                 />
             </Show>
-            <div class="block-frame-textelems-wrapper">{headerTextElems}</div>
+            <div class="block-frame-textelems-wrapper">
+                {headerTextElems()}
+                <Show when={props.error != null}>
+                    <div
+                        class="iconbutton disabled"
+                        onClick={() => clipboardWriteText(props.error.message + "\n" + props.error.stack)}
+                    >
+                        <i
+                            class="fa-sharp fa-solid fa-triangle-exclamation"
+                            title={"Error Rendering View Header: " + props.error.message}
+                        />
+                    </div>
+                </Show>
+            </div>
             <div class="block-frame-end-icons" onDblClick={(e) => e.stopPropagation()}>
                 <EndIcons
                     viewModel={props.viewModel}

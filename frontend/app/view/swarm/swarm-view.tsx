@@ -178,6 +178,10 @@ function phaseToDisplayStatus(blockId: string, _fallback: "running" | "idle"): A
 
 // ── Agent root row ───────────────────────────────────────────────────────
 
+function fmtCtx(tokens: number): string {
+    return `${Math.round(tokens / 100) / 10}k`;
+}
+
 function AgentRow({
     node,
     focusedBlockId,
@@ -193,23 +197,28 @@ function AgentRow({
         <div class="swarm-agent-group">
             <div
                 classList={{
-                    "swarm-agent-row": true,
-                    [`swarm-agent-row--${node.agentStatus}`]: true,
-                    "swarm-agent-row--active": focusedBlockId() === node.blockId,
+                    "swarm-agent-card": true,
+                    [`swarm-agent-card--${node.agentStatus}`]: true,
+                    "swarm-agent-card--active": focusedBlockId() === node.blockId,
                 }}
                 onClick={() => node.blockId && void focusBlock(node.blockId)}
                 title={node.agentName}
             >
-                <span class="swarm-agent-icon">
-                    <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
-                </span>
-                <span class="swarm-agent-label">{node.agentName}</span>
-                <AgentStatusChip status={displayStatus()} />
-            </div>
-            <div class="swarm-children">
+                <div class="swarm-agent-row">
+                    <span class="swarm-agent-icon">
+                        <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
+                    </span>
+                    <span class="swarm-agent-label">{node.agentName}</span>
+                    <Show when={node.contextTokens != null}>
+                        <span class="swarm-ctx-size">{fmtCtx(node.contextTokens!)}</span>
+                    </Show>
+                    <AgentStatusChip status={displayStatus()} />
+                </div>
                 <Show when={node.activitySummary}>
                     <div class="swarm-activity-summary">{node.activitySummary}</div>
                 </Show>
+            </div>
+            <div class="swarm-children">
                 <For each={node.subagents}>
                     {(sub) => <SubagentRow sub={sub} />}
                 </For>
