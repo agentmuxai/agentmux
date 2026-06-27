@@ -109,8 +109,9 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                 el,
                 update,
             );
-            // Dev-only paintable-area guard (spec §6.1).
-            assertMenuInPaintableArea(el, "token-breakdown-popover");
+            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
+            // (airspace transparency cut-out), so intentional native-pane overlap
+            // would produce a false-positive [menu-guard] warning.
         });
     };
 

@@ -154,7 +154,9 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                 el,
                 update,
             );
-            assertMenuInPaintableArea(el, "cpu-cores-popover");
+            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
+            // (airspace transparency cut-out), so intentional native-pane overlap
+            // would produce a false-positive [menu-guard] warning.
         });
     };
 

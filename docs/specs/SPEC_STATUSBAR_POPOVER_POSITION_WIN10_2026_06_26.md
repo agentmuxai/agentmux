@@ -86,8 +86,8 @@ Windows 10 is the user's primary dev machine with an open browser pane.
 |------|------|------|
 | `frontend/app/statusbar/StatusBar.scss` | 23 | `zoom: var(--zoomfactor)` on status bar |
 | `frontend/app/statusbar/SystemStats.tsx` | 67 | captures `cpuButtonRef.getBoundingClientRect()` |
-| `frontend/app/statusbar/CpuCoresPopover.tsx` | 148 | calls `computeMenuPosition({ anchor: cur, placement: "top-end" }, el)` — missing `avoidNativePanes: false` |
-| `frontend/app/statusbar/TokenBreakdownPopover.tsx` | ~100-103 | identical pattern — same bug |
+| `frontend/app/statusbar/CpuCoresPopover.tsx` | 148 | `computeMenuPosition` call — fixed to pass `avoidNativePanes: false` |
+| `frontend/app/statusbar/TokenBreakdownPopover.tsx` | ~100-103 | identical pattern — same fix applied |
 | `frontend/app/util/menu-position.ts` | 83-95 | `getNativePaneRects()` — queries `.browser-placeholder` |
 | `frontend/app/util/menu-position.ts` | 137-188 | `getPaintableArea()` — four-strip heuristic |
 | `frontend/app/util/menu-position.ts` | 291-358 | `computeMenuPosition()` — `avoidNativePanes` defaults to `true` |
