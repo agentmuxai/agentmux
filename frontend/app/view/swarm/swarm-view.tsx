@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createMemo, createSignal, createEffect, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
@@ -195,13 +195,17 @@ function AgentRow({
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
     let flashTimer: ReturnType<typeof setTimeout> | undefined;
+    let prevSummary: string | null = node.activitySummary; // don't flash existing summary on mount
     createEffect(() => {
-        if (node.activitySummary) {
+        const summary = node.activitySummary;
+        if (summary && summary !== prevSummary) {
             clearTimeout(flashTimer);
             setSummaryFlash(true);
             flashTimer = setTimeout(() => setSummaryFlash(false), 600);
         }
+        prevSummary = summary;
     });
+    onCleanup(() => clearTimeout(flashTimer));
 
     return (
         <div class="swarm-agent-group">
