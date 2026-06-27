@@ -19,7 +19,7 @@
 import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { cpuColor, loadColor } from "./cpu-color";
