@@ -200,7 +200,9 @@ pub fn create_browser_pane_view(
     let overlay_controller = parent_window.add_overlay_view(
         Some(&mut view),
         DockingMode::CUSTOM,
-        1, // can_activate
+        0, // can_activate=0: overlay never steals key/main status.
+           // RWHVC::mouseDown: processes clicks because we swizzle
+           // NativeWidgetMacNSWindow::isMainWindow → YES in the task.
     );
 
     let overlay_controller = match overlay_controller {
@@ -229,21 +231,142 @@ pub fn create_browser_pane_view(
     // pane's opaque-black background_color and (b) intercepts all mouse events
     // for the window — the "black screen + UI freeze" bug.
     //
-    // SetPaneBoundsViewsTask (posted after the stash below) re-applies the
-    // bounds on the next UI event-loop tick, after the native NSView has been
-    // fully initialised. The overlay is kept hidden (set_visible(0)) until
-    // that task fires so the user never sees a transient wrong-size overlay.
-    overlay_controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
-    overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
-    parent_window.layout();
+    // macOS strategy (v15): [NSWindow windowWithWindowNumber:] was removed in
+    // macOS 26 Tahoe. Instead, we capture the overlay NSWindow NOW — it is still
+    // present in [NSApp windows] because set_visible(0)/orderOut: has not been
+    // called yet. We call setFrame:display:YES immediately (commits CEF Views
+    // bounds via windowDidResize:), then call set_visible(0) to hide it.
+    // The deferred SetPaneBoundsViewsTask calls set_visible(1) and reaffirms the
+    // frame (in case the show path resets it), then restores key/focus.
+    //
+    // On macOS, set_size/set_position/layout are skipped — all no-ops or harmful:
+    //   - set_size and set_position are no-ops on NativeWidgetMacNSWindow (CEF Views bug)
+    //   - parent_window.layout() schedules an ASYNC layout pass that fires AFTER our
+    //     SetPaneBoundsViewsTask and resets the overlay to wrong/full bounds, triggering
+    //     CEF's event routing for the wrong area → full-window mouse freeze.
+    #[cfg(not(target_os = "macos"))]
+    {
+        overlay_controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
+        overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
+        parent_window.layout();
+    }
 
-    // overlay_wnum: the macOS NSWindow windowNumber of the overlay's backing
-    // NativeWidgetMacNSWindow.  The native NSWindow is created asynchronously
-    // during add_overlay_view (the comment at step 7 above confirms "the native
-    // layer doesn't exist yet"), so any scan here would capture a stale wnum.
-    // SetPaneBoundsViewsTask discovers the correct wnum at runtime via a
-    // pre/post-set_visible(1) snapshot delta (see ui_tasks.rs) and propagates
-    // it to the retry=1 reaffirm task.  Pass 0 here to signal "unknown".
+    // macOS: scan [NSApp windows] RIGHT NOW (overlay is still ordered-in) to find
+    // the new NativeWidgetMacNSWindow and call setFrame before we hide it.
+    #[cfg(target_os = "macos")]
+    let overlay_wnum: isize = unsafe {
+        use std::ffi::c_char;
+        type Id  = *mut std::ffi::c_void;
+        type Sel = *const std::ffi::c_void;
+
+        extern "C" {
+            fn sel_registerName(name: *const c_char) -> Sel;
+            fn objc_msgSend();
+            fn object_getClassName(obj: Id) -> *const c_char;
+            fn objc_getClass(name: *const c_char) -> Id;
+        }
+
+        #[repr(C)] #[derive(Copy,Clone)] struct NSPoint { x: f64, y: f64 }
+        #[repr(C)] #[derive(Copy,Clone)] struct NSSize  { w: f64, h: f64 }
+        #[repr(C)] #[derive(Copy,Clone)] struct NSRect  { origin: NSPoint, size: NSSize }
+
+        let get_id:        extern "C" fn(Id, Sel) -> Id        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+        let get_usize:     extern "C" fn(Id, Sel) -> usize     = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+        let get_isize:     extern "C" fn(Id, Sel) -> isize     = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+        let get_bool:      extern "C" fn(Id, Sel) -> u8        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+        let get_f64:       extern "C" fn(Id, Sel) -> f64       = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+        let obj_at:        extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+        let get_frame:     extern "C" fn(Id, Sel) -> NSRect    = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+        let set_frame_d:   extern "C" fn(Id, Sel, NSRect, u8)  = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+
+        let sel_shared_app    = sel_registerName(b"sharedApplication\0".as_ptr() as _);
+        let sel_windows_arr   = sel_registerName(b"windows\0".as_ptr() as _);
+        let sel_count         = sel_registerName(b"count\0".as_ptr() as _);
+        let sel_obj_at        = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
+        let sel_frame         = sel_registerName(b"frame\0".as_ptr() as _);
+        let sel_is_main       = sel_registerName(b"isMainWindow\0".as_ptr() as _);
+        let sel_backing_scale = sel_registerName(b"backingScaleFactor\0".as_ptr() as _);
+        let sel_set_frame_d   = sel_registerName(b"setFrame:display:\0".as_ptr() as _);
+        let sel_win_number    = sel_registerName(b"windowNumber\0".as_ptr() as _);
+
+        let ns_app_cls = objc_getClass(b"NSApplication\0".as_ptr() as _);
+        let ns_app     = get_id(ns_app_cls, sel_shared_app);
+        let all_wins   = get_id(ns_app, sel_windows_arr);
+        let win_count  = if all_wins.is_null() { 0usize } else { get_usize(all_wins, sel_count) };
+
+        // Find the newest NativeWidgetMacNSWindow (highest windowNumber = just created)
+        // and the main CefNSWindow (for frame/scale reference).
+        let mut main_win:   Id     = std::ptr::null_mut();
+        let mut overlay_win: Id    = std::ptr::null_mut();
+        let mut overlay_wnum: isize = 0;
+
+        for i in 0..win_count {
+            let win = obj_at(all_wins, sel_obj_at, i);
+            if win.is_null() { continue; }
+            let cls_ptr = object_getClassName(win);
+            let cls = if !cls_ptr.is_null() {
+                std::ffi::CStr::from_ptr(cls_ptr).to_str().unwrap_or("?")
+            } else { "?" };
+            let wn      = get_isize(win, sel_win_number);
+            let is_main = get_bool(win, sel_is_main);
+            let fr      = get_frame(win, sel_frame);
+            tracing::info!(
+                label = %label, i, win_count, class = cls,
+                x = fr.origin.x, y = fr.origin.y, w = fr.size.w, h = fr.size.h,
+                is_main, wn,
+                "[browser-pane] ObjC pre-hide NSApp window"
+            );
+            if cls.contains("CefNSWindow") && is_main != 0 {
+                main_win = win;
+            }
+            // Newest NativeWidgetMacNSWindow = highest windowNumber = the overlay we just created.
+            if cls.contains("NativeWidgetMacNSWindow") && wn > overlay_wnum {
+                overlay_win = win;
+                overlay_wnum = wn;
+            }
+        }
+
+        if !overlay_win.is_null() && !main_win.is_null() {
+            let main_fr = get_frame(main_win, sel_frame);
+            let scale = {
+                let s = get_f64(main_win, sel_backing_scale);
+                if s > 0.0 { s } else { 1.0 }
+            };
+            let pane_x = rect.x as f64 / scale;
+            let pane_y = rect.y as f64 / scale;
+            let pane_w = rect.width  as f64 / scale;
+            let pane_h = rect.height as f64 / scale;
+            let screen_x = main_fr.origin.x + pane_x;
+            let screen_y = main_fr.origin.y + main_fr.size.h - pane_y - pane_h;
+            let target = NSRect {
+                origin: NSPoint { x: screen_x, y: screen_y },
+                size:   NSSize  { w: pane_w, h: pane_h },
+            };
+            set_frame_d(overlay_win, sel_set_frame_d, target, 1u8);
+            let new_fr = get_frame(overlay_win, sel_frame);
+            tracing::info!(
+                label = %label, scale, overlay_wnum,
+                pane_x, pane_y, pane_w, pane_h, screen_x, screen_y,
+                main_x = main_fr.origin.x, main_y = main_fr.origin.y,
+                main_w = main_fr.size.w, main_h = main_fr.size.h,
+                req_w = rect.width, req_h = rect.height,
+                got_x = new_fr.origin.x, got_y = new_fr.origin.y,
+                got_w = new_fr.size.w, got_h = new_fr.size.h,
+                "[browser-pane] ObjC pre-hide setFrame applied"
+            );
+        } else {
+            tracing::warn!(
+                label = %label,
+                overlay_found = !overlay_win.is_null(),
+                main_found = !main_win.is_null(),
+                win_count,
+                "[browser-pane] ObjC pre-hide: could not find overlay or main window"
+            );
+        }
+
+        overlay_wnum
+    };
+    #[cfg(not(target_os = "macos"))]
     let overlay_wnum: isize = 0;
 
     overlay_controller.set_visible(0); // deferred task will show after bounds commit
@@ -322,7 +445,7 @@ pub fn create_browser_pane_view(
         rect.y,
         rect.width,
         rect.height,
-        0, // retry counter — task self-retries on macOS if overlay NSWindow not yet visible
+        0, // retry counter
         overlay_wnum,
     );
 }
@@ -343,66 +466,67 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
         );
         return;
     };
+    let pane_rect = (rect.x, rect.y, rect.width, rect.height);
+    let visible = crate::browser_panes::compute_pane_visible(state, &window_label, pane_rect);
+
+    // On macOS, CEF's SetSize/SetPosition are permanent no-ops on NativeWidgetMacNSWindow,
+    // and window.layout() triggers NativeWidgetMac::SetBounds() which resets the frame
+    // back to wrong bounds (since CEF's Views never received a real size). Use the ObjC
+    // NSWindow setFrame: path instead — same as the creation task.
+    #[cfg(target_os = "macos")]
+    if visible {
+        crate::ui_tasks::post_set_pane_bounds_views(
+            state,
+            label,
+            &window_label,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            0,
+            0, // overlay_wnum unknown for resize; task finds by highest wnum
+        );
+        return;
+    }
+
+    // On macOS, if NOT visible — just hide the overlay without a layout pass.
+    #[cfg(target_os = "macos")]
+    {
+        controller.set_visible(0);
+        return;
+    }
+
+    // Linux: CEF Views SetSize/SetPosition work correctly.
     // OverlayController::set_bounds is silently ignored even with
     // DockingMode::CUSTOM (verified during initial spike — readback
     // showed bounds stayed 0,0,0,0 after set_bounds calls). The
     // working pattern is set_size + set_position separately, then
     // a window.layout() on the OWNING window to force the layout pass.
-    controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
-    controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
-    // Visibility = AND of the two independent hide reasons:
-    //  - Zero-area rect (frontend placed the placeholder in `display:none`
-    //    when the tab is inactive → getBoundingClientRect reports 0×0).
-    //  - This pane's bounds intersect a registered overlay-clip rect for
-    //    its window (DOM modal/menu/tooltip is on top of it).
-    // Both are tracked in AppState; `compute_pane_visible` is the single
-    // authoritative answer, shared with `SetPaneOverlayClipViewsTask`.
-    // Without consulting overlay-clip state here, a positive-rect resize
-    // (e.g. user drags a splitter while a modal is open) would clobber
-    // the airspace's set_visible(0) — Codex review on PR #881.
-    let pane_rect = (rect.x, rect.y, rect.width, rect.height);
-    let visible = crate::browser_panes::compute_pane_visible(state, &window_label, pane_rect);
-    controller.set_visible(if visible { 1 } else { 0 });
-    if let Some(window) = state.windows.lock().get(&window_label).cloned() {
-        window.layout();
-    }
-
-    // macOS: set_size/set_position/layout() are no-ops for the overlay's
-    // NativeWidgetMacNSWindow frame — the only working path is ObjC
-    // [NSWindow setFrame:display:YES].
-    //
-    // Always record the latest rect so SetPaneBoundsViewsTask (retry=0) can
-    // pick it up even if it hasn't run yet (race: resize IPC before the
-    // creation bounds task fires and stores the wnum).
-    //
-    // If the wnum is already known, also post a bounds task at retry=2
-    // (physical-pixel path, wnum match, no delta-detection pre-scan) so the
-    // NSWindow frame is updated immediately.  retry=2 avoids delta-detection
-    // (window already exists) and avoids controller.bounds()-as-DIP (we have
-    // fresh physical pixels).
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "macos"))]
     {
-        state.browser_pane_resize_rects.lock()
-            .insert(label.to_string(), (rect.x, rect.y, rect.width, rect.height));
-
-        let wnum = state.browser_pane_overlay_wnums.lock()
-            .get(label).cloned().unwrap_or(0);
-        if wnum > 0 {
-            crate::ui_tasks::post_set_pane_bounds_views(
-                state, label, &window_label,
-                rect.x, rect.y, rect.width, rect.height,
-                2,    // retry=2: physical pixels, wnum match, no pre-scan
-                wnum,
-            );
+        controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
+        controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
+        // Visibility = AND of the two independent hide reasons:
+        //  - Zero-area rect (frontend placed the placeholder in `display:none`
+        //    when the tab is inactive → getBoundingClientRect reports 0×0).
+        //  - This pane's bounds intersect a registered overlay-clip rect for
+        //    its window (DOM modal/menu/tooltip is on top of it).
+        // Both are tracked in AppState; `compute_pane_visible` is the single
+        // authoritative answer, shared with `SetPaneOverlayClipViewsTask`.
+        // Without consulting overlay-clip state here, a positive-rect resize
+        // (e.g. user drags a splitter while a modal is open) would clobber
+        // the airspace's set_visible(0) — Codex review on PR #881.
+        controller.set_visible(if visible { 1 } else { 0 });
+        if let Some(window) = state.windows.lock().get(&window_label).cloned() {
+            window.layout();
         }
+        tracing::debug!(
+            label = %label, window_label = %window_label,
+            x = rect.x, y = rect.y, w = rect.width, h = rect.height,
+            visible,
+            "[browser-pane] views: resize applied (set_size + set_position + visibility + layout)"
+        );
     }
-
-    tracing::debug!(
-        label = %label, window_label = %window_label,
-        x = rect.x, y = rect.y, w = rect.width, h = rect.height,
-        visible,
-        "[browser-pane] views: resize applied (set_size + set_position + visibility + layout)"
-    );
 }
 
 /// Detach a Views-based browser pane (Linux/macOS only).
@@ -428,11 +552,6 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
-    // Remove stored wnum and resize rect so tasks posted after detach become no-ops.
-    #[cfg(target_os = "macos")]
-    state.browser_pane_overlay_wnums.lock().remove(label);
-    #[cfg(target_os = "macos")]
-    state.browser_pane_resize_rects.lock().remove(label);
     let Some((_window_label, controller)) = entry else {
         tracing::debug!(
             label = %label,
