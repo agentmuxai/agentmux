@@ -57,6 +57,17 @@ export class ClaudeTranslator implements OutputTranslator {
             return this.handleUserMessage(rawEvent.message, rawEvent.tool_use_result);
         }
 
+        // Case 5: rate_limit_event — CLI is waiting on a 429, will retry
+        if (rawEvent.type === "rate_limit_event") {
+            return [{
+                type: "provider_waiting",
+                reason: "rate_limited" as const,
+                retryAfterMs: typeof rawEvent.retry_after_ms === "number"
+                    ? rawEvent.retry_after_ms
+                    : null,
+            }];
+        }
+
         // Case 5a: Top-level "result" event — session complete with stats
         if (rawEvent.type === "result") {
             const events: StreamEvent[] = [];
@@ -132,6 +143,7 @@ export class ClaudeTranslator implements OutputTranslator {
             "agent_message",
             "user_message",
             "session_end",
+            "provider_waiting",
         ];
         return streamTypes.includes(event.type);
     }

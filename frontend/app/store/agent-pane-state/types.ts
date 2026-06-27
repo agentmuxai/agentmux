@@ -118,6 +118,10 @@ export type TurnPhase =
           bufferSize: number;
           toolsActive: number;
           lastEventMs: number;
+          /** Set when the provider is rate-limited and retrying. Cleared on next real activity. */
+          waitingReason?: "rate_limited";
+          /** Milliseconds until the next retry, from the provider's Retry-After header. */
+          retryAfterMs?: number | null;
       }
     | {
           kind: "Interrupting";
@@ -437,6 +441,15 @@ export type AgentPaneCommand =
      */
     | { type: "PendingMessageExpired"; id: string }
 
+    /**
+     * Provider is rate-limited (429) and waiting to retry. Updates
+     * `lastEventMs` (keeps the stuck-stream watchdog quiet) and sets
+     * `waitingReason` on `Streaming` so the working row can show
+     * "Rate limited — retrying…" instead of the thinking phrase.
+     * Cleared automatically on the next real activity (bumpEvent).
+     */
+    | { type: "ProviderWaiting"; reason: "rate_limited"; retryAfterMs: number | null; at: number }
+
     // ── Composer details / Log panel ─────────────────────────────
     /** Toggle the log panel open/closed. */
     | { type: "DetailsToggle" }
@@ -505,6 +518,7 @@ export type AgentPaneEvent =
     | { type: "tool-ended" }
     | { type: "tokens-updated"; input: number | null; output: number | null }
     | { type: "context-compacted"; tokensBefore: number; tokensAfter: number }
+    | { type: "provider-waiting"; reason: "rate_limited" }
     | { type: "stop-requested"; at: number }
     | { type: "stop-failed" }
     /**
