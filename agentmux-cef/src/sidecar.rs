@@ -376,9 +376,12 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     });
 
     // Wait for ESTART. On receiving AGENTMUXSRV-MIGRATING, extend the deadline
-    // from 30s to 5 minutes to accommodate large-dataset migrations.
+    // from 30s to 30 minutes to accommodate large-dataset migrations. A shorter
+    // cap risks killing srv mid-migration: 0011_shared_store_backfill's skip-guards
+    // check for non-empty shared tables, so a partial copy followed by a kill would
+    // cause rows to be permanently stranded on the next retry.
     let normal_timeout = std::time::Duration::from_secs(30);
-    let migration_timeout = std::time::Duration::from_secs(300);
+    let migration_timeout = std::time::Duration::from_secs(1800);
     let mut deadline = tokio::time::Instant::now() + normal_timeout;
     let mut sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);

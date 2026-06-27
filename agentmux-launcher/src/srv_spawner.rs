@@ -462,9 +462,12 @@ pub async fn spawn_srv(
     // next launch. (codex P2 @ srv_spawner.rs:240, PR #571 round-4.)
     //
     // If srv emits AGENTMUXSRV-MIGRATING before ESTART, the deadline is
-    // extended to 5 minutes to accommodate large-dataset migrations.
+    // extended to 30 minutes to accommodate large-dataset migrations. A shorter
+    // cap risks killing srv mid-migration: 0011_shared_store_backfill's skip-guards
+    // check for non-empty shared tables, so a partial copy followed by a kill would
+    // cause rows to be permanently stranded on the next retry.
     let normal_timeout = std::time::Duration::from_secs(30);
-    let migration_timeout = std::time::Duration::from_secs(300);
+    let migration_timeout = std::time::Duration::from_secs(1800);
     let mut deadline = tokio::time::Instant::now() + normal_timeout;
     let mut sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
