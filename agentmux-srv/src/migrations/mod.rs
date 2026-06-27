@@ -3,9 +3,10 @@
 
 //! Data migration framework.
 //!
-//! Migrations are versioned steps that run once via `agentmux-srv migrate`
-//! (invoked by the launcher before the daemon starts). They never run during
-//! normal srv startup — main.rs starts with a guaranteed clean, migrated state.
+//! Migrations are versioned steps that run once, either via `agentmux-srv migrate`
+//! or in-process at startup via `run_pending_migrations` when the pending count is
+//! non-zero. The in-process path runs before any store is opened for normal
+//! operation so that `id_store` always binds to a fully-backfilled shared store.
 //!
 //! Adding a migration: implement [`Migration`], add it to [`REGISTRY`], add a
 //! file under this module. The ID must be unique and lexicographically ordered
@@ -30,6 +31,7 @@ mod runner;
 
 pub use runner::count_pending_migrations;
 pub use runner::run_migrate_command;
+pub use runner::run_pending_migrations;
 
 use std::path::PathBuf;
 
