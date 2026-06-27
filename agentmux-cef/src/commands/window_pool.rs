@@ -1332,14 +1332,10 @@ pub(crate) const PANE_POOL_HEIGHT: i32 = 600;
 /// Spawn a single pre-warmed frameless pane window. Follows the same
 /// single-flight + refill chain pattern as `spawn_pool_window`.
 pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
-    // The pane pool promote path on Windows uses a dedicated WS_POPUP + WS_EX_TOOLWINDOW
-    // approach (PR #1612). In this PR the Windows promote still returns None, so spawning
-    // a pool window on Windows would produce an undrainable ~75 MB window. Skip on Windows
-    // until #1612 lands.
-    #[cfg(target_os = "windows")]
-    {
-        return;
-    }
+    // PR #1612 landed (merged 2026-06-20) — Windows promote_pane_pool_window
+    // now uses the WS_POPUP+WS_EX_TOOLWINDOW HWND approach and returns Some
+    // instead of None. The early-return guard that blocked spawning on Windows
+    // was not removed in that PR; removing it here enables the pool on Windows.
     if state.is_quitting() {
         return;
     }
