@@ -42,7 +42,7 @@ export const BashOutputViewer = ({ params, result }: BashOutputViewerProps): JSX
     // or as the loose `{ content: "<string>" }` fallback when the
     // translator can't find a structured field. Treat both — the
     // user just wants to see the output.
-    const looseResult = result as Record<string, unknown> | undefined;
+    const looseResult = result as unknown as Record<string, unknown> | undefined;
     const rawStdout =
         (looseResult?.stdout as string | undefined) ??
         (looseResult?.content as string | undefined) ??

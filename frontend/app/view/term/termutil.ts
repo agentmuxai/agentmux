@@ -40,7 +40,7 @@ const FALLBACK_TERM_THEME: TermThemeType = {
     brightMagenta: "#ff92df",
     brightCyan: "#a4ffff",
     brightWhite: "#ffffff",
-} as TermThemeType;
+} as unknown as TermThemeType;
 
 function applyTransparencyToColor(hexColor: string, transparency: number): string {
     const alpha = 1 - transparency; // transparency is already 0-1

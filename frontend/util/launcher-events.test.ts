@@ -182,7 +182,7 @@ describe("launcher-event idempotency (§8.14 contract, property tests)", () => {
             const admittedMaxByKey = new Map<string, number>();
             for (const e of events) {
                 const passed = shouldDispatchLauncherEvent(e);
-                const k = `${(e as { label: string }).label}`;
+                const k = `${(e as unknown as { label: string }).label}`;
                 if (passed) {
                     const prev = admittedMaxByKey.get(k) ?? 0;
                     expect(e.version).toBeGreaterThan(prev);
@@ -203,7 +203,7 @@ describe("launcher-event idempotency (§8.14 contract, property tests)", () => {
                     version: 2 + Math.floor(rng() * 30),
                     label: ["x", "y"][Math.floor(rng() * 2)],
                 });
-                const k = (ev as { label: string }).label;
+                const k = (ev as unknown as { label: string }).label;
                 const wasAdmitted = shouldDispatchLauncherEvent(ev);
                 if (wasAdmitted) {
                     const prev = admitted.get(k);
@@ -248,7 +248,7 @@ describe("launcher-event idempotency (§8.14 contract, property tests)", () => {
                 label: ["a", "b"][Math.floor(rng() * 2)],
                 hwnd: 1,
             });
-            const k = (ev as { label: string }).label;
+            const k = (ev as unknown as { label: string }).label;
             const passed = shouldDispatchLauncherEvent(ev);
             if (passed) {
                 const prev = seenPostRestart.get(k);

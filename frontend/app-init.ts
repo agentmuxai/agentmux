@@ -602,7 +602,7 @@ export async function initApp() {
                         view: initialView,
                         ...(initialMeta ? { meta: initialMeta } : {}),
                         floating: false,
-                    });
+                    }, {});
                 }
             } else if (isPanePoolMode()) {
                 // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
@@ -636,7 +636,7 @@ export async function initApp() {
                             view: coldInitialView,
                             ...(coldMeta ? { meta: coldMeta } : {}),
                             floating: false,
-                        });
+                        }, {});
                     }
                 }
             }

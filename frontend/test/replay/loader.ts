@@ -71,7 +71,7 @@ export function loadFixture(absPath: string): Fixture {
         prevSeq = fev.seq;
         if (fev.src !== "stream-json" && fev.src !== "wps" && fev.src !== "dispatch") {
             throw new Error(
-                `fixture ${absPath} line ${i + 2}: invalid src "${fev.src}" (expected stream-json / wps / dispatch)`,
+                `fixture ${absPath} line ${i + 2}: invalid src "${(fev as { src: string }).src}" (expected stream-json / wps / dispatch)`,
             );
         }
         events.push(fev);
