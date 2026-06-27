@@ -779,15 +779,6 @@ pub struct AppState {
     /// macOS only — latest resize rect (physical pixels) per pane label.
     ///
     /// Written by `resize_browser_pane_view` on every resize IPC, including
-    /// resizes that arrive before `SetPaneBoundsViewsTask` has run (i.e.
-    /// before the wnum is known).  `SetPaneBoundsViewsTask` reads this at
-    /// retry=0 to prefer the most-recently-requested rect over its own
-    /// creation-time rect, closing the race between pane creation and an
-    /// early resize IPC.  Entries are removed on detach.
-    #[cfg(target_os = "macos")]
-    pub browser_pane_resize_rects:
-        Mutex<std::collections::HashMap<String, (i32, i32, i32, i32)>>,
-
     /// macOS only — NSWindow windowNumber for each live browser-pane overlay,
     /// keyed by pane label.  Discovered by delta-detection in
     /// `SetPaneBoundsViewsTask` (retry=0) and stored here so that
@@ -937,8 +928,6 @@ impl Default for AppState {
             pane_overlay_rects: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             pending_overlay_destroy: Mutex::new(HashMap::new()),
-            #[cfg(target_os = "macos")]
-            browser_pane_resize_rects: Mutex::new(HashMap::new()),
             #[cfg(target_os = "macos")]
             browser_pane_overlay_wnums: Mutex::new(HashMap::new()),
             #[cfg(target_os = "windows")]

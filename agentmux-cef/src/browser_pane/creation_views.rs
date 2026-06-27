@@ -475,6 +475,10 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     // NSWindow setFrame: path instead — same as the creation task.
     #[cfg(target_os = "macos")]
     if visible {
+        let overlay_wnum = state.browser_pane_overlay_wnums
+            .try_lock()
+            .and_then(|m| m.get(label).copied())
+            .unwrap_or(0);
         crate::ui_tasks::post_set_pane_bounds_views(
             state,
             label,
@@ -484,7 +488,7 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
             rect.width,
             rect.height,
             0,
-            0, // overlay_wnum unknown for resize; task finds by highest wnum
+            overlay_wnum,
         );
         return;
     }
@@ -564,6 +568,8 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     // panes on the same window each hold an independent entry; the sendEvent:
     // gate is deactivated only when all pane entries are gone.
     crate::ui_tasks::clear_pane_swizzle_statics(label);
+    #[cfg(target_os = "macos")]
+    { state.browser_pane_overlay_wnums.try_lock().map(|mut m| m.remove(label)); }
 
     // Whether to defer destroy depends on whether there's a live Browser.
     //   - Live Browser + host: close_browser(force=1) fires; on_before_close
