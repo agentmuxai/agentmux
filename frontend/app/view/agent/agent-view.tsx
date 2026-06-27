@@ -719,6 +719,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
     const handleSendMessage = (message: string): Promise<void> => {
+        // Bang commands (`!cmd`) output goes to the ActivityLogPanel inside the
+        // details region. Auto-open the details panel so the output is immediately
+        // visible — without this, the user sees no feedback if the panel is closed.
+        if (message.trim().startsWith("!")) {
+            agentAtoms().detailsOpenAtom[1](true);
+        }
         // Capture working state BEFORE TurnStart so PendingMessageQueued can
         // mark whether this message is queued behind a running turn (true) or
         // is the message that initiated the turn (false). The panel only shows
