@@ -292,7 +292,16 @@ async fn run_migrations_inner(
             &serde_json::json!({ "applied": applied }),
         );
         // Restart srv so id_store rebinds from per-channel fallback to shared store.
-        if let Err(e) = restart_backend(state.clone()).await {
+        // In launcher-managed runs (AGENTMUX_BACKEND_PID set) the host cannot safely
+        // spawn a replacement srv — emit srv-restart-required so the frontend can
+        // prompt the user. In dev mode (no AGENTMUX_BACKEND_PID) restart directly.
+        if std::env::var("AGENTMUX_BACKEND_PID").is_ok() {
+            crate::events::emit_event_to_top_level_windows(
+                &state,
+                "upgrade:srv-restart-required",
+                &serde_json::json!({}),
+            );
+        } else if let Err(e) = restart_backend(state.clone()).await {
             tracing::warn!("[run_migrations] srv restart after migrations failed: {}", e);
         }
         Ok(())

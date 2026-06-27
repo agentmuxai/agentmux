@@ -49,6 +49,7 @@ export const MaintenanceSection = (): JSX.Element => {
     const [migState, setMigState] = createSignal<MigState>({ kind: "idle", pendingCount: 0 });
     const [vacState, setVacState] = createSignal<VacState>({ kind: "idle", lastRunMs: null });
     const [nowMs, setNowMs] = createSignal(Date.now());
+    const [srvRestartRequired, setSrvRestartRequired] = createSignal(false);
 
     // Fetch pending_migrations count from backend info on mount
     onMount(() => {
@@ -125,6 +126,15 @@ export const MaintenanceSection = (): JSX.Element => {
                 const steps = prev.kind === "running" ? prev.steps : [];
                 return { kind: "failed", steps, error, failedId };
             });
+        }).then((fn) => { unlisten = fn; });
+
+        onCleanup(() => unlisten?.());
+    });
+
+    onMount(() => {
+        let unlisten: (() => void) | null = null;
+        getApi().listen("upgrade:srv-restart-required", (_payload: any) => {
+            setSrvRestartRequired(true);
         }).then((fn) => { unlisten = fn; });
 
         onCleanup(() => unlisten?.());
@@ -274,6 +284,14 @@ export const MaintenanceSection = (): JSX.Element => {
                                 {(migState() as Extract<MigState, {kind: "complete"}>).applied} applied
                             </span>
                         </div>
+                        <Show when={srvRestartRequired()}>
+                            <div class="maintenance-alert-row maintenance-restart-notice">
+                                <span class="maintenance-icon maintenance-icon--warn">↺</span>
+                                <span class="maintenance-row-text maintenance-row-text--warn">
+                                    Restart AgentMux to complete identity store rebind
+                                </span>
+                            </div>
+                        </Show>
                     </Show>
                     <Show when={migState().kind === "failed"}>
                         <div class="maintenance-stage-header">
