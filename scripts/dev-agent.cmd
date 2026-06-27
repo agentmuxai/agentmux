@@ -23,6 +23,11 @@
 ::
 :: On macOS / Linux `task dev` works directly — this script is Windows-only.
 
+:: Change to the repo root (parent of scripts\) so go-task can find Taskfile.yml.
+:: Required when the MCP Shell cwd is not the repo root (e.g. called by full path).
+:: %~dp0 expands to the directory of this script (scripts\); .. is the repo root.
+cd /d "%~dp0.."
+
 :: Prepend Git\bin so bash.exe is on PATH for Taskfile subprocesses (Gap B fix).
 :: Standard Git for Windows install location. If your Git is elsewhere, update:
 set "GIT_BIN=C:\Program Files\Git\bin"
