@@ -298,3 +298,21 @@
         font-style: italic;
     }
 }
+
+// sm and below: stack list above detail
+@container identity-pane (max-width: 767px) {
+    .identity-pane {
+        flex-direction: column;
+    }
+
+    .identity-pane-rail {
+        flex: 0 0 auto;
+        max-height: 40%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .identity-pane-detail {
+        padding: 12px 16px;
+    }
+}
