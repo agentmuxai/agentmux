@@ -5,7 +5,8 @@
 //!
 //! Flow:
 //!   1. Generate code_verifier + code_challenge (S256).
-//!   2. Bind a random local TCP port for the redirect_uri.
+//!   2. Bind fixed port 9379 for the redirect_uri (Cognito does exact-string
+//!      matching only — no wildcard port support despite RFC 8252 §8.3).
 //!   3. Open browser to Cognito hosted UI.
 //!   4. Await HTTP callback (code + state).
 //!   5. Exchange code for tokens via /oauth2/token.
@@ -48,16 +49,12 @@ pub async fn run_pkce_login(
     // 3. State (CSRF)
     let state = uuid::Uuid::new_v4().to_string();
 
-    // 4. Bind a random port
-    let listener = TcpListener::bind("127.0.0.1:0")
+    // 4. Bind fixed port 9379 — must match Cognito callbackUrls exactly
+    const CALLBACK_PORT: u16 = 9379;
+    let redirect_uri = format!("http://127.0.0.1:{CALLBACK_PORT}/callback");
+    let listener = TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}"))
         .await
-        .map_err(|e| format!("failed to bind callback listener: {e}"))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| format!("listener addr: {e}"))?
-        .port();
-
-    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+        .map_err(|e| format!("failed to bind callback port {CALLBACK_PORT}: {e} — is another muxbus login in progress?"))?;
 
     // 5. Build auth URL
     let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
@@ -78,7 +75,7 @@ pub async fn run_pkce_login(
 
     tracing::info!(
         cognito_domain = cognito_domain,
-        port = port,
+        port = CALLBACK_PORT,
         "muxbus: PKCE login started, awaiting browser callback"
     );
 
