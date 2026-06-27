@@ -286,18 +286,20 @@ unsafe fn maybe_quit_on_last_user_window() {
     if QUIT_INITIATED.load(SeqCst) {
         return;
     }
-    // "Have we ever had a real user window?" — gate primarily on the CEF
-    // registry: `main` registers as a `is_pool:false` top-level at startup and
-    // STAYS registered through the recycle-on-close (the browser is hidden, not
-    // destroyed; `on_before_close` never fires), so this is ≥1 at close time
-    // yet 0 during early startup before `main` registers — preventing a
-    // premature quit. `HAD_VISIBLE_USER_WINDOW` (armed when a user window is
-    // shown/created-visible) is kept as a belt-and-suspenders OR.
+    // Gate on whether a user window has EVER been shown — prevents a premature
+    // quit when a pool window fails during startup before the main window has
+    // loaded. `main` registers in CEF state (count_live_user_windows ≥ 1) at
+    // on_after_created time, which is BEFORE the main window is visible.
+    // Using `registered > 0` as the armed gate would fire quit when a pool
+    // window fails during that gap (main registered but not yet shown, visible=0).
+    // `HAD_VISIBLE_USER_WINDOW` is set only on EVENT_OBJECT_SHOW, so it stays
+    // false until the page actually loads and the host calls ShowWindow — the
+    // correct moment to arm the last-window quit.
     let registered = app_state()
         .get()
         .map(|s| s.count_live_user_windows())
         .unwrap_or(0);
-    let armed = registered > 0 || HAD_VISIBLE_USER_WINDOW.load(SeqCst);
+    let armed = HAD_VISIBLE_USER_WINDOW.load(SeqCst);
     if !armed {
         return;
     }
