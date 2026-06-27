@@ -560,6 +560,10 @@ pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
         return;
     };
 
+    // Clear the sendEvent: swizzle statics so the swizzle stops intercepting
+    // main-window mouse events now that the pane overlay is gone.
+    crate::ui_tasks::clear_pane_swizzle_statics();
+
     // Whether to defer destroy depends on whether there's a live Browser.
     //   - Live Browser + host: close_browser(force=1) fires; on_before_close
     //     will land asynchronously; stash so the callback finds the

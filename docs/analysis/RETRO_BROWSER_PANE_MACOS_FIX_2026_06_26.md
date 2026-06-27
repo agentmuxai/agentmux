@@ -201,7 +201,7 @@ where `task_dip_{x,y,w,h} = pane_{x,y,w,h}` from ObjC (pixel coords ÷ backingSc
 
 ## Mouse Click Investigation — Session 2 (2026-06-27)
 
-**Status**: Still unresolved. Significant new diagnostics gathered; root cause narrowed but not eliminated.
+**Status**: Resolved in PR #1819. See Session 3 below for root cause and fix.
 
 ---
 
@@ -343,3 +343,13 @@ All of the following are active in the current dev build:
 2. **Swizzle `mouseDown:`** on `RenderWidgetHostViewCocoa` — definitive answer on whether `mouseDown:` is called when clicking interactive elements
 3. **Try `SendMouseClickEvent`** — if swizzle shows `mouseDown:` IS called, try injecting clicks directly into CEF to bypass AppKit
 4. **Investigate `NativeWidgetMacNSWindow::sendEvent:` override** — if swizzle shows `mouseDown:` is NOT called, this is the next suspect
+
+---
+
+## Mouse Click Investigation — Session 3 (2026-06-27) — RESOLVED
+
+**Root cause**: `NSWindow.sendEvent:` has activate-only semantics for non-key windows. The pane overlay (NativeWidgetMacNSWindow, covers only the pane area x≥604) becomes key when the user interacts with it. Subsequent sidebar clicks land on the main CefNSWindow (which is not key) and `NSWindow.sendEvent:` either eats them or the activation sequence causes CEF to call `set_focus(0)` on the main browser, putting Blink into a defocused state.
+
+**Fix**: In `NSApp::sendEvent:` swizzle, detect mouse events on the main window (non-NativeWidgetMacNSWindow), walk its contentView subview tree to find `RenderWidgetHostViewCocoa`, call `host.set_focus(1)` to restore Blink focus, then dispatch `[rwhvc mouseDown:/rightMouseDown:/mouseDragged:/scrollWheel: event]` directly — bypassing `NSWindow.sendEvent:` entirely. RWHVC pointer is cached after first discovery to avoid per-event subview walks. Statics reset on pane close via `clear_pane_swizzle_statics()`.
+
+**Confirmed**: Every direct dispatch is followed by `[AMX-DIAG-MD] mousedown hasFocus=true` in main browser JS.

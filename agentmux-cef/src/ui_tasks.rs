@@ -174,7 +174,7 @@ extern "C" fn swizzled_rwhvc_mouse_down(
             } else { "?".into() }
         } else { "null".into() };
 
-        tracing::info!(
+        tracing::debug!(
             this      = this as usize,
             fr        = fr as usize,
             is_fr     = (fr == this as Id) as u8,
@@ -311,7 +311,7 @@ extern "C" fn swizzled_rwhvc_hit_test(
                             let pw2 = pw as f64;
                             let ph = PANE_LOCAL_H.load(std::sync::atomic::Ordering::Relaxed) as f64;
                             if pt.x < px || pt.x >= px + pw2 || pt.y < py || pt.y >= py + ph {
-                                tracing::info!(
+                                tracing::debug!(
                                     this = this as usize, x = pt.x, y = pt.y,
                                     px, py, pw = pw2, ph,
                                     "[browser-pane] hitTest nil → out-of-pane click falls to main RWHVC"
@@ -359,12 +359,31 @@ static ORIG_NSAPP_SEND_EVENT: std::sync::atomic::AtomicUsize =
 
 // Cached NSWindow* and RenderWidgetHostViewCocoa* for the main browser window.
 // Discovered at leftMouseDown time, reused for drag/up/right-click events so we
-// don't re-walk the subview tree on every event. Invalidated on pane close
-// (PANE_LOCAL_W → 0). Raw pointer: safe because RWHVC lives for the app lifetime.
+// don't re-walk the subview tree on every event. Cleared by clear_pane_swizzle_statics.
+// Raw pointer: safe because RWHVC lives for the browser lifetime.
 #[cfg(target_os = "macos")]
 static MAIN_WIN_PTR:  std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 #[cfg(target_os = "macos")]
 static MAIN_RWHVC_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Called by `detach_browser_pane_view` when a pane closes.
+/// Resets all statics that gate the sendEvent: swizzle so it stops intercepting
+/// main-window mouse events after the pane is gone.
+#[cfg(target_os = "macos")]
+pub(crate) fn clear_pane_swizzle_statics() {
+    use std::sync::atomic::Ordering::Relaxed;
+    PANE_LOCAL_W.store(0, Relaxed);
+    PANE_LOCAL_X.store(0, Relaxed);
+    PANE_LOCAL_Y_BOTTOM.store(0, Relaxed);
+    PANE_LOCAL_H.store(0, Relaxed);
+    MAIN_WIN_PTR.store(0, Relaxed);
+    MAIN_RWHVC_PTR.store(0, Relaxed);
+    if let Ok(mut guard) = MAIN_BROWSER_HOST_FOR_FOCUS.try_lock() {
+        *guard = None;
+    }
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn clear_pane_swizzle_statics() {}
 
 /// Swizzled NSApplication::sendEvent: — for mouse events on the main window
 /// while the browser pane is open, bypasses NSWindow.sendEvent: and dispatches
@@ -431,7 +450,7 @@ extern "C" fn swizzled_nsapp_send_event(
 
             if ev_type == 1 {
                 let wnum = get_usize(event, sel_wn) as i64;
-                tracing::info!(
+                tracing::debug!(
                     wnum, win = win as usize, loc_x = loc.x, loc_y = loc.y,
                     "[nsapp-diag] leftMouseDown → wnum={} win={:#x} loc=({:.1},{:.1})",
                     wnum, win as usize, loc.x, loc.y
@@ -514,7 +533,7 @@ extern "C" fn swizzled_nsapp_send_event(
                         let dispatch_fn: extern "C" fn(Id, Sel, Id) =
                             std::mem::transmute(objc_msgSend as *const c_void);
                         if ev_type == 1 || ev_type == 3 {
-                            tracing::info!(
+                            tracing::debug!(
                                 ev_type, loc_x = loc.x, loc_y = loc.y,
                                 target = rwhvc as usize,
                                 "[browser-pane] direct dispatch: main-win→main RWHVC ev={}",
