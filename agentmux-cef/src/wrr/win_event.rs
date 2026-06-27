@@ -21,6 +21,8 @@
 // non-blocking sync APIs (UnboundedSender → drain task) so this
 // callback returns quickly even under burst load.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use windows_sys::Win32::Foundation::{HWND, RECT};
@@ -53,6 +55,17 @@ fn app_state() -> &'static OnceLock<Arc<AppState>> {
     &S
 }
 
+/// Pending OS-close debounce map: label → cancel flag.
+///
+/// When `EVENT_OBJECT_HIDE` fires for an on-screen non-minimised app window we
+/// defer `report_window_closed` by 200ms instead of firing it immediately. If
+/// `EVENT_OBJECT_SHOW` fires for the same label within that window (virtual
+/// desktop switch, opacity flicker, etc.) we set the cancel flag and the
+/// deferred thread no-ops. If no SHOW arrives the close fires after the delay.
+fn pending_os_closes() -> &'static std::sync::Mutex<HashMap<String, Arc<AtomicBool>>> {
+    static P: OnceLock<std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+    P.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
 
 /// Phase B.9.1 — handles to the installed hooks. Held in a
 /// `OnceLock<Mutex<Option<...>>>` so install_hooks is idempotent
@@ -429,7 +442,7 @@ unsafe extern "system" fn win_event_callback(
             launcher_ipc::report_hwnd_iconic_changed(raw_hwnd, iconic);
             // B1: a user-visible window appeared — arm the last-window quit.
             if visible {
-                HAD_VISIBLE_USER_WINDOW.store(true, std::sync::atomic::Ordering::SeqCst);
+                HAD_VISIBLE_USER_WINDOW.store(true, Ordering::SeqCst);
             }
         }
         EVENT_OBJECT_DESTROY => {
@@ -452,7 +465,25 @@ unsafe extern "system" fn win_event_callback(
             }
             launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, true);
             // B1: a user-visible window was shown — arm the last-window quit.
-            HAD_VISIBLE_USER_WINDOW.store(true, std::sync::atomic::Ordering::SeqCst);
+            HAD_VISIBLE_USER_WINDOW.store(true, Ordering::SeqCst);
+
+            // Cancel any pending OS-close debounce for this label — the window
+            // re-appeared before the 200ms delay fired, so the HIDE was a
+            // virtual-desktop switch (or similar transient hide), not a real close.
+            if let Some(state) = app_state().get() {
+                if let Some(label) = state.label_for_hwnd(hwnd) {
+                    if let Ok(mut map) = pending_os_closes().lock() {
+                        if let Some(cancel) = map.remove(&label) {
+                            cancel.store(true, Ordering::Release);
+                            tracing::debug!(
+                                target: "wrr",
+                                "[wrr] SHOW cancelled pending OS-close for label={}",
+                                label
+                            );
+                        }
+                    }
+                }
+            }
         }
         EVENT_OBJECT_HIDE => {
             let class = read_class_name(hwnd);
@@ -471,16 +502,54 @@ unsafe extern "system" fn win_event_callback(
                 if IsIconic(hwnd) == 0 {
                     if let Some(rect) = read_window_rect(hwnd) {
                         if rect.left >= OFFSCREEN_POOL_THRESHOLD_X {
-                            // On-screen and not minimised → real user-close hide.
+                            // On-screen and not minimised → candidate user-close hide.
+                            // Defer by 200ms: virtual-desktop switches fire a matching
+                            // SHOW within ~50ms; the SHOW arm cancels the flag so no
+                            // report fires. Real closes (Alt+F4, taskbar) have no
+                            // paired SHOW, so the deferred thread fires.
+                            // Ref: reagentx review of PR #1803 (P2 — vdesktop false-positive).
                             if let Some(state) = app_state().get() {
                                 if let Some(label) = state.label_for_hwnd(hwnd) {
                                     if !label.starts_with("browser-pane-") {
                                         tracing::debug!(
                                             target: "wrr",
-                                            "[wrr] HIDE on on-screen app window → report_window_closed label={}",
+                                            "[wrr] HIDE on on-screen app window → debouncing OS-close label={}",
                                             label
                                         );
-                                        crate::launcher_ipc::report_window_closed(label);
+                                        let cancel = Arc::new(AtomicBool::new(false));
+                                        {
+                                            let mut map = pending_os_closes()
+                                                .lock()
+                                                .unwrap_or_else(|p| p.into_inner());
+                                            map.insert(label.clone(), cancel.clone());
+                                        }
+                                        let label_clone = label.clone();
+                                        let cancel_clone = cancel.clone();
+                                        std::thread::spawn(move || {
+                                            std::thread::sleep(
+                                                std::time::Duration::from_millis(200),
+                                            );
+                                            if !cancel_clone.load(Ordering::Acquire) {
+                                                tracing::debug!(
+                                                    target: "wrr",
+                                                    "[wrr] OS-close debounce fired → report_window_closed label={}",
+                                                    label_clone
+                                                );
+                                                crate::launcher_ipc::report_window_closed(
+                                                    label_clone.clone(),
+                                                );
+                                            }
+                                            // Clean up — skip if already removed by SHOW.
+                                            if let Ok(mut map) = pending_os_closes().lock() {
+                                                if map
+                                                    .get(&label_clone)
+                                                    .map(|c| Arc::ptr_eq(c, &cancel_clone))
+                                                    .unwrap_or(false)
+                                                {
+                                                    map.remove(&label_clone);
+                                                }
+                                            }
+                                        });
                                     }
                                 }
                             }
