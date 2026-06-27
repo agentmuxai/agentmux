@@ -2,4 +2,4 @@
 type: minor
 ---
 
-feat(startup): defer migrations and saga vacuum to upgrade panel for near-instant launch
+feat(startup): run migrations in-process at srv startup for near-instant launch

@@ -207,7 +207,7 @@ const BackendStatus = (): JSX.Element => {
                             </div>
                             <div class="status-bar-popover-row">
                                 <span class="status-bar-popover-mono" style={{ "font-size": "0.85em" }}>
-                                    Restart the app to apply pending migrations.
+                                    Migration failed at startup — check logs, then restart to retry.
                                 </span>
                             </div>
                         </Show>
