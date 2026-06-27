@@ -16,7 +16,7 @@
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::TcpSocket;
 
 use crate::backend::storage::muxbus::MuxBusCredentials;
 
@@ -49,12 +49,22 @@ pub async fn run_pkce_login(
     // 3. State (CSRF)
     let state = uuid::Uuid::new_v4().to_string();
 
-    // 4. Bind fixed port 9379 — must match Cognito callbackUrls exactly
+    // 4. Bind fixed port 9379 — must match Cognito callbackUrls exactly.
+    //    SO_REUSEADDR allows immediate re-login after a cancelled attempt whose
+    //    socket is still in TIME_WAIT (would otherwise hit EADDRINUSE).
     const CALLBACK_PORT: u16 = 9379;
     let redirect_uri = format!("http://127.0.0.1:{CALLBACK_PORT}/callback");
-    let listener = TcpListener::bind(format!("127.0.0.1:{CALLBACK_PORT}"))
-        .await
+    let tcp_sock = TcpSocket::new_v4()
+        .map_err(|e| format!("failed to create callback socket: {e}"))?;
+    tcp_sock
+        .set_reuseaddr(true)
+        .map_err(|e| format!("failed to set SO_REUSEADDR: {e}"))?;
+    tcp_sock
+        .bind(format!("127.0.0.1:{CALLBACK_PORT}").parse().unwrap())
         .map_err(|e| format!("failed to bind callback port {CALLBACK_PORT}: {e} — another process may be holding the port"))?;
+    let listener = tcp_sock
+        .listen(10)
+        .map_err(|e| format!("failed to listen on callback port {CALLBACK_PORT}: {e}"))?;
 
     // 5. Build auth URL
     let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
@@ -80,69 +90,79 @@ pub async fn run_pkce_login(
     );
 
     // 7. Accept connections until the valid Cognito callback arrives (5-min overall timeout).
-    //    On a fixed well-known port, stray requests (browser prefetch, health probes) can
-    //    arrive before Cognito's redirect; loop until /callback with matching state+code.
+    //    On a fixed well-known port, stray connections (browser prefetch, port probes) can
+    //    arrive before Cognito's redirect. Each accepted connection is spawned into a task
+    //    so slow/idle strays don't block accept() and delay the real callback.
+    let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
     let code = tokio::time::timeout(
         std::time::Duration::from_secs(LOGIN_TIMEOUT_SECS),
-        async {
+        async move {
             loop {
-                let (mut stream, _) = listener
-                    .accept()
-                    .await
-                    .map_err(|e| format!("callback accept failed: {e}"))?;
+                tokio::select! {
+                    biased;
+                    result = result_rx.recv() => {
+                        return result.unwrap_or_else(|| Err("callback channel closed".to_string()));
+                    }
+                    accept_res = listener.accept() => {
+                        let (mut stream, _) = accept_res
+                            .map_err(|e| format!("callback accept failed: {e}"))?;
+                        let state_val = state.clone();
+                        let tx = result_tx.clone();
+                        tokio::spawn(async move {
+                            let mut buf = [0u8; 4096];
+                            let n = match tokio::time::timeout(
+                                std::time::Duration::from_secs(2),
+                                stream.read(&mut buf),
+                            )
+                            .await
+                            {
+                                Ok(Ok(n)) => n,
+                                _ => return,
+                            };
+                            let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                            let first_line = request.lines().next().unwrap_or("");
+                            let raw_path = first_line.split_whitespace().nth(1).unwrap_or("");
+                            let (path_only, query) =
+                                raw_path.split_once('?').unwrap_or((raw_path, ""));
 
-                let mut buf = [0u8; 4096];
-                let n = match tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    stream.read(&mut buf),
-                )
-                .await
-                {
-                    Ok(Ok(n)) => n,
-                    _ => continue, // stray connection with read timeout/error — keep waiting
-                };
-                let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                            if path_only != "/callback" {
+                                let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n").await;
+                                return;
+                            }
 
-                let first_line = request.lines().next().unwrap_or("");
-                let raw_path = first_line.split_whitespace().nth(1).unwrap_or("");
-                let (path_only, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
+                            let returned_state = query_param(query, "state").unwrap_or_default();
+                            if returned_state != state_val {
+                                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
+                                return;
+                            }
 
-                if path_only != "/callback" {
-                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n").await;
-                    continue;
-                }
+                            let html: &[u8] = if query_param(query, "code").is_some() {
+                                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
+                                  <html><body><h2>Connected to AgentMux Cloud.</h2>\
+                                  <p>You can close this tab.</p></body></html>"
+                            } else {
+                                b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
+                                  <html><body><h2>Login failed.</h2><p>Please retry from AgentMux.</p></body></html>"
+                            };
+                            let _ = stream.write_all(html).await;
 
-                let returned_state = query_param(query, "state").unwrap_or_default();
-                if returned_state != state {
-                    // Wrong state — could be a replayed or unrelated request; keep waiting
-                    let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
-                    continue;
-                }
-
-                let html: &[u8] = if query_param(query, "code").is_some() {
-                    b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                      <html><body><h2>Connected to AgentMux Cloud.</h2>\
-                      <p>You can close this tab.</p></body></html>"
-                } else {
-                    b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-                      <html><body><h2>Login failed.</h2><p>Please retry from AgentMux.</p></body></html>"
-                };
-                let _ = stream.write_all(html).await;
-
-                match query_param(query, "code") {
-                    Some(c) => return Ok::<_, String>(c),
-                    None => {
-                        let err = query_param(query, "error")
-                            .unwrap_or_else(|| "unknown".to_string());
-                        return Err(format!("Cognito returned error: {err}"));
+                            let result = match query_param(query, "code") {
+                                Some(c) => Ok(c),
+                                None => {
+                                    let err = query_param(query, "error")
+                                        .unwrap_or_else(|| "unknown".to_string());
+                                    Err(format!("Cognito returned error: {err}"))
+                                }
+                            };
+                            let _ = tx.send(result).await;
+                        });
                     }
                 }
             }
         },
     )
     .await
-    .map_err(|_| "login timed out (5 min) — please try again".to_string())?
-    .map_err(|e| e)?;
+    .map_err(|_| "login timed out (5 min) — please try again".to_string())??;
 
     // 8. Exchange code for tokens
     let token_url = format!("{cognito_domain}/oauth2/token");
