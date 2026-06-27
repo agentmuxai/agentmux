@@ -51,6 +51,7 @@ const BackendStatus = (): JSX.Element => {
             setRestarting(false);
         });
     };
+
     const [startedAt, setStartedAt] = createSignal<number | null>(null);
     const [uptimeSecs, setUptimeSecs] = createSignal(0);
     const [backendInfo, setBackendInfo] = createSignal<{
@@ -58,6 +59,7 @@ const BackendStatus = (): JSX.Element => {
         started_at?: string;
         web_endpoint?: string;
         version: string;
+        pending_migrations?: number;
     } | null>(null);
     let popoverRef!: HTMLDivElement;
     const gpu = getGpuInfo(); // WebGL/GPU capability — static for the renderer process
@@ -191,6 +193,22 @@ const BackendStatus = (): JSX.Element => {
                             <div class="status-bar-popover-row">
                                 <span class="status-bar-popover-label">Version</span>
                                 <span>{backendInfo().version}</span>
+                            </div>
+                        </Show>
+                        <Show when={(backendInfo()?.pending_migrations ?? 0) > 0}>
+                            <div class="status-bar-popover-divider" />
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-label" style={{ color: "var(--warning-color)" }}>
+                                    Migrations
+                                </span>
+                                <span style={{ color: "var(--warning-color)" }}>
+                                    {backendInfo()!.pending_migrations} pending
+                                </span>
+                            </div>
+                            <div class="status-bar-popover-row">
+                                <span class="status-bar-popover-mono" style={{ "font-size": "0.85em" }}>
+                                    Migration failed at startup — check logs, then restart to retry.
+                                </span>
                             </div>
                         </Show>
                         {/* GPU / WebGL rendering — enabled/disabled + driver info.

@@ -30,7 +30,7 @@ export { setRestartInProgress };
 /// Using a narrow interface keeps the dependency injectable and mockable in tests.
 interface BackendStatusApi {
     listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
-    getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>;
+    getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>;
 }
 
 /// Wire up the Tauri event listeners that drive backendStatusAtom.

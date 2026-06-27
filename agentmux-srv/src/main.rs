@@ -344,15 +344,27 @@ async fn main() {
         "backend directories initialized"
     );
 
+    // Apply any pending migrations in-process before opening stores.
+    // This ensures 0011_shared_store_backfill (and any future Global migrations)
+    // have run before id_store binds to the shared store — avoiding apparent data
+    // loss on first boot after an upgrade. Fast-path: no-op when already current.
+    //
+    // id_store binding below checks shared_store.migration_is_applied("0011_shared_store_backfill")
+    // directly rather than a coarse migration_ok flag: if an early migration (e.g.
+    // 0011) succeeds but a later one fails, the shared store is already backfilled
+    // and safe to use — falling back to per-channel would strand writes made this
+    // session when the later migration succeeds on next boot.
+    let wave_data_dir = base::get_wave_data_dir();
+
     // Open databases
     let db_dir = base::get_wave_db_dir();
 
     // Pre-migration snapshot (Increment B.2 lean cut from
-    // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open so the
-    // backup is taken before any DDL or table rename touches the DB.
-    // The safety lock inside Store::open is the upgrade-direction
-    // guard; this snapshot is the rollback aid for the much rarer case
-    // of a buggy forward migration.
+    // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open AND before
+    // count_pending_migrations/run_pending_migrations — both open
+    // objects.db via Store::open which runs DDL/schema setup, mutating
+    // the file. The snapshot must capture the pre-DDL state so it is a
+    // valid rollback aid for a buggy forward migration.
     //
     // Failures are logged and ignored — refusing to boot when the
     // snapshot can't be written would be worse than booting without a
@@ -381,6 +393,20 @@ async fn main() {
         Ok(Some(path)) => tracing::info!(snapshot = %path.display(), "pre-migration snapshot written"),
         Ok(None) => {}
         Err(e) => tracing::warn!("pre-migration snapshot failed (continuing without backup): {}", e),
+    }
+
+    // Run in-process migrations AFTER snapshot so the rollback aid captures
+    // the pre-DDL state. count_pending_migrations emits AGENTMUXSRV-MIGRATING
+    // first so the launcher/sidecar extend their ESTART deadline before the
+    // (potentially slow) migration work begins.
+    let pre_migration_count = migrations::count_pending_migrations(&wave_data_dir);
+    if pre_migration_count > 0 {
+        eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
+    }
+    match migrations::run_pending_migrations(&wave_data_dir) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
+        Err(e) => tracing::warn!("startup: migration error (continuing): {}", e),
     }
 
     let wstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
@@ -507,8 +533,19 @@ async fn main() {
         }
     };
     // id_store: routes identity/memory/drone/muxbus ops to the shared store when
-    // available so writes survive version upgrades; falls back to wstore otherwise.
-    let id_store: Arc<Store> = shared_store.clone().unwrap_or_else(|| wstore.clone());
+    // available AND the shared-store backfill migration has been applied.
+    // Checking the specific migration (not a coarse migration_ok flag) avoids
+    // a split-brain when 0011 succeeded but a later migration failed: the shared
+    // store is already backfilled, so using per-channel would strand writes made
+    // this session once the later migration succeeds on next boot.
+    let id_store: Arc<Store> = match shared_store.as_ref() {
+        Some(ss) if ss.migration_is_applied("0011_shared_store_backfill") => ss.clone(),
+        Some(_) => {
+            tracing::warn!("id_store: 0011_shared_store_backfill not yet applied — using per-channel store");
+            wstore.clone()
+        }
+        None => wstore.clone(),
+    };
 
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
@@ -1048,9 +1085,13 @@ async fn main() {
     }
 
     // 6. Emit AGENTMUXSRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
+    // pending_migrations reflects any migrations that failed during the in-process
+    // run above. Non-zero causes the status-bar to show a "Migration failed —
+    // restart to retry" message. Zero is the expected steady-state.
+    let pending_migrations = migrations::count_pending_migrations(&base::get_wave_data_dir());
     eprintln!(
-        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{}",
-        ws_addr.port(), web_addr.port(), version, build_time, config.instance_id
+        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{} pending_migrations:{}",
+        ws_addr.port(), web_addr.port(), version, build_time, config.instance_id, pending_migrations
     );
 
     // 7. Build router and serve on both listeners

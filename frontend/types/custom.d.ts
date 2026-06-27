@@ -100,7 +100,7 @@ declare global {
         getConfigDir: () => string;
         getUserHomeDir: () => string;
         getAboutModalDetails: () => AboutModalDetails;
-        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>;
+        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>;
         restartBackend: () => Promise<void>;
         getDocsiteUrl: () => string;
         getZoomFactor: () => number;
