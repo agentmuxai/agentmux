@@ -355,28 +355,16 @@ async fn main() {
     // and safe to use — falling back to per-channel would strand writes made this
     // session when the later migration succeeds on next boot.
     let wave_data_dir = base::get_wave_data_dir();
-    // Notify the launcher / host-spawned paths BEFORE running migrations so they
-    // can extend their ESTART deadline. Without this signal the fixed 30s timeout
-    // would kill srv if a large-dataset migration takes longer to apply.
-    let pre_migration_count = migrations::count_pending_migrations(&wave_data_dir);
-    if pre_migration_count > 0 {
-        eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
-    }
-    match migrations::run_pending_migrations(&wave_data_dir) {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
-        Err(e) => tracing::warn!("startup: migration error (continuing): {}", e),
-    }
 
     // Open databases
     let db_dir = base::get_wave_db_dir();
 
     // Pre-migration snapshot (Increment B.2 lean cut from
-    // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open so the
-    // backup is taken before any DDL or table rename touches the DB.
-    // The safety lock inside Store::open is the upgrade-direction
-    // guard; this snapshot is the rollback aid for the much rarer case
-    // of a buggy forward migration.
+    // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open AND before
+    // count_pending_migrations/run_pending_migrations — both open
+    // objects.db via Store::open which runs DDL/schema setup, mutating
+    // the file. The snapshot must capture the pre-DDL state so it is a
+    // valid rollback aid for a buggy forward migration.
     //
     // Failures are logged and ignored — refusing to boot when the
     // snapshot can't be written would be worse than booting without a
@@ -405,6 +393,20 @@ async fn main() {
         Ok(Some(path)) => tracing::info!(snapshot = %path.display(), "pre-migration snapshot written"),
         Ok(None) => {}
         Err(e) => tracing::warn!("pre-migration snapshot failed (continuing without backup): {}", e),
+    }
+
+    // Run in-process migrations AFTER snapshot so the rollback aid captures
+    // the pre-DDL state. count_pending_migrations emits AGENTMUXSRV-MIGRATING
+    // first so the launcher/sidecar extend their ESTART deadline before the
+    // (potentially slow) migration work begins.
+    let pre_migration_count = migrations::count_pending_migrations(&wave_data_dir);
+    if pre_migration_count > 0 {
+        eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
+    }
+    match migrations::run_pending_migrations(&wave_data_dir) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
+        Err(e) => tracing::warn!("startup: migration error (continuing): {}", e),
     }
 
     let wstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
