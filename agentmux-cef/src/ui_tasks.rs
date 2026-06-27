@@ -2086,13 +2086,20 @@ wrap_task! {
                     std::ptr::null_mut()
                 };
 
+                // Determine desired final visibility before any NSWindow mutation.
+                // Consulted again after setFrame to restore the correct state.
+                let should_be_visible = {
+                    let pane_rect = (self.x, self.y, self.width, self.height);
+                    crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, pane_rect)
+                };
+
                 // Step 1 (retry=0 only): snapshot which NativeWidgetMacNSWindows
                 // exist BEFORE calling set_visible(1).  Our overlay's NSWindow is
-                // created asynchronously and was hidden via set_visible(0) at
-                // creation; set_visible(1) calls [NSWindow orderFront:] which adds
-                // it back to [NSApp windows].  Comparing before vs after gives the
-                // exact wnum for this pane — safe even with multiple panes open
-                // because the CEF UI thread is single-threaded.
+                // created lazily on first show; set_visible(1) calls
+                // [NSWindow orderFront:] which adds it to [NSApp windows].
+                // Comparing before vs after gives the exact wnum for this pane —
+                // safe even with multiple panes open because the CEF UI thread is
+                // single-threaded.
                 let mut pre_wnums: Vec<isize> = Vec::new();
                 if self.retry == 0 {
                     let pre_wins: Id     = get_id(ns_app, sel_windows_arr);
@@ -2111,18 +2118,22 @@ wrap_task! {
                     }
                 }
 
-                // Step 2: show the overlay on the first run only, but only if
-                // compute_pane_visible agrees — an overlay-clip or zero-area rect
-                // queued between creation and this task (e.g. a modal appeared, or
-                // an inactive-tab resize sent a 0×0 rect) must not be overridden.
-                let mut did_set_visible = false;
-                if self.retry == 0 {
-                    let pane_rect = (self.x, self.y, self.width, self.height);
-                    if crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, pane_rect) {
-                        controller.set_visible(1);
-                        did_set_visible = true;
-                    }
-                }
+                // Step 2: ALWAYS call set_visible(1) before scanning [NSApp
+                // windows].
+                //
+                // At retry=0: forces NSWindow creation (it is created lazily on
+                // first show) and enables delta-detection — even when the pane
+                // should ultimately be hidden, we need the NSWindow to exist so
+                // setFrame can be committed and resize_browser_pane_view can find
+                // it later.
+                //
+                // At retry>=1: the NSWindow already exists but may be hidden (if
+                // the pane was created while hidden).  Hidden windows may not
+                // appear in [NSApp windows] so wnum-based lookup would fail.
+                // Temporarily showing it ensures reliable matching.
+                //
+                // In both cases we restore the correct visibility AFTER setFrame.
+                controller.set_visible(1);
 
                 // Step 3: rescan [NSApp windows] AFTER set_visible(1) to find the
                 // overlay and main window.
@@ -2194,17 +2205,6 @@ wrap_task! {
                 }
 
                 if overlay_win.is_null() {
-                    if self.retry == 0 && !did_set_visible {
-                        // Pane was hidden at retry=0 (compute_pane_visible=false).
-                        // No frame work needed here — resize_browser_pane_view handles
-                        // visibility when the pane is eventually shown.  Skip retry=1
-                        // too: there is nothing to reaffirm for a hidden pane.
-                        tracing::info!(
-                            label = %self.label,
-                            "[browser-pane] ObjC task: pane hidden at retry=0, skipping frame commit and retry"
-                        );
-                        return;
-                    }
                     if self.retry < 5 {
                         tracing::info!(
                             label = %self.label, retry = self.retry,
@@ -2254,31 +2254,27 @@ wrap_task! {
                     if s > 0.0 { s } else { 1.0 }
                 };
 
-                // Coordinate source depends on retry and what the controller holds:
+                // Coordinate source:
                 //
-                //  retry=0, cb=0×0  → creation-time physical pixels (set_size no-op on macOS)
-                //  retry=0, cb≠0×0  → resize_browser_pane_view ran before us and committed
-                //                      newer physical pixels via set_size/set_position;
-                //                      use those to avoid rolling back to stale creation rect
-                //  retry≥1, cb≠0×0  → controller.set_bounds() at retry=0 stored DIP;
-                //                      do NOT divide by scale again
-                //  retry≥1, cb=0×0  → set_bounds didn't take; fall back to creation rect
+                //  retry=1, cb≠0×0  → controller.set_bounds() at retry=0 stored DIP;
+                //                      re-use as-is (no scale division — it's already
+                //                      in NSWindow points).
+                //  all other cases  → self.x/y/width/height are physical pixels from
+                //                      the IPC rect; divide by backingScaleFactor.
+                //                      Do NOT fall back to controller.bounds() here:
+                //                      set_size/set_position are no-ops on macOS so
+                //                      controller.bounds() at retry=0 reflects a stale
+                //                      set_bounds() DIP, not a physical-pixel resize —
+                //                      using it would cause a double-scale division.
                 let (pane_x, pane_y, pane_w, pane_h) = {
                     let cb = controller.bounds();
-                    if self.retry >= 1 && cb.width > 0 && cb.height > 0 {
-                        // DIP from set_bounds — no scale division.
+                    if self.retry == 1 && cb.width > 0 && cb.height > 0 {
+                        // DIP from set_bounds() committed at retry=0; no scale division.
                         (cb.x as f64, cb.y as f64, cb.width as f64, cb.height as f64)
                     } else {
-                        // Physical pixels → NSWindow points.
-                        // Prefer an updated controller rect (from intervening resize);
-                        // fall back to creation-time values if controller still reads 0×0.
-                        let (px, py, pw, ph) = if cb.width > 0 && cb.height > 0 {
-                            (cb.x, cb.y, cb.width, cb.height)
-                        } else {
-                            (self.x, self.y, self.width, self.height)
-                        };
-                        (px as f64 / scale, py as f64 / scale,
-                         pw as f64 / scale, ph as f64 / scale)
+                        // Physical pixels from task rect → NSWindow points.
+                        (self.x as f64 / scale, self.y as f64 / scale,
+                         self.width as f64 / scale, self.height as f64 / scale)
                     }
                 };
                 let screen_x = main_frame.origin.x + pane_x;
@@ -2306,19 +2302,24 @@ wrap_task! {
                 task_dip_y = pane_y as i32;
                 task_dip_w = pane_w as i32;
                 task_dip_h = pane_h as i32;
-                // Restore key to main window then bring overlay to front so the
-                // pane is visible and sidebar clicks continue to work.
-                if !main_win.is_null() {
-                    make_key_front(main_win, sel_make_key_front, std::ptr::null_mut());
-                }
-                if !overlay_win.is_null() {
-                    order_front(overlay_win, sel_order_front, std::ptr::null_mut());
+                // Restore key to main window and bring overlay to front.
+                // Only do this when the pane should be visible — for hidden
+                // panes we skip focus/ordering since set_visible(0) will follow.
+                if should_be_visible {
+                    if !main_win.is_null() {
+                        make_key_front(main_win, sel_make_key_front, std::ptr::null_mut());
+                    }
+                    if !overlay_win.is_null() {
+                        order_front(overlay_win, sel_order_front, std::ptr::null_mut());
+                    }
                 }
             }
 
             #[cfg(target_os = "macos")]
-            if let Some(main_browser) = self.state.get_browser(&self.window_label) {
-                if let Some(mut host) = main_browser.host() { host.set_focus(1); }
+            if should_be_visible {
+                if let Some(main_browser) = self.state.get_browser(&self.window_label) {
+                    if let Some(mut host) = main_browser.host() { host.set_focus(1); }
+                }
             }
 
             // macOS: call controller.set_bounds() with DIP coordinates computed above.
@@ -2344,6 +2345,25 @@ wrap_task! {
                 );
             }
 
+            // macOS: restore correct visibility after setFrame.  We always
+            // called set_visible(1) before scanning to surface the NSWindow
+            // (necessary for hidden panes created while compute_pane_visible
+            // returned false, or for retry>=1 where the window may not appear
+            // in [NSApp windows] when hidden).  Now that the frame is
+            // committed, hide it again if the pane should not be visible.
+            #[cfg(target_os = "macos")]
+            if !should_be_visible {
+                controller.set_visible(0);
+            }
+
+            // macOS: store the discovered wnum so resize_browser_pane_view
+            // can post a reaffirm task with an exact wnum match.
+            #[cfg(target_os = "macos")]
+            if discovered_wnum > 0 {
+                self.state.browser_pane_overlay_wnums.lock()
+                    .insert(self.label.clone(), discovered_wnum);
+            }
+
             // macOS: post a delayed reaffirm on the first run. CEF's Widget::Show()
             // (called inside set_visible(1) above) schedules a deferred Views layout
             // that fires AFTER this task and resets the NSWindow frame to 0×0. The
@@ -2359,7 +2379,7 @@ wrap_task! {
                     self.label.clone(),
                     self.window_label.clone(),
                     self.x, self.y, self.width, self.height,
-                    1, // retry=1: skip set_visible(1), just reaffirm frame
+                    1, // retry=1: reaffirm frame after CEF layout pass
                     discovered_wnum,
                 );
                 post_delayed_task(ThreadId::UI, Some(&mut reaffirm), 50);
