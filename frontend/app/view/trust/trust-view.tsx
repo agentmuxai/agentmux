@@ -21,56 +21,61 @@ export function TrustView(_props: ViewComponentProps<TrustViewModel>): JSX.Eleme
     const [section, setSection] = createSignal<TrustSection>("accounts");
 
     return (
-        <div class="trust-view">
-            <nav class="bundle-manager-rail" aria-label="Trust Center section">
-                <For each={RAIL}>
-                    {(item) => (
-                        <button
-                            type="button"
-                            class="bundle-manager-rail-item"
-                            classList={{ "is-active": section() === item.id }}
-                            aria-pressed={section() === item.id}
-                            onClick={() => setSection(item.id)}
-                        >
-                            <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                            <span>{item.label}</span>
-                        </button>
-                    )}
-                </For>
-            </nav>
-            <div class="bundle-manager-section">
-                {/*
-                 * All four managers stay mounted — toggling is instant and
-                 * never re-fetches. Both stay consistent via WPS *:changed events.
-                 */}
-                <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
-                    <AccountsManager />
+        // trust-center-container carries container-type so that .trust-view
+        // (a descendant) can be targeted by @container trust-center queries.
+        // A container element cannot respond to its own container query.
+        <div class="trust-center-container">
+            <div class="trust-view">
+                <nav class="bundle-manager-rail" aria-label="Trust Center section">
+                    <For each={RAIL}>
+                        {(item) => (
+                            <button
+                                type="button"
+                                class="bundle-manager-rail-item"
+                                classList={{ "is-active": section() === item.id }}
+                                aria-pressed={section() === item.id}
+                                onClick={() => setSection(item.id)}
+                            >
+                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
+                                <span>{item.label}</span>
+                            </button>
+                        )}
+                    </For>
+                </nav>
+                <div class="bundle-manager-section">
+                    {/*
+                     * All four managers stay mounted — toggling is instant and
+                     * never re-fetches. Both stay consistent via WPS *:changed events.
+                     */}
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
+                        <AccountsManager />
+                    </div>
+                    <div class="bundle-manager-pane bundle-manager-pane--identity" classList={{ "is-hidden": section() !== "identities" }}>
+                        <IdentityManager />
+                    </div>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "brain" }}>
+                        <GlobalBrainManager />
+                    </div>
+                    <div class="bundle-manager-pane bundle-manager-pane--memories" classList={{ "is-hidden": section() !== "memories" }}>
+                        <MemoryManager />
+                    </div>
                 </div>
-                <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "identities" }}>
-                    <IdentityManager />
-                </div>
-                <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "brain" }}>
-                    <GlobalBrainManager />
-                </div>
-                <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "memories" }}>
-                    <MemoryManager />
-                </div>
+                <nav class="bundle-manager-tab-bar" aria-label="Trust Center section">
+                    <For each={RAIL}>
+                        {(item) => (
+                            <button
+                                type="button"
+                                classList={{ "is-active": section() === item.id }}
+                                aria-pressed={section() === item.id}
+                                onClick={() => setSection(item.id)}
+                            >
+                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
+                                <span>{item.label}</span>
+                            </button>
+                        )}
+                    </For>
+                </nav>
             </div>
-            <nav class="bundle-manager-tab-bar" aria-label="Trust Center section">
-                <For each={RAIL}>
-                    {(item) => (
-                        <button
-                            type="button"
-                            classList={{ "is-active": section() === item.id }}
-                            aria-pressed={section() === item.id}
-                            onClick={() => setSection(item.id)}
-                        >
-                            <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                            <span>{item.label}</span>
-                        </button>
-                    )}
-                </For>
-            </nav>
         </div>
     );
 }
