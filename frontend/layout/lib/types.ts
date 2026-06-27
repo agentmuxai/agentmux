@@ -207,6 +207,24 @@ export interface LayoutNode {
         targetWasLeaf: boolean;
     };
     /**
+     * Set when this Column branch was dissolved because all its leaf children became
+     * minimized. The column is removed from its Row slot and re-inserted at the top of
+     * an adjacent column. Individual leaf children retain their `minimizedSize` values.
+     * Clicking any child's minimize button undissolves this column first, then restores
+     * the child. Never coexists with `minimizedSize` or `slipMinimize` (those are
+     * leaf-only fields).
+     */
+    columnDissolve?: {
+        /** ID of the Column this branch was inserted into. */
+        targetColumnId: string;
+        /** Original width (Row-slot size) before dissolve. */
+        originalRowSize: number;
+        /** Original index in the Row's children array. */
+        originalRowIndex: number;
+        /** True when the target was a plain leaf converted to a Column during dissolve — restore must unwrap it. */
+        targetWasLeaf: boolean;
+    };
+    /**
      * Prevents `balanceNode` from hoisting this branch's single grandchild when the
      * branch has exactly one child that is itself a branch. Set on the Row parent of a
      * slipped pane so the Row(→Column) direction-alternation is preserved even though
