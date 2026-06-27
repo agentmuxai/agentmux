@@ -100,6 +100,10 @@ pub fn use_launcher_endpoints(
             web_endpoint: web,
             version,
             instance_id,
+            // On the launcher path, pending_migrations is delivered via
+            // AGENTMUX_PENDING_MIGRATIONS into AppState (state.rs); no need
+            // to repeat it here.
+            pending_migrations: 0,
         })
     })();
     Some(result)
