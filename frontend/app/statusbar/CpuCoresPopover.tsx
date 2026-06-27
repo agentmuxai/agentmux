@@ -19,7 +19,7 @@
 import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { cpuColor, loadColor } from "./cpu-color";
@@ -145,7 +145,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
             const update = async () => {
                 const cur = props.anchorRect;
                 if (!cur) return;
-                const pos = await computeMenuPosition({ anchor: cur, placement: "top-end" }, el);
+                const pos = await computeMenuPosition({ anchor: cur, placement: "top-end", avoidNativePanes: false }, el);
                 setFloatingStyle(pos.style);
             };
             cleanupAutoUpdate?.();
@@ -154,7 +154,9 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
                 el,
                 update,
             );
-            assertMenuInPaintableArea(el, "cpu-cores-popover");
+            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
+            // (airspace transparency cut-out), so intentional native-pane overlap
+            // would produce a false-positive [menu-guard] warning.
         });
     };
 

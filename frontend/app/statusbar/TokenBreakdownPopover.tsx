@@ -14,10 +14,7 @@
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
-import {
-    assertMenuInPaintableArea,
-    computeMenuPosition,
-} from "@/app/util/menu-position";
+import { computeMenuPosition } from "@/app/util/menu-position";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import {
@@ -97,7 +94,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                 const cur = props.anchorRect;
                 if (!cur) return;
                 const pos = await computeMenuPosition(
-                    { anchor: cur, placement: "top-end" },
+                    { anchor: cur, placement: "top-end", avoidNativePanes: false },
                     el,
                 );
                 setFloatingStyle(pos.style);
@@ -109,8 +106,9 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                 el,
                 update,
             );
-            // Dev-only paintable-area guard (spec §6.1).
-            assertMenuInPaintableArea(el, "token-breakdown-popover");
+            // assertMenuInPaintableArea omitted: this popover uses usePaneOverlay
+            // (airspace transparency cut-out), so intentional native-pane overlap
+            // would produce a false-positive [menu-guard] warning.
         });
     };
 
