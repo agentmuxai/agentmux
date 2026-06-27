@@ -609,6 +609,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
                     endpoints.ws_endpoint = result.ws_endpoint.clone();
                     endpoints.web_endpoint = result.web_endpoint.clone();
                 }
+                *app_state.pending_migrations.lock() = result.pending_migrations;
                 tracing::info!(
                     "Backend ready: ws={} web={}",
                     result.ws_endpoint,

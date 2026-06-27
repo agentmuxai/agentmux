@@ -16,6 +16,9 @@ pub struct BackendSpawnResult {
     pub web_endpoint: String,
     pub version: String,
     pub instance_id: String,
+    /// Number of migrations that were pending at ESTART time (0 = all applied).
+    /// Non-zero means run_pending_migrations failed; the status-bar shows a warning.
+    pub pending_migrations: usize,
 }
 
 /// Phase B.1: when the launcher has already spawned srv (env var
@@ -509,11 +512,17 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
             .unwrap_or_default()
             .to_string()
     };
+    let pending_migrations = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("pending_migrations:"))
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
     BackendSpawnResult {
         ws_endpoint: get("ws:"),
         web_endpoint: get("web:"),
         version: get("version:"),
         instance_id: get("instance:"),
+        pending_migrations,
     }
 }
 
