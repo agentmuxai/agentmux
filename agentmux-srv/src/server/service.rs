@@ -2820,38 +2820,19 @@ pub(crate) fn update_object_meta(
 /// events. Locks the reducer mutex briefly; the lock is released
 /// before any I/O (caller is responsible for publishing the events
 /// to the broadcast bus).
-/// Per-`agent_id` debounce generation for zoom mirroring. Each `term:zoom`
-/// change bumps the agent's generation; the spawned trailing-write task only
-/// commits if its captured generation is still current 300ms later, so a
-/// Ctrl+Wheel burst collapses into a single durable write (+ one global
-/// def-registry re-mirror). See SPEC_AGENT_ZOOM_PERSISTENCE §4.3.
-static ZOOM_MIRROR_GEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> =
-    std::sync::OnceLock::new();
-
-fn zoom_mirror_gen() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> {
-    ZOOM_MIRROR_GEN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-/// Debounced trailing mirror of an agent block's `term:zoom` into the per-agent
-/// `ui:zoom` content blob. `zoom = Some(z)` upserts; `zoom = None` (term:zoom
-/// reset to null / 1.0) deletes the row so a default agent persists nothing.
+/// Mirror an agent block's `term:zoom` into the per-agent `ui:zoom` content
+/// blob immediately (no debounce) so the zoom survives pane close even if the
+/// user closes the pane right after zooming. `zoom = Some(z)` upserts;
+/// `zoom = None` (term:zoom reset to null / 1.0) deletes the row so a
+/// default agent stores nothing. Writes are off-thread so the WebSocket
+/// handler stays non-blocking; SQLite serializes concurrent writes via the
+/// store mutex. See SPEC_AGENT_ZOOM_PERSISTENCE §4.3.
 pub(crate) fn schedule_agent_zoom_mirror(
     store: std::sync::Arc<crate::backend::storage::store::Store>,
     agent_id: String,
     zoom: Option<f64>,
 ) {
-    let generation = {
-        let mut gens = zoom_mirror_gen().lock().unwrap();
-        let g = gens.entry(agent_id.clone()).or_insert(0);
-        *g += 1;
-        *g
-    };
     tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        // Superseded by a newer zoom change for this agent → drop this write.
-        if zoom_mirror_gen().lock().unwrap().get(&agent_id).copied() != Some(generation) {
-            return;
-        }
         let now = chrono::Utc::now().timestamp_millis();
         let result = match zoom {
             Some(z) => store.agent_content_set(
@@ -3262,28 +3243,25 @@ mod agent_zoom_mirror_tests {
         store.agent_def_insert(&mut def).expect("insert agent def");
     }
 
-    /// A Ctrl+Wheel burst of `term:zoom` changes must collapse into a single
-    /// durable write of the FINAL value (SPEC_AGENT_ZOOM_PERSISTENCE §4.3).
+    /// Each `term:zoom` change is written immediately; last write wins.
     #[tokio::test]
-    async fn debounced_mirror_persists_only_final_value() {
+    async fn mirror_writes_each_zoom_immediately() {
         let store = Arc::new(Store::open_in_memory().unwrap());
         let agent = "agent-zoom-burst";
         seed_agent_def(&store, agent);
 
         schedule_agent_zoom_mirror(store.clone(), agent.into(), Some(1.1));
-        schedule_agent_zoom_mirror(store.clone(), agent.into(), Some(1.2));
         schedule_agent_zoom_mirror(store.clone(), agent.into(), Some(1.4));
 
-        // Nothing committed before the debounce window elapses.
-        assert!(store.agent_content_get(agent, "ui:zoom").unwrap().is_none());
-
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        // Give the spawned tasks a moment to complete.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
         let saved = store
             .agent_content_get(agent, "ui:zoom")
             .unwrap()
-            .expect("zoom persisted after debounce");
-        assert_eq!(saved.content, "1.4", "only the final zoom of the burst persists");
+            .expect("zoom persisted immediately");
+        // Last write wins.
+        assert_eq!(saved.content, "1.4", "last zoom value persists");
     }
 
     /// `term:zoom` reset to null/1.0 → `None` → delete the saved row so a
@@ -3303,7 +3281,7 @@ mod agent_zoom_mirror_tests {
             .unwrap();
 
         schedule_agent_zoom_mirror(store.clone(), agent.into(), None);
-        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
         assert!(
             store.agent_content_get(agent, "ui:zoom").unwrap().is_none(),
