@@ -240,6 +240,54 @@ describe("rebuildMinimizedSet", () => {
     });
 });
 
+// ── Cascade dissolve — 3 columns → 2 → 1 ────────────────────────────────────
+
+describe("cascade dissolve — multiple columns collapse into one", () => {
+    it("colA dissolves into colB, then colB dissolves into colC when all minimized", () => {
+        // root (Row)
+        // ├── colA (Column) → paneA1, paneA2
+        // ├── colB (Column) → paneB
+        // └── colC (Column) → paneC
+        const paneA1 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA1" });
+        const paneA2 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA2" });
+        const colA   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneA1, paneA2]);
+        const paneB  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneB" });
+        const colB   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneB]);
+        const paneC  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneC" });
+        const colC   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneC]);
+        const root   = newLayoutNode(FlexDirection.Row, PANE_SIZE, [colA, colB, colC]);
+
+        const model = makeMockModel(root, {
+            [colA.id]: { pixelToSizeRatio: 1 },
+            [colB.id]: { pixelToSizeRatio: 1 },
+            [colC.id]: { pixelToSizeRatio: 1 },
+        });
+
+        // Minimize colA's panes → colA dissolves into colB
+        minimizeNodeToggle(model as any, paneA1.id);
+        minimizeNodeToggle(model as any, paneA2.id);
+        expect(root.children).toHaveLength(2); // colA gone, root has colB + colC
+        expect(colA.columnDissolve).toBeDefined();
+        expect(colB.children![0].id).toBe(colA.id);
+
+        // Minimize colB's pane (colB now has [colA-dissolved, paneB]) →
+        // allCollapsed includes columnDissolve, so colB dissolves into colC
+        minimizeNodeToggle(model as any, paneB.id);
+        expect(root.children).toHaveLength(1); // only colC remains
+        expect(root.children![0].id).toBe(colC.id);
+        expect(colB.columnDissolve).toBeDefined();
+        expect(colC.children![0].id).toBe(colB.id);
+
+        // colB (inside colC) still contains colA-dissolved
+        expect(colB.children!.some(c => c.id === colA.id)).toBe(true);
+
+        // paneC can still be minimized (colB-dissolved is its sibling)
+        minimizeNodeToggle(model as any, paneC.id);
+        expect(paneC.minimizedSize).toBeDefined();
+        expect(root.children).toHaveLength(1); // dissolve bails (no Row sibling) — correct
+    });
+});
+
 // ── Bail case — no adjacent sibling ─────────────────────────────────────────
 
 describe("dissolve bail cases", () => {

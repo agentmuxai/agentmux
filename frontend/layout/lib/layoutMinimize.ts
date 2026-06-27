@@ -153,10 +153,11 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
         node.size = headerSizeUnits;
         sibling.size += freedUnits;
 
-        // If all leaves in the column are now minimized, dissolve the column into
-        // the adjacent Row sibling so the layout consolidates to fewer columns.
+        // If all children of the column are now minimized (leaves via minimizedSize/
+        // slipMinimize, or previously dissolved sub-columns via columnDissolve),
+        // dissolve this column into the adjacent Row sibling.
         const allCollapsed = parentNode.children.every(
-            (c) => c.minimizedSize !== undefined || c.slipMinimize !== undefined
+            (c) => c.minimizedSize !== undefined || c.slipMinimize !== undefined || c.columnDissolve !== undefined
         );
         if (allCollapsed) {
             _dissolveColumn(model, parentNode, addlProps, gapSizePx);
