@@ -2013,6 +2013,7 @@ wrap_task! {
             // to produce 0×0. From this deferred task the parent window IS fully laid out,
             // so set_bounds() should succeed and commit the bounds in CEF's Views layer.
             // The ObjC block additionally sets the NSWindow frame directly.
+
             // Wnum of the overlay NSWindow, discovered at retry=0 by delta-detection
             // (snapshot before/after set_visible) and forwarded to the retry=1 task.
             #[cfg(target_os = "macos")]
@@ -2020,6 +2021,15 @@ wrap_task! {
 
             #[cfg(target_os = "macos")]
             let (mut task_dip_x, mut task_dip_y, mut task_dip_w, mut task_dip_h) = (0i32, 0i32, 0i32, 0i32);
+
+            // Obtain the NSView* for our parent window so we can identify its
+            // CefNSWindow by pointer rather than relying on isMainWindow (which
+            // fails when a secondary/floating CefNSWindow is main).
+            #[cfg(target_os = "macos")]
+            let parent_nsview: *mut std::ffi::c_void = self.state.windows.lock()
+                .get(&self.window_label)
+                .map(|w| w.window_handle() as *mut std::ffi::c_void)
+                .unwrap_or(std::ptr::null_mut());
 
             #[cfg(target_os = "macos")]
             unsafe {
@@ -2050,6 +2060,7 @@ wrap_task! {
                 let sel_make_key_front = sel_registerName(b"makeKeyAndOrderFront:\0".as_ptr() as _);
                 let sel_order_front    = sel_registerName(b"orderFront:\0".as_ptr() as _);
                 let sel_win_number     = sel_registerName(b"windowNumber\0".as_ptr() as _);
+                let sel_win_of_view    = sel_registerName(b"window\0".as_ptr() as _);
 
                 let get_id:         extern "C" fn(Id, Sel) -> Id        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                 let get_usize:      extern "C" fn(Id, Sel) -> usize     = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
@@ -2064,6 +2075,16 @@ wrap_task! {
 
                 let ns_app_class: Id = objc_getClass(b"NSApplication\0".as_ptr() as _);
                 let ns_app: Id       = get_id(ns_app_class, sel_shared_app);
+
+                // Resolve the CefNSWindow for self.window_label via the NSView*
+                // obtained from CefWindow::window_handle(). This is more reliable
+                // than isMainWindow, which misidentifies the parent when a secondary
+                // or floating CefNSWindow currently holds the main-window status.
+                let expected_main_nswin: Id = if !parent_nsview.is_null() {
+                    get_id(parent_nsview, sel_win_of_view)
+                } else {
+                    std::ptr::null_mut()
+                };
 
                 // Step 1 (retry=0 only): snapshot which NativeWidgetMacNSWindows
                 // exist BEFORE calling set_visible(1).  Our overlay's NSWindow is
@@ -2094,10 +2115,12 @@ wrap_task! {
                 // compute_pane_visible agrees — an overlay-clip or zero-area rect
                 // queued between creation and this task (e.g. a modal appeared, or
                 // an inactive-tab resize sent a 0×0 rect) must not be overridden.
+                let mut did_set_visible = false;
                 if self.retry == 0 {
                     let pane_rect = (self.x, self.y, self.width, self.height);
                     if crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, pane_rect) {
                         controller.set_visible(1);
+                        did_set_visible = true;
                     }
                 }
 
@@ -2131,7 +2154,12 @@ wrap_task! {
                         is_main, is_key, wn, want_wnum = self.overlay_wnum,
                         "[browser-pane] ObjC task NSApp window"
                     );
-                    if cls.contains("CefNSWindow") && is_main != 0 {
+                    // Identify the main window: prefer handle-based match for
+                    // self.window_label; isMainWindow is a fallback for the rare
+                    // case where the CefWindow handle isn't available yet.
+                    if !expected_main_nswin.is_null() && win == expected_main_nswin {
+                        main_win = win;
+                    } else if expected_main_nswin.is_null() && cls.contains("CefNSWindow") && is_main != 0 {
                         main_win = win;
                     }
                     if cls.contains("NativeWidgetMacNSWindow") {
@@ -2152,9 +2180,11 @@ wrap_task! {
                     }
                 }
 
-                // Fallback: delta/wnum match missed (pane hidden at retry=0, or
-                // wnum still 0 at retry>=1).  Use newest NativeWidgetMacNSWindow.
-                if overlay_win.is_null() && !highest_native_win.is_null() {
+                // Fallback: ONLY at retry>=1 (wnum known from retry=0 but window
+                // wasn't found by exact match — edge case). At retry=0, applying
+                // the fallback would grab another pane's window when set_visible(1)
+                // was skipped (hidden pane) and there are ≥2 panes open.
+                if overlay_win.is_null() && !highest_native_win.is_null() && self.retry >= 1 {
                     overlay_win = highest_native_win;
                     tracing::info!(
                         label = %self.label, retry = self.retry,
@@ -2164,10 +2194,21 @@ wrap_task! {
                 }
 
                 if overlay_win.is_null() {
+                    if self.retry == 0 && !did_set_visible {
+                        // Pane was hidden at retry=0 (compute_pane_visible=false).
+                        // No frame work needed here — resize_browser_pane_view handles
+                        // visibility when the pane is eventually shown.  Skip retry=1
+                        // too: there is nothing to reaffirm for a hidden pane.
+                        tracing::info!(
+                            label = %self.label,
+                            "[browser-pane] ObjC task: pane hidden at retry=0, skipping frame commit and retry"
+                        );
+                        return;
+                    }
                     if self.retry < 5 {
                         tracing::info!(
                             label = %self.label, retry = self.retry,
-                            "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found after set_visible(1), retrying"
+                            "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found, retrying"
                         );
                         post_set_pane_bounds_views(
                             &self.state, &self.label, &self.window_label,
@@ -2213,20 +2254,31 @@ wrap_task! {
                     if s > 0.0 { s } else { 1.0 }
                 };
 
-                // At retry>=1 the controller holds the DIP values committed by
-                // controller.set_bounds() at retry=0.  Do NOT divide by scale
-                // again — those values are already NSWindow points.  The creation-
-                // time self.x/y/width/height are physical pixels and DO need the
-                // division; use them only at retry=0 or when controller reads back 0×0.
+                // Coordinate source depends on retry and what the controller holds:
+                //
+                //  retry=0, cb=0×0  → creation-time physical pixels (set_size no-op on macOS)
+                //  retry=0, cb≠0×0  → resize_browser_pane_view ran before us and committed
+                //                      newer physical pixels via set_size/set_position;
+                //                      use those to avoid rolling back to stale creation rect
+                //  retry≥1, cb≠0×0  → controller.set_bounds() at retry=0 stored DIP;
+                //                      do NOT divide by scale again
+                //  retry≥1, cb=0×0  → set_bounds didn't take; fall back to creation rect
                 let (pane_x, pane_y, pane_w, pane_h) = {
                     let cb = controller.bounds();
                     if self.retry >= 1 && cb.width > 0 && cb.height > 0 {
-                        // Already DIP/points — no scale division.
+                        // DIP from set_bounds — no scale division.
                         (cb.x as f64, cb.y as f64, cb.width as f64, cb.height as f64)
                     } else {
                         // Physical pixels → NSWindow points.
-                        (self.x as f64 / scale, self.y as f64 / scale,
-                         self.width as f64 / scale, self.height as f64 / scale)
+                        // Prefer an updated controller rect (from intervening resize);
+                        // fall back to creation-time values if controller still reads 0×0.
+                        let (px, py, pw, ph) = if cb.width > 0 && cb.height > 0 {
+                            (cb.x, cb.y, cb.width, cb.height)
+                        } else {
+                            (self.x, self.y, self.width, self.height)
+                        };
+                        (px as f64 / scale, py as f64 / scale,
+                         pw as f64 / scale, ph as f64 / scale)
                     }
                 };
                 let screen_x = main_frame.origin.x + pane_x;
