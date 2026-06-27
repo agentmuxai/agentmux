@@ -2,4 +2,4 @@
 type: patch
 ---
 
-fix(window-count): report OS-level window closes via win_event HIDE hook
+fix(window-count): detect OS-level window closes via LOCATIONCHANGE pool-move
