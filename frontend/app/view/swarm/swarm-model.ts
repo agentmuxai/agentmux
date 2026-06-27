@@ -30,6 +30,7 @@ export interface AgentTreeNode {
     agentName: string;
     agentProvider: string | null;
     activitySummary: string | null;
+    contextTokens: number | null;
     agentStatus: "running" | "idle";
     subagents: ActiveSubagent[];
 }
@@ -219,11 +220,13 @@ export class SwarmViewModel implements ViewModel {
                 (block?.meta?.["agentProvider"] as string | undefined)?.trim() || null;
             const activitySummary =
                 (block?.meta?.["term:activity"] as string | undefined)?.trim() || null;
+            const rawCtx = block?.meta?.["term:ctx-tokens"];
+            const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
             const children = subagents
                 .filter((s) => s.parent_block_id === blockId)
                 .sort((a, b) => b.last_event_at - a.last_event_at);
-            return { blockId, agentName, agentProvider, activitySummary, agentStatus, subagents: children };
+            return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, subagents: children };
         });
     }
 
