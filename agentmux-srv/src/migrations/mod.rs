@@ -4,9 +4,10 @@
 //! Data migration framework.
 //!
 //! Migrations are versioned steps that run once, either via `agentmux-srv migrate`
-//! or in-process at startup via `run_pending_migrations` when the pending count is
-//! non-zero. The in-process path runs before any store is opened for normal
-//! operation so that `id_store` always binds to a fully-backfilled shared store.
+//! or in-process at startup via `run_pending_migrations` (called unconditionally;
+//! fast-paths to `Ok(0)` when already current). The in-process path runs before
+//! any store is opened for normal operation so that `id_store` always binds to a
+//! fully-backfilled shared store.
 //!
 //! Adding a migration: implement [`Migration`], add it to [`REGISTRY`], add a
 //! file under this module. The ID must be unique and lexicographically ordered
