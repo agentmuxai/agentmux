@@ -415,6 +415,8 @@ window.addEventListener("agentmux-event", ((e: CustomEvent) => {
 
 // Listen for `open_agent` dispatched by the Rust IPC handler (App API).
 // Creates a new agent pane with agentId pre-set so the AgentView auto-launches.
+// Reads the persisted ui:zoom before block creation so term:zoom is seeded
+// in the initial meta — this is the only open path for the normal user flow.
 window.addEventListener("agentmux-open-agent", (async (e: CustomEvent) => {
     const agentId = e.detail?.agentId as string;
     if (!agentId) {
@@ -423,7 +425,24 @@ window.addEventListener("agentmux-open-agent", (async (e: CustomEvent) => {
     }
     try {
         const { createBlock } = await import("@/app/store/global");
-        const blockId = await createBlock({ meta: { view: "agent", agentId } });
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        const { TabRpcClient } = await import("@/app/store/rpc-util");
+        const meta: Record<string, unknown> = { view: "agent", agentId };
+        try {
+            const zoomContent = await RpcApi.GetAgentContentCommand(TabRpcClient, {
+                agent_id: agentId,
+                content_type: "ui:zoom",
+            });
+            if (zoomContent?.content) {
+                const z = parseFloat(zoomContent.content);
+                if (!isNaN(z) && z >= 0.5 && z <= 2.0 && Math.abs(z - 1.0) > 0.001) {
+                    meta["term:zoom"] = z;
+                }
+            }
+        } catch {
+            // zoom lookup is best-effort — open the pane at default zoom
+        }
+        const blockId = await createBlock({ meta });
         console.log(`[open-agent] created agent pane ${blockId} for agent ${agentId}`);
     } catch (err) {
         console.error("[open-agent] failed:", err);
