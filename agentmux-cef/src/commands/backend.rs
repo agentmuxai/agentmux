@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use tokio::io::AsyncBufReadExt as _;
+
 use crate::state::AppState;
 
 /// Get the backend WebSocket and HTTP endpoints.
@@ -143,6 +145,224 @@ pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, 
     );
 
     Ok(serde_json::Value::Null)
+}
+
+/// Trigger an on-demand migration run via `agentmux-srv … migrate`.
+///
+/// Returns `{"started": true}` immediately; progress events are pushed to the
+/// frontend as `upgrade:migration-event` / `upgrade:migrations-complete` /
+/// `upgrade:migrations-failed` CEF events so the Maintenance panel can render
+/// a live stage list without polling.
+pub async fn run_migrations(state: Arc<AppState>) -> Result<serde_json::Value, String> {
+    // In launcher-managed production runs (AGENTMUX_BACKEND_PID set) the live srv
+    // cannot be quiesced before the migrate subprocess runs. Both touch the same
+    // SQLite files, so concurrent writes during the backfill window would be
+    // stranded after the srv restarts. The startup path in agentmux-launcher
+    // srv_spawner.rs already runs migrations before srv starts — restart AgentMux
+    // to apply pending migrations safely from a clean pre-start state.
+    if std::env::var("AGENTMUX_BACKEND_PID").is_ok() {
+        return Err(
+            "Cannot run migrations while the backend is launcher-managed. \
+             Restart AgentMux — the startup migration will run cleanly on next boot."
+                .to_string(),
+        );
+    }
+
+    // Guard: only one run at a time.
+    {
+        let mut running = state.migration_running.lock();
+        if *running {
+            return Err("Migration already in progress".to_string());
+        }
+        *running = true;
+    }
+
+    let data_dir = state.version_data_dir.lock().clone().ok_or_else(|| {
+        *state.migration_running.lock() = false;
+        "Data directory not initialized".to_string()
+    })?;
+
+    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
+    let srv_path = crate::sidecar::resolve_backend_binary_pub("agentmux-srv", exe_suffix)
+        .map_err(|e| {
+            *state.migration_running.lock() = false;
+            e
+        })?;
+
+    tokio::spawn(async move {
+        // Kill the existing sidecar srv before spawning the migrate subprocess.
+        // Both share the same SQLite files; running them concurrently risks lock
+        // contention and mid-backfill write races. Production is blocked above, so
+        // sidecar_child is always the dev-mode owned process here.
+        {
+            let mut sidecar = state.sidecar_child.lock();
+            if let Some(ref mut child) = *sidecar {
+                let _ = child.kill();
+                tracing::info!("[run_migrations] killed sidecar srv before migration");
+            }
+            *sidecar = None;
+        }
+        // Small delay so the OS releases file locks before we open the DB.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        if let Err(e) = run_migrations_inner(state.clone(), srv_path, data_dir).await {
+            // run_migrations_inner only Errs for internal/spawn failures — subprocess
+            // failures emit upgrade:migrations-failed themselves and return Ok(()).
+            tracing::error!("[run_migrations] internal error: {}", e);
+            crate::events::emit_event_to_top_level_windows(
+                &state,
+                "upgrade:migrations-failed",
+                &serde_json::json!({ "error": e, "failedId": null }),
+            );
+        }
+
+        // Always restart srv — we killed the sidecar above regardless of outcome.
+        // This applies to success (applied>0 or applied==0), subprocess failure,
+        // and internal errors equally; without this the session has no working backend.
+        if let Err(e) = restart_backend(state.clone()).await {
+            tracing::warn!("[run_migrations] srv restart after migration: {}", e);
+        }
+
+        *state.migration_running.lock() = false;
+    });
+
+    Ok(serde_json::json!({ "started": true }))
+}
+
+async fn run_migrations_inner(
+    state: Arc<AppState>,
+    srv_path: std::path::PathBuf,
+    data_dir: String,
+) -> Result<(), String> {
+    use tokio::process::Command;
+    use tokio::io::BufReader;
+
+    let mut child = Command::new(&srv_path)
+        .arg("--wavedata")
+        .arg(&data_dir)
+        .arg("migrate")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn agentmux-srv migrate: {}", e))?;
+
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let stderr = child.stderr.take().ok_or("no stderr")?;
+
+    // Drain stderr concurrently; failure reasons are written there only.
+    let stderr_task = tokio::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+        let mut buf = String::new();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if !buf.is_empty() {
+                buf.push('\n');
+            }
+            buf.push_str(&line);
+        }
+        buf
+    });
+
+    let mut lines = BufReader::new(stdout).lines();
+    let mut applied = 0usize;
+    // Tracks the migration currently in flight; becomes failed_id if the process exits non-zero.
+    let mut current_migration_id: Option<String> = None;
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let val: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let event_kind = val.get("event").and_then(|v| v.as_str()).unwrap_or("");
+        match event_kind {
+            "migration_start" => {
+                current_migration_id = val.get("id").and_then(|v| v.as_str()).map(str::to_owned);
+                crate::events::emit_event_to_top_level_windows(
+                    &state,
+                    "upgrade:migration-event",
+                    &serde_json::json!({
+                        "kind": "start",
+                        "id": val.get("id"),
+                        "label": val.get("description"),
+                    }),
+                );
+            }
+            "migration_done" => {
+                current_migration_id = None;
+                crate::events::emit_event_to_top_level_windows(
+                    &state,
+                    "upgrade:migration-event",
+                    &serde_json::json!({
+                        "kind": "done",
+                        "id": val.get("id"),
+                        "duration_ms": val.get("duration_ms"),
+                    }),
+                );
+                applied += 1;
+            }
+            "complete" => {
+                let a = val.get("applied").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                applied = a;
+                crate::events::emit_event_to_top_level_windows(
+                    &state,
+                    "upgrade:migration-event",
+                    &serde_json::json!({
+                        "kind": "complete",
+                        "applied": a,
+                        "skipped": val.get("skipped"),
+                    }),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let status = child.wait().await.map_err(|e| format!("wait failed: {}", e))?;
+    let stderr_output = stderr_task.await.unwrap_or_default();
+
+    if status.success() {
+        *state.pending_migrations.lock() = 0;
+        crate::events::emit_event_to_top_level_windows(
+            &state,
+            "upgrade:migrations-complete",
+            &serde_json::json!({ "applied": applied }),
+        );
+        Ok(())
+    } else {
+        let err = if !stderr_output.is_empty() {
+            stderr_output
+        } else {
+            format!("agentmux-srv migrate exited with code {:?}", status.code())
+        };
+        let failed_id = current_migration_id;
+        crate::events::emit_event_to_top_level_windows(
+            &state,
+            "upgrade:migrations-failed",
+            &serde_json::json!({ "error": err, "failedId": failed_id }),
+        );
+        // Return Ok(()) — event already emitted above. The outer wrapper must not
+        // re-emit a second upgrade:migrations-failed with failedId:null.
+        Ok(())
+    }
+}
+
+/// Trigger an on-demand saga log vacuum.
+///
+/// Stubbed: the `agentmux-srv saga-vacuum` subcommand is not yet implemented.
+/// Returns `{"rows_deleted": 0}` and emits `upgrade:saga-vacuum-done` so the
+/// Maintenance panel's vacuum state machine completes correctly.
+pub async fn run_saga_vacuum(state: Arc<AppState>) -> Result<serde_json::Value, String> {
+    // TODO: spawn `agentmux-srv --wavedata <path> saga-vacuum` once the subcommand exists.
+    tracing::info!("[run_saga_vacuum] stub — returning rows_deleted=0");
+    crate::events::emit_event_to_top_level_windows(
+        &state,
+        "upgrade:saga-vacuum-done",
+        &serde_json::json!({ "rows_deleted": 0 }),
+    );
+    Ok(serde_json::json!({ "rows_deleted": 0 }))
 }
 
 /// Set the window initialization status.

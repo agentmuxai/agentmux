@@ -1,0 +1,171 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Maintenance section — embedded inside InstancePanel.
+// Spec: specs/SPEC_UPGRADE_PANEL_2026_06_27.md
+
+// ── Badge on section title ───────────────────────────────────────────────────
+
+.maintenance-badge {
+    display: inline-block;
+    margin-left: var(--space-1-5);
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--warning-color);
+    letter-spacing: 0;
+    text-transform: none;
+
+    &--error {
+        color: var(--error-color);
+    }
+}
+
+// ── Shared row geometry ──────────────────────────────────────────────────────
+
+.maintenance-update-row,
+.maintenance-alert-row,
+.maintenance-summary-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 3px var(--space-1-5);
+    font-size: 11px;
+    min-height: 24px;
+}
+
+// ── Icons ────────────────────────────────────────────────────────────────────
+
+.maintenance-icon {
+    flex: 0 0 12px;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1;
+
+    &--ok      { color: var(--success-color, #5cb85c); }
+    &--warn    { color: var(--warning-color); }
+    &--error   { color: var(--error-color); }
+    &--update  { color: var(--accent-color); }
+    &--working { color: var(--accent-color); }
+    &--neutral { color: var(--secondary-text-color); opacity: 0.5; }
+}
+
+@keyframes maintenance-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.25; }
+}
+
+.maintenance-pulse {
+    animation: maintenance-pulse 1.4s ease-in-out infinite;
+}
+
+// ── Row text ─────────────────────────────────────────────────────────────────
+
+.maintenance-row-label {
+    flex: 0 0 62px;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+}
+
+.maintenance-row-text {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &--dim   { color: var(--secondary-text-color); }
+    &--warn  { color: var(--warning-color); }
+    &--error { color: var(--error-color); }
+}
+
+// ── Buttons ──────────────────────────────────────────────────────────────────
+
+.maintenance-btn {
+    flex: 0 0 auto;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--main-text-color);
+    padding: 1px 8px;
+    border-radius: 0;
+    font-size: 11px;
+    cursor: default;
+    white-space: nowrap;
+
+    &:hover { background: var(--hover-bg-color); }
+
+    &--primary {
+        background: var(--accent-color);
+        border-color: var(--accent-color);
+        color: var(--button-text-color);
+        font-weight: 600;
+        &:hover { filter: brightness(1.1); }
+    }
+}
+
+// ── Migration stage block ────────────────────────────────────────────────────
+
+.maintenance-migration-block {
+    display: flex;
+    flex-direction: column;
+    padding: 4px var(--space-1-5);
+    gap: 2px;
+}
+
+.maintenance-stage-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 11px;
+    font-weight: 500;
+    padding-bottom: 2px;
+}
+
+.maintenance-error-detail {
+    font-size: 10px;
+    color: var(--error-color);
+    padding: 0 0 4px 20px;
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.maintenance-retry-btn {
+    margin-top: 4px;
+    align-self: flex-start;
+}
+
+// ── Migration sub-rows ───────────────────────────────────────────────────────
+
+.maintenance-sub-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: 16px;
+    font-size: 10px;
+    min-height: 18px;
+}
+
+.maintenance-sub-id {
+    flex: 0 0 36px;
+    font-family: var(--font-mono, monospace);
+    color: var(--secondary-text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.maintenance-sub-label {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+}
+
+.maintenance-timer {
+    flex: 0 0 auto;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    opacity: 0.6;
+    white-space: nowrap;
+}

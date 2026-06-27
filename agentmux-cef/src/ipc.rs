@@ -215,6 +215,8 @@ async fn route_command(
         // ---- Tier 2: Core functionality ----
         "get_backend_info" => Ok(commands::backend::get_backend_info(state)),
         "restart_backend" => commands::backend::restart_backend(state.clone()).await,
+        "run_migrations" => commands::backend::run_migrations(state.clone()).await,
+        "run_saga_vacuum" => commands::backend::run_saga_vacuum(state.clone()).await,
         "close_window" => commands::window::close_window(state, args),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),

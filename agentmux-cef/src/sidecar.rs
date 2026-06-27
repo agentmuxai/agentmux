@@ -423,6 +423,14 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 ///   2. Same dir as CEF host: {name}.exe (dev mode — cargo build output)
 ///   3. Workspace dist/bin/: {name}-{version}-{os}.{arch}.exe
 ///   4. Workspace dist/bin/: {name}.exe (plain fallback)
+/// Public re-export for on-demand command spawns (e.g. maintenance panel's run_migrations).
+pub fn resolve_backend_binary_pub(
+    backend_name: &str,
+    exe_suffix: &str,
+) -> Result<std::path::PathBuf, String> {
+    resolve_backend_binary(backend_name, exe_suffix)
+}
+
 fn resolve_backend_binary(
     backend_name: &str,
     exe_suffix: &str,
