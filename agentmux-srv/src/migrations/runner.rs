@@ -296,9 +296,25 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
 
     let channel_store_path = data_dir.join("db").join("objects.db");
     if let Some(parent) = channel_store_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Err(format!("run_pending_migrations: create channel db dir: {}", e));
+        }
     }
-    let channel_store = Store::open(&channel_store_path).ok();
+    // Fail-closed: if objects.db exists but can't be opened (corruption, lock),
+    // return Err rather than swallowing with .ok(). Silently treating the channel
+    // store as absent would let Global migrations (e.g. 0011_shared_store_backfill)
+    // mark themselves applied while the channel data they were supposed to copy was
+    // never read — permanently stranding those rows.
+    let channel_store = if channel_store_path.exists() {
+        match Store::open(&channel_store_path) {
+            Ok(s) => Some(s),
+            Err(e) => return Err(format!("run_pending_migrations: open channel store: {}", e)),
+        }
+    } else {
+        // Fresh install — channel store does not exist yet; Channel-scoped
+        // migrations that need it will create it themselves.
+        None
+    };
 
     let pending: Vec<_> = REGISTRY.iter().filter(|m| {
         let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
