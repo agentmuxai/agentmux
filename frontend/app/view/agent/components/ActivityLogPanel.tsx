@@ -13,7 +13,7 @@
  * see `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
-import { For, Show, createMemo, createSignal, type Accessor, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, type Accessor, type JSX } from "solid-js";
 import type { LogLine } from "../types";
 
 interface ActivityLogPanelProps {
@@ -23,6 +23,16 @@ interface ActivityLogPanelProps {
 export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
     const [isOpen, setIsOpen] = createSignal(false);
     const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
+
+    // Auto-expand when new entries arrive so bang command output is immediately visible.
+    let prevLength = props.entries().length;
+    createEffect(() => {
+        const len = props.entries().length;
+        if (len > prevLength) {
+            setIsOpen(true);
+        }
+        prevLength = len;
+    });
 
     const mostRecent = createMemo(() => {
         const list = props.entries();
