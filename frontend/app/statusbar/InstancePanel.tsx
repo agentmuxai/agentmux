@@ -16,6 +16,7 @@
  */
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
+import { MaintenanceSection } from "./MaintenanceSection";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
@@ -603,6 +604,10 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         )}
                     </For>
                 </Show>
+            </div>
+            <div class="instance-panel-divider" />
+            <div class="instance-panel-section">
+                <MaintenanceSection />
             </div>
             <div class="instance-panel-divider" />
             <div class="instance-panel-footer">

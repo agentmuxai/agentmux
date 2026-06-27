@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getApi, windowCountAtom, backendStatusAtom, isDev } from "@/store/global";
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
 import { GpuStatus } from "./GpuStatus";
@@ -29,6 +29,16 @@ const StatusBar = (): JSX.Element => {
         setAnchorRect(versionRef?.getBoundingClientRect() ?? null);
         setPanelOpen(true);
     };
+
+    // BackendStatus dot can request the version panel to open (e.g. "Open Maintenance ↗").
+    onMount(() => {
+        const handler = () => {
+            setAnchorRect(versionRef?.getBoundingClientRect() ?? null);
+            setPanelOpen(true);
+        };
+        window.addEventListener("agentmux:open-version-panel", handler);
+        onCleanup(() => window.removeEventListener("agentmux:open-version-panel", handler));
+    });
 
     // Esc + click-outside close. Mirrors TokenBreakdownPopover precedent.
     createEffect(() => {

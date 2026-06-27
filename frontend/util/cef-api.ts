@@ -630,6 +630,14 @@ export function buildCefApi(): AppApi {
             return unlisten;
         },
 
+        // --- Maintenance panel ---
+        runMigrations: async () => {
+            return await invokeCommand<{ started: boolean }>("run_migrations");
+        },
+        runSagaVacuum: async () => {
+            return await invokeCommand<{ rows_deleted: number }>("run_saga_vacuum");
+        },
+
         // --- Cross-window drag ---
         startCrossDrag: async (
             dragType: "pane" | "tab",
