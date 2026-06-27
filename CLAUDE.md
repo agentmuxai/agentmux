@@ -253,7 +253,7 @@ git push -u origin feature-name
 gh pr create --title "Feature" --body "$(cat <<EOF
 Description of the change.
 
-<!-- agentmux:agent_id=${AGENTMUX_AGENT_ID:-smike} -->
+<!-- agentmux:agent_id=${AGENTMUX_AGENT_ID,,} -->
 EOF
 )"
 ```
