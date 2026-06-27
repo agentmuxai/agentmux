@@ -46,17 +46,10 @@ static PANE_OVERLAY_TAG_KEY: u8 = 0;
 static ORIG_RWHVC_SHOULD_IGNORE: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
-// Pane bounds in main-window BridgedContentView Cocoa coordinates (y from bottom).
-// Updated each time SetPaneBoundsViewsTask runs. Read by swizzled_nsapp_send_event
-// to decide whether to intercept events for the main window.
+// Non-zero while a pane overlay is open. Used by swizzled_nsapp_send_event as the
+// gate: if 0 the swizzle is inactive and all events fall through to the original.
 #[cfg(target_os = "macos")]
-static PANE_LOCAL_X:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-#[cfg(target_os = "macos")]
-static PANE_LOCAL_Y_BOTTOM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-#[cfg(target_os = "macos")]
-static PANE_LOCAL_W:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-#[cfg(target_os = "macos")]
-static PANE_LOCAL_H:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+static PANE_LOCAL_W: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
 /// Swizzled NSWindow::isMainWindow — returns YES only for the tagged pane overlay.
 /// All other NativeWidgetMacNSWindow instances (pool windows, etc.) call through
@@ -145,9 +138,6 @@ static MAIN_RWHVC_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::Atomi
 pub(crate) fn clear_pane_swizzle_statics() {
     use std::sync::atomic::Ordering::Relaxed;
     PANE_LOCAL_W.store(0, Relaxed);
-    PANE_LOCAL_X.store(0, Relaxed);
-    PANE_LOCAL_Y_BOTTOM.store(0, Relaxed);
-    PANE_LOCAL_H.store(0, Relaxed);
     MAIN_WIN_PTR.store(0, Relaxed);
     MAIN_RWHVC_PTR.store(0, Relaxed);
     if let Ok(mut guard) = MAIN_BROWSER_HOST_FOR_FOCUS.try_lock() {
@@ -239,7 +229,24 @@ extern "C" fn swizzled_nsapp_send_event(
                     std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap_or("").contains("NativeWidgetMacNSWindow");
 
                 if !is_overlay {
-                    // --- Main window event ---
+                    // Only intercept events for the window that owns the pane.
+                    // On the first leftMouseDown MAIN_WIN_PTR is 0 (unknown); we
+                    // learn it during the subview walk and store it. Once set,
+                    // events for any other window (which has no pane and its own
+                    // focus semantics) fall through to the original sendEvent:.
+                    let known_pane_win = MAIN_WIN_PTR.load(std::sync::atomic::Ordering::Relaxed);
+                    if known_pane_win != 0 && win as usize != known_pane_win {
+                        // Different window — pass through without touching focus.
+                        let orig = ORIG_NSAPP_SEND_EVENT.load(std::sync::atomic::Ordering::SeqCst);
+                        if orig != 0 {
+                            let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) =
+                                std::mem::transmute(orig);
+                            f(this, cmd, event);
+                        }
+                        return;
+                    }
+
+                    // --- Main window event (window that owns the pane) ---
                     // Find the RWHVC to dispatch to. For leftMouseDown we walk
                     // the subview tree fresh (window may have been recreated).
                     // For all other types we reuse the cached pointer as long as
@@ -2722,9 +2729,6 @@ wrap_task! {
                         // If hitTest returns BridgedContentView itself → RenderWidgetHostViewCocoa
                         // is NOT in the overlay's NSView tree → clicks never reach the renderer.
                         #[repr(C)] #[derive(Copy,Clone)] struct LPt { x: f64, y: f64 }
-                        extern "C" {
-                            fn class_getInstanceMethod2(cls: Id, sel: Sel) -> *mut std::ffi::c_void;
-                        }
                         let subviews_sel = sel_registerName(b"subviews\0".as_ptr() as _);
                         let count_sel    = sel_registerName(b"count\0".as_ptr() as _);
                         let subviews = get_id(content_view, subviews_sel);
@@ -2798,24 +2802,13 @@ wrap_task! {
                                 }
                                 let rwhvc_cls = objc_getClass(b"RenderWidgetHostViewCocoa\0".as_ptr() as _);
                                 if !rwhvc_cls.is_null() {
-                                // Store pane bounds in Cocoa local coordinates (y from bottom
-                                // of main BridgedContentView) for the sendEvent: redirect.
-                                // pane_local_y_bottom = main_h - dip_y_from_top - pane_h.
-                                let pane_local_y_bottom = task_main_h - task_dip_y - task_dip_h;
-                                crate::ui_tasks::PANE_LOCAL_X.store(
-                                    task_dip_x, std::sync::atomic::Ordering::SeqCst);
-                                crate::ui_tasks::PANE_LOCAL_Y_BOTTOM.store(
-                                    pane_local_y_bottom, std::sync::atomic::Ordering::SeqCst);
+                                // Mark pane as open so swizzled_nsapp_send_event activates.
                                 crate::ui_tasks::PANE_LOCAL_W.store(
                                     task_dip_w, std::sync::atomic::Ordering::SeqCst);
-                                crate::ui_tasks::PANE_LOCAL_H.store(
-                                    task_dip_h, std::sync::atomic::Ordering::SeqCst);
                                 tracing::info!(
                                     retry = self.retry,
-                                    px = task_dip_x, py = pane_local_y_bottom,
-                                    pw = task_dip_w, ph = task_dip_h,
-                                    main_h = task_main_h,
-                                    "[browser-pane] pane bounds stored for sendEvent redirect"
+                                    pw = task_dip_w,
+                                    "[browser-pane] sendEvent swizzle activated (PANE_LOCAL_W set)"
                                 );
 
                                 // Swizzle shouldIgnoreMouseEvent: → always NO so the main
