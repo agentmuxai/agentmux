@@ -353,7 +353,15 @@ async fn main() {
     // id_store falls back to the per-channel store so that (a) data stays visible
     // and (b) writes don't land in the un-backfilled shared store and trigger
     // m0011's non-empty skip-guards on the next boot (permanent data loss).
-    let migration_ok = match migrations::run_pending_migrations(&base::get_wave_data_dir()) {
+    let wave_data_dir = base::get_wave_data_dir();
+    // Notify the launcher BEFORE running migrations so it can extend its ESTART
+    // deadline. Without this signal the launcher's fixed 30s timeout would kill
+    // srv if a large-dataset migration takes longer to apply.
+    let pre_migration_count = migrations::count_pending_migrations(&wave_data_dir);
+    if pre_migration_count > 0 {
+        eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
+    }
+    let migration_ok = match migrations::run_pending_migrations(&wave_data_dir) {
         Ok(0) => true,
         Ok(n) => { tracing::info!(applied = n, "startup: applied pending migrations"); true }
         Err(e) => { tracing::warn!("startup: migration error — id_store will use per-channel store: {}", e); false }
