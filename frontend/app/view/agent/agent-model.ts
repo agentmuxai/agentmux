@@ -1,6 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createSignal, createEffect } from "solid-js";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -71,6 +72,7 @@ export class AgentViewModel implements ViewModel {
     // currently-active pane wrote it just now). useHistoryPagination
     // sets this on snapshot restore.
     continuedFromMsAtom: SignalAtom<number> = createSignalAtom(0);
+    _activityFlash: () => boolean = () => false;
 
     voiceHandle = (): PaneVoiceHandle => ({
         appendFinal: (text: string) => this.voiceTargetRef.current?.appendFinal(text),
@@ -82,6 +84,19 @@ export class AgentViewModel implements ViewModel {
         this.nodeModel = nodeModel;
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentViewWrapper as any;
+
+        // Flash signal: set true briefly when a new activity summary lands.
+        const [activityFlash, setActivityFlash] = createSignal(false);
+        let flashTimer: ReturnType<typeof setTimeout> | undefined;
+        createEffect(() => {
+            const activity = this.blockAtom()?.meta?.["term:activity"];
+            if (activity) {
+                clearTimeout(flashTimer);
+                setActivityFlash(true);
+                flashTimer = setTimeout(() => setActivityFlash(false), 600);
+            }
+        });
+        this._activityFlash = activityFlash;
 
         // Drive the pane's title from block meta — launching an agent sets
         // `agentName` / `agentIcon` and the frame title automatically picks
@@ -116,14 +131,14 @@ export class AgentViewModel implements ViewModel {
             const elems: HeaderElem[] = [];
 
             // Per-turn live mini-summary from useAgentActivitySummary (Haiku on
-            // every turn completion). Cleared to null on Submitting so the header
-            // goes blank while the agent is working.
+            // every turn completion). Persists across turns; flashes briefly when
+            // a new summary lands.
             const activity = this.blockAtom()?.meta?.["term:activity"] as string | undefined;
             if (activity && activity.length > 0) {
                 elems.push({
                     elemtype: "text",
                     text: activity,
-                    className: "term-activity",
+                    className: this._activityFlash() ? "term-activity term-activity--flash" : "term-activity",
                 });
             }
 

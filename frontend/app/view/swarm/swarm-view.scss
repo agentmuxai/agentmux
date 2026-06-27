@@ -176,6 +176,14 @@
     line-height: 1.4;
     word-break: break-word;
     overflow-wrap: break-word;
+    &.swarm-activity-summary--flash {
+        animation: swarm-activity-flash 0.5s ease-out;
+    }
+}
+
+@keyframes swarm-activity-flash {
+    0%   { opacity: 1; color: var(--accent-color, #6c9ef8); }
+    100% { opacity: 1; color: var(--secondary-text-color); }
 }
 
 // ── Status chip ──────────────────────────────────────────────────────────
