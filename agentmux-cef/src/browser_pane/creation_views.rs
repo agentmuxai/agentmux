@@ -237,55 +237,13 @@ pub fn create_browser_pane_view(
     overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
     parent_window.layout();
 
-    // macOS: capture the overlay's NSWindow windowNumber BEFORE set_visible(0).
-    // CEF shows the overlay visible briefly when add_overlay_view completes;
-    // set_visible(0) (below) calls [NSWindow orderOut:] which removes it from
-    // [NSApp windows]. We scan now — while it is still present — so the deferred
-    // SetPaneBoundsViewsTask can target this exact NSWindow even when multiple
-    // panes are open (with wnum=0 all panes fall back to "highest wnum = newest
-    // NativeWidgetMacNSWindow", causing every task to target the same window).
-    #[cfg(target_os = "macos")]
-    let overlay_wnum: isize = unsafe {
-        use std::ffi::c_char;
-        type Id  = *mut std::ffi::c_void;
-        type Sel = *const std::ffi::c_void;
-        extern "C" {
-            fn sel_registerName(name: *const c_char) -> Sel;
-            fn objc_msgSend();
-            fn object_getClassName(obj: Id) -> *const c_char;
-            fn objc_getClass(name: *const c_char) -> Id;
-        }
-        let get_id:     extern "C" fn(Id, Sel) -> Id       = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-        let get_usize:  extern "C" fn(Id, Sel) -> usize    = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-        let obj_at:     extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-        let get_isize:  extern "C" fn(Id, Sel) -> isize    = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
-        let sel_app     = sel_registerName(b"sharedApplication\0".as_ptr() as _);
-        let sel_windows = sel_registerName(b"windows\0".as_ptr() as _);
-        let sel_count   = sel_registerName(b"count\0".as_ptr() as _);
-        let sel_obj_at  = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
-        let sel_wnum    = sel_registerName(b"windowNumber\0".as_ptr() as _);
-        let ns_cls: Id  = objc_getClass(b"NSApplication\0".as_ptr() as _);
-        let ns_app: Id  = get_id(ns_cls, sel_app);
-        let wins: Id    = get_id(ns_app, sel_windows);
-        let count = if wins.is_null() { 0 } else { get_usize(wins, sel_count) };
-        let mut highest: isize = 0;
-        for i in 0..count {
-            let win = obj_at(wins, sel_obj_at, i);
-            if win.is_null() { continue; }
-            let cls_ptr = object_getClassName(win);
-            let cls = if !cls_ptr.is_null() {
-                std::ffi::CStr::from_ptr(cls_ptr).to_str().unwrap_or("?")
-            } else { "?" };
-            if cls.contains("NativeWidgetMacNSWindow") {
-                let wn = get_isize(win, sel_wnum);
-                if wn > highest { highest = wn; }
-            }
-        }
-        tracing::info!(block_id = %block_id, label = %label, wnum = highest,
-            "[browser-pane] views: captured overlay_wnum before set_visible(0)");
-        highest
-    };
-    #[cfg(not(target_os = "macos"))]
+    // overlay_wnum: the macOS NSWindow windowNumber of the overlay's backing
+    // NativeWidgetMacNSWindow.  The native NSWindow is created asynchronously
+    // during add_overlay_view (the comment at step 7 above confirms "the native
+    // layer doesn't exist yet"), so any scan here would capture a stale wnum.
+    // SetPaneBoundsViewsTask discovers the correct wnum at runtime via a
+    // pre/post-set_visible(1) snapshot delta (see ui_tasks.rs) and propagates
+    // it to the retry=1 reaffirm task.  Pass 0 here to signal "unknown".
     let overlay_wnum: isize = 0;
 
     overlay_controller.set_visible(0); // deferred task will show after bounds commit
