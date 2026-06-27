@@ -2013,6 +2013,11 @@ wrap_task! {
             // to produce 0×0. From this deferred task the parent window IS fully laid out,
             // so set_bounds() should succeed and commit the bounds in CEF's Views layer.
             // The ObjC block additionally sets the NSWindow frame directly.
+            // Wnum of the overlay NSWindow, discovered at retry=0 by delta-detection
+            // (snapshot before/after set_visible) and forwarded to the retry=1 task.
+            #[cfg(target_os = "macos")]
+            let mut discovered_wnum: isize = 0;
+
             #[cfg(target_os = "macos")]
             let (mut task_dip_x, mut task_dip_y, mut task_dip_w, mut task_dip_h) = (0i32, 0i32, 0i32, 0i32);
 
@@ -2057,7 +2062,35 @@ wrap_task! {
                 let make_key_front: extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                 let order_front:    extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
 
-                // Step 1: show the overlay on the first run only, but only if
+                let ns_app_class: Id = objc_getClass(b"NSApplication\0".as_ptr() as _);
+                let ns_app: Id       = get_id(ns_app_class, sel_shared_app);
+
+                // Step 1 (retry=0 only): snapshot which NativeWidgetMacNSWindows
+                // exist BEFORE calling set_visible(1).  Our overlay's NSWindow is
+                // created asynchronously and was hidden via set_visible(0) at
+                // creation; set_visible(1) calls [NSWindow orderFront:] which adds
+                // it back to [NSApp windows].  Comparing before vs after gives the
+                // exact wnum for this pane — safe even with multiple panes open
+                // because the CEF UI thread is single-threaded.
+                let mut pre_wnums: Vec<isize> = Vec::new();
+                if self.retry == 0 {
+                    let pre_wins: Id     = get_id(ns_app, sel_windows_arr);
+                    let pre_count: usize = if pre_wins.is_null() { 0 }
+                                           else { get_usize(pre_wins, sel_count) };
+                    for i in 0..pre_count {
+                        let win = obj_at(pre_wins, sel_obj_at, i);
+                        if win.is_null() { continue; }
+                        let cls_ptr = object_getClassName(win);
+                        let cls = if !cls_ptr.is_null() {
+                            std::ffi::CStr::from_ptr(cls_ptr).to_str().unwrap_or("?")
+                        } else { "?" };
+                        if cls.contains("NativeWidgetMacNSWindow") {
+                            pre_wnums.push(get_isize(win, sel_win_number));
+                        }
+                    }
+                }
+
+                // Step 2: show the overlay on the first run only, but only if
                 // compute_pane_visible agrees — an overlay-clip or zero-area rect
                 // queued between creation and this task (e.g. a modal appeared, or
                 // an inactive-tab resize sent a 0×0 rect) must not be overridden.
@@ -2068,17 +2101,16 @@ wrap_task! {
                     }
                 }
 
-                // Step 2: rescan [NSApp windows] to find the overlay and main window.
-                let ns_app_class: Id = objc_getClass(b"NSApplication\0".as_ptr() as _);
-                let ns_app: Id       = get_id(ns_app_class, sel_shared_app);
+                // Step 3: rescan [NSApp windows] AFTER set_visible(1) to find the
+                // overlay and main window.
                 let all_wins: Id     = get_id(ns_app, sel_windows_arr);
                 let win_count: usize = if all_wins.is_null() { 0 }
                                        else { get_usize(all_wins, sel_count) };
 
                 let mut overlay_win: Id = std::ptr::null_mut();
                 let mut main_win:    Id = std::ptr::null_mut();
-                // Highest windowNumber among NativeWidgetMacNSWindows (for fallback
-                // when overlay_wnum is unknown — newest window = highest number).
+                // Highest windowNumber among NativeWidgetMacNSWindows — fallback for
+                // retry>=1 when self.overlay_wnum is still 0 (pane was hidden at retry=0).
                 let mut highest_native_wnum: isize = 0;
                 let mut highest_native_win: Id = std::ptr::null_mut();
 
@@ -2103,7 +2135,14 @@ wrap_task! {
                         main_win = win;
                     }
                     if cls.contains("NativeWidgetMacNSWindow") {
-                        if self.overlay_wnum > 0 && wn == self.overlay_wnum {
+                        // Primary at retry=0: delta detection — this wnum was not
+                        // present before set_visible(1), so it is our overlay.
+                        if self.retry == 0 && !pre_wnums.contains(&wn) {
+                            overlay_win = win;
+                            discovered_wnum = wn;
+                        }
+                        // Primary at retry>=1: exact wnum match from retry=0.
+                        if self.retry >= 1 && self.overlay_wnum > 0 && wn == self.overlay_wnum {
                             overlay_win = win;
                         }
                         if wn > highest_native_wnum {
@@ -2113,9 +2152,8 @@ wrap_task! {
                     }
                 }
 
-                // Fallback: if wnum-based lookup missed (e.g. overlay_wnum==0 because
-                // the pre-hide scan ran before the NSWindow existed), use the newest
-                // NativeWidgetMacNSWindow (highest windowNumber = most recently created).
+                // Fallback: delta/wnum match missed (pane hidden at retry=0, or
+                // wnum still 0 at retry>=1).  Use newest NativeWidgetMacNSWindow.
                 if overlay_win.is_null() && !highest_native_win.is_null() {
                     overlay_win = highest_native_win;
                     tracing::info!(
@@ -2175,22 +2213,22 @@ wrap_task! {
                     if s > 0.0 { s } else { 1.0 }
                 };
 
-                // At retry>=1 prefer the controller's current CEF bounds (which
-                // reflect any resize queued between creation and this task) over
-                // the stale creation-time self.x/y/width/height. Fall back to
-                // creation-time values only if the controller still reports 0×0.
-                let (src_x, src_y, src_w, src_h) = {
+                // At retry>=1 the controller holds the DIP values committed by
+                // controller.set_bounds() at retry=0.  Do NOT divide by scale
+                // again — those values are already NSWindow points.  The creation-
+                // time self.x/y/width/height are physical pixels and DO need the
+                // division; use them only at retry=0 or when controller reads back 0×0.
+                let (pane_x, pane_y, pane_w, pane_h) = {
                     let cb = controller.bounds();
-                    if cb.width > 0 && cb.height > 0 && self.retry >= 1 {
-                        (cb.x, cb.y, cb.width, cb.height)
+                    if self.retry >= 1 && cb.width > 0 && cb.height > 0 {
+                        // Already DIP/points — no scale division.
+                        (cb.x as f64, cb.y as f64, cb.width as f64, cb.height as f64)
                     } else {
-                        (self.x, self.y, self.width, self.height)
+                        // Physical pixels → NSWindow points.
+                        (self.x as f64 / scale, self.y as f64 / scale,
+                         self.width as f64 / scale, self.height as f64 / scale)
                     }
                 };
-                let pane_x = src_x as f64 / scale;
-                let pane_y = src_y as f64 / scale;
-                let pane_w = src_w as f64 / scale;
-                let pane_h = src_h as f64 / scale;
                 let screen_x = main_frame.origin.x + pane_x;
                 let screen_y = main_frame.origin.y + main_frame.size.h - pane_y - pane_h;
 
@@ -2261,13 +2299,16 @@ wrap_task! {
             // re-applies the correct frame — at that point it stays permanently.
             #[cfg(target_os = "macos")]
             if self.retry == 0 {
+                // Pass the wnum discovered by delta-detection above so retry=1
+                // can find the overlay by exact match instead of falling back to
+                // "highest NativeWidgetMacNSWindow" (which fails with ≥2 panes).
                 let mut reaffirm = SetPaneBoundsViewsTask::new(
                     self.state.clone(),
                     self.label.clone(),
                     self.window_label.clone(),
                     self.x, self.y, self.width, self.height,
                     1, // retry=1: skip set_visible(1), just reaffirm frame
-                    self.overlay_wnum,
+                    discovered_wnum,
                 );
                 post_delayed_task(ThreadId::UI, Some(&mut reaffirm), 50);
             }
