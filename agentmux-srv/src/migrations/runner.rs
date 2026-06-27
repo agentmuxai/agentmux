@@ -300,20 +300,14 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
             return Err(format!("run_pending_migrations: create channel db dir: {}", e));
         }
     }
-    // Fail-closed: if objects.db exists but can't be opened (corruption, lock),
-    // return Err rather than swallowing with .ok(). Silently treating the channel
-    // store as absent would let Global migrations (e.g. 0011_shared_store_backfill)
-    // mark themselves applied while the channel data they were supposed to copy was
-    // never read — permanently stranding those rows.
-    let channel_store = if channel_store_path.exists() {
-        match Store::open(&channel_store_path) {
-            Ok(s) => Some(s),
-            Err(e) => return Err(format!("run_pending_migrations: open channel store: {}", e)),
-        }
-    } else {
-        // Fresh install — channel store does not exist yet; Channel-scoped
-        // migrations that need it will create it themselves.
-        None
+    // Always open/create the channel store, mirroring run_migrate_command (runner.rs:85-98).
+    // Skipping it on fresh install left Channel-scoped migrations (0002/0003/0007)
+    // out of the pending list, so they were never marked applied. When wstore then
+    // created objects.db, count_pending_migrations at ESTART time reported them as
+    // pending and fired the "Migration failed" UI warning on every fresh first launch.
+    let channel_store = match Store::open(&channel_store_path) {
+        Ok(s) => Some(s),
+        Err(e) => return Err(format!("run_pending_migrations: open channel store: {}", e)),
     };
 
     let pending: Vec<_> = REGISTRY.iter().filter(|m| {

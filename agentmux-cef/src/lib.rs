@@ -609,7 +609,15 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
                     endpoints.ws_endpoint = result.ws_endpoint.clone();
                     endpoints.web_endpoint = result.web_endpoint.clone();
                 }
-                *app_state.pending_migrations.lock() = result.pending_migrations;
+                // Only update pending_migrations from the ESTART result on the
+                // host-owned spawn_backend path (result.pending_migrations > 0
+                // is meaningful). On the launcher path use_launcher_endpoints
+                // returns 0 and the real count is already in AppState from
+                // AGENTMUX_PENDING_MIGRATIONS — overwriting with 0 would
+                // clobber it.
+                if result.pending_migrations > 0 {
+                    *app_state.pending_migrations.lock() = result.pending_migrations;
+                }
                 tracing::info!(
                     "Backend ready: ws={} web={}",
                     result.ws_endpoint,
