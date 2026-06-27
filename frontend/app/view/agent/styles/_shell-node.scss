@@ -217,12 +217,11 @@
 
 .agent-activity-summary {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-1);
-    padding: var(--space-1) var(--space-2);
+    padding: 2px var(--space-2);
     cursor: default;
     user-select: none;
-    min-height: 24px;
 
     &:hover { background: var(--hover-bg-color, rgba(255, 255, 255, 0.04)); }
 }
@@ -277,12 +276,8 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    // The summary row is `align-items: baseline` (so the text baselines line up);
-    // without this the taller button hangs off the text baseline. Center it in
-    // the row instead.
-    align-self: center;
-    min-width: 32px;
-    height: 32px;
+    align-self: stretch;
+    min-width: 28px;
     appearance: none;
     border: 1px solid transparent;
     background: transparent;
