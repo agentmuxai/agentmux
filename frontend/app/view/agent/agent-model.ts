@@ -1,7 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, createEffect } from "solid-js";
+import { createSignal, createEffect, onCleanup } from "solid-js";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -85,17 +85,22 @@ export class AgentViewModel implements ViewModel {
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentViewWrapper as any;
 
-        // Flash signal: set true briefly when a new activity summary lands.
+        // Flash signal: set true briefly when term:activity changes to a new
+        // non-empty value. Compare to previous so unrelated meta writes (status,
+        // agentName, etc.) during an active turn don't trigger spurious flashes.
         const [activityFlash, setActivityFlash] = createSignal(false);
         let flashTimer: ReturnType<typeof setTimeout> | undefined;
+        let prevActivity: string | undefined;
         createEffect(() => {
-            const activity = this.blockAtom()?.meta?.["term:activity"];
-            if (activity) {
+            const activity = this.blockAtom()?.meta?.["term:activity"] as string | undefined;
+            if (activity && activity !== prevActivity) {
                 clearTimeout(flashTimer);
                 setActivityFlash(true);
                 flashTimer = setTimeout(() => setActivityFlash(false), 600);
             }
+            prevActivity = activity;
         });
+        onCleanup(() => clearTimeout(flashTimer));
         this._activityFlash = activityFlash;
 
         // Drive the pane's title from block meta — launching an agent sets
