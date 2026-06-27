@@ -17,6 +17,486 @@ use std::sync::Arc;
 use cef::*;
 use crate::state::AppState;
 
+// macOS: swizzle storage for RenderWidgetHostViewCocoa::mouseDown: diagnostic.
+// Set once (retry=0 of the first pane); subsequent tasks skip if already set.
+#[cfg(target_os = "macos")]
+static ORIG_RWHVC_MOUSE_DOWN: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(target_os = "macos")]
+static ORIG_RWHVC_MOUSE_UP: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+// macOS: swizzle storage for NativeWidgetMacNSWindow::isMainWindow / isKeyWindow.
+// The swizzled implementations check objc_getAssociatedObject on `self` — only the
+// specific overlay NSWindow instance is tagged, so pool windows (same class) are
+// unaffected and continue returning their real values.
+#[cfg(target_os = "macos")]
+static ORIG_IS_MAIN_WINDOW: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(target_os = "macos")]
+static ORIG_IS_KEY_WINDOW: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+// Stores the main browser's CefBrowserHost so swizzled_nsapp_send_event can call
+// set_focus(1) right before dispatching a click, ensuring Blink isn't in a
+// defocused state that drops events.
+#[cfg(target_os = "macos")]
+static MAIN_BROWSER_HOST_FOR_FOCUS: std::sync::Mutex<Option<cef::BrowserHost>> =
+    std::sync::Mutex::new(None);
+
+// Unique static address used as the objc_setAssociatedObject key for the overlay tag.
+#[cfg(target_os = "macos")]
+static PANE_OVERLAY_TAG_KEY: u8 = 0;
+
+// hitTest: swizzle storage. Returns nil for the overlay RWHVC when the click lands
+// outside the pane bounds, so the click falls through to the main RWHVC below.
+#[cfg(target_os = "macos")]
+static ORIG_RWHVC_HIT_TEST: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+// shouldIgnoreMouseEvent: swizzle storage. Original returns YES when the RWHVC's
+// window is not key/main, silently dropping mouseDown:. We override to always NO.
+#[cfg(target_os = "macos")]
+static ORIG_RWHVC_SHOULD_IGNORE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+// Pane bounds in main-window BridgedContentView Cocoa coordinates (y from bottom).
+// Updated each time SetPaneBoundsViewsTask runs. Read by swizzled_rwhvc_hit_test
+// to decide whether an overlay RWHVC click is in-pane or out-of-pane.
+#[cfg(target_os = "macos")]
+static PANE_LOCAL_X:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+#[cfg(target_os = "macos")]
+static PANE_LOCAL_Y_BOTTOM: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+#[cfg(target_os = "macos")]
+static PANE_LOCAL_W:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+#[cfg(target_os = "macos")]
+static PANE_LOCAL_H:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// NSPoint-compatible struct for use in hitTest: swizzle (parameter, not return).
+/// Passed as HFA (two f64) on arm64 (d0/d1) and as XMM0 on x86_64.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct ObjcPoint { x: f64, y: f64 }
+
+/// Helper: temporarily make `win` the key window, call `body(this, cmd, event)`,
+/// then restore `restore_win` as key. This lets RWHVC's internal `isKeyWindow`
+/// check pass for the overlay window without permanently stealing key status.
+#[cfg(target_os = "macos")]
+unsafe fn with_temp_key_window(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+    event: *mut std::ffi::c_void,
+    orig: usize,
+) {
+    use std::ffi::c_void;
+    extern "C" { fn objc_msgSend(); fn sel_registerName(n: *const i8) -> *const c_void; }
+    type Id  = *mut c_void;
+    type Sel = *const c_void;
+    let get_id: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let call0: extern "C" fn(Id, Sel)        = std::mem::transmute(objc_msgSend as *const c_void);
+    let sel_win        = sel_registerName(b"window\0".as_ptr() as _);
+    let sel_mk         = sel_registerName(b"makeKeyWindow\0".as_ptr() as _);
+    let sel_app        = sel_registerName(b"sharedApplication\0".as_ptr() as _);
+    let sel_kw         = sel_registerName(b"keyWindow\0".as_ptr() as _);
+    let sel_mw         = sel_registerName(b"mainWindow\0".as_ptr() as _);
+    let ns_app_cls: Id = {
+        extern "C" { fn objc_getClass(name: *const i8) -> Id; }
+        objc_getClass(b"NSApplication\0".as_ptr() as _)
+    };
+    let app        = get_id(ns_app_cls, sel_app);
+    let prev_key   = get_id(app, sel_kw);
+    let prev_main  = get_id(app, sel_mw);
+    let overlay_win = get_id(this as Id, sel_win);
+
+    // Make overlay temporarily key so RWHVC::mouseDown: passes isKeyWindow check
+    if !overlay_win.is_null() { call0(overlay_win, sel_mk); }
+
+    // Call the original mouseDown:/mouseUp: — now [self.window isKeyWindow] → YES
+    if orig != 0 {
+        let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) = std::mem::transmute(orig);
+        f(this, cmd, event);
+    }
+
+    // Restore: make main window key again so sidebar clicks still work
+    let restore = if !prev_key.is_null() { prev_key } else { prev_main };
+    if !restore.is_null() { call0(restore, sel_mk); }
+}
+
+/// Swizzled RWHVC::mouseDown: — restores first-responder before forwarding.
+///
+/// Chromium's `shouldIgnoreMouseEvent:` returns YES if
+/// `[self.window firstResponder] != self` (and `acceptsMouseEvents` is NO).
+/// After a pane click, the pane's BridgedContentView/RWHVC steals firstResponder
+/// in the main CefNSWindow. Subsequent main-area clicks reach the correct RWHVC
+/// via hitTest, but `shouldIgnoreMouseEvent` silently drops them because the
+/// main RWHVC is no longer the window's first responder.
+/// Fix: `makeFirstResponder:this` before calling the original so the check passes.
+#[cfg(target_os = "macos")]
+extern "C" fn swizzled_rwhvc_mouse_down(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+    event: *mut std::ffi::c_void,
+) {
+    use std::ffi::c_void;
+    extern "C" { fn objc_msgSend(); fn sel_registerName(n: *const i8) -> *const c_void; }
+    type Id  = *mut c_void;
+    type Sel = *const c_void;
+
+    unsafe {
+        extern "C" {
+            fn object_getClass(obj: Id) -> Id;
+            fn object_getClassName(cls: Id) -> *const i8;
+        }
+        let get_id:    extern "C" fn(Id, Sel) -> Id     = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_i64:   extern "C" fn(Id, Sel) -> i64    = std::mem::transmute(objc_msgSend as *const c_void);
+        let call_id:   extern "C" fn(Id, Sel, Id) -> u8 = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let sel_window    = sel_registerName(b"window\0".as_ptr() as _);
+        let sel_fr        = sel_registerName(b"firstResponder\0".as_ptr() as _);
+        let sel_mfr       = sel_registerName(b"makeFirstResponder:\0".as_ptr() as _);
+        let sel_wnum      = sel_registerName(b"windowNumber\0".as_ptr() as _);
+        let sel_ev_wnum   = sel_registerName(b"windowNumber\0".as_ptr() as _);
+
+        let win    = get_id(this as Id, sel_window);
+        let fr     = if !win.is_null() { get_id(win, sel_fr) } else { std::ptr::null_mut() };
+        let wnum   = if !win.is_null() { get_i64(win, sel_wnum) } else { -1 };
+        let ev_wnum = get_i64(event as Id, sel_ev_wnum);
+
+        let win_cls_name = if !win.is_null() {
+            let cls = object_getClass(win);
+            if !cls.is_null() {
+                let ptr = object_getClassName(cls);
+                if !ptr.is_null() { std::ffi::CStr::from_ptr(ptr).to_str().unwrap_or("?").to_string() }
+                else { "?".into() }
+            } else { "?".into() }
+        } else { "null".into() };
+
+        tracing::info!(
+            this      = this as usize,
+            fr        = fr as usize,
+            is_fr     = (fr == this as Id) as u8,
+            wnum,
+            ev_wnum,
+            win_cls   = %win_cls_name,
+            "[browser-pane] RWHVC mouseDown: fired"
+        );
+
+        // If we're not already the first responder, claim it now so
+        // shouldIgnoreMouseEvent: passes its firstResponder check.
+        if !win.is_null() && fr != this as Id {
+            call_id(win, sel_mfr, this as Id);
+        }
+    }
+
+    let orig = ORIG_RWHVC_MOUSE_DOWN.load(std::sync::atomic::Ordering::SeqCst);
+    if orig != 0 {
+        let f: extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, *mut std::ffi::c_void) =
+            unsafe { std::mem::transmute(orig) };
+        f(this, cmd, event);
+    }
+}
+
+/// Swizzled RWHVC::mouseUp: — logs and forwards.
+#[cfg(target_os = "macos")]
+extern "C" fn swizzled_rwhvc_mouse_up(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+    event: *mut std::ffi::c_void,
+) {
+    tracing::info!(this = this as usize, "[browser-pane] RWHVC mouseUp: fired");
+    let orig = ORIG_RWHVC_MOUSE_UP.load(std::sync::atomic::Ordering::SeqCst);
+    if orig != 0 {
+        let f: extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, *mut std::ffi::c_void) =
+            unsafe { std::mem::transmute(orig) };
+        f(this, cmd, event);
+    }
+}
+
+/// Swizzled NSWindow::isMainWindow — returns YES only for the tagged pane overlay.
+/// All other NativeWidgetMacNSWindow instances (pool windows, etc.) call through
+/// to the original implementation and return their real value.
+#[cfg(target_os = "macos")]
+extern "C" fn swizzled_is_main_window(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+) -> u8 {
+    extern "C" {
+        fn objc_getAssociatedObject(
+            obj: *mut std::ffi::c_void,
+            key: *const std::ffi::c_void,
+        ) -> *mut std::ffi::c_void;
+    }
+    let key = &PANE_OVERLAY_TAG_KEY as *const u8 as *const std::ffi::c_void;
+    let tag = unsafe { objc_getAssociatedObject(this, key) };
+    if !tag.is_null() { return 1; }
+    let orig = ORIG_IS_MAIN_WINDOW.load(std::sync::atomic::Ordering::SeqCst);
+    if orig != 0 {
+        let f: extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void) -> u8 =
+            unsafe { std::mem::transmute(orig) };
+        return f(this, cmd);
+    }
+    0
+}
+
+/// Swizzled NSWindow::isKeyWindow — same instance-aware pattern as isMainWindow.
+#[cfg(target_os = "macos")]
+extern "C" fn swizzled_is_key_window(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+) -> u8 {
+    extern "C" {
+        fn objc_getAssociatedObject(
+            obj: *mut std::ffi::c_void,
+            key: *const std::ffi::c_void,
+        ) -> *mut std::ffi::c_void;
+    }
+    let key = &PANE_OVERLAY_TAG_KEY as *const u8 as *const std::ffi::c_void;
+    let tag = unsafe { objc_getAssociatedObject(this, key) };
+    if !tag.is_null() { return 1; }
+    let orig = ORIG_IS_KEY_WINDOW.load(std::sync::atomic::Ordering::SeqCst);
+    if orig != 0 {
+        let f: extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void) -> u8 =
+            unsafe { std::mem::transmute(orig) };
+        return f(this, cmd);
+    }
+    0
+}
+
+/// Swizzled `RenderWidgetHostViewCocoa::hitTest:`.
+///
+/// The overlay BrowserView's RWHVC ends up in the main CefNSWindow's
+/// BridgedContentView at frame (0,0,W,H) — covering the entire window.
+/// Because hitTest walks from front to back, it always returns the overlay
+/// RWHVC for every click in the main window, routing all events to the pane
+/// browser and leaving the main SolidJS UI unresponsive.
+///
+/// Fix: when the RWHVC lives in NativeWidgetMacNSWindow (the overlay window)
+/// and the click lands OUTSIDE the stored pane bounds, return nil so the hit
+/// walk continues to the main RWHVC below. Clicks inside the pane bounds pass
+/// through to the original implementation as before.
+#[cfg(target_os = "macos")]
+extern "C" fn swizzled_rwhvc_hit_test(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+    pt: ObjcPoint,
+) -> *mut std::ffi::c_void {
+    use std::ffi::c_void;
+    type Id  = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn objc_msgSend();
+        fn sel_registerName(n: *const i8) -> Sel;
+        fn object_getClass(obj: Id) -> Id;
+        fn object_getClassName(cls: Id) -> *const i8;
+    }
+    let pw = PANE_LOCAL_W.load(std::sync::atomic::Ordering::Relaxed);
+    if pw > 0 {
+        unsafe {
+            let get_id: extern "C" fn(Id, Sel) -> Id =
+                std::mem::transmute(objc_msgSend as *const c_void);
+            let sel_win = sel_registerName(b"window\0".as_ptr() as _);
+            let win = get_id(this as Id, sel_win);
+            if !win.is_null() {
+                let win_cls = object_getClass(win);
+                if !win_cls.is_null() {
+                    let name_ptr = object_getClassName(win_cls);
+                    if !name_ptr.is_null() {
+                        let s = std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap_or("");
+                        if s.contains("NativeWidgetMacNSWindow") {
+                            let px = PANE_LOCAL_X.load(std::sync::atomic::Ordering::Relaxed) as f64;
+                            let py = PANE_LOCAL_Y_BOTTOM.load(std::sync::atomic::Ordering::Relaxed) as f64;
+                            let pw2 = pw as f64;
+                            let ph = PANE_LOCAL_H.load(std::sync::atomic::Ordering::Relaxed) as f64;
+                            if pt.x < px || pt.x >= px + pw2 || pt.y < py || pt.y >= py + ph {
+                                tracing::info!(
+                                    this = this as usize, x = pt.x, y = pt.y,
+                                    px, py, pw = pw2, ph,
+                                    "[browser-pane] hitTest nil → out-of-pane click falls to main RWHVC"
+                                );
+                                return std::ptr::null_mut();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let orig = ORIG_RWHVC_HIT_TEST.load(std::sync::atomic::Ordering::SeqCst);
+    if orig != 0 {
+        unsafe {
+            let f: extern "C" fn(*mut c_void, *const c_void, ObjcPoint) -> *mut c_void =
+                std::mem::transmute(orig);
+            f(this, cmd, pt)
+        }
+    } else {
+        this
+    }
+}
+
+/// Swizzled `RenderWidgetHostViewCocoa::shouldIgnoreMouseEvent:` — always returns NO.
+///
+/// Chromium's implementation returns YES when `[self.window isMainWindow]` and
+/// `[self.window isKeyWindow]` are both NO, causing mouseDown: to silently drop
+/// the event. The main CefNSWindow is neither key nor main while the overlay holds
+/// focus. Returning NO unconditionally lets the main RWHVC forward clicks to the
+/// main browser renderer even while the overlay is frontmost.
+#[cfg(target_os = "macos")]
+extern "C" fn swizzled_should_ignore_mouse_event(
+    _this: *mut std::ffi::c_void,
+    _cmd: *const std::ffi::c_void,
+    _event: *mut std::ffi::c_void,
+) -> u8 {
+    0
+}
+
+// Storage for NSApp::sendEvent: original IMP — diagnostic only.
+#[cfg(target_os = "macos")]
+static ORIG_NSAPP_SEND_EVENT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Swizzled NSApplication::sendEvent: — for clicks on the main window while the
+/// browser pane is open, bypasses NSWindow.sendEvent: and dispatches directly
+/// to the main RenderWidgetHostViewCocoa after restoring CEF focus.
+///
+/// Why direct dispatch:
+///   When the pane overlay is frontmost the main window is not the key window.
+///   NSWindow.sendEvent: has "activate-only" semantics for non-key windows: it
+///   activates (makeKeyAndOrderFront:) the window but may not forward the event
+///   to the hit view. Directly calling [rwhvc mouseDown: event] bypasses this
+///   check — confirmed working in the overlay-redirect path where the same
+///   technique delivered events successfully ([AMX-DIAG-MD] hasFocus=true).
+///
+///   set_focus(1) must be called before dispatch so Blink's
+///   RenderWidgetHostImpl does not drop the event (CEF calls set_focus(0) on
+///   the main browser whenever the overlay gains focus).
+///
+/// Overlay clicks (pane area, NativeWidgetMacNSWindow) are forwarded via the
+/// original NSApp sendEvent: so the pane browser handles them normally.
+#[cfg(target_os = "macos")]
+extern "C" fn swizzled_nsapp_send_event(
+    this: *mut std::ffi::c_void,
+    cmd: *const std::ffi::c_void,
+    event: *mut std::ffi::c_void,
+) {
+    use std::ffi::c_void;
+    extern "C" { fn objc_msgSend(); fn sel_registerName(n: *const i8) -> *const c_void; }
+    extern "C" { fn object_getClass(obj: *mut c_void) -> *mut c_void; fn object_getClassName(cls: *mut c_void) -> *const i8; }
+    type Id  = *mut c_void;
+    type Sel = *const c_void;
+
+    unsafe {
+        let get_usize: extern "C" fn(Id, Sel) -> usize   = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_id:    extern "C" fn(Id, Sel) -> Id       = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_usize2:extern "C" fn(Id, Sel, usize) -> Id= std::mem::transmute(objc_msgSend as *const c_void);
+        #[repr(C)] #[derive(Copy,Clone)] struct NSPoint { x: f64, y: f64 }
+        let get_pt: extern "C" fn(Id, Sel) -> NSPoint     = std::mem::transmute(objc_msgSend as *const c_void);
+
+        let sel_type = sel_registerName(b"type\0".as_ptr() as _);
+        let ev_type  = get_usize(event, sel_type);
+
+        // leftMouseDown=1, leftMouseUp=2, scrollWheel=22
+        if (ev_type == 1 || ev_type == 2 || ev_type == 22)
+            && PANE_LOCAL_W.load(std::sync::atomic::Ordering::Relaxed) > 0
+        {
+            let sel_win = sel_registerName(b"window\0".as_ptr() as _);
+            let sel_loc = sel_registerName(b"locationInWindow\0".as_ptr() as _);
+            let sel_wn  = sel_registerName(b"windowNumber\0".as_ptr() as _);
+            let win = get_id(event, sel_win);
+            let loc = get_pt(event, sel_loc);
+
+            if ev_type == 1 {
+                let wnum = get_usize(event, sel_wn) as i64;
+                tracing::info!(
+                    wnum, win = win as usize, loc_x = loc.x, loc_y = loc.y,
+                    "[nsapp-diag] leftMouseDown → wnum={} win={:#x} loc=({:.1},{:.1})",
+                    wnum, win as usize, loc.x, loc.y
+                );
+            }
+
+            if !win.is_null() {
+                // Check if this event is for the overlay (NativeWidgetMacNSWindow
+                // = pane browser window). Overlay events go to the pane browser
+                // via the original sendEvent: path — no intervention needed.
+                let win_cls  = object_getClass(win);
+                let name_ptr = object_getClassName(win_cls);
+                let is_overlay = !name_ptr.is_null() &&
+                    std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap_or("").contains("NativeWidgetMacNSWindow");
+
+                if !is_overlay {
+                    // Main window click. Walk its contentView subview tree to
+                    // find the RenderWidgetHostViewCocoa and dispatch directly,
+                    // bypassing NSWindow.sendEvent: which has activate-only
+                    // semantics for non-key windows.
+                    let sel_cv     = sel_registerName(b"contentView\0".as_ptr() as _);
+                    let sel_subs   = sel_registerName(b"subviews\0".as_ptr() as _);
+                    let sel_count  = sel_registerName(b"count\0".as_ptr() as _);
+                    let sel_obj_at = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
+
+                    let cv = get_id(win, sel_cv);
+                    let mut rwhvc: Id = std::ptr::null_mut();
+                    let mut stack: Vec<Id> = if cv.is_null() { vec![] } else { vec![cv] };
+                    'walk: while let Some(view) = stack.pop() {
+                        let vcls = object_getClass(view);
+                        let vname_ptr = object_getClassName(vcls);
+                        if !vname_ptr.is_null() {
+                            let vname = std::ffi::CStr::from_ptr(vname_ptr).to_str().unwrap_or("");
+                            if vname.contains("RenderWidgetHostViewCocoa") {
+                                rwhvc = view;
+                                break 'walk;
+                            }
+                        }
+                        let subs = get_id(view, sel_subs);
+                        if !subs.is_null() {
+                            let n = get_usize(subs, sel_count);
+                            for i in 0..n { stack.push(get_usize2(subs, sel_obj_at, i)); }
+                        }
+                    }
+
+                    if !rwhvc.is_null() {
+                        // Restore main browser focus so Blink doesn't drop the
+                        // event (CEF called set_focus(0) when the pane overlay
+                        // gained focus; we undo that here before dispatch).
+                        if let Ok(mut guard) = crate::ui_tasks::MAIN_BROWSER_HOST_FOR_FOCUS.try_lock() {
+                            if let Some(ref mut h) = *guard {
+                                h.set_focus(1);
+                            }
+                        }
+                        let method_name: &[u8] = match ev_type {
+                            1  => b"mouseDown:\0",
+                            2  => b"mouseUp:\0",
+                            22 => b"scrollWheel:\0",
+                            _  => b"mouseDown:\0",
+                        };
+                        let sel_m = sel_registerName(method_name.as_ptr() as _);
+                        let dispatch_fn: extern "C" fn(Id, Sel, Id) =
+                            std::mem::transmute(objc_msgSend as *const c_void);
+                        if ev_type == 1 {
+                            tracing::info!(
+                                ev_type, loc_x = loc.x, loc_y = loc.y,
+                                target = rwhvc as usize,
+                                "[browser-pane] direct dispatch: main-win→main RWHVC ev={}",
+                                ev_type
+                            );
+                        }
+                        dispatch_fn(rwhvc, sel_m, event);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    let orig = ORIG_NSAPP_SEND_EVENT.load(std::sync::atomic::Ordering::SeqCst);
+    if orig != 0 {
+        let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) =
+            unsafe { std::mem::transmute(orig) };
+        f(this, cmd, event);
+    }
+}
+
 /// Get the CEF Views Window for a browser label on the UI thread.
 fn get_window_on_ui(state: &Arc<AppState>, label: &str) -> Option<Window> {
     // Phase H.2.b — reducer-aware lookup with fallback.
@@ -1947,33 +2427,8 @@ wrap_task! {
             };
 
             // CEF Views sizing — no-ops on macOS, functional on Linux.
-            // On macOS at retry=0, skip re-applying creation-time bounds: a resize
-            // queued between creation and this task would already have called
-            // set_size/set_position with the correct new values, and overwriting
-            // them here would roll that back. At retry>=1 the controller bounds
-            // reflect any intervening resize and we read them back for the ObjC
-            // frame reaffirm instead of using the stale creation-time self.x/y/w/h.
-            #[cfg(not(target_os = "macos"))]
-            {
-                // Only apply creation-time bounds if no resize has occurred yet.
-                // A browser_pane_resize queued between creation and this task
-                // already updated the controller; overwriting it would roll back.
-                let cb = controller.bounds();
-                if cb.width == 0 && cb.height == 0 {
-                    controller.set_size(Some(&Size { width: self.width, height: self.height }));
-                    controller.set_position(Some(&Point { x: self.x, y: self.y }));
-                }
-            }
-            #[cfg(target_os = "macos")]
-            if self.retry == 0 {
-                // retry=0: only set_size/set_position if controller bounds are
-                // still 0×0 (no resize has happened yet); otherwise leave them alone.
-                let cb = controller.bounds();
-                if cb.width == 0 && cb.height == 0 {
-                    controller.set_size(Some(&Size { width: self.width, height: self.height }));
-                    controller.set_position(Some(&Point { x: self.x, y: self.y }));
-                }
-            }
+            controller.set_size(Some(&Size { width: self.width, height: self.height }));
+            controller.set_position(Some(&Point { x: self.x, y: self.y }));
             // Skip window.layout() on macOS: it schedules a deferred CEF Views layout
             // pass that calls NativeWidgetMac::SetBoundsRect(0,0,0,0) AFTER our ObjC
             // setFrame, resetting the overlay to off-screen and re-engaging its event
@@ -1992,13 +2447,10 @@ wrap_task! {
                 "[browser-pane] views: SetPaneBoundsViewsTask: CEF bounds (macos)"
             );
 
-            // Linux: CEF Views sizing works; show immediately if pane is visible.
+            // Linux: CEF Views sizing works; show immediately.
             #[cfg(not(target_os = "macos"))]
             {
-                let pane_rect = (self.x, self.y, self.width, self.height);
-                if crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, pane_rect) {
-                    controller.set_visible(1);
-                }
+                controller.set_visible(1);
                 if let Some(main_browser) = self.state.get_browser(&self.window_label) {
                     if let Some(mut host) = main_browser.host() { host.set_focus(1); }
                 }
@@ -2013,38 +2465,22 @@ wrap_task! {
             // to produce 0×0. From this deferred task the parent window IS fully laid out,
             // so set_bounds() should succeed and commit the bounds in CEF's Views layer.
             // The ObjC block additionally sets the NSWindow frame directly.
-
-            // Wnum of the overlay NSWindow, discovered at retry=0 by delta-detection
-            // (snapshot before/after set_visible) and forwarded to the retry=1 task.
-            #[cfg(target_os = "macos")]
-            let mut discovered_wnum: isize = 0;
-
             #[cfg(target_os = "macos")]
             let (mut task_dip_x, mut task_dip_y, mut task_dip_w, mut task_dip_h) = (0i32, 0i32, 0i32, 0i32);
-
-            // Obtain the NSView* for our parent window so we can identify its
-            // CefNSWindow by pointer rather than relying on isMainWindow (which
-            // fails when a secondary/floating CefNSWindow is main).
             #[cfg(target_os = "macos")]
-            let parent_nsview: *mut std::ffi::c_void = self.state.windows.lock()
-                .get(&self.window_label)
-                .map(|w| w.window_handle() as *mut std::ffi::c_void)
-                .unwrap_or(std::ptr::null_mut());
-
-            // Prefer a resize rect stored by resize_browser_pane_view over the
-            // task's own creation-time rect.  A resize IPC can arrive between
-            // pane creation and this deferred task; since set_size/set_position
-            // are no-ops on macOS and the wnum is not yet known (so the ObjC
-            // resize path is skipped), the only way to deliver the newer rect is
-            // via this shared slot.  At retry>=2 self.x/y/w/h IS the resize
-            // rect (posted by resize_browser_pane_view with wnum), so preferred_rect
-            // simply returns the same value.
+            let mut task_main_win:    *mut std::ffi::c_void = std::ptr::null_mut();
             #[cfg(target_os = "macos")]
-            let preferred_rect: (i32, i32, i32, i32) = {
-                let stored = self.state.browser_pane_resize_rects.lock()
-                    .get(&self.label).cloned();
-                stored.unwrap_or((self.x, self.y, self.width, self.height))
-            };
+            let mut task_overlay_win: *mut std::ffi::c_void = std::ptr::null_mut();
+            #[cfg(target_os = "macos")]
+            let mut task_sel_make_key_front: *const std::ffi::c_void = std::ptr::null();
+            #[cfg(target_os = "macos")]
+            let mut task_sel_order_front:    *const std::ffi::c_void = std::ptr::null();
+            #[cfg(target_os = "macos")]
+            let mut task_sel_key_window:     *const std::ffi::c_void = std::ptr::null();
+            // Main window height in Cocoa points — used to convert DIP y-from-top to
+            // Cocoa y-from-bottom for the hitTest: bounds stored in PANE_LOCAL_Y_BOTTOM.
+            #[cfg(target_os = "macos")]
+            let mut task_main_h: i32 = 0;
 
             #[cfg(target_os = "macos")]
             unsafe {
@@ -2070,12 +2506,12 @@ wrap_task! {
                 let sel_frame         = sel_registerName(b"frame\0".as_ptr() as _);
                 let sel_is_main       = sel_registerName(b"isMainWindow\0".as_ptr() as _);
                 let sel_is_key        = sel_registerName(b"isKeyWindow\0".as_ptr() as _);
+                let sel_key_window    = sel_registerName(b"keyWindow\0".as_ptr() as _);
                 let sel_backing_scale = sel_registerName(b"backingScaleFactor\0".as_ptr() as _);
                 let sel_set_frame_d   = sel_registerName(b"setFrame:display:\0".as_ptr() as _);
                 let sel_make_key_front = sel_registerName(b"makeKeyAndOrderFront:\0".as_ptr() as _);
                 let sel_order_front    = sel_registerName(b"orderFront:\0".as_ptr() as _);
                 let sel_win_number     = sel_registerName(b"windowNumber\0".as_ptr() as _);
-                let sel_win_of_view    = sel_registerName(b"window\0".as_ptr() as _);
 
                 let get_id:         extern "C" fn(Id, Sel) -> Id        = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                 let get_usize:      extern "C" fn(Id, Sel) -> usize     = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
@@ -2088,79 +2524,27 @@ wrap_task! {
                 let make_key_front: extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
                 let order_front:    extern "C" fn(Id, Sel, Id)          = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
 
-                let ns_app_class: Id = objc_getClass(b"NSApplication\0".as_ptr() as _);
-                let ns_app: Id       = get_id(ns_app_class, sel_shared_app);
-
-                // Resolve the CefNSWindow for self.window_label via the NSView*
-                // obtained from CefWindow::window_handle(). This is more reliable
-                // than isMainWindow, which misidentifies the parent when a secondary
-                // or floating CefNSWindow currently holds the main-window status.
-                let expected_main_nswin: Id = if !parent_nsview.is_null() {
-                    get_id(parent_nsview, sel_win_of_view)
-                } else {
-                    std::ptr::null_mut()
-                };
-
-                // Determine desired final visibility before any NSWindow mutation.
-                // Use preferred_rect (most recent resize rect, or creation rect
-                // if no resize has arrived yet) so visibility reflects the
-                // current intent, not the stale creation-time IPC payload.
-                let should_be_visible = {
-                    crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, preferred_rect)
-                };
-
-                // Step 1 (retry=0 only): snapshot which NativeWidgetMacNSWindows
-                // exist BEFORE calling set_visible(1).  Our overlay's NSWindow is
-                // created lazily on first show; set_visible(1) calls
-                // [NSWindow orderFront:] which adds it to [NSApp windows].
-                // Comparing before vs after gives the exact wnum for this pane —
-                // safe even with multiple panes open because the CEF UI thread is
-                // single-threaded.
-                let mut pre_wnums: Vec<isize> = Vec::new();
+                // Step 1: show the overlay on the first run only.
+                // On retry >= 1, the overlay is already visible; we just reaffirm the
+                // frame AFTER CEF's deferred Widget layout (triggered by Widget::Show()
+                // during retry=0) has had a chance to run and reset the NSWindow bounds
+                // to 0×0. The delayed retry fires 50ms later, after all pending layout
+                // passes have completed.
                 if self.retry == 0 {
-                    let pre_wins: Id     = get_id(ns_app, sel_windows_arr);
-                    let pre_count: usize = if pre_wins.is_null() { 0 }
-                                           else { get_usize(pre_wins, sel_count) };
-                    for i in 0..pre_count {
-                        let win = obj_at(pre_wins, sel_obj_at, i);
-                        if win.is_null() { continue; }
-                        let cls_ptr = object_getClassName(win);
-                        let cls = if !cls_ptr.is_null() {
-                            std::ffi::CStr::from_ptr(cls_ptr).to_str().unwrap_or("?")
-                        } else { "?" };
-                        if cls.contains("NativeWidgetMacNSWindow") {
-                            pre_wnums.push(get_isize(win, sel_win_number));
-                        }
-                    }
+                    controller.set_visible(1);
                 }
 
-                // Step 2: ALWAYS call set_visible(1) before scanning [NSApp
-                // windows].
-                //
-                // At retry=0: forces NSWindow creation (it is created lazily on
-                // first show) and enables delta-detection — even when the pane
-                // should ultimately be hidden, we need the NSWindow to exist so
-                // setFrame can be committed and resize_browser_pane_view can find
-                // it later.
-                //
-                // At retry>=1: the NSWindow already exists but may be hidden (if
-                // the pane was created while hidden).  Hidden windows may not
-                // appear in [NSApp windows] so wnum-based lookup would fail.
-                // Temporarily showing it ensures reliable matching.
-                //
-                // In both cases we restore the correct visibility AFTER setFrame.
-                controller.set_visible(1);
-
-                // Step 3: rescan [NSApp windows] AFTER set_visible(1) to find the
-                // overlay and main window.
+                // Step 2: rescan [NSApp windows] to find the overlay and main window.
+                let ns_app_class: Id = objc_getClass(b"NSApplication\0".as_ptr() as _);
+                let ns_app: Id       = get_id(ns_app_class, sel_shared_app);
                 let all_wins: Id     = get_id(ns_app, sel_windows_arr);
                 let win_count: usize = if all_wins.is_null() { 0 }
                                        else { get_usize(all_wins, sel_count) };
 
                 let mut overlay_win: Id = std::ptr::null_mut();
                 let mut main_win:    Id = std::ptr::null_mut();
-                // Highest windowNumber among NativeWidgetMacNSWindows — fallback for
-                // retry>=1 when self.overlay_wnum is still 0 (pane was hidden at retry=0).
+                // Highest windowNumber among NativeWidgetMacNSWindows (for fallback
+                // when overlay_wnum is unknown — newest window = highest number).
                 let mut highest_native_wnum: isize = 0;
                 let mut highest_native_win: Id = std::ptr::null_mut();
 
@@ -2181,23 +2565,22 @@ wrap_task! {
                         is_main, is_key, wn, want_wnum = self.overlay_wnum,
                         "[browser-pane] ObjC task NSApp window"
                     );
-                    // Identify the main window: prefer handle-based match for
-                    // self.window_label; isMainWindow is a fallback for the rare
-                    // case where the CefWindow handle isn't available yet.
-                    if !expected_main_nswin.is_null() && win == expected_main_nswin {
-                        main_win = win;
-                    } else if expected_main_nswin.is_null() && cls.contains("CefNSWindow") && is_main != 0 {
-                        main_win = win;
+                    if cls.contains("CefNSWindow") {
+                        // Priority 1: the window reporting isMainWindow=1 is definitive.
+                        // Priority 2: any on-screen CefNSWindow (x > -1000) as fallback.
+                        // Never use off-screen pool windows (x = -32000) as main_win —
+                        // they cause makeKeyAndOrderFront: to fire on the wrong window.
+                        // NOTE: the overlay is NativeWidgetMacNSWindow, never CefNSWindow,
+                        // so is_main=1 will never be true for the overlay here.
+                        let fr_tmp = get_frame(win, sel_frame);
+                        if is_main != 0 {
+                            main_win = win;
+                        } else if main_win.is_null() && fr_tmp.origin.x > -1000.0 {
+                            main_win = win;
+                        }
                     }
                     if cls.contains("NativeWidgetMacNSWindow") {
-                        // Primary at retry=0: delta detection — this wnum was not
-                        // present before set_visible(1), so it is our overlay.
-                        if self.retry == 0 && !pre_wnums.contains(&wn) {
-                            overlay_win = win;
-                            discovered_wnum = wn;
-                        }
-                        // Primary at retry>=1: exact wnum match from retry=0.
-                        if self.retry >= 1 && self.overlay_wnum > 0 && wn == self.overlay_wnum {
+                        if self.overlay_wnum > 0 && wn == self.overlay_wnum {
                             overlay_win = win;
                         }
                         if wn > highest_native_wnum {
@@ -2207,11 +2590,10 @@ wrap_task! {
                     }
                 }
 
-                // Fallback: ONLY at retry>=1 (wnum known from retry=0 but window
-                // wasn't found by exact match — edge case). At retry=0, applying
-                // the fallback would grab another pane's window when set_visible(1)
-                // was skipped (hidden pane) and there are ≥2 panes open.
-                if overlay_win.is_null() && !highest_native_win.is_null() && self.retry >= 1 {
+                // Fallback: if wnum-based lookup missed (e.g. overlay_wnum==0 because
+                // the pre-hide scan ran before the NSWindow existed), use the newest
+                // NativeWidgetMacNSWindow (highest windowNumber = most recently created).
+                if overlay_win.is_null() && !highest_native_win.is_null() {
                     overlay_win = highest_native_win;
                     tracing::info!(
                         label = %self.label, retry = self.retry,
@@ -2224,7 +2606,7 @@ wrap_task! {
                     if self.retry < 5 {
                         tracing::info!(
                             label = %self.label, retry = self.retry,
-                            "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found, retrying"
+                            "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found after set_visible(1), retrying"
                         );
                         post_set_pane_bounds_views(
                             &self.state, &self.label, &self.window_label,
@@ -2240,58 +2622,20 @@ wrap_task! {
 
                 // Step 3: reaffirm the frame (set_visible(1) may have triggered a CEF
                 // layout pass that reset the native frame to the pre-creation default).
-                // Bail if main_win is null — we need it to compute screen_x/screen_y
-                // (pane coords are relative to the main window's origin). Placing with
-                // a 0×0 main_frame would put the overlay at (0,0) on the screen, which
-                // is visually wrong and may cover unrelated windows.
-                if main_win.is_null() {
-                    tracing::warn!(
-                        label = %self.label, retry = self.retry,
-                        "[browser-pane] ObjC task: main CefNSWindow not found — cannot compute screen coords, skipping frame commit"
-                    );
-                    // Roll back the unconditional set_visible(1) issued at
-                    // Step 2 so the overlay doesn't sit visible but unpositioned.
-                    // Apply at all retries — not just retry=0 — because Step 2
-                    // now calls set_visible(1) unconditionally.
-                    controller.set_visible(0);
-                    if self.retry < 5 {
-                        post_set_pane_bounds_views(
-                            &self.state, &self.label, &self.window_label,
-                            self.x, self.y, self.width, self.height,
-                            self.retry + 1, self.overlay_wnum,
-                        );
-                    }
-                    return;
-                }
-                let main_frame = get_frame(main_win, sel_frame);
-                let scale = {
+                let main_frame = if !main_win.is_null() {
+                    get_frame(main_win, sel_frame)
+                } else {
+                    NSRect { origin: NSPoint { x: 0.0, y: 0.0 }, size: NSSize { w: 0.0, h: 0.0 } }
+                };
+                let scale = if !main_win.is_null() {
                     let s = get_f64(main_win, sel_backing_scale);
                     if s > 0.0 { s } else { 1.0 }
-                };
+                } else { 1.0 };
 
-                // Coordinate source:
-                //
-                //  retry=1, cb≠0×0  → controller.set_bounds() at retry=0 stored DIP;
-                //                      re-use as-is (no scale division — it's already
-                //                      in NSWindow points).
-                //  all other cases  → preferred_rect is physical pixels from the most
-                //                      recent IPC rect (resize or creation); divide by
-                //                      backingScaleFactor.
-                //                      Do NOT use controller.bounds() here: set_size/
-                //                      set_position are no-ops on macOS so it reflects
-                //                      a stale set_bounds() DIP, causing double-scale.
-                let (pane_x, pane_y, pane_w, pane_h) = {
-                    let cb = controller.bounds();
-                    if self.retry == 1 && cb.width > 0 && cb.height > 0 {
-                        // DIP from set_bounds() committed at retry=0; no scale division.
-                        (cb.x as f64, cb.y as f64, cb.width as f64, cb.height as f64)
-                    } else {
-                        // Physical pixels from preferred_rect → NSWindow points.
-                        let (px, py, pw, ph) = preferred_rect;
-                        (px as f64 / scale, py as f64 / scale,
-                         pw as f64 / scale, ph as f64 / scale)
-                    }
-                };
+                let pane_x = self.x as f64 / scale;
+                let pane_y = self.y as f64 / scale;
+                let pane_w = self.width  as f64 / scale;
+                let pane_h = self.height as f64 / scale;
                 let screen_x = main_frame.origin.x + pane_x;
                 let screen_y = main_frame.origin.y + main_frame.size.h - pane_y - pane_h;
 
@@ -2302,6 +2646,34 @@ wrap_task! {
 
                 set_frame_d(overlay_win, sel_set_frame_d, target, 1u8);
                 let new_fr = get_frame(overlay_win, sel_frame);
+
+                // Diagnostic A: overlay window level (NSNormalWindowLevel=0,
+                //   NSFloatingWindowLevel=3). If can_activate=0 produces a
+                //   floating-level panel it sits above the main window at the
+                //   OS level even outside its frame — understanding this is key.
+                let sel_level = sel_registerName(b"level\0".as_ptr() as _);
+                let get_level: extern "C" fn(Id, Sel) -> isize = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let ov_level  = get_level(overlay_win, sel_level);
+                let main_level = if !main_win.is_null() { get_level(main_win, sel_level) } else { -1 };
+
+                // Diagnostic B: which window is actually on top at the pane
+                // center? [NSWindow windowNumberAtPoint:belowWindowWithWindowNumber:0]
+                // returns the window number of the topmost window at that point.
+                // If it matches the overlay → overlay is frontmost (clicks reach it).
+                // If it matches the main window → main is frontmost (clicks DON'T reach overlay).
+                let sel_wnum_at_pt = sel_registerName(b"windowNumberAtPoint:belowWindowWithWindowNumber:\0".as_ptr() as _);
+                let wnum_at_fn: extern "C" fn(Id, Sel, NSPoint, isize) -> isize = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                let pane_center_screen = NSPoint {
+                    x: screen_x + pane_w / 2.0,
+                    y: screen_y + pane_h / 2.0,
+                };
+                let win_cls_id: Id = objc_getClass(b"NSWindow\0".as_ptr() as _);
+                let wnum_at_center = wnum_at_fn(win_cls_id, sel_wnum_at_pt, pane_center_screen, 0);
+                let ov_wnum  = get_isize(overlay_win, sel_win_number);
+                let main_wnum = if !main_win.is_null() { get_isize(main_win, sel_win_number) } else { -1 };
+                let frontmost_is_overlay = wnum_at_center == ov_wnum;
+                let frontmost_is_main    = wnum_at_center == main_wnum;
+
                 tracing::info!(
                     label = %self.label, retry = self.retry, scale,
                     pane_x, pane_y, pane_w, pane_h, screen_x, screen_y,
@@ -2310,31 +2682,30 @@ wrap_task! {
                     req_w = self.width, req_h = self.height,
                     got_x = new_fr.origin.x, got_y = new_fr.origin.y,
                     got_w = new_fr.size.w, got_h = new_fr.size.h,
-                    "[browser-pane] ObjC task overlay setFrame reaffirmed"
+                    ov_level, main_level,
+                    wnum_at_center, ov_wnum, main_wnum,
+                    frontmost_is_overlay, frontmost_is_main,
+                    "[browser-pane] ObjC task overlay setFrame + z-order diag"
                 );
                 // Export DIP coordinates for the set_bounds call after this block.
                 task_dip_x = pane_x as i32;
                 task_dip_y = pane_y as i32;
                 task_dip_w = pane_w as i32;
                 task_dip_h = pane_h as i32;
-                // Restore key to main window and bring overlay to front.
-                // Only do this when the pane should be visible — for hidden
-                // panes we skip focus/ordering since set_visible(0) will follow.
-                if should_be_visible {
-                    if !main_win.is_null() {
-                        make_key_front(main_win, sel_make_key_front, std::ptr::null_mut());
-                    }
-                    if !overlay_win.is_null() {
-                        order_front(overlay_win, sel_order_front, std::ptr::null_mut());
-                    }
-                }
+                // Main window height in Cocoa points (needed for Cocoa y-from-bottom
+                // conversion in the hitTest: swizzle bounds check).
+                task_main_h = main_frame.size.h as i32;
+                // Export window refs for post-set_bounds key restoration.
+                task_main_win    = main_win;
+                task_overlay_win = overlay_win;
+                task_sel_make_key_front = sel_make_key_front;
+                task_sel_order_front    = sel_order_front;
+                task_sel_key_window     = sel_key_window;
             }
 
             #[cfg(target_os = "macos")]
-            if should_be_visible {
-                if let Some(main_browser) = self.state.get_browser(&self.window_label) {
-                    if let Some(mut host) = main_browser.host() { host.set_focus(1); }
-                }
+            if let Some(main_browser) = self.state.get_browser(&self.window_label) {
+                if let Some(mut host) = main_browser.host() { host.set_focus(1); }
             }
 
             // macOS: call controller.set_bounds() with DIP coordinates computed above.
@@ -2360,23 +2731,409 @@ wrap_task! {
                 );
             }
 
-            // macOS: restore correct visibility after setFrame.  We always
-            // called set_visible(1) before scanning to surface the NSWindow
-            // (necessary for hidden panes created while compute_pane_visible
-            // returned false, or for retry>=1 where the window may not appear
-            // in [NSApp windows] when hidden).  Now that the frame is
-            // committed, hide it again if the pane should not be visible.
+            // macOS: after set_bounds(), restore key focus to the main CefNSWindow
+            // so sidebar clicks always work. Then bring the overlay to the front
+            // so the pane is visually on top. With can_activate=0 the overlay is a
+            // non-activating NSPanel — clicks reach its content view without being
+            // consumed for window activation, so pane clicks should reach Chromium
+            // even though the main window remains KEY.
+            //
+            // Belt-and-suspenders: also inject acceptsFirstMouse:YES into the overlay
+            // contentView's class so that even if can_activate ever changes, the first
+            // click in the pane is always processed as a content click, not an
+            // activation click.
             #[cfg(target_os = "macos")]
-            if !should_be_visible {
-                controller.set_visible(0);
+            if !task_overlay_win.is_null() {
+                unsafe {
+                    use std::ffi::c_char;
+                    type Id  = *mut std::ffi::c_void;
+                    type Sel = *const std::ffi::c_void;
+                    extern "C" {
+                        fn objc_msgSend();
+                        fn sel_registerName(name: *const c_char) -> Sel;
+                        fn object_getClass(obj: Id) -> Id;
+                        fn class_addMethod(cls: Id, sel: Sel, imp: *const std::ffi::c_void, types: *const c_char) -> u8;
+                        fn object_getClassName(obj: Id) -> *const c_char;
+                    }
+                    let get_id:   extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                    let make_key: extern "C" fn(Id, Sel, Id)   = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                    let order_fn: extern "C" fn(Id, Sel, Id)   = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+
+                    // Restore main window as key so sidebar clicks work.
+                    if !task_main_win.is_null() && !task_sel_make_key_front.is_null() {
+                        make_key(task_main_win, task_sel_make_key_front, std::ptr::null_mut());
+                    }
+                    // Keep overlay frontmost.
+                    if !task_sel_order_front.is_null() {
+                        order_fn(task_overlay_win, task_sel_order_front, std::ptr::null_mut());
+                    }
+
+                    // Swizzle NativeWidgetMacNSWindow::isMainWindow → always returns YES.
+                    //
+                    // RenderWidgetHostViewCocoa::mouseDown: has an early-exit guard:
+                    //   if (!isMainWindow && !isKeyWindow) return;
+                    // With can_activate=0 the overlay is neither main nor key (main
+                    // window stays key/main so sidebar always works), so RWHVC drops
+                    // every click. Making the overlay's class return YES for
+                    // isMainWindow bypasses the guard without touching key-window state.
+                    // The overlay window class is NativeWidgetMacNSWindow; the main
+                    // window is NSKVONotifying_CefNSWindow (a different class), so this
+                    // swizzle is scoped only to the overlay.
+                    extern "C" {
+                        fn class_getInstanceMethod(cls: Id, sel: Sel) -> *mut std::ffi::c_void;
+                        fn method_setImplementation(method: *mut std::ffi::c_void, imp: *const std::ffi::c_void) -> *const std::ffi::c_void;
+                    }
+                    // Scope isMainWindow/isKeyWindow→YES to THIS overlay instance only.
+                    //
+                    // Strategy: swizzle the class once (class-level), but inside the
+                    // swizzled fn check objc_getAssociatedObject(self, KEY). Only the
+                    // overlay instance is tagged → only it gets YES. Pool windows (same
+                    // class) call through to the original and return their real value.
+                    // This avoids object_setClass (which breaks CEF rendering) and
+                    // avoids dynamic subclasses (same problem).
+                    extern "C" {
+                        fn objc_setAssociatedObject(
+                            obj: Id,
+                            key: *const std::ffi::c_void,
+                            value: Id,
+                            policy: usize,
+                        );
+                    }
+                    let tag_key = &crate::ui_tasks::PANE_OVERLAY_TAG_KEY as *const u8 as *const std::ffi::c_void;
+                    // Associate overlay with itself — non-nil tag; ASSIGN=0 (no retain).
+                    objc_setAssociatedObject(task_overlay_win, tag_key, task_overlay_win, 0);
+
+                    static OVERLAY_SWIZZLE_DONE: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if !OVERLAY_SWIZZLE_DONE.load(std::sync::atomic::Ordering::SeqCst) {
+                        let win_cls = object_getClass(task_overlay_win);
+                        if !win_cls.is_null() {
+                            let sel_main = sel_registerName(b"isMainWindow\0".as_ptr() as _);
+                            let m_main = class_getInstanceMethod(win_cls, sel_main);
+                            if !m_main.is_null() {
+                                let old = method_setImplementation(
+                                    m_main,
+                                    crate::ui_tasks::swizzled_is_main_window as *const std::ffi::c_void,
+                                );
+                                crate::ui_tasks::ORIG_IS_MAIN_WINDOW.store(
+                                    old as usize,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                );
+                            }
+                            let sel_key = sel_registerName(b"isKeyWindow\0".as_ptr() as _);
+                            let m_key = class_getInstanceMethod(win_cls, sel_key);
+                            if !m_key.is_null() {
+                                let old = method_setImplementation(
+                                    m_key,
+                                    crate::ui_tasks::swizzled_is_key_window as *const std::ffi::c_void,
+                                );
+                                crate::ui_tasks::ORIG_IS_KEY_WINDOW.store(
+                                    old as usize,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                );
+                            }
+                            OVERLAY_SWIZZLE_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+                            let win_cls_name = {
+                                let cp = object_getClassName(win_cls);
+                                if !cp.is_null() { std::ffi::CStr::from_ptr(cp).to_str().unwrap_or("?") } else { "?" }
+                            };
+                            tracing::info!(
+                                retry = self.retry, win_cls_name,
+                                "[browser-pane] instance-aware isMainWindow+isKeyWindow swizzle installed + overlay tagged"
+                            );
+                        }
+                    } else {
+                        tracing::info!(retry = self.retry, "[browser-pane] overlay re-tagged (swizzle already installed)");
+                    }
+
+                    // BridgedContentView stores acceptsFirstMouse as an INSTANCE
+                    // VARIABLE set by initWithStyle:isFrameless:acceptsFirstMouse:.
+                    // The overlay is initialized with acceptsFirstMouse=NO, so the
+                    // existing implementation returns NO and NSWindow::sendEvent:
+                    // drops mouseDown events (it only dispatches if isKeyWindow OR
+                    // acceptsFirstMouse:YES). class_addMethod is a no-op when the
+                    // method exists; we must use method_setImplementation to forcibly
+                    // replace the implementation so it always returns YES regardless
+                    // of the ivar. This affects all BridgedContentView instances
+                    // (including the main window), which is fine: the main window is
+                    // KEY so acceptsFirstMouse: is never consulted for it.
+                    extern "C" fn afm_yes(_self: Id, _cmd: Sel, _event: Id) -> u8 { 1 }
+
+                    let sel_cv = sel_registerName(b"contentView\0".as_ptr() as _);
+                    let content_view = get_id(task_overlay_win, sel_cv);
+                    if !content_view.is_null() {
+                        let cls = object_getClass(content_view);
+                        let cls_name = if !cls.is_null() {
+                            let cp = object_getClassName(cls);
+                            if !cp.is_null() { std::ffi::CStr::from_ptr(cp).to_str().unwrap_or("?") } else { "?" }
+                        } else { "null" };
+                        if !cls.is_null() {
+                            let sel_afm = sel_registerName(b"acceptsFirstMouse:\0".as_ptr() as _);
+                            let method = class_getInstanceMethod(cls, sel_afm);
+                            let old_imp = if !method.is_null() {
+                                method_setImplementation(method, afm_yes as *const std::ffi::c_void)
+                            } else {
+                                // Doesn't exist yet — add it
+                                class_addMethod(cls, sel_afm, afm_yes as *const std::ffi::c_void, b"c@:@\0".as_ptr() as _);
+                                std::ptr::null()
+                            };
+                            tracing::info!(
+                                retry = self.retry, cls_name,
+                                replaced = !old_imp.is_null(),
+                                "[browser-pane] acceptsFirstMouse: REPLACED → YES on BridgedContentView"
+                            );
+                        }
+
+                        // Diagnostic: how many NSView subviews does contentView have,
+                        // and what does hitTest: return at the pane center?
+                        // macOS routes mouseDown: to the DEEPEST subview found by
+                        // hitTest: — that view (not contentView) is where the click lands.
+                        // If hitTest returns BridgedContentView itself → RenderWidgetHostViewCocoa
+                        // is NOT in the overlay's NSView tree → clicks never reach the renderer.
+                        #[repr(C)] #[derive(Copy,Clone)] struct LPt { x: f64, y: f64 }
+                        extern "C" {
+                            fn class_getInstanceMethod2(cls: Id, sel: Sel) -> *mut std::ffi::c_void;
+                        }
+                        let subviews_sel = sel_registerName(b"subviews\0".as_ptr() as _);
+                        let count_sel    = sel_registerName(b"count\0".as_ptr() as _);
+                        let subviews = get_id(content_view, subviews_sel);
+                        let sub_count: usize = if subviews.is_null() { 0 } else {
+                            let get_count: extern "C" fn(Id, Sel) -> usize = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                            get_count(subviews, count_sel)
+                        };
+
+                        // hitTest at the center of the overlay (in local contentView
+                        // coordinates = DIP dimensions / 2).
+                        let local_cx = task_dip_w as f64 / 2.0;
+                        let local_cy = task_dip_h as f64 / 2.0;
+                        let hit_sel  = sel_registerName(b"hitTest:\0".as_ptr() as _);
+                        let hit_fn: extern "C" fn(Id, Sel, LPt) -> Id = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                        let hit_view = hit_fn(content_view, hit_sel, LPt { x: local_cx, y: local_cy });
+                        let hit_cls = if !hit_view.is_null() {
+                            let hc = object_getClass(hit_view);
+                            if !hc.is_null() {
+                                let cp = object_getClassName(hc);
+                                if !cp.is_null() { std::ffi::CStr::from_ptr(cp).to_str().unwrap_or("?") } else { "?" }
+                            } else { "null-cls" }
+                        } else { "nil-no-view" };
+                        tracing::info!(
+                            retry = self.retry, sub_count, hit_cls, local_cx, local_cy,
+                            "[browser-pane] overlay contentView subviews + hitTest diag"
+                        );
+
+                        // NSWindow::sendEvent:mouseDown: checks acceptsFirstMouse: on
+                        // the DEEPEST view returned by hitTest (hit_view), not on the
+                        // contentView. We replaced acceptsFirstMouse: on BridgedContentView
+                        // but the target is RenderWidgetHostViewCocoa, which has its own
+                        // method. Replace it on the hit_view class as well so the non-key
+                        // overlay window dispatches mouseDown: to the renderer.
+                        if !hit_view.is_null() {
+                            let hit_vcls = object_getClass(hit_view);
+                            if !hit_vcls.is_null() {
+                                let sel_afm2 = sel_registerName(b"acceptsFirstMouse:\0".as_ptr() as _);
+                                // Log the current return value before replacement
+                                let afm_pre: extern "C" fn(Id, Sel, Id) -> u8 = std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
+                                let afm_before = afm_pre(hit_view, sel_afm2, std::ptr::null_mut());
+                                let hit_method = class_getInstanceMethod(hit_vcls, sel_afm2);
+                                let hit_old_imp = if !hit_method.is_null() {
+                                    method_setImplementation(hit_method, afm_yes as *const std::ffi::c_void)
+                                } else {
+                                    class_addMethod(hit_vcls, sel_afm2, afm_yes as *const std::ffi::c_void, b"c@:@\0".as_ptr() as _);
+                                    std::ptr::null()
+                                };
+                                let hit_vcls_name = {
+                                    let cp = object_getClassName(hit_vcls);
+                                    if !cp.is_null() { std::ffi::CStr::from_ptr(cp).to_str().unwrap_or("?") } else { "?" }
+                                };
+                                tracing::info!(
+                                    retry = self.retry, hit_vcls_name, afm_before,
+                                    hit_replaced = !hit_old_imp.is_null(),
+                                    "[browser-pane] acceptsFirstMouse BEFORE+REPLACED on hit view class"
+                                );
+
+                                // Swizzle mouseDown:, mouseUp:, hitTest:, and
+                                // shouldIgnoreMouseEvent: on the RenderWidgetHostViewCocoa
+                                // CLASS (not on hit_vcls which may be BridgedContentView if
+                                // RWHVC hasn't been added to the overlay's view tree yet at
+                                // swizzle time). Using objc_getClass guarantees we target the
+                                // correct class regardless of hitTest: timing.
+                                tracing::info!(
+                                    retry = self.retry,
+                                    hit_view = hit_view as usize,
+                                    "[browser-pane] RWHVC hit_view ptr (compare with SWIZZLE HIT this)"
+                                );
+                                extern "C" {
+                                    fn objc_getClass(name: *const std::ffi::c_char) -> Id;
+                                }
+                                let rwhvc_cls = objc_getClass(b"RenderWidgetHostViewCocoa\0".as_ptr() as _);
+                                if !rwhvc_cls.is_null() {
+                                // Store pane bounds in Cocoa local coordinates (y from bottom
+                                // of main BridgedContentView) for the sendEvent: redirect.
+                                // pane_local_y_bottom = main_h - dip_y_from_top - pane_h.
+                                let pane_local_y_bottom = task_main_h - task_dip_y - task_dip_h;
+                                crate::ui_tasks::PANE_LOCAL_X.store(
+                                    task_dip_x, std::sync::atomic::Ordering::SeqCst);
+                                crate::ui_tasks::PANE_LOCAL_Y_BOTTOM.store(
+                                    pane_local_y_bottom, std::sync::atomic::Ordering::SeqCst);
+                                crate::ui_tasks::PANE_LOCAL_W.store(
+                                    task_dip_w, std::sync::atomic::Ordering::SeqCst);
+                                crate::ui_tasks::PANE_LOCAL_H.store(
+                                    task_dip_h, std::sync::atomic::Ordering::SeqCst);
+                                tracing::info!(
+                                    retry = self.retry,
+                                    px = task_dip_x, py = pane_local_y_bottom,
+                                    pw = task_dip_w, ph = task_dip_h,
+                                    main_h = task_main_h,
+                                    "[browser-pane] pane bounds stored for sendEvent redirect"
+                                );
+
+                                // Swizzle shouldIgnoreMouseEvent: → always NO so the main
+                                // RWHVC processes clicks even when the overlay is frontmost,
+                                // without requiring it to be the key/main window.
+                                if ORIG_RWHVC_SHOULD_IGNORE.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                                    let sel_si = sel_registerName(b"shouldIgnoreMouseEvent:\0".as_ptr() as _);
+                                    let si_method = class_getInstanceMethod(rwhvc_cls, sel_si);
+                                    if !si_method.is_null() {
+                                        let old_si = method_setImplementation(
+                                            si_method,
+                                            crate::ui_tasks::swizzled_should_ignore_mouse_event as *const std::ffi::c_void,
+                                        );
+                                        crate::ui_tasks::ORIG_RWHVC_SHOULD_IGNORE.store(
+                                            old_si as usize,
+                                            std::sync::atomic::Ordering::SeqCst,
+                                        );
+                                        tracing::info!(
+                                            retry = self.retry,
+                                            "[browser-pane] shouldIgnoreMouseEvent: SWIZZLED → always NO"
+                                        );
+                                    }
+                                }
+                                } // rwhvc_cls
+                            }
+                        }
+                    }
+                }
             }
 
-            // macOS: store the discovered wnum so resize_browser_pane_view
-            // can post a reaffirm task with an exact wnum match.
+            // Store main browser host for use in sendEvent: swizzle (set_focus before dispatch).
+            // Also inject a JS mousedown listener into the main browser for diagnostics.
             #[cfg(target_os = "macos")]
-            if discovered_wnum > 0 {
-                self.state.browser_pane_overlay_wnums.lock()
-                    .insert(self.label.clone(), discovered_wnum);
+            {
+                let win_label_for_focus = self.window_label.clone();
+                if let Some(main_browser) = self.state.get_browser(&win_label_for_focus) {
+                    if let Some(host) = main_browser.host() {
+                        // Store host so swizzled_nsapp_send_event can call set_focus(1).
+                        *crate::ui_tasks::MAIN_BROWSER_HOST_FOR_FOCUS.lock().unwrap() = Some(host);
+                        tracing::info!(
+                            retry = self.retry,
+                            "[browser-pane] stored main browser host for sendEvent focus restore"
+                        );
+                    }
+                    // Inject mousedown diagnostic: tells us if clicks reach JS at all.
+                    if self.retry == 1 {
+                        if let Some(frame) = main_browser.main_frame() {
+                            let js = "if (!window.__amxMdDiag) { window.__amxMdDiag = true; document.addEventListener('mousedown', function(e) { console.log('[AMX-DIAG-MD] mousedown x=' + e.clientX + ' y=' + e.clientY + ' tgt=' + (e.target ? e.target.tagName : 'null') + ' hasFocus=' + document.hasFocus()); }, true); console.log('[AMX-DIAG-MD] listener installed'); }";
+                            let code = CefString::from(js);
+                            let url  = CefString::from("");
+                            frame.execute_java_script(Some(&code), Some(&url), 0);
+                        }
+                    }
+                }
+            }
+
+            // Diagnostic: swizzle NSApp::sendEvent: once to log all leftMouseDown
+            // events with their target window number. This lets us see where
+            // sidebar clicks actually land (before reaching any RWHVC).
+            #[cfg(target_os = "macos")]
+            if self.retry == 0 {
+                static NSAPP_SWIZZLE_DONE: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !NSAPP_SWIZZLE_DONE.load(std::sync::atomic::Ordering::SeqCst) {
+                    unsafe {
+                        use std::ffi::c_void;
+                        extern "C" {
+                            fn objc_getClass(name: *const i8) -> *mut c_void;
+                            fn sel_registerName(n: *const i8) -> *const c_void;
+                            fn class_getInstanceMethod(cls: *mut c_void, sel: *const c_void) -> *mut c_void;
+                            fn method_setImplementation(m: *mut c_void, imp: *const c_void) -> *const c_void;
+                        }
+                        let ns_app_cls = objc_getClass(b"NSApplication\0".as_ptr() as _);
+                        if !ns_app_cls.is_null() {
+                            let sel_se = sel_registerName(b"sendEvent:\0".as_ptr() as _);
+                            let m_se   = class_getInstanceMethod(ns_app_cls, sel_se);
+                            if !m_se.is_null() {
+                                let old = method_setImplementation(
+                                    m_se,
+                                    crate::ui_tasks::swizzled_nsapp_send_event as *const c_void,
+                                );
+                                crate::ui_tasks::ORIG_NSAPP_SEND_EVENT.store(
+                                    old as usize,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                );
+                                NSAPP_SWIZZLE_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+                                tracing::info!(
+                                    retry = self.retry,
+                                    "[browser-pane] NSApp::sendEvent: swizzled for mouseDown diagnostics"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // macOS: explicitly focus the pane browser renderer.
+            // Link clicks already work (navigation doesn't require renderer focus),
+            // but interactive clicks (form inputs, JS handlers, content-editable)
+            // require document.hasFocus()=true. When makeKeyAndOrderFront:main
+            // makes the main window key, CEF fires windowDidResignKey on the overlay
+            // → set_focus(0) on pane browser → renderer becomes "blurred" → clicks
+            // not interactive. Calling set_focus(1) on the pane browser directly
+            // overrides this, making the renderer accept interactive clicks while the
+            // main window retains key status (sidebar keyboard still works).
+            // We post a 200ms delayed task to call set_focus(1) AFTER CEF's
+            // notification-driven set_focus(0) has fired (it fires asynchronously in
+            // a subsequent run-loop cycle after makeKeyAndOrderFront:main).
+            #[cfg(target_os = "macos")]
+            if self.retry == 1 {
+                let label_clone  = self.label.clone();
+                let state_clone  = self.state.clone();
+                // Delayed task: after can_activate=1 lets the overlay briefly
+                // steal key during creation, restore focus to the main window
+                // so sidebar keyboard input keeps working. The overlay will
+                // naturally re-acquire key when the user clicks into the pane.
+                wrap_task! {
+                    struct PaneFocusTask { state: Arc<AppState>, label: String }
+                    impl Task { fn execute(&self) {
+                        // Find the parent window label from the pane's overlay map.
+                        let win_label = {
+                            let map = self.state.browser_pane_overlays.lock();
+                            map.get(&self.label).map(|(wl, _)| wl.clone())
+                        };
+                        if let Some(win_label) = win_label {
+                            if let Some(mut main_browser) = self.state.get_browser(&win_label) {
+                                if let Some(mut host) = main_browser.host() {
+                                    host.set_focus(1);
+                                    tracing::info!(
+                                        label = %self.label, win = %win_label,
+                                        "[browser-pane] restored focus to main window after pane creation"
+                                    );
+                                }
+                            }
+                            // Reschedule: every pane click fires on_set_focus(SYSTEM) which
+                            // causes CEF to call set_focus(0) on the main browser, blurring
+                            // its renderer and making RenderWidgetHostImpl drop subsequent
+                            // mouse events before they reach Blink. Keep calling set_focus(1)
+                            // on main every 200ms for as long as the pane is open so the
+                            // main renderer stays focused regardless of pane click activity.
+                            // The loop exits automatically when the pane closes (overlay map
+                            // entry is gone → win_label is None → task does not reschedule).
+                            let mut next = PaneFocusTask::new(self.state.clone(), self.label.clone());
+                            post_delayed_task(ThreadId::UI, Some(&mut next), 200);
+                        }
+                    }}
+                }
+                let mut focus_task = PaneFocusTask::new(state_clone, label_clone);
+                post_delayed_task(ThreadId::UI, Some(&mut focus_task), 200);
             }
 
             // macOS: post a delayed reaffirm on the first run. CEF's Widget::Show()
@@ -2386,16 +3143,13 @@ wrap_task! {
             // re-applies the correct frame — at that point it stays permanently.
             #[cfg(target_os = "macos")]
             if self.retry == 0 {
-                // Pass the wnum discovered by delta-detection above so retry=1
-                // can find the overlay by exact match instead of falling back to
-                // "highest NativeWidgetMacNSWindow" (which fails with ≥2 panes).
                 let mut reaffirm = SetPaneBoundsViewsTask::new(
                     self.state.clone(),
                     self.label.clone(),
                     self.window_label.clone(),
                     self.x, self.y, self.width, self.height,
-                    1, // retry=1: reaffirm frame after CEF layout pass
-                    discovered_wnum,
+                    1, // retry=1: skip set_visible(1), just reaffirm frame
+                    self.overlay_wnum,
                 );
                 post_delayed_task(ThreadId::UI, Some(&mut reaffirm), 50);
             }
