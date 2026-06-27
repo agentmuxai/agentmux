@@ -776,16 +776,11 @@ pub struct AppState {
     pub pending_overlay_destroy:
         Mutex<std::collections::HashMap<String, cef::OverlayController>>,
 
-    /// macOS only — latest resize rect (physical pixels) per pane label.
-    ///
-    /// Written by `resize_browser_pane_view` on every resize IPC, including
     /// macOS only — NSWindow windowNumber for each live browser-pane overlay,
-    /// keyed by pane label.  Discovered by delta-detection in
-    /// `SetPaneBoundsViewsTask` (retry=0) and stored here so that
-    /// `resize_browser_pane_view` can post a reaffirm task with an exact wnum
-    /// instead of relying on the highest-wnum fallback (which is ambiguous
-    /// when ≥2 panes are open).  Entries are removed when the overlay is
-    /// detached (`detach_browser_pane_view`).
+    /// keyed by pane label.  Populated by `SetPaneBoundsViewsTask` after it
+    /// resolves the overlay window, consumed by `resize_browser_pane_view` to
+    /// pass an exact wnum instead of the highest-wnum fallback (ambiguous when
+    /// ≥2 panes are open).  Entries are removed on detach.
     #[cfg(target_os = "macos")]
     pub browser_pane_overlay_wnums: Mutex<std::collections::HashMap<String, isize>>,
 
