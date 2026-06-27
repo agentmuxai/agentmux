@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi } from "@/store/global";
+import { WpsEvent } from "@/store/wps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 
@@ -51,11 +52,15 @@ export const MaintenanceSection = (): JSX.Element => {
     const [nowMs, setNowMs] = createSignal(Date.now());
     const [srvRestartRequired, setSrvRestartRequired] = createSignal(false);
 
-    // Fetch pending_migrations count from backend info on mount
+    // Fetch pending_migrations count and persisted srv_restart_required flag from backend info on mount.
+    // srv_restart_required is stored in AppState so it survives panel close/reopen.
     onMount(() => {
         getApi().getBackendInfo().then((info) => {
             const pending = info?.pending_migrations ?? 0;
             setMigState({ kind: "idle", pendingCount: pending });
+            if (info?.srv_restart_required) {
+                setSrvRestartRequired(true);
+            }
         }).catch(() => {});
     });
 
@@ -133,7 +138,7 @@ export const MaintenanceSection = (): JSX.Element => {
 
     onMount(() => {
         let unlisten: (() => void) | null = null;
-        getApi().listen("upgrade:srv-restart-required", (_payload: any) => {
+        getApi().listen(WpsEvent.UpgradeSrvRestartRequired, (_payload: any) => {
             setSrvRestartRequired(true);
         }).then((fn) => { unlisten = fn; });
 

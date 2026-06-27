@@ -23,10 +23,11 @@ export const WpsEvent = {
     ShellNodeCreate: "shell_node_create",
     ShellChunk: "shell_chunk",
     BlockActivity: "block:activity",
-    UpgradeMigrationEvent:     "upgrade:migration-event",
-    UpgradeMigrationsComplete: "upgrade:migrations-complete",
-    UpgradeMigrationsFailed:   "upgrade:migrations-failed",
-    UpgradeSagaVacuumDone:     "upgrade:saga-vacuum-done",
+    UpgradeMigrationEvent:      "upgrade:migration-event",
+    UpgradeMigrationsComplete:  "upgrade:migrations-complete",
+    UpgradeMigrationsFailed:    "upgrade:migrations-failed",
+    UpgradeSagaVacuumDone:      "upgrade:saga-vacuum-done",
+    UpgradeSrvRestartRequired:  "upgrade:srv-restart-required",
 } as const;
 
 export type WpsEventName = (typeof WpsEvent)[keyof typeof WpsEvent];

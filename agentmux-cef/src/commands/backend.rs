@@ -50,6 +50,7 @@ pub fn get_backend_info(state: &Arc<AppState>) -> serde_json::Value {
     let pid = *state.backend_pid.lock();
     let started_at = state.backend_started_at.lock().clone();
     let pending_migrations = *state.pending_migrations.lock();
+    let srv_restart_required = *state.srv_restart_required.lock();
 
     serde_json::json!({
         "pid": pid,
@@ -57,6 +58,7 @@ pub fn get_backend_info(state: &Arc<AppState>) -> serde_json::Value {
         "web_endpoint": endpoints.web_endpoint,
         "version": current_version,
         "pending_migrations": pending_migrations,
+        "srv_restart_required": srv_restart_required,
     })
 }
 
@@ -176,6 +178,21 @@ pub async fn run_migrations(state: Arc<AppState>) -> Result<serde_json::Value, S
         })?;
 
     tokio::spawn(async move {
+        // In dev mode (no AGENTMUX_BACKEND_PID) kill the existing sidecar srv before
+        // spawning the migrate subprocess. Both processes share the same SQLite files;
+        // running them concurrently risks lock contention and mid-backfill write races.
+        if std::env::var("AGENTMUX_BACKEND_PID").is_err() {
+            let mut sidecar = state.sidecar_child.lock();
+            if let Some(ref mut child) = *sidecar {
+                let _ = child.kill();
+                tracing::info!("[run_migrations] killed sidecar srv before migration (dev mode)");
+            }
+            *sidecar = None;
+            // Small delay so the OS releases file locks before we open the DB.
+            drop(sidecar);
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+
         if let Err(e) = run_migrations_inner(state.clone(), srv_path, data_dir).await {
             tracing::error!("[run_migrations] subprocess error: {}", e);
             crate::events::emit_event_to_top_level_windows(
@@ -291,18 +308,23 @@ async fn run_migrations_inner(
             "upgrade:migrations-complete",
             &serde_json::json!({ "applied": applied }),
         );
-        // Restart srv so id_store rebinds from per-channel fallback to shared store.
-        // In launcher-managed runs (AGENTMUX_BACKEND_PID set) the host cannot safely
-        // spawn a replacement srv — emit srv-restart-required so the frontend can
-        // prompt the user. In dev mode (no AGENTMUX_BACKEND_PID) restart directly.
-        if std::env::var("AGENTMUX_BACKEND_PID").is_ok() {
-            crate::events::emit_event_to_top_level_windows(
-                &state,
-                "upgrade:srv-restart-required",
-                &serde_json::json!({}),
-            );
-        } else if let Err(e) = restart_backend(state.clone()).await {
-            tracing::warn!("[run_migrations] srv restart after migrations failed: {}", e);
+        // Only restart/notify when something was actually applied; applied==0
+        // means the DB was already current and id_store is already correct.
+        if applied > 0 {
+            // Restart srv so id_store rebinds from per-channel fallback to shared store.
+            // In launcher-managed runs (AGENTMUX_BACKEND_PID set) the host cannot safely
+            // spawn a replacement srv — emit srv-restart-required so the frontend can
+            // prompt the user. In dev mode (no AGENTMUX_BACKEND_PID) restart directly.
+            if std::env::var("AGENTMUX_BACKEND_PID").is_ok() {
+                *state.srv_restart_required.lock() = true;
+                crate::events::emit_event_to_top_level_windows(
+                    &state,
+                    "upgrade:srv-restart-required",
+                    &serde_json::json!({}),
+                );
+            } else if let Err(e) = restart_backend(state.clone()).await {
+                tracing::warn!("[run_migrations] srv restart after migrations failed: {}", e);
+            }
         }
         Ok(())
     } else {
