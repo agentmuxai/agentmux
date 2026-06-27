@@ -111,11 +111,13 @@ export const MaintenanceSection = (): JSX.Element => {
 
     onMount(() => {
         let unlisten: (() => void) | null = null;
-        getApi().listen("upgrade:migrations-complete", (_payload: any) => {
+        getApi().listen("upgrade:migrations-complete", (payload: any) => {
+            const applied: number = payload?.applied ?? 0;
             setMigState((prev) => {
-                const steps = prev.kind === "running" ? prev.steps : [];
-                const applied = prev.kind === "running" ? steps.filter((s) => s.status === "done").length : 0;
-                return { kind: "complete", steps, applied };
+                // migration-event kind:"complete" may have already transitioned state;
+                // preserve it — don't reset steps/applied with this fallback event.
+                if (prev.kind !== "running") return prev;
+                return { kind: "complete", steps: prev.steps, applied };
             });
         }).then((fn) => { unlisten = fn; });
 
@@ -289,14 +291,6 @@ export const MaintenanceSection = (): JSX.Element => {
                                 {(migState() as Extract<MigState, {kind: "complete"}>).applied} applied
                             </span>
                         </div>
-                        <Show when={srvRestartRequired()}>
-                            <div class="maintenance-alert-row maintenance-restart-notice">
-                                <span class="maintenance-icon maintenance-icon--warn">↺</span>
-                                <span class="maintenance-row-text maintenance-row-text--warn">
-                                    Restart AgentMux to complete identity store rebind
-                                </span>
-                            </div>
-                        </Show>
                     </Show>
                     <Show when={migState().kind === "failed"}>
                         <div class="maintenance-stage-header">
@@ -334,6 +328,17 @@ export const MaintenanceSection = (): JSX.Element => {
                             Retry
                         </button>
                     </Show>
+                </div>
+            </Show>
+
+            {/* ── srv-restart-required notice ────────────────────────────── */}
+            {/* Shown independently of migState so it persists after panel close/reopen. */}
+            <Show when={srvRestartRequired()}>
+                <div class="maintenance-alert-row maintenance-restart-notice">
+                    <span class="maintenance-icon maintenance-icon--warn">↺</span>
+                    <span class="maintenance-row-text maintenance-row-text--warn">
+                        Restart AgentMux to complete identity store rebind
+                    </span>
                 </div>
             </Show>
 
