@@ -1113,6 +1113,37 @@ impl AppState {
             .map(|(k, _)| k.clone())
     }
 
+    /// Returns `true` iff the browser registered under `label` is a
+    /// `TopLevel { is_pool: false }` — a promoted, user-visible instance
+    /// window.
+    ///
+    /// Used by `wrr/win_event.rs` to gate LOCATIONCHANGE close reports on
+    /// the authoritative `is_pool` flag rather than a label-prefix string.
+    /// Reasons each case is excluded when NOT a live top-level:
+    ///
+    /// - `TopLevel { is_pool: true }` — warm pool window, parks at x=-20000
+    ///   during initialization; not a close.
+    /// - `Floater { .. }` — floating pane, parks at x=-20000 when unpromoted;
+    ///   not a close.
+    /// - `Pane { .. }` — child browser, never moves to the offscreen position.
+    /// - Not in `browsers` at all — pool HWND registered before
+    ///   `OnAfterCreated` fires; treat as pool (safe: unwrap_or(false)).
+    ///
+    /// A promoted `window-pool-*` window keeps its original label but
+    /// acquires `is_pool: false` atomically at promotion — so it IS reported
+    /// as closed when the user dismisses it. This is the case that a naïve
+    /// `starts_with("window-pool-")` prefix filter would have suppressed,
+    /// causing a stale window count (reagentx P1 on PR #1827).
+    #[cfg(target_os = "windows")]
+    pub fn is_live_top_level_browser(&self, label: &str) -> bool {
+        self.host_state
+            .lock()
+            .browsers
+            .get(label)
+            .map(|h| matches!(h.kind, BrowserKind::TopLevel { is_pool: false }))
+            .unwrap_or(false)
+    }
+
     /// First registered browser (for "any browser" callers like command
     /// palette routing). Returns the label + Browser pair, or None if
     /// the registry is empty.
