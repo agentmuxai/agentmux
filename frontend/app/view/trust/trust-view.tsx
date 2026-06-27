@@ -38,6 +38,21 @@ export function TrustView(_props: ViewComponentProps<TrustViewModel>): JSX.Eleme
                     )}
                 </For>
             </nav>
+            <nav class="bundle-manager-tab-bar" aria-label="Trust Center section">
+                <For each={RAIL}>
+                    {(item) => (
+                        <button
+                            type="button"
+                            classList={{ "is-active": section() === item.id }}
+                            aria-pressed={section() === item.id}
+                            onClick={() => setSection(item.id)}
+                        >
+                            <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
+                            <span>{item.label}</span>
+                        </button>
+                    )}
+                </For>
+            </nav>
             <div class="bundle-manager-section">
                 {/*
                  * All four managers stay mounted — toggling is instant and

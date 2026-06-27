@@ -8,6 +8,8 @@
     overflow: hidden;
     background: var(--main-bg-color);
     color: var(--main-text-color);
+    container-type: inline-size;
+    container-name: memory-pane;
 
     .memory-view-rail {
         flex: 0 0 240px;
@@ -270,5 +272,23 @@
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
         margin: 4px 0 0;
         font-style: italic;
+    }
+}
+
+// sm and below: stack list above detail
+@container memory-pane (max-width: 767px) {
+    .memory-view {
+        flex-direction: column;
+    }
+
+    .memory-view-rail {
+        flex: 0 0 auto;
+        max-height: 40%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .memory-view-detail {
+        padding: 12px 16px;
     }
 }
