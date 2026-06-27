@@ -344,6 +344,17 @@ async fn main() {
         "backend directories initialized"
     );
 
+    // Apply any pending migrations in-process before opening stores.
+    // This ensures 0011_shared_store_backfill (and any future Global migrations)
+    // have run before id_store binds to the shared store — avoiding apparent data
+    // loss on first boot after an upgrade when the user hasn't yet clicked
+    // "Run Migrations" in the UI. Fast-path: no-op when count is zero.
+    match migrations::run_pending_migrations(&base::get_wave_data_dir()) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
+        Err(e) => tracing::warn!("startup: migration error (continuing): {}", e),
+    }
+
     // Open databases
     let db_dir = base::get_wave_db_dir();
 

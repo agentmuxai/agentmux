@@ -253,6 +253,99 @@ fn prune_old_backups(home: &Path) {
     }
 }
 
+// ── In-process migration runner (used by srv startup) ────────────────────────
+
+/// Apply all pending migrations in-process before srv opens its stores.
+///
+/// Called at srv startup when `AGENTMUX_PENDING_MIGRATIONS > 0` so the shared
+/// store is fully backfilled before `id_store` binds to it. This prevents
+/// apparent data loss (empty shared store) on first boot after an upgrade.
+///
+/// Unlike `run_migrate_command` this writes progress via `tracing` rather than
+/// stdout JSON and is meant to be called from within the daemon process rather
+/// than a subprocess. Returns the number of migrations applied (0 = already
+/// current). On error, logs a warning and returns Err — callers should warn and
+/// continue rather than aborting startup, since a partially-migrated state is
+/// better than refusing to start.
+///
+/// `data_dir` must be the wave data dir (parent of `db/`), not the db dir.
+pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
+    let shared_store_path = match resolve_shared_store_path() {
+        Some(p) => p,
+        None => {
+            tracing::info!("run_pending_migrations: shared store path unresolvable — nothing to do");
+            return Ok(0);
+        }
+    };
+
+    if let Some(parent) = shared_store_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Err(format!("run_pending_migrations: create shared dir: {}", e));
+        }
+    }
+
+    let home = match shared_store_path.parent().and_then(|p| p.parent()) {
+        Some(p) => p.to_path_buf(),
+        None => return Err("run_pending_migrations: cannot derive home from shared store path".to_string()),
+    };
+
+    let shared_store = match Store::open_shared(&shared_store_path) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("run_pending_migrations: open shared store: {}", e)),
+    };
+
+    let channel_store_path = data_dir.join("db").join("objects.db");
+    if let Some(parent) = channel_store_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let channel_store = Store::open(&channel_store_path).ok();
+
+    let pending: Vec<_> = REGISTRY.iter().filter(|m| {
+        let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+        tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
+    }).collect();
+
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    let ctx = super::MigrationContext {
+        home: home.clone(),
+        data_dir: data_dir.to_path_buf(),
+        shared_store_path: shared_store_path.clone(),
+        channel_store_path: channel_store_path.clone(),
+    };
+
+    if let Err(e) = backup_stores(&home, &shared_store_path, data_dir) {
+        tracing::warn!("run_pending_migrations: backup failed (continuing): {}", e);
+    }
+
+    let mut applied = 0;
+    for m in &pending {
+        let t = std::time::Instant::now();
+        tracing::info!(id = m.id(), description = m.description(), "run_pending_migrations: applying");
+        match m.up(&ctx) {
+            Ok(()) => {
+                let ms = t.elapsed().as_millis() as u64;
+                let scope = m.scope().as_str();
+                let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+                if let Some(s) = tracking {
+                    if let Err(e) = s.migration_mark_applied(m.id(), scope, ms) {
+                        return Err(format!("run_pending_migrations: mark applied {}: {}", m.id(), e));
+                    }
+                }
+                tracing::info!(id = m.id(), duration_ms = ms, "run_pending_migrations: applied");
+                applied += 1;
+            }
+            Err(e) => {
+                return Err(format!("run_pending_migrations: migration {} failed: {}", m.id(), e));
+            }
+        }
+    }
+
+    Ok(applied)
+}
+
 // ── Pending count (no-op query used by srv startup to populate ESTART) ──────
 
 /// Return the number of REGISTRY migrations that have not yet been applied.
