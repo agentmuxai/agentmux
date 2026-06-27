@@ -215,6 +215,14 @@ pub async fn run_migrations(state: Arc<AppState>) -> Result<serde_json::Value, S
                 &serde_json::json!({ "error": e, "failedId": null }),
             );
         }
+
+        // Always restart srv — we killed the sidecar above regardless of outcome.
+        // This applies to success (applied>0 or applied==0), subprocess failure,
+        // and internal errors equally; without this the session has no working backend.
+        if let Err(e) = restart_backend(state.clone()).await {
+            tracing::warn!("[run_migrations] srv restart after migration: {}", e);
+        }
+
         *state.migration_running.lock() = false;
     });
 
@@ -322,15 +330,6 @@ async fn run_migrations_inner(
             "upgrade:migrations-complete",
             &serde_json::json!({ "applied": applied }),
         );
-        // Only restart when something was actually applied; applied==0 means the
-        // DB was already current and id_store is already correct.
-        // Production is blocked at run_migrations entry, so restart_backend is
-        // always safe here (we own the sidecar and already killed it above).
-        if applied > 0 {
-            if let Err(e) = restart_backend(state.clone()).await {
-                tracing::warn!("[run_migrations] srv restart after migrations failed: {}", e);
-            }
-        }
         Ok(())
     } else {
         let err = if !stderr_output.is_empty() {

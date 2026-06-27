@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi } from "@/store/global";
+import { WpsEvent } from "@/store/wps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 
@@ -71,7 +72,7 @@ export const MaintenanceSection = (): JSX.Element => {
     // Subscribe to migration progress events (from CEF, not WPS WebSocket)
     onMount(() => {
         let unlisten: (() => void) | null = null;
-        getApi().listen("upgrade:migration-event", (payload: any) => {
+        getApi().listen(WpsEvent.UpgradeMigrationEvent, (payload: any) => {
             const kind: string = payload?.kind ?? "";
             if (kind === "start") {
                 const id: string = payload.id ?? "";
@@ -105,7 +106,7 @@ export const MaintenanceSection = (): JSX.Element => {
 
     onMount(() => {
         let unlisten: (() => void) | null = null;
-        getApi().listen("upgrade:migrations-complete", (payload: any) => {
+        getApi().listen(WpsEvent.UpgradeMigrationsComplete, (payload: any) => {
             const applied: number = payload?.applied ?? 0;
             setMigState((prev) => {
                 // migration-event kind:"complete" may have already transitioned state;
@@ -120,7 +121,7 @@ export const MaintenanceSection = (): JSX.Element => {
 
     onMount(() => {
         let unlisten: (() => void) | null = null;
-        getApi().listen("upgrade:migrations-failed", (payload: any) => {
+        getApi().listen(WpsEvent.UpgradeMigrationsFailed, (payload: any) => {
             const error: string = payload?.error ?? "Migration failed";
             const failedId: string | null = payload?.failedId ?? null;
             setMigState((prev) => {
@@ -134,7 +135,7 @@ export const MaintenanceSection = (): JSX.Element => {
 
     onMount(() => {
         let unlisten: (() => void) | null = null;
-        getApi().listen("upgrade:saga-vacuum-done", (payload: any) => {
+        getApi().listen(WpsEvent.UpgradeSagaVacuumDone, (payload: any) => {
             const rowsDeleted: number = payload?.rows_deleted ?? 0;
             const ranAtMs = Date.now();
             setVacState({ kind: "done", rowsDeleted, ranAtMs });
