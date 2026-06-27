@@ -369,14 +369,22 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
 
     // macOS: set_size/set_position/layout() are no-ops for the overlay's
     // NativeWidgetMacNSWindow frame — the only working path is ObjC
-    // [NSWindow setFrame:display:YES].  Post a bounds task (retry=2 →
-    // physical-pixel path, wnum match, no delta-detection pre-scan) so the
-    // NSWindow frame is updated on this UI-thread tick.  retry=2 is used
-    // rather than retry=0 to skip the delta-detection pre-scan (the window
-    // already exists) and rather than retry=1 to avoid the
-    // controller.bounds()-as-DIP code path (we have fresh physical pixels).
+    // [NSWindow setFrame:display:YES].
+    //
+    // Always record the latest rect so SetPaneBoundsViewsTask (retry=0) can
+    // pick it up even if it hasn't run yet (race: resize IPC before the
+    // creation bounds task fires and stores the wnum).
+    //
+    // If the wnum is already known, also post a bounds task at retry=2
+    // (physical-pixel path, wnum match, no delta-detection pre-scan) so the
+    // NSWindow frame is updated immediately.  retry=2 avoids delta-detection
+    // (window already exists) and avoids controller.bounds()-as-DIP (we have
+    // fresh physical pixels).
     #[cfg(target_os = "macos")]
     {
+        state.browser_pane_resize_rects.lock()
+            .insert(label.to_string(), (rect.x, rect.y, rect.width, rect.height));
+
         let wnum = state.browser_pane_overlay_wnums.lock()
             .get(label).cloned().unwrap_or(0);
         if wnum > 0 {
@@ -420,9 +428,11 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
-    // Remove stored wnum so resize tasks posted after detach become no-ops.
+    // Remove stored wnum and resize rect so tasks posted after detach become no-ops.
     #[cfg(target_os = "macos")]
     state.browser_pane_overlay_wnums.lock().remove(label);
+    #[cfg(target_os = "macos")]
+    state.browser_pane_resize_rects.lock().remove(label);
     let Some((_window_label, controller)) = entry else {
         tracing::debug!(
             label = %label,

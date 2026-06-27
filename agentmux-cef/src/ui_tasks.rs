@@ -2031,6 +2031,21 @@ wrap_task! {
                 .map(|w| w.window_handle() as *mut std::ffi::c_void)
                 .unwrap_or(std::ptr::null_mut());
 
+            // Prefer a resize rect stored by resize_browser_pane_view over the
+            // task's own creation-time rect.  A resize IPC can arrive between
+            // pane creation and this deferred task; since set_size/set_position
+            // are no-ops on macOS and the wnum is not yet known (so the ObjC
+            // resize path is skipped), the only way to deliver the newer rect is
+            // via this shared slot.  At retry>=2 self.x/y/w/h IS the resize
+            // rect (posted by resize_browser_pane_view with wnum), so preferred_rect
+            // simply returns the same value.
+            #[cfg(target_os = "macos")]
+            let preferred_rect: (i32, i32, i32, i32) = {
+                let stored = self.state.browser_pane_resize_rects.lock()
+                    .get(&self.label).cloned();
+                stored.unwrap_or((self.x, self.y, self.width, self.height))
+            };
+
             #[cfg(target_os = "macos")]
             unsafe {
                 use std::ffi::c_char;
@@ -2087,10 +2102,11 @@ wrap_task! {
                 };
 
                 // Determine desired final visibility before any NSWindow mutation.
-                // Consulted again after setFrame to restore the correct state.
+                // Use preferred_rect (most recent resize rect, or creation rect
+                // if no resize has arrived yet) so visibility reflects the
+                // current intent, not the stale creation-time IPC payload.
                 let should_be_visible = {
-                    let pane_rect = (self.x, self.y, self.width, self.height);
-                    crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, pane_rect)
+                    crate::browser_panes::compute_pane_visible(&self.state, &self.window_label, preferred_rect)
                 };
 
                 // Step 1 (retry=0 only): snapshot which NativeWidgetMacNSWindows
@@ -2258,22 +2274,22 @@ wrap_task! {
                 //  retry=1, cb≠0×0  → controller.set_bounds() at retry=0 stored DIP;
                 //                      re-use as-is (no scale division — it's already
                 //                      in NSWindow points).
-                //  all other cases  → self.x/y/width/height are physical pixels from
-                //                      the IPC rect; divide by backingScaleFactor.
-                //                      Do NOT fall back to controller.bounds() here:
-                //                      set_size/set_position are no-ops on macOS so
-                //                      controller.bounds() at retry=0 reflects a stale
-                //                      set_bounds() DIP, not a physical-pixel resize —
-                //                      using it would cause a double-scale division.
+                //  all other cases  → preferred_rect is physical pixels from the most
+                //                      recent IPC rect (resize or creation); divide by
+                //                      backingScaleFactor.
+                //                      Do NOT use controller.bounds() here: set_size/
+                //                      set_position are no-ops on macOS so it reflects
+                //                      a stale set_bounds() DIP, causing double-scale.
                 let (pane_x, pane_y, pane_w, pane_h) = {
                     let cb = controller.bounds();
                     if self.retry == 1 && cb.width > 0 && cb.height > 0 {
                         // DIP from set_bounds() committed at retry=0; no scale division.
                         (cb.x as f64, cb.y as f64, cb.width as f64, cb.height as f64)
                     } else {
-                        // Physical pixels from task rect → NSWindow points.
-                        (self.x as f64 / scale, self.y as f64 / scale,
-                         self.width as f64 / scale, self.height as f64 / scale)
+                        // Physical pixels from preferred_rect → NSWindow points.
+                        let (px, py, pw, ph) = preferred_rect;
+                        (px as f64 / scale, py as f64 / scale,
+                         pw as f64 / scale, ph as f64 / scale)
                     }
                 };
                 let screen_x = main_frame.origin.x + pane_x;
