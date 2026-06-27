@@ -357,24 +357,44 @@ extern "C" fn swizzled_should_ignore_mouse_event(
 static ORIG_NSAPP_SEND_EVENT: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
-/// Swizzled NSApplication::sendEvent: — for clicks on the main window while the
-/// browser pane is open, bypasses NSWindow.sendEvent: and dispatches directly
-/// to the main RenderWidgetHostViewCocoa after restoring CEF focus.
+// Cached NSWindow* and RenderWidgetHostViewCocoa* for the main browser window.
+// Discovered at leftMouseDown time, reused for drag/up/right-click events so we
+// don't re-walk the subview tree on every event. Invalidated on pane close
+// (PANE_LOCAL_W → 0). Raw pointer: safe because RWHVC lives for the app lifetime.
+#[cfg(target_os = "macos")]
+static MAIN_WIN_PTR:  std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(target_os = "macos")]
+static MAIN_RWHVC_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Swizzled NSApplication::sendEvent: — for mouse events on the main window
+/// while the browser pane is open, bypasses NSWindow.sendEvent: and dispatches
+/// directly to the main RenderWidgetHostViewCocoa after restoring CEF focus.
 ///
 /// Why direct dispatch:
-///   When the pane overlay is frontmost the main window is not the key window.
-///   NSWindow.sendEvent: has "activate-only" semantics for non-key windows: it
-///   activates (makeKeyAndOrderFront:) the window but may not forward the event
-///   to the hit view. Directly calling [rwhvc mouseDown: event] bypasses this
-///   check — confirmed working in the overlay-redirect path where the same
-///   technique delivered events successfully ([AMX-DIAG-MD] hasFocus=true).
+///   When the pane overlay is frontmost the main window loses key status.
+///   NSWindow.sendEvent: has "activate-only" semantics for non-key windows:
+///   it activates the window but may not forward the event to the hit view.
+///   Directly calling [rwhvc mouseDown:/rightMouseDown:/etc. event] bypasses
+///   this — confirmed working ([AMX-DIAG-MD] hasFocus=true fires for every
+///   dispatched event).
 ///
 ///   set_focus(1) must be called before dispatch so Blink's
 ///   RenderWidgetHostImpl does not drop the event (CEF calls set_focus(0) on
 ///   the main browser whenever the overlay gains focus).
 ///
-/// Overlay clicks (pane area, NativeWidgetMacNSWindow) are forwarded via the
-/// original NSApp sendEvent: so the pane browser handles them normally.
+/// Event types handled via direct dispatch (main window only):
+///   1=leftMouseDown, 2=leftMouseUp, 3=rightMouseDown, 4=rightMouseUp,
+///   6=leftMouseDragged, 7=rightMouseDragged, 22=scrollWheel
+///
+///   Drag events (6/7) must be intercepted because NSApp never saw the initial
+///   leftMouseDown (we returned early), so its drag-tracking state is absent
+///   and subsequent drag events would not be routed to the main RWHVC.
+///
+///   rightMouseDown/rightMouseUp (3/4) are needed for context menus: without
+///   direct dispatch + set_focus(1) Blink silently drops them.
+///
+/// Overlay clicks (NativeWidgetMacNSWindow, pane area) are forwarded via the
+/// original NSApp sendEvent: path so the pane browser handles them normally.
 #[cfg(target_os = "macos")]
 extern "C" fn swizzled_nsapp_send_event(
     this: *mut std::ffi::c_void,
@@ -388,19 +408,21 @@ extern "C" fn swizzled_nsapp_send_event(
     type Sel = *const c_void;
 
     unsafe {
-        let get_usize: extern "C" fn(Id, Sel) -> usize   = std::mem::transmute(objc_msgSend as *const c_void);
-        let get_id:    extern "C" fn(Id, Sel) -> Id       = std::mem::transmute(objc_msgSend as *const c_void);
-        let get_usize2:extern "C" fn(Id, Sel, usize) -> Id= std::mem::transmute(objc_msgSend as *const c_void);
+        let get_usize:  extern "C" fn(Id, Sel) -> usize    = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_id:     extern "C" fn(Id, Sel) -> Id        = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_obj_at: extern "C" fn(Id, Sel, usize) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
         #[repr(C)] #[derive(Copy,Clone)] struct NSPoint { x: f64, y: f64 }
-        let get_pt: extern "C" fn(Id, Sel) -> NSPoint     = std::mem::transmute(objc_msgSend as *const c_void);
+        let get_pt: extern "C" fn(Id, Sel) -> NSPoint       = std::mem::transmute(objc_msgSend as *const c_void);
 
         let sel_type = sel_registerName(b"type\0".as_ptr() as _);
         let ev_type  = get_usize(event, sel_type);
 
-        // leftMouseDown=1, leftMouseUp=2, scrollWheel=22
-        if (ev_type == 1 || ev_type == 2 || ev_type == 22)
-            && PANE_LOCAL_W.load(std::sync::atomic::Ordering::Relaxed) > 0
-        {
+        // Event types to intercept on the main window.
+        // 1=leftMouseDown  2=leftMouseUp    3=rightMouseDown  4=rightMouseUp
+        // 6=leftMouseDragged  7=rightMouseDragged  22=scrollWheel
+        let is_interceptable = matches!(ev_type, 1|2|3|4|6|7|22);
+
+        if is_interceptable && PANE_LOCAL_W.load(std::sync::atomic::Ordering::Relaxed) > 0 {
             let sel_win = sel_registerName(b"window\0".as_ptr() as _);
             let sel_loc = sel_registerName(b"locationInWindow\0".as_ptr() as _);
             let sel_wn  = sel_registerName(b"windowNumber\0".as_ptr() as _);
@@ -417,48 +439,62 @@ extern "C" fn swizzled_nsapp_send_event(
             }
 
             if !win.is_null() {
-                // Check if this event is for the overlay (NativeWidgetMacNSWindow
-                // = pane browser window). Overlay events go to the pane browser
-                // via the original sendEvent: path — no intervention needed.
+                // Skip overlay (NativeWidgetMacNSWindow = pane window).
+                // Let original NSApp sendEvent: deliver pane-area events to the
+                // pane browser as normal.
                 let win_cls  = object_getClass(win);
                 let name_ptr = object_getClassName(win_cls);
                 let is_overlay = !name_ptr.is_null() &&
                     std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap_or("").contains("NativeWidgetMacNSWindow");
 
                 if !is_overlay {
-                    // Main window click. Walk its contentView subview tree to
-                    // find the RenderWidgetHostViewCocoa and dispatch directly,
-                    // bypassing NSWindow.sendEvent: which has activate-only
-                    // semantics for non-key windows.
-                    let sel_cv     = sel_registerName(b"contentView\0".as_ptr() as _);
-                    let sel_subs   = sel_registerName(b"subviews\0".as_ptr() as _);
-                    let sel_count  = sel_registerName(b"count\0".as_ptr() as _);
-                    let sel_obj_at = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
+                    // --- Main window event ---
+                    // Find the RWHVC to dispatch to. For leftMouseDown we walk
+                    // the subview tree fresh (window may have been recreated).
+                    // For all other types we reuse the cached pointer as long as
+                    // the window pointer matches, to avoid walking on every drag.
+                    let cached_win  = MAIN_WIN_PTR.load(std::sync::atomic::Ordering::Relaxed);
+                    let cached_rwhvc = MAIN_RWHVC_PTR.load(std::sync::atomic::Ordering::Relaxed);
 
-                    let cv = get_id(win, sel_cv);
-                    let mut rwhvc: Id = std::ptr::null_mut();
-                    let mut stack: Vec<Id> = if cv.is_null() { vec![] } else { vec![cv] };
-                    'walk: while let Some(view) = stack.pop() {
-                        let vcls = object_getClass(view);
-                        let vname_ptr = object_getClassName(vcls);
-                        if !vname_ptr.is_null() {
-                            let vname = std::ffi::CStr::from_ptr(vname_ptr).to_str().unwrap_or("");
-                            if vname.contains("RenderWidgetHostViewCocoa") {
-                                rwhvc = view;
-                                break 'walk;
+                    let rwhvc: Id = if ev_type == 1 || cached_win != win as usize || cached_rwhvc == 0 {
+                        // Walk tree.
+                        let sel_cv     = sel_registerName(b"contentView\0".as_ptr() as _);
+                        let sel_subs   = sel_registerName(b"subviews\0".as_ptr() as _);
+                        let sel_count  = sel_registerName(b"count\0".as_ptr() as _);
+                        let sel_obj_at = sel_registerName(b"objectAtIndex:\0".as_ptr() as _);
+
+                        let cv = get_id(win, sel_cv);
+                        let mut found: Id = std::ptr::null_mut();
+                        let mut stack: Vec<Id> = if cv.is_null() { vec![] } else { vec![cv] };
+                        'walk: while let Some(view) = stack.pop() {
+                            let vcls = object_getClass(view);
+                            let vname_ptr = object_getClassName(vcls);
+                            if !vname_ptr.is_null() {
+                                let vname = std::ffi::CStr::from_ptr(vname_ptr).to_str().unwrap_or("");
+                                if vname.contains("RenderWidgetHostViewCocoa") {
+                                    found = view;
+                                    break 'walk;
+                                }
+                            }
+                            let subs = get_id(view, sel_subs);
+                            if !subs.is_null() {
+                                let n = get_usize(subs, sel_count);
+                                for i in 0..n { stack.push(get_obj_at(subs, sel_obj_at, i)); }
                             }
                         }
-                        let subs = get_id(view, sel_subs);
-                        if !subs.is_null() {
-                            let n = get_usize(subs, sel_count);
-                            for i in 0..n { stack.push(get_usize2(subs, sel_obj_at, i)); }
+                        if !found.is_null() {
+                            MAIN_WIN_PTR.store(win as usize, std::sync::atomic::Ordering::Relaxed);
+                            MAIN_RWHVC_PTR.store(found as usize, std::sync::atomic::Ordering::Relaxed);
                         }
-                    }
+                        found
+                    } else {
+                        cached_rwhvc as Id
+                    };
 
                     if !rwhvc.is_null() {
                         // Restore main browser focus so Blink doesn't drop the
-                        // event (CEF called set_focus(0) when the pane overlay
-                        // gained focus; we undo that here before dispatch).
+                        // event (CEF calls set_focus(0) on the main browser
+                        // whenever the overlay gains focus).
                         if let Ok(mut guard) = crate::ui_tasks::MAIN_BROWSER_HOST_FOR_FOCUS.try_lock() {
                             if let Some(ref mut h) = *guard {
                                 h.set_focus(1);
@@ -467,13 +503,17 @@ extern "C" fn swizzled_nsapp_send_event(
                         let method_name: &[u8] = match ev_type {
                             1  => b"mouseDown:\0",
                             2  => b"mouseUp:\0",
+                            3  => b"rightMouseDown:\0",
+                            4  => b"rightMouseUp:\0",
+                            6  => b"mouseDragged:\0",
+                            7  => b"rightMouseDragged:\0",
                             22 => b"scrollWheel:\0",
                             _  => b"mouseDown:\0",
                         };
                         let sel_m = sel_registerName(method_name.as_ptr() as _);
                         let dispatch_fn: extern "C" fn(Id, Sel, Id) =
                             std::mem::transmute(objc_msgSend as *const c_void);
-                        if ev_type == 1 {
+                        if ev_type == 1 || ev_type == 3 {
                             tracing::info!(
                                 ev_type, loc_x = loc.x, loc_y = loc.y,
                                 target = rwhvc as usize,
