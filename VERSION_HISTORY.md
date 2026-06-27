@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.49.6 — 2026-06-27
+
+- fix(muxbus): use fixed port 9379 for PKCE callback listener
+- fix(blockframe): make header text reactive so term:activity updates after mount
+- fix(host-panel): show correct DevTools port and host badge per instance
+- fix(activity-summary): never clear haiku label; flash on update
+- fix(bang-cmd): auto-open details panel and expand log when running bang commands
+- feat(statusbar): add Maintenance section to InstancePanel
+- fix(pool): remove stale Windows guard from spawn_pane_pool_window
+- fix(ts): resolve all 35 TypeScript compiler errors (missing exports, React type refs, rpcCall opts arg, implicit void returns, unsafe casts)
+- fix(agent): seed term:zoom from ui:zoom when opening agent pane — zoom level now persists across close/reopen
+- fix(dev): add scripts/dev-agent.cmd Windows bridge for agent MCP-Shell invocation of task dev
+- fix(bang-cmd): respect user collapse in ActivityLogPanel; fix stale doc comment
+
+
 ## 0.49.5 — 2026-06-27
 
 - fix(browser-pane): black screen + mouse freeze on macOS when opening a browser pane
