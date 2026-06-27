@@ -1055,6 +1055,22 @@ impl AppState {
         crate::reducer::count_live_user_windows(&self.host_state.lock())
     }
 
+    /// Reverse lookup: find the label whose cached HWND matches `hwnd`.
+    /// Used by the win-event HIDE handler to map an OS-level window hide to a
+    /// logical `report_window_closed` call, covering close paths (Alt+F4,
+    /// taskbar) that bypass the `close_window()` RPC.
+    /// O(n) over `window_hwnds` — n is bounded by the number of open windows
+    /// (typically 1–5). Returns `None` if `hwnd` is not in the cache.
+    #[cfg(target_os = "windows")]
+    pub fn label_for_hwnd(&self, hwnd: windows_sys::Win32::Foundation::HWND) -> Option<String> {
+        let raw = hwnd as isize;
+        let guard = self.window_hwnds.lock();
+        guard
+            .iter()
+            .find(|(_k, v): &(&String, &isize)| **v == raw)
+            .map(|(k, _)| k.clone())
+    }
+
     /// First registered browser (for "any browser" callers like command
     /// palette routing). Returns the label + Browser pair, or None if
     /// the registry is empty.

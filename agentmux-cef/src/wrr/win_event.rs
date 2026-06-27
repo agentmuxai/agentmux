@@ -21,6 +21,7 @@
 // non-blocking sync APIs (UnboundedSender → drain task) so this
 // callback returns quickly even under burst load.
 
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 
 use windows_sys::Win32::Foundation::{HWND, RECT};
@@ -52,7 +53,6 @@ fn app_state() -> &'static OnceLock<Arc<AppState>> {
     static S: OnceLock<Arc<AppState>> = OnceLock::new();
     &S
 }
-
 
 /// Phase B.9.1 — handles to the installed hooks. Held in a
 /// `OnceLock<Mutex<Option<...>>>` so install_hooks is idempotent
@@ -429,7 +429,7 @@ unsafe extern "system" fn win_event_callback(
             launcher_ipc::report_hwnd_iconic_changed(raw_hwnd, iconic);
             // B1: a user-visible window appeared — arm the last-window quit.
             if visible {
-                HAD_VISIBLE_USER_WINDOW.store(true, std::sync::atomic::Ordering::SeqCst);
+                HAD_VISIBLE_USER_WINDOW.store(true, Ordering::SeqCst);
             }
         }
         EVENT_OBJECT_DESTROY => {
@@ -452,7 +452,7 @@ unsafe extern "system" fn win_event_callback(
             }
             launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, true);
             // B1: a user-visible window was shown — arm the last-window quit.
-            HAD_VISIBLE_USER_WINDOW.store(true, std::sync::atomic::Ordering::SeqCst);
+            HAD_VISIBLE_USER_WINDOW.store(true, Ordering::SeqCst);
         }
         EVENT_OBJECT_HIDE => {
             let class = read_class_name(hwnd);
@@ -490,15 +490,51 @@ unsafe extern "system" fn win_event_callback(
             launcher_ipc::report_hwnd_iconic_changed(raw_hwnd, false);
         }
         EVENT_OBJECT_LOCATIONCHANGE => {
-            // Heavy event during drags — debounce per HWND.
-            if !position_debounce::should_emit(raw_hwnd) {
-                return;
-            }
             let class = read_class_name(hwnd);
             if !classify::is_app_class(&class) {
                 return;
             }
-            if let Some(rect) = read_window_rect(hwnd) {
+            let Some(rect) = read_window_rect(hwnd) else {
+                return;
+            };
+
+            // Gap A — pool-move detection: CEF Views recycle-on-close moves the
+            // HWND to x < OFFSCREEN_POOL_THRESHOLD_X immediately after the HIDE.
+            // Virtual-desktop switches do NOT move the rect (the window stays at
+            // its on-screen coordinates, only its visibility changes), so this
+            // check correctly distinguishes a real close from a desktop switch
+            // without any debounce heuristic or paired-SHOW cancellation.
+            //
+            // We bypass the position debounce here (unconditional rect read) so a
+            // close that follows a drag within the 50ms debounce window is still
+            // detected. LOCATIONCHANGE fires once per WM_WINDOWPOSCHANGED, so a
+            // stationary pool window never re-fires — no duplicate-report risk.
+            //
+            // Ref: docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap A
+            //      reagentx P1+P2 on PR #1803.
+            // IsIconic guard: minimized windows report (-32000, -32000) from
+            // GetWindowRect, which is below OFFSCREEN_POOL_THRESHOLD_X. Skip
+            // them — a minimize is not a close.
+            if rect.left < OFFSCREEN_POOL_THRESHOLD_X && IsIconic(hwnd) == 0 {
+                if let Some(state) = app_state().get() {
+                    if let Some(label) = state.label_for_hwnd(hwnd) {
+                        if !label.starts_with("browser-pane-") {
+                            tracing::debug!(
+                                target: "wrr",
+                                "[wrr] LOCATIONCHANGE pool-move → report_window_closed label={}",
+                                label
+                            );
+                            crate::launcher_ipc::report_window_closed(label);
+                        }
+                    }
+                }
+                // Pool-position window: suppress position IPC — the launcher
+                // WRR mirror treats negative-x positions as off-monitor noise.
+                return;
+            }
+
+            // Normal on-screen position reporting, debounced to ~20 Hz.
+            if position_debounce::should_emit(raw_hwnd) {
                 launcher_ipc::report_hwnd_position_changed(raw_hwnd, rect);
             }
         }
