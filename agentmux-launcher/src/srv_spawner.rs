@@ -90,6 +90,10 @@ impl std::fmt::Display for SrvSpawnError {
 /// On failure the launcher should surface an error and not start the daemon.
 /// stdout lines are newline-delimited JSON progress events — consumed inline
 /// so sub-events are delivered to the splash before `stage_end` is sent.
+///
+/// Not called during normal startup (migrations are deferred to the upgrade
+/// panel). Preserved here for the upgrade-panel IPC path that will invoke it
+/// on demand once the panel is wired up.
 pub async fn run_migrate(
     launcher_exe_dir: &Path,
     paths: &DataPaths,

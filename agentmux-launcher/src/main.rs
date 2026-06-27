@@ -393,6 +393,7 @@ fn spawn_host_supervised(
         .env("AGENTMUX_BACKEND_WS", &srv.ws_endpoint)
         .env("AGENTMUX_BACKEND_WEB", &srv.web_endpoint)
         .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
+        .env("AGENTMUX_PENDING_MIGRATIONS", srv.pending_migrations.to_string())
         .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         .envs(host_env.iter().cloned())
@@ -471,6 +472,7 @@ fn spawn_host_unix(
         .env("AGENTMUX_BACKEND_WS", &srv.ws_endpoint)
         .env("AGENTMUX_BACKEND_WEB", &srv.web_endpoint)
         .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
+        .env("AGENTMUX_PENDING_MIGRATIONS", srv.pending_migrations.to_string())
         .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         // Parent-identity stamp: our pid == the host's getppid (we spawn it
