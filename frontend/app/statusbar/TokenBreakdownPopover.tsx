@@ -97,7 +97,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                 const cur = props.anchorRect;
                 if (!cur) return;
                 const pos = await computeMenuPosition(
-                    { anchor: cur, placement: "top-end" },
+                    { anchor: cur, placement: "top-end", avoidNativePanes: false },
                     el,
                 );
                 setFloatingStyle(pos.style);

@@ -145,7 +145,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
             const update = async () => {
                 const cur = props.anchorRect;
                 if (!cur) return;
-                const pos = await computeMenuPosition({ anchor: cur, placement: "top-end" }, el);
+                const pos = await computeMenuPosition({ anchor: cur, placement: "top-end", avoidNativePanes: false }, el);
                 setFloatingStyle(pos.style);
             };
             cleanupAutoUpdate?.();
