@@ -272,3 +272,21 @@
         font-style: italic;
     }
 }
+
+// sm and below: stack list above detail
+@container memory-pane (max-width: 767px) {
+    .memory-view {
+        flex-direction: column;
+    }
+
+    .memory-view-rail {
+        flex: 0 0 auto;
+        max-height: 40%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .memory-view-detail {
+        padding: 12px 16px;
+    }
+}
