@@ -17,16 +17,6 @@ use std::sync::Arc;
 use cef::*;
 use crate::state::AppState;
 
-// macOS: swizzle storage for RenderWidgetHostViewCocoa::mouseDown: diagnostic.
-// Set once (retry=0 of the first pane); subsequent tasks skip if already set.
-#[cfg(target_os = "macos")]
-static ORIG_RWHVC_MOUSE_DOWN: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
-#[cfg(target_os = "macos")]
-static ORIG_RWHVC_MOUSE_UP: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
 // macOS: swizzle storage for NativeWidgetMacNSWindow::isMainWindow / isKeyWindow.
 // The swizzled implementations check objc_getAssociatedObject on `self` — only the
 // specific overlay NSWindow instance is tagged, so pool windows (same class) are
@@ -50,12 +40,6 @@ static MAIN_BROWSER_HOST_FOR_FOCUS: std::sync::Mutex<Option<cef::BrowserHost>> =
 #[cfg(target_os = "macos")]
 static PANE_OVERLAY_TAG_KEY: u8 = 0;
 
-// hitTest: swizzle storage. Returns nil for the overlay RWHVC when the click lands
-// outside the pane bounds, so the click falls through to the main RWHVC below.
-#[cfg(target_os = "macos")]
-static ORIG_RWHVC_HIT_TEST: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
-
 // shouldIgnoreMouseEvent: swizzle storage. Original returns YES when the RWHVC's
 // window is not key/main, silently dropping mouseDown:. We override to always NO.
 #[cfg(target_os = "macos")]
@@ -63,8 +47,8 @@ static ORIG_RWHVC_SHOULD_IGNORE: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 // Pane bounds in main-window BridgedContentView Cocoa coordinates (y from bottom).
-// Updated each time SetPaneBoundsViewsTask runs. Read by swizzled_rwhvc_hit_test
-// to decide whether an overlay RWHVC click is in-pane or out-of-pane.
+// Updated each time SetPaneBoundsViewsTask runs. Read by swizzled_nsapp_send_event
+// to decide whether to intercept events for the main window.
 #[cfg(target_os = "macos")]
 static PANE_LOCAL_X:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 #[cfg(target_os = "macos")]
@@ -73,147 +57,6 @@ static PANE_LOCAL_Y_BOTTOM: std::sync::atomic::AtomicI32 = std::sync::atomic::At
 static PANE_LOCAL_W:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 #[cfg(target_os = "macos")]
 static PANE_LOCAL_H:        std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
-
-/// NSPoint-compatible struct for use in hitTest: swizzle (parameter, not return).
-/// Passed as HFA (two f64) on arm64 (d0/d1) and as XMM0 on x86_64.
-#[cfg(target_os = "macos")]
-#[repr(C)]
-#[derive(Copy, Clone)]
-struct ObjcPoint { x: f64, y: f64 }
-
-/// Helper: temporarily make `win` the key window, call `body(this, cmd, event)`,
-/// then restore `restore_win` as key. This lets RWHVC's internal `isKeyWindow`
-/// check pass for the overlay window without permanently stealing key status.
-#[cfg(target_os = "macos")]
-unsafe fn with_temp_key_window(
-    this: *mut std::ffi::c_void,
-    cmd: *const std::ffi::c_void,
-    event: *mut std::ffi::c_void,
-    orig: usize,
-) {
-    use std::ffi::c_void;
-    extern "C" { fn objc_msgSend(); fn sel_registerName(n: *const i8) -> *const c_void; }
-    type Id  = *mut c_void;
-    type Sel = *const c_void;
-    let get_id: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
-    let call0: extern "C" fn(Id, Sel)        = std::mem::transmute(objc_msgSend as *const c_void);
-    let sel_win        = sel_registerName(b"window\0".as_ptr() as _);
-    let sel_mk         = sel_registerName(b"makeKeyWindow\0".as_ptr() as _);
-    let sel_app        = sel_registerName(b"sharedApplication\0".as_ptr() as _);
-    let sel_kw         = sel_registerName(b"keyWindow\0".as_ptr() as _);
-    let sel_mw         = sel_registerName(b"mainWindow\0".as_ptr() as _);
-    let ns_app_cls: Id = {
-        extern "C" { fn objc_getClass(name: *const i8) -> Id; }
-        objc_getClass(b"NSApplication\0".as_ptr() as _)
-    };
-    let app        = get_id(ns_app_cls, sel_app);
-    let prev_key   = get_id(app, sel_kw);
-    let prev_main  = get_id(app, sel_mw);
-    let overlay_win = get_id(this as Id, sel_win);
-
-    // Make overlay temporarily key so RWHVC::mouseDown: passes isKeyWindow check
-    if !overlay_win.is_null() { call0(overlay_win, sel_mk); }
-
-    // Call the original mouseDown:/mouseUp: — now [self.window isKeyWindow] → YES
-    if orig != 0 {
-        let f: extern "C" fn(*mut c_void, *const c_void, *mut c_void) = std::mem::transmute(orig);
-        f(this, cmd, event);
-    }
-
-    // Restore: make main window key again so sidebar clicks still work
-    let restore = if !prev_key.is_null() { prev_key } else { prev_main };
-    if !restore.is_null() { call0(restore, sel_mk); }
-}
-
-/// Swizzled RWHVC::mouseDown: — restores first-responder before forwarding.
-///
-/// Chromium's `shouldIgnoreMouseEvent:` returns YES if
-/// `[self.window firstResponder] != self` (and `acceptsMouseEvents` is NO).
-/// After a pane click, the pane's BridgedContentView/RWHVC steals firstResponder
-/// in the main CefNSWindow. Subsequent main-area clicks reach the correct RWHVC
-/// via hitTest, but `shouldIgnoreMouseEvent` silently drops them because the
-/// main RWHVC is no longer the window's first responder.
-/// Fix: `makeFirstResponder:this` before calling the original so the check passes.
-#[cfg(target_os = "macos")]
-extern "C" fn swizzled_rwhvc_mouse_down(
-    this: *mut std::ffi::c_void,
-    cmd: *const std::ffi::c_void,
-    event: *mut std::ffi::c_void,
-) {
-    use std::ffi::c_void;
-    extern "C" { fn objc_msgSend(); fn sel_registerName(n: *const i8) -> *const c_void; }
-    type Id  = *mut c_void;
-    type Sel = *const c_void;
-
-    unsafe {
-        extern "C" {
-            fn object_getClass(obj: Id) -> Id;
-            fn object_getClassName(cls: Id) -> *const i8;
-        }
-        let get_id:    extern "C" fn(Id, Sel) -> Id     = std::mem::transmute(objc_msgSend as *const c_void);
-        let get_i64:   extern "C" fn(Id, Sel) -> i64    = std::mem::transmute(objc_msgSend as *const c_void);
-        let call_id:   extern "C" fn(Id, Sel, Id) -> u8 = std::mem::transmute(objc_msgSend as *const c_void);
-
-        let sel_window    = sel_registerName(b"window\0".as_ptr() as _);
-        let sel_fr        = sel_registerName(b"firstResponder\0".as_ptr() as _);
-        let sel_mfr       = sel_registerName(b"makeFirstResponder:\0".as_ptr() as _);
-        let sel_wnum      = sel_registerName(b"windowNumber\0".as_ptr() as _);
-        let sel_ev_wnum   = sel_registerName(b"windowNumber\0".as_ptr() as _);
-
-        let win    = get_id(this as Id, sel_window);
-        let fr     = if !win.is_null() { get_id(win, sel_fr) } else { std::ptr::null_mut() };
-        let wnum   = if !win.is_null() { get_i64(win, sel_wnum) } else { -1 };
-        let ev_wnum = get_i64(event as Id, sel_ev_wnum);
-
-        let win_cls_name = if !win.is_null() {
-            let cls = object_getClass(win);
-            if !cls.is_null() {
-                let ptr = object_getClassName(cls);
-                if !ptr.is_null() { std::ffi::CStr::from_ptr(ptr).to_str().unwrap_or("?").to_string() }
-                else { "?".into() }
-            } else { "?".into() }
-        } else { "null".into() };
-
-        tracing::debug!(
-            this      = this as usize,
-            fr        = fr as usize,
-            is_fr     = (fr == this as Id) as u8,
-            wnum,
-            ev_wnum,
-            win_cls   = %win_cls_name,
-            "[browser-pane] RWHVC mouseDown: fired"
-        );
-
-        // If we're not already the first responder, claim it now so
-        // shouldIgnoreMouseEvent: passes its firstResponder check.
-        if !win.is_null() && fr != this as Id {
-            call_id(win, sel_mfr, this as Id);
-        }
-    }
-
-    let orig = ORIG_RWHVC_MOUSE_DOWN.load(std::sync::atomic::Ordering::SeqCst);
-    if orig != 0 {
-        let f: extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, *mut std::ffi::c_void) =
-            unsafe { std::mem::transmute(orig) };
-        f(this, cmd, event);
-    }
-}
-
-/// Swizzled RWHVC::mouseUp: — logs and forwards.
-#[cfg(target_os = "macos")]
-extern "C" fn swizzled_rwhvc_mouse_up(
-    this: *mut std::ffi::c_void,
-    cmd: *const std::ffi::c_void,
-    event: *mut std::ffi::c_void,
-) {
-    tracing::info!(this = this as usize, "[browser-pane] RWHVC mouseUp: fired");
-    let orig = ORIG_RWHVC_MOUSE_UP.load(std::sync::atomic::Ordering::SeqCst);
-    if orig != 0 {
-        let f: extern "C" fn(*mut std::ffi::c_void, *const std::ffi::c_void, *mut std::ffi::c_void) =
-            unsafe { std::mem::transmute(orig) };
-        f(this, cmd, event);
-    }
-}
 
 /// Swizzled NSWindow::isMainWindow — returns YES only for the tagged pane overlay.
 /// All other NativeWidgetMacNSWindow instances (pool windows, etc.) call through
@@ -263,77 +106,6 @@ extern "C" fn swizzled_is_key_window(
         return f(this, cmd);
     }
     0
-}
-
-/// Swizzled `RenderWidgetHostViewCocoa::hitTest:`.
-///
-/// The overlay BrowserView's RWHVC ends up in the main CefNSWindow's
-/// BridgedContentView at frame (0,0,W,H) — covering the entire window.
-/// Because hitTest walks from front to back, it always returns the overlay
-/// RWHVC for every click in the main window, routing all events to the pane
-/// browser and leaving the main SolidJS UI unresponsive.
-///
-/// Fix: when the RWHVC lives in NativeWidgetMacNSWindow (the overlay window)
-/// and the click lands OUTSIDE the stored pane bounds, return nil so the hit
-/// walk continues to the main RWHVC below. Clicks inside the pane bounds pass
-/// through to the original implementation as before.
-#[cfg(target_os = "macos")]
-extern "C" fn swizzled_rwhvc_hit_test(
-    this: *mut std::ffi::c_void,
-    cmd: *const std::ffi::c_void,
-    pt: ObjcPoint,
-) -> *mut std::ffi::c_void {
-    use std::ffi::c_void;
-    type Id  = *mut c_void;
-    type Sel = *const c_void;
-    extern "C" {
-        fn objc_msgSend();
-        fn sel_registerName(n: *const i8) -> Sel;
-        fn object_getClass(obj: Id) -> Id;
-        fn object_getClassName(cls: Id) -> *const i8;
-    }
-    let pw = PANE_LOCAL_W.load(std::sync::atomic::Ordering::Relaxed);
-    if pw > 0 {
-        unsafe {
-            let get_id: extern "C" fn(Id, Sel) -> Id =
-                std::mem::transmute(objc_msgSend as *const c_void);
-            let sel_win = sel_registerName(b"window\0".as_ptr() as _);
-            let win = get_id(this as Id, sel_win);
-            if !win.is_null() {
-                let win_cls = object_getClass(win);
-                if !win_cls.is_null() {
-                    let name_ptr = object_getClassName(win_cls);
-                    if !name_ptr.is_null() {
-                        let s = std::ffi::CStr::from_ptr(name_ptr).to_str().unwrap_or("");
-                        if s.contains("NativeWidgetMacNSWindow") {
-                            let px = PANE_LOCAL_X.load(std::sync::atomic::Ordering::Relaxed) as f64;
-                            let py = PANE_LOCAL_Y_BOTTOM.load(std::sync::atomic::Ordering::Relaxed) as f64;
-                            let pw2 = pw as f64;
-                            let ph = PANE_LOCAL_H.load(std::sync::atomic::Ordering::Relaxed) as f64;
-                            if pt.x < px || pt.x >= px + pw2 || pt.y < py || pt.y >= py + ph {
-                                tracing::debug!(
-                                    this = this as usize, x = pt.x, y = pt.y,
-                                    px, py, pw = pw2, ph,
-                                    "[browser-pane] hitTest nil → out-of-pane click falls to main RWHVC"
-                                );
-                                return std::ptr::null_mut();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    let orig = ORIG_RWHVC_HIT_TEST.load(std::sync::atomic::Ordering::SeqCst);
-    if orig != 0 {
-        unsafe {
-            let f: extern "C" fn(*mut c_void, *const c_void, ObjcPoint) -> *mut c_void =
-                std::mem::transmute(orig);
-            f(this, cmd, pt)
-        }
-    } else {
-        this
-    }
 }
 
 /// Swizzled `RenderWidgetHostViewCocoa::shouldIgnoreMouseEvent:` — always returns NO.
