@@ -393,6 +393,7 @@ fn spawn_host_supervised(
         .env("AGENTMUX_BACKEND_WS", &srv.ws_endpoint)
         .env("AGENTMUX_BACKEND_WEB", &srv.web_endpoint)
         .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
+        .env("AGENTMUX_PENDING_MIGRATIONS", srv.pending_migrations.to_string())
         .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         .envs(host_env.iter().cloned())
@@ -471,6 +472,7 @@ fn spawn_host_unix(
         .env("AGENTMUX_BACKEND_WS", &srv.ws_endpoint)
         .env("AGENTMUX_BACKEND_WEB", &srv.web_endpoint)
         .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
+        .env("AGENTMUX_PENDING_MIGRATIONS", srv.pending_migrations.to_string())
         .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         // Parent-identity stamp: our pid == the host's getppid (we spawn it
@@ -933,31 +935,23 @@ async fn run_unix(
         ));
     }
 
-    // Startup retention vacuum (LSD-4).
-    let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-    let saga_vacuumed_unix = match saga_log.vacuum_older_than(cutoff) {
-        Ok(removed) => {
-            log(&format!(
-                "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
-                removed, cutoff, retention_days
-            ));
-            removed
+    // Vacuum terminal saga rows older than the configured retention window.
+    // Runs after crash recovery so in-flight sagas are never vacuumed by accident.
+    {
+        let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+        match saga_log.vacuum_older_than(cutoff) {
+            Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
+            Ok(_) => {}
+            Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
         }
-        Err(e) => {
-            log(&format!("[saga-log] WARN: vacuum failed: {}", e));
-            0
-        }
-    };
+    }
+
     startup_sink.stage_end(
         "saga",
         saga_t.elapsed().as_millis() as u64,
         startup_events::StartupStatus::Ok,
-        if saga_vacuumed_unix > 0 {
-            Some(format!("{} old sagas pruned", saga_vacuumed_unix))
-        } else {
-            None
-        },
+        None,
     );
 
     // Host pipe wrapper for saga-issued Commands → host. The IPC
@@ -1002,13 +996,6 @@ async fn run_unix(
         },
     );
     log(&format!("IPC server started on {}", socket_path));
-
-    // 2a. Run data migrations before starting the daemon.
-    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths, &startup_sink).await {
-        log(&format!("FATAL: migration failed: {}", e));
-        eprintln!("Failed to migrate data: {}\nSee ~/.agentmux/logs/migration-error.log", e);
-        std::process::exit(1);
-    }
 
     // 2b. Spawn srv. The srv pipe path is the launcher-owned socket
     //    path scope (srv will gain its own Unix-socket bind in a
@@ -1548,9 +1535,6 @@ async fn run_windows(
     // run can't accidentally double-act on partially-applied effects.
     // MUST run BEFORE `tokio::spawn(saga::run_coordinator(..))` below
     // (LSD spec §5 risk #5: don't spawn while recovery is in progress).
-    // Runs BEFORE LSD-4 vacuum so just-recovered sagas land in their
-    // failed_compensation state for the operator to see — vacuum
-    // honors the 7-day retention window and won't immediately purge.
     // Spec `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.5.
     startup_sink.stage_begin("saga", "Saga recovery");
     let saga_t = std::time::Instant::now();
@@ -1561,39 +1545,22 @@ async fn run_windows(
         ));
     }
 
-    // LSD-4 — startup retention vacuum. Runs once per launcher boot,
-    // before the coordinator subscribes, so any rows it deletes are
-    // already terminal and can't possibly belong to an in-flight saga
-    // the coordinator is about to drive (see `vacuum_older_than` SQL —
-    // `running` and `compensating` rows are unreachable by the DELETE
-    // regardless of timing). Failure is non-fatal.
-    // Spec §3.6.
-    let retention_days =
-        config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-    let saga_vacuumed = match saga_log.vacuum_older_than(cutoff) {
-        Ok(removed) => {
-            log(&format!(
-                "[saga-log] vacuumed {} sagas older than {} (retention {} days)",
-                removed, cutoff, retention_days
-            ));
-            removed
+    // Vacuum terminal saga rows older than the configured retention window.
+    {
+        let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+        match saga_log.vacuum_older_than(cutoff) {
+            Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
+            Ok(_) => {}
+            Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
         }
-        Err(e) => {
-            log(&format!("[saga-log] WARN: vacuum failed: {}", e));
-            0
-        }
-    };
-    let saga_detail = if saga_vacuumed > 0 {
-        Some(format!("{} old sagas pruned", saga_vacuumed))
-    } else {
-        None
-    };
+    }
+
     startup_sink.stage_end(
         "saga",
         saga_t.elapsed().as_millis() as u64,
         startup_events::StartupStatus::Ok,
-        saga_detail,
+        None,
     );
 
     // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
@@ -1656,14 +1623,6 @@ async fn run_windows(
         },
     );
     log(&format!("IPC server started on {}", pipe_path));
-
-    // 3. Run data migrations before starting the daemon.
-    if let Err(e) = srv_spawner::run_migrate(launcher_exe_dir, &paths, &startup_sink).await {
-        log(&format!("FATAL: migration failed: {}", e));
-        eprintln!("Failed to migrate data: {}\nSee ~/.agentmux/logs/migration-error.log", e);
-        drop(job);
-        std::process::exit(1);
-    }
 
     // 3b. Spawn srv first. Host needs srv's endpoints to skip its own
     // spawn_backend path. Srv signals readiness via AGENTMUXSRV-ESTART on

@@ -16,6 +16,9 @@ pub struct BackendSpawnResult {
     pub web_endpoint: String,
     pub version: String,
     pub instance_id: String,
+    /// Number of migrations that were pending at ESTART time (0 = all applied).
+    /// Non-zero means run_pending_migrations failed; the status-bar shows a warning.
+    pub pending_migrations: usize,
 }
 
 /// Phase B.1: when the launcher has already spawned srv (env var
@@ -97,6 +100,10 @@ pub fn use_launcher_endpoints(
             web_endpoint: web,
             version,
             instance_id,
+            // On the launcher path, pending_migrations is delivered via
+            // AGENTMUX_PENDING_MIGRATIONS into AppState (state.rs); no need
+            // to repeat it here.
+            pending_migrations: 0,
         })
     })();
     Some(result)
@@ -292,8 +299,11 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         });
     }
 
-    // Parse ESTART from stderr
+    // Parse ESTART from stderr. A second channel carries AGENTMUXSRV-MIGRATING
+    // pings so the async ESTART waiter can extend its deadline when migrations are
+    // running (same pattern as agentmux-launcher/src/srv_spawner.rs).
     let (tx, mut rx) = tokio::sync::mpsc::channel::<BackendSpawnResult>(1);
+    let (migration_tx, mut migration_rx) = tokio::sync::mpsc::channel::<()>(4);
     let state_for_monitor = state.clone();
 
     std::thread::spawn(move || {
@@ -313,6 +323,9 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                         );
                         estart_received = true;
                         let _ = tx.blocking_send(result);
+                    } else if l.starts_with("AGENTMUXSRV-MIGRATING") {
+                        tracing::info!("[agentmux-srv] {}", l);
+                        let _ = migration_tx.blocking_send(());
                     } else if let Some(event_data) = l.strip_prefix("AGENTMUXSRV-EVENT:") {
                         tracing::debug!("Backend event: {}", event_data);
                         // Forward events to the frontend
@@ -362,10 +375,33 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         );
     });
 
-    // Wait for ESTART with 30s timeout
-    let result = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv())
-        .await
-        .map_err(|_| "Timeout waiting for agentmux-srv to start (30s)".to_string())?
+    // Wait for ESTART. On receiving AGENTMUXSRV-MIGRATING, extend the deadline
+    // from 30s to 30 minutes to accommodate large-dataset migrations. A shorter
+    // cap risks killing srv mid-migration: 0011_shared_store_backfill's skip-guards
+    // check for non-empty shared tables, so a partial copy followed by a kill would
+    // cause rows to be permanently stranded on the next retry.
+    let normal_timeout = std::time::Duration::from_secs(30);
+    let migration_timeout = std::time::Duration::from_secs(1800);
+    let mut deadline = tokio::time::Instant::now() + normal_timeout;
+    let mut sleep = tokio::time::sleep_until(deadline);
+    tokio::pin!(sleep);
+
+    let recv: Result<Option<BackendSpawnResult>, ()> = loop {
+        tokio::select! {
+            result = rx.recv() => break Ok(result),
+            _ = &mut sleep => break Err(()),
+            Some(()) = migration_rx.recv() => {
+                let new_deadline = tokio::time::Instant::now() + migration_timeout;
+                if new_deadline > deadline {
+                    deadline = new_deadline;
+                    sleep.as_mut().reset(deadline);
+                    tracing::info!("spawn_backend: migration in progress — ESTART deadline extended to 30 minutes");
+                }
+            }
+        }
+    };
+    let result = recv
+        .map_err(|()| "Timeout waiting for agentmux-srv to start (30s)".to_string())?
         .ok_or_else(|| "agentmux-srv channel closed before sending endpoints".to_string())?;
 
     tracing::info!(
@@ -483,11 +519,17 @@ fn parse_estart(line: &str) -> BackendSpawnResult {
             .unwrap_or_default()
             .to_string()
     };
+    let pending_migrations = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("pending_migrations:"))
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
     BackendSpawnResult {
         ws_endpoint: get("ws:"),
         web_endpoint: get("web:"),
         version: get("version:"),
         instance_id: get("instance:"),
+        pending_migrations,
     }
 }
 

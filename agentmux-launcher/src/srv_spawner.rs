@@ -45,6 +45,9 @@ pub struct SrvSpawnResult {
     pub web_endpoint: String,
     pub instance_id: String,
     pub auth_key: String,
+    /// Number of data migrations still pending after the in-process startup run.
+    /// Non-zero means run_pending_migrations failed; status-bar shows a retry message.
+    pub pending_migrations: usize,
     /// RFC3339 timestamp captured when ESTART arrived. Carried on the
     /// result for `--diag` / debug observability; not currently
     /// propagated into env. F.7 cleanup audit: keep with allow + this
@@ -87,6 +90,12 @@ impl std::fmt::Display for SrvSpawnError {
 /// On failure the launcher should surface an error and not start the daemon.
 /// stdout lines are newline-delimited JSON progress events — consumed inline
 /// so sub-events are delivered to the splash before `stage_end` is sent.
+///
+/// Not called during normal startup — migrations now run in-process inside srv
+/// via `run_pending_migrations` before ESTART is emitted. Preserved here as a
+/// fallback subprocess path (e.g. for a future recovery flow) but has no active
+/// callers.
+#[allow(dead_code)]
 pub async fn run_migrate(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
@@ -402,6 +411,11 @@ pub async fn spawn_srv(
         .take()
         .ok_or_else(|| SrvSpawnError::SpawnFailed("no stderr handle".to_string()))?;
     let (tx, mut rx) = mpsc::channel::<SrvSpawnResult>(1);
+    // Separate channel so the stderr reader can signal that migrations are running.
+    // The ESTART waiter extends its deadline when it receives this ping so that a
+    // large-dataset migration that takes longer than the normal 30s boot window
+    // doesn't cause the launcher to kill srv prematurely.
+    let (migration_tx, mut migration_rx) = mpsc::channel::<()>(4);
     let auth_key_for_estart = auth_key.clone();
     let started_at_for_estart = started_at.clone();
     let pid_for_log = pid;
@@ -417,14 +431,19 @@ pub async fn spawn_srv(
                     web_endpoint: parsed.web_endpoint,
                     instance_id: parsed.instance_id,
                     auth_key: auth_key_for_estart.clone(),
+                    pending_migrations: parsed.pending_migrations,
                     started_at: started_at_for_estart.clone(),
                 };
                 crate::log(&format!(
-                    "srv {} ready: ws={} web={} instance={}",
-                    result.pid, result.ws_endpoint, result.web_endpoint, result.instance_id
+                    "srv {} ready: ws={} web={} instance={} pending_migrations={}",
+                    result.pid, result.ws_endpoint, result.web_endpoint, result.instance_id,
+                    result.pending_migrations
                 ));
                 let _ = tx.send(result).await;
                 estart_sent = true;
+            } else if line.starts_with("AGENTMUXSRV-MIGRATING") {
+                crate::log(&format!("[srv {} migrating] {}", pid_for_log, line));
+                let _ = migration_tx.send(()).await;
             } else if line.starts_with("AGENTMUXSRV-EVENT:") {
                 crate::log(&format!("[srv {} event] {}", pid_for_log, line));
                 // Phase B.2 will forward these to subscribers.
@@ -442,9 +461,35 @@ pub async fn spawn_srv(
     // 30s timeout in degraded mode (J0 absent) would leak a fully-
     // running srv that keeps the data dir lockfile, blocking the
     // next launch. (codex P2 @ srv_spawner.rs:240, PR #571 round-4.)
-    let recv = tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv()).await;
+    //
+    // If srv emits AGENTMUXSRV-MIGRATING before ESTART, the deadline is
+    // extended to 30 minutes to accommodate large-dataset migrations. A shorter
+    // cap risks killing srv mid-migration: 0011_shared_store_backfill's skip-guards
+    // check for non-empty shared tables, so a partial copy followed by a kill would
+    // cause rows to be permanently stranded on the next retry.
+    let normal_timeout = std::time::Duration::from_secs(30);
+    let migration_timeout = std::time::Duration::from_secs(1800);
+    let mut deadline = tokio::time::Instant::now() + normal_timeout;
+    let mut sleep = tokio::time::sleep_until(deadline);
+    tokio::pin!(sleep);
+
+    let recv: Result<Option<SrvSpawnResult>, ()> = loop {
+        tokio::select! {
+            result = rx.recv() => break Ok(result),
+            _ = &mut sleep => break Err(()),
+            Some(()) = migration_rx.recv() => {
+                // Migrations are running — extend the deadline generously.
+                let new_deadline = tokio::time::Instant::now() + migration_timeout;
+                if new_deadline > deadline {
+                    deadline = new_deadline;
+                    sleep.as_mut().reset(deadline);
+                    crate::log("srv: migration in progress — ESTART deadline extended to 30 minutes");
+                }
+            }
+        }
+    };
     match recv {
-        Err(_) => {
+        Err(()) => {
             let _ = child.start_kill();
             sink.stage_end(
                 "backend",
@@ -539,6 +584,7 @@ struct EstartFields {
     ws_endpoint: String,
     web_endpoint: String,
     instance_id: String,
+    pending_migrations: usize,
 }
 
 fn parse_estart(line: &str) -> EstartFields {
@@ -550,10 +596,16 @@ fn parse_estart(line: &str) -> EstartFields {
             .unwrap_or_default()
             .to_string()
     };
+    let pending_migrations = parts
+        .iter()
+        .find_map(|p| p.strip_prefix("pending_migrations:"))
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0);
     EstartFields {
         ws_endpoint: get("ws:"),
         web_endpoint: get("web:"),
         instance_id: get("instance:"),
+        pending_migrations,
     }
 }
 

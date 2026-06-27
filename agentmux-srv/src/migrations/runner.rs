@@ -253,6 +253,148 @@ fn prune_old_backups(home: &Path) {
     }
 }
 
+// ── In-process migration runner (used by srv startup) ────────────────────────
+
+/// Apply all pending migrations in-process before srv opens its stores.
+///
+/// Called unconditionally at srv startup so the shared store is fully backfilled
+/// before `id_store` binds to it. This prevents apparent data loss (empty shared
+/// store) on first boot after an upgrade. Fast-path: returns `Ok(0)` immediately
+/// when all migrations are already applied.
+///
+/// Unlike `run_migrate_command` this writes progress via `tracing` rather than
+/// stdout JSON and is meant to be called from within the daemon process rather
+/// than a subprocess. Returns the number of migrations applied. On error, returns
+/// `Err` — callers should fall back to the per-channel store rather than binding
+/// `id_store` to an un-backfilled shared store.
+///
+/// `data_dir` must be the wave data dir (parent of `db/`), not the db dir.
+pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
+    let shared_store_path = match resolve_shared_store_path() {
+        Some(p) => p,
+        None => {
+            tracing::info!("run_pending_migrations: shared store path unresolvable — nothing to do");
+            return Ok(0);
+        }
+    };
+
+    if let Some(parent) = shared_store_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Err(format!("run_pending_migrations: create shared dir: {}", e));
+        }
+    }
+
+    let home = match shared_store_path.parent().and_then(|p| p.parent()) {
+        Some(p) => p.to_path_buf(),
+        None => return Err("run_pending_migrations: cannot derive home from shared store path".to_string()),
+    };
+
+    let shared_store = match Store::open_shared(&shared_store_path) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("run_pending_migrations: open shared store: {}", e)),
+    };
+
+    let channel_store_path = data_dir.join("db").join("objects.db");
+    if let Some(parent) = channel_store_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Err(format!("run_pending_migrations: create channel db dir: {}", e));
+        }
+    }
+    // Always open/create the channel store, mirroring run_migrate_command (runner.rs:85-98).
+    // Skipping it on fresh install left Channel-scoped migrations (0002/0003/0007)
+    // out of the pending list, so they were never marked applied. When wstore then
+    // created objects.db, count_pending_migrations at ESTART time reported them as
+    // pending and fired the "Migration failed" UI warning on every fresh first launch.
+    let channel_store = match Store::open(&channel_store_path) {
+        Ok(s) => Some(s),
+        Err(e) => return Err(format!("run_pending_migrations: open channel store: {}", e)),
+    };
+
+    let pending: Vec<_> = REGISTRY.iter().filter(|m| {
+        let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+        tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
+    }).collect();
+
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    let ctx = super::MigrationContext {
+        home: home.clone(),
+        data_dir: data_dir.to_path_buf(),
+        shared_store_path: shared_store_path.clone(),
+        channel_store_path: channel_store_path.clone(),
+    };
+
+    if let Err(e) = backup_stores(&home, &shared_store_path, data_dir) {
+        return Err(format!("run_pending_migrations: backup failed: {}", e));
+    }
+
+    let mut applied = 0;
+    for m in &pending {
+        let t = std::time::Instant::now();
+        tracing::info!(id = m.id(), description = m.description(), "run_pending_migrations: applying");
+        match m.up(&ctx) {
+            Ok(()) => {
+                let ms = t.elapsed().as_millis() as u64;
+                let scope = m.scope().as_str();
+                let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+                if let Some(s) = tracking {
+                    if let Err(e) = s.migration_mark_applied(m.id(), scope, ms) {
+                        return Err(format!("run_pending_migrations: mark applied {}: {}", m.id(), e));
+                    }
+                }
+                tracing::info!(id = m.id(), duration_ms = ms, "run_pending_migrations: applied");
+                applied += 1;
+            }
+            Err(e) => {
+                return Err(format!("run_pending_migrations: migration {} failed: {}", m.id(), e));
+            }
+        }
+    }
+
+    Ok(applied)
+}
+
+// ── Pending count (used by srv startup before migration and for ESTART) ──────
+
+/// Return the number of REGISTRY migrations that have not yet been applied.
+/// Opens stores read-write (SQLite does not have a read-only open for WAL mode);
+/// this may create `objects.db` if it does not exist. Returns 0 on any error so
+/// startup is never blocked. `data_dir` must be the wave data dir (parent of
+/// `db/`) not the db dir itself.
+pub fn count_pending_migrations(data_dir: &Path) -> usize {
+    let shared_store_path = match resolve_shared_store_path() {
+        Some(p) => p,
+        None => {
+            tracing::warn!("count_pending_migrations: could not resolve shared store path — reporting 0");
+            return 0;
+        }
+    };
+    let shared_store = match Store::open_shared(&shared_store_path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("count_pending_migrations: failed to open shared store at {}: {} — reporting 0", shared_store_path.display(), e);
+            return 0;
+        }
+    };
+    let channel_store_path = data_dir.join("db").join("objects.db");
+    let channel_store = match Store::open(&channel_store_path) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!("count_pending_migrations: failed to open channel store at {}: {} — channel-scoped migrations will not be counted", channel_store_path.display(), e);
+            None
+        }
+    };
+    REGISTRY
+        .iter()
+        .filter(|m| {
+            let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
+            tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
+        })
+        .count()
+}
+
 // ── Error log ─────────────────────────────────────────────────────────────────
 
 fn write_error_log(home: &Path, msg: &str) {

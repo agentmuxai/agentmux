@@ -47,12 +47,14 @@ pub fn get_backend_info(state: &Arc<AppState>) -> serde_json::Value {
     let endpoints = state.backend_endpoints.lock();
     let pid = *state.backend_pid.lock();
     let started_at = state.backend_started_at.lock().clone();
+    let pending_migrations = *state.pending_migrations.lock();
 
     serde_json::json!({
         "pid": pid,
         "started_at": started_at,
         "web_endpoint": endpoints.web_endpoint,
         "version": current_version,
+        "pending_migrations": pending_migrations,
     })
 }
 

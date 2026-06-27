@@ -284,7 +284,7 @@ export function buildCefApi(): AppApi {
             return cachedValues!.aboutDetails;
         },
         getBackendInfo: async () => {
-            return await invokeCommand<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>(
+            return await invokeCommand<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>(
                 "get_backend_info"
             );
         },
