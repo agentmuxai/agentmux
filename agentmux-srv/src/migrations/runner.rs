@@ -362,11 +362,13 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     Ok(applied)
 }
 
-// ── Pending count (no-op query used by srv startup to populate ESTART) ──────
+// ── Pending count (used by srv startup before migration and for ESTART) ──────
 
 /// Return the number of REGISTRY migrations that have not yet been applied.
-/// Opens stores read-only; returns 0 on any error so startup is never blocked.
-/// `data_dir` must be the wave data dir (parent of `db/`) not the db dir itself.
+/// Opens stores read-write (SQLite does not have a read-only open for WAL mode);
+/// this may create `objects.db` if it does not exist. Returns 0 on any error so
+/// startup is never blocked. `data_dir` must be the wave data dir (parent of
+/// `db/`) not the db dir itself.
 pub fn count_pending_migrations(data_dir: &Path) -> usize {
     let shared_store_path = match resolve_shared_store_path() {
         Some(p) => p,
