@@ -1,5 +1,21 @@
 # AgentMux Version History
 
+## 0.49.5 — 2026-06-27
+
+- fix(browser-pane): black screen + mouse freeze on macOS when opening a browser pane
+- fix(srv): bind to 0.0.0.0 when LAN discovery is enabled so real devices can connect
+- feat(cron+loop): persistent cron scheduler (CronCreate/Delete/List/Pause/Resume) + LoopList + max_iterations on Loop
+- fix(launcher): migrate stdout reader hangs forever if migrate process stalls on Tokio shutdown
+- feat(tool-preview): remove word-wrap distortion and add independent Ctrl+Scroll zoom
+- feat(lifecycle): OOM hardening — saga cancel, WAL checkpoint, commit gauge
+- feat(startup): run migrations in-process at srv startup for near-instant launch
+- fix(agent): zoom persists immediately — drop 300ms debounce that caused race on pane close
+- fix(window-count): retry reconcile on racing event + 30s periodic safety-net
+- fix(window-count): detect OS-level window closes via LOCATIONCHANGE pool-move
+- fix(statusbar): status-bar popovers (CPU, token breakdown) now position correctly when a browser pane is open on Windows
+- fix(claude-md): use lowercase bash expansion for agentmux:agent_id PR tag
+
+
 ## 0.49.4 — 2026-06-25
 
 - fix(agent-stream): force StreamUnsubscribe after process crash so Working clears immediately
