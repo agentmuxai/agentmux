@@ -2465,7 +2465,7 @@ wrap_task! {
 
                 if overlay_win.is_null() {
                     if self.retry < 5 {
-                        tracing::info!(
+                        tracing::debug!(
                             label = %self.label, retry = self.retry,
                             "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found after set_visible(1), retrying"
                         );
@@ -2479,6 +2479,14 @@ wrap_task! {
                             "[browser-pane] ObjC task: no NativeWidgetMacNSWindow found after 5 retries");
                     }
                     return;
+                }
+
+                // Cache the resolved overlay wnum so resize tasks can use an exact
+                // wnum rather than the highest-wnum fallback (which is ambiguous when
+                // ≥2 panes are open on the same window).
+                let discovered_wnum = get_usize(overlay_win, sel_win_number) as isize;
+                if let Some(mut wmap) = self.state.browser_pane_overlay_wnums.try_lock() {
+                    wmap.insert(self.label.clone(), discovered_wnum);
                 }
 
                 // Step 3: reaffirm the frame (set_visible(1) may have triggered a CEF
@@ -2770,7 +2778,7 @@ wrap_task! {
                                 if !cp.is_null() { std::ffi::CStr::from_ptr(cp).to_str().unwrap_or("?") } else { "?" }
                             } else { "null-cls" }
                         } else { "nil-no-view" };
-                        tracing::info!(
+                        tracing::debug!(
                             retry = self.retry, sub_count, hit_cls, local_cx, local_cy,
                             "[browser-pane] overlay contentView subviews + hitTest diag"
                         );
@@ -2799,7 +2807,7 @@ wrap_task! {
                                     let cp = object_getClassName(hit_vcls);
                                     if !cp.is_null() { std::ffi::CStr::from_ptr(cp).to_str().unwrap_or("?") } else { "?" }
                                 };
-                                tracing::info!(
+                                tracing::debug!(
                                     retry = self.retry, hit_vcls_name, afm_before,
                                     hit_replaced = !hit_old_imp.is_null(),
                                     "[browser-pane] acceptsFirstMouse BEFORE+REPLACED on hit view class"
@@ -2811,10 +2819,10 @@ wrap_task! {
                                 // RWHVC hasn't been added to the overlay's view tree yet at
                                 // swizzle time). Using objc_getClass guarantees we target the
                                 // correct class regardless of hitTest: timing.
-                                tracing::info!(
+                                tracing::debug!(
                                     retry = self.retry,
                                     hit_view = hit_view as usize,
-                                    "[browser-pane] RWHVC hit_view ptr (compare with SWIZZLE HIT this)"
+                                    "[browser-pane] RWHVC hit_view ptr"
                                 );
                                 extern "C" {
                                     fn objc_getClass(name: *const std::ffi::c_char) -> Id;
@@ -2942,7 +2950,9 @@ wrap_task! {
                 wrap_task! {
                     struct PaneFocusTask { state: Arc<AppState>, label: String }
                     impl Task { fn execute(&self) {
-                        // Find the parent window label from the pane's overlay map.
+                        // Restore focus to the main browser once, 200ms after pane creation.
+                        // The sendEvent: swizzle calls set_focus(1) before every subsequent
+                        // mouse dispatch, so a one-shot restore is sufficient.
                         let win_label = {
                             let map = self.state.browser_pane_overlays.lock();
                             map.get(&self.label).map(|(wl, _)| wl.clone())
@@ -2951,22 +2961,12 @@ wrap_task! {
                             if let Some(mut main_browser) = self.state.get_browser(&win_label) {
                                 if let Some(mut host) = main_browser.host() {
                                     host.set_focus(1);
-                                    tracing::info!(
+                                    tracing::debug!(
                                         label = %self.label, win = %win_label,
                                         "[browser-pane] restored focus to main window after pane creation"
                                     );
                                 }
                             }
-                            // Reschedule: every pane click fires on_set_focus(SYSTEM) which
-                            // causes CEF to call set_focus(0) on the main browser, blurring
-                            // its renderer and making RenderWidgetHostImpl drop subsequent
-                            // mouse events before they reach Blink. Keep calling set_focus(1)
-                            // on main every 200ms for as long as the pane is open so the
-                            // main renderer stays focused regardless of pane click activity.
-                            // The loop exits automatically when the pane closes (overlay map
-                            // entry is gone → win_label is None → task does not reschedule).
-                            let mut next = PaneFocusTask::new(self.state.clone(), self.label.clone());
-                            post_delayed_task(ThreadId::UI, Some(&mut next), 200);
                         }
                     }}
                 }
