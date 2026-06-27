@@ -531,6 +531,9 @@ pub struct AppState {
     /// the status-bar shows "Migration failed — restart to retry."
     pub pending_migrations: Mutex<usize>,
 
+    /// Guard against concurrent `run_migrations` invocations from the maintenance panel.
+    pub migration_running: Mutex<bool>,
+
     /// Current zoom factor
     pub zoom_factor: Mutex<f64>,
 
@@ -898,6 +901,7 @@ impl Default for AppState {
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(0)
             ),
+            migration_running: Mutex::new(false),
             zoom_factor: Mutex::new(1.0),
             client_id: Mutex::new(None),
             window_id: Mutex::new(None),

@@ -206,9 +206,16 @@ const BackendStatus = (): JSX.Element => {
                                 </span>
                             </div>
                             <div class="status-bar-popover-row">
-                                <span class="status-bar-popover-mono" style={{ "font-size": "0.85em" }}>
-                                    Migration failed at startup — check logs, then restart to retry.
-                                </span>
+                                <button
+                                    type="button"
+                                    class="status-bar-restart-btn"
+                                    onClick={() => {
+                                        setPopoverOpen(false);
+                                        window.dispatchEvent(new CustomEvent("agentmux:open-version-panel"));
+                                    }}
+                                >
+                                    Open Maintenance ↗
+                                </button>
                             </div>
                         </Show>
                         {/* GPU / WebGL rendering — enabled/disabled + driver info.

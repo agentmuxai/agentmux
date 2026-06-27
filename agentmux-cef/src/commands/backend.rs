@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use tokio::io::AsyncBufReadExt as _;
+
 use crate::state::AppState;
 
 /// Get the backend WebSocket and HTTP endpoints.
@@ -143,6 +145,162 @@ pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, 
     );
 
     Ok(serde_json::Value::Null)
+}
+
+/// Trigger an on-demand migration run via `agentmux-srv … migrate`.
+///
+/// Returns `{"started": true}` immediately; progress events are pushed to the
+/// frontend as `upgrade:migration-event` / `upgrade:migrations-complete` /
+/// `upgrade:migrations-failed` CEF events so the Maintenance panel can render
+/// a live stage list without polling.
+pub async fn run_migrations(state: Arc<AppState>) -> Result<serde_json::Value, String> {
+    // Guard: only one run at a time.
+    {
+        let mut running = state.migration_running.lock();
+        if *running {
+            return Err("Migration already in progress".to_string());
+        }
+        *running = true;
+    }
+
+    let data_dir = state.version_data_dir.lock().clone().ok_or_else(|| {
+        *state.migration_running.lock() = false;
+        "Data directory not initialized".to_string()
+    })?;
+
+    let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
+    let srv_path = crate::sidecar::resolve_backend_binary_pub("agentmux-srv", exe_suffix)
+        .map_err(|e| {
+            *state.migration_running.lock() = false;
+            e
+        })?;
+
+    tokio::spawn(async move {
+        if let Err(e) = run_migrations_inner(state.clone(), srv_path, data_dir).await {
+            tracing::error!("[run_migrations] subprocess error: {}", e);
+            crate::events::emit_event_from_state(
+                &state,
+                "upgrade:migrations-failed",
+                &serde_json::json!({ "error": e, "failedId": null }),
+            );
+        }
+        *state.migration_running.lock() = false;
+    });
+
+    Ok(serde_json::json!({ "started": true }))
+}
+
+async fn run_migrations_inner(
+    state: Arc<AppState>,
+    srv_path: std::path::PathBuf,
+    data_dir: String,
+) -> Result<(), String> {
+    use tokio::process::Command;
+    use tokio::io::BufReader;
+
+    let mut child = Command::new(&srv_path)
+        .arg("--wavedata")
+        .arg(&data_dir)
+        .arg("migrate")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn agentmux-srv migrate: {}", e))?;
+
+    let stdout = child.stdout.take().ok_or("no stdout")?;
+    let mut lines = BufReader::new(stdout).lines();
+    let mut applied = 0usize;
+    let mut last_error: Option<String> = None;
+    let mut failed_id: Option<String> = None;
+
+    while let Ok(Some(line)) = lines.next_line().await {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let val: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let event_kind = val.get("event").and_then(|v| v.as_str()).unwrap_or("");
+        match event_kind {
+            "migration_start" => {
+                crate::events::emit_event_from_state(
+                    &state,
+                    "upgrade:migration-event",
+                    &serde_json::json!({
+                        "kind": "start",
+                        "id": val.get("id"),
+                        "label": val.get("description"),
+                    }),
+                );
+            }
+            "migration_done" => {
+                crate::events::emit_event_from_state(
+                    &state,
+                    "upgrade:migration-event",
+                    &serde_json::json!({
+                        "kind": "done",
+                        "id": val.get("id"),
+                        "duration_ms": val.get("duration_ms"),
+                    }),
+                );
+                applied += 1;
+            }
+            "complete" => {
+                let a = val.get("applied").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                applied = a;
+                crate::events::emit_event_from_state(
+                    &state,
+                    "upgrade:migration-event",
+                    &serde_json::json!({
+                        "kind": "complete",
+                        "applied": a,
+                        "skipped": val.get("skipped"),
+                    }),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let status = child.wait().await.map_err(|e| format!("wait failed: {}", e))?;
+
+    if status.success() && last_error.is_none() {
+        *state.pending_migrations.lock() = 0;
+        crate::events::emit_event_from_state(
+            &state,
+            "upgrade:migrations-complete",
+            &serde_json::json!({ "applied": applied }),
+        );
+        Ok(())
+    } else {
+        let err = last_error.unwrap_or_else(|| {
+            format!("agentmux-srv migrate exited with code {:?}", status.code())
+        });
+        crate::events::emit_event_from_state(
+            &state,
+            "upgrade:migrations-failed",
+            &serde_json::json!({ "error": err, "failedId": failed_id }),
+        );
+        Err(err)
+    }
+}
+
+/// Trigger an on-demand saga log vacuum.
+///
+/// Stubbed: the `agentmux-srv saga-vacuum` subcommand is not yet implemented.
+/// Returns `{"rows_deleted": 0}` and emits `upgrade:saga-vacuum-done` so the
+/// Maintenance panel's vacuum state machine completes correctly.
+pub async fn run_saga_vacuum(state: Arc<AppState>) -> Result<serde_json::Value, String> {
+    // TODO: spawn `agentmux-srv --wavedata <path> saga-vacuum` once the subcommand exists.
+    tracing::info!("[run_saga_vacuum] stub — returning rows_deleted=0");
+    crate::events::emit_event_from_state(
+        &state,
+        "upgrade:saga-vacuum-done",
+        &serde_json::json!({ "rows_deleted": 0 }),
+    );
+    Ok(serde_json::json!({ "rows_deleted": 0 }))
 }
 
 /// Set the window initialization status.

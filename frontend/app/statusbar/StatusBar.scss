@@ -4,6 +4,7 @@
 @use "./token-usage";
 @use "./instance-panel";
 @use "./cpu-cores-popover";
+@use "./maintenance-section";
 
 .status-bar {
     // Responsive 2-row wrap (§4.4 of SPEC_STATUSBAR_TOKEN_USAGE).
