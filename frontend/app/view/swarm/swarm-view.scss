@@ -73,14 +73,9 @@
     }
 }
 
-// ── Agent root row ───────────────────────────────────────────────────────
+// ── Agent card (name row + activity summary, enclosed together) ──────────
 
-.swarm-agent-row {
-    display: flex;
-    align-items: center;
-    height: 36px;
-    padding: 0 6px 0 10px;
-    gap: 5px;
+.swarm-agent-card {
     cursor: default;
     border-radius: 4px;
     user-select: none;
@@ -97,6 +92,16 @@
         box-shadow: inset 0 0 0 1px var(--accent-color, #5b8dd9);
         border-radius: 0;
     }
+}
+
+// ── Agent root row ───────────────────────────────────────────────────────
+
+.swarm-agent-row {
+    display: flex;
+    align-items: center;
+    height: 36px;
+    padding: 0 6px 0 10px;
+    gap: 5px;
 
     .swarm-agent-icon {
         flex-shrink: 0;
@@ -112,6 +117,14 @@
         text-overflow: ellipsis;
         white-space: nowrap;
         color: var(--main-text-color);
+    }
+
+    .swarm-ctx-size {
+        flex-shrink: 0;
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        white-space: nowrap;
     }
 }
 
@@ -156,13 +169,13 @@
 // ── Haiku activity summary ───────────────────────────────────────────────
 
 .swarm-activity-summary {
-    padding: 0 10px 4px 30px;
+    padding: 0 10px 6px 30px;
     font-size: 11px;
     color: var(--secondary-text-color);
     font-style: italic;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 // ── Status chip ──────────────────────────────────────────────────────────
