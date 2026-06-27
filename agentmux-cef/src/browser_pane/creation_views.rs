@@ -218,24 +218,39 @@ pub fn create_browser_pane_view(
         "[browser-pane] views: add_overlay_view returned OverlayController"
     );
 
-    // 7. Position the overlay. We tried `set_bounds(rect)` directly: silently
-    //    ignored — readback shows 0,0,0,0. Trying separate set_size + set_position
-    //    and explicit window.layout() to force a layout pass.
+    // 7. Position the overlay.
     //
-    // set_visible(1) is intentionally called AFTER layout() so the overlay is
-    // at the correct position/size before it becomes visible and can intercept
-    // input. Calling it before layout() caused a brief window where the overlay
-    // was visible at the wrong position (or 0×0), which on macOS allowed CEF's
-    // new-browser focus steal (from add_overlay_view above) to intercept clicks
-    // for the whole window before the layout pass corrected the bounds.
+    // On macOS, the overlay's native NSView is not yet created at this point —
+    // `add_overlay_view` posts native view creation asynchronously. Calling
+    // `set_size` / `set_position` / `layout()` here is a best-effort attempt
+    // that MAY commit the bounds on Linux but silently does nothing on macOS
+    // (readback: oc_w=0 oc_h=0). Without committed bounds the overlay defaults
+    // to filling the entire parent window, which (a) covers the UI with the
+    // pane's opaque-black background_color and (b) intercepts all mouse events
+    // for the window — the "black screen + UI freeze" bug.
+    //
+    // SetPaneBoundsViewsTask (posted after the stash below) re-applies the
+    // bounds on the next UI event-loop tick, after the native NSView has been
+    // fully initialised. The overlay is kept hidden (set_visible(0)) until
+    // that task fires so the user never sees a transient wrong-size overlay.
     overlay_controller.set_size(Some(&Size { width: rect.width, height: rect.height }));
     overlay_controller.set_position(Some(&Point { x: rect.x, y: rect.y }));
     parent_window.layout();
-    overlay_controller.set_visible(1);
+
+    // overlay_wnum: the macOS NSWindow windowNumber of the overlay's backing
+    // NativeWidgetMacNSWindow.  The native NSWindow is created asynchronously
+    // during add_overlay_view (the comment at step 7 above confirms "the native
+    // layer doesn't exist yet"), so any scan here would capture a stale wnum.
+    // SetPaneBoundsViewsTask discovers the correct wnum at runtime via a
+    // pre/post-set_visible(1) snapshot delta (see ui_tasks.rs) and propagates
+    // it to the retry=1 reaffirm task.  Pass 0 here to signal "unknown".
+    let overlay_wnum: isize = 0;
+
+    overlay_controller.set_visible(0); // deferred task will show after bounds commit
     tracing::info!(
         block_id = %block_id, label = %label,
         x = rect.x, y = rect.y, w = rect.width, h = rect.height,
-        "[browser-pane] views: overlay set_size + set_position + layout() + set_visible applied"
+        "[browser-pane] views: overlay set_size + set_position + layout() applied (visible=0; deferred show pending)"
     );
 
     // 7b. Return focus to the main window's BrowserView. CEF's default
@@ -291,6 +306,25 @@ pub fn create_browser_pane_view(
         block_id = %block_id, label = %label, window_label = %window_label,
         "[browser-pane] views: OverlayController stashed in state.browser_pane_overlays"
     );
+
+    // 10. Deferred bounds + show: re-apply set_size / set_position / layout() / set_visible(1)
+    //     on the next UI event-loop tick. On macOS the overlay's native NSView is
+    //     created asynchronously during add_overlay_view; the first-tick sizing
+    //     (step 7 above) is silently ignored because the native layer doesn't exist
+    //     yet. Posting a task ensures the bounds land AFTER CEF has initialised the
+    //     NSView. The task also re-issues set_focus(1) on the main browser in case
+    //     a focus steal happened during the event-loop tick.
+    crate::ui_tasks::post_set_pane_bounds_views(
+        &state,
+        &label,
+        &window_label,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height,
+        0, // retry counter — task self-retries on macOS if overlay NSWindow not yet visible
+        overlay_wnum,
+    );
 }
 
 /// Resize a Views-based browser pane (Linux/macOS only).
@@ -332,6 +366,37 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     if let Some(window) = state.windows.lock().get(&window_label).cloned() {
         window.layout();
     }
+
+    // macOS: set_size/set_position/layout() are no-ops for the overlay's
+    // NativeWidgetMacNSWindow frame — the only working path is ObjC
+    // [NSWindow setFrame:display:YES].
+    //
+    // Always record the latest rect so SetPaneBoundsViewsTask (retry=0) can
+    // pick it up even if it hasn't run yet (race: resize IPC before the
+    // creation bounds task fires and stores the wnum).
+    //
+    // If the wnum is already known, also post a bounds task at retry=2
+    // (physical-pixel path, wnum match, no delta-detection pre-scan) so the
+    // NSWindow frame is updated immediately.  retry=2 avoids delta-detection
+    // (window already exists) and avoids controller.bounds()-as-DIP (we have
+    // fresh physical pixels).
+    #[cfg(target_os = "macos")]
+    {
+        state.browser_pane_resize_rects.lock()
+            .insert(label.to_string(), (rect.x, rect.y, rect.width, rect.height));
+
+        let wnum = state.browser_pane_overlay_wnums.lock()
+            .get(label).cloned().unwrap_or(0);
+        if wnum > 0 {
+            crate::ui_tasks::post_set_pane_bounds_views(
+                state, label, &window_label,
+                rect.x, rect.y, rect.width, rect.height,
+                2,    // retry=2: physical pixels, wnum match, no pre-scan
+                wnum,
+            );
+        }
+    }
+
     tracing::debug!(
         label = %label, window_label = %window_label,
         x = rect.x, y = rect.y, w = rect.width, h = rect.height,
@@ -363,6 +428,11 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
+    // Remove stored wnum and resize rect so tasks posted after detach become no-ops.
+    #[cfg(target_os = "macos")]
+    state.browser_pane_overlay_wnums.lock().remove(label);
+    #[cfg(target_os = "macos")]
+    state.browser_pane_resize_rects.lock().remove(label);
     let Some((_window_label, controller)) = entry else {
         tracing::debug!(
             label = %label,

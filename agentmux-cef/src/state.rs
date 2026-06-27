@@ -767,6 +767,28 @@ pub struct AppState {
     pub pending_overlay_destroy:
         Mutex<std::collections::HashMap<String, cef::OverlayController>>,
 
+    /// macOS only — latest resize rect (physical pixels) per pane label.
+    ///
+    /// Written by `resize_browser_pane_view` on every resize IPC, including
+    /// resizes that arrive before `SetPaneBoundsViewsTask` has run (i.e.
+    /// before the wnum is known).  `SetPaneBoundsViewsTask` reads this at
+    /// retry=0 to prefer the most-recently-requested rect over its own
+    /// creation-time rect, closing the race between pane creation and an
+    /// early resize IPC.  Entries are removed on detach.
+    #[cfg(target_os = "macos")]
+    pub browser_pane_resize_rects:
+        Mutex<std::collections::HashMap<String, (i32, i32, i32, i32)>>,
+
+    /// macOS only — NSWindow windowNumber for each live browser-pane overlay,
+    /// keyed by pane label.  Discovered by delta-detection in
+    /// `SetPaneBoundsViewsTask` (retry=0) and stored here so that
+    /// `resize_browser_pane_view` can post a reaffirm task with an exact wnum
+    /// instead of relying on the highest-wnum fallback (which is ambiguous
+    /// when ≥2 panes are open).  Entries are removed when the overlay is
+    /// detached (`detach_browser_pane_view`).
+    #[cfg(target_os = "macos")]
+    pub browser_pane_overlay_wnums: Mutex<std::collections::HashMap<String, isize>>,
+
     /// Tear-off Phase 6 — pre-warmed pool of hidden CEF windows ready for
     /// instant promotion on tear-off. Each entry is a label of a window
     /// that's already painted, has its renderer connected, and is sitting
@@ -899,6 +921,10 @@ impl Default for AppState {
             pane_overlay_rects: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             pending_overlay_destroy: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "macos")]
+            browser_pane_resize_rects: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "macos")]
+            browser_pane_overlay_wnums: Mutex::new(HashMap::new()),
             #[cfg(target_os = "windows")]
             pane_clip_cache: Mutex::new(HashMap::new()),
             // window_pool / unpromoted_pool_labels / window_pool_respawn_in_flight
