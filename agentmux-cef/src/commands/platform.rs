@@ -235,6 +235,7 @@ pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
     let endpoints = state.backend_endpoints.lock();
     let ipc_port = *state.ipc_port.lock();
+    let debug_port = *state.debug_port.lock();
     let data_dir = state.version_data_dir.lock().clone().unwrap_or_default();
     let pid = std::process::id();
 
@@ -258,13 +259,13 @@ pub fn get_host_info(state: &Arc<AppState>) -> serde_json::Value {
         "instanceId": format!("v{}", version),
         "version": version,
         "dataDir": data_dir,
-        "hostType": "CEF 148",
+        "hostType": "host",
         "pid": pid,
         "ports": {
             "ipc": format!("127.0.0.1:{}", ipc_port),
             "web": endpoints.web_endpoint,
             "ws": endpoints.ws_endpoint,
-            "devtools": "127.0.0.1:9222",
+            "devtools": format!("127.0.0.1:{}", debug_port),
         }
     })
 }
