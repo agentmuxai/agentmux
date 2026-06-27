@@ -512,7 +512,10 @@ unsafe extern "system" fn win_event_callback(
             //
             // Ref: docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap A
             //      reagentx P1+P2 on PR #1803.
-            if rect.left < OFFSCREEN_POOL_THRESHOLD_X {
+            // IsIconic guard: minimized windows report (-32000, -32000) from
+            // GetWindowRect, which is below OFFSCREEN_POOL_THRESHOLD_X. Skip
+            // them — a minimize is not a close.
+            if rect.left < OFFSCREEN_POOL_THRESHOLD_X && IsIconic(hwnd) == 0 {
                 if let Some(state) = app_state().get() {
                     if let Some(label) = state.label_for_hwnd(hwnd) {
                         if !label.starts_with("browser-pane-") {
