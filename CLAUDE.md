@@ -49,6 +49,30 @@ On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (l
 
 **npm Users:** Can use `npm run <command>` - it delegates to Task.
 
+#### Launching `task dev` from an agent / MCP Shell (Windows)
+
+`task dev` requires `bash.exe` to be on the Windows PATH (go-task's Taskfile calls `bash -c '...'` for build steps via cmd.exe). The registry PATH has `Git\cmd` (shims) but not `Git\bin` (bash.exe). Two additional traps exist when launching from an agent's MCP Shell:
+
+- **Gap A:** MSYS2 bash won't resolve `.cmd` files from bare command names — `bash -c "task dev"` exits with "command not found".
+- **Gap B:** Passing Unix-style paths (`/c/Program Files/Git/bin`) in the MCP Shell env override is silently ignored by cmd.exe.
+
+**Use `scripts\dev-agent.cmd` instead of `task dev` directly:**
+
+```json
+{ "cmd": "C:\\<repo>\\scripts\\dev-agent.cmd TITLE=\"zoom-fix: PR #1234\"" }
+```
+
+This `.cmd` wrapper prepends `Git\bin` to PATH (fixing Gap B) and calls `task.cmd dev` by explicit extension (fixing Gap A). On macOS/Linux `task dev` works directly — no wrapper needed.
+
+**Diagnosing failed shells:** Check `shell.exit` events in the server log:
+```bash
+grep "shell\." ~/.agentmux/logs/agentmuxsrv-*.log.$(date +%Y-%m-%d)
+# line_count:2  + exit:1   + <100ms  → Gap A (bash cmd not found in MSYS2)
+# line_count:53 + exit:200 + <500ms  → Gap B (bash.exe not in cmd.exe PATH)
+```
+
+See `docs/retro/retro-task-dev-agent-shell-path-2026-06-27.md` for full analysis.
+
 ### Build Prerequisites
 
 CMake and Ninja are required for `cef-dll-sys` (builds CEF's C wrapper). Both must be on PATH.
