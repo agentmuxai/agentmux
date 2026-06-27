@@ -458,6 +458,35 @@ unsafe extern "system" fn win_event_callback(
             let class = read_class_name(hwnd);
             if classify::is_app_class(&class) {
                 launcher_ipc::report_hwnd_visibility_changed(raw_hwnd, false);
+
+                // Gap A: CEF Views recycle-on-close hides the window without
+                // destroying the browser, so `on_before_close` never fires.
+                // `close_window()` RPC added a report site (PR #1701 Part 1) but
+                // OS-level closes (Alt+F4, taskbar "Close window") bypass the RPC
+                // entirely. Detect them here: an on-screen, non-minimized,
+                // non-pool app window hiding is a real user-close regardless of
+                // which path triggered it. Double-report is harmless — the launcher
+                // silently no-ops already-removed labels.
+                // Ref: docs/retro/retro-window-count-stale-post-1701-2026-06-27.md §Gap A.
+                if IsIconic(hwnd) == 0 {
+                    if let Some(rect) = read_window_rect(hwnd) {
+                        if rect.left >= OFFSCREEN_POOL_THRESHOLD_X {
+                            // On-screen and not minimised → real user-close hide.
+                            if let Some(state) = app_state().get() {
+                                if let Some(label) = state.label_for_hwnd(hwnd) {
+                                    if !label.starts_with("browser-pane-") {
+                                        tracing::debug!(
+                                            target: "wrr",
+                                            "[wrr] HIDE on on-screen app window → report_window_closed label={}",
+                                            label
+                                        );
+                                        crate::launcher_ipc::report_window_closed(label);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             // B1: a HIDE may mean the last user window is gone. Do NOT gate this
             // on is_app_class — closing a window fires HIDE for its CHILD render
