@@ -24,7 +24,10 @@ describe("ClaudeTranslator", () => {
                 type: "assistant",
                 message: { content: [{ type: "text", text: "hello world" }] },
             });
-            expect(events).toHaveLength(0);
+            // Text is not duplicated (arrived via streaming deltas), but session_end IS
+            // emitted — text-only assistant message signals turn completion in persistent mode.
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("session_end");
         });
 
         it("skips thinking blocks in final assistant event", () => {
@@ -33,7 +36,9 @@ describe("ClaudeTranslator", () => {
                 type: "assistant",
                 message: { content: [{ type: "thinking", thinking: "let me think..." }] },
             });
-            expect(events).toHaveLength(0);
+            // Thinking is not duplicated, but session_end IS emitted (thinking-only = turn done).
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("session_end");
         });
 
         it("preserves tool_use blocks in final assistant event", () => {
@@ -337,13 +342,32 @@ describe("ClaudeTranslator", () => {
                 type: "assistant",
                 message: { content: [] },
             });
-            expect(events).toHaveLength(0);
+            // Empty content = no tool_use = turn end; session_end emitted for persistent mode.
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("session_end");
         });
 
         it("handles assistant with no message", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({ type: "assistant" });
             expect(events).toHaveLength(0);
+        });
+
+        it("translates rate_limit_event to provider_waiting", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({ type: "rate_limit_event", retry_after_ms: 30000 });
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("provider_waiting");
+            expect((events[0] as any).reason).toBe("rate_limited");
+            expect((events[0] as any).retryAfterMs).toBe(30000);
+        });
+
+        it("translates rate_limit_event without retry_after_ms", () => {
+            const t = new ClaudeTranslator();
+            const events = t.translate({ type: "rate_limit_event" });
+            expect(events).toHaveLength(1);
+            expect(events[0].type).toBe("provider_waiting");
+            expect((events[0] as any).retryAfterMs).toBeNull();
         });
 
         it("reset clears all state", () => {

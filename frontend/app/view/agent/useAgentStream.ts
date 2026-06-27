@@ -842,6 +842,18 @@ export function useAgentStream({
                         finalizeTurn(event.stats ?? null);
                         continue;
                     }
+                    // Provider is rate-limited and retrying. Keep lastEventMs
+                    // live (suppresses false "stream-stuck" watchdog) and surface
+                    // "Rate limited…" in the working row instead of a thinking phrase.
+                    if (event.type === "provider_waiting") {
+                        model.dispatchPane({
+                            type: "ProviderWaiting",
+                            reason: event.reason,
+                            retryAfterMs: event.retryAfterMs,
+                            at: Date.now(),
+                        });
+                        continue;
+                    }
                     // Track the currently-running tool for the status line.
                     // Per-tool subscription open/close was removed — a single
                     // per-block subscription installed on mount above handles

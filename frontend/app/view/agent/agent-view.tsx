@@ -1104,6 +1104,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     currentToolArg={agentAtoms().currentToolArgAtom[0]()}
                     sessionStats={agentAtoms().sessionStatsAtom[0]()}
                     turnTokens={agentAtoms().turnTokensAtom[0]()}
+                    waitingReason={
+                        (() => {
+                            const phase = agentAtoms().turnPhaseAtom[0]();
+                            return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
+                        })()
+                    }
+                    retryAfterMs={
+                        (() => {
+                            const phase = agentAtoms().turnPhaseAtom[0]();
+                            return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
+                        })()
+                    }
                 />
             </Show>
 

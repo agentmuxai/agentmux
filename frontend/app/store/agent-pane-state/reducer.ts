@@ -751,6 +751,23 @@ export function update(
         }
 
         // ── Composer details / Log panel ──────────────────────────
+        case "ProviderWaiting": {
+            if (state.lastEventMs == null) return { state, events: [] };
+            const next: AgentPaneState = { ...state, lastEventMs: command.at };
+            if (next.turnPhase.kind === "Streaming") {
+                next.turnPhase = {
+                    ...next.turnPhase,
+                    lastEventMs: command.at,
+                    waitingReason: command.reason,
+                    retryAfterMs: command.retryAfterMs,
+                };
+            }
+            return {
+                state: next,
+                events: [{ type: "provider-waiting", reason: command.reason }],
+            };
+        }
+
         case "DetailsToggle": {
             return {
                 state: { ...state, detailsOpen: !state.detailsOpen },
@@ -797,6 +814,8 @@ function bumpEvent(
             ...next.turnPhase,
             lastEventMs: nowMs,
             toolsActive: Math.max(0, next.turnPhase.toolsActive + toolsDelta),
+            waitingReason: undefined,
+            retryAfterMs: undefined,
         };
     } else if (
         next.turnPhase.kind === "Submitting" ||

@@ -57,6 +57,10 @@ interface AgentWorkingRowProps {
     currentToolArg?: string | null;
     sessionStats?: SessionStats | null;
     turnTokens?: TurnTokens | null;
+    /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
+    waitingReason?: "rate_limited" | null;
+    /** Milliseconds until next retry (from provider Retry-After). Shown when waitingReason is set. */
+    retryAfterMs?: number | null;
 }
 
 export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
@@ -145,6 +149,10 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 <span class="agent-working-row-left">
                     {props.stopping
                         ? "Stopping…"
+                        : props.waitingReason === "rate_limited"
+                            ? props.retryAfterMs != null
+                                ? `Rate limited — retrying in ${Math.ceil(props.retryAfterMs / 1000)}s`
+                                : "Rate limited — retrying…"
                         : props.currentTool
                             ? props.currentToolArg
                                 ? `${props.currentTool}  ·  ${abbreviateArg(props.currentToolArg, 40)}`

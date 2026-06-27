@@ -403,7 +403,15 @@ export type StreamEvent =
     | UserMessageEvent
     | SessionEndEvent
     | ErrorResultEvent
-    | PermissionRequestEvent;
+    | PermissionRequestEvent
+    | ProviderWaitingEvent;
+
+/** Provider is rate-limited and retrying. Updates lastEventMs; shows "Rate limited…" in working row. */
+export interface ProviderWaitingEvent {
+    type: "provider_waiting";
+    reason: "rate_limited";
+    retryAfterMs: number | null;
+}
 
 /** API error from a `type:"result"` line with is_error:true + api_error_status. */
 export interface ErrorResultEvent {
