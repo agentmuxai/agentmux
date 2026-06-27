@@ -525,9 +525,10 @@ pub struct AppState {
     /// Backend process start time as ISO 8601 string
     pub backend_started_at: Mutex<Option<String>>,
 
-    /// Number of data migrations not yet applied, as reported in ESTART and
-    /// forwarded by the launcher via AGENTMUX_PENDING_MIGRATIONS. Non-zero
-    /// means the upgrade panel should surface a "run migrations" prompt.
+    /// Number of data migrations still pending after the in-process startup run,
+    /// as reported in ESTART (forwarded via AGENTMUX_PENDING_MIGRATIONS on the
+    /// launcher path). Non-zero means run_pending_migrations failed at startup;
+    /// the status-bar shows "Migration failed — restart to retry."
     pub pending_migrations: Mutex<usize>,
 
     /// Current zoom factor

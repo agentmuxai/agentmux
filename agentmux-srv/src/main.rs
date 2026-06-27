@@ -1070,8 +1070,9 @@ async fn main() {
     }
 
     // 6. Emit AGENTMUXSRV-ESTART on stderr (exact format from cmd/server/main-server.go:617)
-    // pending_migrations is informational — the launcher no longer blocks startup
-    // on migrations; the upgrade panel drives them on demand.
+    // pending_migrations reflects any migrations that failed during the in-process
+    // run above. Non-zero causes the status-bar to show a "Migration failed —
+    // restart to retry" message. Zero is the expected steady-state.
     let pending_migrations = migrations::count_pending_migrations(&base::get_wave_data_dir());
     eprintln!(
         "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{} pending_migrations:{}",
