@@ -38,7 +38,9 @@ pub(crate) fn test_state() -> AppState {
         auth_key: "test-secret-key".to_string(),
         version: "0.28.20".to_string(),
         app_path: String::new(),
-        wstore,
+        wstore: wstore.clone(),
+        shared_store: None,
+        id_store: wstore,
         filestore,
         global_transcript_store: None,
         event_bus: event_bus.clone(),
@@ -73,6 +75,12 @@ pub(crate) fn test_state() -> AppState {
         install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
         container_manager: None,
         shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
+        cron_scheduler: crate::backend::cron::CronScheduler::new(
+            None,
+            reqwest::Client::new(),
+            String::new(),
+            "test-secret-key".to_string(),
+        ),
     }
 }
 
