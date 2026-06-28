@@ -87,23 +87,89 @@ pub(crate) fn memory_dir_for_agent(
     // agent_id arriving from App API is the agent slug (AGENTMUX_AGENT_ID /
     // bus:register id), not a UUID — use instance_get_by_name for the slug
     // lookup. agent_def_get queries by UUID and would always return None here.
-    let instance = wstore
+    if let Some(instance) = wstore
         .instance_get_by_name(agent_id)
         .map_err(|e| format!("memory: store: {e}"))?
-        .ok_or_else(|| format!("memory: agent {agent_id} not found"))?;
-
-    if instance.working_directory.is_empty() {
-        return Err(format!("memory: agent {agent_id} has no working directory"));
+    {
+        if instance.working_directory.is_empty() {
+            return Err(format!("memory: agent {agent_id} has no working directory"));
+        }
+        let config_dir = wstore
+            .agent_content_get(&instance.id, "env")
+            .ok()
+            .flatten()
+            .map(|c| parse_claude_config_dir(&c.content))
+            .unwrap_or_default();
+        return Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory));
     }
 
-    let config_dir = wstore
-        .agent_content_get(&instance.id, "env")
-        .ok()
-        .flatten()
-        .map(|c| parse_claude_config_dir(&c.content))
-        .unwrap_or_default();
+    // No persisted db_agents instance row. Running agents are tracked in the
+    // global named-agent registry, not db_agents (launching an agent does not
+    // create an instance row there), so the slug lookup above misses every live
+    // agent. Fall back to the registry, which records the slug → working_dir +
+    // identity binding needed to locate the agent's isolated memory dir.
+    // See issue #1836.
+    memory_dir_from_registry(agent_id)
+        .ok_or_else(|| format!("memory: agent {agent_id} not found"))
+}
 
-    Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory))
+/// Resolve a memory dir for `agent_id` from the global named-agent registry.
+///
+/// Each live agent is recorded by `instance_name` with a `working_dir` relative
+/// to `source_agents_base` (the channel/dev instance it lives in) and an
+/// `identity_id` that determines its `CLAUDE_CONFIG_DIR` root. Returns `None`
+/// when the registry is unavailable or no active record matches the slug.
+fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
+    let registry_dir = crate::registry::resolve_shared_registry_dir()?;
+    let registry = crate::registry::Registry::open(registry_dir).ok()?;
+    let rec = registry
+        .list_active()
+        .ok()?
+        .into_iter()
+        .find(|r| r.data.instance_name == agent_id)?;
+
+    // Reconstruct the absolute working directory: source_agents_base joined with
+    // the relative working_dir. Legacy (v1/v2) records without a base fall back
+    // to the current channel's agents dir (AGENTMUX_AGENTS_DIR), matching the
+    // registry's own pre-P0.4 reconstruction rule.
+    let base = rec
+        .data
+        .source_agents_base
+        .clone()
+        .or_else(|| std::env::var("AGENTMUX_AGENTS_DIR").ok())?;
+    let working_directory = std::path::Path::new(&base)
+        .join(&rec.data.working_dir)
+        .to_string_lossy()
+        .to_string();
+
+    let config_dir = claude_config_dir_for_identity(rec.data.identity_id.as_deref());
+    Some(memory_dir_for_cwd(&config_dir, &working_directory))
+}
+
+/// Compute the `CLAUDE_CONFIG_DIR` root for an agent bound to `identity_id`,
+/// mirroring the spawn-time isolated-home layout (`OAuthConfigDir`):
+///   - unbound / "default" → `<shared>/providers/claude` (the default home;
+///     returned as an empty string so `memory_dir_for_cwd` applies its own
+///     identical fallback)
+///   - a per-identity bundle → `<shared>/identities/<id>/claude`
+fn claude_config_dir_for_identity(identity_id: Option<&str>) -> String {
+    match identity_id {
+        Some(id) if !id.is_empty() && id != "default" => {
+            let shared = std::env::var_os("AGENTMUX_SHARED_DIR")
+                .map(PathBuf::from)
+                .or_else(|| dirs::home_dir().map(|h| h.join(".agentmux").join("shared")));
+            match shared {
+                Some(s) => s
+                    .join("identities")
+                    .join(id)
+                    .join("claude")
+                    .to_string_lossy()
+                    .to_string(),
+                None => String::new(),
+            }
+        }
+        _ => String::new(),
+    }
 }
 
 /// Validate a memory filename.
@@ -425,4 +491,59 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Process-global env access — serialize so parallel tests don't race.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn config_dir_for_default_identity_is_empty() {
+        // Unbound / "default" agents use the shared default home; we return an
+        // empty string so memory_dir_for_cwd applies its own providers/claude
+        // fallback rather than duplicating it here.
+        assert_eq!(claude_config_dir_for_identity(None), "");
+        assert_eq!(claude_config_dir_for_identity(Some("")), "");
+        assert_eq!(claude_config_dir_for_identity(Some("default")), "");
+    }
+
+    #[test]
+    fn config_dir_for_bound_identity_points_at_bundle() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        std::env::set_var("AGENTMUX_SHARED_DIR", "/home/u/.agentmux/shared");
+
+        let got = claude_config_dir_for_identity(Some("bundle-x"));
+        let want = PathBuf::from("/home/u/.agentmux/shared")
+            .join("identities")
+            .join("bundle-x")
+            .join("claude")
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(got, want);
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+    }
+
+    #[test]
+    fn memory_dir_for_cwd_default_root_matches_spawn_layout() {
+        // Empty config dir → the default isolated home under shared, with the
+        // working dir sanitized the same way Claude Code encodes project dirs.
+        // Assert on path components so mixed separators (Windows) don't matter.
+        let dir = memory_dir_for_cwd("", "/work/proj");
+        let comps: Vec<String> = dir
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+        let want_tail = ["providers", "claude", "projects", "-work-proj", "memory"];
+        let tail = &comps[comps.len() - want_tail.len()..];
+        assert_eq!(tail, want_tail, "unexpected memory dir tail: {comps:?}");
+    }
 }
