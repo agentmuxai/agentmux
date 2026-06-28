@@ -1438,10 +1438,12 @@ unsafe fn set_macos_app_display_name_impl(set_bundle_id: bool) {
     tracing::info!(app_name = name, "macOS: set app display name (Dock + app menu)");
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn set_macos_app_display_name() {
     set_macos_app_display_name_impl(true);
 }
 
+#[cfg(target_os = "macos")]
 unsafe fn set_macos_app_display_name_pre_init() {
     set_macos_app_display_name_impl(false);
 }
