@@ -185,7 +185,11 @@ async fn create_no_window_flag_set() {
     drop(stdin);
 
     let mut reader = BufReader::new(stdout).lines();
-    let result = timeout(Duration::from_secs(5), reader.next_line()).await;
+    // 15s (not 5s) to tolerate node.exe cold-start on a loaded Windows CI
+    // runner — the assertion still catches the real regression (output that
+    // never arrives because node wrote to a console instead of the pipe),
+    // just without flaking on a slow process spawn.
+    let result = timeout(Duration::from_secs(15), reader.next_line()).await;
 
     assert!(
         result.is_ok(),
