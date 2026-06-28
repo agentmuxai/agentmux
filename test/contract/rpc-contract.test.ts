@@ -188,6 +188,7 @@ const KNOWN_LIVE_UNREGISTERED = [
     "recordtevent",
     "resolveids",
     "setrtinfo",
+    "workspacelist",
     "wsllist",
 ];
 
