@@ -14,7 +14,7 @@ The Agent App API (`app_api.rs`) is the only RPC surface agents can reach (the p
 This means an agent cannot:
 - Register or update its own GitHub/Anthropic/AWS credential so the Trust Center shows it as connected
 - Read or modify the Memory bundle (preset) it was launched with
-- Read or write its own native memory files (Claude Code's `~/.claude/projects/…/memory/*.md`)
+- Read or write its own native memory files (Claude Code's `$CLAUDE_CONFIG_DIR/projects/…/memory/*.md`)
 
 Every one of those operations currently requires either direct DB manipulation or calling low-level handlers that agents aren't allowed to reach.
 
@@ -28,7 +28,7 @@ Add three new namespaces to the App API with the highest-value endpoints first. 
 |-----------|---------|
 | `identity.*` | Credential accounts + agent-to-account links |
 | `preset.*` | Memory bundles (what Trust Center calls "Presets") |
-| `memory.*` | Native agent memory files (`~/.claude/projects/…/memory/*.md`) |
+| `memory.*` | Native agent memory files (`$CLAUDE_CONFIG_DIR/projects/…/memory/*.md`) |
 
 Security rule that threads through all three: **writes are agent-scoped** (an agent can only mutate its own records), **reads of shared catalogs are allowed** (list all presets), **enumeration of other agents' secrets is denied**.
 
@@ -48,9 +48,11 @@ This is a one-line struct change + one assignment at the `set_rpc_context` call 
 
 `native_memory_handlers.rs` operates on **files**, not a key/value store. Specifically:
 
-- Directory: `~/.claude/projects/<sanitized-cwd>/memory/`
+- Directory: `$CLAUDE_CONFIG_DIR/projects/<sanitized-cwd>/memory/`
 - Files: `*.md` (max 10 MiB each, atomic tmp→rename write)
 - Existing commands: `agent:memory:list`, `agent:memory:read_file`, `agent:memory:write_file`
+
+**`CLAUDE_CONFIG_DIR` isolation:** AgentMux sets `CLAUDE_CONFIG_DIR` at agent spawn time (`app_api.rs`) so that Claude Code never writes to the global `~/.claude/`. The actual root is `~/.agentmux/shared/providers/claude/` for default agents and `~/.agentmux/shared/identities/<bundle_id>/claude/` for per-identity bundles. `native_memory_handlers.rs` must resolve this path from the agent's stored env blob (`agent_content_get(agent_id, "env")` → parse `CLAUDE_CONFIG_DIR`) rather than hardcoding `~/.claude/projects`.
 
 The `memory.*` App API commands delegate directly to these handlers — no new storage layer. The only additions are: (a) routing through the App API permission boundary, and (b) emitting a `agent:memory:changed:<agent_id>` event after writes.
 
@@ -288,7 +290,7 @@ Delegates via: `instance_get_by_name(agent_id)` (storage layer — maps agent sl
 
 ### 5.3 `memory.*` — Native Agent Memories
 
-These delegate directly to the existing `agent:memory:*` handlers in `native_memory_handlers.rs`. The storage is Claude Code's native memory directory: `~/.claude/projects/<sanitized-cwd>/memory/*.md`. All three commands already exist at the low-level RPC layer — these wrappers add (a) App API permission enforcement and (b) the `agent:memory:changed` event.
+These delegate directly to the existing `agent:memory:*` handlers in `native_memory_handlers.rs`. The storage is Claude Code's native memory directory: `$CLAUDE_CONFIG_DIR/projects/<sanitized-cwd>/memory/*.md` — see OQ2 for isolation details. All three commands already exist at the low-level RPC layer — these wrappers add (a) App API permission enforcement and (b) the `agent:memory:changed` event.
 
 #### `memory.list`
 
