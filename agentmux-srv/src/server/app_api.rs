@@ -3189,11 +3189,15 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 // Steps 2+4: replace provider link (unlink old, link new).
                 let _ = id_store.agent_identity_unlink(&req.agent_id, &req.provider);
                 if let Err(e) = id_store.agent_identity_link(&req.agent_id, &account_id, &req.provider) {
-                    // Unlink already ran — keychain secret is now orphaned. Best-effort delete.
-                    let aid = account_id.clone();
-                    let _ = tokio::task::spawn_blocking(move || {
-                        crate::identity::secret_store::delete(&aid)
-                    }).await;
+                    // Only clean up keychain for new accounts — on the update path the
+                    // account still exists in the DB and may be linked to other providers,
+                    // so deleting the keychain secret would destroy a valid credential.
+                    if is_new {
+                        let aid = account_id.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            crate::identity::secret_store::delete(&aid)
+                        }).await;
+                    }
                     return Err(format!("identity.account.upsert: link: {e}"));
                 }
 
