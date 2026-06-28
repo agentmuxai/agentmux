@@ -140,7 +140,7 @@ Create or update a credential account **and** link it to the calling agent for t
 ```
 
 Delegates (in order):
-1. `account.key.verify` — validates secret + stores in keychain (step 1 is non-atomic with respect to steps 2–3; see compensation note below)
+1. `account.key.verify` — stores the secret in the keychain unconditionally, then probes the provider if `validate: true`. The `validate` field in the request controls only whether the probe is attempted — not whether the keychain write happens. If `validate: false` (or omitted), the secret is stored and the response `status` is `"unknown"`. (Step 1 is non-atomic with respect to steps 2–3; see compensation note below.)
 2. If the agent already has a link for `provider`: call `unlinkagentidentity { agent_id, provider }` to remove it (the App API handler must do this explicitly — `linkagentidentity` inserts, it does not replace)
 3. `linkagentidentity { agent_id, account_id, provider }` — creates the new link
 
@@ -179,7 +179,7 @@ Delegates to: `account.key.verify { validate: true }`. Read-only — fires no ev
 Remove the agent's link to a provider account. The account record stays in the DB.
 
 ```jsonc
-// Request  { "agent_id": "agentx", "provider": "github" }
+// Request  { "agent_id": "agentx", "provider": "github" }  // agent_id must match ctx.agent_id (S1)
 // Response { "unlinked": true }
 ```
 
@@ -282,7 +282,7 @@ Get the preset bound to the calling agent's current instance. Resolves via `memo
 // Response — full Memory object (is_blank: true when no preset is bound)
 ```
 
-Delegates via: `instance_get_by_name(agent_id)` (storage layer — maps agent slug → `AgentInstance`) → read `memory_id` from the returned row → `getmemory { id: memory_id }`. `CommandGetAgentInstanceData` takes an instance UUID (`id: String`), not a slug, so the handler cannot call `getagentinstance` directly with the request's `agent_id`; `instance_get_by_name` is the correct intermediate. If `memory_id` is null, fall back to `listmemories` + filter `is_blank: true` to fetch the blank singleton.
+Delegates via: `instance_get_by_name(agent_id)` (storage layer — maps agent slug → `AgentInstance`) → read `memory_id` from the returned row → `getmemory { id: memory_id }`. `CommandGetAgentInstanceData` takes an instance UUID (`id: String`), not a slug, so the handler cannot call `getagentinstance` directly with the request's `agent_id`; `instance_get_by_name` is the correct intermediate. If `memory_id` is null, fall back to two steps: (1) `listmemories` + filter `is_blank: true` to retrieve the blank singleton's `id` (summary fields only — `listmemories` does not return `instructions`, `context_files`, `mcp_servers`, or `skills`), then (2) `getmemory { id: <blank_id> }` to fetch the full Memory object. Step 2 is required to satisfy the response contract — step 1 alone is insufficient.
 
 ---
 
