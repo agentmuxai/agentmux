@@ -384,6 +384,20 @@ pub const COMMAND_BLOCKFILE_READ_RANGE: &str = "blockfile:read_range";
 pub const COMMAND_BLOCKFILE_READ_STATE: &str = "blockfile:read_state";
 pub const COMMAND_BLOCKFILE_WRITE_STATE: &str = "blockfile:write_state";
 
+// App API — identity/preset/memory namespaces
+pub const COMMAND_IDENTITY_SELF_ACCOUNTS: &str = "identity.self.accounts";
+pub const COMMAND_IDENTITY_ACCOUNT_UPSERT: &str = "identity.account.upsert";
+pub const COMMAND_IDENTITY_ACCOUNT_VALIDATE: &str = "identity.account.validate";
+pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
+pub const COMMAND_PRESET_LIST: &str = "preset.list";
+pub const COMMAND_PRESET_GET: &str = "preset.get";
+pub const COMMAND_PRESET_UPSERT: &str = "preset.upsert";
+pub const COMMAND_PRESET_DELETE: &str = "preset.delete";
+pub const COMMAND_PRESET_SELF_GET: &str = "preset.self.get";
+pub const COMMAND_MEMORY_LIST: &str = "memory.list";
+pub const COMMAND_MEMORY_READ: &str = "memory.read";
+pub const COMMAND_MEMORY_WRITE: &str = "memory.write";
+
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
 pub const COMMAND_SESSION_RESTORE: &str = "session:restore";
@@ -1351,6 +1365,11 @@ pub struct RpcContext {
     pub tabid: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub conn: String,
+    /// Slug of the authenticated agent from `bus:register`. Empty for non-agent
+    /// connections (plain WebSocket, CEF UI). App API handlers use this for S1
+    /// enforcement — reject if empty (unauthenticated), reject if ≠ request agent_id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub agent_id: String,
 }
 
 /// Matches Go's `CommandVarData`

@@ -30,19 +30,25 @@ use crate::backend::rpc_types::{
 
 use super::AppState;
 
-/// Compute `~/.claude/projects/<sanitized>/memory/` for the given working directory.
+/// Compute `$CLAUDE_CONFIG_DIR/projects/<sanitized>/memory/` for the given
+/// working directory and Claude config dir.
 ///
-/// Mirrors Claude Code's `sessionStoragePortable.ts` algorithm:
+/// `claude_config_dir` is the value of `CLAUDE_CONFIG_DIR` from the agent's
+/// stored env blob. When empty, falls back to
+/// `~/.agentmux/shared/providers/claude/` — the default isolated home that
+/// `app_api.rs` sets at agent spawn time. We never write to the global
+/// `~/.claude/projects/` because AgentMux always sets `CLAUDE_CONFIG_DIR`.
+///
+/// Sanitization mirrors Claude Code's `sessionStoragePortable.ts`:
 /// 1. Replace every non-alphanumeric char with `-`.
 /// 2. If the result is longer than 200 chars, truncate at 200 and append a
-///    base-36 hash of the *raw* working_directory (before sanitization) as a suffix.
-fn memory_dir_for_cwd(working_directory: &str) -> PathBuf {
+///    base-36 hash of the *raw* working_directory (before sanitization).
+fn memory_dir_for_cwd(claude_config_dir: &str, working_directory: &str) -> PathBuf {
     let sanitized: String = working_directory
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
 
-    // Spec §5.2: hash is computed on the raw working_directory (before sanitization).
     let folder_name = if sanitized.len() > 200 {
         let hash = djb2_hash(working_directory);
         let truncated = &sanitized[..200];
@@ -51,9 +57,63 @@ fn memory_dir_for_cwd(working_directory: &str) -> PathBuf {
         sanitized
     };
 
-    expand_home_dir_safe("~/.claude/projects")
-        .join(folder_name)
-        .join("memory")
+    let base = if claude_config_dir.is_empty() {
+        expand_home_dir_safe("~/.agentmux/shared/providers/claude")
+    } else {
+        expand_home_dir_safe(claude_config_dir)
+    };
+    base.join("projects").join(folder_name).join("memory")
+}
+
+/// Extract `CLAUDE_CONFIG_DIR` from a `KEY=VALUE\n…` env blob.
+fn parse_claude_config_dir(env_blob: &str) -> String {
+    for line in env_blob.lines() {
+        if let Some(val) = line.strip_prefix("CLAUDE_CONFIG_DIR=") {
+            return val.to_string();
+        }
+    }
+    String::new()
+}
+
+/// Resolve the memory directory for `agent_id`. Reads the agent definition and
+/// its stored env blob to find `CLAUDE_CONFIG_DIR`. Returns an error if the
+/// agent is not found or has no working directory.
+///
+/// Shared by `native_memory_handlers` and the `memory.*` App API handlers.
+pub(crate) fn memory_dir_for_agent(
+    wstore: &crate::backend::storage::store::Store,
+    agent_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    // agent_id arriving from App API is the agent slug (AGENTMUX_AGENT_ID /
+    // bus:register id), not a UUID — use instance_get_by_name for the slug
+    // lookup. agent_def_get queries by UUID and would always return None here.
+    let instance = wstore
+        .instance_get_by_name(agent_id)
+        .map_err(|e| format!("memory: store: {e}"))?
+        .ok_or_else(|| format!("memory: agent {agent_id} not found"))?;
+
+    if instance.working_directory.is_empty() {
+        return Err(format!("memory: agent {agent_id} has no working directory"));
+    }
+
+    let config_dir = wstore
+        .agent_content_get(&instance.id, "env")
+        .ok()
+        .flatten()
+        .map(|c| parse_claude_config_dir(&c.content))
+        .unwrap_or_default();
+
+    Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory))
+}
+
+/// Validate a memory filename.
+pub(crate) fn validate_memory_filename(filename: &str) -> Result<(), String> {
+    validate_filename(filename)
+}
+
+/// Parse `metadata.type` from YAML frontmatter (re-exported for App API).
+pub(crate) fn parse_memory_frontmatter_type(content: &str) -> Option<String> {
+    parse_frontmatter_type(content)
 }
 
 /// Hash matching Claude Code's sessionStoragePortable.ts implementation.
@@ -168,7 +228,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     return Ok(Some(serde_json::to_value(NativeMemoryListResult { files: vec![] }).map_err(|e| e.to_string())?));
                 }
 
-                let memory_dir = memory_dir_for_cwd(&agent.working_directory);
+                let config_dir = wstore
+                    .agent_content_get(&agent.id, "env")
+                    .ok().flatten()
+                    .map(|c| parse_claude_config_dir(&c.content))
+                    .unwrap_or_default();
+                let memory_dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
 
                 let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
                 // Treat both "dir doesn't exist" and the TOCTOU case where the dir
@@ -265,7 +330,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     return Err(format!("agent:memory:read_file: agent {} has no configured working directory", cmd.agent_id));
                 }
 
-                let path = memory_dir_for_cwd(&agent.working_directory).join(&cmd.filename);
+                let config_dir = wstore
+                    .agent_content_get(&agent.id, "env")
+                    .ok().flatten()
+                    .map(|c| parse_claude_config_dir(&c.content))
+                    .unwrap_or_default();
+                let path = memory_dir_for_cwd(&config_dir, &agent.working_directory).join(&cmd.filename);
                 // Reject symlinks — consistent with list handler's file_type check.
                 let file_type = std::fs::symlink_metadata(&path)
                     .map_err(|e| format!("agent:memory:read_file: {}: {e}", cmd.filename))?
@@ -320,7 +390,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     return Err(format!("agent:memory:write_file: agent {} has no configured working directory", cmd.agent_id));
                 }
 
-                let dir = memory_dir_for_cwd(&agent.working_directory);
+                let config_dir = wstore
+                    .agent_content_get(&agent.id, "env")
+                    .ok().flatten()
+                    .map(|c| parse_claude_config_dir(&c.content))
+                    .unwrap_or_default();
+                let dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
 
