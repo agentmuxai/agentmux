@@ -62,7 +62,7 @@ On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (l
 { "cmd": "C:\\<repo>\\scripts\\dev-agent.cmd TITLE=\"zoom-fix: PR #1234\"" }
 ```
 
-This `.cmd` wrapper prepends `Git\bin` to PATH (fixing Gap B) and calls `task.cmd dev` by explicit extension (fixing Gap A). On macOS/Linux `task dev` works directly — no wrapper needed.
+This `.cmd` wrapper prepends `Git\bin` to PATH (fixing Gap B) and calls `task.exe dev` by explicit extension (fixing Gap A). On macOS/Linux `task dev` works directly — no wrapper needed.
 
 **Diagnosing failed shells:** Check `shell.exit` events in the server log:
 ```bash
