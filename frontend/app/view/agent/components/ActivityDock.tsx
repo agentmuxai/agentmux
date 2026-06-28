@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ActivityDock — a strip pinned to the top of the agent pane listing every
- * long-running activity (Phase 1: shells) as a uniform row. Click a row → its
- * live view expands; click again → collapses. The conversation scrolls under it.
+ * ActivityDock — a strip pinned above the composer listing every long-running
+ * activity (Phase 1: shells) as a uniform row. Click a row → its live view
+ * expands in the dock; click again → collapses.
  *
- * Pure derived view of the agent-document store — no new state. Expand state is
- * the shared `documentState.pinnedNodes`, so the dock and the inline
- * PersistentShellBlock stay in sync.
+ * Expansion state is local to the dock (`expandedIds` signal). It is intentionally
+ * NOT shared with `documentState.pinnedNodes` — that shared state caused the
+ * inline PersistentShellBlock in the conversation to expand simultaneously,
+ * showing a duplicate log at whatever scroll position the shell block occupied.
+ * Clicking in the dock expands in-dock only; clicking the inline block expands
+ * there only. No cross-talk.
  *
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md
  *   (D1 dock vs swarm · D3 ordering · D4 retention · D6 cap/overflow)
@@ -22,7 +25,7 @@ import { ActivityRow } from "./ActivityRow";
 import { shellActivities } from "../activity/shell-adapter";
 import { RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
 import type { SignalPair } from "../state";
-import type { DocumentNode, DocumentState } from "../types";
+import type { DocumentNode } from "../types";
 
 const MAX_INLINE = 3;
 
@@ -41,15 +44,16 @@ function overflowSummary(items: PinnedActivity[]): string {
 
 interface ActivityDockProps {
     documentAtom: SignalPair<DocumentNode[]>;
-    documentStateAtom: SignalPair<DocumentState>;
 }
 
 export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     const [nodes] = props.documentAtom;
-    const [docState, setDocState] = props.documentStateAtom;
     const tick = useTick(1000);
     const [dismissed, setDismissed] = createSignal<Set<string>>(new Set());
     const [overflowOpen, setOverflowOpen] = createSignal(false);
+    // Local expansion state — decoupled from documentState.pinnedNodes so that
+    // expanding in the dock does not also expand the inline PersistentShellBlock.
+    const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
 
     const allActivities = createMemo(() => shellActivities(nodes()));
 
@@ -104,11 +108,11 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
 
     // D3 — running-first, expanded-first, newest-first.
     const ordered = createMemo(() => {
-        const pinned = docState().pinnedNodes;
+        const expanded = expandedIds();
         return [...visible()].sort((x, y) => {
             const rank = STATUS_RANK[x.status] - STATUS_RANK[y.status];
             if (rank !== 0) return rank;
-            const exp = (pinned.has(x.id) ? 0 : 1) - (pinned.has(y.id) ? 0 : 1);
+            const exp = (expanded.has(x.id) ? 0 : 1) - (expanded.has(y.id) ? 0 : 1);
             if (exp !== 0) return exp;
             return y.startedAt - x.startedAt;
         });
@@ -117,9 +121,9 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     // D6 — up to MAX_INLINE inline; expanded rows past the cap stay visible.
     const inline = createMemo(() => {
         const all = ordered();
-        const pinned = docState().pinnedNodes;
+        const expanded = expandedIds();
         const head = all.slice(0, MAX_INLINE);
-        const keptTail = all.slice(MAX_INLINE).filter((a) => pinned.has(a.id));
+        const keptTail = all.slice(MAX_INLINE).filter((a) => expanded.has(a.id));
         return [...head, ...keptTail];
     });
     const overflow = createMemo(() => {
@@ -135,11 +139,11 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     });
 
     const togglePin = (id: string): void => {
-        setDocState((prev) => {
-            const pinned = new Set(prev.pinnedNodes);
-            if (pinned.has(id)) pinned.delete(id);
-            else pinned.add(id);
-            return { ...prev, pinnedNodes: pinned };
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
         });
     };
 
@@ -167,7 +171,7 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
                     {(id) => (
                         <ActivityRow
                             activity={() => activityById().get(id)}
-                            expanded={() => docState().pinnedNodes.has(id)}
+                            expanded={() => expandedIds().has(id)}
                             onToggle={() => togglePin(id)}
                             onStop={() => stop(id)}
                             onDismiss={() => dismiss(id)}
