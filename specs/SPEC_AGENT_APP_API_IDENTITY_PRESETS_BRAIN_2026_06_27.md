@@ -140,9 +140,11 @@ Create or update a credential account **and** link it to the calling agent for t
 ```
 
 Delegates (in order):
-1. `account.key.verify` — validates secret + stores in keychain
+1. `account.key.verify` — validates secret + stores in keychain (step 1 is non-atomic with respect to steps 2–3; see compensation note below)
 2. If the agent already has a link for `provider`: call `unlinkagentidentity { agent_id, provider }` to remove it (the App API handler must do this explicitly — `linkagentidentity` inserts, it does not replace)
 3. `linkagentidentity { agent_id, account_id, provider }` — creates the new link
+
+**Compensation:** If step 3 fails (e.g. DB write error), the secret is already in the OS keychain with no agent link. The handler MUST attempt to delete the orphaned keychain entry via the existing keychain-delete path. If that also fails, log a warning and return an error to the caller — the caller can retry, which will re-enter at step 1 and overwrite the orphaned entry. This is the same best-effort-cleanup pattern used by other two-phase writes in `identity_handlers.rs`.
 
 Fires: `identityaccounts:changed` (global) + `agentidentities:changed:<agent_id>`
 
@@ -244,7 +246,7 @@ Create or update a preset. Omit `id` to create. Guards blank singleton.
   "description":   "...",
   "instructions":  "You are AgentX ...",
   "context_files": [],
-  "mcp_servers":   {},
+  "mcp_servers":   [],
   "skills":        []
 }
 // Response — full updated Memory object
@@ -258,14 +260,14 @@ Fires: `memories:changed`
 
 #### `preset.delete`
 
-Delete a preset by id. Rejects blank singleton.
+Delete a preset by id. Rejects blank singleton and `seed-` prefixed bundles (see S4).
 
 ```jsonc
 // Request  { "id": "abc-123" }
 // Response { "deleted": true }
 ```
 
-Delegates to: `deletememory { id }`
+Delegates to: `deletememory { id }`. The handler must catch `StoreError::Other` from `bundle_memory_delete` and re-surface it as `FORBIDDEN: cannot delete a seeded bundle` (not a raw storage error string).
 
 Fires: `memories:changed`
 
@@ -280,7 +282,7 @@ Get the preset bound to the calling agent's current instance. Resolves via `memo
 // Response — full Memory object (is_blank: true when no preset is bound)
 ```
 
-Delegates to: `getagentinstance` → `getmemory` on the resolved `memory_id`. If `memory_id` is null, delegates to `listmemories` + filter `is_blank: true` to fetch the singleton.
+Delegates via: `instance_get_by_name(agent_id)` (storage layer — maps agent slug → `AgentInstance`) → read `memory_id` from the returned row → `getmemory { id: memory_id }`. `CommandGetAgentInstanceData` takes an instance UUID (`id: String`), not a slug, so the handler cannot call `getagentinstance` directly with the request's `agent_id`; `instance_get_by_name` is the correct intermediate. If `memory_id` is null, fall back to `listmemories` + filter `is_blank: true` to fetch the blank singleton.
 
 ---
 
@@ -349,14 +351,16 @@ Fires: `agent:memory:changed:<agent_id>` (fire-and-forget, persist=0) — emitte
 
 | Command | Event | Scope | Persist |
 |---------|-------|-------|---------|
-| `identity.account.upsert` | `identityaccounts:changed` | global | 1 |
-| `identity.account.upsert` | `agentidentities:changed:<agent_id>` | scoped | 1 |
-| `identity.self.unlink` | `agentidentities:changed:<agent_id>` | scoped | 1 |
-| `preset.upsert` | `memories:changed` | global | 1 |
-| `preset.delete` | `memories:changed` | global | 1 |
+| `identity.account.upsert` | `identityaccounts:changed` | global | 0 |
+| `identity.account.upsert` | `agentidentities:changed:<agent_id>` | scoped | 0 |
+| `identity.self.unlink` | `agentidentities:changed:<agent_id>` | scoped | 0 |
+| `preset.upsert` | `memories:changed` | global | 0 |
+| `preset.delete` | `memories:changed` | global | 0 |
 | `memory.write` | `agent:memory:changed:<agent_id>` | scoped | 0 |
 
-`agent:memory:changed:<agent_id>` is a new event type. Subscribe via `eventsub` with scope `<agent_id>` to receive live updates when memory files change. Persist=0 means fire-and-forget — missed events require a `memory.list` re-poll (cheap for small memory dirs).
+All events are `persist=0` (fire-and-forget), matching the existing pattern in `agent_handlers.rs`. Subscribers that miss an event due to reconnect must re-poll: `identity.self.accounts` for identity events, `preset.list` for preset events, `memory.list` for memory events.
+
+`agent:memory:changed:<agent_id>` is a new event type. Subscribe via `eventsub` with scope `<agent_id>` to receive live updates when memory files change.
 
 ---
 
@@ -370,9 +374,9 @@ Fires: `agent:memory:changed:<agent_id>` (fire-and-forget, persist=0) — emitte
 | `identity.self.unlink` | `unlinkagentidentity` | Direct delegation |
 | `preset.list` | `listmemories` | Strip instruction/context blobs from response |
 | `preset.get` | `getmemory` | Add name-based lookup via list+filter |
-| `preset.upsert` | `upsertmemory` | Guard blank singleton |
-| `preset.delete` | `deletememory` | Guard blank singleton |
-| `preset.self.get` | `getagentinstance` → `getmemory` | Resolve memory_id FK |
+| `preset.upsert` | `upsertmemory` | Guard blank singleton; strip `is_global` and `sort_order` from request before delegating (S4a) |
+| `preset.delete` | `deletememory` | Guard blank singleton + `seed-` prefix; catch `StoreError::Other` and re-surface as `FORBIDDEN` |
+| `preset.self.get` | `instance_get_by_name(agent_id)` → `getmemory` | `instance_get_by_name` maps agent slug → instance row → `memory_id`; `getagentinstance` takes a UUID and cannot be used directly |
 | `memory.list` | `agent:memory:list` | S1 scope check, emit no event |
 | `memory.read` | `agent:memory:read_file` | S1 scope check |
 | `memory.write` | `agent:memory:write_file` | S1 scope check, emit `agent:memory:changed` |
@@ -383,13 +387,19 @@ All handlers register in `register_app_api_handlers` in `app_api.rs`.
 
 ## 8. Security Invariants
 
-**S1 — Agent-scoped writes only.** For any command with an `agent_id` field, the handler MUST compare it against `ctx.agent_id` (populated from `bus_agent_id` per OQ1). If they differ, return `FORBIDDEN`. This requires the one-time `RpcContext` extension described in §3 OQ1.
+**S1 — Agent-scoped writes only.** For any command with an `agent_id` field, the handler MUST:
+1. Reject with `FORBIDDEN: unauthenticated agent connection` if `ctx.agent_id` is empty (i.e., the connection never sent `bus:register`; `unwrap_or_default()` in §9 leaves it `""`).
+2. Reject with `FORBIDDEN: agent_id mismatch` if `ctx.agent_id != request.agent_id`.
+
+Both checks are required. Checking only for equality is insufficient because `ctx.agent_id = ""` and `request.agent_id = ""` would pass the equality check, allowing an unauthenticated connection to call any agent-scoped command with an empty agent_id. This requires the one-time `RpcContext` extension described in §3 OQ1.
 
 **S2 — No secret enumeration.** `identity.self.accounts` returns `masked_tail` (last 4 chars), never the plaintext secret. Plaintext lives only in the OS keychain.
 
 **S3 — No cross-agent memory reads.** `memory.*` commands reject `agent_id` values that differ from `ctx.agent_id`. The memory directory path is derived from the agent's `working_directory` in `db_agent_definitions` — an agent cannot path-traverse into another agent's directory.
 
-**S4 — Blank preset singleton guard.** `preset.upsert` and `preset.delete` return `FORBIDDEN: cannot mutate the blank preset` when the target id is the `is_blank` singleton.
+**S4 — Blank preset and seeded-bundle guard.** `preset.upsert` and `preset.delete` return `FORBIDDEN: cannot mutate the blank preset` when the target id is the `is_blank` singleton. `preset.delete` additionally returns `FORBIDDEN: cannot delete a seeded bundle` when the target id starts with `seed-` — `bundle_memory_delete` rejects these at the storage layer (`memory_bundles.rs:194`); the App API wrapper must catch the `StoreError::Other` and re-surface it as a clean `FORBIDDEN` rather than a raw storage error string.
+
+**S4a — `is_global` and `sort_order` strip.** `preset.upsert` MUST strip `is_global` and `sort_order` from the caller-supplied payload before delegating to `upsertmemory`. `bundle_memory_upsert` passes `is_global = excluded.is_global` straight through (`memory_bundles.rs:156`), so an agent sending `"is_global": true` would elevate its preset to global-brain status, injecting its instructions into every other agent's context at launch. These fields are not part of the `preset.upsert` API surface and must be silently ignored (not rejected) to allow future callers to pass extra fields without breaking.
 
 **S5 — validate=true is minimally destructive.** `identity.account.validate` never writes a new keychain entry and never creates or deletes DB rows. The only permitted DB side-effect is updating the `status` column on an existing account row (when `account_id` is supplied and the probe result resolves a previously-`unknown` status). No write occurs for ad-hoc probes (no `account_id`).
 
