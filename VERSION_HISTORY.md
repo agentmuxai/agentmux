@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.49.8 — 2026-06-28
+
+- feat(trust-center): responsive layout from phone strip to desktop
+- feat(settings): responsive layout from phone strip to desktop
+- fix(wrr): gate last-window quit on HAD_VISIBLE_USER_WINDOW; tighten ActivityDock height
+- fix(agent-pane): remove redundant inner left bar from tool call blocks
+- fix(macos): add cfg guards to display-name wrapper fns so Windows/Linux builds don't see unresolvable macOS-only impl
+- feat(app-api): implement identity, preset, and memory namespaces for agents
+- fix(tests): add missing struct fields to agentmux-srv test fixtures
+- fix(tests): use forward-slash path in dotdot_workdir_is_rejected for cross-platform compat
+- fix(srv): echo-stdin test fixture truncated large payloads on exit, flaking nightly CI
+- fix(srv): add agent_id to RpcContext test literal (E0063 broke nightly compile)
+- fix(test): waive new identity/memory/preset backend handlers in rpc-contract test
+- fix(srv): widen create_no_window_flag_set timeout to 15s to de-flake Windows CI
+- fix(app-api): resolve memory.* for live agents via the named-agent registry
+- fix(app-api): preset.upsert accepts the documented request shape
+- fix(agent-stream): show "Rate limited…" and clear Working... on 429 retry
+
+
 ## 0.49.7 — 2026-06-27
 
 - fix(macos): restore main browser clicks when browser pane overlay is open
