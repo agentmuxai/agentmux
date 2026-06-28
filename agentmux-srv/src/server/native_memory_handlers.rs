@@ -84,23 +84,26 @@ pub(crate) fn memory_dir_for_agent(
     wstore: &crate::backend::storage::store::Store,
     agent_id: &str,
 ) -> Result<std::path::PathBuf, String> {
-    let agent = wstore
-        .agent_def_get(agent_id)
+    // agent_id arriving from App API is the agent slug (AGENTMUX_AGENT_ID /
+    // bus:register id), not a UUID — use instance_get_by_name for the slug
+    // lookup. agent_def_get queries by UUID and would always return None here.
+    let instance = wstore
+        .instance_get_by_name(agent_id)
         .map_err(|e| format!("memory: store: {e}"))?
         .ok_or_else(|| format!("memory: agent {agent_id} not found"))?;
 
-    if agent.working_directory.is_empty() {
+    if instance.working_directory.is_empty() {
         return Err(format!("memory: agent {agent_id} has no working directory"));
     }
 
     let config_dir = wstore
-        .agent_content_get(&agent.id, "env")
+        .agent_content_get(&instance.id, "env")
         .ok()
         .flatten()
         .map(|c| parse_claude_config_dir(&c.content))
         .unwrap_or_default();
 
-    Ok(memory_dir_for_cwd(&config_dir, &agent.working_directory))
+    Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory))
 }
 
 /// Validate a memory filename.
