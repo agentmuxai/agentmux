@@ -364,6 +364,11 @@ async fn handle_incoming_text(
             "bus:register" => {
                 if let Some(ref agent_id) = incoming.agent_id {
                     let rx = state.messagebus.register(agent_id, "websocket");
+                    // Stamp agent_id on the RPC context so App API S1 checks work.
+                    engine.set_rpc_context(crate::backend::rpc_types::RpcContext {
+                        agent_id: agent_id.clone(),
+                        ..Default::default()
+                    });
                     let ack = json!({ "type": "bus:registered", "agent_id": agent_id });
                     let msg = serde_json::to_string(&ack).unwrap_or_default();
                     if socket.send(Message::Text(msg.into())).await.is_err() {
