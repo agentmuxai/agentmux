@@ -292,6 +292,82 @@ const CRON_RESUME_TOOL: &str = r#"{
   }
 }"#;
 
+const MEMORY_LIST_TOOL: &str = r#"{
+  "name": "MemoryList",
+  "description": "List your own native memory (brain) markdown files. Returns each file's filename, whether it is the index, its metadata_type, size in bytes, and last-modified time. Use it to see what you've remembered before reading or writing a specific file. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const MEMORY_READ_TOOL: &str = r#"{
+  "name": "MemoryRead",
+  "description": "Read one of your own native memory (brain) markdown files by filename. Returns its content. Get valid filenames from MemoryList.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "filename": { "type": "string", "description": "The memory file to read (from MemoryList)" }
+    },
+    "required": ["filename"]
+  }
+}"#;
+
+const MEMORY_WRITE_TOOL: &str = r#"{
+  "name": "MemoryWrite",
+  "description": "Create or overwrite one of your own native memory (brain) markdown files. The write is atomic. Use it to persist notes/context for your future self across conversations.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "filename": { "type": "string", "description": "The memory file to write (created if absent, overwritten if present)" },
+      "content":  { "type": "string", "description": "Full markdown content to store in the file" }
+    },
+    "required": ["filename", "content"]
+  }
+}"#;
+
+const PRESET_LIST_TOOL: &str = r#"{
+  "name": "PresetList",
+  "description": "List the presets available to you (summary fields only). A preset is a provider-agnostic config bundle — instructions, context files, MCP servers, and skills. Use it to discover presets before fetching one in full with PresetGet. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const PRESET_GET_TOOL: &str = r#"{
+  "name": "PresetGet",
+  "description": "Fetch a full preset object by id or name. With BOTH id and name omitted, returns your OWN bound preset (the one you are currently configured with). Use PresetList to discover ids/names.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id":   { "type": "string", "description": "Preset id to fetch (optional)" },
+      "name": { "type": "string", "description": "Preset name to fetch (optional)" }
+    }
+  }
+}"#;
+
+const IDENTITY_ACCOUNTS_TOOL: &str = r#"{
+  "name": "IdentityAccounts",
+  "description": "List your own linked identity accounts. Returns each account's account_id, provider, name, kind, status, masked_tail, and updated_at. Secrets are never returned — only masked tails. Use it to see which provider accounts you can use and to get account_ids for IdentityValidate. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const IDENTITY_VALIDATE_TOOL: &str = r#"{
+  "name": "IdentityValidate",
+  "description": "Live-probe one of your own linked accounts against its provider using the stored key, to confirm the credential still works. You never supply a secret — pass an account_id from IdentityAccounts. Returns valid, status, masked_tail, and error.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "account_id": { "type": "string", "description": "One of your linked accounts (from IdentityAccounts)" }
+    },
+    "required": ["account_id"]
+  }
+}"#;
+
 #[tokio::main]
 async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
@@ -393,10 +469,19 @@ async fn main() {
                 let cron_list: Value = serde_json::from_str(CRON_LIST_TOOL).expect("static json");
                 let cron_pause: Value = serde_json::from_str(CRON_PAUSE_TOOL).expect("static json");
                 let cron_resume: Value = serde_json::from_str(CRON_RESUME_TOOL).expect("static json");
+                let memory_list: Value = serde_json::from_str(MEMORY_LIST_TOOL).expect("static json");
+                let memory_read: Value = serde_json::from_str(MEMORY_READ_TOOL).expect("static json");
+                let memory_write: Value = serde_json::from_str(MEMORY_WRITE_TOOL).expect("static json");
+                let preset_list: Value = serde_json::from_str(PRESET_LIST_TOOL).expect("static json");
+                let preset_get: Value = serde_json::from_str(PRESET_GET_TOOL).expect("static json");
+                let identity_accounts: Value =
+                    serde_json::from_str(IDENTITY_ACCOUNTS_TOOL).expect("static json");
+                let identity_validate: Value =
+                    serde_json::from_str(IDENTITY_VALIDATE_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -444,6 +529,23 @@ fn require_agent_env(local_url: &str, auth_key: &str, block_id: &str) -> Result<
         );
     }
     Ok(())
+}
+
+/// The calling agent's slug (its `AGENTMUX_AGENT_ID`), injected by AgentMux into
+/// this MCP server's trusted environment. The App API identity/preset/memory
+/// REST endpoints stamp their `agent_id` from this — the agent's own model
+/// output cannot reach those endpoints (no auth key in the PTY) nor override
+/// this value, so the slug cannot be forged. See
+/// SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md §5.
+fn agent_slug() -> Result<String> {
+    let slug = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
+    if slug.is_empty() {
+        anyhow::bail!(
+            "AGENTMUX_AGENT_ID is not set — cannot resolve this agent's identity. \
+             Is this agent pane opened via AgentMux?"
+        );
+    }
+    Ok(slug)
 }
 
 async fn call_tool(
@@ -1220,6 +1322,198 @@ async fn call_tool(
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
             cron_set_enabled(client, local_url, auth_key, id, "resume").await
         }
+        "MemoryList" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/memory/list", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("agent_id", agent_id.as_str())])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("memory/list failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "MemoryRead" => {
+            let filename = arguments
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: filename"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/memory/read", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("agent_id", agent_id.as_str()), ("filename", filename)])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("memory/read failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            // Surface the file content directly when present; fall back to the raw body.
+            Ok(result
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+                }))
+        }
+        "MemoryWrite" => {
+            let filename = arguments
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: filename"))?;
+            let content = arguments
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: content"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/memory/write", local_url.trim_end_matches('/'));
+            let body = json!({
+                "agent_id": agent_id,
+                "filename": filename,
+                "content": content,
+            });
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("memory/write failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Wrote memory file \"{filename}\""))
+        }
+        "PresetList" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/api/v1/agent/preset/list", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("preset/list failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "PresetGet" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/preset/get", local_url.trim_end_matches('/'));
+            // id/name are both optional; with neither set the server returns the
+            // agent's own bound preset ("self"), resolved from agent_id.
+            let mut query: Vec<(&str, &str)> = vec![("agent_id", agent_id.as_str())];
+            if let Some(pid) = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                query.push(("id", pid));
+            }
+            if let Some(pname) = arguments.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                query.push(("name", pname));
+            }
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&query)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("preset/get failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "IdentityAccounts" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/identity/accounts", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("agent_id", agent_id.as_str())])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("identity/accounts failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "IdentityValidate" => {
+            let account_id = arguments
+                .get("account_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: account_id"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/identity/validate", local_url.trim_end_matches('/'));
+            let body = json!({
+                "agent_id": agent_id,
+                "account_id": account_id,
+            });
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("identity/validate failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
         _ => anyhow::bail!("unknown tool: {name}"),
     }
 }
@@ -1318,8 +1612,15 @@ mod tests {
             CRON_LIST_TOOL,
             CRON_PAUSE_TOOL,
             CRON_RESUME_TOOL,
+            MEMORY_LIST_TOOL,
+            MEMORY_READ_TOOL,
+            MEMORY_WRITE_TOOL,
+            PRESET_LIST_TOOL,
+            PRESET_GET_TOOL,
+            IDENTITY_ACCOUNTS_TOOL,
+            IDENTITY_VALIDATE_TOOL,
         ];
-        assert_eq!(defs.len(), 19, "tools/list advertises 19 tools (11 original + 3 Loop + 5 Cron)");
+        assert_eq!(defs.len(), 26, "tools/list advertises 26 tools (11 original + 3 Loop + 5 Cron + 7 agent-API)");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
