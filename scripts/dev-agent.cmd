@@ -34,5 +34,6 @@ set "GIT_BIN=C:\Program Files\Git\bin"
 set "GIT_USR=C:\Program Files\Git\usr\bin"
 set "PATH=%GIT_BIN%;%GIT_USR%;%PATH%"
 
-:: Call task.cmd by explicit extension (Gap A fix — no bash lookup needed here).
-task.cmd dev %*
+:: Call task.exe by explicit extension (Gap A fix — no bash lookup needed here).
+:: task is installed as task.exe (via go install / WinGet), not task.cmd.
+task.exe dev %*
