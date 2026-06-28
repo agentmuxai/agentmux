@@ -132,7 +132,7 @@ mod tests {
     fn missing_auth_key_errors() {
         let _lock = lock();
         clear_env();
-        let args = CliArgs { wavedata: None, instance: "default".to_string() };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("AGENTMUX_AUTH_KEY"));
@@ -143,7 +143,7 @@ mod tests {
         let _lock = lock();
         clear_env();
         std::env::set_var("AGENTMUX_AUTH_KEY", "");
-        let args = CliArgs { wavedata: None, instance: "default".to_string() };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
         let result = Config::from_env_and_args(&args);
         assert!(result.is_err());
         clear_env();
@@ -158,6 +158,7 @@ mod tests {
         let args = CliArgs {
             wavedata: Some("/from/cli".to_string()),
             instance: "default".to_string(),
+            command: None,
         };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.data_home, "/from/cli");
@@ -174,7 +175,7 @@ mod tests {
         std::env::set_var("AGENTMUX_CONFIG_DIR", "/config");
         std::env::set_var("AGENTMUX_APP_PATH", "/app");
         std::env::set_var("AGENTMUX_RUNTIME_MODE", "dev:main");
-        let args = CliArgs { wavedata: None, instance: "default".to_string() };
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
         let config = Config::from_env_and_args(&args).unwrap();
         assert_eq!(config.data_home, "/data");
         assert_eq!(config.config_home, "/config");

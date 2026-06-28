@@ -2961,6 +2961,7 @@ mod pane_open_reducer_tests {
             focus: None,
             tree_expanded: None,
             floating: None,
+            meta: None,
         };
         let res = open_pane(&state, cmd).await.expect("open_pane docked");
 
