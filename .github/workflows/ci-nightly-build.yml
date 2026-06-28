@@ -1,23 +1,31 @@
-name: CI — nightly cross-platform build
+name: CI — nightly cross-platform build + test
 
+# Consolidates the former ci-nightly-build.yml (compile-only) and ci-fast.yml /
+# ci-nightly.yml (test-only) into one workflow. Since the CEF build is already
+# paid for the compile step, the test step costs only marginal runner time.
+#
 # Phase A of SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md (issue #1718):
 # compile the whole workspace (incl. agentmux-cef → the CEF build) on all three
 # shipping platforms, nightly, so a Linux/macOS BUILD break is caught instead of
 # shipping unnoticed. NOT packaging — that's Phase B (artifacts).
 #
 # Windows is the REQUIRED leg (primary platform); ubuntu + macOS are NON-BLOCKING
-# (continue-on-error) until greened — same staged approach as ci-fast. Standard
+# (continue-on-error) until greened — same staged approach as before. Standard
 # GitHub-hosted runners only (free on public repos for any workload; only LARGER
 # runners are billed — invariant CI-1). Run on demand via the Actions tab.
+#
+# --test-threads=1: accumulated test-isolation flakes (process-shared in-memory
+# FileStore, a focus-flag global) flake under parallel runs; serial is
+# deterministic. Follow-up to fix isolation + drop this (SPEC_CI_TEST_RUNNER §6.4).
 
 on:
   schedule:
-    - cron: '0 7 * * *' # 07:00 UTC daily (ahead of the test nightlies at 08/09)
+    - cron: '0 7 * * *' # 07:00 UTC daily
   workflow_dispatch: {}
 
 jobs:
-  build:
-    name: cargo build --release --workspace
+  build-and-test:
+    name: cargo build + test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -45,3 +53,21 @@ jobs:
       # Surfaces cross-platform compile/link breaks; packaging is Phase B (#1718).
       - name: cargo build --release --workspace
         run: cargo build --release --workspace
+
+      # CEF build already paid above — run the full test suite at near-zero
+      # marginal cost. Serial (--test-threads=1) for determinism; see note above.
+      - name: cargo test --workspace
+        run: cargo test --workspace -- --test-threads=1
+
+  frontend:
+    name: vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: vitest run
+        run: npx vitest run
