@@ -2375,6 +2375,7 @@ mod tests {
             blockid: "blk-1".to_string(),
             tabid: "tab-1".to_string(),
             conn: "local".to_string(),
+            agent_id: String::new(),
         };
         let json = serde_json::to_string(&ctx).unwrap();
         assert!(json.contains(r#""ctype":"connserver""#));
