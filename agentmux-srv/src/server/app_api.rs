@@ -3396,6 +3396,37 @@ fn register_preset_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // preset.upsert
 // ---------------------------------------------------------------------------
 
+/// Normalize a `preset.upsert` request body into the shape the `Memory` struct
+/// deserializes from, so the App API accepts the request exactly as documented
+/// in the spec:
+///   - `id` may be omitted to create (the struct has no serde default), so an
+///     absent or null `id` is filled with an empty string (the handler then
+///     mints a UUID).
+///   - `context_files` / `mcp_servers` / `skills` are JSON-encoded array strings
+///     on the struct, but the spec shows them as JSON arrays. Array values are
+///     re-encoded to their JSON string form; values already given as strings
+///     pass through untouched.
+fn normalize_preset_upsert_input(mut data: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(ref mut map) = data {
+        match map.get("id") {
+            Some(serde_json::Value::String(_)) => {}
+            _ => {
+                map.insert("id".to_string(), serde_json::Value::String(String::new()));
+            }
+        }
+        for key in ["context_files", "mcp_servers", "skills"] {
+            if let Some(v) = map.get(key) {
+                if v.is_array() {
+                    let encoded =
+                        serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string());
+                    map.insert(key.to_string(), serde_json::Value::String(encoded));
+                }
+            }
+        }
+    }
+    data
+}
+
 fn register_preset_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let broker = state.broker.clone();
@@ -3405,8 +3436,9 @@ fn register_preset_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
-                let mut memory: Memory = serde_json::from_value(data)
-                    .map_err(|e| format!("preset.upsert: {e}"))?;
+                let mut memory: Memory =
+                    serde_json::from_value(normalize_preset_upsert_input(data))
+                        .map_err(|e| format!("preset.upsert: {e}"))?;
 
                 // S4: guard on the target id, not the caller-supplied is_blank flag
                 // (which defaults false and can be omitted to bypass is_blank check).
@@ -3733,5 +3765,49 @@ mod agent_zoom_seed_tests {
         assert_eq!(parse_seed_zoom("0.4"), None, "below range");
         assert_eq!(parse_seed_zoom("abc"), None, "unparseable");
         assert_eq!(parse_seed_zoom(""), None, "empty");
+    }
+}
+
+#[cfg(test)]
+mod preset_upsert_input_tests {
+    use super::normalize_preset_upsert_input;
+    use serde_json::json;
+
+    #[test]
+    fn fills_missing_or_null_id_with_empty_string() {
+        let no_id = normalize_preset_upsert_input(json!({ "name": "p" }));
+        assert_eq!(no_id["id"], json!(""));
+
+        let null_id = normalize_preset_upsert_input(json!({ "id": null, "name": "p" }));
+        assert_eq!(null_id["id"], json!(""));
+
+        // A real id is preserved untouched.
+        let kept = normalize_preset_upsert_input(json!({ "id": "abc", "name": "p" }));
+        assert_eq!(kept["id"], json!("abc"));
+    }
+
+    #[test]
+    fn encodes_array_fields_to_json_strings() {
+        let out = normalize_preset_upsert_input(json!({
+            "name": "p",
+            "context_files": [{ "path": "a.md", "content": "x" }],
+            "mcp_servers": [],
+            "skills": ["s1", "s2"],
+        }));
+        // serde_json::Value maps serialize keys in sorted order.
+        assert_eq!(out["context_files"], json!("[{\"content\":\"x\",\"path\":\"a.md\"}]"));
+        assert_eq!(out["mcp_servers"], json!("[]"));
+        assert_eq!(out["skills"], json!("[\"s1\",\"s2\"]"));
+    }
+
+    #[test]
+    fn leaves_string_fields_untouched() {
+        let out = normalize_preset_upsert_input(json!({
+            "name": "p",
+            "context_files": "[]",
+            "skills": "[\"already\"]",
+        }));
+        assert_eq!(out["context_files"], json!("[]"));
+        assert_eq!(out["skills"], json!("[\"already\"]"));
     }
 }
