@@ -42,20 +42,6 @@ ws.on("error", (e) => { console.error("WS error:", e.message); process.exit(1); 
 
 const show = (label, v) => console.log(`${label}:`, JSON.stringify(v, null, 2));
 
-// Hit the REST surface the way agentmux-mcp does (X-AuthKey header, /api/v1/...).
-async function rest(method, path, body) {
-    const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
-        method,
-        headers: { "X-AuthKey": KEY, "Content-Type": "application/json" },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await res.text();
-    let parsed; try { parsed = JSON.parse(text); } catch { parsed = text; }
-    console.log(`  ${method} ${path.split("?")[0]} → ${res.status}`, JSON.stringify(parsed, null, 2));
-    if (!res.ok) throw new Error(`REST ${path} → ${res.status}`);
-    return parsed;
-}
-
 async function run() {
     try {
         console.log("=== identity.self.accounts (before) ===");
@@ -102,17 +88,6 @@ async function run() {
 
         console.log("\n=== identity.self.unlink (cleanup) ===");
         show("unlink", await call("identity.self.unlink", { agent_id: AGENT, provider: "anthropic" }));
-
-        // ---- REST path (the MCP→REST→handler chain agentmux-mcp uses) ----
-        console.log("\n=== REST /api/v1/agent/memory/list (server-stamped agent_id) ===");
-        await rest("GET", `/api/v1/agent/memory/list?agent_id=${encodeURIComponent(AGENT)}`);
-        console.log("\n=== REST /api/v1/agent/preset/get (self — no id/name) ===");
-        await rest("GET", `/api/v1/agent/preset/get?agent_id=${encodeURIComponent(AGENT)}`);
-        console.log("\n=== REST /api/v1/agent/identity/accounts ===");
-        await rest("GET", `/api/v1/agent/identity/accounts?agent_id=${encodeURIComponent(AGENT)}`);
-        console.log("\n=== REST memory/write → read round-trip ===");
-        await rest("POST", `/api/v1/agent/memory/write`, { agent_id: AGENT, filename: "rest-smoke.md", content: "via REST\n" });
-        await rest("GET", `/api/v1/agent/memory/read?agent_id=${encodeURIComponent(AGENT)}&filename=rest-smoke.md`);
 
         console.log("\nAll calls completed.");
         ws.close();
