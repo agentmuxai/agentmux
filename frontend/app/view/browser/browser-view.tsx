@@ -365,6 +365,24 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             if (authDisposed) unsub();
             else authUnsub = unsub;
         });
+        // macOS/Linux: after a JS-driven drag moves the floating pane window,
+        // paneRect() returns the same client coords (viewport-relative, unchanged
+        // by window movement), so syncPosition's dedupe guard skips the re-send.
+        // SetPaneBoundsViewsTask computes the overlay's absolute screen position
+        // from the CefNSWindow's CURRENT frame + client coords, so we must re-send
+        // after drag to reposition the NativeWidgetMacNSWindow overlay.
+        // floating-pane-workspace.tsx dispatches "floating-pane-js-drag-ended" on
+        // window after every JS-driven drag so we can clear the dedupe guard here.
+        if (windowLabel.startsWith("floating-")) {
+            const onJsDragEnded = (ev: Event) => {
+                const detail = (ev as CustomEvent<{ label: string }>).detail;
+                if (detail?.label !== windowLabel) return;
+                lastSentRect = null;
+                syncPosition();
+            };
+            window.addEventListener("floating-pane-js-drag-ended", onJsDragEnded);
+            onCleanup(() => window.removeEventListener("floating-pane-js-drag-ended", onJsDragEnded));
+        }
         const url = model.urlAtom();
         if (url) createPane(url);
     });

@@ -1612,7 +1612,9 @@ pub fn get_window_rect_blocking(state: &Arc<AppState>, label: &str) -> Option<(i
     let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(i32, i32, i32, i32)>>(1);
     let mut task = GetWindowRectTask::new(state.clone(), label.to_string(), tx);
     post_task(ThreadId::UI, Some(&mut task));
-    rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
+    // 500ms: the UI thread may still be processing set_bounds tasks queued
+    // during a prior drag — give it more headroom before treating as failed.
+    rx.recv_timeout(std::time::Duration::from_millis(500)).ok().flatten()
 }
 
 // ── Set window rect (position + size, DIP) ───────────────────────────────
