@@ -1,5 +1,12 @@
 # AgentMux Version History
 
+## 0.49.7 — 2026-06-27
+
+- fix(macos): restore main browser clicks when browser pane overlay is open
+- fix(macos): extend direct dispatch to right-click and drag events
+- fix(macos): clear sendEvent: swizzle statics on pane close; only clear when last pane exits
+- chore: remove dead RWHVC swizzle scaffolding (mouseDown/Up/hitTest/with_temp_key_window)
+
 ## 0.49.6 — 2026-06-27
 
 - fix(muxbus): use fixed port 9379 for PKCE callback listener

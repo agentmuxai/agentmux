@@ -199,48 +199,157 @@ where `task_dip_{x,y,w,h} = pane_{x,y,w,h}` from ObjC (pixel coords ÷ backingSc
 
 ---
 
-## Open Issue: Mouse Clicks Unresponsive in Browser Pane (macOS)
+## Mouse Click Investigation — Session 2 (2026-06-27)
 
-**Status**: Known limitation as of 2026-06-26 — tracked for follow-up.
+**Status**: Resolved in PR #1819. See Session 3 below for root cause and fix.
 
-After the black-pane fix, the pane renders and scroll wheel events reach the Chromium renderer (user can scroll the web page). However, mouse button clicks (left-click / right-click) in the pane are unresponsive.
+---
 
-### Observed Behaviour
+### Updated Observed Behaviour
 
-- **Scroll**: Works — scroll events reach the pane renderer regardless of key-window status.
-- **Click in pane**: Silent — mouseDown is not dispatched to the Chromium renderer.
-- **Click in sidebar**: Also broken while pane is open.
+- **Scroll**: Works ✓
+- **Link clicks (navigation)**: Work ✓ — clicking a hyperlink navigates to the linked URL
+- **Interactive clicks**: Unresponsive ✗ — form inputs don't focus, buttons don't activate, JS `click` handlers don't fire
+- **Sidebar clicks**: Work ✓ (with `makeKeyAndOrderFront:main` in task)
 
-### Root Cause Investigation
+The link-click finding is the most important new data: **mouse events DO reach the Chromium renderer** (otherwise links wouldn't navigate). The problem is not event delivery — it is **renderer interactivity state**.
 
-The two-window macOS architecture is the core of the problem:
+---
 
-- Main window (`NSKVONotifying_CefNSWindow`) — hosts SolidJS sidebar via main BrowserView.
-- Overlay window (`NativeWidgetMacNSWindow`) — hosts pane browser via CEF Views overlay.
+### Diagnostic Chain (Confirmed Facts)
 
-**Why scroll works but clicks don't**: macOS routes `NSEventTypeScrollWheel` to the window under the cursor regardless of key-window status. Mouse button events (`NSEventTypeLeftMouseDown`) go to the frontmost window under the cursor, but Chromium's renderer checks whether its enclosing window is the key window (or `acceptsFirstMouse:YES`) before dispatching `mouseDown` to the JS layer. When the overlay is not KEY, Chromium silently drops the mouseDown.
+#### 1. Z-order confirmed correct
+`windowNumberAtPoint:belowWindowWithWindowNumber:0` returns the overlay window number at the pane center → overlay IS frontmost at the click location. Clicks go to the overlay NSWindow, not the main window.
 
-**Competing constraints**:
+#### 2. hitTest returns RenderWidgetHostViewCocoa
+`[overlayContentView hitTest:(paneCenter)]` → `RenderWidgetHostViewCocoa`. NSWindow's `sendEvent:mouseDown:` dispatches to this view (deepest hit-test result), not to `BridgedContentView`.
 
-| State | Sidebar clicks | Pane clicks |
-|---|---|---|
-| Main is KEY (`makeKeyAndOrderFront:main` called in task) | ✓ work | ✗ broken (overlay not KEY) |
-| Overlay is KEY (no `makeKeyAndOrderFront:main`) | ✗ broken (main not KEY) | ✗ still broken (see below) |
+#### 3. RenderWidgetHostViewCocoa::acceptsFirstMouse: returned NO (0) before fix
+Confirmed via `afm_before=0` (retry=0). NSView's inherited `acceptsFirstMouse:` returns NO. Replaced via `method_setImplementation` → now returns YES. This fix is correct but was not the final cause.
 
-When the overlay IS the key window, pane clicks STILL don't reach the renderer. Hypothesis: `host.set_focus(1)` on the main browser (called in `creation_views.rs`) tells CEF's internal focus routing to direct events to the main browser, overriding the OS key-window state for the overlay.
+#### 4. can_activate=0 vs can_activate=1: no difference
+Switching to `can_activate=1` (overlay can become key window) made no difference. Clicks still unresponsive for interactive elements, links still navigate. Key-window status is NOT the root cause.
 
-Confirmed diagnostic: after tasks run, `[NSApp keyWindow]` pointed to `NSKVONotifying_CefNSWindow` when `makeKeyAndOrderFront:main` was called (v18), confirming sidebar-focus-restore works. Removing that call (v19) let overlay retain key status but clicks still failed — pointing to a deeper CEF input-routing issue, not just key-window status.
+#### 5. set_focus(1) on pane browser: no difference
+After `makeKeyAndOrderFront:main`, a 200ms-delayed task calls `host.set_focus(1)` on the pane browser. Confirmed fired in logs. Still no interactive clicks.
 
-### Approaches to Try
+---
 
-1. **`acceptsFirstMouse:YES` on overlay content view**: Swizzle or subclass the overlay's root `NSView` to return YES from `acceptsFirstMouse:`. This allows the first click to be processed without needing key-window status. Requires ObjC in the task after `set_visible(1)`.
+### Active Bug: Pool Window Contamination at retry=1
 
-2. **`can_activate=0` for the overlay**: Change `add_overlay_view(..., can_activate=1)` to `can_activate=0`. This prevents the overlay from becoming KEY, but CEF may then route mouseDown events differently (possibly accepting them unconditionally since the window cannot steal focus). Untested.
+At retry=1 (50ms reaffirm task), the main-window scan picks the WRONG window because `is_main` check was removed:
 
-3. **`host.set_focus(1)` on pane browser**: Call `set_focus(1)` on the pane browser (not main) to tell CEF's internal routing to direct events to the pane renderer. Risk: sidebar clicks then go to pane renderer and may be swallowed.
+```
+i=0: NSKVONotifying_CefNSWindow x=-32000 (pool, is_main=0)  ← becomes main_win candidate
+i=2: NSKVONotifying_CefNSWindow x=51     (real main, is_main=1)  ← overwritten by i=4
+i=4: NSKVONotifying_CefNSWindow x=-32000 (pool, is_main=0)  ← LAST → becomes main_win!
+```
 
-4. **CEF `SetAccessibilityState` / `NotifyMoveOrResizeStarted`**: Some CEF calls force a re-sync of the internal widget focus state. Worth trying to see if any of these reset CEF's input routing to match the actual NSWindow key state.
+**Effect**: `makeKeyAndOrderFront:pool_window` fires on the off-screen window at retry=1. Confirmed: retry=1 shows `main_x=-32000` and `screen_x=-31395` (wrong position). `controller.set_bounds()` corrects the overlay position afterward, but the wrong key-window assignment corrupts state.
 
-### Current PR State
+**Fix (ready to apply)**:
+```rust
+if cls.contains("CefNSWindow") {
+    if is_main != 0 {
+        main_win = win;  // Definitive: is_main=1 window
+    } else if main_win.is_null() {
+        let fr = get_frame(win, sel_frame);
+        if fr.origin.x > -1000.0 {
+            main_win = win;  // Fallback: on-screen CefNSWindow
+        }
+    }
+}
+```
 
-The PR ships with `makeKeyAndOrderFront:main` after `set_bounds()` (sidebar-first policy): sidebar clicks are restored, pane clicks remain non-functional. This matches the pre-pane UX (sidebar usable) while the pane is visible but click-limited.
+This is a correctness fix but is NOT expected to fix pane clicks (the correct main window was already found at retry=0, which is when links started working).
+
+---
+
+### Working Hypothesis: Renderer Input Routing in Overlay Mode
+
+Links navigate → `mouseDown:` reaches `RenderWidgetHostViewCocoa` → renderer receives the event → Blink processes it → link activation occurs. This entire path works.
+
+What doesn't work: anything requiring the renderer to treat the click as an **interactive user gesture** (focus a form field, fire an `onclick` JS handler, etc.).
+
+In Chromium, interactive gestures require the render frame to have **user activation** (`LocalFrame::NotifyUserActivation`). `NotifyUserActivation` is called by:
+- `RenderWidgetHostImpl::ForwardMouseEvent()` when the event is a `mousedown`
+
+BUT: `ForwardMouseEvent` may check `IsUserInteractionInputType()` and the renderer's **focus state** before calling `NotifyUserActivation`. If the renderer's `WebWidget` is not focused (`RenderWidget::is_focused_ == false`), some activation paths are skipped.
+
+**Sub-hypothesis A (focus state)**: CEF marks the pane renderer as unfocused (via `RenderWidgetHostImpl::Blur()`) when the overlay window loses key status. `set_focus(1)` on the CEF host may be overridden by CEF's internal Views focus system before or after our call. The renderer stays blurred → interactive clicks silently drop user activation.
+
+**Sub-hypothesis B (input routing)**: CEF's `NativeWidgetNSWindowBridge` for the overlay may be routing mouse events to the PARENT widget (main window's bridge) because the overlay was created with `params.parent = parent_widget`. The parent bridge may process them incorrectly (wrong coordinate space, or just drop non-scroll events).
+
+**Sub-hypothesis C (missing gesture handler)**: The overlay's `BrowserView` or its delegate may have an `OnGestureEvent` handler that returns `true` (consumed) for click events, eating them before they reach the renderer's `InputRouter`. Scroll events wouldn't be consumed this way.
+
+---
+
+### Approaches Not Yet Tried
+
+#### A. Swizzle RenderWidgetHostViewCocoa::mouseDown: to confirm it's called
+```rust
+// In task code, at setup time:
+static ORIG_MD: AtomicUsize = AtomicUsize::new(0);
+extern "C" fn swizzled_md(this: Id, cmd: Sel, event: Id) {
+    tracing::info!("[PANE-CLICK] RenderWidgetHostViewCocoa mouseDown: CALLED");
+    let f: extern "C" fn(Id, Sel, Id) = transmute(ORIG_MD.load(SeqCst));
+    f(this, cmd, event);
+}
+// method_setImplementation on RenderWidgetHostViewCocoa::mouseDown:
+// ORIG_MD.store(old_imp, SeqCst);
+```
+If this logs when clicking → `mouseDown:` IS called → issue is INSIDE it.
+If it DOESN'T log → NSWindow::sendEvent: is NOT dispatching mouseDown despite acceptsFirstMouse:YES → check NativeWidgetMacNSWindow::sendEvent: override.
+
+#### B. Check NativeWidgetMacNSWindow::sendEvent: override
+`sendEvent:` appears as a string in CEF's framework binary. If `NativeWidgetMacNSWindow` overrides it, it may bypass `acceptsFirstMouse:` entirely and use custom dispatch logic that ignores non-key windows.
+
+Diagnostic: check whether `class_getInstanceMethod(NativeWidgetMacNSWindow_class, sendEvent_sel)` returns a method whose `IMP` is different from `NSWindow`'s `sendEvent:`. If different → CEF has a custom override.
+
+#### C. Try add_child_view instead of add_overlay_view
+Instead of creating a separate NSWindow for the pane, add the pane BrowserView directly as a child view of the main window's CefWindowView. All clicks would go to the main window (key) and NSView hit-testing would naturally route them to the pane's `RenderWidgetHostViewCocoa`.
+
+Tradeoff: requires the main BrowserView to NOT cover the pane area (needs layout split), and the SolidJS UI must not overlap the pane. This is a larger architecture change.
+
+#### D. NSEvent addLocalMonitorForEventsMatchingMask (from Rust via block)
+Intercept all `NSEventTypeLeftMouseDown` events at the app level. When the event is in the overlay window's bounds → directly call `[renderWidgetHostViewCocoa mouseDown:event]` on the pane browser's RWHVC. This bypasses all NSWindow routing.
+
+Limitation: requires creating an Obj-C block from Rust (needs objc_blocks crate or manual block ABI).
+
+#### E. Synthesize clicks via CefBrowserHost::SendMouseClickEvent
+`CefBrowserHost::SendMouseClickEvent(CefMouseEvent, MBT_LEFT, false, 1)` manually injects a click event directly into the CEF input pipeline, bypassing NSWindow/AppKit entirely. This would confirm whether the issue is in AppKit→CEF routing or deeper in CEF's input processing.
+
+If synthetic clicks work → the Appkit→CEF path is broken.
+If synthetic clicks don't work → CEF's own input pipeline has an issue for overlay browsers.
+
+---
+
+### Code State (ui_tasks.rs, as of this session)
+
+All of the following are active in the current dev build:
+
+1. `acceptsFirstMouse:YES` via `method_setImplementation` on `BridgedContentView` — correct but not sufficient (RWHVC is the hit target, not BridgedContentView)
+2. `acceptsFirstMouse:YES` via `method_setImplementation` on `RenderWidgetHostViewCocoa` — `afm_before=0` confirmed at retry=0; now returns YES
+3. `hitTest:` logging confirmed `RenderWidgetHostViewCocoa` with `sub_count=2` at pane center
+4. `set_focus(1)` on pane browser (200ms delay after retry=1) — fired but no effect
+5. `makeKeyAndOrderFront:main` at retry=0 (correct) and retry=1 (wrong — pool window)
+6. `can_activate=0` (reverted from diagnostic `can_activate=1`)
+
+---
+
+### Next Priority Steps
+
+1. **Fix pool-window bug** (pool window contaminating `main_win` at retry=1) — correctness fix, low risk
+2. **Swizzle `mouseDown:`** on `RenderWidgetHostViewCocoa` — definitive answer on whether `mouseDown:` is called when clicking interactive elements
+3. **Try `SendMouseClickEvent`** — if swizzle shows `mouseDown:` IS called, try injecting clicks directly into CEF to bypass AppKit
+4. **Investigate `NativeWidgetMacNSWindow::sendEvent:` override** — if swizzle shows `mouseDown:` is NOT called, this is the next suspect
+
+---
+
+## Mouse Click Investigation — Session 3 (2026-06-27) — RESOLVED
+
+**Root cause**: `NSWindow.sendEvent:` has activate-only semantics for non-key windows. The pane overlay (NativeWidgetMacNSWindow, covers only the pane area x≥604) becomes key when the user interacts with it. Subsequent sidebar clicks land on the main CefNSWindow (which is not key) and `NSWindow.sendEvent:` either eats them or the activation sequence causes CEF to call `set_focus(0)` on the main browser, putting Blink into a defocused state.
+
+**Fix**: In `NSApp::sendEvent:` swizzle, detect mouse events on the main window (non-NativeWidgetMacNSWindow), walk its contentView subview tree to find `RenderWidgetHostViewCocoa`, call `host.set_focus(1)` to restore Blink focus, then dispatch `[rwhvc mouseDown:/rightMouseDown:/mouseDragged:/scrollWheel: event]` directly — bypassing `NSWindow.sendEvent:` entirely. RWHVC pointer is cached after first discovery to avoid per-event subview walks. Statics reset on pane close via `clear_pane_swizzle_statics()`.
+
+**Confirmed**: Every direct dispatch is followed by `[AMX-DIAG-MD] mousedown hasFocus=true` in main browser JS.

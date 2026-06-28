@@ -292,6 +292,26 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     let type_switch = CefString::from("type");
     let is_browser_process = cmd_line.has_switch(Some(&type_switch)) != 1;
 
+    // macOS 26 + dev build: ChromeWebAppShortcutCopierMain CHECK-aborts (SIGTRAP)
+    // because the dev binary is not in a signed .app bundle.
+    // --disable-features=MacAppCodeSignClone in on_before_command_line_processing
+    // cannot prevent the spawn because the feature flag is checked before FeatureList
+    // is initialized (same timing problem as MachPortRendezvous). Exit 0 immediately
+    // for this subprocess type so the main process sees a "clean" failure and
+    // continues without the code-sign clone (which is irrelevant for dev builds).
+    // The main process logs "Failed to send Mojo invitation to web_app_shortcut_copier"
+    // (harmless) and continues. This exit must happen BEFORE execute_process() which
+    // calls ChromeWebAppShortcutCopierMain() and SIGTRAP-kills the subprocess.
+    #[cfg(target_os = "macos")]
+    if !is_browser_process {
+        let pt = CefString::from(&cmd_line.switch_value(Some(&type_switch)));
+        let pt_str = pt.to_string();
+        if pt_str == "web-app-shortcut-copier" {
+            eprintln!("agentmux-cef: intercepted web-app-shortcut-copier (dev build, not in .app bundle) — exiting 0");
+            std::process::exit(0);
+        }
+    }
+
     // Execute subprocess if applicable (exits here for non-browser processes).
     let ret = execute_process(
         Some(args.as_main_args()),
@@ -426,8 +446,10 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // Name the app early (sets CFBundleName on the main bundle, which AppKit
     // may read when it first builds a menu). Also re-run post-init below, since
     // Chromium can reset the process name during cef::initialize.
+    // NOTE: CFBundleIdentifier is NOT set here (pre-init) — setting it before
+    // cef::initialize triggers MacAppCodeSignClone which SIGTRAP-crashes dev builds.
     #[cfg(target_os = "macos")]
-    unsafe { set_macos_app_display_name() };
+    unsafe { set_macos_app_display_name_pre_init() };
 
     // Phase B.6 (post-fix): the named-pipe bind in the launcher is
     // the AUTHORITATIVE single-instance lock — a second launcher
@@ -1280,7 +1302,7 @@ unsafe fn disable_macos_drag_slideback() {
 /// setting it here (right before our menu bar is built) is what sticks. Raw
 /// libobjc FFI, mirroring the other macOS shims.
 #[cfg(target_os = "macos")]
-unsafe fn set_macos_app_display_name() {
+unsafe fn set_macos_app_display_name_impl(set_bundle_id: bool) {
     use std::ffi::{c_char, c_void};
 
     type Id    = *mut c_void;
@@ -1368,39 +1390,45 @@ unsafe fn set_macos_app_display_name() {
                 set_obj(info, sel_set_obj, ns_name, k_name);
                 set_obj(info, sel_set_obj, ns_name, k_disp);
 
-                // Set CFBundleIdentifier so LaunchServices treats each channel
-                // as a distinct app. Without this the dev build has no
-                // identifier and macOS may coalesce it with the packaged stable
-                // .app under the same Dock tile, letting a click on either
-                // focus whichever was most recently active.
-                //
-                // AGENTMUX_CHANNEL is set by the launcher before the host
-                // starts (stable/dev/portable all write it via to_env_vars()).
-                // Fall back to "dev" only for unmanaged direct invocations.
-                let channel = std::env::var("AGENTMUX_CHANNEL")
-                    .unwrap_or_else(|_| "dev".to_string());
-                // Sanitize channel to match the normalization applied by
-                // scripts/package-macos.sh (lines 67-68):
-                //   tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]'
-                // Replace any char not in [A-Za-z0-9.-] with '-', then lowercase,
-                // so runtime and build-time CFBundleIdentifiers always match.
-                let channel_sanitized: String = channel
-                    .chars()
-                    .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '-' })
-                    .collect::<String>()
-                    .to_lowercase();
-                let bundle_id = format!("ai.agentmux.{}.{}", channel_sanitized, env!("CARGO_PKG_VERSION"));
-                if let Ok(c_id) = std::ffi::CString::new(bundle_id.as_str()) {
-                    let ns_id = make(cls_str, sel_with, c_id.as_ptr());
-                    if !ns_id.is_null() {
-                        let k_id = make(cls_str, sel_with, b"CFBundleIdentifier\0".as_ptr() as _);
-                        set_obj(info, sel_set_obj, ns_id, k_id);
+                // CFBundleIdentifier: only set on PACKAGED builds (running
+                // inside a proper .app bundle). For dev builds (flat binary,
+                // no bundle), setting CFBundleIdentifier at any point — before
+                // OR after cef::initialize — triggers macOS to fire a
+                // LaunchServices notification that causes Chromium to spawn a
+                // --type=web-app-shortcut-copier subprocess. That subprocess
+                // CHECK-aborts (EXC_BREAKPOINT / SIGTRAP) because the binary
+                // is not in a signed .app bundle. Packaged builds already have
+                // CFBundleIdentifier in their Info.plist so no runtime set is
+                // needed there either. Skip for dev builds entirely.
+                // TODO(faf754e6): if LaunchServices Dock-tile isolation for
+                // dev builds is needed in the future, find a way to set the ID
+                // that does NOT trigger the MacAppCodeSignClone spawn (e.g.
+                // a CEF source patch to disable the spawn for unbundled builds).
+                if set_bundle_id && !agentmux_common::is_dev_self() {
+                    let channel = std::env::var("AGENTMUX_CHANNEL")
+                        .unwrap_or_else(|_| "dev".to_string());
+                    let channel_sanitized: String = channel
+                        .chars()
+                        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '-' })
+                        .collect::<String>()
+                        .to_lowercase();
+                    let bundle_id = format!("ai.agentmux.{}.{}", channel_sanitized, env!("CARGO_PKG_VERSION"));
+                    if let Ok(c_id) = std::ffi::CString::new(bundle_id.as_str()) {
+                        let ns_id = make(cls_str, sel_with, c_id.as_ptr());
+                        if !ns_id.is_null() {
+                            let k_id = make(cls_str, sel_with, b"CFBundleIdentifier\0".as_ptr() as _);
+                            set_obj(info, sel_set_obj, ns_id, k_id);
+                        }
                     }
+                    tracing::info!(
+                        bundle_id = %bundle_id,
+                        "macOS: set CFBundleName/CFBundleDisplayName/CFBundleIdentifier on main bundle"
+                    );
+                } else if set_bundle_id {
+                    tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle (dev build: CFBundleIdentifier skipped to prevent MacAppCodeSignClone SIGTRAP)");
+                } else {
+                    tracing::info!("macOS: set CFBundleName/CFBundleDisplayName on main bundle (pre-init pass)");
                 }
-                tracing::info!(
-                    bundle_id = %bundle_id,
-                    "macOS: set CFBundleName/CFBundleDisplayName/CFBundleIdentifier on main bundle"
-                );
             } else {
                 tracing::warn!("macOS: main bundle info dict not mutable; app name unchanged");
             }
@@ -1408,6 +1436,14 @@ unsafe fn set_macos_app_display_name() {
     }
 
     tracing::info!(app_name = name, "macOS: set app display name (Dock + app menu)");
+}
+
+unsafe fn set_macos_app_display_name() {
+    set_macos_app_display_name_impl(true);
+}
+
+unsafe fn set_macos_app_display_name_pre_init() {
+    set_macos_app_display_name_impl(false);
 }
 
 /// macOS accessibility activation governor — Layer 1 of
