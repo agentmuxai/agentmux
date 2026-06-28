@@ -3188,9 +3188,14 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
 
                 // Steps 2+4: replace provider link (unlink old, link new).
                 let _ = id_store.agent_identity_unlink(&req.agent_id, &req.provider);
-                id_store
-                    .agent_identity_link(&req.agent_id, &account_id, &req.provider)
-                    .map_err(|e| format!("identity.account.upsert: link: {e}"))?;
+                if let Err(e) = id_store.agent_identity_link(&req.agent_id, &account_id, &req.provider) {
+                    // Unlink already ran — keychain secret is now orphaned. Best-effort delete.
+                    let aid = account_id.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        crate::identity::secret_store::delete(&aid)
+                    }).await;
+                    return Err(format!("identity.account.upsert: link: {e}"));
+                }
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "identityaccounts:changed".to_string(),
@@ -3394,6 +3399,17 @@ fn register_preset_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // (which defaults false and can be omitted to bypass is_blank check).
                 if memory.id == "blank" || memory.id.starts_with("seed-") || memory.is_blank {
                     return Err("FORBIDDEN: cannot mutate a protected preset".to_string());
+                }
+                // Guard existing global presets: an agent must not be able to demote or
+                // corrupt a shared global brain bundle it doesn't own by supplying its id.
+                if !memory.id.is_empty() {
+                    if let Some(existing) = id_store.bundle_memory_get(&memory.id)
+                        .map_err(|e| format!("preset.upsert: {e}"))?
+                    {
+                        if existing.is_global {
+                            return Err("FORBIDDEN: cannot mutate a global preset".to_string());
+                        }
+                    }
                 }
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
