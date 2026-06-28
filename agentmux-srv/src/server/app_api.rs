@@ -3232,12 +3232,13 @@ fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppSta
     let id_store = state.id_store.clone();
     engine.register_handler(
         COMMAND_IDENTITY_ACCOUNT_VALIDATE,
-        Box::new(move |data, _ctx| {
+        Box::new(move |data, ctx| {
             let id_store = id_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize, Default)]
                 #[serde(rename_all = "snake_case")]
                 struct Req {
+                    #[serde(default)] agent_id: String,
                     #[serde(default)] account_id: String,
                     #[serde(default)] provider: String,
                     #[serde(default)] secret: String,
@@ -3246,7 +3247,15 @@ fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppSta
                     .map_err(|e| format!("identity.account.validate: {e}"))?;
 
                 let (provider, secret, masked_tail) = if !req.account_id.is_empty() {
-                    // Probe a stored account — fetch secret from keychain.
+                    // Stored-account path: S1 check + ownership verification so
+                    // callers can't probe another agent's credential by account UUID.
+                    check_s1(&ctx, &req.agent_id)?;
+                    let links = id_store
+                        .agent_identity_list_for_agent(&req.agent_id)
+                        .map_err(|e| format!("identity.account.validate: {e}"))?;
+                    if !links.iter().any(|l| l.account_id == req.account_id) {
+                        return Err("FORBIDDEN: account not linked to this agent".to_string());
+                    }
                     let acct = id_store.identity_get(&req.account_id)
                         .map_err(|e| format!("identity.account.validate: {e}"))?
                         .ok_or_else(|| format!("identity.account.validate: account {} not found", req.account_id))?;
@@ -3260,7 +3269,7 @@ fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppSta
                     let tail = crate::identity::key_validator::masked_tail(&plaintext);
                     (acct.provider.clone(), plaintext.to_string(), tail)
                 } else if !req.provider.is_empty() && !req.secret.is_empty() {
-                    // Ad-hoc probe — nothing stored.
+                    // Ad-hoc probe — caller supplies their own secret, nothing stored.
                     let tail = crate::identity::key_validator::masked_tail(&req.secret);
                     (req.provider.clone(), req.secret.clone(), tail)
                 } else {
