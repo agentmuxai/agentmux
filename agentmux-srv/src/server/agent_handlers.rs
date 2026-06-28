@@ -3728,6 +3728,8 @@ mod recent_sessions_tests {
             version: "test".to_string(),
             app_path: String::new(),
             wstore: wstore.clone(),
+            shared_store: None,
+            id_store: wstore.clone(),
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),
@@ -3758,6 +3760,12 @@ mod recent_sessions_tests {
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
             container_manager: None,
             shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
+            cron_scheduler: crate::backend::cron::CronScheduler::new(
+                None,
+                reqwest::Client::new(),
+                String::new(),
+                "test".to_string(),
+            ),
         };
 
         // Seed: 1 SEEDED definition (template), 1 identity bundle, 1
@@ -4018,6 +4026,8 @@ mod recent_sessions_tests {
             version: "test".to_string(),
             app_path: String::new(),
             wstore: wstore.clone(),
+            shared_store: None,
+            id_store: wstore.clone(),
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),
@@ -4048,6 +4058,12 @@ mod recent_sessions_tests {
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
             container_manager: None,
             shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
+            cron_scheduler: crate::backend::cron::CronScheduler::new(
+                None,
+                reqwest::Client::new(),
+                String::new(),
+                "test".to_string(),
+            ),
         };
 
         // One seeded template + one already-user-owned definition.
