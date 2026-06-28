@@ -38,7 +38,7 @@ Security rule that threads through all three: **writes are agent-scoped** (an ag
 
 ### OQ1 — How do handlers know which agent is calling? (S1 enforcement)
 
-`RpcContext` (`rpc_types.rs:1345`) currently carries `client_type`, `blockid`, `tabid`, `conn` — no `agent_id`. The agent slug IS tracked on the WebSocket connection as `bus_agent_id` (set when the client sends `bus:register`), but it is not forwarded into `RpcContext`.
+`RpcContext` (`agentmux-srv/src/backend/rpc_types.rs:1345`) currently carries `client_type`, `blockid`, `tabid`, `conn` — no `agent_id`. The agent slug IS tracked on the WebSocket connection as `bus_agent_id` (set when the client sends `bus:register`), but it is not forwarded into `RpcContext`.
 
 **Resolution:** Add an `agent_id: String` field to `RpcContext`. Populate it in `websocket.rs` when `set_rpc_context` is called, using the connection's `bus_agent_id` if available. App API handlers enforce S1 by comparing `ctx.agent_id` against the `agent_id` field in the request — they are equal or the call is rejected.
 
@@ -141,7 +141,8 @@ Create or update a credential account **and** link it to the calling agent for t
 
 Delegates (in order):
 1. `account.key.verify` — validates secret + stores in keychain
-2. `linkagentidentity { agent_id, account_id, provider }` — replaces existing link
+2. If the agent already has a link for `provider`: call `unlinkagentidentity { agent_id, provider }` to remove it (the App API handler must do this explicitly — `linkagentidentity` inserts, it does not replace)
+3. `linkagentidentity { agent_id, account_id, provider }` — creates the new link
 
 Fires: `identityaccounts:changed` (global) + `agentidentities:changed:<agent_id>`
 
@@ -225,7 +226,7 @@ Fetch a full preset (instructions, context_files, mcp_servers, skills) by `id` o
 // Response — full Memory object (see db_memory_bundles schema in memory.md)
 ```
 
-Delegates to: `getmemory { id }`. For `name` lookup: list + filter client-side (no name index on the table).
+Delegates to: `getmemory { id }`. For `name` lookup: list + filter client-side (no name index on the table). Preset names are not enforced unique — if multiple presets share a name, return the one with the most recent `updated_at`. If zero match, return a not-found error.
 
 ---
 
@@ -272,14 +273,14 @@ Fires: `memories:changed`
 
 #### `preset.self.get`
 
-Get the preset bound to the calling agent's current instance. Resolves via `memory_id` on `db_agent_instances`; returns the blank sentinel if unset.
+Get the preset bound to the calling agent's current instance. Resolves via `memory_id` on `db_agent_instances`; returns the blank singleton object (not null) if `memory_id` is unset.
 
 ```jsonc
 // Request  { "agent_id": "agentx" }
-// Response — full Memory object
+// Response — full Memory object (is_blank: true when no preset is bound)
 ```
 
-Delegates to: `getagentinstance` → `getmemory` on the resolved `memory_id`.
+Delegates to: `getagentinstance` → `getmemory` on the resolved `memory_id`. If `memory_id` is null, delegates to `listmemories` + filter `is_blank: true` to fetch the singleton.
 
 ---
 
@@ -299,7 +300,7 @@ List all memory files for the calling agent.
     {
       "filename":      "user_preferences.md",
       "is_index":      false,
-      "metadata_type": "feedback",   // from YAML frontmatter, null if absent
+      "metadata_type": "feedback",   // value of `metadata.type` YAML frontmatter key; null if absent or unparseable
       "size_bytes":    412,
       "modified_at":   1751020800000
     }
@@ -340,7 +341,7 @@ Write (create or replace) a memory file atomically. Max 10 MiB. Filename rules s
 
 Delegates to: `agent:memory:write_file { agent_id, filename, content }`
 
-Fires: `agent:memory:changed:<agent_id>` (fire-and-forget, persist=0)
+Fires: `agent:memory:changed:<agent_id>` (fire-and-forget, persist=0) — emitted only after the write succeeds. No event is fired on error.
 
 ---
 
@@ -364,7 +365,7 @@ Fires: `agent:memory:changed:<agent_id>` (fire-and-forget, persist=0)
 | App API command | Existing handler(s) | New logic |
 |-----------------|--------------------|-----------| 
 | `identity.self.accounts` | `listagentidentities` + `getidentityaccount` per entry | Join results, mask secret tail |
-| `identity.account.upsert` | `account.key.verify` → `linkagentidentity` | Sequential, S1 scope check |
+| `identity.account.upsert` | `account.key.verify` → `unlinkagentidentity` (if existing link) → `linkagentidentity` | Sequential, S1 scope check, explicit unlink-then-relink for provider replacement |
 | `identity.account.validate` | `account.key.verify { validate: true }` | Ad-hoc path skips write |
 | `identity.self.unlink` | `unlinkagentidentity` | Direct delegation |
 | `preset.list` | `listmemories` | Strip instruction/context blobs from response |
@@ -390,15 +391,17 @@ All handlers register in `register_app_api_handlers` in `app_api.rs`.
 
 **S4 — Blank preset singleton guard.** `preset.upsert` and `preset.delete` return `FORBIDDEN: cannot mutate the blank preset` when the target id is the `is_blank` singleton.
 
-**S5 — validate=true is non-destructive.** `identity.account.validate` never writes to keychain or DB. The only allowed side-effect is updating the `status` column on an existing account row when a probe succeeds and current status is `unknown`.
+**S5 — validate=true is minimally destructive.** `identity.account.validate` never writes a new keychain entry and never creates or deletes DB rows. The only permitted DB side-effect is updating the `status` column on an existing account row (when `account_id` is supplied and the probe result resolves a previously-`unknown` status). No write occurs for ad-hoc probes (no `account_id`).
 
 **S6 — Memory filename validation.** `memory.read` and `memory.write` enforce the existing `validate_filename` check from `native_memory_handlers.rs`: stem must be `[a-zA-Z0-9_-]+`, extension must be `.md`, no path separators, max 200-char stem. This blocks path traversal at the App API layer before the low-level handler can be reached.
+
+**Error format.** Security rejections return a string error in the existing RPC error convention: `"FORBIDDEN: <reason>"` (e.g. `"FORBIDDEN: agent_id mismatch"`, `"FORBIDDEN: cannot mutate the blank preset"`). This matches the string-error pattern used by other handlers in `app_api.rs` — no new error type is introduced.
 
 ---
 
 ## 9. RpcContext Extension (prerequisite)
 
-`rpc_types.rs` — add one field to `RpcContext`:
+`agentmux-srv/src/backend/rpc_types.rs` — add one field to `RpcContext`:
 
 ```rust
 pub struct RpcContext {
@@ -436,7 +439,7 @@ No wire-format break: `skip_serializing_if = "String::is_empty"` means existing 
 
 | Phase | Commands | Why first |
 |-------|----------|-----------|
-| **P0** | `RpcContext` extension | Prerequisite for S1 — must land before any identity/memory writes |
+| **P0** | `RpcContext` extension | Prerequisite for S1 — must land before any identity/memory writes. The change is a single struct field + one assignment; it can be bundled in the same PR as P1 rather than shipped as a bare prereq commit. |
 | **P1** | `identity.account.upsert`, `identity.self.accounts`, `identity.account.validate` | Unblocks agents registering their own credentials |
 | **P2** | `identity.self.unlink`, `preset.list`, `preset.get`, `preset.upsert`, `preset.delete`, `preset.self.get` | Preset management — agents that self-configure |
 | **P3** | `memory.list`, `memory.read`, `memory.write` | Thin wrappers over existing handlers; low risk, high value for memory-aware agents |
