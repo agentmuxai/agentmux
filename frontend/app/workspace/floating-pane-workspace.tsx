@@ -276,7 +276,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             let dir = 0;
             let startX = 0; // screen px at pointerdown
             let startY = 0;
-            let startRect = { x: 0, y: 0, w: 0, h: 0 }; // physical px
+            let startRect = { x: 0, y: 0, w: 0, h: 0 }; // physical px (Windows) / DIP (macOS, Linux)
 
             // Coalesce moves the same way the header MOVE does: one IPC in
             // flight at a time, last position wins (no timers/RAF).
@@ -326,10 +326,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     document.body.style.cursor = d ? CURSORS[d] : "";
                     return;
                 }
-                // screenX/Y are CSS px; the window rect is physical px.
-                const dpr = window.devicePixelRatio || 1;
-                const dx = Math.round((e.screenX - startX) * dpr);
-                const dy = Math.round((e.screenY - startY) * dpr);
+                // screenX/Y are CSS px. Windows: rect is physical px → scale by DPR.
+                // macOS / Linux: rect is DIP (1 CSS px == 1 DIP) → scale 1:1.
+                // posScale() encodes this: DPR on Windows, 1 elsewhere (mirrors drag).
+                const scale = posScale();
+                const dx = Math.round((e.screenX - startX) * scale);
+                const dy = Math.round((e.screenY - startY) * scale);
                 let { x, y, w, h } = startRect;
                 const left = dir === 1 || dir === 4 || dir === 7;
                 const right = dir === 2 || dir === 5 || dir === 8;

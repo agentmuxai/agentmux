@@ -1582,6 +1582,75 @@ pub fn get_window_position_blocking(state: &Arc<AppState>, label: &str) -> Optio
     rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
 }
 
+// ── Get window full rect (DIP) — blocking UI-thread read ─────────────────
+//
+// Like GetWindowPositionTask but returns (x, y, width, height). Used by the
+// macOS / Linux floater edge-resize path (`get_window_rect` IPC) to capture
+// the start rect on pointer-down — Windows reads it directly via GetWindowRect.
+wrap_task! {
+    pub struct GetWindowRectTask {
+        state: Arc<AppState>,
+        label: String,
+        tx: std::sync::mpsc::SyncSender<Option<(i32, i32, i32, i32)>>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let rect = get_window_on_ui(&self.state, &self.label).map(|w| {
+                let b = w.bounds();
+                (b.x, b.y, b.width, b.height)
+            });
+            let _ = self.tx.try_send(rect);
+        }
+    }
+}
+
+/// Read a CEF Views window's full rect (DIP) from the IPC thread by bouncing
+/// through the UI thread. Returns `None` if the window isn't found or the UI
+/// thread doesn't answer within the timeout.
+pub fn get_window_rect_blocking(state: &Arc<AppState>, label: &str) -> Option<(i32, i32, i32, i32)> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Option<(i32, i32, i32, i32)>>(1);
+    let mut task = GetWindowRectTask::new(state.clone(), label.to_string(), tx);
+    post_task(ThreadId::UI, Some(&mut task));
+    rx.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
+}
+
+// ── Set window rect (position + size, DIP) ───────────────────────────────
+//
+// Non-Windows analogue of the Windows SetWindowPos call in `set_window_rect`.
+// Used by the floater edge-resize drag: the frontend captures the start rect on
+// pointer-down, computes a new rect per cursor delta + edge, and calls this on
+// each move. `set_bounds` is self-contained (no read-modify-write) so concurrent
+// in-flight calls are idempotent — last write wins.
+wrap_task! {
+    pub struct SetWindowRectTask {
+        state: Arc<AppState>,
+        label: String,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                window.set_bounds(Some(&cef::Rect {
+                    x: self.x,
+                    y: self.y,
+                    width: self.width,
+                    height: self.height,
+                }));
+            }
+        }
+    }
+}
+
+pub fn post_set_window_rect(state: &Arc<AppState>, label: &str, x: i32, y: i32, width: i32, height: i32) {
+    let mut task = SetWindowRectTask::new(state.clone(), label.to_string(), x, y, width, height);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 // ── Resolve which window is under a screen point (DIP) — blocking UI read ──
 //
 // The macOS/Linux analogue of the Windows HWND Z-order walk in
