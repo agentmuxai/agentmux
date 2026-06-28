@@ -36,4 +36,6 @@ set "PATH=%GIT_BIN%;%GIT_USR%;%PATH%"
 
 :: Call task.exe by explicit extension (Gap A fix — no bash lookup needed here).
 :: task is installed as task.exe (via go install / WinGet), not task.cmd.
-task.exe dev %*
+:: Merge stderr into stdout so shell viewers don't color build progress red
+:: (cargo writes all output to stderr, not stdout).
+task.exe dev %* 2>&1
