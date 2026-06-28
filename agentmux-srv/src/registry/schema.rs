@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn dotdot_workdir_is_rejected() {
         let mut r = v1_record("abc");
-        r.data.working_dir = "..\\..\\sneaky".to_string();
+        r.data.working_dir = "../../sneaky".to_string();
         assert!(matches!(
             validate("abc", &r).unwrap_err(),
             ValidationError::UnsafeWorkingDir(_)
