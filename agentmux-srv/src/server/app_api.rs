@@ -3100,6 +3100,16 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 let account_id = if is_new {
                     uuid::Uuid::new_v4().to_string()
                 } else {
+                    // Ownership check: the supplied account_id must already be
+                    // linked to the calling agent, so callers can't overwrite
+                    // another agent's credentials by guessing a UUID.
+                    let links = id_store
+                        .agent_identity_list_for_agent(&req.agent_id)
+                        .map_err(|e| format!("identity.account.upsert: {e}"))?;
+                    let owned = links.iter().any(|l| l.account_id == req.account_id);
+                    if !owned {
+                        return Err("FORBIDDEN: account not linked to this agent".to_string());
+                    }
                     req.account_id.clone()
                 };
 
@@ -3380,8 +3390,10 @@ fn register_preset_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut memory: Memory = serde_json::from_value(data)
                     .map_err(|e| format!("preset.upsert: {e}"))?;
 
-                if memory.is_blank {
-                    return Err("FORBIDDEN: cannot mutate the blank preset".to_string());
+                // S4: guard on the target id, not the caller-supplied is_blank flag
+                // (which defaults false and can be omitted to bypass is_blank check).
+                if memory.id == "blank" || memory.id.starts_with("seed-") || memory.is_blank {
+                    return Err("FORBIDDEN: cannot mutate a protected preset".to_string());
                 }
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
