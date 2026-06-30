@@ -16,8 +16,10 @@ projections. See `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` and
 | Architecture analysis + decision | ✅ Merged (#1847) |
 | OOM crash diagnosis + graceful-exit design | ✅ Merged (specs in #1847) |
 | **Pillar 2 — single lifecycle authority** | 🟡 Stage 1 merged (#1850); Stage 2 designed, blocked on runtime verification; Stage 3 pending |
-| Pillar 3 — commit-aware admission control | ⬜ Specced (P0), not started |
-| Pillar 1 — host reproject | ⬜ Deepest; deliberately last |
+| Pillar 3 — commit-aware admission control | ✅ Merged (#1853); follow-ons (queue-and-drain, per-agent cap, badge) pending |
+| Pillar 1 — host reproject | 🟡 Q1–Q4 resolved (`SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30`); blocked on #864 |
+| #864 — layout single writer (Pillar 1 prereq) | 🟡 = **Phase 1** of strong reducer-authority (below); spec `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30` |
+| **Strong reducer-authority (layout)** | 🟡 Full spec `SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`; ~70% prebuilt (algebra+commands exist), keystone = port `balance_node`; 6-phase plan, not started. **Decided critical, not optional.** |
 | Saga collapse + persistence paydown | ⬜ After Pillars 1–3 |
 | Disk cleanup + tooling | ✅ Done (~107 GB reclaimed; `bin/clean-agentmux-builds.ps1`) |
 

@@ -108,6 +108,35 @@ If either dies, a fresh instance reprojects from srv.
 - **Q3.** Write-through mechanism: event-sourced through the reducer (ties into **#864**) vs. snapshot?
 - **Q4.** Can admission control (Pillar 3) ship independently and early, before the host rework? (Likely yes.)
 
+**Q1–Q4 RESOLVED 2026-06-30** — see `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md`
+(grounded in crash-only software / microreboot / event-sourcing-snapshot literature). Summary: Q1 only
+logical topology moves (layout tree, per-window opacity, floating placement/restore-rects); Q2 visible
+bounded rebuild (<~1.5s + overlay), not invisible recovery; Q3 snapshot write-through via the reducer
+as sole writer (NOT event sourcing), **#864 promoted to a hard prerequisite** — see
+`SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md`; Q4 yes, Pillar 3 already shipped (#1853).
+
+## 7a. Clarification (2026-06-30) — authority belongs ONLY to the durable tier
+Captured from discussion. There are **two reducers**: the **srv reducer** (`agentmux-srv/src/reducer/`,
+durable, owns domain state) and the **host reducer** (`agentmux-cef/src/reducer/`, *disposable* tier —
+where `reconcile_quit` was wired). That asymmetry is a deeper split-brain than #864's (which is purely
+intra-srv write-coherence on one `db_layout` row).
+
+**Decided principle:** a disposable component must not own *authority*. Split the concept:
+- **Authority** (source of truth; decisions that must survive death) → **launcher + srv only.**
+  launcher owns process/OS-window identity (`instance_registry`, `backend_window_ids`, window meta);
+  srv owns logical/domain content (layout tree, tabs, agents / SQLite).
+- **Mechanism** (translate authoritative decisions into native CEF/OS calls; react to native
+  callbacks) → **host + renderer**, as pure executors/projectors.
+
+The host reducer is therefore **demoted from decider to projector**, not deleted — it keeps only
+ephemeral, reconstructable coordination state (native handles, pool, in-flight queues) and may run
+real-time native coordination, **provided every decision it makes is a pure function of launcher/srv
+truth that the durable tier could recompute** (a derived cache, never a source). `reconcile_quit` is
+legitimate host-side under this rule because it's derived from window topology (launcher's truth). The
+host's existing `shadow_*` fields are the reference pattern (read-only projections of launcher truth).
+This demotion = Pillar 2 Stage 3 (demote `orphan_reconcile` + WRR to pure executors) + Pillar 1 (host
+topology becomes a projection).
+
 ## 8. Next steps — see §"Best next steps" in the closing discussion / `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR` §6.
 Sequence: **Pillar 2 (wire `reconcile_quit`)** → **Pillar 3 (admission control)** → **Pillar 1 (host
 reproject)** → saga collapse + persistence pay-down (#864, agents Phase 3b/3c). Add the missing E2E
