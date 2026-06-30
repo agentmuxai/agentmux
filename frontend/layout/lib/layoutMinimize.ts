@@ -308,7 +308,7 @@ function _dissolveColumn(
         console.warn("[layoutMinimize] dissolve: cannot determine column ratio, skipping");
         if (targetWasLeaf) {
             const only = sibling.children?.[0];
-            if (only?.data) {
+            if (only) {
                 sibling.data = only.data;
                 sibling.children = undefined;
                 sibling.flexDirection = FlexDirection.Row;
@@ -317,14 +317,23 @@ function _dissolveColumn(
         return false;
     }
 
-    // One header per leaf child.
-    const leafCount = colNode.children!.length;
+    // One header per leaf child — count recursively: a dissolved sub-column
+    // (with columnDissolve set) represents multiple collapsed headers and should
+    // count as its children.length, not 1, so cascade dissolve heights are correct.
+    const leafCount = colNode.children!.reduce((sum, c) =>
+        sum + (c.columnDissolve !== undefined && c.children ? c.children.length : 1), 0);
     const totalHeaderUnits = leafCount * (HeaderHeightPx + gapSizePx) * colRatio;
 
     // Steal from sibling's first child so sibling's total flex-size stays constant.
+    // Track actualStolen separately: if firstChild.size is clamped to the floor,
+    // less than totalHeaderUnits is stolen, so colNode.size must reflect that.
     const firstChild = sibling.children![0];
+    let actualStolen = totalHeaderUnits;
     if (firstChild) {
-        firstChild.size = Math.max(firstChild.size - totalHeaderUnits, (HeaderHeightPx + gapSizePx) * colRatio);
+        const floorUnits = (HeaderHeightPx + gapSizePx) * colRatio;
+        const prevSize = firstChild.size;
+        firstChild.size = Math.max(firstChild.size - totalHeaderUnits, floorUnits);
+        actualStolen = prevSize - firstChild.size;
     }
 
     // Record dissolve context.
@@ -341,7 +350,9 @@ function _dissolveColumn(
     rowNode._slipAnchor = true;
 
     // Insert the dissolved column branch at the top of the sibling column.
-    colNode.size = totalHeaderUnits;
+    // Use actualStolen (not totalHeaderUnits) to keep the size budget honest
+    // when firstChild.size was clamped to the floor value.
+    colNode.size = actualStolen;
     sibling.children!.unshift(colNode);
 
     return true;
@@ -357,13 +368,15 @@ function _dissolveColumn(
  */
 function _undissolveColumn(model: LayoutModel, colNode: LayoutNode): void {
     const { targetColumnId, originalRowSize, originalRowIndex, targetWasLeaf } = colNode.columnDissolve!;
-    colNode.columnDissolve = undefined;
 
     const targetCol = findNode(model.treeState.rootNode, targetColumnId);
     if (!targetCol?.children) {
         console.warn(`[layoutMinimize] undissolve: target column ${targetColumnId} not found`);
         return;
     }
+    // Clear dissolve context only after confirming targetCol exists — clearing
+    // it before the check would permanently lose restore context on a missing target.
+    colNode.columnDissolve = undefined;
 
     // Remove colNode from the host column; give its height back to the neighbor.
     const slipIdx = targetCol.children.findIndex((c) => c.id === colNode.id);
@@ -377,7 +390,7 @@ function _undissolveColumn(model: LayoutModel, colNode: LayoutNode): void {
     // If the target was originally a leaf that got wrapped, unwrap it.
     if (targetWasLeaf && targetCol.children.length === 1) {
         const only = targetCol.children[0];
-        if (only.data && !only.children) {
+        if (!only.children) {
             targetCol.data = only.data;
             targetCol.children = undefined;
             targetCol.flexDirection = FlexDirection.Row;
@@ -391,7 +404,13 @@ function _undissolveColumn(model: LayoutModel, colNode: LayoutNode): void {
     const rowNode = findParent(model.treeState.rootNode, targetColumnId) ?? model.treeState.rootNode;
     if (rowNode.children) {
         colNode.size = originalRowSize;
-        rowNode._slipAnchor = undefined;
+        // Only clear _slipAnchor if no remaining sibling has a concurrent slipMinimize
+        // that also depends on it — undissolving one column must not remove an anchor
+        // that a slip-minimized pane on the same row still needs.
+        const stillNeedsAnchor = rowNode.children.some((c) => c.slipMinimize !== undefined);
+        if (!stillNeedsAnchor) {
+            rowNode._slipAnchor = undefined;
+        }
         const idx = Math.min(originalRowIndex, rowNode.children.length);
         rowNode.children.splice(idx, 0, colNode);
     }
