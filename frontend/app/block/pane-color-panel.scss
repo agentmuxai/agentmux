@@ -1,0 +1,40 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+@use "../element/menu-frame" as menuFrame;
+
+.pane-color-panel {
+    @include menuFrame.menu-frame;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-2);
+    user-select: none;
+}
+
+.pane-color-panel-sep {
+    height: 1px;
+    background: var(--border-color);
+    margin: 0 calc(-1 * var(--space-2));
+}
+
+.pane-color-panel-clear {
+    display: flex;
+
+    button {
+        flex: 1;
+        padding: 3px var(--space-1-5);
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 0;
+        color: var(--secondary-text-color);
+        font-size: 10px;
+        cursor: default;
+        white-space: nowrap;
+
+        &:hover {
+            background: var(--highlight-bg-color);
+            color: var(--main-text-color);
+        }
+    }
+}
