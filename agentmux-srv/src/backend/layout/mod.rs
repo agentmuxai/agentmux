@@ -29,6 +29,10 @@ pub enum LayoutError {
     InvalidSize { node_id: String, size: f32 },
     /// index_arr was empty or led to a non-existent location.
     InvalidIndexPath,
+    /// A node failed the leaf-XOR-branch invariant during balance — it has
+    /// both `data` and `children`, or neither. The TS oracle (`validateNode`
+    /// in `layoutNode.ts`) throws "Invalid node" here.
+    InvalidNode { id: String },
 }
 
 impl std::fmt::Display for LayoutError {
@@ -39,6 +43,7 @@ impl std::fmt::Display for LayoutError {
             Self::RootCannotBeTarget => write!(f, "root node cannot be the target of this operation"),
             Self::InvalidSize { node_id, size } => write!(f, "invalid size {:.2} for node {}", size, node_id),
             Self::InvalidIndexPath => write!(f, "index_arr is empty or points to a non-existent location"),
+            Self::InvalidNode { id } => write!(f, "invalid node (leaf-XOR-branch violated): {}", id),
         }
     }
 }
@@ -598,6 +603,86 @@ fn split_impl(
 /// actual clearing in the reducer just sets root = None.
 pub fn clear_tree_node(_root: &mut Option<LayoutNode>) {
     *_root = None;
+}
+
+// ── Tree normalization (balanceNode) ────────────────────────────────────────
+
+/// Validate the leaf-XOR-branch invariant. Mirrors `validateNode` in
+/// `frontend/layout/lib/layoutNode.ts`: a node must have **either** `data`
+/// **or** `children`, never both and never neither. (In TS the "empty
+/// children array" case is a separate check; here an empty `children` vec
+/// with no `data` is the same "neither" case and is rejected by the single
+/// XOR below.)
+fn validate_node(node: &LayoutNode) -> bool {
+    let has_children = !node.children.is_empty();
+    let has_data = node.data.is_some();
+    has_children != has_data
+}
+
+/// Port of `balanceNode` in `frontend/layout/lib/layoutNode.ts`. Recursively
+/// normalizes the tree: validates each node, alternates child flex direction,
+/// hoists redundant single-child-branch chains, drops empty branches, and
+/// collapses a branch with a single leaf child into that leaf.
+///
+/// Returns `Err(InvalidNode)` where the TS oracle throws "Invalid node", so
+/// the reducer can surface an `Event::Error` rather than panic.
+///
+/// Faithfulness notes (matched to the TS oracle, deliberately NOT "improved"):
+/// - The direction flip mutates only the *iterated* child; hoisted
+///   grandchildren are returned unflipped (a later pass alternates them) —
+///   matches the TS `flatMap`.
+/// - `_slipAnchor` (read from the untyped `extra` catch-all, where the
+///   frontend stores it) suppresses the single-child-branch hoist.
+/// - The single-leaf collapse copies the child's `data` + `id` only; the node
+///   keeps its own `size` / `flex_direction` / `extra` — exactly as TS does.
+pub fn balance_node(node: &mut LayoutNode) -> Result<(), LayoutError> {
+    // BEFORE-walk: validate, then rebuild children (flip / hoist / drop).
+    if !validate_node(node) {
+        return Err(LayoutError::InvalidNode { id: node.id.clone() });
+    }
+    let parent_flex = node.flex_direction;
+    let mut rebuilt: Vec<LayoutNode> = Vec::with_capacity(node.children.len());
+    for mut child in std::mem::take(&mut node.children) {
+        if child.flex_direction == parent_flex {
+            child.flex_direction = reverse_flex_direction(parent_flex);
+        }
+        let slip_anchor = child
+            .extra
+            .get("_slipAnchor")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        // Hoist: child has exactly one child and that grandchild is itself a
+        // branch (TS `child.children[0].children` truthy) — replace `child`
+        // with the grandchild's children. Suppressed for slip anchors.
+        if child.children.len() == 1 && !child.children[0].children.is_empty() && !slip_anchor {
+            let grandchild = child.children.remove(0);
+            rebuilt.extend(grandchild.children);
+            continue;
+        }
+        // Drop an empty branch (no data, no children). A leaf (data present,
+        // children empty) is kept — TS `children?.length === 0` is false for a
+        // leaf whose `children` is `undefined`.
+        if child.children.is_empty() && child.data.is_none() {
+            continue;
+        }
+        rebuilt.push(child);
+    }
+    node.children = rebuilt;
+
+    // Recurse into the rebuilt children (walkNodes' `forEach`, which iterates
+    // the post-rebuild children because the before-callback ran first).
+    for child in &mut node.children {
+        balance_node(child)?;
+    }
+
+    // AFTER-walk: collapse a single leaf child into this node.
+    if node.children.len() == 1 && node.children[0].children.is_empty() {
+        let only = node.children.remove(0);
+        node.data = only.data;
+        node.id = only.id;
+        node.children = Vec::new();
+    }
+    Ok(())
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
