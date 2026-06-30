@@ -317,11 +317,16 @@
                 &--agent {
                     .block-frame-default-header-iconview {
                         flex-shrink: 0;
-                        max-width: 60%;
                     }
 
                     .block-frame-textelems-wrapper {
                         flex-shrink: 100;
+                    }
+                }
+
+                &--agent&--has-summary {
+                    .block-frame-default-header-iconview {
+                        max-width: 60%;
                     }
                 }
             }
