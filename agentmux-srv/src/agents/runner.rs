@@ -58,6 +58,44 @@ pub enum AgentError {
     InvalidRef(String),
     #[error("agent runner: spawn failed: {0}")]
     Spawn(String),
+    /// System commit headroom is below the reserve required to safely start
+    /// another agent. Refusing here prevents a new `claude.exe` from tipping the
+    /// system commit charge into its limit, where a failed allocation aborts the
+    /// CEF host (Chromium OOM, `0xE0000008`). Callers should surface a transient
+    /// "memory full — try again when memory frees" rather than a hard failure.
+    /// Pillar 3 (`SPEC_WIN10_PAGEFILE_OOM_CRASH` / `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR`).
+    #[error("agent runner: insufficient memory to start agent ({avail_gb:.1} GB commit free, need {reserve_gb:.1} GB headroom)")]
+    CommitPressure { avail_gb: f64, reserve_gb: f64 },
+}
+
+/// Minimum free system commit (GB) required to admit a new agent spawn. Below
+/// this, launching another `claude.exe` (~0.5–0.7 GB private commit plus tooling
+/// overhead) risks pushing the system commit charge to its limit, where a failed
+/// allocation aborts the CEF host (Chromium OOM). Conservative floor; tune from
+/// measured per-agent `PrivateUsage`. Overridable via
+/// `AGENTMUX_AGENT_COMMIT_RESERVE_GB` (e.g. 0 disables the gate on a host with a
+/// huge page file; higher on a constrained box).
+const DEFAULT_AGENT_COMMIT_RESERVE_GB: f64 = 2.0;
+
+fn agent_commit_reserve_gb() -> f64 {
+    std::env::var("AGENTMUX_AGENT_COMMIT_RESERVE_GB")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|v| *v >= 0.0)
+        .unwrap_or(DEFAULT_AGENT_COMMIT_RESERVE_GB)
+}
+
+/// Pure admission decision: is there enough free system commit to spawn another
+/// agent? `None` available (non-Windows, or the read failed) ⇒ admit — there's no
+/// cheap commit limit to enforce. Strict `<` so a value exactly at the reserve is
+/// admitted. CEF-free / OS-free so it is fully unit-testable.
+fn admit_spawn(avail_commit_gb: Option<f64>, reserve_gb: f64) -> Result<(), AgentError> {
+    match avail_commit_gb {
+        Some(avail) if avail < reserve_gb => {
+            Err(AgentError::CommitPressure { avail_gb: avail, reserve_gb })
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Spawn `claude --print --output-format=stream-json` per the given
@@ -80,6 +118,15 @@ pub async fn run_agent(
     task: AgentTask,
     tx: mpsc::UnboundedSender<AgentEvent>,
 ) -> Result<AgentRunHandle, AgentError> {
+    // Pillar 3 — commit-aware admission control. Refuse to spawn another agent
+    // when system commit headroom is below the reserve, rather than letting the
+    // new claude.exe push the box into an OOM abort. Gated here (the production
+    // entry) not in `run_agent_with_bin`, so the unit tests that inject a binary
+    // path bypass the gate and stay deterministic across hosts.
+    admit_spawn(
+        crate::backend::sysinfo::available_commit_gb(),
+        agent_commit_reserve_gb(),
+    )?;
     let bin = std::env::var(ENV_CLAUDE_BIN)
         .unwrap_or_else(|_| DEFAULT_CLAUDE_BIN.to_string());
     run_agent_with_bin(&bin, agent_ref, task, tx).await
@@ -392,6 +439,40 @@ mod tests {
 "#
         ));
         s.into_bytes()
+    }
+
+    // ── Pillar 3 — commit-aware admission control (pure decision) ──────────────
+
+    #[test]
+    fn admit_spawn_allows_when_headroom_at_or_above_reserve() {
+        assert!(admit_spawn(Some(8.0), 2.0).is_ok());
+        // Exactly at the reserve admits (strict `<`).
+        assert!(admit_spawn(Some(2.0), 2.0).is_ok());
+    }
+
+    #[test]
+    fn admit_spawn_refuses_below_reserve() {
+        match admit_spawn(Some(1.0), 2.0) {
+            Err(AgentError::CommitPressure { avail_gb, reserve_gb }) => {
+                assert_eq!(avail_gb, 1.0);
+                assert_eq!(reserve_gb, 2.0);
+            }
+            other => panic!("expected CommitPressure, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn admit_spawn_admits_when_commit_unknown() {
+        // None (non-Windows / read failure) ⇒ no cheap limit to enforce ⇒ admit.
+        assert!(admit_spawn(None, 2.0).is_ok());
+    }
+
+    #[test]
+    fn agent_commit_reserve_defaults_when_env_absent_or_invalid() {
+        // Not asserting on the env var (tests share a process); just verify the
+        // default is the documented conservative floor and is non-negative.
+        assert_eq!(DEFAULT_AGENT_COMMIT_RESERVE_GB, 2.0);
+        assert!(DEFAULT_AGENT_COMMIT_RESERVE_GB >= 0.0);
     }
 
     #[tokio::test]
