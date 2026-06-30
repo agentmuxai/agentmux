@@ -553,17 +553,36 @@ pub(super) fn handle_layout_insert_node_at_index(
 ) -> Vec<Event> {
     let new_id = node.id.clone();
     let node_event = node.clone();
-    // An index path can't address a non-existent tree; `apply_atomic`'s
-    // empty-tree guard rejects that (so we never promote-to-root and emit a
-    // `LayoutNodeInsertedAtIndex` that echoes an `index_arr` the tree never
-    // honoured — a replay/persist divergence the sibling
-    // `handle_layout_insert_node` also rejects).
-    if let Err(events) = apply_atomic(state, &tab_id, "LayoutInsertNodeAtIndex", |root| {
-        crate::backend::layout::insert_node_at_index(root, node, &index_arr)
-    }) {
-        return events;
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        return unknown_tab(state, "LayoutInsertNodeAtIndex", &tab_id);
+    };
+    // Build the new tree on a clone, balance, and commit only on success
+    // (atomic — no partial mutation on error). Matches the frontend oracle:
+    // `insertNodeAtIndex` PROMOTES the node to root when the tree is empty
+    // (frontend/layout/lib/layoutTree.ts:303-304), so strong-reducer authority
+    // promotes too rather than rejecting — `index_arr` is moot on an empty
+    // tree. (Replay stays consistent: the same insert-at-index semantics
+    // promote on empty; the event documents the request.)
+    let working_result: Result<agentmux_common::LayoutNode, String> = match tab.rootnode.as_ref() {
+        Some(root) => {
+            let mut w = root.clone();
+            crate::backend::layout::insert_node_at_index(&mut w, node, &index_arr)
+                .map(|_| w)
+                .map_err(|e| format!("LayoutInsertNodeAtIndex: {} (tab {})", e, tab_id))
+        }
+        None => Ok(node),
+    };
+    let mut working = match working_result {
+        Ok(w) => w,
+        Err(msg) => return op_error(state, msg),
+    };
+    if let Err(e) = crate::backend::layout::balance_node(&mut working) {
+        return op_error(
+            state,
+            format!("LayoutInsertNodeAtIndex balance: {} (tab {})", e, tab_id),
+        );
     }
-    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
+    tab.rootnode = Some(working);
     // magnify implies focus (frontend invariant; see handle_layout_insert_node).
     if focus_after || magnify_after {
         tab.focused_node_id = new_id.clone();
