@@ -106,7 +106,7 @@ fn main() {
         if splash_config::splash_disabled() {
             tokio::runtime::Runtime::new()
                 .expect("failed to build Tokio runtime")
-                .block_on(launcher_main());
+                .block_on(launcher_main(None));
             return;
         }
         let splash = splash_mac::Splash::show();
@@ -119,7 +119,7 @@ fn main() {
                 let result = std::panic::catch_unwind(|| {
                     tokio::runtime::Runtime::new()
                         .expect("failed to build Tokio runtime")
-                        .block_on(launcher_main());
+                        .block_on(launcher_main(None));
                 });
                 if result.is_err() {
                     eprintln!("AgentMux launcher supervisor panicked — exiting");
@@ -142,13 +142,21 @@ fn main() {
         // Windows keeps spawning its splash inside launcher_main (event-name
         // model). See splash_linux/.
         #[cfg(target_os = "linux")]
-        if !splash_config::splash_disabled() {
-            splash_linux::spawn();
-        }
+        let linux_startup_sink = {
+            let (sink, rx) = startup_events::StartupEventSink::new();
+            if !splash_config::splash_disabled() {
+                splash_linux::spawn(rx);
+            } else {
+                drop(rx);
+            }
+            Some(sink)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let linux_startup_sink: Option<startup_events::StartupEventSink> = None;
 
         tokio::runtime::Runtime::new()
             .expect("failed to build Tokio runtime")
-            .block_on(launcher_main());
+            .block_on(launcher_main(linux_startup_sink));
     }
 }
 
@@ -164,7 +172,28 @@ fn splash_selftest() {
 
     #[cfg(target_os = "linux")]
     {
-        splash_linux::spawn();
+        let (sink, rx) = startup_events::StartupEventSink::new();
+        // Fire fake startup events so the stage list is exercised.
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            sink.stage_begin("saga", "Saga recovery");
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            sink.stage_end("saga", 120, startup_events::StartupStatus::Ok, None);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            sink.stage_begin("migrations", "Migrations");
+            sink.sub_begin("migrations", "0009", "cron_schema");
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            sink.sub_end("migrations", "0009", 80, startup_events::StartupStatus::Ok, None);
+            sink.sub_begin("migrations", "0010", "identity_dedup");
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            sink.sub_end("migrations", "0010", 40, startup_events::StartupStatus::Ok, None);
+            sink.stage_end("migrations", 220, startup_events::StartupStatus::Ok, None);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            sink.stage_begin("backend", "Backend startup");
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            sink.stage_end("backend", 1500, startup_events::StartupStatus::Ok, None);
+        });
+        splash_linux::spawn(rx);
         std::thread::sleep(hold);
     }
     #[cfg(target_os = "macos")]
@@ -184,7 +213,7 @@ fn splash_selftest() {
     }
 }
 
-async fn launcher_main() {
+async fn launcher_main(startup_sink: Option<startup_events::StartupEventSink>) {
     let exe_path = std::env::current_exe().expect("cannot resolve exe path");
     let exe_dir = exe_path.parent().expect("exe has no parent directory");
     // Production + Windows dev use a `runtime/` subdir (launcher at root,
@@ -341,7 +370,7 @@ async fn launcher_main() {
         // and supervises both with the same crash budget Windows uses.
         // The legacy exec-into-host escape hatch lives in
         // `task dev:standalone` (host invoked directly, no launcher).
-        run_unix(exe_dir, &real_exe, &args).await;
+        run_unix(exe_dir, &real_exe, &args, startup_sink).await;
     }
 }
 
@@ -788,6 +817,9 @@ async fn run_unix(
     launcher_exe_dir: &std::path::Path,
     real_exe: &std::path::Path,
     args: &[String],
+    // Linux: pre-created sink whose rx was handed to the splash thread.
+    // macOS / other Unix: None; a fresh sink (rx dropped) is created below.
+    startup_sink_opt: Option<startup_events::StartupEventSink>,
 ) {
     use tokio::signal::unix::{signal, SignalKind};
 
@@ -918,10 +950,16 @@ async fn run_unix(
         }
     };
 
-    // Startup telemetry bus (Unix/macOS — receiver dropped immediately since
-    // the native splash on this platform doesn't yet consume typed events).
-    let (startup_sink, startup_rx_unix) = startup_events::StartupEventSink::new();
-    drop(startup_rx_unix);
+    // Startup telemetry bus.
+    // Linux: sink was created in main() before the splash thread launched;
+    // its rx is already being drained by the splash — reuse it so stage
+    // events flow live. macOS/other: create a fresh sink and drop rx
+    // (macOS splash doesn't yet consume typed events).
+    let startup_sink = startup_sink_opt.unwrap_or_else(|| {
+        let (s, rx) = startup_events::StartupEventSink::new();
+        drop(rx);
+        s
+    });
 
     // Startup recovery walker: mark any saga left running from a prior
     // crashed run as failed_compensation. Must run BEFORE coordinator

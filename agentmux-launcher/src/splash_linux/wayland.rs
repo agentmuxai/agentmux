@@ -40,11 +40,15 @@ use smithay_client_toolkit::reexports::client::{
 };
 
 use super::{
-    fade_alpha, min_hold, pulse_alpha, render_frame, CARD_H, CARD_W, CORNER_RADIUS_PX,
+    fade_alpha, min_hold, pulse_alpha, render_frame, StageList, CARD_H, CARD_W, CORNER_RADIUS_PX,
     DISMISS_TIMEOUT,
 };
 
-pub(super) fn run(ready_file: &Path, footer: Vec<String>) -> Result<(), Box<dyn Error>> {
+pub(super) fn run(
+    ready_file: &Path,
+    footer: Vec<String>,
+    startup_rx: std::sync::mpsc::Receiver<crate::startup_events::StartupEvent>,
+) -> Result<(), Box<dyn Error>> {
     let conn = Connection::connect_to_env()?;
     let (globals, mut event_queue) = registry_queue_init::<SplashState>(&conn)?;
     let qh = event_queue.handle();
@@ -81,6 +85,8 @@ pub(super) fn run(ready_file: &Path, footer: Vec<String>) -> Result<(), Box<dyn 
         fade_start: None,
         exit: false,
         footer,
+        startup_rx,
+        stage_list: StageList::new(),
     };
 
     while !state.exit {
@@ -103,6 +109,8 @@ struct SplashState {
     fade_start: Option<Instant>,
     exit: bool,
     footer: Vec<String>,
+    startup_rx: std::sync::mpsc::Receiver<crate::startup_events::StartupEvent>,
+    stage_list: StageList,
 }
 
 impl SplashState {
@@ -115,6 +123,11 @@ impl SplashState {
     /// the dismiss condition is met. Driven by the compositor's frame callbacks
     /// (which also pace the ~60 fps pulse).
     fn draw(&mut self, qh: &QueueHandle<Self>) {
+        // Drain all pending startup events before rendering (non-blocking).
+        while let Ok(event) = self.startup_rx.try_recv() {
+            self.stage_list.apply(event);
+        }
+
         let now = Instant::now();
         // Begin the fade-out the first time the dismiss condition holds; tear
         // down once it completes.
@@ -141,6 +154,7 @@ impl SplashState {
         };
 
         let brain_alpha = pulse_alpha(self.start.elapsed().as_secs_f32());
+        let stage_lines = self.stage_list.lines();
         // wl_shm ARGB8888 is native-endian 0xAARRGGBB → pre-multiplied B,G,R,A on LE.
         render_frame(
             canvas,
@@ -151,6 +165,7 @@ impl SplashState {
             CORNER_RADIUS_PX,
             /* bgr = */ true,
             &self.footer,
+            &stage_lines,
         );
 
         let surface = self.window.wl_surface();
