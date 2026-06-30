@@ -520,7 +520,17 @@ unsafe extern "system" fn win_event_callback(
             if rect.left < OFFSCREEN_POOL_THRESHOLD_X && IsIconic(hwnd) == 0 {
                 if let Some(state) = app_state().get() {
                     if let Some(label) = state.label_for_hwnd(hwnd) {
-                        if !label.starts_with("browser-pane-") {
+                        // Gate on BrowserKind::TopLevel { is_pool: false } — the
+                        // authoritative type flag, not a label prefix. This correctly
+                        // handles promoted window-pool-* windows: they keep their
+                        // original label but acquire is_pool:false at promotion, so a
+                        // user closing one still fires report_window_closed. A naïve
+                        // starts_with("window-pool-") check would have suppressed that
+                        // report and left the launcher with a stale window count.
+                        // Warm-pool HWNDs (is_pool:true), Floaters, Panes, and HWNDs
+                        // whose browser hasn't fired OnAfterCreated yet all return
+                        // false and are correctly skipped. See reagentx P1 on PR #1827.
+                        if state.is_live_top_level_browser(&label) {
                             tracing::debug!(
                                 target: "wrr",
                                 "[wrr] LOCATIONCHANGE pool-move → report_window_closed label={}",
