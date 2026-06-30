@@ -57,7 +57,7 @@ Center.
 | **Memory** | Persistent learned knowledge (native memory store; the `memory.*` App API / `memory/` dir) | colloquially "the brain", per-account | Trust Center › **Memories** |
 | **MCP server** | An external tool/connection surface (URL/stdio + which tools) | inlined in preset | Trust Center › **MCP Servers** (break out) |
 | **Skill** | On-demand instruction/knowledge module (a folder) | inlined in preset | Trust Center › **Skills** (break out) |
-| **Brief** (instructions/context) | Standing system-level instructions + context files (the CLAUDE.md-equivalent) | the rest of "preset" | Trust Center › **Briefs** |
+| **Brief** (instructions/context) | The **always-on** standing instructions + context — what loads the moment the agent loads (the `soul`/`agentmd` → CLAUDE.md, plus the injected startup instructions). Distinct from Skills, which are on-demand. | the `startup` / `soul` / `agentmd` content types | Trust Center › **Briefs** |
 
 > Each primitive carries its own **ownership/sharing** (agent-owned vs **global**,
 > mirroring the App API's existing global-preset guard) and its own audit trail.
@@ -118,6 +118,35 @@ This also **simplifies the in-flight provisioning spec**
 its own `OAuthConfigDir`, so there is no bundle to provision — log in → get an
 Account → bind it. The resolver change (instance → account directly, instead of
 instance → bundle → binding → account) is the one real refactor; flag it there.
+
+### 3.4 What loads when (verified against the spawn path)
+
+The Brief is precisely *"what loads when the agent loads."* Traced through the
+current spawn path:
+
+| Primitive | When | Mechanism (today) |
+|---|---|---|
+| **Brief** | **always, at startup** | two paths, both always-on: the `startup` instructions are injected as the **first user message** (`buildStartupPayload()` → `AgentInputCommand` → CLI stdin, `subprocess.rs:494`); `soul`+`agentmd` are written to **`CLAUDE.md`** in the workdir (`agent_config.rs:55-96`), auto-read by Claude Code |
+| **Memory** | recalled at startup | native memory store (the brain), per-account `CLAUDE_CONFIG_DIR` |
+| **Skill** | **on-demand** | indexed in CLAUDE.md + `.claude/commands/<trigger>.md`; loaded only when invoked — the lean-core vs. on-demand split |
+| **MCP server** | connection at startup, tools on-demand | `.mcp.json` (`build_mcp_config`, auto-injects the `agentmux-mcp` entry) |
+| **Account** | at startup | "Assigned Accounts" in the startup payload + identity resolution (`resolver.rs`) |
+
+> This confirms the **Brief = always-on / Skill = on-demand** distinction concretely
+> — the `startup`+`soul`+`agentmd` content is read every launch; skills are not.
+> (Citations: `frontend/.../startup/buildStartupPayload.ts`, `subprocess.rs:494`,
+> `server/agent_config.rs:55-96`, `server/app_api.rs:2299-2405` `write_agent_config_files`.)
+
+**Two content types the 5-primitive model doesn't yet place** (surfaced by the
+trace — decide their home, §9):
+- **`hooks` + `settings`/permissions** → `.claude/settings.json`. These are
+  behavior/safety config that also loads at startup. Candidate: a separate
+  **Policy** primitive (permissions are a trust decision → Trust Center fit), or
+  fold into the Brief. *Recommend a distinct `Policy` primitive* — permissions
+  deserve their own review surface, not burial in instructions.
+- **the static `memory` content blob** (baked into CLAUDE.md today) is **not** the
+  native Memory store. It's really just more standing context → **merge it into the
+  Brief** (or migrate into native Memory); don't carry two "memory" concepts.
 
 ## 4. Naming (the crux of the question)
 
@@ -248,6 +277,11 @@ building blocks — not config smeared across three stores.
 5. **Rename `db_memory_bundles` → `db_bundles` / `db_identity_accounts` →
    `db_accounts`** now (clean) or defer the storage migration and rename the
    concept/UI first?
+6. **Home for hooks + permissions** (`.claude/settings.json`): a distinct **Policy**
+   primitive (recommended — permissions are a trust decision) vs. fold into Brief?
+7. **Static `memory` content blob** (in CLAUDE.md today): merge into Brief
+   (recommended) vs. migrate into the native Memory store? Either way, retire the
+   second "memory" concept.
 
 ## 10. Recommendation
 
