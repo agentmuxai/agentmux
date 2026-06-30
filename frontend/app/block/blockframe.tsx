@@ -439,6 +439,16 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         }
         return elems;
     });
+    // True when the textelems wrapper has visible content (summary text or an
+    // error indicator). Used to conditionally apply max-width to the name
+    // region — see block.scss .block-frame-default-header--has-summary.
+    const hasSummary = createMemo(() => {
+        if (props.error != null) return true;
+        const htu = headerTextUnion();
+        if (typeof htu === "string") return !util.isBlank(htu);
+        if (Array.isArray(htu)) return htu.length > 0;
+        return false;
+    });
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
         const hue = blockData()?.meta?.["frame:hue"];
@@ -457,6 +467,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     return (
         <div
             class="block-frame-default-header"
+            classList={{ "block-frame-default-header--agent": blockData()?.meta?.view === "agent", "block-frame-default-header--has-summary": hasSummary() }}
             data-role="block-header"
             data-testid="block-header"
             ref={dragHandleRef ? (el) => { dragHandleRef.current = el; } : undefined}
