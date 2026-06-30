@@ -28,7 +28,7 @@ ugly OS fault box, and show one clear native message stating the reason.
 | Symptom | Root cause | Code |
 |---------|-----------|------|
 | **Half-broken Reload screen** | The recovery / low-memory pause page is **HTML rendered by a freshly-spawned CEF renderer** (`frame.load_url("data:text/html;base64,…")`). Under true commit exhaustion that new renderer *also* can't get memory, so it paints partially or crash-loops. The recovery UI depends on the exact resource that's exhausted. | `agentmux-cef/src/client/mod.rs` `on_render_process_terminated` (~1547), `memory_paused_page` (~2211), `crash_loop_terminal_page` |
-| **Raw Windows fault box w/ memory address** | The **host and CEF subprocesses don't suppress the GPF error box**. Only the launcher sets `SEM_FAILCRITICALERRORS`; nothing sets `SEM_NOGPFAULTERRORBOX`, and there's **no `SetUnhandledExceptionFilter`**. So an unhandled `0xE0000008` / `0xC0000005` falls through to Windows' default crash dialog. | `agentmux-cef/src/lib.rs` init (no SEH filter); launcher `main.rs:~72` (`SEM_FAILCRITICALERRORS` only) |
+| **Raw Windows fault box w/ memory address** | Partly already handled — `suppress_os_crash_dialogs()` runs in both host and launcher and calls `WerSetFlags(WER_FAULT_REPORTING_NO_UI)` (UI off, **dumps kept**) + `SEM_FAILCRITICALERRORS`. It **deliberately avoids `SEM_NOGPFAULTERRORBOX`** because that also kills WER/LocalDumps. So the standard WER "stopped working" box should already be suppressed. The dialog the user saw is therefore **either** a surface WER-no-UI doesn't cover (a `__fastfail`/hard-error, or a `0xC0000005` "memory could not be read" box) **or** a process/timing where `suppress_os_crash_dialogs()` hadn't run yet (e.g. a CEF subprocess faulting before its early-init). There is **no `SetUnhandledExceptionFilter`**. | `agentmux-cef/src/lib.rs:52-68` & `agentmux-launcher/src/main.rs:59-74` (`suppress_os_crash_dialogs`); no SEH filter anywhere |
 | **No reason / unclear if saved** | The one good native dialog (`show_fatal_dialog` → `MessageBoxW`, with reassuring text) only fires in the launcher **after a 5-minute relaunch-deadline expires** — not at the moment of death, and not when the host hard-crashes vs. is supervised. | `agentmux-launcher/src/main.rs` `show_fatal_dialog` (~2155), `OOM_GIVEUP_BODY` |
 
 **Key architectural asset:** the **launcher is a tiny, separate process that survives OOM** (the
@@ -37,14 +37,25 @@ not the dying host — should own the "explain + verify cleanup" step.
 
 ## 3. Design — four pillars
 
-### Pillar A — Suppress the ugly OS fault box; install our own last-resort handler
-On **every** AgentMux process (host + each CEF subprocess + launcher), at the earliest entry point:
-- `SetErrorMode(prev | SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS)` — augment, never overwrite
-  (the classic bug: overwriting clobbers other flags — read-modify-write). Also consider
-  `WerSetFlags(WER_FAULT_REPORTING_NO_UI)` to keep WER silent.
-- `SetUnhandledExceptionFilter(amx_last_breath)` — a minimal SEH filter that runs on `0xE0000008`
-  (Chromium OOM) and `0xC0000005` (AV). It must do the **least possible work** (see Pillar B) and
-  then signal the launcher, returning `EXCEPTION_EXECUTE_HANDLER` so Windows shows nothing.
+### Pillar A — Close the gaps in the *existing* suppression; install our own last-resort handler
+**Do NOT add `SEM_NOGPFAULTERRORBOX`.** The codebase already made the correct call: `suppress_os_crash_dialogs()`
+(`lib.rs:52-68`, `main.rs:59-74`) uses `WerSetFlags(WER_FAULT_REPORTING_NO_UI)` + `SEM_FAILCRITICALERRORS`
+and explicitly avoids `SEM_NOGPFAULTERRORBOX` so WER/LocalDumps crash dumps keep getting collected — the
+postmortem diagnostics this stability work depends on. Adding that flag would silence the box **and** blind
+us. (Credit: Codex review on PR #1847.)
+
+So Pillar A is not "add a flag" — it's **find why a box still reached the user despite suppression**:
+- **Coverage audit:** confirm `suppress_os_crash_dialogs()` runs in **every** process — especially each
+  **CEF subprocess** (renderer/GPU/utility) — and runs **before** any code that can fault. The comment
+  claims it's "process-wide; also covers the CEF subprocesses," but a subprocess that faults during very
+  early init (before the call) would still show a box. Verify the actual subprocess entry order.
+- **Identify the surface:** `WER_FAULT_REPORTING_NO_UI` suppresses the WER "stopped working" dialog, but
+  **not** necessarily a `__fastfail`/hard-error or the classic `0xC0000005` "the memory could not be read"
+  box. Capture which one the user hit (the "memory address" detail points at an AV hard-error, not WER).
+- **Add `SetUnhandledExceptionFilter(amx_last_breath)`** — a minimal SEH filter on `0xE0000008` (Chromium
+  OOM) / `0xC0000005` (AV) that does the least possible work (see Pillar B), signals the launcher, and
+  returns `EXCEPTION_EXECUTE_HANDLER` so nothing further is shown. This is the piece that genuinely doesn't
+  exist yet, and it's WER-friendly (the filter can still let WER write the dump first if we choose).
 
 ### Pillar B — A pre-allocated "parachute" so cleanup can run when the heap is exhausted
 At startup, reserve a small **committed** block (e.g. 8–16 MB) in the host and launcher. The
@@ -102,7 +113,7 @@ Native dialog (launcher), shown **at the moment of unrecoverable exit** (not aft
 
 | Phase | Scope | Effort | Files |
 |-------|-------|--------|-------|
-| **P0** | **Kill the ugly box.** `SetErrorMode(+SEM_NOGPFAULTERRORBOX)` + `SetUnhandledExceptionFilter` (minimal, no parachute yet) on host + CEF subprocesses + launcher. Filter just signals launcher + returns EXECUTE_HANDLER. | small | `agentmux-cef/src/lib.rs`, subprocess entry, `agentmux-launcher/src/main.rs` |
+| **P0** | **Close the suppression gap** (NOT a new flag). Audit that `suppress_os_crash_dialogs()` runs in every CEF subprocess before any fault; identify the actual dialog surface the user hit; add `SetUnhandledExceptionFilter` (minimal, no parachute yet) that signals the launcher + returns EXECUTE_HANDLER. **Keep `WER_FAULT_REPORTING_NO_UI`; never `SEM_NOGPFAULTERRORBOX`** (it kills LocalDumps). | small | `agentmux-cef/src/lib.rs:52`, subprocess entry, `agentmux-launcher/src/main.rs:59` |
 | **P0** | **Move the native dialog to the moment of death.** Fire `show_fatal_dialog` from the launcher as soon as it classifies host exit as OOM, with the reason text — not only after the 5-min deadline. | small | `mem_supervisor.rs`, `main.rs` |
 | **P1** | **Renderer-independent path.** Add `PAINT_FLOOR_MB`; below it, skip HTML recovery and go straight to launcher native dialog. | medium | `client/mod.rs` `on_render_process_terminated` |
 | **P1** | **Parachute reserve** in host + launcher; free-on-fault so the last-breath handler/closeout has heap. | medium | new `agentmux-cef/src/last_breath.rs`, launcher |
@@ -128,12 +139,13 @@ explain — all from the surviving launcher.
 - Force the condition: shrink the pagefile + spawn a memory balloon until commit < `PAINT_FLOOR_MB`,
   trigger a renderer OOM. Expect: **no raw Windows fault box**, no half-painted HTML, one native
   dialog with the reason, WAL truncated, sagas closed, clean relaunch.
-- Confirm `SetErrorMode` is read-modify-write (doesn't clobber `SEM_FAILCRITICALERRORS`).
+- Confirm crash dumps (WER/LocalDumps) are still collected after the change — the suppression must stay
+  dump-preserving (`WER_FAULT_REPORTING_NO_UI`, never `SEM_NOGPFAULTERRORBOX`).
 - Confirm the parachute is actually freed in the filter (instrument the handler).
 - Confirm the dialog fires at death, not after the 5-minute deadline.
 
 ## 9. Sources
 - [Chromium — Investigating OOM crashes](https://chromium.googlesource.com/chromium/src/+/main/docs/memory/oom.md) — allocators prefer crashing over null; `OnNoMemoryInternal`.
 - [OOM crashes for Chromium browsers (memory-dev)](https://groups.google.com/a/chromium.org/g/memory-dev/c/mPeec9KEc74) — `0xE0000008`, allocation size in exception record.
-- [The Old New Thing — Disabling the program crash dialog](https://devblogs.microsoft.com/oldnewthing/20040727-00/?p=38323) — `SEM_NOGPFAULTERRORBOX`, read-modify-write the error mode.
+- [The Old New Thing — Disabling the program crash dialog](https://devblogs.microsoft.com/oldnewthing/20040727-00/?p=38323) — background on `SEM_NOGPFAULTERRORBOX` (which we deliberately do **not** use — it kills WER/LocalDumps; we use `WER_FAULT_REPORTING_NO_UI` instead).
 - [libuv suppresses Windows Error Reporting (#1327)](https://github.com/libuv/libuv/issues/1327) — practical WER/error-mode suppression.
