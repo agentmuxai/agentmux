@@ -29,8 +29,10 @@ Both pins must be updated together when bumping.
 1. Check the latest release: `npm view @anthropic-ai/claude-code version`
 2. In `docker/Dockerfile.agent-agentmux`: update `ARG CLAUDE_VERSION=<new>`
 3. In `.github/workflows/container-image.yml`: update `default: '<new>'`
-4. Open a PR; the CI workflow's `workflow_dispatch` on merge will build and push
-   the image tagged with the release version and `:latest`.
+4. Open a PR and merge it.
+5. To publish the image, either:
+   - **Push a `v*` git tag** (e.g. `git tag v0.50.0 && git push origin v0.50.0`) — this triggers the workflow automatically and publishes both the semver tag and `:latest`.
+   - **Manually dispatch** the `Container Agent Image` workflow — this builds and pushes a `dispatch-<sha>` tag only; `:latest` is *not* updated by a manual dispatch.
 
 ## Version history
 
