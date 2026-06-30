@@ -241,10 +241,29 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # check-macos probes the APPLE_CEF_AVAILABLE secret and exposes it as a job
+  # output, because the `secrets` context is not available in job-level `if`
+  # expressions (only github, needs, vars, inputs, and status functions are).
+  check-macos:
+    name: Check macOS build availability
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.check.outputs.available }}
+    steps:
+      - id: check
+        env:
+          APPLE_CEF_AVAILABLE: ${{ secrets.APPLE_CEF_AVAILABLE }}
+        run: |
+          if [ -n "$APPLE_CEF_AVAILABLE" ]; then
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+
   build-macos:
     name: Build — macOS arm64 DMG
-    needs: verify
-    if: ${{ secrets.APPLE_CEF_AVAILABLE != '' }}
+    needs: [verify, check-macos]
+    if: needs.check-macos.outputs.available == 'true'
     runs-on: macos-latest
     permissions:
       contents: write
@@ -324,7 +343,7 @@ jobs:
   # ── Phase 3: Publish GitHub Release + S3 mirror ──────────────────────────
   publish:
     name: Publish release
-    needs: [verify, build-windows, build-linux, build-macos]
+    needs: [verify, check-macos, build-windows, build-linux, build-macos]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -356,10 +375,10 @@ jobs:
       - name: Extract changelog for this version
         id: changelog
         run: |
+          # extract-changelog.sh exits non-zero on a missing entry, so an
+          # empty-NOTES fallback here is dead code — the step would already
+          # have failed under set -e before reaching it.
           NOTES=$(bash scripts/extract-changelog.sh "$VERSION")
-          if [ -z "$NOTES" ]; then
-            NOTES="Release v${VERSION}"
-          fi
           # Write to file to safely pass multiline content to gh release create
           echo "$NOTES" > /tmp/release-notes.md
           echo "Release notes:"
