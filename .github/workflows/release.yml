@@ -244,6 +244,7 @@ jobs:
   build-macos:
     name: Build — macOS arm64 DMG
     needs: verify
+    if: ${{ secrets.APPLE_CEF_AVAILABLE != '' }}
     runs-on: macos-latest
     permissions:
       contents: write
@@ -324,6 +325,7 @@ jobs:
   publish:
     name: Publish release
     needs: [verify, build-windows, build-linux, build-macos]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
