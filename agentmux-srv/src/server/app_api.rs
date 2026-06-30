@@ -3020,43 +3020,18 @@ fn check_s1(ctx: &RpcContext, req_agent_id: &str) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 fn register_identity_self_accounts(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_IDENTITY_SELF_ACCOUNTS,
         Box::new(move |data, ctx| {
-            let id_store = id_store.clone();
+            let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("identity.self.accounts: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-
-                let links = id_store
-                    .agent_identity_list_for_agent(&req.agent_id)
-                    .map_err(|e| format!("identity.self.accounts: {e}"))?;
-
-                let mut accounts = Vec::new();
-                for link in &links {
-                    if let Some(acct) = id_store.identity_get(&link.account_id)
-                        .map_err(|e| format!("identity.self.accounts: {e}"))? {
-                        let masked_tail = acct.context
-                            .get("masked_tail")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        accounts.push(json!({
-                            "account_id": acct.id,
-                            "provider":   acct.provider,
-                            "name":       acct.name,
-                            "kind":       acct.kind,
-                            "status":     acct.status,
-                            "masked_tail": masked_tail,
-                            "updated_at": acct.updated_at,
-                        }));
-                    }
-                }
-                Ok(Some(json!({ "accounts": accounts })))
+                Ok(Some(identity_self_accounts_impl(&state, &req.agent_id).await?))
             })
         }),
     );
@@ -3229,11 +3204,11 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
 // ---------------------------------------------------------------------------
 
 fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_IDENTITY_ACCOUNT_VALIDATE,
         Box::new(move |data, ctx| {
-            let id_store = id_store.clone();
+            let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize, Default)]
                 #[serde(rename_all = "snake_case")]
@@ -3246,43 +3221,27 @@ fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppSta
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("identity.account.validate: {e}"))?;
 
-                let (provider, secret, masked_tail) = if !req.account_id.is_empty() {
-                    // Stored-account path: S1 check + ownership verification so
-                    // callers can't probe another agent's credential by account UUID.
+                if !req.account_id.is_empty() {
+                    // Stored-account path: S1 + ownership verification, then probe
+                    // using the stored keychain secret (shared with the REST path).
                     check_s1(&ctx, &req.agent_id)?;
-                    let links = id_store
-                        .agent_identity_list_for_agent(&req.agent_id)
-                        .map_err(|e| format!("identity.account.validate: {e}"))?;
-                    if !links.iter().any(|l| l.account_id == req.account_id) {
-                        return Err("FORBIDDEN: account not linked to this agent".to_string());
-                    }
-                    let acct = id_store.identity_get(&req.account_id)
-                        .map_err(|e| format!("identity.account.validate: {e}"))?
-                        .ok_or_else(|| format!("identity.account.validate: account {} not found", req.account_id))?;
-                    let aid = req.account_id.clone();
-                    let plaintext = tokio::task::spawn_blocking(move || {
-                        crate::identity::secret_store::get(&aid)
-                    })
-                    .await
-                    .map_err(|e| format!("identity.account.validate: keychain task: {e}"))?
-                    .map_err(|e| format!("identity.account.validate: keychain: {e}"))?;
-                    let tail = crate::identity::key_validator::masked_tail(&plaintext);
-                    (acct.provider.clone(), plaintext.to_string(), tail)
-                } else if !req.provider.is_empty() && !req.secret.is_empty() {
-                    // Ad-hoc probe — caller supplies their own secret, nothing stored.
-                    let tail = crate::identity::key_validator::masked_tail(&req.secret);
-                    (req.provider.clone(), req.secret.clone(), tail)
-                } else {
-                    return Err("identity.account.validate: provide account_id or (provider + secret)".to_string());
-                };
-
-                let outcome = crate::identity::key_validator::validate(&provider, &secret).await;
-                Ok(Some(json!({
-                    "valid":       outcome.valid,
-                    "status":      if outcome.valid { "valid" } else { "invalid" },
-                    "masked_tail": masked_tail,
-                    "error":       outcome.error,
-                })))
+                    return Ok(Some(
+                        identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await?,
+                    ));
+                }
+                if !req.provider.is_empty() && !req.secret.is_empty() {
+                    // Ad-hoc probe — caller supplies their own secret, nothing
+                    // stored. WS-only; not exposed over REST/MCP (no inline secret).
+                    let masked_tail = crate::identity::key_validator::masked_tail(&req.secret);
+                    let outcome = crate::identity::key_validator::validate(&req.provider, &req.secret).await;
+                    return Ok(Some(json!({
+                        "valid": outcome.valid,
+                        "status": if outcome.valid { "valid" } else { "invalid" },
+                        "masked_tail": masked_tail,
+                        "error": outcome.error,
+                    })));
+                }
+                Err("identity.account.validate: provide account_id or (provider + secret)".to_string())
             })
         }),
     );
@@ -3327,27 +3286,12 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // ---------------------------------------------------------------------------
 
 fn register_preset_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_PRESET_LIST,
         Box::new(move |_data, _ctx| {
-            let id_store = id_store.clone();
-            Box::pin(async move {
-                let memories = id_store
-                    .bundle_memory_list()
-                    .map_err(|e| format!("preset.list: {e}"))?;
-                // Return summary fields only — no instruction/context blobs.
-                let presets: Vec<_> = memories.iter().map(|m| json!({
-                    "id":          m.id,
-                    "name":        m.name,
-                    "description": m.description,
-                    "provider":    m.provider,
-                    "model":       m.model,
-                    "is_blank":    m.is_blank,
-                    "updated_at":  m.updated_at,
-                })).collect();
-                Ok(Some(json!({ "presets": presets })))
-            })
+            let state = state.clone();
+            Box::pin(async move { Ok(Some(preset_list_impl(&state).await?)) })
         }),
     );
 }
@@ -3357,11 +3301,11 @@ fn register_preset_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // ---------------------------------------------------------------------------
 
 fn register_preset_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_PRESET_GET,
         Box::new(move |data, _ctx| {
-            let id_store = id_store.clone();
+            let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize, Default)]
                 struct Req {
@@ -3370,23 +3314,7 @@ fn register_preset_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("preset.get: {e}"))?;
-
-                let memory = if !req.id.is_empty() {
-                    id_store.bundle_memory_get(&req.id)
-                        .map_err(|e| format!("preset.get: {e}"))?
-                        .ok_or_else(|| format!("preset.get: not found id={}", req.id))?
-                } else if !req.name.is_empty() {
-                    // Name lookup: list + filter, pick most-recently-updated.
-                    let all = id_store.bundle_memory_list()
-                        .map_err(|e| format!("preset.get: {e}"))?;
-                    all.into_iter()
-                        .filter(|m| m.name == req.name)
-                        .max_by_key(|m| m.updated_at)
-                        .ok_or_else(|| format!("preset.get: not found name={}", req.name))?
-                } else {
-                    return Err("preset.get: provide id or name".to_string());
-                };
-                Ok(Some(serde_json::to_value(&memory).map_err(|e| e.to_string())?))
+                Ok(Some(preset_get_impl(&state, &req.id, &req.name).await?))
             })
         }),
     );
@@ -3531,49 +3459,18 @@ fn register_preset_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // ---------------------------------------------------------------------------
 
 fn register_preset_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
-    let id_store = state.id_store.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_PRESET_SELF_GET,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
-            let id_store = id_store.clone();
+            let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("preset.self.get: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-
-                // Resolve agent slug → instance row → memory_id.
-                let instance = wstore
-                    .instance_get_by_name(&req.agent_id)
-                    .map_err(|e| format!("preset.self.get: {e}"))?;
-
-                let memory_id = instance.as_ref().and_then(|i| {
-                    if i.memory_id.is_empty() { None } else { Some(i.memory_id.clone()) }
-                });
-
-                let memory = if let Some(mid) = memory_id {
-                    id_store.bundle_memory_get(&mid)
-                        .map_err(|e| format!("preset.self.get: {e}"))?
-                        .ok_or_else(|| format!("preset.self.get: memory_id {mid} not found"))?
-                } else {
-                    // No preset bound: return the blank singleton.
-                    // listmemories returns summary only, so two steps:
-                    // (1) find blank id, (2) getmemory for full object.
-                    let all = id_store.bundle_memory_list()
-                        .map_err(|e| format!("preset.self.get: {e}"))?;
-                    let blank_id = all.into_iter()
-                        .find(|m| m.is_blank)
-                        .map(|m| m.id)
-                        .ok_or_else(|| "preset.self.get: blank singleton not found".to_string())?;
-                    id_store.bundle_memory_get(&blank_id)
-                        .map_err(|e| format!("preset.self.get: {e}"))?
-                        .ok_or_else(|| "preset.self.get: blank singleton row missing".to_string())?
-                };
-
-                Ok(Some(serde_json::to_value(&memory).map_err(|e| e.to_string())?))
+                Ok(Some(preset_self_get_impl(&state, &req.agent_id).await?))
             })
         }),
     );
@@ -3584,151 +3481,284 @@ fn register_preset_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // ---------------------------------------------------------------------------
 
 fn register_memory_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_MEMORY_LIST,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("memory.list: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-
-                let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-                    &wstore, &req.agent_id,
-                ).map_err(|e| format!("memory.list: {e}"))?;
-
-                let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
-                let entries = match std::fs::read_dir(&memory_dir) {
-                    Ok(e) => e,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        return Ok(Some(json!({ "files": [] })));
-                    }
-                    Err(e) => return Err(format!("memory.list: read_dir: {e}")),
-                };
-                for entry in entries {
-                    let entry = entry.map_err(|e| format!("memory.list: {e}"))?;
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    if !name.ends_with(".md") { continue; }
-                    let file_type = entry.file_type()
-                        .map_err(|e| format!("memory.list: file_type {name}: {e}"))?;
-                    if !file_type.is_file() { continue; }
-                    let meta = match entry.metadata() {
-                        Ok(m) => m,
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                        Err(e) => return Err(format!("memory.list: metadata {name}: {e}")),
-                    };
-                    let preview_content = {
-                        use std::io::Read;
-                        std::fs::File::open(entry.path())
-                            .map(|f| {
-                                let mut buf = Vec::with_capacity(512);
-                                f.take(512).read_to_end(&mut buf).ok();
-                                String::from_utf8_lossy(&buf).into_owned()
-                            })
-                            .unwrap_or_default()
-                    };
-                    files.push(NativeMemoryFileMeta {
-                        is_index: name == "MEMORY.md",
-                        metadata_type: crate::server::native_memory_handlers::parse_memory_frontmatter_type(&preview_content),
-                        size_bytes: meta.len(),
-                        modified_at: meta.modified().ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_millis() as i64)
-                            .unwrap_or(0),
-                        filename: name,
-                    });
-                }
-                files.sort_by(|a, b| b.is_index.cmp(&a.is_index).then(a.filename.cmp(&b.filename)));
-                Ok(Some(serde_json::to_value(NativeMemoryListResult { files }).map_err(|e| e.to_string())?))
+                Ok(Some(memory_list_impl(&state, &req.agent_id)?))
             })
         }),
     );
 }
 
 fn register_memory_read(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_MEMORY_READ,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, filename: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("memory.read: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                crate::server::native_memory_handlers::validate_memory_filename(&req.filename)
-                    .map_err(|e| format!("memory.read: {e}"))?;
-
-                let path = crate::server::native_memory_handlers::memory_dir_for_agent(
-                    &wstore, &req.agent_id,
-                ).map_err(|e| format!("memory.read: {e}"))?.join(&req.filename);
-
-                let file_type = std::fs::symlink_metadata(&path)
-                    .map_err(|e| format!("memory.read: {}: {e}", req.filename))?.file_type();
-                if !file_type.is_file() {
-                    return Err(format!("memory.read: {} is not a regular file", req.filename));
-                }
-                const MAX: u64 = 10 * 1024 * 1024;
-                let mut buf = Vec::new();
-                std::fs::File::open(&path)
-                    .and_then(|f| { use std::io::Read; f.take(MAX).read_to_end(&mut buf) })
-                    .map_err(|e| format!("memory.read: {}: {e}", req.filename))?;
-                let content = String::from_utf8_lossy(&buf).into_owned();
-                Ok(Some(serde_json::to_value(NativeMemoryReadFileResult { content }).map_err(|e| e.to_string())?))
+                Ok(Some(memory_read_impl(&state, &req.agent_id, &req.filename)?))
             })
         }),
     );
 }
 
 fn register_memory_write(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
-    let broker = state.broker.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_MEMORY_WRITE,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
-            let broker = broker.clone();
+            let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, filename: String, content: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("memory.write: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                crate::server::native_memory_handlers::validate_memory_filename(&req.filename)
-                    .map_err(|e| format!("memory.write: {e}"))?;
-                const MAX: usize = 10 * 1024 * 1024;
-                if req.content.len() > MAX {
-                    return Err(format!("memory.write: content too large ({} bytes, max {MAX})", req.content.len()));
-                }
-
-                let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-                    &wstore, &req.agent_id,
-                ).map_err(|e| format!("memory.write: {e}"))?;
-                std::fs::create_dir_all(&dir)
-                    .map_err(|e| format!("memory.write: mkdir: {e}"))?;
-
-                let dest = dir.join(&req.filename);
-                let tmp = dir.join(format!(".{}.{}.tmp", req.filename, uuid::Uuid::new_v4()));
-                if let Err(e) = std::fs::write(&tmp, &req.content) {
-                    let _ = std::fs::remove_file(&tmp);
-                    return Err(format!("memory.write: write tmp: {e}"));
-                }
-                if let Err(e) = std::fs::rename(&tmp, &dest) {
-                    let _ = std::fs::remove_file(&tmp);
-                    return Err(format!("memory.write: rename: {e}"));
-                }
-                broker.publish(crate::backend::wps::WaveEvent {
-                    event: format!("agent:memory:changed:{}", req.agent_id),
-                    scopes: vec![], sender: String::new(), persist: 0, data: None,
-                });
+                memory_write_impl(&state, &req.agent_id, &req.filename, &req.content)?;
                 Ok(None)
             })
         }),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Shared App API implementations.
+//
+// Each is called by both (a) the WebSocket RPC closure above — after the S1
+// check validates the agent-supplied `agent_id` against `ctx.agent_id` — and
+// (b) the REST handlers in `mod.rs`, which resolve the agent slug server-side
+// from the trusted `AGENTMUX_BLOCKID` and pass it as `agent_id`. On the REST
+// path S1 holds by construction (the slug is server-derived, not agent input),
+// so these fns take an already-trusted `agent_id` and never re-check S1.
+// See SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md §5.
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn identity_self_accounts_impl(
+    state: &AppState,
+    agent_id: &str,
+) -> Result<serde_json::Value, String> {
+    let links = state.id_store.agent_identity_list_for_agent(agent_id)
+        .map_err(|e| format!("identity.self.accounts: {e}"))?;
+    let mut accounts = Vec::new();
+    for link in &links {
+        if let Some(acct) = state.id_store.identity_get(&link.account_id)
+            .map_err(|e| format!("identity.self.accounts: {e}"))? {
+            let masked_tail = acct.context.get("masked_tail")
+                .and_then(|v| v.as_str()).unwrap_or("").to_string();
+            accounts.push(json!({
+                "account_id": acct.id, "provider": acct.provider, "name": acct.name,
+                "kind": acct.kind, "status": acct.status, "masked_tail": masked_tail,
+                "updated_at": acct.updated_at,
+            }));
+        }
+    }
+    Ok(json!({ "accounts": accounts }))
+}
+
+/// Validate one of the agent's own linked accounts by probing the provider with
+/// the stored keychain secret. Ownership is verified (the account must be linked
+/// to `agent_id`) before the secret is read.
+pub(crate) async fn identity_account_validate_stored_impl(
+    state: &AppState,
+    agent_id: &str,
+    account_id: &str,
+) -> Result<serde_json::Value, String> {
+    let links = state.id_store.agent_identity_list_for_agent(agent_id)
+        .map_err(|e| format!("identity.account.validate: {e}"))?;
+    if !links.iter().any(|l| l.account_id == account_id) {
+        return Err("FORBIDDEN: account not linked to this agent".to_string());
+    }
+    let acct = state.id_store.identity_get(account_id)
+        .map_err(|e| format!("identity.account.validate: {e}"))?
+        .ok_or_else(|| format!("identity.account.validate: account {account_id} not found"))?;
+    let aid = account_id.to_string();
+    let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))
+        .await.map_err(|e| format!("identity.account.validate: keychain task: {e}"))?
+        .map_err(|e| format!("identity.account.validate: keychain: {e}"))?;
+    let tail = crate::identity::key_validator::masked_tail(&plaintext);
+    let outcome = crate::identity::key_validator::validate(&acct.provider, &plaintext).await;
+    Ok(json!({
+        "valid": outcome.valid,
+        "status": if outcome.valid { "valid" } else { "invalid" },
+        "masked_tail": tail,
+        "error": outcome.error,
+    }))
+}
+
+pub(crate) async fn preset_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
+    let memories = state.id_store.bundle_memory_list().map_err(|e| format!("preset.list: {e}"))?;
+    let presets: Vec<_> = memories.iter().map(|m| json!({
+        "id": m.id, "name": m.name, "description": m.description,
+        "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
+    })).collect();
+    Ok(json!({ "presets": presets }))
+}
+
+pub(crate) async fn preset_get_impl(
+    state: &AppState,
+    id: &str,
+    name: &str,
+) -> Result<serde_json::Value, String> {
+    let memory = if !id.is_empty() {
+        state.id_store.bundle_memory_get(id).map_err(|e| format!("preset.get: {e}"))?
+            .ok_or_else(|| format!("preset.get: not found id={id}"))?
+    } else if !name.is_empty() {
+        let all = state.id_store.bundle_memory_list().map_err(|e| format!("preset.get: {e}"))?;
+        all.into_iter().filter(|m| m.name == name).max_by_key(|m| m.updated_at)
+            .ok_or_else(|| format!("preset.get: not found name={name}"))?
+    } else {
+        return Err("preset.get: provide id or name".to_string());
+    };
+    serde_json::to_value(&memory).map_err(|e| e.to_string())
+}
+
+pub(crate) async fn preset_self_get_impl(
+    state: &AppState,
+    agent_id: &str,
+) -> Result<serde_json::Value, String> {
+    let instance = state.wstore.instance_get_by_name(agent_id)
+        .map_err(|e| format!("preset.self.get: {e}"))?;
+    let memory_id = instance.as_ref()
+        .and_then(|i| if i.memory_id.is_empty() { None } else { Some(i.memory_id.clone()) });
+    let memory = if let Some(mid) = memory_id {
+        state.id_store.bundle_memory_get(&mid).map_err(|e| format!("preset.self.get: {e}"))?
+            .ok_or_else(|| format!("preset.self.get: memory_id {mid} not found"))?
+    } else {
+        // No preset bound: return the blank singleton (two-step — list to find
+        // the blank id, then fetch the full object).
+        let all = state.id_store.bundle_memory_list().map_err(|e| format!("preset.self.get: {e}"))?;
+        let blank_id = all.into_iter().find(|m| m.is_blank).map(|m| m.id)
+            .ok_or_else(|| "preset.self.get: blank singleton not found".to_string())?;
+        state.id_store.bundle_memory_get(&blank_id).map_err(|e| format!("preset.self.get: {e}"))?
+            .ok_or_else(|| "preset.self.get: blank singleton row missing".to_string())?
+    };
+    serde_json::to_value(&memory).map_err(|e| e.to_string())
+}
+
+pub(crate) fn memory_list_impl(
+    state: &AppState,
+    agent_id: &str,
+) -> Result<serde_json::Value, String> {
+    let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent(
+        &state.wstore, agent_id,
+    ).map_err(|e| format!("memory.list: {e}"))?;
+
+    let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
+    let entries = match std::fs::read_dir(&memory_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(json!({ "files": [] }));
+        }
+        Err(e) => return Err(format!("memory.list: read_dir: {e}")),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("memory.list: {e}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".md") { continue; }
+        let file_type = entry.file_type()
+            .map_err(|e| format!("memory.list: file_type {name}: {e}"))?;
+        if !file_type.is_file() { continue; }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("memory.list: metadata {name}: {e}")),
+        };
+        let preview_content = {
+            use std::io::Read;
+            std::fs::File::open(entry.path())
+                .map(|f| {
+                    let mut buf = Vec::with_capacity(512);
+                    f.take(512).read_to_end(&mut buf).ok();
+                    String::from_utf8_lossy(&buf).into_owned()
+                })
+                .unwrap_or_default()
+        };
+        files.push(NativeMemoryFileMeta {
+            is_index: name == "MEMORY.md",
+            metadata_type: crate::server::native_memory_handlers::parse_memory_frontmatter_type(&preview_content),
+            size_bytes: meta.len(),
+            modified_at: meta.modified().ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0),
+            filename: name,
+        });
+    }
+    files.sort_by(|a, b| b.is_index.cmp(&a.is_index).then(a.filename.cmp(&b.filename)));
+    serde_json::to_value(NativeMemoryListResult { files }).map_err(|e| e.to_string())
+}
+
+pub(crate) fn memory_read_impl(
+    state: &AppState,
+    agent_id: &str,
+    filename: &str,
+) -> Result<serde_json::Value, String> {
+    crate::server::native_memory_handlers::validate_memory_filename(filename)
+        .map_err(|e| format!("memory.read: {e}"))?;
+    let path = crate::server::native_memory_handlers::memory_dir_for_agent(
+        &state.wstore, agent_id,
+    ).map_err(|e| format!("memory.read: {e}"))?.join(filename);
+
+    let file_type = std::fs::symlink_metadata(&path)
+        .map_err(|e| format!("memory.read: {filename}: {e}"))?.file_type();
+    if !file_type.is_file() {
+        return Err(format!("memory.read: {filename} is not a regular file"));
+    }
+    const MAX: u64 = 10 * 1024 * 1024;
+    let mut buf = Vec::new();
+    std::fs::File::open(&path)
+        .and_then(|f| { use std::io::Read; f.take(MAX).read_to_end(&mut buf) })
+        .map_err(|e| format!("memory.read: {filename}: {e}"))?;
+    let content = String::from_utf8_lossy(&buf).into_owned();
+    serde_json::to_value(NativeMemoryReadFileResult { content }).map_err(|e| e.to_string())
+}
+
+pub(crate) fn memory_write_impl(
+    state: &AppState,
+    agent_id: &str,
+    filename: &str,
+    content: &str,
+) -> Result<(), String> {
+    crate::server::native_memory_handlers::validate_memory_filename(filename)
+        .map_err(|e| format!("memory.write: {e}"))?;
+    const MAX: usize = 10 * 1024 * 1024;
+    if content.len() > MAX {
+        return Err(format!("memory.write: content too large ({} bytes, max {MAX})", content.len()));
+    }
+    let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
+        &state.wstore, agent_id,
+    ).map_err(|e| format!("memory.write: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("memory.write: mkdir: {e}"))?;
+
+    let dest = dir.join(filename);
+    let tmp = dir.join(format!(".{}.{}.tmp", filename, uuid::Uuid::new_v4()));
+    if let Err(e) = std::fs::write(&tmp, content) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("memory.write: write tmp: {e}"));
+    }
+    if let Err(e) = std::fs::rename(&tmp, &dest) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("memory.write: rename: {e}"));
+    }
+    state.broker.publish(crate::backend::wps::WaveEvent {
+        event: format!("agent:memory:changed:{agent_id}"),
+        scopes: vec![], sender: String::new(), persist: 0, data: None,
+    });
+    Ok(())
 }
 
 /// Parse + validate a saved per-agent `ui:zoom` content blob for seeding a new

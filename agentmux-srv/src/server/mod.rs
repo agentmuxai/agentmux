@@ -304,6 +304,19 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tab/activate", post(handle_tab_activate))
         .route("/api/v1/tab/new", post(handle_tab_new))
         .route("/api/v1/window/focus", post(handle_window_focus))
+        // Agent App API — identity / preset / memory namespaces, the MCP-facing
+        // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
+        // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
+        // trusted AGENTMUX_AGENT_ID env; an agent's PTY has no auth key to reach
+        // these directly, so the slug cannot be forged. Each handler calls the
+        // same `app_api::*_impl` the WebSocket RPC handlers use.
+        .route("/api/v1/agent/memory/list", get(handle_agent_memory_list))
+        .route("/api/v1/agent/memory/read", get(handle_agent_memory_read))
+        .route("/api/v1/agent/memory/write", post(handle_agent_memory_write))
+        .route("/api/v1/agent/preset/list", get(handle_agent_preset_list))
+        .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
+        .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
+        .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         // Persistent cron scheduler (SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2.4).
@@ -644,6 +657,156 @@ async fn handle_pane_open(
             (status, Json(json!({ "error": e }))).into_response()
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Agent App API REST handlers (identity / preset / memory).
+//
+// `agent_id` is the agent slug, supplied by agentmux-mcp from its trusted
+// AGENTMUX_AGENT_ID env. Each handler maps a 4xx for caller/validation errors
+// (FORBIDDEN, "not found", "provide …", "not a regular file") and 5xx otherwise,
+// then delegates to the shared `app_api::*_impl`.
+// ---------------------------------------------------------------------------
+
+/// Classify an app-API impl error string into an HTTP status. FORBIDDEN and
+/// argument/not-found errors are the caller's fault (4xx); the rest are 5xx.
+fn app_api_error_status(e: &str) -> StatusCode {
+    if e.starts_with("FORBIDDEN") {
+        StatusCode::FORBIDDEN
+    } else if e.contains("not found")
+        || e.contains("provide ")
+        || e.contains("not a regular file")
+        || e.contains("too large")
+        || e.contains("invalid")
+    {
+        StatusCode::BAD_REQUEST
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+fn app_api_response(result: Result<serde_json::Value, String>) -> axum::response::Response {
+    match result {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryListQuery {
+    agent_id: String,
+}
+
+/// `GET /api/v1/agent/memory/list?agent_id=<slug>` — list the agent's own
+/// native-memory markdown files. Backs the `MemoryList` MCP tool.
+async fn handle_agent_memory_list(
+    State(state): State<AppState>,
+    Query(q): Query<AgentMemoryListQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_list_impl(&state, &q.agent_id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryReadQuery {
+    agent_id: String,
+    filename: String,
+}
+
+/// `GET /api/v1/agent/memory/read?agent_id=<slug>&filename=<f>` — read one of
+/// the agent's own memory files. Backs the `MemoryRead` MCP tool.
+async fn handle_agent_memory_read(
+    State(state): State<AppState>,
+    Query(q): Query<AgentMemoryReadQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_read_impl(&state, &q.agent_id, &q.filename))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryWriteRequest {
+    agent_id: String,
+    filename: String,
+    content: String,
+}
+
+/// `POST /api/v1/agent/memory/write` — create/overwrite one of the agent's own
+/// memory files (atomic tmp→rename). Backs the `MemoryWrite` MCP tool.
+async fn handle_agent_memory_write(
+    State(state): State<AppState>,
+    Json(req): Json<AgentMemoryWriteRequest>,
+) -> impl IntoResponse {
+    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content) {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
+        Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+/// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary
+/// fields only). Backs the `PresetList` MCP tool.
+async fn handle_agent_preset_list(State(state): State<AppState>) -> impl IntoResponse {
+    app_api_response(app_api::preset_list_impl(&state).await)
+}
+
+#[derive(serde::Deserialize)]
+struct AgentPresetGetQuery {
+    #[serde(default)]
+    agent_id: String,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+}
+
+/// `GET /api/v1/agent/preset/get?agent_id=<slug>&id=&name=` — fetch a preset by
+/// id or name; with neither, return the agent's own bound preset (self).
+/// Backs the `PresetGet` MCP tool.
+async fn handle_agent_preset_get(
+    State(state): State<AppState>,
+    Query(q): Query<AgentPresetGetQuery>,
+) -> impl IntoResponse {
+    if q.id.is_empty() && q.name.is_empty() {
+        if q.agent_id.is_empty() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "preset.get: provide id, name, or agent_id (for self)" })),
+            )
+                .into_response();
+        }
+        return app_api_response(app_api::preset_self_get_impl(&state, &q.agent_id).await);
+    }
+    app_api_response(app_api::preset_get_impl(&state, &q.id, &q.name).await)
+}
+
+#[derive(serde::Deserialize)]
+struct AgentIdentityAccountsQuery {
+    agent_id: String,
+}
+
+/// `GET /api/v1/agent/identity/accounts?agent_id=<slug>` — list the agent's own
+/// linked credential accounts (masked tails only, never secrets). Backs the
+/// `IdentityAccounts` MCP tool.
+async fn handle_agent_identity_accounts(
+    State(state): State<AppState>,
+    Query(q): Query<AgentIdentityAccountsQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::identity_self_accounts_impl(&state, &q.agent_id).await)
+}
+
+#[derive(serde::Deserialize)]
+struct AgentIdentityValidateRequest {
+    agent_id: String,
+    account_id: String,
+}
+
+/// `POST /api/v1/agent/identity/validate` — live-probe one of the agent's own
+/// linked accounts using its stored keychain secret (the agent never supplies a
+/// secret). Backs the `IdentityValidate` MCP tool.
+async fn handle_agent_identity_validate(
+    State(state): State<AppState>,
+    Json(req): Json<AgentIdentityValidateRequest>,
+) -> impl IntoResponse {
+    app_api_response(
+        app_api::identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await,
+    )
 }
 
 #[derive(serde::Deserialize)]
