@@ -90,7 +90,6 @@ describe("useHistoryPagination — Option E agent-anchored snapshot read", () =>
         });
 
         const model = makeMockModel();
-        const onContinuationModts = vi.fn();
 
         createRoot((d) => {
             dispose = d;
@@ -99,7 +98,6 @@ describe("useHistoryPagination — Option E agent-anchored snapshot read", () =>
                 model,
                 outputFormat: () => "claude-stream-json",
                 definitionId: "def-claude",
-                onContinuationModts,
                 log: () => {},
             });
         });
@@ -127,10 +125,6 @@ describe("useHistoryPagination — Option E agent-anchored snapshot read", () =>
 
         // InitReady fired.
         expect(model.paneEvents.some((e) => e.type === "InitReady")).toBe(true);
-
-        // modts surfaced for the continuation chip.
-        expect(onContinuationModts).toHaveBeenCalledTimes(1);
-        expect(onContinuationModts.mock.calls[0][0]).toBeGreaterThan(0);
     });
 
     it("falls through to NDJSON replay when AgentSessionRead returns no content", async () => {
