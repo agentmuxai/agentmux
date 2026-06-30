@@ -44,8 +44,13 @@ shared or reviewed as a unit.
   to the skill/MCP IDs it uses (direct binding; Bundle-level grouping is v2).
 - **Config gen reads references** — `agent_config.rs` assembles `.mcp.json` +
   skills index + `.claude/commands/*.md` from the *referenced standalone* records.
-- **Ownership/global** — every standalone record is **agent-owned** or **global**;
-  the App API enforces it (mirroring the `preset.upsert` global guard).
+- **Ownership/global — single source of truth.** Every standalone record carries
+  exactly one flag, **`is_global: bool`** (mirroring `Memory` in `memory_bundles.rs`,
+  which stores *only* `is_global` — no redundant owner column). **No
+  `owner_agent_id` column** (reagent P1 on `:51`): a separate owner string +
+  `is_global` can disagree (owner set yet `is_global=1`). Per-agent *ownership for
+  editing* is established by the **reference** (an agent may mutate a non-global
+  record it references) and enforced exactly as `preset.upsert` does — see §5.
 
 ## 4. Storage design
 
@@ -57,13 +62,12 @@ trigger       TEXT          -- slash-command trigger
 skill_type    TEXT
 description   TEXT
 content       TEXT
-owner_agent_id TEXT         -- "" ⇒ global/shared; else the owning agent
-is_global     INTEGER       -- mirrors preset global flag
+is_global     INTEGER       -- 0/1; THE single ownership flag (cf. Memory)
 created_at    INTEGER
 updated_at    INTEGER
 ```
-Reuse the `AgentSkill` field names (`name/trigger/skill_type/description/content`)
-to minimize churn; add `owner_agent_id`/`is_global`, drop the hard `agent_id` FK.
+Reuse the `AgentSkill` field names (`name/trigger/skill_type/description/content`);
+drop the hard `agent_id` FK; add only `is_global` (no `owner_agent_id`).
 
 ### 4.2 `db_mcp_servers` (standalone — decomposed)
 ```
@@ -71,8 +75,7 @@ id            TEXT PK
 name          TEXT          -- unique server name (the .mcp.json key)
 transport     TEXT          -- "stdio" | "url"
 config        TEXT (JSON)   -- command/args/env or url/headers
-owner_agent_id TEXT
-is_global     INTEGER
+is_global     INTEGER       -- single ownership flag (as above)
 created_at    INTEGER
 updated_at    INTEGER
 ```
@@ -83,8 +86,16 @@ user row) — see §6.
 ### 4.3 References (direct agent binding)
 ```
 db_agent_skills_ref:  agent_id TEXT, skill_id TEXT  (PK pair)
+                      FK skill_id  → db_skills(id)      ON DELETE CASCADE
+                      FK agent_id  → db_agents(id)      ON DELETE CASCADE
 db_agent_mcp_ref:     agent_id TEXT, mcp_id   TEXT  (PK pair)
+                      FK mcp_id    → db_mcp_servers(id) ON DELETE CASCADE
+                      FK agent_id  → db_agents(id)      ON DELETE CASCADE
 ```
+**FK cascade is required** (reagent P1 on `:86`): deleting an agent *or* a standalone
+record must remove its ref rows, so no orphaned references silently survive. Where
+SQLite FK enforcement isn't guaranteed (PRAGMA off in some stores), the `delete`
+handlers (§5) must also explicitly purge matching ref rows in the same transaction.
 An agent's effective set = its referenced records. (Bundle membership unions in at
 v2; the resolver shape is identical — just another source of references.)
 
@@ -97,13 +108,15 @@ Add command consts in `rpc_types.rs` and handlers in `app_api.rs`, mirroring
 |---|---|
 | `skill.list` / `mcp.list` | list records visible to the agent (own + global) |
 | `skill.get` / `mcp.get` | by id |
-| `skill.upsert` / `mcp.upsert` | create/update **own** record; **reject** editing a `is_global` record (the `preset.upsert` guard, generalized) |
-| `skill.delete` / `mcp.delete` | own, non-global only |
+| `skill.upsert` / `mcp.upsert` | create/update; **both** guards from `preset.upsert` (`app_api.rs` S4a): (a) **strip caller-supplied `is_global`** — force `is_global=false` on every write so an agent can never self-promote a record to global (reagent P1 on `:100`); (b) **reject mutating an existing `is_global` record** ("cannot mutate a global"). |
+| `skill.delete` / `mcp.delete` | own, non-global only; also purge the record's ref rows (§4.3) |
 | `skill.bind` / `skill.unbind` (and `mcp.*`) | add/remove an agent→record reference |
 
 - **S1** (existing): `ctx.agent_id` non-empty and matches `req.agent_id`.
-- **Ownership/global guard** (generalize `preset.upsert`): an agent may write/delete
-  only records it owns; never a global or another agent's.
+- **Ownership/global guard** (exactly `preset.upsert`): force `is_global=false` on
+  write (strip caller escalation); reject mutating/deleting an existing global; an
+  agent may write/delete only a non-global record it references — never a global or
+  another agent's.
 - Expose the same set over the **REST** routes the App API already mirrors, and as
   **MCP tools** in `agentmux-mcp` (parallel to the memory tools) so agents manage
   their own skills/servers.
@@ -129,13 +142,13 @@ No change to *when* files are written (still `write_agent_config_files` at launc
 One-time, idempotent, behind the App API surface:
 
 1. **Skills:** for each existing `AgentSkill` row → create a `db_skills` record
-   (`owner_agent_id = agent_id`, `is_global = 0`) + a `db_agent_skills_ref`
-   (agent_id → new skill id). De-dupe identical skills across agents into one global
+   (`is_global = 0`) + a `db_agent_skills_ref` (agent_id → new skill id); the ref
+   establishes ownership. De-dupe identical skills across agents into one global
    record where names+content match (optional; safe default is per-agent copies).
 2. **MCP:** parse each agent's `AgentContent("mcp")` `.mcp.json` blob → one
-   `db_mcp_servers` row per server entry (`owner_agent_id = agent_id`) + a
-   `db_agent_mcp_ref` per server. The synthetic `agentmux-mcp` entry is **skipped**
-   (it's re-injected at build time).
+   `db_mcp_servers` row per server entry (`is_global = 0`) + a `db_agent_mcp_ref`
+   per server (the ref establishes ownership). The synthetic `agentmux-mcp` entry is
+   **skipped** (it's re-injected at build time).
 3. **Read alias / fallback:** keep the legacy tables readable; config-gen falls back
    to them for any agent without refs (until migration is confirmed complete).
 4. **Follow-on (not v1 plumbing): `soul`/`agentmd` → Skills.** Per the Brief stance
