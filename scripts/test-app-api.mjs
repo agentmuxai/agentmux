@@ -5,6 +5,7 @@ import WebSocket from "ws";
 const PORT = process.env.AGENTMUX_LOCAL_URL?.split(":").pop() ?? "61018";
 const KEY = process.env.AGENTMUX_AUTH_KEY;
 const AGENT = process.env.AGENTMUX_AGENT_ID ?? "AgentX";
+const BLOCK_ID = process.env.AGENTMUX_BLOCKID ?? "";
 const url = `ws://127.0.0.1:${PORT}/ws?authkey=${KEY}`;
 
 const ws = new WebSocket(url);
@@ -42,11 +43,12 @@ ws.on("error", (e) => { console.error("WS error:", e.message); process.exit(1); 
 
 const show = (label, v) => console.log(`${label}:`, JSON.stringify(v, null, 2));
 
-// Hit the REST surface the way agentmux-mcp does (X-AuthKey header, /api/v1/...).
+// Hit the REST surface the way agentmux-mcp does (X-AuthKey + X-Block-Id headers, /api/v1/...).
+// BLOCK_ID must be set (via AGENTMUX_BLOCKID env) for REST calls to succeed.
 async function rest(method, path, body) {
     const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
         method,
-        headers: { "X-AuthKey": KEY, "Content-Type": "application/json" },
+        headers: { "X-AuthKey": KEY, "Content-Type": "application/json", "X-Block-Id": BLOCK_ID },
         body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
@@ -104,15 +106,19 @@ async function run() {
         show("unlink", await call("identity.self.unlink", { agent_id: AGENT, provider: "anthropic" }));
 
         // ---- REST path (the MCP→REST→handler chain agentmux-mcp uses) ----
+        // agent_id is server-derived from X-Block-Id; no client-supplied agent_id needed.
+        if (!BLOCK_ID) { console.log("\n⚠ AGENTMUX_BLOCKID not set — skipping REST path tests"); }
+        else {
         console.log("\n=== REST /api/v1/agent/memory/list (server-stamped agent_id) ===");
-        await rest("GET", `/api/v1/agent/memory/list?agent_id=${encodeURIComponent(AGENT)}`);
+        await rest("GET", `/api/v1/agent/memory/list`);
         console.log("\n=== REST /api/v1/agent/preset/get (self — no id/name) ===");
-        await rest("GET", `/api/v1/agent/preset/get?agent_id=${encodeURIComponent(AGENT)}`);
+        await rest("GET", `/api/v1/agent/preset/get`);
         console.log("\n=== REST /api/v1/agent/identity/accounts ===");
-        await rest("GET", `/api/v1/agent/identity/accounts?agent_id=${encodeURIComponent(AGENT)}`);
+        await rest("GET", `/api/v1/agent/identity/accounts`);
         console.log("\n=== REST memory/write → read round-trip ===");
-        await rest("POST", `/api/v1/agent/memory/write`, { agent_id: AGENT, filename: "rest-smoke.md", content: "via REST\n" });
-        await rest("GET", `/api/v1/agent/memory/read?agent_id=${encodeURIComponent(AGENT)}&filename=rest-smoke.md`);
+        await rest("POST", `/api/v1/agent/memory/write`, { filename: "rest-smoke.md", content: "via REST\n" });
+        await rest("GET", `/api/v1/agent/memory/read?filename=rest-smoke.md`);
+        }
 
         console.log("\nAll calls completed.");
         ws.close();
