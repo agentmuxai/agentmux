@@ -121,6 +121,97 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             node_id,
             correlation_id,
         } => layout::handle_layout_delete_node(state, tab_id, node_id, correlation_id),
+        // Phase 3 — the remaining 7 layout-tree arms. Each resolves the
+        // tab, calls the existing pure fn in `backend::layout`, runs
+        // `balance_node` (matching the frontend's post-action normalize),
+        // reconciles dangling focus/magnify, and emits the granular event.
+        Command::LayoutMoveNode {
+            tab_id,
+            node_id,
+            new_parent_id,
+            index,
+            correlation_id,
+        } => layout::handle_layout_move_node(
+            state,
+            tab_id,
+            node_id,
+            new_parent_id,
+            index,
+            correlation_id,
+        ),
+        Command::LayoutSwapNodes {
+            tab_id,
+            node1_id,
+            node2_id,
+            correlation_id,
+        } => layout::handle_layout_swap_nodes(state, tab_id, node1_id, node2_id, correlation_id),
+        Command::LayoutResizeNodes {
+            tab_id,
+            ops,
+            correlation_id,
+        } => layout::handle_layout_resize_nodes(state, tab_id, ops, correlation_id),
+        Command::LayoutReplaceNode {
+            tab_id,
+            target_id,
+            new_node,
+            focus_after,
+            correlation_id,
+        } => layout::handle_layout_replace_node(
+            state,
+            tab_id,
+            target_id,
+            new_node,
+            focus_after,
+            correlation_id,
+        ),
+        Command::LayoutSplitHorizontal {
+            tab_id,
+            target_id,
+            new_node,
+            position,
+            focus_after,
+            correlation_id,
+        } => layout::handle_layout_split_horizontal(
+            state,
+            tab_id,
+            target_id,
+            new_node,
+            position,
+            focus_after,
+            correlation_id,
+        ),
+        Command::LayoutSplitVertical {
+            tab_id,
+            target_id,
+            new_node,
+            position,
+            focus_after,
+            correlation_id,
+        } => layout::handle_layout_split_vertical(
+            state,
+            tab_id,
+            target_id,
+            new_node,
+            position,
+            focus_after,
+            correlation_id,
+        ),
+        Command::LayoutInsertNodeAtIndex {
+            tab_id,
+            node,
+            index_arr,
+            focus_after,
+            magnify_after,
+            correlation_id,
+        } => layout::handle_layout_insert_node_at_index(
+            state,
+            tab_id,
+            node,
+            index_arr,
+            focus_after,
+            magnify_after,
+            correlation_id,
+        ),
         Command::CreateWindow {
             window_id,
             workspace_id,
@@ -2701,6 +2792,246 @@ mod tests {
         let root = state.tabs[&tab_id].rootnode.as_ref().expect("root");
         let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "b"], "out-of-range index clamps to end");
+    }
+
+    // ── Phase 3 — the 7 remaining structural arms ──────────────────────────
+    fn group_node(id: &str, children: Vec<agentmux_common::LayoutNode>) -> agentmux_common::LayoutNode {
+        agentmux_common::LayoutNode {
+            id: id.to_string(),
+            size: 10.0,
+            children,
+            ..Default::default()
+        }
+    }
+
+    fn tree_has(state: &State, tab_id: &str, node_id: &str) -> bool {
+        state.tabs[tab_id].rootnode.as_ref().is_some_and(|r| {
+            crate::backend::layout::find_node_by_id(r, node_id).is_some()
+        })
+    }
+
+    #[test]
+    fn layout_move_node_reparents_and_emits_event() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group_node(
+            "root",
+            vec![
+                group_node("g1", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]),
+                leaf_node("c", "bc"),
+            ],
+        ));
+        let events = update(
+            &mut state,
+            Command::LayoutMoveNode {
+                tab_id: tab_id.clone(),
+                node_id: "c".into(),
+                new_parent_id: "g1".into(),
+                index: 0,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeMoved { .. }));
+        assert!(tree_has(&state, &tab_id, "c"), "c still in tree");
+        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        assert!(
+            !root.children.iter().any(|ch| ch.id == "c"),
+            "c reparented out of root's direct children"
+        );
+    }
+
+    #[test]
+    fn layout_swap_nodes_swaps_positions() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode =
+            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
+        let events = update(
+            &mut state,
+            Command::LayoutSwapNodes {
+                tab_id: tab_id.clone(),
+                node1_id: "a".into(),
+                node2_id: "b".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodesSwapped { .. }));
+        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["b", "a"], "positions swapped");
+    }
+
+    #[test]
+    fn layout_resize_nodes_applies_sizes() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode =
+            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
+        let events = update(
+            &mut state,
+            Command::LayoutResizeNodes {
+                tab_id: tab_id.clone(),
+                ops: vec![
+                    agentmux_common::ResizeOp { node_id: "a".into(), size: 30.0 },
+                    agentmux_common::ResizeOp { node_id: "b".into(), size: 70.0 },
+                ],
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodesResized { .. }));
+        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        let a = crate::backend::layout::find_node_by_id(root, "a").unwrap();
+        assert_eq!(a.size, 30.0);
+    }
+
+    #[test]
+    fn layout_replace_node_swaps_in_new_and_honours_focus() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode =
+            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
+        let events = update(
+            &mut state,
+            Command::LayoutReplaceNode {
+                tab_id: tab_id.clone(),
+                target_id: "a".into(),
+                new_node: leaf_node("x", "bx"),
+                focus_after: true,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeReplaced { .. }));
+        assert!(tree_has(&state, &tab_id, "x"));
+        assert!(!tree_has(&state, &tab_id, "a"), "a replaced");
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "x");
+    }
+
+    #[test]
+    fn layout_split_horizontal_wraps_root_and_focuses_new() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("a", "ba"));
+        let events = update(
+            &mut state,
+            Command::LayoutSplitHorizontal {
+                tab_id: tab_id.clone(),
+                target_id: "a".into(),
+                new_node: leaf_node("x", "bx"),
+                position: agentmux_common::SplitPosition::After,
+                focus_after: true,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutSplitHorizontalApplied { .. }));
+        assert!(tree_has(&state, &tab_id, "a"));
+        assert!(tree_has(&state, &tab_id, "x"));
+        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        assert!(root.data.is_none(), "root became a group");
+        assert_eq!(root.children.len(), 2);
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "x");
+    }
+
+    #[test]
+    fn layout_split_vertical_wraps_root() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("a", "ba"));
+        let events = update(
+            &mut state,
+            Command::LayoutSplitVertical {
+                tab_id: tab_id.clone(),
+                target_id: "a".into(),
+                new_node: leaf_node("x", "bx"),
+                position: agentmux_common::SplitPosition::Before,
+                focus_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutSplitVerticalApplied { .. }));
+        assert!(tree_has(&state, &tab_id, "a"));
+        assert!(tree_has(&state, &tab_id, "x"));
+        assert_eq!(state.tabs[&tab_id].rootnode.as_ref().unwrap().children.len(), 2);
+    }
+
+    #[test]
+    fn layout_insert_node_at_index_inserts_after_path() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode =
+            Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNodeAtIndex {
+                tab_id: tab_id.clone(),
+                node: leaf_node("x", "bx"),
+                index_arr: vec![0],
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeInsertedAtIndex { .. }));
+        let root = state.tabs[&tab_id].rootnode.as_ref().unwrap();
+        let ids: Vec<_> = root.children.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "x", "b"], "inserted after index 0");
+    }
+
+    #[test]
+    fn layout_insert_node_at_index_into_empty_promotes_to_root() {
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutInsertNodeAtIndex {
+                tab_id: tab_id.clone(),
+                node: leaf_node("only", "b"),
+                index_arr: vec![0],
+                focus_after: false,
+                magnify_after: false,
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::LayoutNodeInsertedAtIndex { .. }));
+        assert_eq!(
+            state.tabs[&tab_id].rootnode.as_ref().map(|n| n.id.as_str()),
+            Some("only")
+        );
+    }
+
+    #[test]
+    fn layout_move_node_unknown_tab_errors() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::LayoutMoveNode {
+                tab_id: "nope".into(),
+                node_id: "a".into(),
+                new_parent_id: "b".into(),
+                index: 0,
+                correlation_id: "c".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(
+            &events[0],
+            Event::Error { code: ErrorCode::InvalidCommand, .. }
+        ));
+    }
+
+    #[test]
+    fn layout_swap_nodes_empty_tree_errors() {
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutSwapNodes {
+                tab_id: tab_id.clone(),
+                node1_id: "a".into(),
+                node2_id: "b".into(),
+                correlation_id: "c".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
     }
 
     #[test]
