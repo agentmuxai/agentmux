@@ -109,7 +109,7 @@ error state. UI is read-only after automation is live.
 
 ### OQ9 — Where do the secrets live?
 GitHub **repository (or org) secrets**: `MSSTORE_TENANT_ID`, `MSSTORE_SELLER_ID`,
-`MSSTORE_CLIENT_ID`, `MSSTORE_CLIENT_SECRET`. Same secret-store pattern the winget
+`MSSTORE_CLIENT_ID`, `MSSTORE_CLIENT_SECRET`, `MSSTORE_APP_ID`. Same secret-store pattern the winget
 step already uses for its token. The client secret rotates per Entra policy;
 document the rotation owner.
 
@@ -199,19 +199,25 @@ jobs:
 
       - name: Configure credentials
         # [P1] Secrets must not appear in CLI args (visible in process list).
-        # Pass MSSTORE_CLIENT_SECRET via env: and read it as $env:MSSTORE_CLIENT_SECRET.
+        # Pass all secret values via env: and read them as $env:* to keep them
+        # out of the process list (tenant/seller/client IDs can also leak paths).
         env:
+          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
           MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         shell: pwsh
         run: |
           msstore reconfigure `
-            --tenantId ${{ secrets.MSSTORE_TENANT_ID }} `
-            --sellerId ${{ secrets.MSSTORE_SELLER_ID }} `
-            --clientId ${{ secrets.MSSTORE_CLIENT_ID }} `
+            --tenantId $env:MSSTORE_TENANT_ID `
+            --sellerId $env:MSSTORE_SELLER_ID `
+            --clientId $env:MSSTORE_CLIENT_ID `
             --clientSecret $env:MSSTORE_CLIENT_SECRET
 
       - name: Publish to Store
-        run: msstore publish "AgentMux.msix" --no-commit=false
+        env:
+          MSSTORE_APP_ID: ${{ secrets.MSSTORE_APP_ID }}
+        run: msstore publish "AgentMux.msix" --appId $env:MSSTORE_APP_ID --no-commit=false
         # OQ5: gradual rollout is managed post-publish via:
         #   msstore submission rollout update --rollout <pct>
         #   msstore submission rollout finalize
@@ -227,7 +233,7 @@ jobs:
 1. **Release build:** extend the release artifact upload to also push
    `AgentMux_<ver>_x64.msix` to `dl.agentmux.ai/releases/` (the only change to
    existing tasks — one upload line, mirroring the `.msi`).
-2. **Secrets:** add the four `MSSTORE_*` repo secrets (after §3).
+2. **Secrets:** add the five `MSSTORE_*` repo secrets (after §3).
 3. **Workflow:** land `.github/workflows/msstore-release.yml`, initially
    `workflow_dispatch`-only; flip on the `v*` tag trigger once a supervised manual
    run succeeds end-to-end.
