@@ -286,6 +286,76 @@ describe("cascade dissolve — multiple columns collapse into one", () => {
         expect(paneC.minimizedSize).toBeDefined();
         expect(root.children).toHaveLength(1); // dissolve bails (no Row sibling) — correct
     });
+
+    it("restores pane from 3-deep cascade (A→B→C → restore colA pane)", () => {
+        // root (Row)
+        // ├── colA (Column) → paneA1, paneA2
+        // ├── colB (Column) → paneB
+        // └── colC (Column) → paneC
+        const paneA1 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA1" });
+        const paneA2 = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneA2" });
+        const colA   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneA1, paneA2]);
+        const paneB  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneB" });
+        const colB   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneB]);
+        const paneC  = newLayoutNode(FlexDirection.Row, PANE_SIZE, undefined, { blockId: "paneC" });
+        const colC   = newLayoutNode(FlexDirection.Column, PANE_SIZE, [paneC]);
+        const root   = newLayoutNode(FlexDirection.Row, PANE_SIZE, [colA, colB, colC]);
+
+        const model = makeMockModel(root, {
+            [colA.id]: { pixelToSizeRatio: 1 },
+            [colB.id]: { pixelToSizeRatio: 1 },
+            [colC.id]: { pixelToSizeRatio: 1 },
+        });
+
+        // Step 1: Dissolve colA into colB (minimize all panes in colA)
+        minimizeNodeToggle(model as any, paneA1.id);
+        minimizeNodeToggle(model as any, paneA2.id);
+        expect(colA.columnDissolve).toBeDefined();
+        expect(root.children).toHaveLength(2); // colB + colC remain
+
+        // Step 2: Dissolve colB into colC (colB now has [colA-dissolved, paneB]; minimizing paneB collapses it)
+        minimizeNodeToggle(model as any, paneB.id);
+        expect(colB.columnDissolve).toBeDefined();
+        expect(root.children).toHaveLength(1); // only colC remains
+        expect(root.children![0].id).toBe(colC.id);
+
+        // Step 3: Restore paneA1 from the deeply dissolved colA.
+        // The recursive-undissolve-ancestors path must undissolve colB (outermost) then colA
+        // (immediate parent) before restoring paneA1 — exercising the path added in commit 360dd82.
+        minimizeNodeToggle(model as any, paneA1.id);
+
+        // All three columns must be back in the root Row
+        expect(root.children).toHaveLength(3);
+        const rootIds = root.children!.map((c) => c.id);
+        expect(rootIds).toContain(colA.id);
+        expect(rootIds).toContain(colB.id);
+        expect(rootIds).toContain(colC.id);
+
+        // No column retains a columnDissolve marker
+        expect(colA.columnDissolve).toBeUndefined();
+        expect(colB.columnDissolve).toBeUndefined();
+        expect(colC.columnDissolve).toBeUndefined();
+
+        // Each column is restored to its original Row-slot size
+        expect(colA.size).toBe(PANE_SIZE);
+        expect(colB.size).toBe(PANE_SIZE);
+        expect(colC.size).toBe(PANE_SIZE);
+
+        // root Row no longer needs the slip anchor
+        expect(root._slipAnchor).toBeUndefined();
+
+        // paneA1 is restored (the pane we clicked)
+        expect(paneA1.minimizedSize).toBeUndefined();
+        expect(model.getMinimizedSet().has(paneA1.id)).toBe(false);
+
+        // paneA2 remains minimized inside colA
+        expect(paneA2.minimizedSize).toBeDefined();
+        expect(model.getMinimizedSet().has(paneA2.id)).toBe(true);
+
+        // paneB remains minimized inside colB
+        expect(paneB.minimizedSize).toBeDefined();
+        expect(model.getMinimizedSet().has(paneB.id)).toBe(true);
+    });
 });
 
 // ── Bail case — no adjacent sibling ─────────────────────────────────────────
