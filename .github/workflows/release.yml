@@ -2,10 +2,13 @@ name: Release
 
 # Triggered by pushing a semver tag (v0.50.0) or via workflow_dispatch for
 # emergency reruns. Verifies version consistency, builds all three platform
-# artifacts, publishes a GitHub Release + S3 mirror, submits to WinGet and
-# the Microsoft Store (non-blocking), and triggers the landing page deploy.
+# artifacts, publishes a GitHub Release (the single source of truth for
+# distribution), submits to WinGet and the Microsoft Store (non-blocking), and
+# triggers the landing page deploy. Asset mirroring to agentmux.ai is done by the
+# landing page itself (fetch-release.mjs) — this workflow never touches S3/AWS.
 #
-# See docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md for the full design.
+# See docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md and the correction
+# docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md for the full design.
 
 on:
   push:
@@ -340,7 +343,12 @@ jobs:
         if: always()
         run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
 
-  # ── Phase 3: Publish GitHub Release + S3 mirror ──────────────────────────
+  # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
+  # GitHub Releases is the single source of truth for distribution. The landing
+  # page (agentmux-landing/scripts/fetch-release.mjs) reads this release, mirrors
+  # the assets into its OWN bucket (agentmux-landing-prod), and serves them from
+  # agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
+  # GitHub Release plus a repository_dispatch to redeploy the landing page.
   publish:
     name: Publish release
     needs: [verify, check-macos, build-windows, build-linux, build-macos]
@@ -350,7 +358,6 @@ jobs:
       contents: write
     env:
       VERSION: ${{ needs.verify.outputs.version }}
-      S3_RELEASES: s3://dl.agentmux.ai/releases
     steps:
       - uses: actions/checkout@v4
         with:
@@ -398,45 +405,6 @@ jobs:
             gh release upload "v${VERSION}" dist-flat/* --clobber
           fi
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Mirror artifacts to S3 (versioned path)
-        run: |
-          for f in dist-flat/*; do
-            aws s3 cp "$f" "${S3_RELEASES}/${VERSION}/$(basename "$f")" \
-              --cache-control "public, max-age=31536000, immutable"
-          done
-
-      - name: Mirror artifacts to S3 (latest/ unversioned stable URLs)
-        run: |
-          # Unversioned names match the map in agentmux-landing/scripts/fetch-release.mjs
-          # Note: no .deb — only AppImage is produced by the Linux build job.
-          declare -A UNVERSIONED=(
-            ["x64-setup.exe"]="AgentMux_x64-setup.exe"
-            ["portable.zip"]="agentmux-x64-portable.zip"
-            [".AppImage"]="AgentMux_amd64.AppImage"
-            ["arm64.dmg"]="AgentMux_aarch64.dmg"
-            ["x64.msix"]="AgentMux_x64.msix"
-          )
-          for f in dist-flat/*; do
-            BASENAME=$(basename "$f")
-            LOWER="${BASENAME,,}"
-            for suffix in "${!UNVERSIONED[@]}"; do
-              if [[ "$LOWER" == *"${suffix,,}"* ]]; then
-                DEST="${UNVERSIONED[$suffix]}"
-                aws s3 cp "$f" "${S3_RELEASES}/latest/${DEST}" \
-                  --cache-control "public, max-age=300"
-                echo "  $BASENAME → latest/$DEST"
-                break
-              fi
-            done
-          done
-
       - name: Trigger landing page deploy
         env:
           GH_TOKEN: ${{ secrets.LANDING_DEPLOY_TOKEN }}
@@ -468,17 +436,17 @@ jobs:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Resolve the actual installer filename from the GitHub Release assets
-          # (package-installer.ps1 produces AgentMux-<ver>-x64-setup.exe with dashes,
-          # not underscores — the versioned S3 path uses the same name as the artifact).
-          INSTALLER_NAME=$(gh release view "v${VERSION}" \
+          # Resolve the GitHub Release asset download URL directly — GitHub
+          # Releases is the source of truth (no separate CDN). package-installer.ps1
+          # produces AgentMux-<ver>-x64-setup.exe.
+          INSTALLER_URL=$(gh release view "v${VERSION}" \
             --repo agentmuxai/agentmux \
-            --json assets --jq '.assets[].name' | grep -i 'setup\.exe$' | head -1)
-          if [ -z "$INSTALLER_NAME" ]; then
+            --json assets \
+            --jq '.assets[] | select(.name | test("setup\\.exe$"; "i")) | .url' | head -1)
+          if [ -z "$INSTALLER_URL" ]; then
             echo "❌ No setup.exe asset found in GitHub Release v${VERSION}" >&2
             exit 1
           fi
-          INSTALLER_URL="https://dl.agentmux.ai/releases/${VERSION}/${INSTALLER_NAME}"
           echo "WinGet installer URL: $INSTALLER_URL"
           ./wingetcreate update AgentMux.AgentMux \
             --version "${VERSION}" \
