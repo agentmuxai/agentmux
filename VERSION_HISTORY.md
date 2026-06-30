@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.49.10 — 2026-06-30
+
+- fix(agent-pane): watchdog recovers a stalled rate-limited turn past retryAfterMs + liveness window
+- feat(srv): persist LayoutCleared/LayoutTreeReplaced via the persist subscriber + bridge (layout single-writer, phase 1; behavior-neutral)
+- feat(srv): port balanceNode tree-normalization to Rust (strong-reducer-authority keystone)
+- feat(srv): wire the 7 remaining layout reducer arms (Move/Swap/Resize/Replace/Split/InsertAtIndex) through the pure algebra + balance_node
+
+
 ## 0.49.9 — 2026-06-30
 
 - fix(floating-pane): dragging a torn-off floating pane is broken on Linux — get_window_position returns {0,0} post-load
