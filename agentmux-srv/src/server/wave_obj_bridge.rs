@@ -431,21 +431,27 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         }
 
         // ----- Layout (Phase 2 — partial) -----
-        // ONLY the focused/magnified events are persisted by
-        // `apply_event_to_wstore` (persist_subscriber.rs:289-292).
-        // The other 11 layout-tree events (Insert/Delete/Move/Swap/
-        // Resize/Replace/Split*/Clear/TreeReplaced) are persisted via
-        // wcore-direct in their RPC handlers — they DON'T appear in
-        // `apply_event_to_wstore`. If the bridge tried to broadcast
-        // LayoutState for those, `wstore.get<LayoutState>` could return
-        // pre-event tree state (subscriber and bridge race; only this
-        // one is the unsafe direction). Tracked as a follow-up issue
-        // for the layout-tree-event persistence migration. Until then,
-        // those handlers' existing `success_with_updates(...)` response
-        // broadcasts cover the frontend (Codex P2 on PR #861).
+        // Focused/Magnified + Cleared/TreeReplaced are now persisted by
+        // `apply_event_to_wstore` (persist_subscriber.rs), so the bridge
+        // can safely re-read LayoutState and broadcast it: the HTTP RPC
+        // path applies SQLite synchronously before publishing the event
+        // (see the post-event-state guarantee above), so the read sees
+        // post-event tree state.
+        //
+        // The remaining tree events (Insert/Delete/Move/Swap/Resize/
+        // Replace/Split*) are still persisted via wcore-direct in their
+        // RPC handlers — they DON'T yet appear in `apply_event_to_wstore`.
+        // If the bridge broadcast LayoutState for those, the read could
+        // race ahead of the wcore-direct write. They remain covered by
+        // their handlers' existing `success_with_updates(...)` response
+        // broadcasts (Codex P2 on PR #861) until their persistence
+        // migrates here in a later phase.
         Event::FocusedNodeChanged { tab_id, .. }
         | Event::MagnifiedNodeChanged { tab_id, .. } => {
             emit_layout_for_tab(&wstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
+        }
+        Event::LayoutCleared { tab_id, .. } | Event::LayoutTreeReplaced { tab_id, .. } => {
+            emit_layout_for_tab(&wstore, &event_bus, tab_id, "LayoutCleared/TreeReplaced").await;
         }
 
         // Saga lifecycle, launcher-domain events, OS facts, etc. — not
