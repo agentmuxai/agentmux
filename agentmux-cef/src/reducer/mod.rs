@@ -850,6 +850,14 @@ pub struct DispatchOutput {
     pub pane_pool_size_after: Option<usize>,
     pub pane_pool_destroyed_was_unpromoted: bool,
     pub promoted_pane_pool_label: Option<String>,
+    /// Pillar 2 (level-triggered quit) — set by `update()` after any quit-relevant
+    /// command when the host should begin draining NOW (no live user window, no
+    /// user creation in flight, still `Running`). The UI-thread drain executor
+    /// consumes this and posts the Stage-1 cascade. `None` in the common case.
+    /// This is the level-triggered replacement for the edge-triggered gate that
+    /// previously lived only in `client::on_before_close` and could miss a
+    /// concurrent pool-refill race (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md).
+    pub request_drain: Option<crate::state::QuitReason>,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -874,6 +882,7 @@ impl std::fmt::Debug for DispatchOutput {
             .field("pool_size_after", &self.pool_size_after)
             .field("pool_destroyed_was_unpromoted", &self.pool_destroyed_was_unpromoted)
             .field("promoted_pool_label", &self.promoted_pool_label)
+            .field("request_drain", &self.request_drain)
             .finish()
     }
 }
@@ -897,8 +906,37 @@ mod top_level;
 /// internal to `quit` — used by `count_live_user_windows` and its tests.)
 pub(crate) use quit::count_live_user_windows;
 
+/// Whether a command can change the quit decision's inputs — the live
+/// user-window count (`browsers`), pending user-initiated creations, or
+/// `quit_state`. **Negative guard:** only known high-frequency / clearly
+/// quit-irrelevant commands are excluded, so any command NOT listed here
+/// defaults to relevant. That fail-safe is deliberate — silently missing a
+/// window/pool transition is exactly the edge-triggered bug Pillar 2 replaces,
+/// whereas an extra cheap `reconcile_quit` read on an irrelevant command is
+/// harmless (it just returns `None`). The excluded set is the genuine hot path
+/// (drag-opacity ticks) plus the browser-pane lifecycle (panes live in the
+/// separate `browser_panes` map and never affect `count_live_user_windows`).
+fn is_quit_relevant(cmd: &HostCommand) -> bool {
+    !matches!(
+        cmd,
+        HostCommand::SetWindowOpacity { .. }
+            | HostCommand::StartDrag { .. }
+            | HostCommand::EndDrag { .. }
+            | HostCommand::ToggleFloatingMaximize { .. }
+            | HostCommand::EvictFloatingPaneWindowState { .. }
+            | HostCommand::EnqueueBrowserPaneCreate { .. }
+            | HostCommand::TryRegisterBrowserPaneLive { .. }
+            | HostCommand::CompleteBrowserPaneCreate { .. }
+            | HostCommand::EnqueueBrowserPaneClose { .. }
+            | HostCommand::CompleteBrowserPaneClose { .. }
+            | HostCommand::DrainBrowserPaneByLabel { .. }
+            | HostCommand::AbortBrowserPaneCreate { .. }
+    )
+}
+
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
-    match cmd {
+    let quit_relevant = is_quit_relevant(&cmd);
+    let mut out = match cmd {
         HostCommand::EnqueuePendingWindowCreation { entry } => {
             handle_enqueue_pending_window_creation(state, entry)
         }
@@ -980,7 +1018,19 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::EvictFloatingPaneWindowState { label } => {
             pane_window::handle_evict_floating_pane_window_state(state, label)
         }
+    };
+    // Pillar 2 — level-triggered quit reconciliation. After any transition that
+    // can change the decision's inputs, recompute the pure `reconcile_quit` over
+    // the resulting state. A drain that an edge-triggered close gate missed
+    // (e.g. raced by a concurrent pool refill) is caught here, on the very next
+    // transition that settles the count. Pure read; the actual close cascade is
+    // posted to the UI thread by the consumer (never run inline — that would
+    // deadlock, see client::on_before_close). `reconcile_quit` is monotonic:
+    // once Draining/Quit it returns None, so this can't re-fire or loop.
+    if quit_relevant {
+        out.request_drain = quit::reconcile_quit(state);
     }
+    out
 }
 
 fn handle_enqueue_pending_window_creation(

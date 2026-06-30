@@ -961,3 +961,49 @@ fn reconcile_quit_noop_once_draining() {
     update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
     assert_eq!(reconcile_quit(&state), None);
 }
+
+// ── Pillar 2 Stage 1 — the reducer hook (`is_quit_relevant` + `request_drain`) ──
+//
+// The hook is the wiring that makes the level-triggered decision fire after every
+// quit-relevant transition. These pin (a) the negative guard's membership and
+// (b) that `update` surfaces the decision via `DispatchOutput::request_drain`
+// only for relevant commands. Stage 1 is behavior-neutral — nothing consumes
+// `request_drain` yet — so these are the safety net for the wiring itself.
+
+/// The negative guard: window/pool/pending/quit commands are relevant (default
+/// true); the drag-opacity hot path and the browser-pane lifecycle are excluded.
+#[test]
+fn is_quit_relevant_guard_membership() {
+    use super::is_quit_relevant;
+    // Relevant — change live-window count / pending creations / quit_state.
+    assert!(is_quit_relevant(&HostCommand::UnregisterBrowser { label: "w".into() }));
+    assert!(is_quit_relevant(&HostCommand::DequeuePendingWindowCreation));
+    assert!(is_quit_relevant(&HostCommand::PoolDrainAll));
+    assert!(is_quit_relevant(&HostCommand::BeginDrain {
+        reason: QuitReason::LastWindowClosed
+    }));
+    // Irrelevant — hot path + pane lifecycle (panes never affect the window count).
+    assert!(!is_quit_relevant(&HostCommand::EvictFloatingPaneWindowState { label: "f".into() }));
+    assert!(!is_quit_relevant(&HostCommand::EnqueueBrowserPaneClose { block_id: "b".into() }));
+}
+
+/// `update` surfaces the level-triggered drain decision on a quit-relevant
+/// command, and skips it on a quit-irrelevant one even when the state would drain.
+#[test]
+fn update_surfaces_request_drain_only_for_relevant_commands() {
+    let mut state = HostState::default(); // Running, no windows, no pending → drainable
+    let out = update(&mut state, HostCommand::DequeuePendingWindowCreation);
+    assert_eq!(
+        out.request_drain,
+        Some(QuitReason::LastWindowClosed),
+        "quit-relevant command must surface the reconcile decision"
+    );
+    let out2 = update(
+        &mut state,
+        HostCommand::EvictFloatingPaneWindowState { label: "missing".into() },
+    );
+    assert_eq!(
+        out2.request_drain, None,
+        "quit-irrelevant command must not compute a drain request"
+    );
+}
