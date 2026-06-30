@@ -592,23 +592,26 @@ pub(super) fn handle_layout_insert_node_at_index(
     let Some(tab) = state.tabs.get_mut(&tab_id) else {
         return unknown_tab(state, "LayoutInsertNodeAtIndex", &tab_id);
     };
-    if tab.rootnode.is_none() {
-        // Empty tree — promote the node to root (mirrors the empty-tree
-        // path in `handle_layout_insert_node`).
-        tab.rootnode = Some(node);
-    } else {
-        let root = tab.rootnode.as_mut().expect("non-empty checked above");
-        if let Err(e) = crate::backend::layout::insert_node_at_index(root, node, &index_arr) {
-            return op_error(state, format!("LayoutInsertNodeAtIndex: {} (tab {})", e, tab_id));
-        }
+    let Some(root) = tab.rootnode.as_mut() else {
+        // An index path can't address a non-existent tree. Reject rather
+        // than promote-to-root and emit a divergent event: the emitted
+        // `LayoutNodeInsertedAtIndex` echoes `index_arr`, but a promote
+        // ignores it, so a replay consumer / the persist subscriber would
+        // diverge from the reducer. (The sibling `handle_layout_insert_node`
+        // rejects empty-tree + explicit `index` for exactly this reason.)
+        return op_error(
+            state,
+            format!("LayoutInsertNodeAtIndex: cannot index into an empty tree (tab {})", tab_id),
+        );
+    };
+    if let Err(e) = crate::backend::layout::insert_node_at_index(root, node, &index_arr) {
+        return op_error(state, format!("LayoutInsertNodeAtIndex: {} (tab {})", e, tab_id));
     }
-    if let Some(root) = tab.rootnode.as_mut() {
-        if let Err(e) = crate::backend::layout::balance_node(root) {
-            return op_error(
-                state,
-                format!("LayoutInsertNodeAtIndex balance: {} (tab {})", e, tab_id),
-            );
-        }
+    if let Err(e) = crate::backend::layout::balance_node(root) {
+        return op_error(
+            state,
+            format!("LayoutInsertNodeAtIndex balance: {} (tab {})", e, tab_id),
+        );
     }
     // magnify implies focus (frontend invariant; see handle_layout_insert_node).
     if focus_after || magnify_after {

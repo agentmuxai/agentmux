@@ -2977,7 +2977,10 @@ mod tests {
     }
 
     #[test]
-    fn layout_insert_node_at_index_into_empty_promotes_to_root() {
+    fn layout_insert_node_at_index_into_empty_errors() {
+        // An index path can't address a non-existent tree — reject rather
+        // than promote-to-root and emit an event that echoes index_arr the
+        // tree never honoured (event/tree divergence).
         let (mut state, tab_id) = fresh_tab();
         let events = update(
             &mut state,
@@ -2991,11 +2994,11 @@ mod tests {
             },
             &ctx(1),
         );
-        assert!(matches!(&events[0], Event::LayoutNodeInsertedAtIndex { .. }));
-        assert_eq!(
-            state.tabs[&tab_id].rootnode.as_ref().map(|n| n.id.as_str()),
-            Some("only")
+        assert!(
+            matches!(&events[0], Event::Error { code: ErrorCode::InvalidCommand, .. }),
+            "index into empty tree rejected"
         );
+        assert!(state.tabs[&tab_id].rootnode.is_none(), "tree unchanged");
     }
 
     #[test]
