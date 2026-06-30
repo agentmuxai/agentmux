@@ -292,6 +292,22 @@ pub(crate) fn apply_event_to_wstore(
         Event::MagnifiedNodeChanged { tab_id, node_id, .. } => {
             apply_magnified_node_changed(wstore, tab_id, node_id)
         }
+        // Phase E.4.B — layout-tree persistence. These two are the
+        // first tree-mutating layout events to persist through the
+        // subscriber (rather than wcore-direct). They are behaviour-
+        // neutral until a production caller dispatches LayoutClear /
+        // LayoutSetTree (the Layout* arms are still dormant per
+        // reducer.rs §"4 of 11"); they land the persistence path that
+        // the UpdateObject→LayoutSetTree reroute (next phase) needs.
+        // Insert/Delete are deliberately NOT here yet — their events
+        // carry op params, not the resulting tree, so persisting them
+        // would require re-running the algebra in the subscriber (a new
+        // divergence surface). That is resolved in a later phase by
+        // having those events carry the reducer's resulting tree.
+        Event::LayoutCleared { tab_id, .. } => apply_layout_cleared(wstore, tab_id),
+        Event::LayoutTreeReplaced {
+            tab_id, new_tree, ..
+        } => apply_layout_tree_replaced(wstore, tab_id, new_tree),
         // All other event variants are not domain-state mutations
         // (lifecycle, errors, snapshots). The subscriber ignores them.
         _ => Ok(()),
@@ -711,6 +727,90 @@ fn apply_magnified_node_changed(
         return Ok(());
     }
     layout.magnifiednodeid = node_id.to_string();
+    wstore.update(&mut layout)?;
+    Ok(())
+}
+
+/// Phase E.4.B — apply a `LayoutCleared` event: wipe the tab's persisted
+/// layout tree and the focus/magnify ids (and the leaforder cache — an
+/// empty tree has no leaves). Mirrors
+/// `reducer::layout::handle_layout_clear`. Idempotent: silent no-op when
+/// the tab is unknown, the layout row is missing, or it is already clear
+/// (so a double-apply — once synchronously from the RPC handler, once
+/// from the broadcast — does not churn the version).
+fn apply_layout_cleared(
+    wstore: &Store,
+    tab_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+        return Ok(());
+    };
+    if tab.layoutstate.is_empty() {
+        return Ok(());
+    }
+    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+        return Ok(());
+    };
+    if layout.rootnode.is_none()
+        && layout.focusednodeid.is_empty()
+        && layout.magnifiednodeid.is_empty()
+        && layout.leaforder.is_none()
+    {
+        return Ok(());
+    }
+    layout.rootnode = None;
+    layout.focusednodeid = String::new();
+    layout.magnifiednodeid = String::new();
+    layout.leaforder = None;
+    wstore.update(&mut layout)?;
+    Ok(())
+}
+
+/// Phase E.4.B — apply a `LayoutTreeReplaced` event: write the reducer-
+/// supplied tree onto `LayoutState.rootnode`. Mirrors
+/// `reducer::layout::handle_layout_set_tree` — when the new tree is
+/// empty, also clear the focus/magnify ids (and leaforder) so they don't
+/// dangle at nodes that no longer exist.
+///
+/// When a tree IS present, `leaforder` is intentionally left untouched:
+/// it is a frontend-recomputed geometry cache (`getLeafOrder` in
+/// `layoutGeometry.ts`, sorted by render `treeKey`) and is NOT read on
+/// reproject — `persist::bootstrap_state_from_wstore` reads
+/// rootnode/focus/magnify only. The next phase extends LayoutSetTree to
+/// carry the frontend's leaforder when the UpdateObject push routes
+/// through it. Idempotent: no-op (no version bump) when nothing changes.
+fn apply_layout_tree_replaced(
+    wstore: &Store,
+    tab_id: &str,
+    new_tree: &Option<agentmux_common::LayoutNode>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+        return Ok(());
+    };
+    if tab.layoutstate.is_empty() {
+        return Ok(());
+    }
+    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+        return Ok(());
+    };
+    let clears = new_tree.is_none();
+    // Idempotent short-circuit: skip the write (and version bump) when the
+    // tree already matches and, for the empty-tree case, focus/magnify/
+    // leaforder are already cleared.
+    let already = layout.rootnode == *new_tree
+        && (!clears
+            || (layout.focusednodeid.is_empty()
+                && layout.magnifiednodeid.is_empty()
+                && layout.leaforder.is_none()));
+    if already {
+        return Ok(());
+    }
+    layout.rootnode = new_tree.clone();
+    if clears {
+        layout.focusednodeid = String::new();
+        layout.magnifiednodeid = String::new();
+        layout.leaforder = None;
+    }
     wstore.update(&mut layout)?;
     Ok(())
 }
@@ -1219,6 +1319,197 @@ mod tests {
             .unwrap()
             .expect("layout row must exist");
         assert_eq!(layout.oid, tab.layoutstate);
+    }
+
+    // ── Layout-tree persistence (Phase E.4.B) ───────────────────────────
+    fn leaf(id: &str, block: &str) -> agentmux_common::LayoutNode {
+        agentmux_common::LayoutNode {
+            id: id.into(),
+            data: Some(agentmux_common::LayoutNodeData {
+                block_id: block.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Create ws-1 + tab-1 (which provisions a real LayoutState row) and
+    /// return the tab id.
+    fn ws_tab(s: &Store) -> String {
+        apply_event_to_wstore(
+            &Event::WorkspaceCreated {
+                workspace_id: "ws-1".into(),
+                name: "A".into(),
+                version: 1,
+            },
+            s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::TabCreated {
+                workspace_id: "ws-1".into(),
+                tab_id: "tab-1".into(),
+                name: "T".into(),
+                version: 2,
+            },
+            s,
+        )
+        .unwrap();
+        "tab-1".to_string()
+    }
+
+    fn layout_of(s: &Store, tab_id: &str) -> PersistedLayoutState {
+        let tab = s.get::<Tab>(tab_id).unwrap().unwrap();
+        s.get::<PersistedLayoutState>(&tab.layoutstate)
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn layout_tree_replaced_persists_rootnode() {
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("n1", "b1")),
+                correlation_id: "c1".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        let root = layout_of(&s, &tab).rootnode.expect("rootnode set");
+        assert_eq!(root.id, "n1");
+        assert_eq!(root.data.unwrap().block_id, "b1");
+    }
+
+    #[test]
+    fn layout_cleared_wipes_tree_and_ids() {
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("n1", "b1")),
+                correlation_id: "c".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::FocusedNodeChanged {
+                tab_id: tab.clone(),
+                node_id: "n1".into(),
+                version: 4,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::MagnifiedNodeChanged {
+                tab_id: tab.clone(),
+                node_id: "n1".into(),
+                version: 5,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::LayoutCleared {
+                tab_id: tab.clone(),
+                correlation_id: "c".into(),
+                version: 6,
+            },
+            &s,
+        )
+        .unwrap();
+        let layout = layout_of(&s, &tab);
+        assert!(layout.rootnode.is_none());
+        assert!(layout.focusednodeid.is_empty());
+        assert!(layout.magnifiednodeid.is_empty());
+        assert!(layout.leaforder.is_none());
+    }
+
+    #[test]
+    fn layout_tree_replaced_empty_clears_focus_magnify() {
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("n1", "b1")),
+                correlation_id: "c".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::FocusedNodeChanged {
+                tab_id: tab.clone(),
+                node_id: "n1".into(),
+                version: 4,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: None,
+                correlation_id: "c".into(),
+                version: 5,
+            },
+            &s,
+        )
+        .unwrap();
+        let layout = layout_of(&s, &tab);
+        assert!(layout.rootnode.is_none());
+        assert!(layout.focusednodeid.is_empty());
+        assert!(layout.magnifiednodeid.is_empty());
+    }
+
+    #[test]
+    fn layout_tree_replaced_idempotent_no_version_churn() {
+        let s = store();
+        let tab = ws_tab(&s);
+        let ev = Event::LayoutTreeReplaced {
+            tab_id: tab.clone(),
+            new_tree: Some(leaf("n1", "b1")),
+            correlation_id: "c".into(),
+            version: 3,
+        };
+        apply_event_to_wstore(&ev, &s).unwrap();
+        let v1 = layout_of(&s, &tab).version;
+        apply_event_to_wstore(&ev, &s).unwrap();
+        let v2 = layout_of(&s, &tab).version;
+        assert_eq!(v1, v2, "idempotent re-apply must not bump version");
+    }
+
+    #[test]
+    fn layout_events_silent_when_tab_missing() {
+        let s = store();
+        apply_event_to_wstore(
+            &Event::LayoutCleared {
+                tab_id: "ghost".into(),
+                correlation_id: "c".into(),
+                version: 1,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: "ghost".into(),
+                new_tree: Some(leaf("n", "b")),
+                correlation_id: "c".into(),
+                version: 1,
+            },
+            &s,
+        )
+        .unwrap();
     }
 
     #[test]
