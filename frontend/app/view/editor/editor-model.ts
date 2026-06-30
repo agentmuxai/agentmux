@@ -39,10 +39,10 @@ import { FileTreeModel } from "./file-tree-model";
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
-const META_PREVIEW_OPEN = "editor:preview_open";
 const META_PREVIEW_HEIGHT = "editor:preview_height";
-const META_SOURCE_HIDDEN = "editor:source_hidden";
 const META_LEGACY_FILE = "file";
+
+export type EditorMode = "preview" | "source" | "split";
 const META_SCRATCH = "editor:scratch";
 const TREE_WIDTH_DEFAULT = 240;
 const TREE_WIDTH_MIN = 150;
@@ -139,15 +139,13 @@ export class EditorViewModel implements ViewModel {
     private _treeWidth = createSignal<number>(TREE_WIDTH_DEFAULT);
     treeWidthAtom: Accessor<number> = this._treeWidth[0];
 
-    private _previewOpen = createSignal<boolean>(true);
-    previewOpenAtom: Accessor<boolean> = this._previewOpen[0];
-
     private _previewHeight = createSignal<number>(PREVIEW_HEIGHT_DEFAULT);
     previewHeightAtom: Accessor<number> = this._previewHeight[0];
 
-    /** When true the CodeMirror editor is hidden and the preview fills the full pane. */
-    private _sourceHidden = createSignal<boolean>(false);
-    sourceHiddenAtom: Accessor<boolean> = this._sourceHidden[0];
+    // Per-tab editor mode: "preview" | "source" | "split".
+    // Not persisted — tabs return to their language-appropriate default on reopen.
+    private _tabModes = new Map<string, EditorMode>();
+    private _tabModesVersion = createSignal<number>(0);
 
     treeModel = new FileTreeModel();
 
@@ -297,12 +295,6 @@ export class EditorViewModel implements ViewModel {
         const persistedWidth = meta?.[META_TREE_WIDTH];
         if (typeof persistedWidth === "number") {
             this._treeWidth[1](clampTreeWidth(persistedWidth));
-        }
-        if (meta?.[META_PREVIEW_OPEN] === false) {
-            this._previewOpen[1](false);
-        }
-        if (meta?.[META_SOURCE_HIDDEN] === true) {
-            this._sourceHidden[1](true);
         }
         const persistedPreviewH = meta?.[META_PREVIEW_HEIGHT];
         if (typeof persistedPreviewH === "number") {
@@ -843,21 +835,24 @@ export class EditorViewModel implements ViewModel {
         await this.persistMeta({ [META_TREE_WIDTH]: this._treeWidth[0]() });
     }
 
-    async togglePreview(): Promise<void> {
-        const next = !this._previewOpen[0]();
-        this._previewOpen[1](next);
-        await this.persistMeta({ [META_PREVIEW_OPEN]: next });
+    editorMode(): EditorMode {
+        void this._tabModesVersion[0](); // reactive dependency
+        const tabId = this.activeIdAtom();
+        if (!tabId) return "source";
+        const stored = this._tabModes.get(tabId);
+        if (stored !== undefined) return stored;
+        return this.activeTabAtom()?.language === "markdown" ? "preview" : "source";
     }
 
-    async toggleSourceHidden(): Promise<void> {
-        const next = !this._sourceHidden[0]();
-        this._sourceHidden[1](next);
-        if (!next && !this._previewOpen[0]()) {
-            this._previewOpen[1](true);
-            await this.persistMeta({ [META_SOURCE_HIDDEN]: next, [META_PREVIEW_OPEN]: true });
-        } else {
-            await this.persistMeta({ [META_SOURCE_HIDDEN]: next });
-        }
+    setEditorMode(mode: EditorMode): void {
+        const tabId = this.activeIdAtom();
+        if (!tabId) return;
+        this._tabModes.set(tabId, mode);
+        this._tabModesVersion[1]((v) => v + 1);
+    }
+
+    toggleEditorMode(): void {
+        this.setEditorMode(this.editorMode() === "preview" ? "source" : "preview");
     }
 
     setPreviewHeight(height: number): void {
