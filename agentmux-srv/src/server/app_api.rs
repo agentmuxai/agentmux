@@ -3568,36 +3568,15 @@ pub(crate) async fn identity_bundle_link_impl(
         return Err("FORBIDDEN: account not linked to this agent for the given provider".to_string());
     }
 
-    // Find or create the agent's default identity bundle.
-    let bundle_id = format!("bundle-{agent_id}-default");
-    if state
-        .id_store
-        .bundle_identity_get(&bundle_id)
-        .map_err(|e| format!("identity.bundle.link: bundle lookup: {e}"))?
-        .is_none()
-    {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        let bundle = crate::backend::storage::identities::Identity {
-            id: bundle_id.clone(),
-            name: format!("{agent_id} Default"),
-            description: String::new(),
-            is_blank: false,
-            created_at: now,
-            updated_at: now,
-        };
-        state
-            .id_store
-            .bundle_identity_upsert(&bundle)
-            .map_err(|e| format!("identity.bundle.link: create bundle: {e}"))?;
-    }
+    // Bind into the shared default bundle. All instances use DEFAULT_BUNDLE_ID
+    // ("default") as their identity_id (set by backfill at migration time and
+    // as the default in the launch modal). Per-agent bundle selection is G3 work.
+    let bundle_id = crate::identity::migration::DEFAULT_BUNDLE_ID;
 
     // Bind the account into the bundle for the given provider.
     state
         .id_store
-        .bundle_identity_bind(&bundle_id, provider, account_id)
+        .bundle_identity_bind(bundle_id, provider, account_id)
         .map_err(|e| format!("identity.bundle.link: bind: {e}"))?;
 
     Ok(json!({
