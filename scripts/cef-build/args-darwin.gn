@@ -1,0 +1,49 @@
+# Canonical GN args for the AgentMux patched CEF framework (macOS arm64).
+#
+# This is the configuration that produced the
+# `Chromium Embedded Framework.framework` verified in
+# docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md
+# (arm64, 545 MB unstripped, CEF 148.0.9, carries CefWindowImpl::BeginWindowDrag).
+# Treat it as the source of truth; `docs/cef-build/build-patched-framework-macos.md`
+# defers to this file.
+#
+# Counterpart to `args.gn` (Linux x64). Notable differences from Linux:
+#   - target_cpu="arm64"            (Apple Silicon)
+#   - is_official_build=false       (the captured build did NOT use official-build;
+#                                     hence 545 MB unstripped. See size note below.)
+#   - symbol_level=1                (line-table symbols; package-macos.sh strips
+#                                     them with `strip -S -x` at bundle time)
+#   - no use_sysroot / use_qt*      (Linux-only knobs)
+
+alternate_cdm_storage_id_key="968b476909da4373b08903c28e859454"
+clang_use_chrome_plugins=false
+enable_background_mode=false
+enable_cdm_host_verification=true
+enable_cdm_storage_id=true
+enable_downgrade_processing=false
+enable_resource_allowlist_generation=false
+enable_rlz=true
+enable_widevine=true
+forbid_non_component_debug_builds=false
+is_component_build=false
+is_debug=false
+is_official_build=false
+optimize_webui=true
+symbol_level=1
+dcheck_always_on=false
+target_cpu="arm64"
+
+# --- size reduction (FOLLOW-UP, not yet applied to the shipped framework) ------
+# The captured build used is_official_build=false → 545 MB unstripped. Linux flips
+# is_official_build=true (thin-LTO + ICF + full opt), roughly halving the binary.
+# Doing the same on macOS should bring the framework down substantially. This is a
+# tracked follow-up: re-build arm64 with is_official_build=true + use_thin_lto=true
+# and re-cut the agentmuxai/cef release. Until then we ship the larger framework;
+# package-macos.sh's `strip -S -x` already removes the symbol_level=1 symbols at
+# bundle time so the in-DMG size is much smaller than 545 MB regardless.
+#
+# Gotcha (same as Linux): is_official_build rebuilds V8, so a re-build MUST ship a
+# fresh snapshot_blob.bin / v8_context_snapshot.bin inside the framework Resources/
+# or the host crashes on a checksum mismatch.
+# is_official_build=true
+# use_thin_lto=true

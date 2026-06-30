@@ -26,9 +26,13 @@ on:
         description: "GitHub release tag to upload the DMG to (blank = skip upload)"
         required: false
         default: ""
+      cef-runtime-tag:
+        description: "agentmuxai/cef release tag for patched framework (blank = latest macOS)"
+        required: false
+        default: ""
   repository_dispatch:
     types: [build-macos]
-    # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z" }
+    # client_payload: { ref: "vX.Y.Z", release_tag: "vX.Y.Z", cef_runtime_tag: "" }
 
 permissions:
   contents: write   # needed to upload release assets via GITHUB_TOKEN
@@ -39,6 +43,7 @@ jobs:
     runs-on: macos-latest   # Apple Silicon arm64 (M-series)
     env:
       OUT: ${{ github.workspace }}/artifacts
+      CEF_RUNTIME_DIR_DARWIN: ${{ github.workspace }}/cef-runtime-darwin
 
     steps:
       - name: Resolve inputs
@@ -46,11 +51,13 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            echo "ref=${{ github.event.client_payload.ref }}"              >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.event.client_payload.ref }}"                 >> "$GITHUB_OUTPUT"
             echo "release_tag=${{ github.event.client_payload.release_tag }}" >> "$GITHUB_OUTPUT"
+            echo "cef_tag=${{ github.event.client_payload.cef_runtime_tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "ref=${{ inputs.ref }}"                 >> "$GITHUB_OUTPUT"
             echo "release_tag=${{ inputs.release-tag }}" >> "$GITHUB_OUTPUT"
+            echo "cef_tag=${{ inputs.cef-runtime-tag }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout agentmux source
@@ -78,6 +85,63 @@ jobs:
 
       - name: Install go-task
         run: brew install go-task
+
+      # ── Patched CEF framework ─────────────────────────────────────────────
+      # The upstream cef-dll-sys framework lacks CefWindow::BeginWindowDrag, so
+      # native window drag / floating-pane resize silently no-ops on macOS. We
+      # download a pre-built PATCHED framework (agentmuxai/cef release) and point
+      # AGENTMUX_CEF_RUNTIME_DIR_DARWIN at it — the macOS analogue of build-linux's
+      # patched-libcef.so download. The package-macos.sh patch gate then verifies
+      # the framework carries BeginWindowDrag before signing.
+      # See docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md.
+      - name: Resolve patched CEF framework tag
+        id: cef
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          TAG="${{ steps.in.outputs.cef_tag }}"
+          if [ -z "$TAG" ]; then
+            # agentmuxai/cef holds BOTH platforms' releases — filter to macOS arm64
+            # (a bare --limit 1 would grab whichever platform released most recently).
+            TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
+                    --json tagName \
+                    --jq '[.[].tagName | select(startswith("cef-macos-arm64-"))][0]')
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "❌ no cef-macos-arm64-* release found in agentmuxai/cef" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved patched CEF framework tag: $TAG"
+
+      - name: Cache patched CEF framework
+        id: cef-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CEF_RUNTIME_DIR_DARWIN }}
+          key: cef-runtime-darwin-${{ steps.cef.outputs.tag }}
+
+      - name: Download patched CEF framework
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR_DARWIN"
+          gh release download "${{ steps.cef.outputs.tag }}" \
+            --repo agentmuxai/cef \
+            --pattern "*.tar.gz" \
+            --dir /tmp/cef-extract \
+            --clobber
+          tar -xzf /tmp/cef-extract/*.tar.gz -C /tmp/cef-extract
+          # Find the .framework regardless of whether the tarball has a top-level dir
+          FW=$(find /tmp/cef-extract -maxdepth 3 -name "Chromium Embedded Framework.framework" -type d | head -1)
+          if [ -z "$FW" ]; then echo "❌ framework not found in tarball"; exit 1; fi
+          # ditto preserves the Versions/Current symlink chain the CEF loader follows.
+          ditto "$FW" "$CEF_RUNTIME_DIR_DARWIN/Chromium Embedded Framework.framework"
+          rm -rf /tmp/cef-extract
+
+      - name: Set AGENTMUX_CEF_RUNTIME_DIR_DARWIN
+        run: echo "AGENTMUX_CEF_RUNTIME_DIR_DARWIN=$CEF_RUNTIME_DIR_DARWIN" >> "$GITHUB_ENV"
 
       # ── Apple Developer ID codesigning setup ──────────────────────────────
       # Creates a short-lived keychain that is torn down in the cleanup step.
