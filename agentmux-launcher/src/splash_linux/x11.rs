@@ -29,7 +29,7 @@ use x11rb::wrapper::ConnectionExt as _;
 use x11rb::NONE;
 
 use super::{
-    fade_alpha, min_hold, pulse_alpha, render_frame, CARD_H, CARD_W, CORNER_RADIUS_PX,
+    fade_alpha, min_hold, pulse_alpha, render_frame, StageList, CARD_H, CARD_W, CORNER_RADIUS_PX,
     DISMISS_TIMEOUT, FRAME_MS,
 };
 
@@ -42,7 +42,11 @@ pub(super) fn server_reachable() -> bool {
     x11rb::connect(None).is_ok()
 }
 
-pub(super) fn run(ready_file: &Path, footer: Vec<String>) -> Result<(), Box<dyn Error>> {
+pub(super) fn run(
+    ready_file: &Path,
+    footer: Vec<String>,
+    startup_rx: std::sync::mpsc::Receiver<crate::startup_events::StartupEvent>,
+) -> Result<(), Box<dyn Error>> {
     let (conn, screen_num) = x11rb::connect(None)?;
     let screen = conn.setup().roots[screen_num].clone();
     let root = screen.root;
@@ -111,10 +115,16 @@ pub(super) fn run(ready_file: &Path, footer: Vec<String>) -> Result<(), Box<dyn 
     let start = Instant::now();
     let hold = min_hold();
     let mut fade_start: Option<Instant> = None;
+    let mut stage_list = StageList::new();
     // 4 bytes/pixel (depth-24 and depth-32 are both 32 bpp on modern servers).
     let mut buf = vec![0u8; w as usize * h as usize * 4];
 
     loop {
+        // Drain all pending startup events before rendering (non-blocking).
+        while let Ok(event) = startup_rx.try_recv() {
+            stage_list.apply(event);
+        }
+
         let now = Instant::now();
         let elapsed = now.duration_since(start);
         let dismiss =
@@ -142,6 +152,7 @@ pub(super) fn run(ready_file: &Path, footer: Vec<String>) -> Result<(), Box<dyn 
             radius,
             true,
             &footer,
+            &stage_list.lines(),
         );
 
         // PutImage in horizontal strips so no single request exceeds the server's

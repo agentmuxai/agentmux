@@ -27,7 +27,10 @@
 mod wayland;
 mod x11;
 
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
+
+use crate::startup_events::{StartupEvent, StartupStatus};
 
 // ── Shared look (matches splash_mac.rs / splash.rs) ─────────────────────────
 /// Opaque dark backdrop RGB(26, 26, 31) = #1A1A1F.
@@ -53,6 +56,22 @@ pub(crate) const FADE_OUT: Duration = Duration::from_millis(160);
 pub(crate) static BRAIN_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/brain_rgba.bin"));
 include!(concat!(env!("OUT_DIR"), "/brain_dims.rs")); // pub const BRAIN_W / BRAIN_H (i32)
 
+// ── Stage list band (startup telemetry between brain and footer) ─────────────
+/// Muted stage text color — slightly brighter than the footer for readability.
+pub(crate) const STAGE_COLOR: [u8; 3] = [0xA0, 0xA0, 0xAA];
+/// Vertical padding above the first stage line.
+pub(crate) const STAGE_PAD_TOP: i32 = 10;
+/// Vertical gap between stage lines.
+pub(crate) const STAGE_LINE_GAP: i32 = 4;
+/// Maximum number of stage lines shown simultaneously.
+pub(crate) const STAGE_MAX_LINES: usize = 4;
+/// Height of the stage band.
+pub(crate) const STAGE_H: i32 = STAGE_PAD_TOP
+    + STAGE_MAX_LINES as i32 * crate::splash_font::GLYPH_H as i32
+    + (STAGE_MAX_LINES as i32 - 1) * STAGE_LINE_GAP;
+/// Left margin for stage lines (px from card edge).
+pub(crate) const STAGE_X: i32 = 20;
+
 // ── Footer (identity strip near the bottom) ─────────────────────────────────
 /// Muted footer text color (#8A8A93) on the #1A1A1F backdrop.
 pub(crate) const FOOTER_COLOR: [u8; 3] = [0x8A, 0x8A, 0x93];
@@ -62,9 +81,111 @@ pub(crate) const FOOTER_PAD_BOTTOM: i32 = 12;
 /// Bottom band height: top pad + 2 glyph rows + inter-line gap + bottom pad.
 pub(crate) const FOOTER_H: i32 =
     FOOTER_PAD_TOP + 2 * crate::splash_font::GLYPH_H as i32 + FOOTER_LINE_GAP + FOOTER_PAD_BOTTOM;
-/// Full card dimensions: brain + padding, with the footer band added to height.
+/// Full card dimensions: brain + padding, stage band, footer band.
 pub(crate) const CARD_W: i32 = BRAIN_W + PADDING * 2;
-pub(crate) const CARD_H: i32 = BRAIN_H + PADDING * 2 + FOOTER_H;
+pub(crate) const CARD_H: i32 = BRAIN_H + PADDING * 2 + STAGE_H + FOOTER_H;
+
+// ── Startup telemetry stage list ─────────────────────────────────────────────
+
+struct StageEntry {
+    stage: &'static str,
+    label: &'static str,
+    started_at: Instant,
+    duration_ms: Option<u64>,
+    status: StartupStatus,
+    subs: Vec<SubEntry>,
+}
+
+struct SubEntry {
+    id: String,
+    label: String,
+    started_at: Instant,
+    duration_ms: Option<u64>,
+}
+
+/// Accumulates startup events and emits rendered text lines for the stage band.
+pub(super) struct StageList {
+    stages: Vec<StageEntry>,
+}
+
+impl StageList {
+    pub(super) fn new() -> Self {
+        Self { stages: vec![] }
+    }
+
+    pub(super) fn apply(&mut self, event: StartupEvent) {
+        match event {
+            StartupEvent::StageBegin { stage, label } => {
+                self.stages.push(StageEntry {
+                    stage,
+                    label,
+                    started_at: Instant::now(),
+                    duration_ms: None,
+                    status: StartupStatus::Ok,
+                    subs: vec![],
+                });
+            }
+            StartupEvent::StageEnd { stage, duration_ms, status, .. } => {
+                if let Some(e) = self.stages.iter_mut().rev().find(|e| e.stage == stage) {
+                    e.duration_ms = Some(duration_ms);
+                    e.status = status;
+                }
+            }
+            StartupEvent::SubBegin { stage, id, label } => {
+                if let Some(e) = self.stages.iter_mut().rev().find(|e| e.stage == stage) {
+                    e.subs.push(SubEntry {
+                        id,
+                        label,
+                        started_at: Instant::now(),
+                        duration_ms: None,
+                    });
+                }
+            }
+            StartupEvent::SubEnd { stage, id, duration_ms, .. } => {
+                if let Some(e) = self.stages.iter_mut().rev().find(|e| e.stage == stage) {
+                    if let Some(s) = e.subs.iter_mut().find(|s| s.id == id) {
+                        s.duration_ms = Some(duration_ms);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Up to `STAGE_MAX_LINES` formatted lines for the stage band.
+    pub(super) fn lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for s in &self.stages {
+            let pfx = match s.duration_ms {
+                None => ">> ",
+                Some(_) => match s.status {
+                    StartupStatus::Ok => "ok ",
+                    _ => "!! ",
+                },
+            };
+            let ms = match s.duration_ms {
+                Some(ms) => ms,
+                None => s.started_at.elapsed().as_millis() as u64,
+            };
+            // "ok  Saga recovery       42ms"
+            out.push(format!("{pfx}{:<18}{:>5}ms", s.label, ms));
+            if out.len() >= STAGE_MAX_LINES {
+                break;
+            }
+            // Show the last sub-item (e.g. most recent migration).
+            if let Some(sub) = s.subs.last() {
+                let sub_ms = match sub.duration_ms {
+                    Some(ms) => ms,
+                    None => sub.started_at.elapsed().as_millis() as u64,
+                };
+                out.push(format!("   >{:<16}{:>5}ms", sub.label, sub_ms));
+                if out.len() >= STAGE_MAX_LINES {
+                    break;
+                }
+            }
+        }
+        out
+    }
+}
 
 enum Session {
     Wayland,
@@ -152,14 +273,15 @@ fn corner_coverage(x: i32, y: i32, w: i32, h: i32, radius: f32) -> f32 {
 }
 
 /// Composite one frame, **pre-multiplied**, into a 4-byte-per-pixel buffer: the
-/// dark backdrop with the centered brain blended at `brain_alpha`, masked to a
-/// `radius`-rounded rect, all scaled by the global `window_alpha` (fade-out).
-/// Pre-multiplied output is what both X Render compositors and `wl_shm`
-/// ARGB8888 expect. `bgr` selects byte order: `true` → B,G,R,A (X11 ARGB /
-/// Wayland ARGB8888 on LE), `false` → R,G,B,A. Shared by both backends.
+/// dark backdrop with the centered brain blended at `brain_alpha`, the stage list
+/// band, and the footer identity strip — all masked to a `radius`-rounded rect
+/// and scaled by the global `window_alpha` (fade-out). Pre-multiplied output is
+/// what both X Render compositors and `wl_shm` ARGB8888 expect. `bgr` selects
+/// byte order: `true` → B,G,R,A (X11 ARGB / Wayland ARGB8888 on LE), `false` →
+/// R,G,B,A. Shared by both backends.
 ///
 /// `radius=0` + `window_alpha=1` yields a fully-opaque square (the X11
-/// no-compositor fallback path).
+/// no-compositor fallback path). `stages` may be empty (no events received).
 pub(crate) fn render_frame(
     buf: &mut [u8],
     w: i32,
@@ -169,11 +291,12 @@ pub(crate) fn render_frame(
     radius: f32,
     bgr: bool,
     footer: &[String],
+    stages: &[String],
 ) {
     let ox = (w - BRAIN_W) / 2;
-    // Center the brain in the brain region (above the footer band), not the
-    // whole card — otherwise the footer would push it off-center.
-    let oy = (h - FOOTER_H - BRAIN_H) / 2;
+    // Center the brain in the brain region (above stage band and footer), not the
+    // whole card — otherwise the stage band + footer would push it off-center.
+    let oy = (h - FOOTER_H - STAGE_H - BRAIN_H) / 2;
     for y in 0..h {
         for x in 0..w {
             // Backdrop, in RGB.
@@ -200,6 +323,13 @@ pub(crate) fn render_frame(
         }
     }
 
+    // Stage list: startup telemetry lines above the footer.
+    let stage_top = h - FOOTER_H - STAGE_H + STAGE_PAD_TOP;
+    for (i, line) in stages.iter().enumerate() {
+        let y = stage_top + i as i32 * (crate::splash_font::GLYPH_H as i32 + STAGE_LINE_GAP);
+        crate::splash_text::draw_text(buf, w, h, STAGE_X, y, line, STAGE_COLOR, window_alpha, bgr);
+    }
+
     // Footer: muted identity lines in the bottom band (static; fades with the card).
     let footer_top = h - FOOTER_H + FOOTER_PAD_TOP;
     for (i, line) in footer.iter().enumerate() {
@@ -214,7 +344,12 @@ pub(crate) fn render_frame(
 /// The thread self-terminates on first-paint or the safety timeout. Best-effort:
 /// any failure (no display, protocol error) just means no splash — the launcher
 /// is unaffected.
-pub fn spawn() {
+///
+/// `startup_rx` is the receiver end of the startup event bus. The splash thread
+/// drains it every animation frame to update the stage list. Pass the receiver
+/// from `startup_events::StartupEventSink::new()` created in `main()` before
+/// the Tokio runtime is started.
+pub fn spawn(startup_rx: Receiver<StartupEvent>) {
     let ready_file =
         std::env::temp_dir().join(format!("agentmux-splash-ready-{}", std::process::id()));
     let _ = std::fs::remove_file(&ready_file);
@@ -232,7 +367,7 @@ pub fn spawn() {
             std::thread::Builder::new()
                 .name("agentmux-splash".into())
                 .spawn(move || {
-                    if let Err(e) = x11::run(&ready_file, footer) {
+                    if let Err(e) = x11::run(&ready_file, footer, startup_rx) {
                         eprintln!("[splash] x11 backend disabled: {e}");
                     }
                 })
@@ -242,7 +377,7 @@ pub fn spawn() {
             std::thread::Builder::new()
                 .name("agentmux-splash".into())
                 .spawn(move || {
-                    if let Err(e) = wayland::run(&ready_file, footer) {
+                    if let Err(e) = wayland::run(&ready_file, footer, startup_rx) {
                         eprintln!("[splash] wayland backend disabled: {e}");
                     }
                 })
