@@ -138,7 +138,7 @@ pub fn set_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> R
 
 /// Get the window's full screen rect `{ x, y, width, height }`.
 /// Windows: physical px via GetWindowRect (thread-agnostic).
-/// macOS / Linux: DIP via CEF Views `window.bounds()` (UI-thread read, 250ms timeout).
+/// macOS / Linux: DIP via CEF Views `window.bounds()` (UI-thread read, 500ms timeout).
 /// Used by the floater JS-driven edge-resize to capture the start rect on pointer-down.
 pub fn get_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
