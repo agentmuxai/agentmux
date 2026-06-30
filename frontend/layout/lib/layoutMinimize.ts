@@ -359,6 +359,22 @@ function _dissolveColumn(
 }
 
 /**
+ * Walk up the ancestor chain from `nodeId` and return the first ancestor whose
+ * `flexDirection` is `FlexDirection.Row`.  Returns `undefined` if none is found
+ * (e.g. the node is already at the root level with no Row ancestor).
+ *
+ * Used by `_undissolveColumn` to locate the correct Row insertion point in
+ * cascade-dissolve scenarios where the host column is itself nested inside
+ * another dissolved column.
+ */
+function _findRowAncestor(root: LayoutNode, nodeId: string): LayoutNode | undefined {
+    const parent = findParent(root, nodeId);
+    if (!parent) return undefined;
+    if (parent.flexDirection === FlexDirection.Row) return parent;
+    return _findRowAncestor(root, parent.id);
+}
+
+/**
  * Restore a dissolved column to its original Row slot.
  *
  * Removes `colNode` from its host column, shrinks the host back by the original
@@ -401,7 +417,13 @@ function _undissolveColumn(model: LayoutModel, colNode: LayoutNode): void {
     targetCol.size = Math.max(targetCol.size - originalRowSize, 1);
 
     // Re-insert colNode into the Row at its original index.
-    const rowNode = findParent(model.treeState.rootNode, targetColumnId) ?? model.treeState.rootNode;
+    // IMPORTANT: In a cascade-dissolve scenario, targetCol may itself be
+    // nested inside another column (dissolved into a third column).
+    // findParent(root, targetColumnId) would return that outer column rather
+    // than the Row — causing colNode to be spliced in as a Column-in-Column
+    // instead of going back to its Row slot. We must walk up the ancestor
+    // chain from targetCol until we reach a Row-direction node.
+    const rowNode = _findRowAncestor(model.treeState.rootNode, targetColumnId) ?? model.treeState.rootNode;
     if (rowNode.children) {
         colNode.size = originalRowSize;
         // Only clear _slipAnchor if no remaining sibling has a concurrent slipMinimize
