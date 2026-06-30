@@ -1,0 +1,481 @@
+name: Release
+
+# Triggered by pushing a semver tag (v0.50.0) or via workflow_dispatch for
+# emergency reruns. Verifies version consistency, builds all three platform
+# artifacts, publishes a GitHub Release + S3 mirror, submits to WinGet and
+# the Microsoft Store (non-blocking), and triggers the landing page deploy.
+#
+# See docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md for the full design.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.50.0) — must already exist'
+        required: true
+
+jobs:
+  # ── Phase 1: Version consistency guard ───────────────────────────────────
+  verify:
+    name: Verify version consistency
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Check version consistency
+        id: check
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          PKG_VER=$(node -p "require('./package.json').version")
+          CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"//;s/".*//')
+          VH_VER=$(grep -m1 '^## ' VERSION_HISTORY.md | sed 's/## //' | tr -d '[:space:]')
+          echo "tag=$VER  pkg=$PKG_VER  cargo=$CARGO_VER  vh=$VH_VER"
+          if [ "$VER" != "$PKG_VER" ] || [ "$VER" != "$CARGO_VER" ] || [ "$VER" != "$VH_VER" ]; then
+            echo "❌ Version mismatch — all five locations must agree before release"
+            echo "   tag=$VER  package.json=$PKG_VER  Cargo.toml=$CARGO_VER  VERSION_HISTORY=$VH_VER"
+            exit 1
+          fi
+          echo "✓ Version $VER consistent across all locations"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+  # ── Phase 2: Build all platforms (parallel) ───────────────────────────────
+  build-windows:
+    name: Build — Windows portable + installer + MSIX
+    needs: verify
+    runs-on: windows-latest
+    env:
+      OUT: ${{ github.workspace }}/artifacts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Auth npm for @a5af GitHub Packages
+        shell: bash
+        run: |
+          {
+            echo "@a5af:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
+          } >> .npmrc
+
+      - run: npm install
+
+      - name: Install build tools (Ninja, go-task, Inno Setup)
+        shell: pwsh
+        run: choco install ninja go-task innosetup -y
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build portable (RELEASE_CHANNEL=stable, STRIP_MAPS=1)
+        shell: bash
+        run: |
+          mkdir -p "$OUT"
+          STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh "$OUT"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $portableDir = Get-ChildItem "$env:OUT" -Directory -Filter "agentmux-*-x64-portable" |
+                         Sort-Object LastWriteTime -Descending |
+                         Select-Object -First 1 -ExpandProperty FullName
+          if (-not $portableDir) { throw "portable dir not found in $env:OUT" }
+          & "${{ github.workspace }}\scripts\package-installer.ps1" `
+            -PortableDir $portableDir `
+            -OutputDir "$env:OUT"
+
+      - name: Build MSIX (unsigned — Store re-signs on ingest)
+        shell: pwsh
+        run: |
+          $msixOut = Join-Path "$env:OUT" "msix"
+          New-Item -ItemType Directory -Force -Path $msixOut | Out-Null
+          $portableDir = Get-ChildItem "$env:OUT" -Directory -Filter "agentmux-*-x64-portable" |
+                         Sort-Object LastWriteTime -Descending |
+                         Select-Object -First 1 -ExpandProperty FullName
+          & "${{ github.workspace }}\scripts\package-msix.ps1" `
+            -PortableDir $portableDir `
+            -OutputDir $msixOut `
+            -SkipBuild
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: ${{ env.OUT }}/agentmux-*-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: ${{ env.OUT }}/AgentMux-*-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msix
+          path: ${{ env.OUT }}/msix/AgentMux_*_x64.msix
+          if-no-files-found: error
+          retention-days: 7
+
+  build-linux:
+    name: Build — Linux AppImage
+    needs: verify
+    runs-on: ubuntu-22.04
+    env:
+      OUT: ${{ github.workspace }}/artifacts
+      CEF_RUNTIME_DIR: ${{ github.workspace }}/cef-runtime
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-ubuntu22-release"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Auth npm for @a5af GitHub Packages
+        run: |
+          {
+            echo "@a5af:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
+          } >> .npmrc
+
+      - run: npm install
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build \
+            libwayland-dev libxkbcommon-dev libgtk-3-dev \
+            libglib2.0-dev libpango1.0-dev libcairo2-dev \
+            libgdk-pixbuf2.0-dev libatk1.0-dev
+
+      - name: Install go-task
+        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Resolve patched libcef.so tag
+        id: cef
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          TAG=$(gh release list --repo agentmuxai/cef --limit 1 \
+                  --json tagName --jq '.[0].tagName')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Cache patched libcef.so
+        id: cef-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CEF_RUNTIME_DIR }}
+          key: cef-runtime-${{ steps.cef.outputs.tag }}
+
+      - name: Download patched libcef.so
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
+        run: |
+          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR"
+          gh release download "${{ steps.cef.outputs.tag }}" \
+            --repo agentmuxai/cef --pattern "*.tar.gz" \
+            --dir /tmp/cef-extract --clobber
+          tar -xzf /tmp/cef-extract/*.tar.gz -C /tmp/cef-extract
+          LIBCEF=$(find /tmp/cef-extract -name "libcef.so" | head -1)
+          if [ -z "$LIBCEF" ]; then echo "ERROR: libcef.so not found in tarball"; exit 1; fi
+          cp -r "$(dirname "$LIBCEF")/." "$CEF_RUNTIME_DIR/"
+          rm -rf /tmp/cef-extract
+
+      - name: Set AGENTMUX_CEF_RUNTIME_DIR
+        run: echo "AGENTMUX_CEF_RUNTIME_DIR=$CEF_RUNTIME_DIR" >> "$GITHUB_ENV"
+
+      - name: Install appimagetool
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/appimagetool" \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x "$HOME/.local/bin/appimagetool"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+
+      - name: Build AppImage
+        run: |
+          mkdir -p "$OUT"
+          RELEASE_CHANNEL=stable bash scripts/package-linux.sh "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: ${{ env.OUT }}/AgentMux_*_amd64.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: Build — macOS arm64 DMG
+    needs: verify
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      OUT: ${{ github.workspace }}/artifacts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Auth npm for @a5af GitHub Packages
+        run: |
+          {
+            echo "@a5af:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
+          } >> .npmrc
+
+      - run: npm install
+
+      - name: Install go-task
+        run: brew install go-task
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build-${{ github.run_id }}.keychain"
+          KEYCHAIN_PASS="$(uuidgen)"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 \
+            -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f /tmp/cert.p12
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+
+      - name: Store notarytool credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool store-credentials "notarytool" \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" --keychain "$KEYCHAIN_PATH" --no-validate
+
+      - name: Build, sign, and notarize DMG
+        run: |
+          mkdir -p "$OUT"
+          task package:macos -- "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: ${{ env.OUT }}/AgentMux_*_arm64.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Delete temp keychain
+        if: always()
+        run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+
+  # ── Phase 3: Publish GitHub Release + S3 mirror ──────────────────────────
+  publish:
+    name: Publish release
+    needs: [verify, build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      S3_RELEASES: s3://dl.agentmux.ai/releases
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p dist-flat
+          find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" \) -exec cp {} dist-flat/ \;
+          echo "--- Release artifacts ---"
+          ls -lh dist-flat/
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          NOTES=$(bash scripts/extract-changelog.sh "$VERSION")
+          if [ -z "$NOTES" ]; then
+            NOTES="Release v${VERSION}"
+          fi
+          # Write to file to safely pass multiline content to gh release create
+          echo "$NOTES" > /tmp/release-notes.md
+          echo "Release notes:"
+          cat /tmp/release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "AgentMux v${VERSION}" \
+            --notes-file /tmp/release-notes.md \
+            dist-flat/*
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Mirror artifacts to S3 (versioned path)
+        run: |
+          for f in dist-flat/*; do
+            aws s3 cp "$f" "${S3_RELEASES}/${VERSION}/$(basename "$f")" \
+              --cache-control "public, max-age=31536000, immutable"
+          done
+
+      - name: Mirror artifacts to S3 (latest/ unversioned stable URLs)
+        run: |
+          # Unversioned names match the map in agentmux-landing/scripts/fetch-release.mjs
+          declare -A UNVERSIONED=(
+            ["setup.exe"]="AgentMux_x64-setup.exe"
+            ["portable.zip"]="agentmux-x64-portable.zip"
+            ["amd64.AppImage"]="AgentMux_amd64.AppImage"
+            ["arm64.dmg"]="AgentMux_aarch64.dmg"
+            ["x64.msix"]="AgentMux_x64.msix"
+          )
+          for f in dist-flat/*; do
+            BASENAME=$(basename "$f")
+            LOWER="${BASENAME,,}"
+            for suffix in "${!UNVERSIONED[@]}"; do
+              if [[ "$LOWER" == *"${suffix,,}"* ]]; then
+                DEST="${UNVERSIONED[$suffix]}"
+                aws s3 cp "$f" "${S3_RELEASES}/latest/${DEST}" \
+                  --cache-control "public, max-age=300"
+                echo "  $BASENAME → latest/$DEST"
+                break
+              fi
+            done
+          done
+
+      - name: Trigger landing page deploy
+        env:
+          GH_TOKEN: ${{ secrets.LANDING_DEPLOY_TOKEN }}
+        run: |
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            /repos/agentmuxai/agentmux-landing/dispatches \
+            -f event_type=release \
+            -F client_payload[version]="${VERSION}"
+
+  # ── Phase 4: Distribution channels (non-blocking, parallel) ───────────────
+  winget:
+    name: Submit WinGet update
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - name: Install wingetcreate
+        run: |
+          curl -fsSL -o wingetcreate \
+            "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate-linux"
+          chmod +x wingetcreate
+
+      - name: Submit WinGet manifest PR
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          INSTALLER_URL="https://dl.agentmux.ai/releases/${VERSION}/AgentMux_x64-setup.exe"
+          ./wingetcreate update AgentMux.AgentMux \
+            --version "${VERSION}" \
+            --urls "$INSTALLER_URL" \
+            --submit \
+            --token "$WINGET_TOKEN"
+
+  ms-store:
+    name: Submit Microsoft Store update
+    needs: [verify, publish]
+    runs-on: windows-latest
+    continue-on-error: true
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - name: Install msstore CLI
+        shell: pwsh
+        run: winget install Microsoft.StoreCLI --silent --accept-package-agreements --accept-source-agreements
+
+      - name: Configure msstore credentials
+        shell: pwsh
+        env:
+          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+          MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+        run: |
+          msstore settings --tenantId $env:MSSTORE_TENANT_ID `
+            --clientId $env:MSSTORE_CLIENT_ID `
+            --clientSecret $env:MSSTORE_CLIENT_SECRET `
+            --sellerId $env:MSSTORE_SELLER_ID
+
+      - name: Download MSIX from GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "v${VERSION}" \
+            --repo agentmuxai/agentmux \
+            --pattern "*.msix" \
+            --dir msix-download
+
+      - name: Submit to Microsoft Store
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem msix-download -Filter "*.msix" | Select-Object -First 1
+          msstore publish $msix.FullName --no-confirmation
