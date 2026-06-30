@@ -590,6 +590,14 @@ tasks:
                   if [ -n "$cefOutDir" ]; then
                     echo "rust-cache hit: staging CEF DLLs from OUT_DIR ($cefOutDir) → $cefDir"
                     cp -rf "$cefOutDir/." "$cefDir/"
+                    # Re-assert both required files are now present — an OUT_DIR
+                    # that has libcef.dll but not icudtl.dat (e.g. a partial
+                    # extract) would pass the version check above but still
+                    # produce a broken bundle.
+                    if [ ! -f "$cefDir/icudtl.dat" ]; then
+                      echo "❌ OUT_DIR copy succeeded but icudtl.dat still missing in $cefDir" >&2
+                      exit 1
+                    fi
                   else
                     echo "❌ incomplete CEF runtime in $cefDir (need libcef.dll + icudtl.dat) — run 'task build:host' first"
                     exit 1
