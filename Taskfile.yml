@@ -571,11 +571,20 @@ tasks:
                   # full platform dir to target/release/ — same files the build
                   # script would have copied (copy_cef_runtime_files in
                   # cef-dll-sys/sys/build.rs).
+                  # Glob may match multiple OUT_DIRs (e.g. stale build from a
+                  # previous CEF major alongside the current one — exactly the
+                  # hazard the Taskfile comment above warns about). Run
+                  # verify-cef-version.sh against each candidate and take the
+                  # first that passes, so a stale 146 directory is skipped when
+                  # the linked crate expects 148.
                   cefOutDir=""
                   for dll in target/release/build/cef-dll-sys-*/out/*/libcef.dll; do
                     if [ -f "$dll" ]; then
-                      cefOutDir="$(dirname "$dll")"
-                      break
+                      candidate="$(dirname "$dll")"
+                      if bash scripts/verify-cef-version.sh "$candidate" 2>/dev/null; then
+                        cefOutDir="$candidate"
+                        break
+                      fi
                     fi
                   done
                   if [ -n "$cefOutDir" ]; then
