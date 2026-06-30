@@ -164,7 +164,7 @@ const SystemStats = (): JSX.Element => {
                         <span
                             class="stat-mono stat-commit"
                             style={{ color: commitColor(s().commitUsed, s().commitTotal) }}
-                            data-tip="Commit charge used and total (RAM + page file budget). High commit causes OOM kills."
+                            data-tip="Commit charge used and total (RAM + page file budget)."
                             aria-label="Commit charge"
                         >
                             PF {formatMemBytes(s().commitUsed)}/{formatMemBytes(s().commitTotal)}
