@@ -140,24 +140,18 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             // there's nothing editable to search. See
             // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
             if (!ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
-                if (!cmView || model.sourceHiddenAtom()) return;
+                if (!cmView || model.editorMode() === "preview") return;
                 ev.preventDefault();
                 ev.stopPropagation();
                 openSearchPanel(cmView);
                 return;
             }
-            // Mod-Shift-V: cycle through preview modes.
-            // In preview-only (sourceHidden) → exit to split view.
-            // In split or source-only → toggle the split panel.
+            // Mod-Shift-V: toggle between preview and source modes.
             if (ev.shiftKey && (ev.key === "v" || ev.key === "V")) {
                 if (!isMarkdown()) return;
                 ev.preventDefault();
                 ev.stopPropagation();
-                if (model.sourceHiddenAtom()) {
-                    void model.toggleSourceHidden();
-                } else {
-                    void model.togglePreview();
-                }
+                model.toggleEditorMode();
             }
         };
         rootRef.addEventListener("keydown", handleEditorKeys, { capture: true });
@@ -749,6 +743,32 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                     />
                 </Show>
 
+                <Show when={isMarkdown() && model.tabsAtom().length > 0}>
+                    <div class="editor-mode-toolbar" role="group" aria-label="View mode">
+                        <button
+                            type="button"
+                            class="editor-mode-btn"
+                            classList={{ active: model.editorMode() === "preview" }}
+                            onClick={() => model.setEditorMode("preview")}
+                            title="Rendered preview (Mod+Shift+V)"
+                        >Preview</button>
+                        <button
+                            type="button"
+                            class="editor-mode-btn"
+                            classList={{ active: model.editorMode() === "source" }}
+                            onClick={() => model.setEditorMode("source")}
+                            title="Source editor"
+                        >Source</button>
+                        <button
+                            type="button"
+                            class="editor-mode-btn"
+                            classList={{ active: model.editorMode() === "split" }}
+                            onClick={() => model.setEditorMode("split")}
+                            title="Split view"
+                        >Split</button>
+                    </div>
+                </Show>
+
                 <Show when={model.loadingAtom()}>
                     <div class="editor-loading">Loading...</div>
                 </Show>
@@ -844,65 +864,29 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                         <div
                             class="editor-codemirror"
                             ref={setContainerRef}
-                            style={{ display: (model.sourceHiddenAtom() && isMarkdown()) ? "none" : undefined }}
+                            style={{
+                                display: isMarkdown() && model.editorMode() === "preview" ? "none" : undefined,
+                            }}
                         />
-                        <Show when={isMarkdown()}>
-                            <Show when={model.previewOpenAtom() && !model.sourceHiddenAtom()}>
-                                <div
-                                    class="editor-preview-divider"
-                                    onMouseDown={handlePreviewResizeMouseDown}
-                                    title="Drag to resize preview"
-                                />
-                            </Show>
+                        <Show when={isMarkdown() && model.editorMode() === "split"}>
+                            <div
+                                class="editor-preview-divider"
+                                onMouseDown={handlePreviewResizeMouseDown}
+                                title="Drag to resize preview"
+                            />
+                        </Show>
+                        <Show when={isMarkdown() && model.editorMode() !== "source"}>
                             <div
                                 class="editor-preview-pane"
-                                classList={{
-                                    "editor-preview-pane--collapsed": !model.previewOpenAtom() && !model.sourceHiddenAtom(),
-                                }}
                                 style={
-                                    model.sourceHiddenAtom()
-                                        ? { flex: "1 1 auto" }
-                                        : model.previewOpenAtom()
-                                            ? { height: `${model.previewHeightAtom()}px` }
-                                            : undefined
+                                    model.editorMode() === "split"
+                                        ? { height: `${model.previewHeightAtom()}px`, flex: "0 0 auto" }
+                                        : { flex: "1 1 auto" }
                                 }
-                                id={`editor-preview-panel-${model.blockId}`}
                             >
-                                <div class="editor-preview-header">
-                                    <span class="editor-preview-header-label">Preview</span>
-                                    <div class="editor-preview-header-actions">
-                                        <button
-                                            type="button"
-                                            class="editor-preview-source-toggle"
-                                            title={model.sourceHiddenAtom() ? "Show source" : "Preview only (Mod+Shift+V)"}
-                                            aria-label={model.sourceHiddenAtom() ? "Show source" : "Preview only (Mod+Shift+V)"}
-                                            onClick={() => void model.toggleSourceHidden()}
-                                        >
-                                            {"</>"}
-                                        </button>
-                                        <Show when={!model.sourceHiddenAtom()}>
-                                            <button
-                                                type="button"
-                                                class="editor-preview-chevron"
-                                                aria-expanded={model.previewOpenAtom()}
-                                                aria-controls={`editor-preview-panel-${model.blockId}`}
-                                                aria-label={
-                                                    model.previewOpenAtom()
-                                                        ? "Collapse preview"
-                                                        : "Expand preview"
-                                                }
-                                                onClick={() => void model.togglePreview()}
-                                            >
-                                                {model.previewOpenAtom() ? "▴" : "▾"}
-                                            </button>
-                                        </Show>
-                                    </div>
+                                <div class="editor-preview-content">
+                                    <Markdown textAtom={() => liveDoc()} />
                                 </div>
-                                <Show when={model.previewOpenAtom() || model.sourceHiddenAtom()}>
-                                    <div class="editor-preview-content">
-                                        <Markdown textAtom={() => liveDoc()} />
-                                    </div>
-                                </Show>
                             </div>
                         </Show>
                     </div>
