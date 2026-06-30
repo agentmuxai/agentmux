@@ -10,10 +10,17 @@ import {
     isDisconnected,
     isInitReady,
     isWorking,
+    LIVENESS_RECOVERY_MS,
     STUCK_THRESHOLD_MS,
     SUBMIT_TIMEOUT_MS,
     TurnPhase,
 } from "./types";
+
+/** Bring a fresh state into a live `Streaming` turn (toolsActive 0). */
+const streaming = (atMs = 100) => {
+    const s1 = update(ready(atMs), { type: "TurnStart", at: atMs }).state;
+    return update(s1, { type: "StreamFlushObserved", addedCount: 1, at: atMs }).state;
+};
 
 const mk = () => initialState("test-agent");
 /**
@@ -468,8 +475,50 @@ describe("agent-pane-state reducer", () => {
                 idleSinceMs: tick,
                 thresholdMs: STUCK_THRESHOLD_MS,
             });
-            // Watchdog never mutates state.
+            // Below LIVENESS_RECOVERY_MS the watchdog only diagnoses — no mutation.
             expect(r.state).toBe(s0);
+        });
+
+        it("StreamWatchdogTick past LIVENESS_RECOVERY_MS recovers a hung Streaming turn to Idle", () => {
+            const s0 = streaming(1_000); // Streaming, toolsActive 0, lastEventMs 1000
+            expect(isWorking(s0)).toBe(true);
+            const tick = 1_000 + LIVENESS_RECOVERY_MS + 1_000;
+            const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(isWorking(r.state)).toBe(false);
+            expect(r.state.currentTool).toBeNull();
+            expect(r.state.turnTokens).toBeNull();
+            expect(r.events[0]).toMatchObject({
+                type: "working-recovered",
+                thresholdMs: LIVENESS_RECOVERY_MS,
+            });
+        });
+
+        it("StreamWatchdogTick does NOT recover while a tool is active (emits stream-stuck)", () => {
+            const base = streaming(1_000);
+            // A running tool keeps the turn alive; lastEventMs bumped to 2000.
+            const s0 = update(base, { type: "ToolStart", name: "Bash" }, 2_000).state;
+            expect((s0.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>).toolsActive).toBe(1);
+            const tick = 2_000 + LIVENESS_RECOVERY_MS + 5_000;
+            const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect(r.events[0]).toMatchObject({ type: "stream-stuck" });
+        });
+
+        it("StreamWatchdogTick does NOT recover while rate-limited (waitingReason set)", () => {
+            const base = streaming(1_000);
+            const s0 = update(base, {
+                type: "ProviderWaiting",
+                reason: "rate_limited",
+                retryAfterMs: 30_000,
+                at: 2_000,
+            }).state;
+            const phase = s0.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>;
+            expect(phase.waitingReason).toBe("rate_limited");
+            const tick = (s0.lastEventMs ?? 2_000) + LIVENESS_RECOVERY_MS + 5_000;
+            const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect(r.events[0]).toMatchObject({ type: "stream-stuck" });
         });
 
         it("ToolStart bumps lastEventMs (resets watchdog clock)", () => {

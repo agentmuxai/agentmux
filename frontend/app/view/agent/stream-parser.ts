@@ -245,6 +245,15 @@ export class ClaudeCodeStreamParser {
                 this.currentThinkingNode = null;
                 return this.errorResultToNode(event as ErrorResultEvent);
 
+            // Control events that intentionally produce no DocumentNode. The
+            // live consumer (useAgentStream) handles these ahead of the parser
+            // (`session_end` → finalizeTurn, `provider_waiting` → ProviderWaiting),
+            // but history replay re-parses every persisted line through here —
+            // returning null silently avoids a warn-spam flood (one per turn).
+            case "session_end":
+            case "provider_waiting":
+                return null;
+
             default:
                 console.warn("Unknown event type:", (event as any).type);
                 return null;

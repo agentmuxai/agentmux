@@ -16,7 +16,8 @@
  *   4. pending FIFO; accepting/rejecting/expiring unknown ids is no-op.
  *   5. StreamFlushObserved is a no-op when the stream is unsubscribed.
  *   6. StreamWatchdogTick is a no-op when the stream is unsubscribed or
- *      lastEventMs is null (no events seen yet).
+ *      lastEventMs is null (no events seen yet); past LIVENESS_RECOVERY_MS it
+ *      force-recovers a hung Streaming turn (no tool, not rate-limited) to Idle.
  *   7. Init lifecycle transitions are one-way: InitStart / InitReady /
  *      InitFailed are no-ops once the pane has reached a terminal init
  *      state (InitReady / InitFailed). Re-entering pending requires a
@@ -36,6 +37,7 @@ import {
     AgentPaneState,
     INTERRUPT_TIMEOUT_MS,
     KindBeforeDisconnect,
+    LIVENESS_RECOVERY_MS,
     ReducerResult,
     STUCK_THRESHOLD_MS,
     SUBMIT_TIMEOUT_MS,
@@ -262,6 +264,42 @@ export function update(
             const idleSinceMs = command.nowMs - state.lastEventMs;
             if (idleSinceMs < STUCK_THRESHOLD_MS) {
                 return { state, events: [] };
+            }
+            // Liveness recovery (SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29).
+            // A `Streaming` turn idle past the longer LIVENESS_RECOVERY_MS — with
+            // no tool running and not rate-limited — is hung: its terminal
+            // `session_end` was never observed. For persistent agents no
+            // `ControllerStatus: done` will ever arrive to clear it (the process
+            // doesn't exit between turns), so the watchdog itself transitions out
+            // of "Working". Land in `Idle` (turn abandoned) — NOT a synthetic
+            // `Done.completed`, which would feed false stats to session digests.
+            // Guarded to Streaming-with-no-tool-and-not-waiting so a running tool
+            // or a 429 backoff (both of which keep `lastEventMs` fresh anyway) can
+            // never be mistaken for a hang. Interrupting/Submitting are left to
+            // their own bounded timers (INTERRUPT_TIMEOUT_MS / SUBMIT_TIMEOUT_MS).
+            const phase = state.turnPhase;
+            if (
+                phase.kind === "Streaming" &&
+                phase.toolsActive === 0 &&
+                phase.waitingReason === undefined &&
+                idleSinceMs >= LIVENESS_RECOVERY_MS
+            ) {
+                return {
+                    state: {
+                        ...state,
+                        currentTool: null,
+                        currentToolArg: null,
+                        turnTokens: null,
+                        turnPhase: { kind: "Idle" },
+                    },
+                    events: [
+                        {
+                            type: "working-recovered",
+                            idleSinceMs,
+                            thresholdMs: LIVENESS_RECOVERY_MS,
+                        },
+                    ],
+                };
             }
             return {
                 state,
