@@ -505,7 +505,10 @@ describe("agent-pane-state reducer", () => {
             expect(r.events[0]).toMatchObject({ type: "stream-stuck" });
         });
 
-        it("StreamWatchdogTick does NOT recover while rate-limited (waitingReason set)", () => {
+        it("StreamWatchdogTick does NOT recover a rate-limited turn within retryAfterMs + LIVENESS window", () => {
+            // A genuine 429 backoff re-emits provider_waiting within retryAfterMs,
+            // so the recovery threshold is retryAfterMs + LIVENESS_RECOVERY_MS. A
+            // tick past LIVENESS alone (but short of the sum) must NOT recover.
             const base = streaming(1_000);
             const s0 = update(base, {
                 type: "ProviderWaiting",
@@ -515,10 +518,50 @@ describe("agent-pane-state reducer", () => {
             }).state;
             const phase = s0.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>;
             expect(phase.waitingReason).toBe("rate_limited");
+            // idle = LIVENESS + 5s, still < retryAfterMs(30s) + LIVENESS.
             const tick = (s0.lastEventMs ?? 2_000) + LIVENESS_RECOVERY_MS + 5_000;
             const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
             expect(r.state.turnPhase.kind).toBe("Streaming");
             expect(r.events[0]).toMatchObject({ type: "stream-stuck" });
+        });
+
+        it("StreamWatchdogTick recovers a stalled rate-limited turn past retryAfterMs + LIVENESS window", () => {
+            const base = streaming(1_000);
+            const retryAfterMs = 30_000;
+            const s0 = update(base, {
+                type: "ProviderWaiting",
+                reason: "rate_limited",
+                retryAfterMs,
+                at: 2_000,
+            }).state;
+            // idle past retryAfterMs + LIVENESS → the retry loop stalled (no
+            // follow-up provider_waiting / token / session_end); recover to Idle.
+            const tick = (s0.lastEventMs ?? 2_000) + retryAfterMs + LIVENESS_RECOVERY_MS + 1_000;
+            const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(isWorking(r.state)).toBe(false);
+            expect(r.events[0]).toMatchObject({
+                type: "working-recovered",
+                thresholdMs: retryAfterMs + LIVENESS_RECOVERY_MS,
+            });
+        });
+
+        it("StreamWatchdogTick recovers a stalled rate-limited turn with null retryAfterMs at the LIVENESS window", () => {
+            const base = streaming(1_000);
+            const s0 = update(base, {
+                type: "ProviderWaiting",
+                reason: "rate_limited",
+                retryAfterMs: null,
+                at: 2_000,
+            }).state;
+            // null retryAfterMs → threshold falls back to LIVENESS_RECOVERY_MS.
+            const tick = (s0.lastEventMs ?? 2_000) + LIVENESS_RECOVERY_MS + 1_000;
+            const r = update(s0, { type: "StreamWatchdogTick", nowMs: tick });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.events[0]).toMatchObject({
+                type: "working-recovered",
+                thresholdMs: LIVENESS_RECOVERY_MS,
+            });
         });
 
         it("ToolStart bumps lastEventMs (resets watchdog clock)", () => {
