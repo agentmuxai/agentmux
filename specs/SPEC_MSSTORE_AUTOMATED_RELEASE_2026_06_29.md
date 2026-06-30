@@ -130,7 +130,7 @@ task release            # changesets → version bump (+ VERSION_HISTORY), no co
         2. assert filename version == tag version                       (OQ4)
         3. winget install "Microsoft Store Developer CLI"
         4. msstore reconfigure --tenantId … --sellerId … --clientId … --clientSecret …  (OQ9)
-        5. msstore publish --… <msix>  [--rollout <pct>]                (OQ5)
+        5. msstore publish --… <msix>  (rollout deferred to manual post-publish step, see OQ5)
         6. poll submission status (bounded); annotate, never block      (OQ6/OQ7)
 ```
 
