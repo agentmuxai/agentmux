@@ -1,0 +1,50 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.color-swatch-grid {
+    display: grid;
+    gap: var(--space-1);
+    // columns driven by --swatch-cols CSS var set inline by ColorSwatchPalette
+    grid-template-columns: repeat(var(--swatch-cols, 5), 20px);
+}
+
+.color-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 0;
+    cursor: default;
+    border: 1.5px solid transparent;
+    transition: transform 0.1s ease, border-color 0.1s ease;
+
+    &:hover {
+        transform: scale(1.25);
+        border-color: rgba(255, 255, 255, 0.5);
+        z-index: 1;
+    }
+
+    &.color-swatch--selected {
+        border-color: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+    }
+}
+
+.color-swatch-clear {
+    display: flex;
+
+    button {
+        flex: 1;
+        padding: 3px var(--space-1-5);
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 0;
+        color: var(--secondary-text-color);
+        font-size: 10px;
+        cursor: default;
+        white-space: nowrap;
+
+        &:hover {
+            background: var(--highlight-bg-color);
+            color: var(--main-text-color);
+        }
+    }
+}

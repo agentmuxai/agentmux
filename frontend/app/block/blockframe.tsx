@@ -32,7 +32,8 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
-import { buildPaneColorSubmenu, hueToHeaderBg, hueToActiveBorder } from "./pane-color-menu";
+import { hueToHeaderBg, hueToActiveBorder } from "./pane-color-menu";
+import { PaneColorPanel } from "./pane-color-panel";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -61,11 +62,6 @@ function handleHeaderContextMenu(
     // Header-only: view-specific settings (font size, theme, etc.)
     const extraItems = viewModel?.getSettingsMenuItems?.();
     if (extraItems && extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
-
-    // Agent panes: Pane Color hue picker
-    if (blockData?.meta?.view === "agent") {
-        menu.push({ type: "separator" }, buildPaneColorSubmenu(blockData, blockData.oid));
-    }
 
     // Header-only: title management + Copy BlockId
     menu.push(
@@ -374,7 +370,10 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         return util.useAtomValueSafe(props.viewModel?.viewText);
     });
 
+    const [colorPanelAnchor, setColorPanelAnchor] = createSignal<DOMRect | null>(null);
+
     const onContextMenu = (e: MouseEvent) => {
+        setColorPanelAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
         handleHeaderContextMenu(e, blockData(), props.viewModel, props.nodeModel.isMagnified(), props.nodeModel.toggleMagnify, props.nodeModel.onClose);
     };
     const viewFaviconUrl = createMemo(() => util.useAtomValueSafe(props.viewModel?.viewFaviconUrl));
@@ -517,6 +516,14 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     blockView={blockData()?.meta?.view}
                 />
             </div>
+            <Show when={colorPanelAnchor()}>
+                <PaneColorPanel
+                    anchor={colorPanelAnchor()!}
+                    currentHue={(blockData()?.meta?.["frame:hue"] as number | undefined) ?? null}
+                    blockId={blockData()!.oid}
+                    onClose={() => setColorPanelAnchor(null)}
+                />
+            </Show>
         </div>
     );
 }

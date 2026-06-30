@@ -251,21 +251,7 @@ body:not(.nohover) .tab.tab-colored.dragging {
     user-select: none;
 }
 
-.tab-context-colors {
-    display: grid;
-    grid-template-columns: repeat(5, 20px);
-    gap: var(--space-1);
-}
-
-.tab-context-color-clear {
-    display: flex;
-
-    .tab-context-btn-clear {
-        flex: 1;
-        font-size: 10px;
-        padding: 3px var(--space-1-5);
-    }
-}
+// .tab-context-colors and .tab-color-swatch moved to color-swatch-palette.scss
 
 .tab-context-actions {
     display: flex;
@@ -296,33 +282,3 @@ body:not(.nohover) .tab.tab-colored.dragging {
     }
 }
 
-.tab-color-swatch {
-    width: 20px;
-    height: 20px;
-    border-radius: 0;
-    cursor: default;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 9px;
-    border: 1.5px solid transparent;
-    transition: transform 0.1s ease, border-color 0.1s ease;
-    color: var(--secondary-text-color);
-
-    &:hover {
-        transform: scale(1.25);
-        border-color: rgba(255, 255, 255, 0.5);
-        z-index: 1;
-    }
-
-    &.selected {
-        border-color: rgba(255, 255, 255, 0.9);
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
-    }
-
-    // "None" swatch (last item, no background)
-    &:last-child {
-        background: rgba(255, 255, 255, 0.06);
-        border-color: rgba(255, 255, 255, 0.1);
-    }
-}
