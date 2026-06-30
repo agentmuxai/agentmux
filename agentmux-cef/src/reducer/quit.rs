@@ -53,11 +53,14 @@ pub(super) fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
 // executor that actually closes pool browsers (Stage 1) and exits the message
 // loop (Stage 2) stays exactly where it is today. `reconcile_quit` only DECIDES.
 //
-// NOT YET WIRED: this PR lands the decision + its test coverage (the safety net
-// the regression slipped through). Calling it from the browser-deregister /
-// promote-complete / creation-abort transitions — behind the §10.1 UI-thread
-// executor — is the explicit next step. Hence `#[allow(dead_code)]`, matching the
-// reducer-scaffolding convention documented in `state.rs`.
+// WIRED (Pillar 2, Stage 1 — SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md):
+// `reducer::update` now calls `reconcile_quit` after every quit-relevant command
+// (gated by `is_quit_relevant`) and surfaces the result via
+// `DispatchOutput::request_drain`. The decision is computed here, under the
+// host-state lock, as a pure read. The UI-thread executor that consumes
+// `request_drain` and runs the Stage-1 close cascade is wired in Stage 2; until
+// then the legacy edge-triggered gate in `client::on_before_close` still drives
+// the actual drain, so Stage 1 is behavior-neutral.
 
 /// Background PENDING-CREATION labels — warm-pool tab refills (`window-pool-`),
 /// browser-pane children (`browser-pane-`), and floating panes (`floating-`, the
@@ -70,7 +73,6 @@ pub(super) fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
 ///
 /// Used ONLY for pending creations. Registered browsers are classified by
 /// `is_live_user_window` (the `is_pool` flag), NOT by label — see its doc.
-#[allow(dead_code)]
 fn is_background_pending_creation_label(label: &str) -> bool {
     label.starts_with("window-pool-")
         || label.starts_with("browser-pane-")
@@ -117,7 +119,6 @@ pub(crate) fn count_live_user_windows(state: &HostState) -> usize {
 /// consult the PRE-registration `pending_window_creations` queue (spec §10.2):
 /// draining while a user's "New Window" is still loading would quit the instance
 /// out from under it. Background creations (pool refill / panes) do not block drain.
-#[allow(dead_code)]
 pub(super) fn user_creation_in_flight(state: &HostState) -> bool {
     state
         .pending_window_creations
@@ -130,7 +131,6 @@ pub(super) fn user_creation_in_flight(state: &HostState) -> bool {
 /// creation is in flight. Safe to call after every transition — once
 /// `Draining`/`Quit` it returns `None` (the transition is monotonic — see
 /// `handle_begin_drain`). CEF-free so the full truth table is unit-testable.
-#[allow(dead_code)]
 pub(super) fn should_begin_drain(
     live_user_windows: usize,
     user_creation_in_flight: bool,
@@ -147,7 +147,6 @@ pub(super) fn should_begin_drain(
 
 /// Level-triggered quit reconciliation over the full `HostState`. Composes the
 /// three reads above. Returns the drain reason iff it is safe to begin draining.
-#[allow(dead_code)]
 pub(super) fn reconcile_quit(state: &HostState) -> Option<QuitReason> {
     should_begin_drain(
         count_live_user_windows(state),

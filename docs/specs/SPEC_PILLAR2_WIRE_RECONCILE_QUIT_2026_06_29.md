@@ -59,7 +59,34 @@ Quit-relevant command set (the only ones that can flip the answer):
 
 All other commands skip the check (cheap guard — match on the variant).
 
+> **Stage 1 implementation note (landed):** the guard is implemented as a **negative**
+> match (`is_quit_relevant`) — only the drag-opacity hot path and the browser-pane lifecycle
+> are excluded; everything else defaults to relevant. This is fail-safe: a future window/pool
+> command can't silently miss reconciliation. `DispatchOutput` gained `request_drain:
+> Option<QuitReason>`; `update()` sets it after relevant commands. Behavior-neutral until Stage 2
+> consumes it. Tests: `is_quit_relevant_guard_membership`, `update_surfaces_request_drain_only_for_relevant_commands` (reducer suite green, 51 passed).
+
 ### 3.2 Action: route through the EXISTING UI-thread drain executor
+
+> **Stage 2 design decision (resolved during Stage 1 — IMPORTANT, supersedes the "post from
+> host_dispatch" sketch below):** `host_dispatch` is a `&self` method on `AppState` and `AppState`
+> holds **no `Arc<Self>`/`Weak<Self>` handle**, so it cannot cheaply construct a CEF task to post
+> the cascade cross-thread. Centralizing consumption there would require threading an `Arc<AppState>`
+> through (a wider change). Instead, **Stage 2 consumes `request_drain` at the UI-thread CEF
+> callbacks** that dispatch quit-relevant commands — `client::on_before_close` (window/pool close)
+> **and the pool spawn/promote/destroy completion callbacks** (the transitions that *settle* the
+> count to zero after a refill race). Those run on the UI thread already, so a `Client` method
+> `begin_drain_and_cascade(&self, reason)` (the extracted Stage-1 cascade) can be called **inline**
+> — no cross-thread post, no new task type, no Arc plumbing. The level-triggered guarantee comes
+> from consuming at *every* settling callback, not from a single chokepoint.
+>
+> **The correctness obligation for Stage 2:** enumerate *all* UI-thread callbacks that can drive
+> `count_live_user_windows`→0 (close, pool-ready, promote, pool-destroy) and consume `request_drain`
+> at each. Missing one reintroduces the orphan race; acting inline on the wrong one (e.g. calling
+> `quit_message_loop` from `on_before_close`) reintroduces the deadlock. This is the deadlock-
+> sensitive core and is deliberately a **separate, focused PR** from Stage 1.
+
+The (now-superseded) original sketch, kept for context:
 **Critical threading contract** (`reducer/quit.rs:49-54`, spec §10.1): `reconcile_quit` only DECIDES.
 It must not call `quit_message_loop()`, re-lock `host_state`, or close anything. Calling
 `quit_message_loop` from inside `on_before_close` **deadlocks the UI thread** (confirmed v0.33.498,
