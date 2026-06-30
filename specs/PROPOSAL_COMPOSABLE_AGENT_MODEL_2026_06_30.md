@@ -57,7 +57,7 @@ Center.
 | **Memory** | Persistent learned knowledge (native memory store; the `memory.*` App API / `memory/` dir) | colloquially "the brain", per-account | Trust Center › **Memories** |
 | **MCP server** | An external tool/connection surface (URL/stdio + which tools) | inlined in preset | Trust Center › **MCP Servers** (break out) |
 | **Skill** | On-demand instruction/knowledge module (a folder) | inlined in preset | Trust Center › **Skills** (break out) |
-| **Brief** (instructions/context) | The **always-on** standing instructions + context — what loads the moment the agent loads (the `soul`/`agentmd` → CLAUDE.md, plus the injected startup instructions). Distinct from Skills, which are on-demand. | the `startup` / `soul` / `agentmd` content types | Trust Center › **Briefs** |
+| **Brief** | **The first message** injected when an agent pane opens — the startup payload (session context / identity / kickoff). That is *all* it is. It is **not** a standing instruction set; there is no always-on instruction blob. Behavioral/instructional content lives in **Skills** (on-demand). | the `startup` content type | Trust Center › **Briefs** |
 
 > Each primitive carries its own **ownership/sharing** (agent-owned vs **global**,
 > mirroring the App API's existing global-preset guard) and its own audit trail.
@@ -121,32 +121,34 @@ instance → bundle → binding → account) is the one real refactor; flag it t
 
 ### 3.4 What loads when (verified against the spawn path)
 
-The Brief is precisely *"what loads when the agent loads."* Traced through the
+**The Brief is *just the first message* the pane opens with** — nothing more. There
+is deliberately **no always-on standing-instruction blob**. Traced through the
 current spawn path:
 
 | Primitive | When | Mechanism (today) |
 |---|---|---|
-| **Brief** | **always, at startup** | two paths, both always-on: the `startup` instructions are injected as the **first user message** (`buildStartupPayload()` → `AgentInputCommand` → CLI stdin, `subprocess.rs:494`); `soul`+`agentmd` are written to **`CLAUDE.md`** in the workdir (`agent_config.rs:55-96`), auto-read by Claude Code |
-| **Memory** | recalled at startup | native memory store (the brain), per-account `CLAUDE_CONFIG_DIR` |
-| **Skill** | **on-demand** | indexed in CLAUDE.md + `.claude/commands/<trigger>.md`; loaded only when invoked — the lean-core vs. on-demand split |
+| **Brief** | **the first message, at pane open** | the `startup` content is injected as the **first user message** (`buildStartupPayload()` → `AgentInputCommand` → CLI stdin, `subprocess.rs:494`) — session context / identity / kickoff |
+| **Memory** | recalled at startup | native memory store, per-account `CLAUDE_CONFIG_DIR` |
+| **Skill** | **on-demand** | indexed + `.claude/commands/<trigger>.md`; loaded only when invoked. **Instructional/behavioral content lives here** — not in an always-on prompt |
 | **MCP server** | connection at startup, tools on-demand | `.mcp.json` (`build_mcp_config`, auto-injects the `agentmux-mcp` entry) |
-| **Account** | at startup | "Assigned Accounts" in the startup payload + identity resolution (`resolver.rs`) |
+| **Account** | at pane open | "Assigned Accounts" in the startup payload + identity resolution (`resolver.rs`) |
 
-> This confirms the **Brief = always-on / Skill = on-demand** distinction concretely
-> — the `startup`+`soul`+`agentmd` content is read every launch; skills are not.
+> **Deliberate stance: no always-on instruction set.** Today the `soul`+`agentmd`
+> content is written to an always-loaded **`CLAUDE.md`** (`agent_config.rs:55-96`).
+> We are **retiring that** — heavy standing instructions ("that terminality") are
+> not wanted. **Brief = the first message; everything instructional moves to
+> Skills** (on-demand). So `soul`/`agentmd` migrate into Skills, not into Brief.
 > (Citations: `frontend/.../startup/buildStartupPayload.ts`, `subprocess.rs:494`,
-> `server/agent_config.rs:55-96`, `server/app_api.rs:2299-2405` `write_agent_config_files`.)
+> `server/agent_config.rs:55-96`, `server/app_api.rs:2299-2405`.)
 
-**Two content types the 5-primitive model doesn't yet place** (surfaced by the
-trace — decide their home, §9):
-- **`hooks` + `settings`/permissions** → `.claude/settings.json`. These are
-  behavior/safety config that also loads at startup. Candidate: a separate
-  **Policy** primitive (permissions are a trust decision → Trust Center fit), or
-  fold into the Brief. *Recommend a distinct `Policy` primitive* — permissions
-  deserve their own review surface, not burial in instructions.
-- **the static `memory` content blob** (baked into CLAUDE.md today) is **not** the
-  native Memory store. It's really just more standing context → **merge it into the
-  Brief** (or migrate into native Memory); don't carry two "memory" concepts.
+**Two content types the model must place** (surfaced by the trace — §9):
+- **`hooks` + `settings`/permissions** → `.claude/settings.json`. Behavior/safety
+  config that loads at startup. *Recommend a distinct **Policy** primitive* —
+  permissions are a trust decision and deserve their own review surface.
+- **`soul` / `agentmd` (today's CLAUDE.md instructions)** → **migrate into Skills**
+  (on-demand), per the stance above — not Brief, not a standing prompt.
+- **the static `memory` content blob** (in CLAUDE.md today) is **not** the native
+  Memory store → migrate into native **Memory**; don't carry two "memory" concepts.
 
 ## 4. Naming (the crux of the question)
 
@@ -172,11 +174,11 @@ Keep them concrete and singular: **Account, Memory, MCP Server, Skill, Brief**.
 (**Memory** matches the native concept + the `memory.*` App API — no UI/backend
 split; "the brain" stays a colloquial nickname, not the canonical term. The reason
 "Brain" was ever needed — disambiguating from `db_memory_bundles` — is removed by
-this proposal's `db_memory_bundles` → `db_bundles` rename. "Brief" is a crisp word for the standing
-instructions + context that "instructions" or "rules" undersell.) Open to
-"Instructions" instead of "Brief" if you prefer the literal term. Note: **there is
-no "Identity" primitive** — Account is the primitive; "identity" is a derived view
-(§3.3).
+this proposal's `db_memory_bundles` → `db_bundles` rename. **`Brief` is the name —
+not "Instructions"**: it is deliberately *not* a standing instruction set, it's the
+opening message; "Instructions" would mislabel it and re-imply the always-on prompt
+we're removing.) Note: **there is no "Identity" primitive** — Account is the
+primitive; "identity" is a derived view (§3.3).
 
 ### 4.3 Why "Bundle" works now (the collision is removed, not worked around)
 
@@ -203,7 +205,7 @@ Trust Center
 ├─ Brains          ← memory stores
 ├─ MCP Servers     ← external tool/connection surfaces  (NEW: broken out)
 ├─ Skills          ← instruction/knowledge modules       (NEW: broken out)
-└─ Briefs          ← standing instructions + context files
+└─ Briefs          ← the opening message a pane loads with (no standing prompt)
 ```
 
 No **Identities** tab — Account is the primitive; "identity" is a derived view
@@ -254,7 +256,8 @@ workspace.
 
 The `a5af/claw` "AgentX/AgentY" scheme maps **cleanly** onto this model — it stops
 being an awkward "dump it in memory" and becomes:
-- **Brief:** the claw `CLAUDE.md` + startup instructions
+- **Brief:** the claw startup message only (the kickoff). The claw `CLAUDE.md` /
+  startup-prompt *instructions* become **Skills** (on-demand), not the Brief
 - **Skills:** the claw `templates/skills/*` (each a first-class Skill)
 - **MCP Servers:** the claw `.mcp.json` entries (each a first-class MCP server)
 - **Account:** AgentX's Claude login (the per-agent provisioning work)
@@ -269,7 +272,8 @@ building blocks — not config smeared across three stores.
 
 1. **Collection name:** `Bundle` (recommended; product owner's call) vs. `Profile`
    / `Assembly`. Confirm.
-2. **"Brief" vs "Instructions"** for the standing-instructions primitive.
+2. ~~"Brief" vs "Instructions"~~ — **settled: `Brief`, defined as the opening
+   message only**; no "Instructions" concept; standing instructions → Skills.
 3. **Scope of v1:** break out **MCP + Skills** first (the explicit ask), or land the
    whole primitives + Bundle IA at once?
 4. **Drop the identity-bundle layer** (Account direct, §3.3) — confirmed direction;
