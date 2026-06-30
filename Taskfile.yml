@@ -564,8 +564,27 @@ tasks:
                 # uses a limited Go coreutils that rejects those flags.)
                 cefDir=target/release
                 if [ ! -f "$cefDir/libcef.dll" ] || [ ! -f "$cefDir/icudtl.dat" ]; then
-                  echo "❌ incomplete CEF runtime in $cefDir (need libcef.dll + icudtl.dat) — run 'task build:host' first"
-                  exit 1
+                  # rust-cache hit: cef-dll-sys build script didn't re-run →
+                  # DLLs not staged to target/release/. The CEF SDK is still in
+                  # the build OUT_DIR (rust-cache preserves
+                  # target/release/build/). Find libcef.dll there and copy the
+                  # full platform dir to target/release/ — same files the build
+                  # script would have copied (copy_cef_runtime_files in
+                  # cef-dll-sys/sys/build.rs).
+                  cefOutDir=""
+                  for dll in target/release/build/cef-dll-sys-*/out/*/libcef.dll; do
+                    if [ -f "$dll" ]; then
+                      cefOutDir="$(dirname "$dll")"
+                      break
+                    fi
+                  done
+                  if [ -n "$cefOutDir" ]; then
+                    echo "rust-cache hit: staging CEF DLLs from OUT_DIR ($cefOutDir) → $cefDir"
+                    cp -rf "$cefOutDir/." "$cefDir/"
+                  else
+                    echo "❌ incomplete CEF runtime in $cefDir (need libcef.dll + icudtl.dat) — run 'task build:host' first"
+                    exit 1
+                  fi
                 fi
                 echo "Found runtime binaries in: $cefDir"
                 # Guard: the bundled libcef.dll MUST match the linked `cef` crate
