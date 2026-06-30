@@ -80,6 +80,26 @@ require dist/schema/settings.json
 require "dist/Frameworks/Chromium Embedded Framework.framework"
 [ -f "$ENTITLEMENTS" ] || { echo "❌ missing entitlements: $ENTITLEMENTS" >&2; exit 1; }
 
+# ── Hard BeginWindowDrag-patch gate ───────────────────────────────────────────
+# Release builds MUST ship the patched CEF framework (agentmuxai/cef fork) — the
+# upstream cef-dll-sys framework lacks CefWindow::BeginWindowDrag(), so native
+# window drag / floating-pane resize silently no-ops. This is the macOS analogue
+# of the Linux gate in build-appimage-linux.sh. It runs on dist/Frameworks/ —
+# UNSTRIPPED at this point; the strip (which removes the local patch symbol) runs
+# later, inside the assembled .app. Escape hatch: AGENTMUX_SKIP_CEF_PATCH_CHECK=1
+# for a deliberate upstream-CEF package (e.g. local smoke test without the patch).
+if [ "${AGENTMUX_SKIP_CEF_PATCH_CHECK:-0}" = "1" ]; then
+    echo "⚠️  AGENTMUX_SKIP_CEF_PATCH_CHECK=1 — skipping the BeginWindowDrag patch gate" >&2
+else
+    if ! bash scripts/verify-cef-framework-darwin.sh "dist/Frameworks/Chromium Embedded Framework.framework"; then
+        echo "❌ CEF framework patch gate failed — refusing to package an unpatched/unverifiable" >&2
+        echo "   framework. Point AGENTMUX_CEF_RUNTIME_DIR_DARWIN at the patched framework and" >&2
+        echo "   re-run task bundle:darwin, or set AGENTMUX_SKIP_CEF_PATCH_CHECK=1 to override." >&2
+        echo "   See docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md." >&2
+        exit 1
+    fi
+fi
+
 echo "==> Assembling AgentMux.app v$VERSION ($ARCH)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
