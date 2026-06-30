@@ -2907,6 +2907,45 @@ mod tests {
     }
 
     #[test]
+    fn layout_replace_with_malformed_node_is_atomic() {
+        // A new_node with neither data nor children fails balance AFTER
+        // replace_node has swapped it in. The arm must leave the tab's tree
+        // untouched (operate on a clone, commit only on success) and emit
+        // only Error — no partial mutation. [codex P2 #1868]
+        let (mut state, tab_id) = fresh_tab();
+        let original = group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]);
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(original.clone());
+        let malformed = agentmux_common::LayoutNode {
+            id: "bad".into(),
+            // BOTH data and children violates leaf-XOR-branch → balance_node
+            // returns Err(InvalidNode) after replace_node has swapped it in.
+            data: Some(agentmux_common::LayoutNodeData {
+                block_id: "x".into(),
+                ..Default::default()
+            }),
+            children: vec![leaf_node("inner", "bi")],
+            ..Default::default()
+        };
+        let events = update(
+            &mut state,
+            Command::LayoutReplaceNode {
+                tab_id: tab_id.clone(),
+                target_id: "a".into(),
+                new_node: malformed,
+                focus_after: false,
+                correlation_id: "c".into(),
+            },
+            &ctx(1),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
+        assert_eq!(
+            state.tabs[&tab_id].rootnode,
+            Some(original),
+            "tree left untouched on error (atomic)"
+        );
+    }
+
+    #[test]
     fn layout_split_horizontal_wraps_root_and_focuses_new() {
         let (mut state, tab_id) = fresh_tab();
         state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("a", "ba"));

@@ -384,18 +384,12 @@ pub(super) fn handle_layout_move_node(
     index: usize,
     correlation_id: String,
 ) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutMoveNode", &tab_id);
-    };
-    let Some(root) = tab.rootnode.as_mut() else {
-        return op_error(state, format!("LayoutMoveNode: empty tree (tab {})", tab_id));
-    };
-    if let Err(e) = crate::backend::layout::move_node(root, &node_id, &new_parent_id, index) {
-        return op_error(state, format!("LayoutMoveNode: {} (tab {})", e, tab_id));
+    if let Err(events) = apply_atomic(state, &tab_id, "LayoutMoveNode", |root| {
+        crate::backend::layout::move_node(root, &node_id, &new_parent_id, index)
+    }) {
+        return events;
     }
-    if let Err(e) = crate::backend::layout::balance_node(root) {
-        return op_error(state, format!("LayoutMoveNode balance: {} (tab {})", e, tab_id));
-    }
+    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     reconcile_focus_magnify(tab);
     let v = state.bump_version();
     vec![Event::LayoutNodeMoved {
@@ -415,18 +409,12 @@ pub(super) fn handle_layout_swap_nodes(
     node2_id: String,
     correlation_id: String,
 ) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutSwapNodes", &tab_id);
-    };
-    let Some(root) = tab.rootnode.as_mut() else {
-        return op_error(state, format!("LayoutSwapNodes: empty tree (tab {})", tab_id));
-    };
-    if let Err(e) = crate::backend::layout::swap_nodes(root, &node1_id, &node2_id) {
-        return op_error(state, format!("LayoutSwapNodes: {} (tab {})", e, tab_id));
+    if let Err(events) = apply_atomic(state, &tab_id, "LayoutSwapNodes", |root| {
+        crate::backend::layout::swap_nodes(root, &node1_id, &node2_id)
+    }) {
+        return events;
     }
-    if let Err(e) = crate::backend::layout::balance_node(root) {
-        return op_error(state, format!("LayoutSwapNodes balance: {} (tab {})", e, tab_id));
-    }
+    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     reconcile_focus_magnify(tab);
     let v = state.bump_version();
     vec![Event::LayoutNodesSwapped {
@@ -444,18 +432,12 @@ pub(super) fn handle_layout_resize_nodes(
     ops: Vec<agentmux_common::ResizeOp>,
     correlation_id: String,
 ) -> Vec<Event> {
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutResizeNodes", &tab_id);
-    };
-    let Some(root) = tab.rootnode.as_mut() else {
-        return op_error(state, format!("LayoutResizeNodes: empty tree (tab {})", tab_id));
-    };
-    if let Err(e) = crate::backend::layout::resize_nodes(root, &ops) {
-        return op_error(state, format!("LayoutResizeNodes: {} (tab {})", e, tab_id));
+    if let Err(events) = apply_atomic(state, &tab_id, "LayoutResizeNodes", |root| {
+        crate::backend::layout::resize_nodes(root, &ops)
+    }) {
+        return events;
     }
-    if let Err(e) = crate::backend::layout::balance_node(root) {
-        return op_error(state, format!("LayoutResizeNodes balance: {} (tab {})", e, tab_id));
-    }
+    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     reconcile_focus_magnify(tab);
     let v = state.bump_version();
     vec![Event::LayoutNodesResized {
@@ -476,18 +458,12 @@ pub(super) fn handle_layout_replace_node(
 ) -> Vec<Event> {
     let new_id = new_node.id.clone();
     let new_node_event = new_node.clone();
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutReplaceNode", &tab_id);
-    };
-    let Some(root) = tab.rootnode.as_mut() else {
-        return op_error(state, format!("LayoutReplaceNode: empty tree (tab {})", tab_id));
-    };
-    if let Err(e) = crate::backend::layout::replace_node(root, &target_id, new_node) {
-        return op_error(state, format!("LayoutReplaceNode: {} (tab {})", e, tab_id));
+    if let Err(events) = apply_atomic(state, &tab_id, "LayoutReplaceNode", |root| {
+        crate::backend::layout::replace_node(root, &target_id, new_node)
+    }) {
+        return events;
     }
-    if let Err(e) = crate::backend::layout::balance_node(root) {
-        return op_error(state, format!("LayoutReplaceNode balance: {} (tab {})", e, tab_id));
-    }
+    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     if focus_after {
         tab.focused_node_id = new_id;
     }
@@ -513,18 +489,12 @@ pub(super) fn handle_layout_split_horizontal(
 ) -> Vec<Event> {
     let new_id = new_node.id.clone();
     let new_node_event = new_node.clone();
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutSplitHorizontal", &tab_id);
-    };
-    let Some(root) = tab.rootnode.as_mut() else {
-        return op_error(state, format!("LayoutSplitHorizontal: empty tree (tab {})", tab_id));
-    };
-    if let Err(e) = crate::backend::layout::split_horizontal(root, &target_id, new_node, position) {
-        return op_error(state, format!("LayoutSplitHorizontal: {} (tab {})", e, tab_id));
+    if let Err(events) = apply_atomic(state, &tab_id, "LayoutSplitHorizontal", |root| {
+        crate::backend::layout::split_horizontal(root, &target_id, new_node, position)
+    }) {
+        return events;
     }
-    if let Err(e) = crate::backend::layout::balance_node(root) {
-        return op_error(state, format!("LayoutSplitHorizontal balance: {} (tab {})", e, tab_id));
-    }
+    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     if focus_after {
         tab.focused_node_id = new_id;
     }
@@ -551,18 +521,12 @@ pub(super) fn handle_layout_split_vertical(
 ) -> Vec<Event> {
     let new_id = new_node.id.clone();
     let new_node_event = new_node.clone();
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutSplitVertical", &tab_id);
-    };
-    let Some(root) = tab.rootnode.as_mut() else {
-        return op_error(state, format!("LayoutSplitVertical: empty tree (tab {})", tab_id));
-    };
-    if let Err(e) = crate::backend::layout::split_vertical(root, &target_id, new_node, position) {
-        return op_error(state, format!("LayoutSplitVertical: {} (tab {})", e, tab_id));
+    if let Err(events) = apply_atomic(state, &tab_id, "LayoutSplitVertical", |root| {
+        crate::backend::layout::split_vertical(root, &target_id, new_node, position)
+    }) {
+        return events;
     }
-    if let Err(e) = crate::backend::layout::balance_node(root) {
-        return op_error(state, format!("LayoutSplitVertical balance: {} (tab {})", e, tab_id));
-    }
+    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     if focus_after {
         tab.focused_node_id = new_id;
     }
@@ -589,30 +553,17 @@ pub(super) fn handle_layout_insert_node_at_index(
 ) -> Vec<Event> {
     let new_id = node.id.clone();
     let node_event = node.clone();
-    let Some(tab) = state.tabs.get_mut(&tab_id) else {
-        return unknown_tab(state, "LayoutInsertNodeAtIndex", &tab_id);
-    };
-    let Some(root) = tab.rootnode.as_mut() else {
-        // An index path can't address a non-existent tree. Reject rather
-        // than promote-to-root and emit a divergent event: the emitted
-        // `LayoutNodeInsertedAtIndex` echoes `index_arr`, but a promote
-        // ignores it, so a replay consumer / the persist subscriber would
-        // diverge from the reducer. (The sibling `handle_layout_insert_node`
-        // rejects empty-tree + explicit `index` for exactly this reason.)
-        return op_error(
-            state,
-            format!("LayoutInsertNodeAtIndex: cannot index into an empty tree (tab {})", tab_id),
-        );
-    };
-    if let Err(e) = crate::backend::layout::insert_node_at_index(root, node, &index_arr) {
-        return op_error(state, format!("LayoutInsertNodeAtIndex: {} (tab {})", e, tab_id));
+    // An index path can't address a non-existent tree; `apply_atomic`'s
+    // empty-tree guard rejects that (so we never promote-to-root and emit a
+    // `LayoutNodeInsertedAtIndex` that echoes an `index_arr` the tree never
+    // honoured — a replay/persist divergence the sibling
+    // `handle_layout_insert_node` also rejects).
+    if let Err(events) = apply_atomic(state, &tab_id, "LayoutInsertNodeAtIndex", |root| {
+        crate::backend::layout::insert_node_at_index(root, node, &index_arr)
+    }) {
+        return events;
     }
-    if let Err(e) = crate::backend::layout::balance_node(root) {
-        return op_error(
-            state,
-            format!("LayoutInsertNodeAtIndex balance: {} (tab {})", e, tab_id),
-        );
-    }
+    let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     // magnify implies focus (frontend invariant; see handle_layout_insert_node).
     if focus_after || magnify_after {
         tab.focused_node_id = new_id.clone();
@@ -629,4 +580,40 @@ pub(super) fn handle_layout_insert_node_at_index(
         correlation_id,
         version: v,
     }]
+}
+
+/// Apply a fallible structural mutation to a tab's layout tree atomically:
+/// operate on a *clone*, run `balance_node`, and commit back to
+/// `tab.rootnode` only if both succeed. On any error the tab's tree is left
+/// untouched — no partial mutation is visible to a later snapshot or to the
+/// next operation. [codex P2 #1868]
+///
+/// On error, returns the `Event::Error` vec the caller should return verbatim
+/// (unknown tab, empty tree, op failure, or balance failure). On success,
+/// returns `Ok(())`; the caller re-fetches the tab for focus/magnify
+/// reconciliation and to emit the granular event.
+fn apply_atomic<F>(
+    state: &mut State,
+    tab_id: &str,
+    op: &str,
+    f: F,
+) -> Result<(), Vec<Event>>
+where
+    F: FnOnce(&mut agentmux_common::LayoutNode) -> Result<(), crate::backend::layout::LayoutError>,
+{
+    let Some(tab) = state.tabs.get_mut(tab_id) else {
+        return Err(unknown_tab(state, op, tab_id));
+    };
+    let Some(current) = tab.rootnode.as_ref() else {
+        return Err(op_error(state, format!("{}: empty tree (tab {})", op, tab_id)));
+    };
+    let mut working = current.clone();
+    if let Err(e) = f(&mut working) {
+        return Err(op_error(state, format!("{}: {} (tab {})", op, e, tab_id)));
+    }
+    if let Err(e) = crate::backend::layout::balance_node(&mut working) {
+        return Err(op_error(state, format!("{} balance: {} (tab {})", op, e, tab_id)));
+    }
+    tab.rootnode = Some(working);
+    Ok(())
 }
