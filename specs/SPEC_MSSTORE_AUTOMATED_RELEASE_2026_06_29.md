@@ -150,46 +150,72 @@ on:
       version:
         description: "Version to publish (e.g. 0.49.8)"
         required: true
-      rollout_percentage:
-        description: "Gradual rollout % (100 = full)"
-        default: "100"
+      # rollout_percentage removed: msstore CLI does not accept a rollout flag on
+      # publish; use `msstore submission rollout update/finalize` manually (OQ5).
 
 jobs:
   publish:
     runs-on: windows-latest
+    # [P1] Restrict job to the minimum required permissions (no repo write needed).
+    permissions:
+      contents: read
     steps:
       - name: Resolve version
         id: ver
         shell: pwsh
+        # [P0] Do NOT interpolate github context expressions directly into run:
+        # blocks — that enables script injection. Pass values through env: instead.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          $v = "${{ github.event.inputs.version }}"
-          if (-not $v) { $v = "${{ github.ref_name }}".TrimStart('v') }
+          $v = $env:INPUT_VERSION
+          if (-not $v) { $v = $env:REF_NAME.TrimStart('v') }
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Download MSIX artifact
         shell: pwsh
+        # [P1] Do NOT interpolate step outputs directly into run: blocks.
+        # Pass through env: to prevent injection.
+        env:
+          STEP_VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          $v = "${{ steps.ver.outputs.version }}"
+          $v = $env:STEP_VERSION
           $url = "https://dl.agentmux.ai/releases/AgentMux_${v}_x64.msix"
           Invoke-WebRequest $url -OutFile "AgentMux.msix"
-          # OQ4: fail fast if the published artifact isn't the tagged version.
           if (-not (Test-Path "AgentMux.msix")) { throw "MSIX not found at $url" }
+          # [P1] OQ4: assert the MSIX manifest version matches the tag version,
+          # not just that the file exists.
+          $manifestVersion = (Get-AppxPackageManifest -Path (Resolve-Path "AgentMux.msix")).Package.Identity.Version
+          # Manifest uses X.Y.Z.0 format; tag uses X.Y.Z
+          if ($manifestVersion -ne "${v}.0") {
+            throw "Manifest version '$manifestVersion' does not match expected '${v}.0'"
+          }
 
       - name: Install msstore CLI
-        run: winget install --id "9P53PC5S0PHJ" --accept-package-agreements --accept-source-agreements
-        # (or: winget install "Microsoft Store Developer CLI")
+        # [P2] Pin the CLI version to avoid silent breaking changes from upstream updates.
+        # Update this pin deliberately when testing a new CLI release.
+        run: winget install --id "9P53PC5S0PHJ" --version 1.0.8.0 --accept-package-agreements --accept-source-agreements
 
       - name: Configure credentials
-        run: >
-          msstore reconfigure
-          --tenantId ${{ secrets.MSSTORE_TENANT_ID }}
-          --sellerId ${{ secrets.MSSTORE_SELLER_ID }}
-          --clientId ${{ secrets.MSSTORE_CLIENT_ID }}
-          --clientSecret ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        # [P1] Secrets must not appear in CLI args (visible in process list).
+        # Pass MSSTORE_CLIENT_SECRET via env: and read it as $env:MSSTORE_CLIENT_SECRET.
+        env:
+          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        shell: pwsh
+        run: |
+          msstore reconfigure `
+            --tenantId ${{ secrets.MSSTORE_TENANT_ID }} `
+            --sellerId ${{ secrets.MSSTORE_SELLER_ID }} `
+            --clientId ${{ secrets.MSSTORE_CLIENT_ID }} `
+            --clientSecret $env:MSSTORE_CLIENT_SECRET
 
       - name: Publish to Store
         run: msstore publish "AgentMux.msix" --no-commit=false
-        # rollout % applied via msstore flights/submission rollout per OQ5
+        # OQ5: gradual rollout is managed post-publish via:
+        #   msstore submission rollout update --rollout <pct>
+        #   msstore submission rollout finalize
+        # Document those commands in the runbook; do not wire them here in v1.
 
       - name: Report submission status (non-blocking)
         continue-on-error: true
