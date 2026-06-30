@@ -666,6 +666,11 @@ tasks:
                     echo "❌ resolve-cef-runtime-darwin.sh did not yield a usable CEF framework" >&2
                     exit 1
                 fi
+                # Advisory BeginWindowDrag-patch check — non-fatal here so `task dev`
+                # still works on the upstream cef-dll-sys fallback (no multi-hour CEF
+                # build required). Must run on the UNSTRIPPED framework, before the
+                # packaging strip. The hard release gate is in package-macos.sh.
+                bash scripts/verify-cef-framework-darwin.sh "$CEF_DIR" || true
                 mkdir -p dist/Frameworks dist/cef
                 rm -rf "dist/Frameworks/Chromium Embedded Framework.framework"
                 # `ditto` preserves the Versions/Current symlink chain that the

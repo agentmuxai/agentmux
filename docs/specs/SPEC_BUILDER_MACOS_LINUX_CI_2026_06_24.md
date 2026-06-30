@@ -55,14 +55,29 @@ all required by `scripts/package-macos.sh`.
 1. Checkout agentmuxai/agentmux at <ref> (AGENTMUX_CHECKOUT_TOKEN)
 2. Install Rust (stable) + dtolnay/rust-toolchain
 3. Install Node 22 + npm ci (A5AF_PACKAGES_TOKEN for @a5af packages)
-4. Import Developer ID certificate into a temporary keychain
-5. Store notarytool credentials in the temporary keychain
-6. task package:macos -- "$OUTDIR"
-7. gh release upload <release-tag> <DMG> (AGENTMUX_RELEASE_TOKEN)
-8. Cleanup: delete temp keychain
+4. Download + extract patched CEF framework from agentmuxai/cef release;
+   set AGENTMUX_CEF_RUNTIME_DIR_DARWIN  (CEF_RUNTIME_TOKEN)
+5. Import Developer ID certificate into a temporary keychain
+6. Store notarytool credentials in the temporary keychain
+7. task package:macos -- "$OUTDIR"   (package-macos.sh hard-gates the patch)
+8. gh release upload <release-tag> <DMG> (AGENTMUX_RELEASE_TOKEN)
+9. Cleanup: delete temp keychain
 ```
 
-### 2.4 Certificate Import (Step 4)
+> **Patched CEF framework (Step 4) — added 2026-06-29.** The upstream
+> `cef-dll-sys` framework lacks `CefWindow::BeginWindowDrag()`, so macOS native
+> window drag / floating-pane resize silently no-ops (the JS-polled workaround in
+> `floating-pane-workspace.tsx` exists precisely because of this). macOS now
+> mirrors Linux: it downloads a **pre-built patched framework** from an
+> `agentmuxai/cef` release (`cef-macos-arm64-<ver>.tar.gz`), sets
+> `AGENTMUX_CEF_RUNTIME_DIR_DARWIN`, and `package-macos.sh` verifies the patch
+> before signing via `scripts/verify-cef-framework-darwin.sh`. The
+> `cef-runtime-tag` input (auto-detects the latest `cef-macos-arm64-*` when blank)
+> selects the release. See
+> `SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md` and
+> `docs/cef-build/build-patched-framework-macos.md`.
+
+### 2.4 Certificate Import (Step 5)
 
 The standard CI pattern for Apple codesigning — creates a short-lived keychain
 that is torn down after the job:
@@ -144,9 +159,12 @@ Only runs when `release-tag` input is non-empty.
 | `APPLE_ID` | Apple ID email for notarytool | ✅ |
 | `APPLE_PASSWORD` | App-specific password | ✅ |
 | `APPLE_TEAM_ID` | 10-char Apple Team ID | ✅ |
+| `CEF_RUNTIME_TOKEN` | PAT (`contents:read`) for agentmuxai/cef | shared with Linux (§3.10) |
 
-All secrets are already present in `agentmux-builder` per the README. No new
-secrets need to be created.
+All Apple/npm secrets are already present in `agentmux-builder` per the README.
+The macOS workflow additionally needs `CEF_RUNTIME_TOKEN` — the **same** secret the
+Linux workflow uses (§3.10) to download patched CEF assets from the private
+`agentmuxai/cef` repo; no new secret beyond the one Linux already introduced.
 
 ---
 
@@ -336,8 +354,10 @@ settings → Secrets.
 1. `chore: release vX.Y.Z` PR merged → tag `vX.Y.Z` pushed to `agentmuxai/agentmux`
 2. GitHub Release created for `vX.Y.Z` (draft or pre-release; Windows build
    attaches the signed installer)
-3. Patched `libcef.so` for the current CEF version is available as a release in
-   `agentmuxai/cef` (only changes when CEF version bumps)
+3. Patched `libcef.so` (Linux) AND patched `Chromium Embedded Framework.framework`
+   (macOS arm64) for the current CEF version are available as releases in
+   `agentmuxai/cef` — `cef-linux-x86_64-<ver>` and `cef-macos-arm64-<ver>`
+   (only change when CEF version bumps)
 
 ### 4.2 Triggering the three builds
 
@@ -379,8 +399,15 @@ using `AGENTMUX_RELEASE_TOKEN`.
 
 ## 5. Not in Scope
 
-- **Intel Mac (x86_64)**: all builds target Apple Silicon (arm64). `cef-dll-sys`
-  resolves the aarch64 framework; x86_64 support would need a separate CEF build.
+- **Building the patched macOS framework from source in CI**: like the Linux
+  `libcef.so`, the arm64 framework is built out-of-band (multi-hour Chromium
+  compile) and stored as an `agentmuxai/cef` release; CI only downloads + verifies
+  it. The build recipe is `docs/cef-build/build-patched-framework-macos.md`. (This
+  revises the original spec's implicit assumption that macOS used the stock
+  `cef-dll-sys` framework — as of 2026-06-29 it consumes the patched framework,
+  per `SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md`.)
+- **Intel Mac (x86_64)**: all builds target Apple Silicon (arm64). The patched CEF
+  framework is built for arm64 only; x86_64 support would need a separate CEF build.
 - **Linux arm64**: `build-appimage-linux.sh` targets x86_64; arm64 AppImage deferred.
 - **Windows code signing** (SignPath): deferred per `docs/windows-code-signing.md`.
 - **macOS App Store**: direct distribution only; notarized Developer ID path.
