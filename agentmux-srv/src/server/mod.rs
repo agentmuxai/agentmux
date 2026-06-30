@@ -648,16 +648,15 @@ async fn handle_shell_input(
     State(state): State<AppState>,
     Json(req): Json<ShellInputRequest>,
 ) -> impl IntoResponse {
-    use tokio::io::AsyncWriteExt as _;
-    let stdin_arc = state.shell_sessions.get_stdin(&req.shell_id);
-    let written = if let Some(stdin) = stdin_arc {
-        let mut guard = stdin.lock().await;
+    // Non-blocking send to the stdin relay task — no mutex, no risk of
+    // blocking if the child's pipe buffer is full (the relay owns that concern).
+    let stdin_tx = state.shell_sessions.get_stdin_tx(&req.shell_id);
+    let written = if let Some(tx) = stdin_tx {
         let mut text = req.text.clone();
         if !text.ends_with('\n') {
             text.push('\n');
         }
-        let ok = guard.write_all(text.as_bytes()).await.is_ok()
-            && guard.flush().await.is_ok();
+        let ok = tx.send(text).is_ok();
         tracing::debug!(shell_id = %req.shell_id, written = ok, "shell.input");
         ok
     } else {
