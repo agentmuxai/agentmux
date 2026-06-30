@@ -3547,6 +3547,68 @@ fn register_memory_write(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // See SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md §5.
 // ---------------------------------------------------------------------------
 
+/// Bind an account the agent already owns (via `db_agent_identity_links`) into
+/// its default identity bundle so the resolver injects the credential at next
+/// launch. Creates the bundle if it does not yet exist.
+///
+/// Security: ownership is verified (the account must be linked to `agent_id`)
+/// before the bundle write. No secret is touched.
+pub(crate) async fn identity_bundle_link_impl(
+    state: &AppState,
+    agent_id: &str,
+    account_id: &str,
+    provider: &str,
+) -> Result<serde_json::Value, String> {
+    // S1: account must already be linked to this agent.
+    let links = state
+        .id_store
+        .agent_identity_list_for_agent(agent_id)
+        .map_err(|e| format!("identity.bundle.link: {e}"))?;
+    if !links.iter().any(|l| l.account_id == account_id) {
+        return Err("FORBIDDEN: account not linked to this agent".to_string());
+    }
+
+    // Find or create the agent's default identity bundle.
+    let bundle_id = format!("bundle-{agent_id}-default");
+    if state
+        .id_store
+        .bundle_identity_get(&bundle_id)
+        .map_err(|e| format!("identity.bundle.link: bundle lookup: {e}"))?
+        .is_none()
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let bundle = crate::backend::storage::identities::Identity {
+            id: bundle_id.clone(),
+            name: format!("{agent_id} Default"),
+            description: String::new(),
+            is_blank: false,
+            created_at: now,
+            updated_at: now,
+        };
+        state
+            .id_store
+            .bundle_identity_upsert(&bundle)
+            .map_err(|e| format!("identity.bundle.link: create bundle: {e}"))?;
+    }
+
+    // Bind the account into the bundle for the given provider.
+    state
+        .id_store
+        .bundle_identity_bind(&bundle_id, provider, account_id)
+        .map_err(|e| format!("identity.bundle.link: bind: {e}"))?;
+
+    Ok(json!({
+        "bundle_id": bundle_id,
+        "provider": provider,
+        "account_id": account_id,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+
 pub(crate) async fn identity_self_accounts_impl(
     state: &AppState,
     agent_id: &str,
