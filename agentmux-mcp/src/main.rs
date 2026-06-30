@@ -1339,12 +1339,11 @@ async fn call_tool(
         }
         "MemoryList" => {
             require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/memory/list", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
                 .header("X-AuthKey", auth_key)
-                .query(&[("agent_id", agent_id.as_str())])
+                .header("X-Block-Id", block_id)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -1366,12 +1365,12 @@ async fn call_tool(
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: filename"))?;
             require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/memory/read", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
                 .header("X-AuthKey", auth_key)
-                .query(&[("agent_id", agent_id.as_str()), ("filename", filename)])
+                .header("X-Block-Id", block_id)
+                .query(&[("filename", filename)])
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -1404,16 +1403,15 @@ async fn call_tool(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: content"))?;
             require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/memory/write", local_url.trim_end_matches('/'));
             let body = json!({
-                "agent_id": agent_id,
                 "filename": filename,
                 "content": content,
             });
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
+                .header("X-Block-Id", block_id)
                 .json(&body)
                 .send()
                 .await
@@ -1431,6 +1429,7 @@ async fn call_tool(
             let resp = client
                 .get(&url)
                 .header("X-AuthKey", auth_key)
+                .header("X-Block-Id", block_id)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -1447,11 +1446,10 @@ async fn call_tool(
         }
         "PresetGet" => {
             require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/preset/get", local_url.trim_end_matches('/'));
             // id/name are both optional; with neither set the server returns the
-            // agent's own bound preset ("self"), resolved from agent_id.
-            let mut query: Vec<(&str, &str)> = vec![("agent_id", agent_id.as_str())];
+            // agent's own bound preset ("self"), resolved from X-Block-Id.
+            let mut query: Vec<(&str, &str)> = vec![];
             if let Some(pid) = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
                 query.push(("id", pid));
             }
@@ -1461,6 +1459,7 @@ async fn call_tool(
             let resp = client
                 .get(&url)
                 .header("X-AuthKey", auth_key)
+                .header("X-Block-Id", block_id)
                 .query(&query)
                 .send()
                 .await
@@ -1478,12 +1477,11 @@ async fn call_tool(
         }
         "IdentityAccounts" => {
             require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/identity/accounts", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
                 .header("X-AuthKey", auth_key)
-                .query(&[("agent_id", agent_id.as_str())])
+                .header("X-Block-Id", block_id)
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -1505,15 +1503,14 @@ async fn call_tool(
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: account_id"))?;
             require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/identity/validate", local_url.trim_end_matches('/'));
             let body = json!({
-                "agent_id": agent_id,
                 "account_id": account_id,
             });
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
+                .header("X-Block-Id", block_id)
                 .json(&body)
                 .send()
                 .await
@@ -1541,16 +1538,15 @@ async fn call_tool(
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: provider"))?;
             require_agent_env(local_url, auth_key, block_id)?;
-            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/identity/link", local_url.trim_end_matches('/'));
             let body = json!({
-                "agent_id": agent_id,
                 "account_id": account_id,
                 "provider": provider,
             });
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
+                .header("X-Block-Id", block_id)
                 .json(&body)
                 .send()
                 .await
@@ -1671,8 +1667,9 @@ mod tests {
             PRESET_GET_TOOL,
             IDENTITY_ACCOUNTS_TOOL,
             IDENTITY_VALIDATE_TOOL,
+            IDENTITY_LINK_TOOL,
         ];
-        assert_eq!(defs.len(), 26, "tools/list advertises 26 tools (11 original + 3 Loop + 5 Cron + 7 agent-API)");
+        assert_eq!(defs.len(), 27, "tools/list advertises 27 tools (11 original + 3 Loop + 5 Cron + 8 agent-API)");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(

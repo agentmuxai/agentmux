@@ -3539,11 +3539,11 @@ fn register_memory_write(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // Shared App API implementations.
 //
 // Each is called by both (a) the WebSocket RPC closure above — after the S1
-// check validates the agent-supplied `agent_id` against `ctx.agent_id` — and
-// (b) the REST handlers in `mod.rs`, which resolve the agent slug server-side
-// from the trusted `AGENTMUX_BLOCKID` and pass it as `agent_id`. On the REST
-// path S1 holds by construction (the slug is server-derived, not agent input),
-// so these fns take an already-trusted `agent_id` and never re-check S1.
+// check validates `ctx.agent_id` (connection-scoped) against `req.agent_id` —
+// and (b) the REST handlers in `mod.rs`, which derive the agent slug from the
+// `X-Block-Id` header via `app_api_agent_slug()`. On the REST path S1 holds
+// by construction: agentmux-mcp stamps the header from its trusted
+// `AGENTMUX_BLOCKID` env and the server resolves `agentId` from the block.
 // See SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md §5.
 // ---------------------------------------------------------------------------
 
@@ -3564,8 +3564,8 @@ pub(crate) async fn identity_bundle_link_impl(
         .id_store
         .agent_identity_list_for_agent(agent_id)
         .map_err(|e| format!("identity.bundle.link: {e}"))?;
-    if !links.iter().any(|l| l.account_id == account_id) {
-        return Err("FORBIDDEN: account not linked to this agent".to_string());
+    if !links.iter().any(|l| l.account_id == account_id && l.provider == provider) {
+        return Err("FORBIDDEN: account not linked to this agent for the given provider".to_string());
     }
 
     // Find or create the agent's default identity bundle.
