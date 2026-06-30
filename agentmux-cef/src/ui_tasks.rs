@@ -1570,11 +1570,23 @@ wrap_task! {
             let pos = if let Some(w) = get_window_on_ui(&self.state, &self.label) {
                 let b = w.bounds();
                 Some((b.x, b.y))
-            } else if let Some(w) = self.state.windows.lock().get(&self.label) {
-                let b = w.bounds();
-                Some((b.x, b.y))
             } else {
-                None
+                // Fall back to `state.windows` on Linux/macOS, where the Views
+                // BrowserView loses its Window reference post-page-load. That map
+                // is `cfg(not(windows))`-only (Windows uses native HWND lookup and
+                // never populates it), so on Windows the primary path above is the
+                // only source — gate the fallback to keep the Windows build green.
+                #[cfg(not(target_os = "windows"))]
+                {
+                    self.state.windows.lock().get(&self.label).map(|w| {
+                        let b = w.bounds();
+                        (b.x, b.y)
+                    })
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    None
+                }
             };
             // Capacity-1, freshly created per call → try_send never blocks
             // the UI thread.
