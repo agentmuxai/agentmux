@@ -7,26 +7,31 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
-import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
+import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
 import { ObjectService } from "../store/services";
 import { makeORef, useWaveObjectValue } from "../store/wos";
 import { measureTabWidth } from "./tab-measure";
 import "./tab.scss";
 
-// 10 equally-spaced hues (0°, 36°, 72°, … 324°) — full spectrum, no near-duplicates
+// 14 colors — 10 original hues + 4 new fills at perceptual midpoints
 export const TAB_COLORS: { name: string; hex: string }[] = [
-    { name: "Red",    hex: "#ef4444" },
-    { name: "Orange", hex: "#f97316" },
-    { name: "Yellow", hex: "#eab308" },
-    { name: "Lime",   hex: "#84cc16" },
-    { name: "Green",  hex: "#22c55e" },
-    { name: "Teal",   hex: "#14b8a6" },
-    { name: "Blue",   hex: "#3b82f6" },
-    { name: "Violet", hex: "#8b5cf6" },
-    { name: "Pink",   hex: "#ec4899" },
-    { name: "Rose",   hex: "#f43f5e" },
+    { name: "Red",     hex: "#ef4444" },
+    { name: "Orange",  hex: "#f97316" },
+    { name: "Amber",   hex: "#f59e0b" },
+    { name: "Yellow",  hex: "#eab308" },
+    { name: "Lime",    hex: "#84cc16" },
+    { name: "Green",   hex: "#22c55e" },
+    { name: "Teal",    hex: "#14b8a6" },
+    { name: "Cyan",    hex: "#06b6d4" },
+    { name: "Blue",    hex: "#3b82f6" },
+    { name: "Indigo",  hex: "#6366f1" },
+    { name: "Violet",  hex: "#8b5cf6" },
+    { name: "Fuchsia", hex: "#d946ef" },
+    { name: "Pink",    hex: "#ec4899" },
+    { name: "Rose",    hex: "#f43f5e" },
 ];
 
 interface TabContextPanelProps {
@@ -67,28 +72,12 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
     return (
         <Portal>
             <div ref={panelRef!} class="tab-context-panel" style={style()} data-pane-overlay>
-                <div class="tab-context-colors">
-                    <For each={TAB_COLORS}>
-                        {({ name, hex }) => (
-                            <div
-                                class={clsx("tab-color-swatch", { selected: (props.currentColor ?? null) === hex })}
-                                title={name}
-                                style={{ "background-color": hex }}
-                                onClick={() => props.onColorSelect(
-                                    (props.currentColor ?? null) === hex ? null : hex
-                                )}
-                            />
-                        )}
-                    </For>
-                </div>
-                <div class="tab-context-color-clear">
-                    <button
-                        class="tab-context-btn tab-context-btn-clear"
-                        onClick={() => props.onColorSelect(null)}
-                    >
-                        ✕ Clear color
-                    </button>
-                </div>
+                <ColorSwatchPalette
+                    colors={TAB_COLORS}
+                    columns={7}
+                    currentColor={props.currentColor}
+                    onSelect={props.onColorSelect}
+                />
                 <div class="tab-context-actions">
                     <button class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
                         ✏️ Rename
