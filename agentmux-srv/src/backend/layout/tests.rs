@@ -34,6 +34,217 @@ fn group(id: &str, dir: FlexDirection, size: f32, children: Vec<LayoutNode>) -> 
     }
 }
 
+/// Leaf with an explicit flex direction (the `leaf` helper hardcodes Row;
+/// the balance oracle cares about each leaf's own direction).
+fn leaf_dir(id: &str, block_id: &str, dir: FlexDirection) -> LayoutNode {
+    LayoutNode {
+        id: id.into(),
+        flex_direction: dir,
+        size: DEFAULT_NODE_SIZE,
+        data: Some(LayoutNodeData {
+            block_id: block_id.into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+// ── balanceNode (ported from frontend/layout/tests/layoutNode.test.ts) ──────
+
+#[test]
+fn balance_corrects_flex_directions() {
+    // Row[ Row-leaf, Row-leaf ] → children flipped to Column.
+    let mut node = group(
+        "n",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![
+            leaf_dir("a", "node1Inner1", FlexDirection::Row),
+            leaf_dir("b", "node1Inner2", FlexDirection::Row),
+        ],
+    );
+    balance_node(&mut node).unwrap();
+    assert!(node.data.is_none(), "root should remain a branch");
+    assert_ne!(node.children[0].flex_direction, node.flex_direction);
+}
+
+#[test]
+fn balance_collapses_single_grandchild_1() {
+    // Row[ Column[ Row-leaf node1 ] ] → collapses to leaf node1.
+    let mut node = group(
+        "n",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![group(
+            "c",
+            FlexDirection::Column,
+            DEFAULT_NODE_SIZE,
+            vec![leaf_dir("g", "node1", FlexDirection::Row)],
+        )],
+    );
+    balance_node(&mut node).unwrap();
+    assert!(node.children.is_empty(), "should collapse to a leaf");
+    assert_eq!(node.data.unwrap().block_id, "node1");
+}
+
+#[test]
+fn balance_collapses_single_grandchild_2() {
+    // Row[ Column[ Row[ Column-leaf i1, Column-leaf i2 ] ] ] → hoist to 2 children.
+    let mut node = group(
+        "n",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![group(
+            "c",
+            FlexDirection::Column,
+            DEFAULT_NODE_SIZE,
+            vec![group(
+                "gc",
+                FlexDirection::Row,
+                DEFAULT_NODE_SIZE,
+                vec![
+                    leaf_dir("i1", "node2Inner1", FlexDirection::Column),
+                    leaf_dir("i2", "node2Inner2", FlexDirection::Column),
+                ],
+            )],
+        )],
+    );
+    balance_node(&mut node).unwrap();
+    assert_eq!(node.children.len(), 2);
+    assert_eq!(
+        node.children[0].data.as_ref().unwrap().block_id,
+        "node2Inner1"
+    );
+}
+
+#[test]
+fn balance_collapses_single_grandchild_3() {
+    // Row[ Column[ Row[ Column-leaf node3 ] ] ] → collapses to leaf node3.
+    let mut node = group(
+        "n",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![group(
+            "c",
+            FlexDirection::Column,
+            DEFAULT_NODE_SIZE,
+            vec![group(
+                "gc",
+                FlexDirection::Row,
+                DEFAULT_NODE_SIZE,
+                vec![leaf_dir("ggc", "node3", FlexDirection::Column)],
+            )],
+        )],
+    );
+    balance_node(&mut node).unwrap();
+    assert!(node.children.is_empty());
+    assert_eq!(node.data.unwrap().block_id, "node3");
+}
+
+#[test]
+fn balance_collapses_single_grandchild_4() {
+    // Row[ Column[ Row[ Column[ Row-leaf i1, Row-leaf i2 ] ] ] ]
+    // → node.children.len()==1, grandchildren len==2.
+    let mut node = group(
+        "n",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![group(
+            "c",
+            FlexDirection::Column,
+            DEFAULT_NODE_SIZE,
+            vec![group(
+                "gc",
+                FlexDirection::Row,
+                DEFAULT_NODE_SIZE,
+                vec![group(
+                    "ggc",
+                    FlexDirection::Column,
+                    DEFAULT_NODE_SIZE,
+                    vec![
+                        leaf_dir("i1", "node4Inner1", FlexDirection::Row),
+                        leaf_dir("i2", "node4Inner2", FlexDirection::Row),
+                    ],
+                )],
+            )],
+        )],
+    );
+    balance_node(&mut node).unwrap();
+    assert_eq!(node.children.len(), 1);
+    assert_eq!(node.children[0].children.len(), 2);
+    assert_eq!(
+        node.children[0].children[0].data.as_ref().unwrap().block_id,
+        "node4Inner1"
+    );
+}
+
+#[test]
+fn balance_rejects_invalid_node() {
+    // A node with BOTH data and children violates leaf-XOR-branch.
+    let mut bad = LayoutNode {
+        id: "bad".into(),
+        flex_direction: FlexDirection::Row,
+        size: DEFAULT_NODE_SIZE,
+        children: vec![leaf("x", "b", 1.0)],
+        data: Some(LayoutNodeData {
+            block_id: "both".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert!(matches!(
+        balance_node(&mut bad),
+        Err(LayoutError::InvalidNode { .. })
+    ));
+}
+
+#[test]
+fn balance_slip_anchor_suppresses_hoist() {
+    // Row[ Column(_slipAnchor)[ Row[ leaf1, leaf2 ] ] ] — without the slip
+    // anchor the single-child-branch chain would hoist/collapse; the anchor
+    // preserves it.
+    let mut anchored = group(
+        "c",
+        FlexDirection::Column,
+        DEFAULT_NODE_SIZE,
+        vec![group(
+            "gc",
+            FlexDirection::Row,
+            DEFAULT_NODE_SIZE,
+            vec![
+                leaf_dir("l1", "b1", FlexDirection::Column),
+                leaf_dir("l2", "b2", FlexDirection::Column),
+            ],
+        )],
+    );
+    anchored
+        .extra
+        .insert("_slipAnchor".into(), serde_json::Value::Bool(true));
+    let mut node = group("n", FlexDirection::Row, DEFAULT_NODE_SIZE, vec![anchored]);
+    balance_node(&mut node).unwrap();
+    // The anchored Column wrapper survives (not hoisted), still wrapping gc.
+    assert_eq!(node.children.len(), 1);
+    assert_eq!(node.children[0].children.len(), 1, "chain preserved by anchor");
+}
+
+#[test]
+fn balance_drops_empty_branch_child() {
+    // Row[ leaf1, leaf2, empty-branch ] → empty branch dropped, 2 remain.
+    let mut node = group(
+        "n",
+        FlexDirection::Row,
+        DEFAULT_NODE_SIZE,
+        vec![
+            leaf_dir("l1", "b1", FlexDirection::Column),
+            leaf_dir("l2", "b2", FlexDirection::Column),
+            group("empty", FlexDirection::Row, DEFAULT_NODE_SIZE, vec![]),
+        ],
+    );
+    balance_node(&mut node).unwrap();
+    assert_eq!(node.children.len(), 2);
+    assert!(node.children.iter().all(|c| c.data.is_some()));
+}
+
 // ── isInstanceLabel filter (JS analogue: insert location) ──────────────────
 
 #[test]
