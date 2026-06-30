@@ -663,11 +663,55 @@ async fn handle_pane_open(
 // ---------------------------------------------------------------------------
 // Agent App API REST handlers (identity / preset / memory).
 //
-// `agent_id` is the agent slug, supplied by agentmux-mcp from its trusted
-// AGENTMUX_AGENT_ID env. Each handler maps a 4xx for caller/validation errors
-// (FORBIDDEN, "not found", "provide …", "not a regular file") and 5xx otherwise,
-// then delegates to the shared `app_api::*_impl`.
+// S1: `agent_id` is derived server-side from the `X-Block-Id` header, which
+// agentmux-mcp stamps from its trusted `AGENTMUX_BLOCKID` env. The server
+// reads `agentId` from the block's metadata — the caller cannot forge the
+// slug. Each handler maps a 4xx for caller/validation errors and 5xx
+// otherwise, then delegates to the shared `app_api::*_impl`.
 // ---------------------------------------------------------------------------
+
+/// Derive the calling agent's slug from the `X-Block-Id` header.
+/// agentmux-mcp stamps the header from its trusted `AGENTMUX_BLOCKID` env;
+/// the server resolves `agentId` from the block — S1 holds by construction.
+fn app_api_agent_slug(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<String, axum::response::Response> {
+    let block_id = headers
+        .get("X-Block-Id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if block_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "missing X-Block-Id header" })),
+        )
+            .into_response());
+    }
+    let block = state
+        .wstore
+        .get::<crate::backend::obj::Block>(block_id)
+        .map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+                .into_response()
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("block not found: {block_id}") })),
+            )
+                .into_response()
+        })?;
+    let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+    if agent_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "block has no agentId" })),
+        )
+            .into_response());
+    }
+    Ok(agent_id)
+}
 
 /// Classify an app-API impl error string into an HTTP status. FORBIDDEN and
 /// argument/not-found errors are the caller's fault (4xx); the rest are 5xx.
@@ -678,7 +722,7 @@ fn app_api_error_status(e: &str) -> StatusCode {
         || e.contains("provide ")
         || e.contains("not a regular file")
         || e.contains("too large")
-        || e.contains("invalid")
+        || e.starts_with("invalid ")
     {
         StatusCode::BAD_REQUEST
     } else {
@@ -693,38 +737,40 @@ fn app_api_response(result: Result<serde_json::Value, String>) -> axum::response
     }
 }
 
-#[derive(serde::Deserialize)]
-struct AgentMemoryListQuery {
-    agent_id: String,
-}
-
-/// `GET /api/v1/agent/memory/list?agent_id=<slug>` — list the agent's own
-/// native-memory markdown files. Backs the `MemoryList` MCP tool.
+/// `GET /api/v1/agent/memory/list` — list the agent's own native-memory
+/// markdown files. Backs the `MemoryList` MCP tool.
 async fn handle_agent_memory_list(
     State(state): State<AppState>,
-    Query(q): Query<AgentMemoryListQuery>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    app_api_response(app_api::memory_list_impl(&state, &q.agent_id))
+    let agent_id = match app_api_agent_slug(&state, &headers) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    app_api_response(app_api::memory_list_impl(&state, &agent_id))
 }
 
 #[derive(serde::Deserialize)]
 struct AgentMemoryReadQuery {
-    agent_id: String,
     filename: String,
 }
 
-/// `GET /api/v1/agent/memory/read?agent_id=<slug>&filename=<f>` — read one of
-/// the agent's own memory files. Backs the `MemoryRead` MCP tool.
+/// `GET /api/v1/agent/memory/read?filename=<f>` — read one of the agent's own
+/// memory files. Backs the `MemoryRead` MCP tool.
 async fn handle_agent_memory_read(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(q): Query<AgentMemoryReadQuery>,
 ) -> impl IntoResponse {
-    app_api_response(app_api::memory_read_impl(&state, &q.agent_id, &q.filename))
+    let agent_id = match app_api_agent_slug(&state, &headers) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    app_api_response(app_api::memory_read_impl(&state, &agent_id, &q.filename))
 }
 
 #[derive(serde::Deserialize)]
 struct AgentMemoryWriteRequest {
-    agent_id: String,
     filename: String,
     content: String,
 }
@@ -733,9 +779,14 @@ struct AgentMemoryWriteRequest {
 /// memory files (atomic tmp→rename). Backs the `MemoryWrite` MCP tool.
 async fn handle_agent_memory_write(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<AgentMemoryWriteRequest>,
 ) -> impl IntoResponse {
-    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content) {
+    let agent_id = match app_api_agent_slug(&state, &headers) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    match app_api::memory_write_impl(&state, &agent_id, &req.filename, &req.content) {
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
     }
@@ -750,51 +801,45 @@ async fn handle_agent_preset_list(State(state): State<AppState>) -> impl IntoRes
 #[derive(serde::Deserialize)]
 struct AgentPresetGetQuery {
     #[serde(default)]
-    agent_id: String,
-    #[serde(default)]
     id: String,
     #[serde(default)]
     name: String,
 }
 
-/// `GET /api/v1/agent/preset/get?agent_id=<slug>&id=&name=` — fetch a preset by
-/// id or name; with neither, return the agent's own bound preset (self).
+/// `GET /api/v1/agent/preset/get?id=&name=` — fetch a preset by id or name;
+/// with neither, return the agent's own bound preset (self).
 /// Backs the `PresetGet` MCP tool.
 async fn handle_agent_preset_get(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(q): Query<AgentPresetGetQuery>,
 ) -> impl IntoResponse {
     if q.id.is_empty() && q.name.is_empty() {
-        if q.agent_id.is_empty() {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": "preset.get: provide id, name, or agent_id (for self)" })),
-            )
-                .into_response();
-        }
-        return app_api_response(app_api::preset_self_get_impl(&state, &q.agent_id).await);
+        let agent_id = match app_api_agent_slug(&state, &headers) {
+            Ok(id) => id,
+            Err(resp) => return resp,
+        };
+        return app_api_response(app_api::preset_self_get_impl(&state, &agent_id).await);
     }
     app_api_response(app_api::preset_get_impl(&state, &q.id, &q.name).await)
 }
 
-#[derive(serde::Deserialize)]
-struct AgentIdentityAccountsQuery {
-    agent_id: String,
-}
-
-/// `GET /api/v1/agent/identity/accounts?agent_id=<slug>` — list the agent's own
-/// linked credential accounts (masked tails only, never secrets). Backs the
+/// `GET /api/v1/agent/identity/accounts` — list the agent's own linked
+/// credential accounts (masked tails only, never secrets). Backs the
 /// `IdentityAccounts` MCP tool.
 async fn handle_agent_identity_accounts(
     State(state): State<AppState>,
-    Query(q): Query<AgentIdentityAccountsQuery>,
+    headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
-    app_api_response(app_api::identity_self_accounts_impl(&state, &q.agent_id).await)
+    let agent_id = match app_api_agent_slug(&state, &headers) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+    app_api_response(app_api::identity_self_accounts_impl(&state, &agent_id).await)
 }
 
 #[derive(serde::Deserialize)]
 struct AgentIdentityValidateRequest {
-    agent_id: String,
     account_id: String,
 }
 
@@ -803,16 +848,20 @@ struct AgentIdentityValidateRequest {
 /// secret). Backs the `IdentityValidate` MCP tool.
 async fn handle_agent_identity_validate(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<AgentIdentityValidateRequest>,
 ) -> impl IntoResponse {
+    let agent_id = match app_api_agent_slug(&state, &headers) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
     app_api_response(
-        app_api::identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await,
+        app_api::identity_account_validate_stored_impl(&state, &agent_id, &req.account_id).await,
     )
 }
 
 #[derive(serde::Deserialize)]
 struct AgentIdentityLinkRequest {
-    agent_id: String,
     account_id: String,
     provider: String,
 }
@@ -823,10 +872,15 @@ struct AgentIdentityLinkRequest {
 /// side). No secret is supplied — backs the `IdentityLink` MCP tool.
 async fn handle_agent_identity_link(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<AgentIdentityLinkRequest>,
 ) -> impl IntoResponse {
+    let agent_id = match app_api_agent_slug(&state, &headers) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
     app_api_response(
-        app_api::identity_bundle_link_impl(&state, &req.agent_id, &req.account_id, &req.provider).await,
+        app_api::identity_bundle_link_impl(&state, &agent_id, &req.account_id, &req.provider).await,
     )
 }
 
