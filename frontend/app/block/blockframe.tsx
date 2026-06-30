@@ -457,6 +457,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
     return (
         <div
             class="block-frame-default-header"
+            classList={{ "block-frame-default-header--agent": blockData()?.meta?.view === "agent" }}
             data-role="block-header"
             data-testid="block-header"
             ref={dragHandleRef ? (el) => { dragHandleRef.current = el; } : undefined}

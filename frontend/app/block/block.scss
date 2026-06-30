@@ -304,6 +304,26 @@
                         flex-shrink: 0;
                     }
                 }
+
+                // Agent header name precedence (SPEC_AGENT_PANE_HEADER_NAME_
+                // PRECEDENCE_2026_06_29). By default the name region
+                // (.block-frame-default-header-iconview) has flex-shrink:3 and
+                // the summary region (.block-frame-textelems-wrapper) flex:1 2,
+                // so the agent name truncated *before* the per-turn activity
+                // summary. Scoped to agent panes only (other views keep the
+                // shared behavior): pin the name and make the summary absorb
+                // the squeeze + ellipsize first. The max-width cap stops a long
+                // name from monopolizing the whole header.
+                &--agent {
+                    .block-frame-default-header-iconview {
+                        flex-shrink: 0;
+                        max-width: 60%;
+                    }
+
+                    .block-frame-textelems-wrapper {
+                        flex-shrink: 100;
+                    }
+                }
             }
 
             .block-frame-preview {

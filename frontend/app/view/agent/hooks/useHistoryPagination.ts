@@ -68,14 +68,6 @@ export interface UseHistoryPaginationOptions {
      * straight through to the NDJSON ring-buffer replay.
      */
     definitionId?: string;
-    /**
-     * Option E: called with the `modts` (Unix ms) returned by
-     * `agent:session:read` when the pane successfully restores from a
-     * pre-existing snapshot. The view model projects this into the
-     * "· continued Xm ago" chip in the title bar. Called with 0 when
-     * the read returned no snapshot (fresh agent).
-     */
-    onContinuationModts?: (modts: number) => void;
     /** Called once when the initial history load is complete (or immediately
      *  for an empty document). Used to gate the new-message enter animation
      *  so history rows don't animate on open/restore. See PR #1212. */
@@ -233,7 +225,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (!mounted) return;
                 if (stateResp.content) {
                     const snapshot = JSON.parse(stateResp.content);
-                    const modts = typeof stateResp.modts === "number" ? stateResp.modts : 0;
 
                     // --- Schema v2: overlay only, reconstruct nodes from NDJSON ---
                     // Taken only for a SAME-BLOCK reopen with a usable high-water mark:
@@ -318,7 +309,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         const clampedStart = Math.min(windowStart, available);
                         setHistoryOffset(clampedStart);
                         setHistoryTotal(available);
-                        opts.onContinuationModts?.(modts);
                         opts.log(
                             "history",
                             `v2 restore: ${nodes.length} nodes from lines [${clampedStart}, ${available})` +
@@ -361,7 +351,6 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             : 0;
                         setHistoryOffset(offset);
                         setHistoryTotal(typeof snapshot.highWaterMark === "number" ? snapshot.highWaterMark : snapshot.nodes.length);
-                        opts.onContinuationModts?.(modts);
                         opts.log(
                             "history",
                             `v1 restore: ${snapshot.nodes.length} nodes from snapshot ` +

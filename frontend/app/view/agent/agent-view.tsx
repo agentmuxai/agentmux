@@ -320,12 +320,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         model: paneModel,
         outputFormat,
         definitionId: agentId,
-        // Option E: snapshot read returns the modts of the previous
-        // owner's last write; project into the model so `viewText`
-        // renders a "· continued Xm ago" title-bar chip when the gap
-        // is >30s. Setter is a no-op if the pane unmounts before
-        // restore.
-        onContinuationModts: (ms) => model.continuedFromMsAtom._set(ms),
         onHistoryReady: () => historyReadyFn?.(),
         // Schema v2: apply DocumentState + pane overlay after NDJSON replay.
         onSnapshotOverlay: ({ documentState, detailsOpen }) => {

@@ -15,20 +15,6 @@ import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 
-/**
- * Compact relative-time label for the title-bar continuation chip.
- *
- * Mirrors the wording of `formatRelative` in `MyAgentsList.tsx`
- * (same "Xm ago" / "Xh ago" / "Xd ago" buckets) but lives here so the
- * model file has no UI-only dependency cycle. Exported for unit tests.
- */
-export function formatContinuationAgo(deltaMs: number): string {
-    if (deltaMs < 60_000) return "just now";
-    if (deltaMs < 3_600_000) return `${Math.floor(deltaMs / 60_000)}m ago`;
-    if (deltaMs < 86_400_000) return `${Math.floor(deltaMs / 3_600_000)}h ago`;
-    return `${Math.floor(deltaMs / 86_400_000)}d ago`;
-}
-
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
     blockId: string;
@@ -63,15 +49,6 @@ export class AgentViewModel implements ViewModel {
     // before AgentFooter mounts (or after it unmounts) it's a no-op.
     voiceTargetRef: { current: PaneVoiceHandle | null } = { current: null };
 
-    // Option E (PR #1007 backend, this PR frontend): when this pane
-    // mounted on an agent-anchored session zone (`agent:<defId>:current`)
-    // that already contained a snapshot, this holds the `modts` of that
-    // snapshot — the timestamp the previous owner pane last wrote.
-    // `viewText` projects it into a "· continued from Xm ago" chip in
-    // the pane title bar. Zero means "no continuation" (fresh agent or
-    // currently-active pane wrote it just now). useHistoryPagination
-    // sets this on snapshot restore.
-    continuedFromMsAtom: SignalAtom<number> = createSignalAtom(0);
     _activityFlash: () => boolean = () => false;
 
     voiceHandle = (): PaneVoiceHandle => ({
@@ -145,20 +122,6 @@ export class AgentViewModel implements ViewModel {
                     text: activity,
                     className: this._activityFlash() ? "term-activity term-activity--flash" : "term-activity",
                 });
-            }
-
-            // "· continued from Xm ago" chip — shown when this pane mounted
-            // on a non-empty agent session zone whose last write was >30s ago.
-            const continuedFromMs = this.continuedFromMsAtom();
-            if (continuedFromMs) {
-                const delta = Math.max(0, Date.now() - continuedFromMs);
-                if (delta >= 30_000) {
-                    elems.push({
-                        elemtype: "text",
-                        text: `· continued ${formatContinuationAgo(delta)}`,
-                        className: "agent-pane-continuation-chip",
-                    });
-                }
             }
 
             return elems;
