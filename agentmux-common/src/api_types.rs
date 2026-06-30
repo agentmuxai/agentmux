@@ -62,6 +62,37 @@ pub struct ShellStopResponse {
     pub stopped: bool,
 }
 
+/// `POST /api/v1/shell/input` — write text to a running shell's stdin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellInputRequest {
+    pub shell_id: String,
+    /// Text to write. A newline is appended automatically so single answers
+    /// like "y" work without the caller knowing the line discipline.
+    pub text: String,
+}
+
+/// Response from `POST /api/v1/shell/input`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellInputResponse {
+    /// false if the shell is not running or stdin write failed.
+    pub written: bool,
+}
+
+/// `POST /api/v1/shell/status` — query whether a shell is still running.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStatusRequest {
+    pub shell_id: String,
+}
+
+/// Response from `POST /api/v1/shell/status`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStatusResponse {
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub line_count: u64,
+}
+
 // ── Inject (SendMessage + Loop) ───────────────────────────────────────────────
 
 /// `POST /agentmux/reactive/inject` — deliver a message to an agent.
