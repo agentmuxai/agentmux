@@ -136,8 +136,10 @@ pub fn set_window_position(state: &Arc<AppState>, args: &serde_json::Value) -> R
     Ok(serde_json::Value::Null)
 }
 
-/// Get the window's full screen rect `{ x, y, width, height }` (physical px).
-/// Used by the floater JS-driven edge-resize to capture the start rect.
+/// Get the window's full screen rect `{ x, y, width, height }`.
+/// Windows: physical px via GetWindowRect (thread-agnostic).
+/// macOS / Linux: DIP via CEF Views `window.bounds()` (UI-thread read, 500ms timeout).
+/// Used by the floater JS-driven edge-resize to capture the start rect on pointer-down.
 pub fn get_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     #[cfg(target_os = "windows")]
@@ -156,18 +158,20 @@ pub fn get_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
             }));
         }
     }
+    #[cfg(not(target_os = "windows"))]
+    if let Some((x, y, width, height)) = crate::ui_tasks::get_window_rect_blocking(state, label) {
+        return Ok(serde_json::json!({ "x": x, "y": y, "width": width, "height": height }));
+    }
     let _ = (state, label);
     Ok(serde_json::json!({ "x": 0, "y": 0, "width": 0, "height": 0 }))
 }
 
-/// Set the window's full screen rect (absolute position AND size), physical px.
+/// Set the window's full screen rect (absolute position AND size).
 /// Self-contained (no read-modify-write) so concurrent in-flight calls are
 /// idempotent — last write wins, exactly right for a live edge-resize drag.
-/// This is the floater edge-resize primitive: the frontend captures the start
-/// rect (`get_window_rect`) on edge pointer-down (with pointer capture so it
-/// keeps receiving moves), computes the new rect per cursor delta + edge, and
-/// calls this on each move. Sidesteps WM_NCHITTEST / native SC_SIZE (Chromium
-/// holds the DOM mouse capture). See SPEC_FLOATING_PANE_EDGE_RESIZE.
+/// Windows: physical px via SetWindowPos. macOS / Linux: DIP via CEF Views
+/// `window.set_bounds()` posted to the UI thread (1 CSS px == 1 DIP, matching
+/// the frontend's `screenX/Y` deltas which are in CSS px). See SPEC_FLOATING_PANE_EDGE_RESIZE.
 pub fn set_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
@@ -193,6 +197,10 @@ pub fn set_window_rect(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
                 return Ok(serde_json::Value::Null);
             }
         }
+    }
+    #[cfg(not(target_os = "windows"))]
+    if width > 0 && height > 0 {
+        crate::ui_tasks::post_set_window_rect(state, label, x, y, width, height);
     }
     let _ = (state, label, x, y, width, height);
     Ok(serde_json::Value::Null)
