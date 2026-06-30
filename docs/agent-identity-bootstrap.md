@@ -7,11 +7,14 @@ from the `a5af/dev-tools` secrets CLI.
 
 1. **Retrieve credential** — pull the agent's PAT from AWS Secrets Manager:
    ```
-   node packages/secrets/bin/secrets.js get services/infra --path gh-token-<agent>
+   secrets get services/infra --path gh-token-<agent>
    ```
 
 2. **Store in OS keychain** — write to Windows Credential Manager so the
-   secret never sits in plaintext in the DB:
+   secret is not logged to disk. Note: the PAT is briefly visible in the
+   process argument list during `cmdkey` invocation (e.g. in Task Manager or
+   `wmic process` output) — it is not persisted to disk but can be observed by
+   other processes on the machine at that moment:
    ```
    cmdkey /generic:agentmux /user:acct-<agent>-github-<ts> /pass:<pat>
    ```
@@ -53,6 +56,6 @@ from the `a5af/dev-tools` secrets CLI.
 
 ## First agent bootstrapped
 
-- **AgentY** (`agenty`, def `dedc33bf-b69c-4236-9b34-20bda3ef2738`)
-  — GitHub account `AgentY-asaf`, keychain key `acct-agenty-github-1782788341`
-  — bootstrapped 2026-06-30
+- **Example** (`<agent-name>`, def `<your-agent-def-uuid>`)
+  — GitHub account `<GitHubAccount>`, keychain key `acct-<agent>-github-<ts>`
+  — bootstrapped `<date>`
