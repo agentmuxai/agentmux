@@ -368,6 +368,19 @@ const IDENTITY_VALIDATE_TOOL: &str = r#"{
   }
 }"#;
 
+const IDENTITY_LINK_TOOL: &str = r#"{
+  "name": "IdentityLink",
+  "description": "Bind one of your own linked accounts (from IdentityAccounts) into your default identity bundle so the credential injects into your environment at next launch. No secret is supplied — the account must already exist and be linked to you. Returns bundle_id, provider, and account_id on success.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "account_id": { "type": "string", "description": "One of your linked accounts (from IdentityAccounts)" },
+      "provider":   { "type": "string", "description": "Provider for this account (e.g. \"github\", \"aws\", \"anthropic\")" }
+    },
+    "required": ["account_id", "provider"]
+  }
+}"#;
+
 #[tokio::main]
 async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
@@ -478,10 +491,12 @@ async fn main() {
                     serde_json::from_str(IDENTITY_ACCOUNTS_TOOL).expect("static json");
                 let identity_validate: Value =
                     serde_json::from_str(IDENTITY_VALIDATE_TOOL).expect("static json");
+                let identity_link: Value =
+                    serde_json::from_str(IDENTITY_LINK_TOOL).expect("static json");
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate, identity_link] }
                 })
             }
             "tools/call" => {
@@ -1507,6 +1522,43 @@ async fn call_tool(
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("identity/validate failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "IdentityLink" => {
+            let account_id = arguments
+                .get("account_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: account_id"))?;
+            let provider = arguments
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: provider"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/identity/link", local_url.trim_end_matches('/'));
+            let body = json!({
+                "agent_id": agent_id,
+                "account_id": account_id,
+                "provider": provider,
+            });
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("identity/link failed: HTTP {status} — {text}");
             }
             let result: Value = resp
                 .json()

@@ -317,6 +317,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
+        .route("/api/v1/agent/identity/link", post(handle_agent_identity_link))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         // Persistent cron scheduler (SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2.4).
@@ -806,6 +807,26 @@ async fn handle_agent_identity_validate(
 ) -> impl IntoResponse {
     app_api_response(
         app_api::identity_account_validate_stored_impl(&state, &req.agent_id, &req.account_id).await,
+    )
+}
+
+#[derive(serde::Deserialize)]
+struct AgentIdentityLinkRequest {
+    agent_id: String,
+    account_id: String,
+    provider: String,
+}
+
+/// `POST /api/v1/agent/identity/link` — bind one of the agent's own linked
+/// accounts into its default identity bundle so it injects at next launch.
+/// The account must already be linked to this agent (ownership enforced server-
+/// side). No secret is supplied — backs the `IdentityLink` MCP tool.
+async fn handle_agent_identity_link(
+    State(state): State<AppState>,
+    Json(req): Json<AgentIdentityLinkRequest>,
+) -> impl IntoResponse {
+    app_api_response(
+        app_api::identity_bundle_link_impl(&state, &req.agent_id, &req.account_id, &req.provider).await,
     )
 }
 
