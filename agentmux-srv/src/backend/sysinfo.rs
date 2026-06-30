@@ -70,6 +70,24 @@ fn get_commit_data(_values: &mut HashMap<String, f64>) {
     }
 }
 
+/// Available system commit headroom in GB (Windows: `GlobalMemoryStatusEx`
+/// → `ullAvailPageFile`). Returns `None` where there's no cheap commit figure
+/// (non-Windows) or the read fails — callers treat `None` as "no limit / admit".
+/// This is the admission-control signal for Pillar 3 (commit-aware agent spawn):
+/// see `agents::runner::admit_spawn` and `SPEC_WIN10_PAGEFILE_OOM_CRASH`.
+pub fn available_commit_gb() -> Option<f64> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut mem: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+        mem.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        if unsafe { GlobalMemoryStatusEx(&mut mem) } != 0 {
+            return Some(mem.ullAvailPageFile as f64 / BYTES_PER_GB);
+        }
+    }
+    None
+}
+
 /// Network I/O tracking state for rate calculations.
 struct NetState {
     prev_sent: u64,
