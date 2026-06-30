@@ -17,7 +17,8 @@
  *   5. StreamFlushObserved is a no-op when the stream is unsubscribed.
  *   6. StreamWatchdogTick is a no-op when the stream is unsubscribed or
  *      lastEventMs is null (no events seen yet); past LIVENESS_RECOVERY_MS it
- *      force-recovers a hung Streaming turn (no tool, not rate-limited) to Idle.
+ *      force-recovers a hung Streaming turn (no tool active) to Idle — and for a
+ *      stalled rate-limit wait, past retryAfterMs + LIVENESS_RECOVERY_MS.
  *   7. Init lifecycle transitions are one-way: InitStart / InitReady /
  *      InitFailed are no-ops once the pane has reached a terminal init
  *      state (InitReady / InitFailed). Re-entering pending requires a
@@ -266,40 +267,54 @@ export function update(
                 return { state, events: [] };
             }
             // Liveness recovery (SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29).
-            // A `Streaming` turn idle past the longer LIVENESS_RECOVERY_MS — with
-            // no tool running and not rate-limited — is hung: its terminal
-            // `session_end` was never observed. For persistent agents no
-            // `ControllerStatus: done` will ever arrive to clear it (the process
-            // doesn't exit between turns), so the watchdog itself transitions out
-            // of "Working". Land in `Idle` (turn abandoned) — NOT a synthetic
-            // `Done.completed`, which would feed false stats to session digests.
-            // Guarded to Streaming-with-no-tool-and-not-waiting so a running tool
-            // or a 429 backoff (both of which keep `lastEventMs` fresh anyway) can
-            // never be mistaken for a hang. Interrupting/Submitting are left to
-            // their own bounded timers (INTERRUPT_TIMEOUT_MS / SUBMIT_TIMEOUT_MS).
+            // A `Streaming` turn that goes idle too long with no tool running is
+            // hung: its terminal `session_end` was never observed. For persistent
+            // agents no `ControllerStatus: done` will ever arrive to clear it (the
+            // process doesn't exit between turns), so the watchdog itself
+            // transitions out of "Working". Land in `Idle` (turn abandoned) — NOT
+            // a synthetic `Done.completed`, which would feed false stats to session
+            // digests. If real activity arrives after recovery, `bumpEvent`
+            // re-promotes Idle → Streaming, so a late recovery self-corrects.
+            //
+            // Threshold depends on the wait state:
+            //  - normal stall → LIVENESS_RECOVERY_MS (a running tool keeps
+            //    `lastEventMs` fresh, so an active tool never reaches it).
+            //  - rate-limit stall → retryAfterMs + LIVENESS_RECOVERY_MS. A genuine
+            //    429 backoff re-emits `provider_waiting` within `retryAfterMs`
+            //    (refreshing `lastEventMs`), so it only accumulates this much idle
+            //    if the retry loop itself stalled — the Claude CLI emitted one
+            //    `rate_limit_event` then went silent with no follow-up event,
+            //    `session_end`, or process exit. Waiting out the advertised retry
+            //    window PLUS the liveness window guarantees a long-but-live backoff
+            //    is never mistaken for a hang. (Pre-fix, rate-limited turns were
+            //    excluded from recovery entirely — see
+            //    docs/retro/retro-busy-animation-stuck-on-429-2026-06-24.md.)
+            // Interrupting/Submitting are left to their own bounded timers
+            // (INTERRUPT_TIMEOUT_MS / SUBMIT_TIMEOUT_MS).
             const phase = state.turnPhase;
-            if (
-                phase.kind === "Streaming" &&
-                phase.toolsActive === 0 &&
-                phase.waitingReason === undefined &&
-                idleSinceMs >= LIVENESS_RECOVERY_MS
-            ) {
-                return {
-                    state: {
-                        ...state,
-                        currentTool: null,
-                        currentToolArg: null,
-                        turnTokens: null,
-                        turnPhase: { kind: "Idle" },
-                    },
-                    events: [
-                        {
-                            type: "working-recovered",
-                            idleSinceMs,
-                            thresholdMs: LIVENESS_RECOVERY_MS,
+            if (phase.kind === "Streaming" && phase.toolsActive === 0) {
+                const recoverThresholdMs =
+                    phase.waitingReason === "rate_limited"
+                        ? (phase.retryAfterMs ?? 0) + LIVENESS_RECOVERY_MS
+                        : LIVENESS_RECOVERY_MS;
+                if (idleSinceMs >= recoverThresholdMs) {
+                    return {
+                        state: {
+                            ...state,
+                            currentTool: null,
+                            currentToolArg: null,
+                            turnTokens: null,
+                            turnPhase: { kind: "Idle" },
                         },
-                    ],
-                };
+                        events: [
+                            {
+                                type: "working-recovered",
+                                idleSinceMs,
+                                thresholdMs: recoverThresholdMs,
+                            },
+                        ],
+                    };
+                }
             }
             return {
                 state,
