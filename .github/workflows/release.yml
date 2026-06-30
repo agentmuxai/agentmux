@@ -40,7 +40,7 @@ jobs:
           VER="${TAG#v}"
           PKG_VER=$(node -p "require('./package.json').version")
           CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"//;s/".*//')
-          VH_VER=$(grep -m1 '^## ' VERSION_HISTORY.md | sed 's/## //' | tr -d '[:space:]')
+          VH_VER=$(grep -m1 '^## ' VERSION_HISTORY.md | awk '{print $2}')
           # Cargo.lock: workspace member version (e.g. agentmux-cef)
           LOCK_VER=$(awk '/^name = "agentmux-cef"/{found=1} found && /^version =/{gsub(/[" ]*/,"",$NF); print $NF; exit}' Cargo.lock)
           # package-lock.json: root "version" field
