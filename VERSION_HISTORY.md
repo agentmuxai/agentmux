@@ -1,5 +1,27 @@
 # AgentMux Version History
 
+## 0.49.9 — 2026-06-30
+
+- fix(floating-pane): dragging a torn-off floating pane is broken on Linux — get_window_position returns {0,0} post-load
+- fix(wrr): exclude window-pool-* from LOCATIONCHANGE pool-move close detection
+- fix(floating-pane): reduce browser edge-resize border from 12px to 4px
+- fix(floating-pane/macos): implement get/set_window_rect for CEF Views (macOS+Linux resize)
+- spec(agent-pane): agent pane header name precedence + drop "continued" chip
+- fix(spec): address script injection, dead input, and missing permissions in MS Store release spec
+- fix(ci): correct VH_VER extraction, installer URL, version gate message, and changelog exit code in unified release workflow
+- fix(layout): correct 6 P1 bugs in column dissolve — rollback guards, allCollapsed cascade, size budget, and slip-anchor teardown
+- fix(ci): stage CEF DLLs from OUT_DIR on rust-cache hit (Windows artifacts)
+- feat(ci): unified release workflow — build, publish, winget, MS Store, landing page
+- ci(macos): consume patched CEF framework from agentmuxai/cef + add BeginWindowDrag patch gate
+- chore(statusbar): drop 'OOM kills' wording from PF commit-charge chip tooltip
+- feat(splash): wire startup telemetry to Linux splash stage list
+- feat(lifecycle): compute level-triggered quit decision in reducer (Pillar 2 stage 1)
+- feat(srv): commit-aware agent admission — refuse new agent spawn under low system commit (Pillar 3)
+- fix(windows): cfg-gate state.windows fallback in GetWindowPositionTask — fixes Windows build break from #1823
+- fix(ci): remove fabricated dl.agentmux.ai S3 mirror from release workflow
+- fix(ci): release.yml consumes patched macOS CEF + filters Linux CEF tag by platform
+
+
 ## 0.49.8 — 2026-06-28
 
 - feat(trust-center): responsive layout from phone strip to desktop
