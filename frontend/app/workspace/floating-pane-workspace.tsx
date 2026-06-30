@@ -276,7 +276,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             let dir = 0;
             let startX = 0; // screen px at pointerdown
             let startY = 0;
-            let startRect = { x: 0, y: 0, w: 0, h: 0 }; // physical px
+            let startRect = { x: 0, y: 0, w: 0, h: 0 }; // physical px (Windows) / DIP (macOS, Linux)
 
             // Coalesce moves the same way the header MOVE does: one IPC in
             // flight at a time, last position wins (no timers/RAF).
@@ -312,8 +312,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     "get_window_rect",
                     { label },
                 ).then((r) => {
-                    startRect = { x: r.x, y: r.y, w: r.width, h: r.height };
-                    resizing = true;
+                    if (r.width > 0 && r.height > 0) {
+                        startRect = { x: r.x, y: r.y, w: r.width, h: r.height };
+                        resizing = true;
+                    } else {
+                        // IPC returned zeros (timeout or lookup failure) — abort.
+                        try { target.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+                    }
                 }).catch(() => {
                     try { target.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
                 });
@@ -326,10 +331,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     document.body.style.cursor = d ? CURSORS[d] : "";
                     return;
                 }
-                // screenX/Y are CSS px; the window rect is physical px.
-                const dpr = window.devicePixelRatio || 1;
-                const dx = Math.round((e.screenX - startX) * dpr);
-                const dy = Math.round((e.screenY - startY) * dpr);
+                // screenX/Y are CSS px. Windows: rect is physical px → scale by DPR.
+                // macOS / Linux: rect is DIP (1 CSS px == 1 DIP) → scale 1:1.
+                // posScale() encodes this: DPR on Windows, 1 elsewhere (mirrors drag).
+                const scale = posScale();
+                const dx = Math.round((e.screenX - startX) * scale);
+                const dy = Math.round((e.screenY - startY) * scale);
                 let { x, y, w, h } = startRect;
                 const left = dir === 1 || dir === 4 || dir === 7;
                 const right = dir === 2 || dir === 5 || dir === 8;
@@ -487,6 +494,15 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (jsDrivenDrag) jsDragMouseDownId += 1;
             if (!dragging) return;
             dragging = false;
+            // On macOS/Linux, paneRect() returns unchanged client coords after a
+            // window move, so browser-view's syncPosition dedupe guard skips the
+            // browser_pane_resize re-send. Signal it to force one so the
+            // NativeWidgetMacNSWindow overlay repositions to the new window frame.
+            if (jsDrivenDrag) {
+                window.dispatchEvent(
+                    new CustomEvent("floating-pane-js-drag-ended", { detail: { label } }),
+                );
+            }
             // Phase 4b — dispatch get_floating_redock_target BEFORE clear_floating_redock_hover.
             // Both are fire-and-forget IPCs from the same floater renderer → CEF backend
             // channel (FIFO). The ghost read queues ahead of the event broadcast that
