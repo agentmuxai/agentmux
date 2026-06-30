@@ -100,8 +100,32 @@ export function minimizeNodeToggle(model: LayoutModel, nodeId: string) {
     // undissolves the parent column (returns it to its Row slot), then falls through
     // to the normal restore path so both the undissolve and the individual pane
     // restore happen in a single click.
+    //
+    // In a cascade (A→B→C, 3-deep): colA dissolves into colB, then colB dissolves
+    // into colC. When the user restores a pane in colA, the immediate parent (colA)
+    // has columnDissolve set, but colA's targetColumnId (colB) is itself still
+    // dissolved inside colC. We must undissolve ancestor columns from outermost to
+    // innermost before undissolving the immediate parent, otherwise _undissolveColumn
+    // cannot find the correct Row insertion point and colB.size underflows.
     const parentForDissolveCheck = findParent(model.treeState.rootNode, nodeId);
     if (parentForDissolveCheck?.columnDissolve !== undefined) {
+        // Collect all dissolved ancestors of parentForDissolveCheck from innermost
+        // to outermost by walking up via the columnDissolve.targetColumnId chain.
+        const dissolvedAncestors: LayoutNode[] = [];
+        let cursor: LayoutNode | undefined = parentForDissolveCheck;
+        while (cursor?.columnDissolve !== undefined) {
+            const targetCol = findNode(model.treeState.rootNode, cursor.columnDissolve.targetColumnId);
+            if (targetCol?.columnDissolve !== undefined) {
+                dissolvedAncestors.push(targetCol);
+            }
+            cursor = targetCol;
+        }
+        // Undissolve from outermost to innermost so each column is returned to its
+        // Row slot before its inner neighbour tries to use it as an insertion target.
+        for (const ancestor of dissolvedAncestors.reverse()) {
+            _undissolveColumn(model, ancestor);
+        }
+        // Now undissolve the immediate parent of the clicked pane.
         _undissolveColumn(model, parentForDissolveCheck);
         // Fall through — node still has minimizedSize set; normal restore runs below.
     }
