@@ -52,7 +52,7 @@ git tag v0.50.0 → push
   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
   │  │ build:win    │  │ build:linux  │  │ build:macos  │    │
   │  │ portable.zip │  │ AppImage     │  │ DMG arm64    │    │
-  │  │ setup.exe    │  │ .deb         │  │              │    │
+  │  │ setup.exe    │  │              │  │              │    │
   │  │ .msix        │  │              │  │              │    │
   │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘   │
   │         └──────────────────┴──────────────────┘          │
@@ -137,7 +137,7 @@ _Windows_ (`windows-latest`):
 
 _Linux_ (`ubuntu-22.04`):
 - Same steps as `ci-nightly-artifacts.yml` linux job (patched CEF download)
-- Outputs: AppImage, .deb
+- Outputs: AppImage
 
 _macOS_ (`macos-latest`):
 - Same steps as `ci-nightly-artifacts.yml` macos job (Apple cert, notarize, patched CEF TBD)

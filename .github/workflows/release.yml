@@ -41,10 +41,18 @@ jobs:
           PKG_VER=$(node -p "require('./package.json').version")
           CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*= *"//;s/".*//')
           VH_VER=$(grep -m1 '^## ' VERSION_HISTORY.md | sed 's/## //' | tr -d '[:space:]')
-          echo "tag=$VER  pkg=$PKG_VER  cargo=$CARGO_VER  vh=$VH_VER"
-          if [ "$VER" != "$PKG_VER" ] || [ "$VER" != "$CARGO_VER" ] || [ "$VER" != "$VH_VER" ]; then
+          # Cargo.lock: workspace member version (e.g. agentmux-cef)
+          LOCK_VER=$(awk '/^name = "agentmux-cef"/{found=1} found && /^version =/{gsub(/[" ]*/,"",$NF); print $NF; exit}' Cargo.lock)
+          # package-lock.json: root "version" field
+          PKGLOCK_VER=$(node -p "require('./package-lock.json').version")
+          echo "tag=$VER  pkg=$PKG_VER  cargo=$CARGO_VER  vh=$VH_VER  lock=$LOCK_VER  pkglock=$PKGLOCK_VER"
+          MISMATCH=0
+          for v in "$PKG_VER" "$CARGO_VER" "$VH_VER" "$LOCK_VER" "$PKGLOCK_VER"; do
+            if [ "$v" != "$VER" ]; then MISMATCH=1; fi
+          done
+          if [ "$MISMATCH" = "1" ]; then
             echo "❌ Version mismatch — all five locations must agree before release"
-            echo "   tag=$VER  package.json=$PKG_VER  Cargo.toml=$CARGO_VER  VERSION_HISTORY=$VH_VER"
+            echo "   tag=$VER  package.json=$PKG_VER  Cargo.toml=$CARGO_VER  VERSION_HISTORY=$VH_VER  Cargo.lock=$LOCK_VER  package-lock.json=$PKGLOCK_VER"
             exit 1
           fi
           echo "✓ Version $VER consistent across all locations"
@@ -381,10 +389,11 @@ jobs:
       - name: Mirror artifacts to S3 (latest/ unversioned stable URLs)
         run: |
           # Unversioned names match the map in agentmux-landing/scripts/fetch-release.mjs
+          # Note: no .deb — only AppImage is produced by the Linux build job.
           declare -A UNVERSIONED=(
-            ["setup.exe"]="AgentMux_x64-setup.exe"
+            ["x64-setup.exe"]="AgentMux_x64-setup.exe"
             ["portable.zip"]="agentmux-x64-portable.zip"
-            ["amd64.AppImage"]="AgentMux_amd64.AppImage"
+            [".AppImage"]="AgentMux_amd64.AppImage"
             ["arm64.dmg"]="AgentMux_aarch64.dmg"
             ["x64.msix"]="AgentMux_x64.msix"
           )
@@ -431,8 +440,20 @@ jobs:
       - name: Submit WinGet manifest PR
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          INSTALLER_URL="https://dl.agentmux.ai/releases/${VERSION}/AgentMux_x64-setup.exe"
+          # Resolve the actual installer filename from the GitHub Release assets
+          # (package-installer.ps1 produces AgentMux-<ver>-x64-setup.exe with dashes,
+          # not underscores — the versioned S3 path uses the same name as the artifact).
+          INSTALLER_NAME=$(gh release view "v${VERSION}" \
+            --repo agentmuxai/agentmux \
+            --json assets --jq '.assets[].name' | grep -i 'setup\.exe$' | head -1)
+          if [ -z "$INSTALLER_NAME" ]; then
+            echo "❌ No setup.exe asset found in GitHub Release v${VERSION}" >&2
+            exit 1
+          fi
+          INSTALLER_URL="https://dl.agentmux.ai/releases/${VERSION}/${INSTALLER_NAME}"
+          echo "WinGet installer URL: $INSTALLER_URL"
           ./wingetcreate update AgentMux.AgentMux \
             --version "${VERSION}" \
             --urls "$INSTALLER_URL" \
