@@ -1561,10 +1561,21 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
-            let pos = get_window_on_ui(&self.state, &self.label).map(|w| {
+            // Primary: browser_view.window() — works on Windows and on non-Windows
+            // windows that haven't finished loading. On Linux/macOS the Views
+            // BrowserView loses its Window reference post-page-load, so
+            // browser_view.window() returns None. Fall back to state.windows,
+            // which is populated via on_window_created and stays valid for the
+            // lifetime of the window (same registry ResolveWindowAtCursorTask uses).
+            let pos = if let Some(w) = get_window_on_ui(&self.state, &self.label) {
                 let b = w.bounds();
-                (b.x, b.y)
-            });
+                Some((b.x, b.y))
+            } else if let Some(w) = self.state.windows.lock().get(&self.label) {
+                let b = w.bounds();
+                Some((b.x, b.y))
+            } else {
+                None
+            };
             // Capacity-1, freshly created per call → try_send never blocks
             // the UI thread.
             let _ = self.tx.try_send(pos);
