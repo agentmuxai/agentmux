@@ -16,7 +16,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::process::ChildStdin;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::backend::wps::{Broker, WaveEvent, EVENT_SHELL_CHUNK};
@@ -28,13 +29,31 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// Per-shell stop handles. `ShellStop` (MCP tool / UI button) looks up a
-/// `shell_id` and fires the oneshot, which makes the owning `ShellNodeRunner`
-/// tree-kill its child. Mirrors `InstallSessionRegistry`; lives in
-/// `AppState.shell_sessions`. Phase 3 of SPEC_PERSISTENT_SHELL_NODE.
+/// Live status of a running (or recently exited) shell. Updated by
+/// `ShellNodeRunner` as output arrives and on exit.
+#[derive(Clone, Default)]
+pub struct ShellStatusInfo {
+    pub running: bool,
+    pub exit_code: Option<i32>,
+    pub line_count: u64,
+}
+
+// Per-shell registry entry: stop handle + optional stdin writer (Phase 3b).
+struct ShellEntry {
+    stop_tx: oneshot::Sender<()>,
+    // None only for entries created by unit tests (no real ChildStdin).
+    stdin: Option<Arc<tokio::sync::Mutex<BufWriter<ChildStdin>>>>,
+}
+
+/// Per-shell stop handles + status. `ShellStop` fires the oneshot; `ShellInput`
+/// writes to the stored stdin; `ShellStatus` reads the live status arc.
+/// Lives in `AppState.shell_sessions`.
 #[derive(Default)]
 pub struct ShellSessionRegistry {
-    shells: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    // Entries removed on stop or natural exit (stop_tx consumed).
+    shells: Mutex<HashMap<String, ShellEntry>>,
+    // Status arcs survive exit so `ShellStatus` can report the final state.
+    status_map: Mutex<HashMap<String, Arc<Mutex<ShellStatusInfo>>>>,
 }
 
 impl ShellSessionRegistry {
@@ -42,39 +61,65 @@ impl ShellSessionRegistry {
         Arc::new(Self::default())
     }
 
+    // Used by unit tests — registers a stop handle with no stdin/status.
     fn insert(&self, shell_id: String, tx: oneshot::Sender<()>) {
-        self.shells.lock().insert(shell_id, tx);
+        self.shells.lock().insert(shell_id, ShellEntry { stop_tx: tx, stdin: None });
     }
 
-    /// Request stop of a running shell. Returns false if the id is unknown
-    /// (never started, or already exited). Removing here also closes the
-    /// window for the runner's own natural-exit `remove`.
+    // Full registration called by the runner after spawning the child.
+    fn register_full(
+        &self,
+        shell_id: String,
+        stop_tx: oneshot::Sender<()>,
+        stdin: Arc<tokio::sync::Mutex<BufWriter<ChildStdin>>>,
+        status: Arc<Mutex<ShellStatusInfo>>,
+    ) {
+        self.shells.lock().insert(shell_id.clone(), ShellEntry { stop_tx, stdin: Some(stdin) });
+        self.status_map.lock().insert(shell_id, status);
+    }
+
+    /// Request stop of a running shell. Returns false if unknown or already exited.
     pub fn stop(&self, shell_id: &str) -> bool {
-        if let Some(tx) = self.shells.lock().remove(shell_id) {
-            let _ = tx.send(());
+        self.status_map.lock().remove(shell_id);
+        if let Some(entry) = self.shells.lock().remove(shell_id) {
+            let _ = entry.stop_tx.send(());
             true
         } else {
             false
         }
     }
 
-    /// Drop a shell's handle without signalling — called by the runner on
+    /// Drop a shell's stop handle without signalling — called by the runner on
     /// natural exit so its `kill_task` resolves `Err` (= not stopped).
     fn remove(&self, shell_id: &str) {
         self.shells.lock().remove(shell_id);
+        // Status is updated by the runner AFTER remove() is called (exit_code
+        // comes from child.wait()). We keep the status_map entry so ShellStatus
+        // can report the final state; stop_all() prunes it on srv shutdown.
     }
 
-    /// Stop every running shell. For srv-shutdown cleanup so long-running
-    /// children (`task dev` → `task.exe`/`node`) don't orphan and hold ports.
-    /// Returns the number of shells signalled (so the caller can skip the
-    /// grace-period sleep when there was nothing to stop).
+    /// Stop every running shell. For srv-shutdown cleanup.
     pub fn stop_all(&self) -> usize {
-        let drained: Vec<_> = self.shells.lock().drain().map(|(_, tx)| tx).collect();
+        self.status_map.lock().clear();
+        let drained: Vec<_> = self.shells.lock().drain().map(|(_, e)| e.stop_tx).collect();
         let n = drained.len();
         for tx in drained {
             let _ = tx.send(());
         }
         n
+    }
+
+    /// Return the stdin writer for `ShellInput`, or None if not running.
+    pub fn get_stdin(&self, shell_id: &str) -> Option<Arc<tokio::sync::Mutex<BufWriter<ChildStdin>>>> {
+        self.shells.lock().get(shell_id).and_then(|e| e.stdin.clone())
+    }
+
+    /// Return a snapshot of the shell's status. Returns `running: false` if unknown.
+    pub fn get_status(&self, shell_id: &str) -> ShellStatusInfo {
+        self.status_map.lock()
+            .get(shell_id)
+            .map(|arc| arc.lock().clone())
+            .unwrap_or_default()
     }
 }
 
@@ -158,14 +203,12 @@ impl ShellNodeRunner {
 
         child_cmd.stdout(std::process::Stdio::piped());
         child_cmd.stderr(std::process::Stdio::piped());
-        // Null stdin (CRITICAL). The shell runs non-interactively and the srv's
-        // own stdin is not a usable TTY. Without this the child inherits the srv
-        // stdin, and tools that probe/read stdin at startup HANG before doing any
-        // work — e.g. `npm run dev` spawned npm-cli.js but it never launched the
-        // vite script (no output, never bound its port). Confirmed: the same
-        // command with `< NUL` starts vite instantly (agentx/fix-shell-dev-server).
-        // (When ShellInput lands — Phase 3b — this becomes a piped stdin.)
-        child_cmd.stdin(std::process::Stdio::null());
+        // Piped stdin (Phase 3b — ShellInput). A fresh pipe is NOT the same as
+        // inheriting the srv's TTY stdin — it doesn't cause the probe-hang that
+        // `Stdio::inherit()` caused (agentx/fix-shell-dev-server). Tools that
+        // don't use stdin ignore the open pipe; tools that need interactive input
+        // can now receive it via ShellInput(shell_id, text).
+        child_cmd.stdin(std::process::Stdio::piped());
         // Windows: suppress the console window that Windows auto-creates for
         // CUI-subsystem processes (cmd.exe). stdout/stderr are piped so no
         // output is lost — the window was decorative noise only.
@@ -194,13 +237,22 @@ impl ShellNodeRunner {
             }
         };
 
-        // Register a stop handle. `ShellStop` fires `cancel_rx`, and `kill_task`
-        // tree-kills this child. On natural exit we drop the sender (via
-        // registry.remove) so `kill_task` resolves Err → "not stopped".
+        // Register stop handle + stdin + status. `ShellStop` fires `cancel_rx`;
+        // `ShellInput` writes to the stdin arc; `ShellStatus` reads the status arc.
         let pid = child.id();
         tracing::info!(shell_id = %shell_id, pid = ?pid, "shell.spawn");
+
+        let child_stdin = child.stdin.take().expect("stdin piped");
+        let stdin_arc = Arc::new(tokio::sync::Mutex::new(BufWriter::new(child_stdin)));
+        let status_arc = Arc::new(Mutex::new(ShellStatusInfo { running: true, exit_code: None, line_count: 0 }));
+
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        self.registry.insert(shell_id.clone(), cancel_tx);
+        self.registry.register_full(
+            shell_id.clone(),
+            cancel_tx,
+            Arc::clone(&stdin_arc),
+            Arc::clone(&status_arc),
+        );
         let kill_task = tokio::spawn(async move {
             match cancel_rx.await {
                 Ok(()) => {
@@ -215,6 +267,15 @@ impl ShellNodeRunner {
 
         let stdout = child.stdout.take().expect("stdout piped");
         let stderr = child.stderr.take().expect("stderr piped");
+
+        // Drop the runner's own reference to stdin_arc so that only the registry
+        // holds it. This means: when ShellStop fires (registry.stop() → entry
+        // removed → Arc dropped), the write end of the stdin pipe closes and the
+        // child sees EOF — safely unblocking any process that reads stdin to EOF
+        // (e.g. `cat`, some REPLs). Without this drop, the runner holds the pipe
+        // open until child.wait() completes, which can never happen for stdin-
+        // blocking commands without an explicit ShellStop.
+        drop(stdin_arc);
 
         // Collect both stdout and stderr into a single ordered channel.
         // Each task owns its half of the pipe; the channel closes when both
@@ -246,6 +307,7 @@ impl ShellNodeRunner {
         let mut line_count: u64 = 0;
         while let Some((kind, content, ts)) = rx.recv().await {
             line_count += 1;
+            status_arc.lock().line_count = line_count;
             publish_chunk(&broker, &block_id, &shell_id, kind, &content, ts);
         }
 
@@ -262,6 +324,15 @@ impl ShellNodeRunner {
 
         let was_stopped = kill_task.await.unwrap_or(false);
         tracing::info!(shell_id = %shell_id, exit_code, was_stopped, line_count, "shell.exit");
+
+        // Persist final status in the status_map so ShellStatus can still query it.
+        {
+            let mut s = status_arc.lock();
+            s.running = false;
+            s.exit_code = Some(exit_code);
+            s.line_count = line_count;
+        }
+
         publish_exit(&broker, &block_id, &shell_id, exit_code, was_stopped, now_ms());
     }
 }
