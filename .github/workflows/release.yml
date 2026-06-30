@@ -388,10 +388,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v${VERSION}" \
-            --title "AgentMux v${VERSION}" \
-            --notes-file /tmp/release-notes.md \
-            dist-flat/*
+          if ! gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "v${VERSION}" \
+              --title "AgentMux v${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              dist-flat/*
+          else
+            echo "Release v${VERSION} already exists -- uploading/overwriting artifacts only"
+            gh release upload "v${VERSION}" dist-flat/* --clobber
+          fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
