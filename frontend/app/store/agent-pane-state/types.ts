@@ -353,8 +353,11 @@ export type AgentPaneCommand =
     | { type: "StreamFlushObserved"; addedCount: number; at: number }
     /**
      * Periodic tick from useAgentStream's watchdog interval. Emits a
-     * `stream-stuck` event when the active stream has been silent for
-     * more than `STUCK_THRESHOLD_MS`. No state mutation.
+     * `stream-stuck` diagnostic past `STUCK_THRESHOLD_MS`, and — past the
+     * longer `LIVENESS_RECOVERY_MS` — force-recovers a hung `Streaming` turn
+     * (no tool active, not rate-limited) to `Idle`, clearing a stuck
+     * "Working" that never received its terminal `session_end`. See
+     * SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
      */
     | { type: "StreamWatchdogTick"; nowMs: number }
 
@@ -488,6 +491,19 @@ export type AgentPaneEvent =
           idleSinceMs: number;
           thresholdMs: number;
       }
+    | {
+          /**
+           * The watchdog force-recovered a hung `Streaming` turn to `Idle`
+           * after `idleSinceMs` ≥ `LIVENESS_RECOVERY_MS` with no tool active
+           * and no rate-limit wait — i.e. a turn whose terminal `session_end`
+           * was never observed (the persistent-mode stuck-"Working" class).
+           * Surfaced for telemetry; the phase change is the real effect.
+           * See SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+           */
+          type: "working-recovered";
+          idleSinceMs: number;
+          thresholdMs: number;
+      }
     | { type: "turn-started"; at: number }
     | {
           /**
@@ -599,6 +615,19 @@ export interface ReducerResult {
  * positives. Issue #728 gap 3.
  */
 export const STUCK_THRESHOLD_MS = 45_000;
+
+/**
+ * Liveness-recovery threshold. A `Streaming` turn that has produced no
+ * observable activity for this many ms — with no tool running and not
+ * rate-limited — is treated as hung: its terminal `session_end` was never
+ * observed and no other signal will arrive to clear it. For persistent-mode
+ * agents the process never exits between turns, so `ControllerStatus: done`
+ * never fires and the process-exit grace timer can't recover the phase; the
+ * watchdog itself must transition out of "Working" (→ `Idle`). 3 min is well
+ * past `STUCK_THRESHOLD_MS` (45s) so a merely-quiet reasoning run is never
+ * mistaken for a hang. See SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md.
+ */
+export const LIVENESS_RECOVERY_MS = 180_000;
 
 /**
  * Bounded `Interrupting → Done.{interrupted}` window. After `RequestStop`
