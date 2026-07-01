@@ -1,7 +1,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-#![allow(unused_imports)]
 
 use std::sync::Arc;
 use chrono::Utc;
@@ -99,8 +98,6 @@ use super::super::AppState;
 use super::read_session_preview;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // ---- Recent sessions (cascade follow-up 2026-05-23) ----
-
     // ---- Recent sessions (cascade follow-up 2026-05-23) ----
     //
     // listrecentsessions — joins `db_agent_instances` with the
