@@ -562,8 +562,43 @@
     }
 }
 
+// ── Markdown mode toolbar ─────────────────────────────────────────────
+// Segmented Preview | Source | Split toggle, shown only for .md tabs.
+
+.editor-mode-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    padding: 3px 8px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--secondary-bg-color, var(--block-bg-color));
+}
+
+.editor-mode-btn {
+    padding: 1px 8px;
+    font-size: 11px;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    user-select: none;
+
+    &.active {
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.1));
+        color: var(--main-text-color);
+    }
+
+    &:hover:not(.active) {
+        color: var(--main-text-color);
+    }
+}
+
 // ── Markdown live preview panel ───────────────────────────────────────
-// Split layout: CodeMirror on top (flex: 1), drag handle, preview below.
+// preview mode: CodeMirror hidden, preview pane fills full height.
+// source mode:  CodeMirror fills full height, no preview pane.
+// split mode:   CodeMirror on top (flex: 1), drag handle, preview below.
 
 .editor-body-wrap {
     flex: 1 1 0;
@@ -589,62 +624,11 @@
 }
 
 .editor-preview-pane {
-    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--border-color);
-    min-height: 28px;
-
-    &--collapsed {
-        height: 28px !important;
-    }
-}
-
-.editor-preview-header {
-    flex: 0 0 28px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 8px;
-    background: var(--panel-bg-color, var(--block-bg-color));
-    border-bottom: 1px solid var(--border-color);
-    user-select: none;
-}
-
-.editor-preview-header-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--main-text-color);
-    opacity: 0.7;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
-.editor-preview-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-}
-
-.editor-preview-chevron,
-.editor-preview-source-toggle {
-    background: none;
-    border: none;
-    color: var(--main-text-color);
-    opacity: 0.7;
-    cursor: pointer;
-    padding: 2px 4px;
-    font-size: 10px;
-
-    &:hover {
-        opacity: 1;
-    }
-}
-
-.editor-preview-source-toggle {
-    font-family: var(--fixed-font, monospace);
-    font-size: 9px;
-    letter-spacing: -0.02em;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .editor-preview-content {
