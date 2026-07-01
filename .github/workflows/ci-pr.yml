@@ -1,0 +1,78 @@
+name: CI (PR) — compile tests + run
+
+# The nightly (ci-nightly-build.yml) compiles + tests all three platforms, but
+# only on a `schedule` — so a broken TEST build or a stale test assertion merges
+# UNNOTICED until the next 07:00 UTC run. That is how both #1823 (a Windows-only
+# `cfg` break in agentmux-cef) and #1876 (JEKT `InjectionRequest` gained fields
+# its `reactive/tests.rs` constructors never got, plus 3 tests left asserting the
+# pre-JEKT message format) reached `main`: the release build workflows are
+# manual `workflow_dispatch` and never compile `#[cfg(test)]` code, and reviewers
+# (incl. reagent) read diffs — they do not compile or run the suite. Nothing ran
+# on the PR.
+#
+# This runs the same compile-and-test on EVERY PR, so the gate is at merge time.
+#
+# Scope: `cargo check --workspace --tests` compiles `#[cfg(test)]` code too — the
+# exact step that catches a missing-field / cfg-gated test break — then
+# `cargo test --workspace` catches stale-assertion breaks. Windows is the
+# REQUIRED leg (primary platform; catches cfg-gated breaks); ubuntu is
+# non-blocking (continue-on-error) until greened. Standard GitHub-hosted runners
+# only (free on public repos).
+#
+# NOTE: adding this workflow makes the checks RUN on PRs; to ENFORCE them, add
+# "check --tests + test (windows-latest)" and "vitest" as required status checks
+# in branch protection.
+#
+# --test-threads=1 mirrors the nightly (process-shared in-memory FileStore + a
+# focus-flag global flake under parallel runs; serial is deterministic).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  rust:
+    name: check --tests + test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # cef-dll-sys builds CEF's C wrapper with CMake + Ninja (runs in build.rs,
+      # so `cargo check` triggers it too).
+      - name: Install Ninja (Windows — CMake ships with VS)
+        if: matrix.os == 'windows-latest'
+        run: choco install ninja -y
+      - name: Install build deps (Linux — CEF + launcher Wayland/GTK)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Compiles the WHOLE workspace including `#[cfg(test)]` code — the gate that
+      # would have caught #1823 (Windows cfg) and #1876 (missing fields).
+      - name: cargo check --workspace --tests
+        run: cargo check --workspace --tests
+
+      # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations).
+      - name: cargo test --workspace
+        run: cargo test --workspace -- --test-threads=1
+
+  frontend:
+    name: vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: vitest run
+        run: npx vitest run
