@@ -702,15 +702,37 @@ fn app_api_agent_slug(
             )
                 .into_response()
         })?;
-    let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
-    if agent_id.is_empty() {
+    let def_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+    if def_id.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "block has no agentId" })),
         )
             .into_response());
     }
-    Ok(agent_id)
+    // agentId meta holds the definition UUID; resolve to slug for impl functions.
+    let agent = state
+        .wstore
+        .agent_def_get(&def_id)
+        .map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() })))
+                .into_response()
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("agent not found: {def_id}") })),
+            )
+                .into_response()
+        })?;
+    if agent.slug.is_empty() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "agent has no slug" })),
+        )
+            .into_response());
+    }
+    Ok(agent.slug)
 }
 
 /// Classify an app-API impl error string into an HTTP status. FORBIDDEN and
@@ -718,7 +740,7 @@ fn app_api_agent_slug(
 fn app_api_error_status(e: &str) -> StatusCode {
     if e.starts_with("FORBIDDEN") {
         StatusCode::FORBIDDEN
-    } else if (e.starts_with("memory:") && e.contains("not found"))
+    } else if (e.starts_with("memory.") && e.contains("not found"))
         || e.contains("provide ")
         || e.contains("not a regular file")
         || e.contains("too large")
@@ -879,8 +901,22 @@ async fn handle_agent_identity_link(
         Ok(id) => id,
         Err(resp) => return resp,
     };
+    let block_id = headers
+        .get("X-Block-Id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    // Use this instance's identity_id so the bind lands in the bundle the
+    // resolver will actually read at next launch, not always the shared default.
+    let bundle_id = state
+        .wstore
+        .instance_get_active_for_block(block_id)
+        .ok()
+        .flatten()
+        .map(|inst| inst.identity_id)
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| crate::identity::migration::DEFAULT_BUNDLE_ID.to_string());
     app_api_response(
-        app_api::identity_bundle_link_impl(&state, &agent_id, &req.account_id, &req.provider).await,
+        app_api::identity_bundle_link_impl(&state, &agent_id, &req.account_id, &req.provider, &bundle_id).await,
     )
 }
 
