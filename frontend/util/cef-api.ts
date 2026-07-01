@@ -181,6 +181,16 @@ function showJsContextMenu(
                 row.appendChild(icon);
             }
 
+            // Inline color swatch (exact hue) rendered before the label — used
+            // by the pane "Pane Color" submenu. This is a real DOM square, not an
+            // emoji, so it matches our palette colors precisely.
+            if (item.swatchColor) {
+                const swatch = document.createElement("span");
+                swatch.className = "menu-item-swatch";
+                swatch.style.backgroundColor = item.swatchColor;
+                row.appendChild(swatch);
+            }
+
             const label = document.createElement("span");
             label.className = "label";
             label.textContent = item.label ?? "";

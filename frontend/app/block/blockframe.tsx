@@ -32,13 +32,43 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show }
 import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
 import { buildPaneContextMenu } from "./pane-actions";
-import { hueToHeaderBg, hueToActiveBorder } from "./pane-color-menu";
-import { PaneColorPanel } from "./pane-color-panel";
+import { hueToHeaderBg, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 
 const NumActiveConnColors = 8;
+
+/**
+ * Build a "Pane Color" submenu — mirrors the "Replace With..." submenu pattern
+ * (pane-actions.ts). Looks and acts exactly like the rest of the context menu:
+ * expands on hover, fully clickable, consistent with every other menu. Each
+ * item carries an inline color swatch in its exact hue (the context menu is a
+ * DOM overlay, so `swatchColor` renders a real colored square before the label
+ * — see showJsContextMenu). The current color is marked with a checkmark;
+ * "Default" clears it.
+ */
+function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
+    const currentHue = blockData?.meta?.["frame:hue"] as number | undefined;
+    const colorItems: ContextMenuItem[] = [
+        {
+            label: "Default",
+            checked: currentHue == null,
+            click: () => setHue(blockData.oid, null),
+        },
+        { type: "separator" as const },
+        ...PANE_HUE_OPTIONS.map(({ label, hue }) => ({
+            label,
+            swatchColor: hueToActiveBorder(hue),
+            checked: currentHue === hue,
+            click: () => setHue(blockData.oid, hue),
+        })),
+    ];
+    return [
+        { label: "Pane Color", type: "submenu" as const, submenu: colorItems },
+        { type: "separator" as const },
+    ];
+}
 
 function handleHeaderContextMenu(
     e: MouseEvent,
@@ -59,53 +89,12 @@ function handleHeaderContextMenu(
         inspectAt: { x: e.clientX, y: e.clientY },
     }, viewModel);
 
+    // Header-only: pane color submenu (mirrors "Replace With...")
+    menu.push(...buildPaneColorSubmenu(blockData));
+
     // Header-only: view-specific settings (font size, theme, etc.)
     const extraItems = viewModel?.getSettingsMenuItems?.();
     if (extraItems && extraItems.length > 0) menu.push({ type: "separator" }, ...extraItems);
-
-    // Header-only: title management + Copy BlockId
-    menu.push(
-        { type: "separator" },
-        {
-            label: "Copy BlockId",
-            click: () => {
-                clipboardWriteText(blockData.oid);
-            },
-        },
-        {
-            label: "Edit Pane Title",
-            click: () => {
-                const titleElement = document.querySelector(
-                    `.block-${blockData.oid} .pane-title-text`
-                ) as HTMLElement;
-                if (titleElement) {
-                    titleElement.click();
-                }
-            },
-        },
-        {
-            label: "Auto-Generate Title",
-            click: async () => {
-                const { generateAutoTitle } = await import("./autotitle");
-                const fullConfig = atoms.fullConfigAtom();
-                const settingsEnv = fullConfig?.settings?.["cmd:env"] as Record<string, string> | undefined;
-                const autoTitle = generateAutoTitle(blockData, settingsEnv);
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", blockData.oid),
-                    meta: { "pane-title": autoTitle } as any,
-                });
-            },
-        },
-        {
-            label: "Clear Title",
-            click: async () => {
-                await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", blockData.oid),
-                    meta: { "pane-title": "" } as any,
-                });
-            },
-        }
-    );
 
     ContextMenuModel.showContextMenu(menu, e);
 }
@@ -370,11 +359,19 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
         return util.useAtomValueSafe(props.viewModel?.viewText);
     });
 
-    const [colorPanelAnchor, setColorPanelAnchor] = createSignal<DOMRect | null>(null);
-
     const onContextMenu = (e: MouseEvent) => {
-        setColorPanelAnchor((e.currentTarget as HTMLElement).getBoundingClientRect());
-        handleHeaderContextMenu(e, blockData(), props.viewModel, props.nodeModel.isMagnified(), props.nodeModel.toggleMagnify, props.nodeModel.onClose);
+        // Native context menu. Pane color is a native "Pane Color" submenu inside
+        // it (see handleHeaderContextMenu / buildPaneColorSubmenu) — mirroring
+        // "Replace With...". Fully native: expands on hover, clickable, no DOM
+        // overlay to conflict with the modal menu.
+        handleHeaderContextMenu(
+            e,
+            blockData(),
+            props.viewModel,
+            props.nodeModel.isMagnified(),
+            props.nodeModel.toggleMagnify,
+            props.nodeModel.onClose
+        );
     };
     const viewFaviconUrl = createMemo(() => util.useAtomValueSafe(props.viewModel?.viewFaviconUrl));
     const viewIconElem = createMemo(() => {
@@ -516,14 +513,6 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     blockView={blockData()?.meta?.view}
                 />
             </div>
-            <Show when={colorPanelAnchor() && blockData()?.oid}>
-                <PaneColorPanel
-                    anchor={colorPanelAnchor()!}
-                    currentHue={(blockData()?.meta?.["frame:hue"] as number | undefined) ?? null}
-                    blockId={blockData()?.oid ?? ""}
-                    onClose={() => setColorPanelAnchor(null)}
-                />
-            </Show>
         </div>
     );
 }
