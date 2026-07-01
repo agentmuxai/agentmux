@@ -308,6 +308,21 @@ pub(crate) fn apply_event_to_wstore(
         Event::LayoutTreeReplaced {
             tab_id, new_tree, ..
         } => apply_layout_tree_replaced(wstore, tab_id, new_tree),
+        // The 7 granular structural arms each carry the reducer's resulting
+        // tree in `new_tree` (post-op, post-balance), so persistence is the
+        // same rootnode write as LayoutTreeReplaced — no algebra re-run in the
+        // subscriber (the divergence surface we're avoiding). Focus/magnify
+        // changes from these ops are not persisted here yet (the frontend
+        // reconciles focus on load); that's a tracked follow-up.
+        Event::LayoutNodeMoved { tab_id, new_tree, .. }
+        | Event::LayoutNodesSwapped { tab_id, new_tree, .. }
+        | Event::LayoutNodesResized { tab_id, new_tree, .. }
+        | Event::LayoutNodeReplaced { tab_id, new_tree, .. }
+        | Event::LayoutSplitHorizontalApplied { tab_id, new_tree, .. }
+        | Event::LayoutSplitVerticalApplied { tab_id, new_tree, .. }
+        | Event::LayoutNodeInsertedAtIndex { tab_id, new_tree, .. } => {
+            apply_layout_tree_replaced(wstore, tab_id, new_tree)
+        }
         // All other event variants are not domain-state mutations
         // (lifecycle, errors, snapshots). The subscriber ignores them.
         _ => Ok(()),
@@ -1382,6 +1397,33 @@ mod tests {
         let root = layout_of(&s, &tab).rootnode.expect("rootnode set");
         assert_eq!(root.id, "n1");
         assert_eq!(root.data.unwrap().block_id, "b1");
+    }
+
+    #[test]
+    fn layout_granular_event_persists_new_tree() {
+        // The 7 granular structural events each carry the reducer's resulting
+        // tree in `new_tree`; the unified subscriber arm writes it to
+        // db_layout (same path as LayoutTreeReplaced). Representative check
+        // via LayoutNodeMoved — the |-pattern routes all 7 identically.
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutNodeMoved {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("moved-root", "bm")),
+                node_id: "x".into(),
+                new_parent_id: "y".into(),
+                index: 0,
+                correlation_id: "c".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        let root = layout_of(&s, &tab)
+            .rootnode
+            .expect("granular event persisted rootnode");
+        assert_eq!(root.id, "moved-root");
     }
 
     #[test]

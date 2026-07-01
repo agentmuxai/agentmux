@@ -450,8 +450,20 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         | Event::MagnifiedNodeChanged { tab_id, .. } => {
             emit_layout_for_tab(&wstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
         }
-        Event::LayoutCleared { tab_id, .. } | Event::LayoutTreeReplaced { tab_id, .. } => {
-            emit_layout_for_tab(&wstore, &event_bus, tab_id, "LayoutCleared/TreeReplaced").await;
+        Event::LayoutCleared { tab_id, .. }
+        | Event::LayoutTreeReplaced { tab_id, .. }
+        // The 7 granular structural arms persist their resulting tree via the
+        // subscriber (`new_tree`), so the bridge can safely re-read and
+        // broadcast the post-event LayoutState — same synchronous-apply-then-
+        // publish guarantee as the events above.
+        | Event::LayoutNodeMoved { tab_id, .. }
+        | Event::LayoutNodesSwapped { tab_id, .. }
+        | Event::LayoutNodesResized { tab_id, .. }
+        | Event::LayoutNodeReplaced { tab_id, .. }
+        | Event::LayoutSplitHorizontalApplied { tab_id, .. }
+        | Event::LayoutSplitVerticalApplied { tab_id, .. }
+        | Event::LayoutNodeInsertedAtIndex { tab_id, .. } => {
+            emit_layout_for_tab(&wstore, &event_bus, tab_id, "Layout structural op").await;
         }
 
         // Saga lifecycle, launcher-domain events, OS facts, etc. — not
