@@ -251,7 +251,7 @@ body:not(.nohover) .tab.tab-colored.dragging {
     user-select: none;
 }
 
-// .tab-context-colors and .tab-color-swatch moved to color-swatch-palette.scss
+// swatch grid moved to color-swatch-palette.scss as .color-swatch-grid / .color-swatch
 
 .tab-context-actions {
     display: flex;
