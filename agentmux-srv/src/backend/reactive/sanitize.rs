@@ -142,18 +142,52 @@ pub fn format_injected_message(msg: &str, source_agent: Option<&str>, include_so
     msg.to_string()
 }
 
-/// Keywords that trigger automatic escalation to the SENSITIVE jekt tier.
-const SENSITIVE_KEYWORDS: &[&str] = &[
-    "pat", "token", "api_key", "apikey", "secret", "password",
-    "credential", "force-push", "--force", "drop table", "rm -rf",
-    "delete_repo", "account.key.verify", "trust center", "keychain",
-    "private key", "ssh key", "webhook secret", "auth key",
+/// Keywords that must appear as whole words (surrounded by non-alphanumeric
+/// characters or at string boundaries) to trigger SENSITIVE escalation.
+/// This prevents false positives from substrings like "patch", "dispatch",
+/// "pattern", "tokenize", "compatibility", etc.
+const SENSITIVE_WHOLE_WORD_KEYWORDS: &[&str] = &[
+    "pat", "token", "secret", "password", "credential", "keychain",
 ];
+
+/// Keywords that are matched as substrings (they are distinctive enough that
+/// substring matches are always sensitive — no common English words contain them).
+const SENSITIVE_SUBSTRING_KEYWORDS: &[&str] = &[
+    "api_key", "apikey", "force-push", "--force", "drop table", "rm -rf",
+    "delete_repo", "account.key.verify", "trust center", "private key",
+    "ssh key", "webhook secret", "auth key",
+];
+
+/// Returns true if `c` is a word-boundary character (not alphanumeric/underscore).
+fn is_word_boundary(c: char) -> bool {
+    !c.is_alphanumeric() && c != '_'
+}
+
+/// Returns true if `haystack` contains `needle` as a whole word.
+fn contains_whole_word(haystack: &str, needle: &str) -> bool {
+    let needle_len = needle.len();
+    let bytes = haystack.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    let mut i = 0;
+    while i + needle_len <= haystack.len() {
+        if bytes[i..i + needle_len].eq_ignore_ascii_case(needle_bytes) {
+            let before_ok = i == 0 || is_word_boundary(haystack[..i].chars().next_back().unwrap());
+            let after_ok = i + needle_len == haystack.len()
+                || is_word_boundary(haystack[i + needle_len..].chars().next().unwrap());
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
 
 /// Returns true if the message body contains keywords indicating a sensitive operation.
 pub fn is_sensitive_message(msg: &str) -> bool {
     let lower = msg.to_lowercase();
-    SENSITIVE_KEYWORDS.iter().any(|kw| lower.contains(kw))
+    SENSITIVE_SUBSTRING_KEYWORDS.iter().any(|kw| lower.contains(kw))
+        || SENSITIVE_WHOLE_WORD_KEYWORDS.iter().any(|kw| contains_whole_word(&lower, kw))
 }
 
 /// Wrap an injected message with a structured `[JEKT:...]` marker block.
