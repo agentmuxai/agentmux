@@ -68,7 +68,7 @@ Center.
 
 The base mechanism is **direct binding**: an agent binds the primitives it needs
 (any number of MCP servers + skills, one Brief, ≤1 Account per provider, a Memory).
-An **Bundle** is **not a required wrapper** — it's a *named, reusable collection*
+A **Bundle** is **not a required wrapper** — it's a *named, reusable collection*
 of those same bindings, for "apply this whole set in one step" and "share it across
 agents." It's convenience + reuse, not a new layer the agent must have.
 
@@ -202,14 +202,14 @@ precisely what *frees* the word for its natural use. `db_memory_bundles` →
 Trust Center
 ├─ Bundles      ← named collections you apply to agents (optional, reusable)
 ├─ Accounts        ← provider logins / credentials (per-account CLAUDE_CONFIG_DIR)
-├─ Brains          ← memory stores
+├─ Memories        ← memory stores
 ├─ MCP Servers     ← external tool/connection surfaces  (NEW: broken out)
 ├─ Skills          ← instruction/knowledge modules       (NEW: broken out)
 └─ Briefs          ← the opening message a pane loads with (no standing prompt)
 ```
 
 No **Identities** tab — Account is the primitive; "identity" is a derived view
-(§3.3). An **Bundle** view shows reference slots and lets you pick from the
+(§3.3). A **Bundle** view shows reference slots and lets you pick from the
 primitive lists; "create new" from a slot deep-links to the primitive editor. An
 agent binds primitives directly and/or includes Bundles, plus picks model +
 workspace.
