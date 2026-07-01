@@ -10,15 +10,20 @@ export interface PaneHueOption {
     hue: number;
 }
 
+// 12 hues at 30° intervals — full spectrum, evenly spaced
 export const PANE_HUE_OPTIONS: ReadonlyArray<PaneHueOption> = [
-    { label: "Cobalt",  hue: 218 },
-    { label: "Emerald", hue: 150 },
-    { label: "Amber",   hue:  38 },
-    { label: "Rose",    hue: 352 },
-    { label: "Violet",  hue: 270 },
-    { label: "Cyan",    hue: 188 },
-    { label: "Coral",   hue:  14 },
-    { label: "Mint",    hue: 163 },
+    { label: "Crimson",    hue:   0 },
+    { label: "Coral",      hue:  30 },
+    { label: "Amber",      hue:  60 },
+    { label: "Chartreuse", hue:  90 },
+    { label: "Green",      hue: 120 },
+    { label: "Emerald",    hue: 150 },
+    { label: "Teal",       hue: 180 },
+    { label: "Sky",        hue: 210 },
+    { label: "Blue",       hue: 240 },
+    { label: "Violet",     hue: 270 },
+    { label: "Fuchsia",    hue: 300 },
+    { label: "Pink",       hue: 330 },
 ];
 
 /** Derive the muted header background from a hue (0–360). */
@@ -31,38 +36,18 @@ export function hueToActiveBorder(hue: number): string {
     return `hsl(${hue}, 65%, 52%)`;
 }
 
-function setHue(blockId: string, hue: number | null): void {
+export interface PaneSwatch extends PaneHueOption {
+    preview: string;
+}
+
+// Vivid preview hex for each hue — used by PaneColorPanel swatches
+export const PANE_SWATCH_COLORS: ReadonlyArray<PaneSwatch> = PANE_HUE_OPTIONS.map(
+    ({ label, hue }) => ({ label, hue, preview: hueToActiveBorder(hue) })
+);
+
+export function setHue(blockId: string, hue: number | null): void {
     void RpcApi.SetMetaCommand(TabRpcClient, {
         oref: WOS.makeORef("block", blockId),
         meta: { "frame:hue": hue } as any,
     });
-}
-
-export function buildPaneColorSubmenu(
-    blockData: Block | null,
-    blockId: string,
-): ContextMenuItem {
-    const currentHue = (blockData?.meta?.["frame:hue"] as number | undefined) ?? null;
-
-    const items: ContextMenuItem[] = [
-        {
-            label: "None",
-            type: "radio",
-            checked: currentHue === null,
-            click: () => setHue(blockId, null),
-        },
-        { type: "separator" },
-        ...PANE_HUE_OPTIONS.map(({ label, hue }) => ({
-            label,
-            type: "radio" as const,
-            checked: currentHue === hue,
-            click: () => setHue(blockId, hue),
-        })),
-    ];
-
-    return {
-        label: "Pane Color",
-        type: "submenu",
-        submenu: items,
-    };
 }
