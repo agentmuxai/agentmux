@@ -76,12 +76,29 @@ pub fn uninstall_focus_redirect_for_block(block_id: &str) {
         return;
     }
 
-    // Build the full set of HWNDs to restore: the outer HWND itself, plus any
-    // live children currently tracked in BROWSER_PANE_WNDPROCS.
+    // Build the full set of HWNDs to restore:
+    //   1. The outer HWND(s) themselves (may already be destroyed — that's fine,
+    //      map.remove still drains their BROWSER_PANE_WNDPROCS entry).
+    //   2. Live children found via EnumChildWindows (outer alive path).
+    //   3. Dead children still in BROWSER_PANE_WNDPROCS (outer destroyed path) —
+    //      we can't walk the HWND tree for a dead outer, so we drain every entry
+    //      from BROWSER_PANE_WNDPROCS whose HWND is no longer a valid window.
+    //      Those dead entries can only belong to the closed pane (no other code
+    //      leaves dead HWNDs in the map), so removing them is safe and closes the
+    //      recycled-child-HWND gap described in §3 of the analysis.
     let mut candidates: Vec<usize> = outer_hwnds.clone();
     for &outer in &outer_hwnds {
         let outer_ptr = outer as *mut std::ffi::c_void;
         if unsafe { IsWindow(outer_ptr) } == 0 {
+            // Outer is gone — collect all BROWSER_PANE_WNDPROCS keys that are
+            // also dead; they must be children of this (now-destroyed) pane.
+            if let Ok(map) = BROWSER_PANE_WNDPROCS.lock() {
+                for &hwnd in map.keys() {
+                    if unsafe { IsWindow(hwnd as *mut std::ffi::c_void) } == 0 {
+                        candidates.push(hwnd);
+                    }
+                }
+            }
             continue;
         }
         unsafe extern "system" fn collect_children(
