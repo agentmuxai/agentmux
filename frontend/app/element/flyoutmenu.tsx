@@ -66,8 +66,15 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
+        // avoidNativePanes:false — this menu always renders with
+        // `data-pane-overlay` (below), which clips a hole through any native
+        // browser/webview pane HWND so the DOM menu shows on top. So it should
+        // open in place at its anchor, NOT be pushed into the largest pane-free
+        // rect (which shoved the menu to the window edge whenever a browser/
+        // slack/webview pane sat under the anchor). Matches showJsContextMenu
+        // and the statusbar popovers.
         const pos = await computeMenuPosition(
-            { anchor: referenceEl, placement: props.placement ?? "bottom-start" },
+            { anchor: referenceEl, placement: props.placement ?? "bottom-start", avoidNativePanes: false },
             floatingEl,
         );
         setFloatingStyle(styleToString(pos.style));
@@ -302,10 +309,15 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                 // Mirrored (right-anchored) menus prefer to open submenus to
                 // the LEFT; flip() still sends them right if there's no room.
                 // Standard menus prefer right, flipping left near the edge.
+                // avoidNativePanes:false — same rationale as the top-level menu:
+                // the submenu also carries `data-pane-overlay` and must open at
+                // its parent row, not get pushed off toward the window edge when
+                // a native pane sits behind it.
                 const computed = await computeMenuPosition(
                     {
                         anchor: cur.anchorRect,
                         placement: props.mirrored ? "left-start" : "right-start",
+                        avoidNativePanes: false,
                     },
                     el,
                 );
