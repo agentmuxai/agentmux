@@ -291,6 +291,8 @@ declare global {
         visible?: boolean;
         enabled?: boolean;
         sublabel?: string;
+        /** CSS color for an inline swatch square rendered before the label. */
+        swatchColor?: string;
     };
 
     type ContextMenuItem = {
@@ -303,6 +305,8 @@ declare global {
         visible?: boolean;
         enabled?: boolean;
         sublabel?: string;
+        /** CSS color for an inline swatch square rendered before the label. */
+        swatchColor?: string;
     };
 
     type KeyPressDecl = {
