@@ -139,13 +139,16 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     state.browser_panes.drain_closed_label(state, label);
 
     // Labels are `browser-pane-<uuid>-<seq>`; strip prefix + trailing `-<seq>`
-    // to recover the block_id, then wipe any HWND context entries the
-    // WndProc subclass registered for that block.
+    // to recover the block_id, then:
+    //   1. Restore WndProcs for all subclassed HWNDs (must run first, before
+    //      remove_contexts_for_block wipes the outer-HWND lookup).
+    //   2. Wipe BROWSER_PANE_HWND_CONTEXT entries for the block.
     #[cfg(target_os = "windows")]
     {
         if let Some(rest) = label.strip_prefix("browser-pane-") {
             if let Some(dash) = rest.rfind('-') {
                 let block_id = &rest[..dash];
+                crate::browser_pane::hwnd::uninstall_focus_redirect_for_block(block_id);
                 crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
             }
         }

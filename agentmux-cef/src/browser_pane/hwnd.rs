@@ -40,6 +40,125 @@ static BROWSER_PANE_HWND_CONTEXT: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, BrowserPaneContext>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+/// Restore the original WndProc for every HWND (outer + children) that was
+/// subclassed by `install_browser_pane_focus_redirect` for the given `block_id`,
+/// and clear any `LAST_FOCUSED_BY_ROOT` entries that point at those HWNDs.
+///
+/// Call this from `on_before_close_browser_pane` **before**
+/// `remove_contexts_for_block` — we still need `BROWSER_PANE_HWND_CONTEXT` to
+/// locate the outer HWND.
+///
+/// If an HWND has already been destroyed by the time this runs, the
+/// `SetWindowLongPtrW` call is skipped (guarded by `IsWindow`) but the entry
+/// is still removed from `BROWSER_PANE_WNDPROCS` and `LAST_FOCUSED_BY_ROOT` is
+/// still cleared. This prevents the closed pane's HWND value from being picked
+/// as the "main render widget" by `find_main_render_widget` if the value is
+/// later recycled by a new `Chrome_RenderWidgetHostHWND`.
+pub fn uninstall_focus_redirect_for_block(block_id: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumChildWindows, IsWindow, SetWindowLongPtrW, GWLP_WNDPROC,
+    };
+
+    // Collect outer HWND(s) for this block from BROWSER_PANE_HWND_CONTEXT.
+    let outer_hwnds: Vec<usize> = BROWSER_PANE_HWND_CONTEXT
+        .lock()
+        .ok()
+        .map(|m| {
+            m.iter()
+                .filter(|(_, ctx)| ctx.block_id == block_id)
+                .map(|(&hwnd, _)| hwnd)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if outer_hwnds.is_empty() {
+        tracing::debug!(block_id = %block_id, "[pane-unsubclass] no outer HWNDs in context for block — already cleaned up?");
+        return;
+    }
+
+    // Build the full set of HWNDs to restore:
+    //   1. The outer HWND(s) themselves (may already be destroyed — that's fine,
+    //      map.remove still drains their BROWSER_PANE_WNDPROCS entry).
+    //   2. Live children found via EnumChildWindows (outer alive path).
+    //   3. Dead children still in BROWSER_PANE_WNDPROCS (outer destroyed path) —
+    //      we can't walk the HWND tree for a dead outer, so we drain every entry
+    //      from BROWSER_PANE_WNDPROCS whose HWND is no longer a valid window.
+    //      Those dead entries can only belong to the closed pane (no other code
+    //      leaves dead HWNDs in the map), so removing them is safe and closes the
+    //      recycled-child-HWND gap described in §3 of the analysis.
+    let mut candidates: Vec<usize> = outer_hwnds.clone();
+    for &outer in &outer_hwnds {
+        let outer_ptr = outer as *mut std::ffi::c_void;
+        if unsafe { IsWindow(outer_ptr) } == 0 {
+            // Outer is gone — collect all BROWSER_PANE_WNDPROCS keys that are
+            // also dead; they must be children of this (now-destroyed) pane.
+            if let Ok(map) = BROWSER_PANE_WNDPROCS.lock() {
+                for &hwnd in map.keys() {
+                    if unsafe { IsWindow(hwnd as *mut std::ffi::c_void) } == 0 {
+                        candidates.push(hwnd);
+                    }
+                }
+            }
+            continue;
+        }
+        unsafe extern "system" fn collect_children(
+            child: *mut std::ffi::c_void,
+            lparam: isize,
+        ) -> i32 {
+            let acc = &mut *(lparam as *mut Vec<usize>);
+            acc.push(child as usize);
+            1
+        }
+        unsafe {
+            EnumChildWindows(
+                outer_ptr,
+                Some(collect_children),
+                &mut candidates as *mut Vec<usize> as isize,
+            );
+        }
+    }
+
+    let mut restored = 0usize;
+    if let Ok(mut map) = BROWSER_PANE_WNDPROCS.lock() {
+        for hwnd in candidates {
+            if let Some(orig) = map.remove(&hwnd) {
+                let hwnd_ptr = hwnd as *mut std::ffi::c_void;
+                unsafe {
+                    if IsWindow(hwnd_ptr) != 0 {
+                        SetWindowLongPtrW(hwnd_ptr, GWLP_WNDPROC, orig);
+                    }
+                    // Clear focus record regardless of liveness — prevents
+                    // WM_ACTIVATE from restoring focus to a dead/recycled HWND.
+                    forget_focus_for_child(hwnd_ptr);
+                }
+                restored += 1;
+            }
+        }
+    }
+
+    tracing::info!(
+        block_id = %block_id,
+        restored = restored,
+        "[pane-unsubclass] restored WndProcs and cleared LAST_FOCUSED_BY_ROOT for {} HWNDs on pane close",
+        restored,
+    );
+}
+
+/// Return the outer HWND for every pane currently tracked in
+/// `BROWSER_PANE_HWND_CONTEXT`, regardless of whether that pane is still
+/// registered in `state.browsers`. Used by `MainFocusReclaimTask` as a
+/// defence-in-depth supplement to the `state.list_browsers` source so that
+/// panes which have been `BrowserUnregistered` but whose HWNDs are still live
+/// (deferred CEF teardown window) are still excluded from
+/// `find_main_render_widget`.
+pub fn pane_outer_hwnds_from_context() -> Vec<*mut std::ffi::c_void> {
+    BROWSER_PANE_HWND_CONTEXT
+        .lock()
+        .ok()
+        .map(|m| m.keys().map(|&h| h as *mut std::ffi::c_void).collect())
+        .unwrap_or_default()
+}
+
 /// Remove every `BROWSER_PANE_HWND_CONTEXT` entry whose context refers to the given
 /// `block_id`. Called from `on_before_close_browser_pane` so the map doesn't grow
 /// unbounded as panes are opened and closed over the session. Keyed by
