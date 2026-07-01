@@ -42,6 +42,67 @@ pub(super) fn handle_register_browser(
     }
 }
 
+/// Rename a browser entry `old_label` → `new_label`, re-keying the per-label
+/// host state that persists for the window's life: the `browsers` map (and the
+/// duplicated `BrowserHandle.label` field), plus `window_opacities` and
+/// `pane_window_states` when an entry exists. `window_meta` / `window_hwnds`
+/// live on `AppState` and are re-keyed by the caller
+/// (`promote_pane_pool_window`). Errors if `old_label` is absent or `new_label`
+/// is already registered. Emits no event — the frontend learns the new label
+/// via the `pool:pane-promote` payload, not a host event.
+/// See `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`.
+pub(super) fn handle_relabel_browser(
+    state: &mut HostState,
+    old_label: String,
+    new_label: String,
+) -> DispatchOutput {
+    if old_label == new_label {
+        // No-op: label already correct. Treated as success so the caller
+        // proceeds (nothing to re-key).
+        return DispatchOutput {
+            relabel_ok: true,
+            ..Default::default()
+        };
+    }
+    if !state.browsers.contains_key(&old_label) {
+        return emit_error(
+            state,
+            format!("relabel_browser: old label {} not found", old_label),
+        );
+    }
+    if state.browsers.contains_key(&new_label) {
+        return emit_error(
+            state,
+            format!("relabel_browser: new label {} already registered", new_label),
+        );
+    }
+    // Move the handle and update its duplicated `.label` field.
+    let mut handle = state
+        .browsers
+        .remove(&old_label)
+        .expect("presence checked above");
+    handle.label = new_label.clone();
+    state.browsers.insert(new_label.clone(), handle);
+    // Re-key sibling per-label state only when an entry exists (both are
+    // created lazily and are usually absent at promote time).
+    if let Some(opacity) = state.window_opacities.remove(&old_label) {
+        state.window_opacities.insert(new_label.clone(), opacity);
+    }
+    if let Some(win_state) = state.pane_window_states.remove(&old_label) {
+        state.pane_window_states.insert(new_label.clone(), win_state);
+    }
+    tracing::info!(
+        target: "pool:pane",
+        old_label = %old_label,
+        new_label = %new_label,
+        "[relabel] browser re-keyed on pane-pool promotion"
+    );
+    DispatchOutput {
+        relabel_ok: true,
+        ..Default::default()
+    }
+}
+
 pub(super) fn handle_unregister_browser(state: &mut HostState, label: String) -> DispatchOutput {
     // Atomic remove + return the Browser handle in `removed_browser`
     // (codex P2 PR #660). The pane close path in
