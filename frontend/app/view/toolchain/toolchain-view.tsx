@@ -115,7 +115,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     const providerRows: ToolRow[] = getProviderList().map((p) => ({
         id: p.id, label: p.displayName, icon: p.icon, kind: "provider",
         loading: true, found: false, docsUrl: p.docsUrl, installUrl: p.docsUrl,
-        npmPackage: (p as any).npmPackage as string | undefined,
+        npmPackage: p.npmPackage,
     }));
     const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...providerRows]);
 
@@ -223,7 +223,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                         <Show when={row.source === "local_install"}>
                             <span class="toolchain-pill toolchain-pill--muted">managed</span>
                         </Show>
-                        <Show when={row.latestVersion !== undefined}>
+                        <Show when={row.latestVersion !== undefined && row.version !== undefined}>
                             <span
                                 class={`toolchain-pill ${row.version === row.latestVersion ? "toolchain-pill--muted" : "toolchain-pill--update"}`}
                                 title={`Latest: ${row.latestVersion}`}
