@@ -1597,10 +1597,25 @@ pub fn promote_pane_pool_window(
         let new_label = label.replacen("floating-pool-", "floating-", 1);
         // Reducer state: `browsers` (+ the duplicated label field) and, if
         // present, `window_opacities` / `pane_window_states`.
-        let _ = state.host_dispatch(crate::reducer::HostCommand::RelabelBrowser {
+        let relabel = state.host_dispatch(crate::reducer::HostCommand::RelabelBrowser {
             old_label: label.clone(),
             new_label: new_label.clone(),
         });
+        if !relabel.relabel_ok {
+            // The browser vanished between promote and relabel (concurrent
+            // close-before-promote race). Bail rather than re-key the AppState
+            // maps under `new_label` while `browsers` still holds `old_label`
+            // — that split would make the emit below resolve no browser and
+            // leave dangling AppState entries. Clean up under the old label.
+            tracing::warn!(
+                target: "pool:pane",
+                old_label = %label,
+                new_label = %new_label,
+                "[relabel] relabel failed (browser gone?) — aborting promotion, orphan cleanup"
+            );
+            cleanup_failed_pane_promote_orphan(state, &label);
+            return None;
+        }
         // AppState label maps (not reducer state).
         {
             let mut hwnds = state.window_hwnds.lock();

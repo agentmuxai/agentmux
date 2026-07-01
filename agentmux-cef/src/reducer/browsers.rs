@@ -57,7 +57,12 @@ pub(super) fn handle_relabel_browser(
     new_label: String,
 ) -> DispatchOutput {
     if old_label == new_label {
-        return DispatchOutput::default();
+        // No-op: label already correct. Treated as success so the caller
+        // proceeds (nothing to re-key).
+        return DispatchOutput {
+            relabel_ok: true,
+            ..Default::default()
+        };
     }
     if !state.browsers.contains_key(&old_label) {
         return emit_error(
@@ -92,7 +97,10 @@ pub(super) fn handle_relabel_browser(
         new_label = %new_label,
         "[relabel] browser re-keyed on pane-pool promotion"
     );
-    DispatchOutput::default()
+    DispatchOutput {
+        relabel_ok: true,
+        ..Default::default()
+    }
 }
 
 pub(super) fn handle_unregister_browser(state: &mut HostState, label: String) -> DispatchOutput {

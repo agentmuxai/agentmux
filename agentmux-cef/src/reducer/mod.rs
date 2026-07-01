@@ -874,6 +874,15 @@ pub struct DispatchOutput {
     /// previously lived only in `client::on_before_close` and could miss a
     /// concurrent pool-refill race (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md).
     pub request_drain: Option<crate::state::QuitReason>,
+
+    /// Set `true` by `RelabelBrowser` when the rename succeeded (or was a
+    /// no-op because `old_label == new_label`). Stays `false` on failure
+    /// (old label absent, or new label already registered — e.g. a
+    /// concurrent close removed the browser between promote and relabel).
+    /// The caller MUST gate the AppState `window_hwnds`/`window_meta` re-key
+    /// and the `pool:pane-promote` emit on this, else `browsers` and the
+    /// AppState maps would disagree and the emit would resolve no browser.
+    pub relabel_ok: bool,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
