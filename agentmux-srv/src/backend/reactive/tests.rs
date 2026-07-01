@@ -257,6 +257,8 @@ fn test_handler_inject_no_sender() {
         request_id: None,
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     });
 
     assert!(!resp.success);
@@ -274,6 +276,8 @@ fn test_handler_inject_agent_not_found() {
         request_id: None,
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     });
 
     assert!(!resp.success);
@@ -307,6 +311,8 @@ async fn test_handler_inject_success() {
         request_id: Some("req-1".to_string()),
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     });
 
     assert!(resp.success);
@@ -320,7 +326,14 @@ async fn test_handler_inject_success() {
     // the assertions in this synchronous-only test body.
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0], ("block1".to_string(), b"\r".to_vec()));
-    assert_eq!(calls[1], ("block1".to_string(), b"hello\r".to_vec()));
+    // The message is now wrapped in a JEKT marker block (#1876); the block
+    // carries a timestamp so assert structurally, not by exact bytes.
+    assert_eq!(calls[1].0, "block1");
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("[JEKT:"), "JEKT open marker present");
+    assert!(payload.contains("[/JEKT]"), "JEKT close marker present");
+    assert!(payload.contains("hello"), "message payload present");
+    assert!(payload.ends_with('\r'), "trailing CR submits the message");
 }
 
 // Controller-aware delivery (SPEC_AGENT_CONTROL_PROTOCOL §6 / Phase 3).
@@ -359,14 +372,20 @@ fn test_handler_inject_structured_delivery_skips_pty() {
         request_id: Some("req-1".to_string()),
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     });
 
     assert!(resp.success);
     assert_eq!(resp.block_id.as_deref(), Some("block1"));
-    // Structured channel got the message; PTY got nothing.
-    assert_eq!(
-        *msg_calls.lock().unwrap(),
-        vec![("block1".to_string(), "hello".to_string())]
+    // Structured channel got the (JEKT-wrapped, #1876) message; PTY got
+    // nothing. The wrap carries a timestamp, so assert structurally.
+    let msgs = msg_calls.lock().unwrap();
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0].0, "block1");
+    assert!(
+        msgs[0].1.contains("[JEKT:") && msgs[0].1.contains("hello"),
+        "structured channel got the JEKT-wrapped message"
     );
     assert!(pty_calls.lock().unwrap().is_empty());
 }
@@ -396,6 +415,8 @@ async fn test_handler_inject_pty_fallback() {
         request_id: Some("req-1".to_string()),
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     });
 
     assert!(resp.success);
@@ -403,7 +424,14 @@ async fn test_handler_inject_pty_fallback() {
     let calls = pty_calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0], ("block1".to_string(), b"\r".to_vec()));
-    assert_eq!(calls[1], ("block1".to_string(), b"hello\r".to_vec()));
+    // The message is now wrapped in a JEKT marker block (#1876); the block
+    // carries a timestamp so assert structurally, not by exact bytes.
+    assert_eq!(calls[1].0, "block1");
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("[JEKT:"), "JEKT open marker present");
+    assert!(payload.contains("[/JEKT]"), "JEKT close marker present");
+    assert!(payload.contains("hello"), "message payload present");
+    assert!(payload.ends_with('\r'), "trailing CR submits the message");
 }
 
 // A structured controller that fails to accept the message must surface the error
@@ -433,6 +461,8 @@ fn test_handler_inject_structured_failure_no_pty_fallback() {
         request_id: Some("req-1".to_string()),
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     });
 
     assert!(!resp.success);
@@ -456,6 +486,8 @@ fn test_handler_audit_log() {
         request_id: Some("req-1".to_string()),
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     });
 
     let log = handler.get_audit_log(10);
@@ -580,6 +612,8 @@ fn test_injection_request_serde() {
         request_id: Some("req-123".to_string()),
         priority: None,
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
     };
 
     let json = serde_json::to_string(&req).unwrap();
