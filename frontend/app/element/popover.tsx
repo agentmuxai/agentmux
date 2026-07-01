@@ -94,6 +94,11 @@ const Popover = (props: PopoverProps): JSX.Element => {
     const updatePosition = async () => {
         if (!referenceEl || !floatingEl) return;
         const off = resolveOffset();
+        // avoidNativePanes:false — the popover renders with `data-pane-overlay`
+        // (below), which clips a hole through any native browser/webview pane
+        // behind it so the DOM draws on top. It should open at its anchor, not
+        // be pushed to the window edge into the largest pane-free rect. Matches
+        // FlyoutMenu / showJsContextMenu / the More dropdown.
         const pos = await computeMenuPosition(
             {
                 anchor: referenceEl,
@@ -101,6 +106,7 @@ const Popover = (props: PopoverProps): JSX.Element => {
                 gutter: off.gutter,
                 offsetCrossAxis: off.crossAxis,
                 offsetAlignmentAxis: off.alignmentAxis,
+                avoidNativePanes: false,
             },
             floatingEl,
         );
