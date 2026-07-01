@@ -312,6 +312,17 @@ pub enum HostCommand {
     /// Remove browser from `browsers` map. Idempotent; no-op if absent.
     UnregisterBrowser { label: String },
 
+    /// Rename a browser entry `old_label` → `new_label`, re-keying the
+    /// per-label host state that persists for the window's life
+    /// (`browsers` + the duplicated `BrowserHandle.label`, and, if present,
+    /// `window_opacities` / `pane_window_states`). Used when a pane-pool
+    /// window (`floating-pool-*`) is promoted into a user floating pane
+    /// (`floating-*`). Errors if `old_label` is absent or `new_label`
+    /// already exists. `window_meta` / `window_hwnds` live on `AppState`
+    /// and are re-keyed by the caller. See
+    /// `SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30`.
+    RelabelBrowser { old_label: String, new_label: String },
+
     // ── H.3 — drag state ────────────────────────────────────────────────
 
     /// Begin a cross-window drag session. Reject if one is already
@@ -487,6 +498,11 @@ impl std::fmt::Debug for HostCommand {
             HostCommand::UnregisterBrowser { label } => f
                 .debug_struct("UnregisterBrowser")
                 .field("label", label)
+                .finish(),
+            HostCommand::RelabelBrowser { old_label, new_label } => f
+                .debug_struct("RelabelBrowser")
+                .field("old_label", old_label)
+                .field("new_label", new_label)
                 .finish(),
             HostCommand::StartDrag { session } => f
                 .debug_struct("StartDrag")
@@ -858,6 +874,15 @@ pub struct DispatchOutput {
     /// previously lived only in `client::on_before_close` and could miss a
     /// concurrent pool-refill race (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md).
     pub request_drain: Option<crate::state::QuitReason>,
+
+    /// Set `true` by `RelabelBrowser` when the rename succeeded (or was a
+    /// no-op because `old_label == new_label`). Stays `false` on failure
+    /// (old label absent, or new label already registered — e.g. a
+    /// concurrent close removed the browser between promote and relabel).
+    /// The caller MUST gate the AppState `window_hwnds`/`window_meta` re-key
+    /// and the `pool:pane-promote` emit on this, else `browsers` and the
+    /// AppState maps would disagree and the emit would resolve no browser.
+    pub relabel_ok: bool,
 }
 
 // Manual Debug — `cef::Browser` doesn't impl Debug.
@@ -931,6 +956,7 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
             | HostCommand::CompleteBrowserPaneClose { .. }
             | HostCommand::DrainBrowserPaneByLabel { .. }
             | HostCommand::AbortBrowserPaneCreate { .. }
+            | HostCommand::RelabelBrowser { .. }
     )
 }
 
@@ -971,6 +997,9 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         }
         HostCommand::UnregisterBrowser { label } => {
             browsers::handle_unregister_browser(state, label)
+        }
+        HostCommand::RelabelBrowser { old_label, new_label } => {
+            browsers::handle_relabel_browser(state, old_label, new_label)
         }
         // H.3 drag
         HostCommand::StartDrag { session } => drag::handle_start_drag(state, session),
