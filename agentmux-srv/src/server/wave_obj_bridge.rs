@@ -450,21 +450,20 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         | Event::MagnifiedNodeChanged { tab_id, .. } => {
             emit_layout_for_tab(&wstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
         }
-        Event::LayoutCleared { tab_id, .. }
-        | Event::LayoutTreeReplaced { tab_id, .. }
-        // The 7 granular structural arms persist their resulting tree via the
-        // subscriber (`new_tree`), so the bridge can safely re-read and
-        // broadcast the post-event LayoutState — same synchronous-apply-then-
-        // publish guarantee as the events above.
-        | Event::LayoutNodeMoved { tab_id, .. }
-        | Event::LayoutNodesSwapped { tab_id, .. }
-        | Event::LayoutNodesResized { tab_id, .. }
-        | Event::LayoutNodeReplaced { tab_id, .. }
-        | Event::LayoutSplitHorizontalApplied { tab_id, .. }
-        | Event::LayoutSplitVerticalApplied { tab_id, .. }
-        | Event::LayoutNodeInsertedAtIndex { tab_id, .. } => {
-            emit_layout_for_tab(&wstore, &event_bus, tab_id, "Layout structural op").await;
+        Event::LayoutCleared { tab_id, .. } | Event::LayoutTreeReplaced { tab_id, .. } => {
+            emit_layout_for_tab(&wstore, &event_bus, tab_id, "LayoutCleared/TreeReplaced").await;
         }
+        // The 7 granular structural events (LayoutNodeMoved/…/InsertedAtIndex)
+        // are persisted by the subscriber (they carry `new_tree`), but are
+        // deliberately NOT bridged here. `emit_layout_for_tab` re-reads
+        // LayoutState, which is only guaranteed post-event on the HTTP-RPC
+        // path (synchronous apply before publish). On the srv-IPC path,
+        // `srv_ipc/server.rs` publishes to `events_tx` without a synchronous
+        // apply, so a bridge broadcast could race ahead of the persist
+        // subscriber and emit pre-event state (codex P2 on #1883 — the IPC-path
+        // caveat documented above). These events have no production dispatcher
+        // yet; their bridge projection lands in the Phase-4 frontend
+        // intent-flip, where the path is HTTP-RPC (synchronous, race-free).
 
         // Saga lifecycle, launcher-domain events, OS facts, etc. — not
         // StoreObj changes. The catch-all keeps the bridge future-proof
