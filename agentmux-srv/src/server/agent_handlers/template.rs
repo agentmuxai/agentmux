@@ -1,7 +1,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-#![allow(unused_imports)]
 
 use std::sync::Arc;
 use chrono::Utc;
