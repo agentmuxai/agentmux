@@ -3558,6 +3558,7 @@ pub(crate) async fn identity_bundle_link_impl(
     agent_id: &str,
     account_id: &str,
     provider: &str,
+    bundle_id: &str,
 ) -> Result<serde_json::Value, String> {
     // S1: account must already be linked to this agent.
     let links = state
@@ -3568,12 +3569,10 @@ pub(crate) async fn identity_bundle_link_impl(
         return Err("FORBIDDEN: account not linked to this agent for the given provider".to_string());
     }
 
-    // Bind into the shared default bundle. All instances use DEFAULT_BUNDLE_ID
-    // ("default") as their identity_id (set by backfill at migration time and
-    // as the default in the launch modal). Per-agent bundle selection is G3 work.
-    let bundle_id = crate::identity::migration::DEFAULT_BUNDLE_ID;
-
     // Bind the account into the bundle for the given provider.
+    // bundle_id comes from the caller (= instance.identity_id for this block,
+    // falling back to DEFAULT_BUNDLE_ID). The resolver reads whichever bundle
+    // the instance is bound to, so the bind must land there.
     state
         .id_store
         .bundle_identity_bind(bundle_id, provider, account_id)
