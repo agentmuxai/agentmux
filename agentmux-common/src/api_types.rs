@@ -42,6 +42,11 @@ pub struct ShellCreateRequest {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
+    /// If true, pipe the child's stdin so ShellInput() can write to it.
+    /// Default false (stdin is /dev/null) — avoids blocking programs that
+    /// read stdin to EOF (e.g. `cat` with no args).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_stdin: Option<bool>,
 }
 
 /// Response from `POST /api/v1/shell/create`

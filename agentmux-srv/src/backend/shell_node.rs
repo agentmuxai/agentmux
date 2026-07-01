@@ -54,9 +54,9 @@ struct ShellEntry {
 #[derive(Default)]
 pub struct ShellSessionRegistry {
     shells: Mutex<HashMap<String, ShellEntry>>,
-    // Status map is pruned when entries are removed (stop or natural exit).
-    // Bounded growth: at most one entry per shell ever spawned per session.
-    // stop_all() clears any remaining entries on srv shutdown.
+    // Status entries persist after exit so ShellStatus can query final
+    // exit_code/line_count. Bounded growth: one entry per shell per session.
+    // stop_all() clears everything on srv shutdown.
     status_map: Mutex<HashMap<String, Arc<Mutex<ShellStatusInfo>>>>,
 }
 
@@ -70,15 +70,16 @@ impl ShellSessionRegistry {
         self.shells.lock().insert(shell_id, ShellEntry { stop_tx: tx, stdin_tx: None });
     }
 
-    // Full registration called by the runner after spawning the child + relay task.
+    // Full registration called by the runner after spawning the child.
+    // stdin_tx is None when capture_stdin is false (stdin is /dev/null).
     fn register_full(
         &self,
         shell_id: String,
         stop_tx: oneshot::Sender<()>,
-        stdin_tx: mpsc::UnboundedSender<String>,
+        stdin_tx: Option<mpsc::UnboundedSender<String>>,
         status: Arc<Mutex<ShellStatusInfo>>,
     ) {
-        self.shells.lock().insert(shell_id.clone(), ShellEntry { stop_tx, stdin_tx: Some(stdin_tx) });
+        self.shells.lock().insert(shell_id.clone(), ShellEntry { stop_tx, stdin_tx });
         self.status_map.lock().insert(shell_id, status);
     }
 
@@ -86,7 +87,8 @@ impl ShellSessionRegistry {
     /// Dropping the stdin_tx here closes the relay channel → ChildStdin drops →
     /// child sees EOF, unblocking any stdin-reading process before the kill.
     pub fn stop(&self, shell_id: &str) -> bool {
-        self.status_map.lock().remove(shell_id);
+        // Do NOT remove from status_map here — the runner task is still live
+        // and will persist the final exit status after child.wait() returns.
         if let Some(entry) = self.shells.lock().remove(shell_id) {
             // stdin_tx dropped here → relay closes → child gets stdin EOF
             let _ = entry.stop_tx.send(());
@@ -97,10 +99,12 @@ impl ShellSessionRegistry {
     }
 
     /// Called by the runner on natural exit (stdout/stderr closed). Removes the
-    /// shells entry (dropping stdin_tx → child gets stdin EOF) and the status entry.
+    /// shells entry (dropping stdin_tx → child gets stdin EOF). Status entry is
+    /// intentionally kept so ShellStatus can query the final exit code/line count.
     fn remove(&self, shell_id: &str) {
         self.shells.lock().remove(shell_id);
-        self.status_map.lock().remove(shell_id);
+        // status_map entry is NOT removed — it persists so get_status() can
+        // return the final running:false / exit_code / line_count after exit.
     }
 
     /// Stop every running shell. For srv-shutdown cleanup.
@@ -165,6 +169,10 @@ pub struct ShellNodeRunner {
     /// Stop registry — the runner registers its `shell_id` here so
     /// `ShellStop` can tree-kill it, and removes itself on natural exit.
     pub registry: Arc<ShellSessionRegistry>,
+    /// If true, pipe stdin and start the relay task so ShellInput() works.
+    /// If false (default), stdin is /dev/null — avoids blocking programs that
+    /// read stdin to EOF (e.g. `cat` with no args).
+    pub capture_stdin: bool,
 }
 
 impl ShellNodeRunner {
@@ -209,12 +217,15 @@ impl ShellNodeRunner {
 
         child_cmd.stdout(std::process::Stdio::piped());
         child_cmd.stderr(std::process::Stdio::piped());
-        // Piped stdin (Phase 3b — ShellInput). A fresh pipe is NOT the same as
-        // inheriting the srv's TTY stdin — it doesn't cause the probe-hang that
-        // `Stdio::inherit()` caused (agentx/fix-shell-dev-server). Tools that
-        // don't use stdin ignore the open pipe; tools that need interactive input
-        // can now receive it via ShellInput(shell_id, text).
-        child_cmd.stdin(std::process::Stdio::piped());
+        // stdin: piped only when capture_stdin=true (opt-in). Default is null so
+        // programs that read stdin to EOF (e.g. `cat` with no args) don't block
+        // forever. When piped, a relay task forwards ShellInput() writes; when all
+        // senders drop the relay exits, ChildStdin drops, and the child sees EOF.
+        if self.capture_stdin {
+            child_cmd.stdin(std::process::Stdio::piped());
+        } else {
+            child_cmd.stdin(std::process::Stdio::null());
+        }
         // Windows: suppress the console window that Windows auto-creates for
         // CUI-subsystem processes (cmd.exe). stdout/stderr are piped so no
         // output is lost — the window was decorative noise only.
@@ -243,30 +254,32 @@ impl ShellNodeRunner {
             }
         };
 
-        // Spawn a stdin relay task that owns the ChildStdin.
-        // ShellInput sends text via an mpsc channel (non-blocking send — no mutex,
-        // no risk of blocking the HTTP handler). When all channel senders are
-        // dropped, the relay exits, ChildStdin is dropped, and the child sees EOF.
         let pid = child.id();
-        tracing::info!(shell_id = %shell_id, pid = ?pid, "shell.spawn");
+        tracing::info!(shell_id = %shell_id, pid = ?pid, capture_stdin = self.capture_stdin, "shell.spawn");
 
-        let child_stdin = child.stdin.take().expect("stdin piped");
-        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
-        tokio::spawn(async move {
-            let mut writer = BufWriter::new(child_stdin);
-            while let Some(text) = stdin_rx.recv().await {
-                if writer.write_all(text.as_bytes()).await.is_err() { break; }
-                if writer.flush().await.is_err() { break; }
-            }
-            // All senders dropped or write error → ChildStdin dropped → child EOF
-        });
+        // Spawn stdin relay only when capture_stdin=true.
+        let stdin_tx: Option<mpsc::UnboundedSender<String>> = if self.capture_stdin {
+            let child_stdin = child.stdin.take().expect("stdin piped");
+            let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+            tokio::spawn(async move {
+                let mut writer = BufWriter::new(child_stdin);
+                while let Some(text) = rx.recv().await {
+                    if writer.write_all(text.as_bytes()).await.is_err() { break; }
+                    if writer.flush().await.is_err() { break; }
+                }
+                // All senders dropped or write error → ChildStdin dropped → child EOF
+            });
+            Some(tx)
+        } else {
+            None
+        };
 
         let status_arc = Arc::new(Mutex::new(ShellStatusInfo { running: true, exit_code: None, line_count: 0 }));
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
         self.registry.register_full(
             shell_id.clone(),
             cancel_tx,
-            stdin_tx,  // registry holds the only sender; dropping it closes stdin
+            stdin_tx,
             Arc::clone(&status_arc),
         );
         let kill_task = tokio::spawn(async move {

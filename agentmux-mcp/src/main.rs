@@ -60,10 +60,11 @@ const SHELL_TOOL: &str = r#"{
   "inputSchema": {
     "type": "object",
     "properties": {
-      "cmd":   { "type": "string",  "description": "Command to run (passed to sh -c / cmd /C)" },
-      "cwd":   { "type": "string",  "description": "Working directory (defaults to agent workdir)" },
-      "title": { "type": "string",  "description": "Display label shown in the conversation row (defaults to cmd)" },
-      "env":   { "type": "object",  "description": "Extra environment variables", "additionalProperties": { "type": "string" } }
+      "cmd":            { "type": "string",  "description": "Command to run (passed to sh -c / cmd /C)" },
+      "cwd":            { "type": "string",  "description": "Working directory (defaults to agent workdir)" },
+      "title":          { "type": "string",  "description": "Display label shown in the conversation row (defaults to cmd)" },
+      "env":            { "type": "object",  "description": "Extra environment variables", "additionalProperties": { "type": "string" } },
+      "capture_stdin":  { "type": "boolean", "description": "Pipe stdin so ShellInput() can write to it. Default false — avoids blocking programs that read stdin to EOF (e.g. `cat` with no args). Set true only when you intend to use ShellInput()." }
     },
     "required": ["cmd"]
   }
@@ -628,12 +629,14 @@ async fn call_tool(
                 "{}/api/v1/shell/create",
                 local_url.trim_end_matches('/')
             );
+            let capture_stdin = arguments.get("capture_stdin").and_then(|v| v.as_bool());
             let req = ShellCreateRequest {
                 agent_block_id: block_id.to_string(),
                 cmd: cmd.to_string(),
                 title: Some(title.to_string()),
                 cwd,
                 env,
+                capture_stdin,
             };
 
             let resp = client
