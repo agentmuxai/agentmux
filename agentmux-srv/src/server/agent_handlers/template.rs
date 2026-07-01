@@ -1,0 +1,509 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+#![allow(unused_imports)]
+
+use std::sync::Arc;
+use chrono::Utc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::json;
+
+use crate::backend::rpc::engine::WshRpcEngine;
+use crate::backend::rpc_types::{
+    COMMAND_LIST_AGENTS, COMMAND_CREATE_AGENT, COMMAND_UPDATE_AGENT,
+    COMMAND_DELETE_AGENT, COMMAND_GET_AGENT_CONTENT, COMMAND_SET_AGENT_CONTENT,
+    COMMAND_GET_ALL_AGENT_CONTENT,
+    COMMAND_LIST_AGENT_SKILLS, COMMAND_CREATE_AGENT_SKILL, COMMAND_UPDATE_AGENT_SKILL,
+    COMMAND_DELETE_AGENT_SKILL,
+    COMMAND_APPEND_AGENT_HISTORY, COMMAND_LIST_AGENT_HISTORY, COMMAND_SEARCH_AGENT_HISTORY,
+    COMMAND_IMPORT_AGENT_FROM_CLAW, COMMAND_IMPORT_AGENTS, COMMAND_EXPORT_AGENTS,
+    COMMAND_RESEED_AGENTS,
+    // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md)
+    COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+    COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+    CommandAgentDefCreateFromTemplateData, AgentDefCreateFromTemplateResult,
+    CommandListAgentDefinitionsData,
+    // Two-tier picker — Phase 2 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
+    // Q2 Decision Y: hide templates).
+    COMMAND_AGENT_DEF_HIDE, COMMAND_AGENT_DEF_UNHIDE,
+    COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+    CommandAgentDefHideData, AgentDefHideResult,
+    CommandCreateAgentDefinitionData, CommandUpdateAgentDefinitionData, CommandDeleteAgentDefinitionData,
+    CommandGetAgentContentData, CommandSetAgentContentData, CommandGetAllAgentContentData,
+    CommandListAgentSkillsData, CommandCreateAgentSkillData, CommandUpdateAgentSkillData,
+    CommandDeleteAgentSkillData,
+    CommandAppendAgentHistoryData, CommandListAgentHistoryData, CommandSearchAgentHistoryData,
+    CommandImportAgentFromClawData,
+    CommandImportAgentDefinitionsData, ImportAgentDefinitionsResult,
+    ExportAgentDefinitionsResult, AgentDefinitionExport, AgentSkillExport,
+    // v6 identity / instance / fork
+    COMMAND_LIST_IDENTITY_ACCOUNTS, COMMAND_GET_IDENTITY_ACCOUNT,
+    COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
+    COMMAND_ACCOUNT_KEY_VERIFY,
+    COMMAND_ACCOUNT_OAUTH_START, COMMAND_ACCOUNT_OAUTH_POLL, COMMAND_ACCOUNT_OAUTH_CANCEL,
+    COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
+    COMMAND_LIST_AGENT_IDENTITIES,
+    COMMAND_LIST_AGENT_INSTANCES, COMMAND_GET_AGENT_INSTANCE,
+    COMMAND_CREATE_AGENT_INSTANCE, COMMAND_UPDATE_AGENT_INSTANCE,
+    COMMAND_DELETE_AGENT_INSTANCE,
+    COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
+    CommandListNamedAgentsData, CommandHideNamedAgentData,
+    NamedAgentRow,
+    COMMAND_LIST_RECENT_SESSIONS, CommandListRecentSessionsData,
+    RecentSessionRow,
+    // Option E (PR 1 of 2) — agent-anchored session zones.
+    COMMAND_AGENT_SESSION_READ, COMMAND_AGENT_SESSION_WRITE_STATE,
+    COMMAND_AGENT_SESSION_APPEND_OUTPUT, COMMAND_AGENT_SESSION_ARCHIVE,
+    COMMAND_AGENT_SESSION_LIST_ARCHIVES,
+    CommandAgentSessionReadData, AgentSessionReadResult,
+    CommandAgentSessionWriteStateData, AgentSessionWriteStateResult,
+    CommandAgentSessionAppendOutputData, AgentSessionAppendOutputResult,
+    CommandAgentSessionArchiveData, AgentSessionArchiveResult,
+    CommandAgentSessionListArchivesData, AgentArchiveRow,
+    COMMAND_FORK_AGENT_DEFINITION,
+    COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
+    CommandForkAgentDefinitionSuggestData, ForkAgentDefinitionSuggestResult,
+    CommandListIdentityAccountsData, CommandGetIdentityAccountData,
+    CommandDeleteIdentityAccountData,
+    CommandLinkAgentIdentityData, CommandUnlinkAgentIdentityData,
+    CommandListAgentIdentitiesData,
+    CommandListAgentInstancesData, CommandGetAgentInstanceData,
+    CommandCreateAgentInstanceData, CommandUpdateAgentInstanceData,
+    CommandDeleteAgentInstanceData,
+    CommandForkAgentDefinitionData,
+    // v7 Identity bundles + Memory
+    COMMAND_LIST_IDENTITY_BUNDLES, COMMAND_GET_IDENTITY_BUNDLE,
+    COMMAND_UPSERT_IDENTITY_BUNDLE, COMMAND_DELETE_IDENTITY_BUNDLE,
+    COMMAND_BIND_IDENTITY_ACCOUNT, COMMAND_UNBIND_IDENTITY_ACCOUNT,
+    COMMAND_LIST_IDENTITY_BINDINGS,
+    COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
+    COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
+    CommandGetIdentityBundleData, CommandDeleteIdentityBundleData,
+    CommandBindIdentityAccountData, CommandUnbindIdentityAccountData,
+    CommandListIdentityBindingsData,
+    CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
+};
+use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
+use crate::backend::storage::store::{
+    AgentInstance, Identity, IdentityAccount, InstanceStatus, Memory, SecretRef,
+};
+use crate::backend::rpc_types::{
+    COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP,
+    CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData,
+};
+use crate::backend::obj::Block;
+use crate::backend::blockcontroller;
+
+use super::super::AppState;
+
+pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // agentdefcreatefromtemplate → clone a seeded template into a new
+    // user-owned definition (Phase 1 two-tier picker —
+    // SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md). The template stays
+    // pristine; the new row carries `is_seeded = 0`. Returns the new
+    // definition_id so the frontend can immediately launch.
+    //
+    // Validation rules:
+    //  - `template_id` MUST resolve to a row with `is_seeded = 1`.
+    //    Cloning a user-owned row would be confusing semantics — use
+    //    the existing `forkagentdefinition` RPC for that case.
+    //  - `name` non-empty, ≤200 chars, and not already taken by any
+    //    `is_seeded = 0` row. Avoids collisions in the picker's
+    //    "My Agents" list.
+    let wstore_act = state.wstore.clone();
+    let broker_act = state.broker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_act.clone();
+            let broker = broker_act.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefCreateFromTemplateData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
+                let name = cmd.name.trim().to_string();
+                if name.is_empty() {
+                    return Err("agentdefcreatefromtemplate: name must be non-empty".into());
+                }
+                if name.chars().count() > 200 {
+                    return Err(
+                        "agentdefcreatefromtemplate: name must be ≤200 characters".into(),
+                    );
+                }
+
+                let all = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("agentdefcreatefromtemplate: list: {e}"))?;
+                let template = all
+                    .iter()
+                    .find(|a| a.id == cmd.template_id)
+                    .ok_or_else(|| {
+                        format!(
+                            "agentdefcreatefromtemplate: template {} not found",
+                            cmd.template_id
+                        )
+                    })?;
+                if template.is_seeded != 1 {
+                    return Err(format!(
+                        "agentdefcreatefromtemplate: {} is not a seeded template (is_seeded={})",
+                        cmd.template_id, template.is_seeded
+                    ));
+                }
+                if all
+                    .iter()
+                    .any(|a| a.is_seeded == 0 && a.name.eq_ignore_ascii_case(&name))
+                {
+                    return Err(format!(
+                        "agentdefcreatefromtemplate: an agent named {:?} already exists",
+                        name
+                    ));
+                }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                // Runtime is the user's instantiation-time choice, not a
+                // template property. When supplied, the clone records it
+                // (and the matching `environment`); empty falls back to
+                // the template's value for back-compat with older callers.
+                let chosen_agent_type = match cmd.agent_type.trim() {
+                    "host" | "container" => cmd.agent_type.trim().to_string(),
+                    _ => template.agent_type.clone(),
+                };
+                let chosen_environment = if chosen_agent_type == "container" {
+                    "docker".to_string()
+                } else {
+                    "local".to_string()
+                };
+                let mut new_def = AgentDefinition {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    // agent_def_insert derives a unique slug from the
+                    // name when this is empty + collision-resolves.
+                    slug: String::new(),
+                    name: name.clone(),
+                    icon: template.icon.clone(),
+                    provider: template.provider.clone(),
+                    description: template.description.clone(),
+                    // Force re-allocation of the per-agent working
+                    // directory at first launch via the new slug —
+                    // matches forkagentdefinition's behaviour.
+                    working_directory: String::new(),
+                    shell: template.shell.clone(),
+                    provider_flags: template.provider_flags.clone(),
+                    // Users opt in to auto-start explicitly; cloning
+                    // shouldn't carry it over (mirrors fork).
+                    auto_start: 0,
+                    restart_on_crash: template.restart_on_crash,
+                    idle_timeout_minutes: template.idle_timeout_minutes,
+                    created_at: now,
+                    agent_type: chosen_agent_type,
+                    environment: chosen_environment,
+                    agent_bus_id: String::new(),
+                    is_seeded: 0,
+                    accounts: String::new(),
+                    parent_id: template.id.clone(),
+                    branch_label: String::new(),
+                    updated_at: now,
+                    // New user-owned agent starts visible. Phase 2
+                    // (Q2 Decision Y) — hide applies only to seeded
+                    // templates, never to user-owned agents.
+                    user_hidden: 0,
+                    // Inherit container config from template so container-type
+                    // templates propagate their image to user-cloned agents.
+                    container_image: template.container_image.clone(),
+                    container_volumes: template.container_volumes.clone(),
+                    container_name: String::new(),
+                };
+                wstore
+                    .agent_def_insert(&mut new_def)
+                    .map_err(|e| format!("agentdefcreatefromtemplate: insert: {e}"))?;
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "agents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+
+                let resp = AgentDefCreateFromTemplateResult {
+                    definition_id: new_def.id.clone(),
+                    identity_id: cmd.identity_id,
+                    memory_id: cmd.memory_id,
+                };
+                tracing::info!(
+                    template_id = %cmd.template_id,
+                    new_definition_id = %new_def.id,
+                    new_name = %new_def.name,
+                    "agentdefcreatefromtemplate: cloned template into user agent"
+                );
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // agentdefhide → set user_hidden = 1 on a seeded template, so it
+    // disappears from the picker's "+ New from template" tier. Phase 2
+    // (Q2 Decision Y) of SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
+    //
+    // Validation:
+    //  - `definition_id` MUST exist. Missing → returns `{ ok: false }`.
+    //  - The row MUST be a seeded template (`is_seeded = 1`). User-owned
+    //    rows reject with a hard error — they have their own delete path
+    //    and a hide flag on them would be misleading.
+    //
+    // Broadcasts `agents:changed` so the picker refetches and the card
+    // disappears (existing list query already excludes hidden by default).
+    let wstore_hide = state.wstore.clone();
+    let broker_hide = state.broker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_HIDE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_hide.clone();
+            let broker = broker_hide.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefHideData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentdefhide: {e}"))?;
+                let ok = wstore
+                    .agent_def_set_hidden(&cmd.definition_id, true)
+                    .map_err(|e| format!("agentdefhide: {e}"))?;
+                if ok {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "agents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                    tracing::info!(
+                        definition_id = %cmd.definition_id,
+                        "agentdefhide: hid template"
+                    );
+                }
+                let resp = AgentDefHideResult { ok };
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // agentdefunhide → set user_hidden = 0 on a seeded template,
+    // bringing it back into the picker. Same validation + broadcast as
+    // agentdefhide. Phase 2 of the two-tier picker spec.
+    let wstore_unhide = state.wstore.clone();
+    let broker_unhide = state.broker.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_UNHIDE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_unhide.clone();
+            let broker = broker_unhide.clone();
+            Box::pin(async move {
+                let cmd: CommandAgentDefHideData = serde_json::from_value(data)
+                    .map_err(|e| format!("agentdefunhide: {e}"))?;
+                let ok = wstore
+                    .agent_def_set_hidden(&cmd.definition_id, false)
+                    .map_err(|e| format!("agentdefunhide: {e}"))?;
+                if ok {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "agents:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                    tracing::info!(
+                        definition_id = %cmd.definition_id,
+                        "agentdefunhide: unhid template"
+                    );
+                }
+                let resp = AgentDefHideResult { ok };
+                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // agentdeflisthiddentemplates → templates the user has hidden
+    // (is_seeded = 1 AND user_hidden = 1). Used by the settings panel
+    // to render the unhide list. The picker proper never calls this —
+    // it uses `listagents` with the default-filter-out behaviour.
+    let wstore_lh = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore_lh.clone();
+            Box::pin(async move {
+                let agents = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("agentdeflisthiddentemplates: {e}"))?;
+                let hidden: Vec<_> = agents
+                    .into_iter()
+                    .filter(|a| a.is_seeded == 1 && a.user_hidden == 1)
+                    .collect();
+                Ok(Some(serde_json::to_value(&hidden).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // ---- Definition fork ----
+
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_FORK_AGENT_DEFINITION,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandForkAgentDefinitionData = serde_json::from_value(data)
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+
+                // Find the source definition by id.
+                let all_defs = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+                let source = all_defs
+                    .iter()
+                    .find(|a| a.id == cmd.source_id)
+                    .cloned()
+                    .ok_or_else(|| format!("forkagentdefinition: source not found: {}", cmd.source_id))?;
+
+                // Build a new definition that shares the source's content but
+                // has a fresh id/slug and records the lineage. Seed-bit is
+                // cleared — forks are always user-owned, not built-in.
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+
+                // branch_label is the fork's full display name when provided.
+                // When empty, auto-generate "Name #N" based on existing fork count.
+                let fork_name = if cmd.branch_label.is_empty() {
+                    let existing_fork_count = all_defs
+                        .iter()
+                        .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
+                        .count();
+                    format!("{} #{}", source.name, existing_fork_count + 2)
+                } else {
+                    cmd.branch_label.clone()
+                };
+                let branch_label = if cmd.branch_label.is_empty() {
+                    fork_name.clone()
+                } else {
+                    cmd.branch_label.clone()
+                };
+                let branch_slug_part = crate::backend::storage::store::derive_slug(&branch_label);
+                let mut fork = AgentDefinition {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    // Empty slug → agent_def_insert derives + resolves collisions.
+                    slug: format!("{}-{}", source.slug, branch_slug_part),
+                    name: fork_name,
+                    icon: source.icon.clone(),
+                    provider: source.provider.clone(),
+                    description: source.description.clone(),
+                    working_directory: String::new(), // force re-resolve via agentmuxHome()
+                    shell: source.shell.clone(),
+                    provider_flags: source.provider_flags.clone(),
+                    auto_start: 0, // forks don't auto-start; explicit launch only
+                    restart_on_crash: source.restart_on_crash,
+                    idle_timeout_minutes: source.idle_timeout_minutes,
+                    created_at: now,
+                    agent_type: source.agent_type.clone(),
+                    environment: source.environment.clone(),
+                    agent_bus_id: String::new(), // fresh bus id so broadcasts don't cross
+                    is_seeded: 0,
+                    accounts: String::new(),
+                    parent_id: source.id.clone(),
+                    branch_label: branch_label.clone(),
+                    updated_at: now,
+                    user_hidden: 0,
+                    // Forks inherit container config from source so forked container agents
+                    // retain their image and volumes.
+                    container_image: source.container_image.clone(),
+                    container_volumes: source.container_volumes.clone(),
+                    container_name: String::new(),
+                };
+                wstore
+                    .agent_def_insert(&mut fork)
+                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+
+                // Deep-copy content blobs + skills from source. Cascade foreign
+                // keys on the source are unaffected — we're copying out, not
+                // moving.
+                let source_contents = wstore
+                    .agent_content_get_all(&source.id)
+                    .map_err(|e| format!("forkagentdefinition content: {e}"))?;
+                for c in source_contents {
+                    let new_content = AgentContent {
+                        agent_id: fork.id.clone(),
+                        content_type: c.content_type,
+                        content: c.content,
+                        updated_at: now,
+                    };
+                    wstore
+                        .agent_content_set(&new_content)
+                        .map_err(|e| format!("forkagentdefinition content: {e}"))?;
+                }
+                let source_skills = wstore
+                    .agent_skill_list(&source.id)
+                    .map_err(|e| format!("forkagentdefinition skills: {e}"))?;
+                for s in source_skills {
+                    let new_skill = AgentSkill {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        agent_id: fork.id.clone(),
+                        name: s.name,
+                        trigger: s.trigger,
+                        skill_type: s.skill_type,
+                        description: s.description,
+                        content: s.content,
+                        created_at: now,
+                    };
+                    wstore
+                        .agent_skill_insert(&new_skill)
+                        .map_err(|e| format!("forkagentdefinition skill: {e}"))?;
+                }
+
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "agents:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+
+                Ok(Some(serde_json::to_value(&fork).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // ---- Definition fork suggest (read-only — no mutation) ----
+
+    let wstore_sug = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_sug.clone();
+            Box::pin(async move {
+                let cmd: CommandForkAgentDefinitionSuggestData = serde_json::from_value(data)
+                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
+
+                let all = wstore
+                    .agent_def_list()
+                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
+                let source = all
+                    .iter()
+                    .find(|a| a.id == cmd.source_id)
+                    .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
+
+                let existing_fork_count = all
+                    .iter()
+                    .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
+                    .count();
+                let suggested_label = format!("{} #{}", source.name, existing_fork_count + 2);
+
+                let result = ForkAgentDefinitionSuggestResult { suggested_label };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
+
+}
