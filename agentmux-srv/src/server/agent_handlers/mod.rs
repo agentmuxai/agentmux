@@ -131,6 +131,7 @@ fn collapse_preview(s: &str) -> String {
 #[cfg(test)]
 mod recent_sessions_tests {
     use super::*;
+    use crate::backend::rpc_types::{RecentSessionRow, COMMAND_LIST_RECENT_SESSIONS};
     use crate::backend::storage::filestore::FileStore;
 
     fn fresh_filestore() -> std::sync::Arc<FileStore> {
