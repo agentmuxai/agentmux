@@ -36,15 +36,6 @@ export function hueToActiveBorder(hue: number): string {
     return `hsl(${hue}, 65%, 52%)`;
 }
 
-export interface PaneSwatch extends PaneHueOption {
-    preview: string;
-}
-
-// Vivid preview hex for each hue — used by PaneColorPanel swatches
-export const PANE_SWATCH_COLORS: ReadonlyArray<PaneSwatch> = PANE_HUE_OPTIONS.map(
-    ({ label, hue }) => ({ label, hue, preview: hueToActiveBorder(hue) })
-);
-
 export function setHue(blockId: string, hue: number | null): void {
     void RpcApi.SetMetaCommand(TabRpcClient, {
         oref: WOS.makeORef("block", blockId),
