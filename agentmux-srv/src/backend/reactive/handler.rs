@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::sanitize::{format_injected_message, sanitize_message, validate_agent_id};
+use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message};
 use super::types::*;
 use super::{now_unix_millis, sha256_hex, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
@@ -252,11 +252,40 @@ impl Handler {
             }
         };
 
-        // Format message with source prefix if configured
-        let final_msg = format_injected_message(
+        // Determine effective jekt tier — escalate to sensitive if keywords found.
+        let declared_tier = req.jekt_tier.as_ref();
+        let is_sensitive = matches!(declared_tier, Some(super::types::JektTier::Sensitive))
+            || (declared_tier.map_or(true, |t| *t != super::types::JektTier::Sensitive)
+                && is_sensitive_message(&sanitized));
+        let effective_tier = if is_sensitive { "sensitive" } else {
+            declared_tier.map_or("coord", |t| match t {
+                super::types::JektTier::Info => "info",
+                super::types::JektTier::Coord => "coord",
+                super::types::JektTier::Sensitive => "sensitive",
+            })
+        };
+        let delivery_tier = req.delivery_tier.as_deref().unwrap_or("host");
+        let priority = req.priority.as_deref().unwrap_or("normal");
+
+        // Wrap in JEKT marker block (structured tag + human-readable header).
+        let wrapped = wrap_jekt_message(
             &sanitized,
             req.source_agent.as_deref(),
-            self.include_source_in_message,
+            &req.target_agent,
+            effective_tier,
+            delivery_tier,
+            &request_id,
+            priority,
+        );
+
+        // Legacy source-prefix format preserved for PTY controllers that don't
+        // parse the JEKT block — the wrap_jekt_message output already includes
+        // the source in the human-readable header so format_injected_message
+        // is called with include_source=false here.
+        let final_msg = format_injected_message(
+            &wrapped,
+            req.source_agent.as_deref(),
+            false,
         );
 
         // Controller-aware delivery (SPEC_AGENT_CONTROL_PROTOCOL §6 / Phase 3).

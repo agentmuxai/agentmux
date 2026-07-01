@@ -137,6 +137,8 @@ pub(super) async fn handle_inject(
         request_id: None,
         priority: req.priority.clone(),
         wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("host".to_string()),
     };
     let resp = state.reactive_handler.inject_message(reactive_req);
     if resp.success {
