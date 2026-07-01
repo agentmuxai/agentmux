@@ -113,7 +113,7 @@ export async function awaitPanePoolPromote(): Promise<void> {
         let unsub: (() => void) | undefined;
         const cleanup = () => { unsub?.(); };
 
-        unsub = await listenEvent<{ paneId: string; workspaceId: string }>(
+        unsub = await listenEvent<{ paneId: string; workspaceId: string; windowLabel?: string }>(
             "pool:pane-promote",
             (payload) => {
                 cleanup();
@@ -125,6 +125,16 @@ export async function awaitPanePoolPromote(): Promise<void> {
                 // for a pane tear-off, but guard defensively.
                 if (payload.workspaceId) {
                     url.searchParams.set("workspaceId", payload.workspaceId);
+                }
+                // The host renames floating-pool-<uuid> → floating-<uuid> on
+                // promotion (SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30). Adopt
+                // the new label so every ?windowLabel=-derived reader and
+                // label-addressed IPC from this renderer targets the host's
+                // current browser key — otherwise the renderer keeps addressing
+                // the dead pool label. Guarded: only the Windows promote path
+                // carries `windowLabel` today.
+                if (payload.windowLabel) {
+                    url.searchParams.set("windowLabel", payload.windowLabel);
                 }
                 url.searchParams.delete("pane-pool");
                 window.history.replaceState({}, "", url.toString());

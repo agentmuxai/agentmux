@@ -1588,32 +1588,70 @@ pub fn promote_pane_pool_window(
             let _ = ShowWindow(outer_hwnd as HWND, SW_SHOWNORMAL);
         }
 
+        // Rename `floating-pool-<uuid>` → `floating-<uuid>` so the promoted
+        // pane is counted as a real user floater rather than filtered out as a
+        // warm pool window (SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30). Re-key
+        // every per-label store BEFORE the emit below — `emit_event_to_window`
+        // resolves the target via `get_browser(label)`, which after the reducer
+        // re-key lives under `new_label`.
+        let new_label = label.replacen("floating-pool-", "floating-", 1);
+        // Reducer state: `browsers` (+ the duplicated label field) and, if
+        // present, `window_opacities` / `pane_window_states`.
+        let _ = state.host_dispatch(crate::reducer::HostCommand::RelabelBrowser {
+            old_label: label.clone(),
+            new_label: new_label.clone(),
+        });
+        // AppState label maps (not reducer state).
+        {
+            let mut hwnds = state.window_hwnds.lock();
+            if let Some(h) = hwnds.remove(&label) {
+                hwnds.insert(new_label.clone(), h);
+            }
+        }
+        {
+            let mut meta = state.window_meta.lock();
+            if let Some(mut m) = meta.remove(&label) {
+                m.label = new_label.clone();
+                meta.insert(new_label.clone(), m);
+            }
+        }
+
         // Bind this floater to the source window's cascade hook. Deferred from
         // spawn time because the parent HWND is only known at tear-off.
         crate::floating_pane::register_floater_hwnd(
-            label.clone(),
+            new_label.clone(),
             outer_hwnd as isize,
             parent_hwnd,
         );
 
-        // Tell the renderer to bootstrap pane + workspace.
+        // Tell the renderer to bootstrap pane + workspace. Carry the new window
+        // label so `awaitPanePoolPromote` rewrites its `?windowLabel=` param —
+        // otherwise the renderer keeps addressing the host by the dead pool
+        // label (spec §5.2).
         crate::events::emit_event_to_window(
             state,
-            &label,
+            &new_label,
             "pool:pane-promote",
             &serde_json::json!({
                 "paneId": pane_id,
                 "workspaceId": workspace_id,
+                "windowLabel": new_label,
             }),
         );
 
         spawn_pane_pool_window(state);
 
-        return Some(label);
+        return Some(new_label);
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+        // NOTE: the `floating-pool-*` → `floating-*` relabel
+        // (SPEC_FLOATING_PANE_POOL_RELABEL_2026_06_30) is currently applied on
+        // the Windows path only — that's where the bug was reported and where
+        // it can be runtime-verified. The equivalent re-key + payload
+        // `windowLabel` should be applied here (via `post_promote_pane_pool_window`)
+        // as a follow-up on macOS/Linux.
         let _ = parent_hwnd; // unused on non-Windows
         let dispatch = state.host_dispatch(
             crate::reducer::HostCommand::PopAndPromoteFrontPanePoolWindow,
