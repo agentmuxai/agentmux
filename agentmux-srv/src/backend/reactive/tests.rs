@@ -384,8 +384,10 @@ fn test_handler_inject_structured_delivery_skips_pty() {
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].0, "block1");
     assert!(
-        msgs[0].1.contains("[JEKT:") && msgs[0].1.contains("hello"),
-        "structured channel got the JEKT-wrapped message"
+        msgs[0].1.contains("[JEKT:")
+            && msgs[0].1.contains("[/JEKT]")
+            && msgs[0].1.contains("hello"),
+        "structured channel got the JEKT-wrapped message (open + close markers + payload)"
     );
     assert!(pty_calls.lock().unwrap().is_empty());
 }
