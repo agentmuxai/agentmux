@@ -27,11 +27,18 @@ export function PaneColorPanel(props: PaneColorPanelProps): JSX.Element {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === "Escape") props.onClose();
         };
+        // CEF native context menus steal OS focus while open and do not fire DOM
+        // mousedown when an item is selected. Listening for window focus returning
+        // catches the close of the native menu (regardless of whether the user
+        // picked an item or dismissed it) so the swatch panel doesn't linger.
+        const handleWindowFocus = () => props.onClose();
         document.addEventListener("mousedown", handleClickOutside);
         document.addEventListener("keydown", handleKeyDown);
+        window.addEventListener("focus", handleWindowFocus);
         onCleanup(() => {
             document.removeEventListener("mousedown", handleClickOutside);
             document.removeEventListener("keydown", handleKeyDown);
+            window.removeEventListener("focus", handleWindowFocus);
         });
     });
 
