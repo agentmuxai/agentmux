@@ -15,6 +15,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    gap: var(--space-1, 6px);
     padding: var(--space-2, 8px) var(--space-3, 12px);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
@@ -212,6 +213,10 @@
     }
     &--muted {
         opacity: 0.7;
+    }
+    &--update {
+        background: rgba(219, 154, 4, 0.18);
+        color: var(--warning-color, #d29922);
     }
 }
 
