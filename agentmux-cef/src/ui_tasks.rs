@@ -2129,19 +2129,37 @@ wrap_task! {
                 // Views top-level, so a naive EnumChildWindows would pick up
                 // their Chrome_RenderWidgetHostHWND and SetFocus on the wrong
                 // target.
+                //
+                // Two sources are combined:
+                // 1. Live registered panes from state.list_browsers().
+                // 2. Pane outer HWNDs still tracked in BROWSER_PANE_HWND_CONTEXT
+                //    — covers the window between BrowserUnregistered and CEF's
+                //    on_before_close (deferred teardown), during which the HWND
+                //    is still live but the label is gone from state.browsers.
+                //    Without this, panes_excluded=0 and find_main_render_widget
+                //    picks the pane's render widget → infinite focus storm.
+                //
                 // Phase H.2.b — reducer-aware iteration with fallback.
-                let pane_outer_hwnds: Vec<*mut std::ffi::c_void> = self
-                    .state
-                    .list_browsers()
-                    .into_iter()
-                    .filter(|(k, _)| k.starts_with("browser-pane-"))
-                    .filter_map(|(_, mut b)| {
-                        b.host().and_then(|h| {
-                            let wh = h.window_handle();
-                            if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
+                let pane_outer_hwnds: Vec<*mut std::ffi::c_void> = {
+                    let mut hwnds: Vec<*mut std::ffi::c_void> = self
+                        .state
+                        .list_browsers()
+                        .into_iter()
+                        .filter(|(k, _)| k.starts_with("browser-pane-"))
+                        .filter_map(|(_, mut b)| {
+                            b.host().and_then(|h| {
+                                let wh = h.window_handle();
+                                if wh.0.is_null() { None } else { Some(wh.0 as *mut std::ffi::c_void) }
+                            })
                         })
-                    })
-                    .collect();
+                        .collect();
+                    for h in crate::browser_pane::hwnd::pane_outer_hwnds_from_context() {
+                        if !hwnds.contains(&h) {
+                            hwnds.push(h);
+                        }
+                    }
+                    hwnds
+                };
 
                 match views_top_hwnd {
                     Some(top_hwnd) => unsafe {
