@@ -420,6 +420,8 @@ fn handle_dispatch(
                 request_id: Some(msg.id.clone()),
                 priority: None,
                 wait_for_idle: false,
+                jekt_tier: None,
+                delivery_tier: Some("host".to_string()),
             };
             let result = handler.inject_message(req);
             if result.success {

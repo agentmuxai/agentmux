@@ -6,6 +6,32 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+/// Sensitivity tier for a jekt message.
+///
+/// - `Info`: routine status / progress update; agent may act autonomously.
+/// - `Coord`: task handoff or coordination; agent may act, human sees the marker.
+/// - `Sensitive`: credential, destructive op, external side-effect; agent MUST
+///   pause and ask the human operator before acting. A confirming reply from
+///   another agent over muxbus is NOT sufficient.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum JektTier {
+    Info,
+    #[default]
+    Coord,
+    Sensitive,
+}
+
+impl std::fmt::Display for JektTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JektTier::Info => write!(f, "info"),
+            JektTier::Coord => write!(f, "coord"),
+            JektTier::Sensitive => write!(f, "sensitive"),
+        }
+    }
+}
+
 /// Request to inject a message into an agent's terminal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InjectionRequest {
@@ -19,6 +45,13 @@ pub struct InjectionRequest {
     pub priority: Option<String>,
     #[serde(default)]
     pub wait_for_idle: bool,
+    /// Sensitivity tier declared by the sender. When absent, defaults to `Coord`.
+    /// The handler may escalate to `Sensitive` based on keyword scanning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jekt_tier: Option<JektTier>,
+    /// Delivery tier of this jekt (host/lan/wan) — used in the marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_tier: Option<String>,
 }
 
 /// Response from a message injection attempt.
