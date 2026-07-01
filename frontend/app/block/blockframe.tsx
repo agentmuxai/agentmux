@@ -520,7 +520,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                 <PaneColorPanel
                     anchor={colorPanelAnchor()!}
                     currentHue={(blockData()?.meta?.["frame:hue"] as number | undefined) ?? null}
-                    blockId={blockData()!.oid}
+                    blockId={blockData()?.oid ?? ""}
                     onClose={() => setColorPanelAnchor(null)}
                 />
             </Show>
