@@ -178,8 +178,14 @@ const MoreDropdown = ({
             const update = async () => {
                 const a = anchor();
                 if (!a) return;
+                // avoidNativePanes:false — this dropdown renders with
+                // `data-pane-overlay` (+ usePaneOverlay), which clips a hole
+                // through any native browser/webview pane behind it so the DOM
+                // draws on top. So it should open in place under the More button,
+                // not get pushed to the window edge into the largest pane-free
+                // rect. Matches FlyoutMenu / showJsContextMenu.
                 const pos = await computeMenuPosition(
-                    { anchor: a, placement: "bottom-end", gutter: 4 },
+                    { anchor: a, placement: "bottom-end", gutter: 4, avoidNativePanes: false },
                     el,
                 );
                 setFloatingStyle(pos.style);
