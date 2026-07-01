@@ -626,6 +626,53 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // toolchain.versions — fetch the latest published version for a list of npm
+    // packages from the npm registry. Input: { packages: [{id, package}] }.
+    // Output: { id: "x.y.z" | null, ... }. Each lookup is independent — a
+    // network error for one package yields null for that entry, not a failure.
+    // 5-second per-request timeout; all lookups run concurrently.
+    engine.register_handler(
+        "toolchain.versions",
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Pkg { id: String, package: String }
+                let packages: Vec<Pkg> = data
+                    .get("packages")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .user_agent("agentmux/toolchain-versions")
+                    .build()
+                    .map_err(|e| e.to_string())?;
+
+                let futs: Vec<_> = packages.into_iter().map(|pkg| {
+                    let c = client.clone();
+                    async move {
+                        let url = format!("https://registry.npmjs.org/{}/latest", pkg.package);
+                        let version = match c.get(&url).send().await {
+                            Ok(resp) if resp.status().is_success() => {
+                                resp.json::<serde_json::Value>().await.ok()
+                                    .and_then(|v| v.get("version").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                            }
+                            _ => None,
+                        };
+                        (pkg.id, version)
+                    }
+                }).collect();
+
+                let results = futures_util::future::join_all(futs).await;
+                let mut out = serde_json::Map::new();
+                for (id, version) in results {
+                    out.insert(id, version.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null));
+                }
+                Ok(Some(serde_json::Value::Object(out)))
+            })
+        }),
+    );
 }
 
 /// Re-export from shared crate for internal use.

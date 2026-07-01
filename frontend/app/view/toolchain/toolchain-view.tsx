@@ -52,6 +52,8 @@ interface ToolRow {
     docsUrl?: string;
     installUrl?: string;
     installCommand?: string;
+    npmPackage?: string;
+    latestVersion?: string;
 }
 
 interface WidgetRow {
@@ -113,6 +115,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     const providerRows: ToolRow[] = getProviderList().map((p) => ({
         id: p.id, label: p.displayName, icon: p.icon, kind: "provider",
         loading: true, found: false, docsUrl: p.docsUrl, installUrl: p.docsUrl,
+        npmPackage: p.npmPackage,
     }));
     const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...providerRows]);
 
@@ -179,6 +182,28 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
         wrows.forEach((_, i) => void probeWidget(i));
     };
 
+    const [latestLoading, setLatestLoading] = createSignal(false);
+
+    const checkLatestVersions = async () => {
+        const packages = rows
+            .filter((r) => r.npmPackage)
+            .map((r) => ({ id: r.id, package: r.npmPackage! }));
+        if (!packages.length) return;
+        setLatestLoading(true);
+        try {
+            const result = await RpcApi.ToolchainVersionsCommand(TabRpcClient, { packages }, { timeout: 15000 });
+            rows.forEach((r, i) => {
+                if (r.npmPackage && result[r.id] !== undefined) {
+                    setRows(i, "latestVersion", result[r.id] ?? undefined);
+                }
+            });
+        } catch {
+            // network failure — leave latestVersion undefined
+        } finally {
+            setLatestLoading(false);
+        }
+    };
+
     const open = (url?: string) => { if (url) getApi().openExternal(url); };
     const copy = (cmd?: string) => { if (cmd) void navigator.clipboard?.writeText(cmd); };
 
@@ -197,6 +222,15 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                         </span>
                         <Show when={row.source === "local_install"}>
                             <span class="toolchain-pill toolchain-pill--muted">managed</span>
+                        </Show>
+                        <Show when={row.latestVersion !== undefined && row.version !== undefined}>
+                            <span
+                                class={`toolchain-pill ${row.version === row.latestVersion ? "toolchain-pill--muted" : "toolchain-pill--update"}`}
+                                title={`Latest: ${row.latestVersion}`}
+                            >
+                                <i class={`fa-solid ${row.version === row.latestVersion ? "fa-circle-check" : "fa-circle-up"}`} />
+                                {" "}{row.version === row.latestVersion ? "up to date" : `${row.latestVersion} available`}
+                            </span>
                         </Show>
                     </Show>
                     <Show when={!row.loading && !row.found}>
@@ -237,6 +271,15 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
             <div class="toolchain-view-header">
                 <button class="toolchain-btn toolchain-btn--ghost" onClick={refresh}>
                     <i class="fa-solid fa-rotate" /> Refresh
+                </button>
+                <button
+                    class="toolchain-btn toolchain-btn--ghost"
+                    onClick={() => void checkLatestVersions()}
+                    disabled={latestLoading()}
+                    title="Fetch latest published versions from npm registry"
+                >
+                    <i class={`fa-solid ${latestLoading() ? "fa-spinner fa-spin" : "fa-arrow-up"}`} />
+                    {latestLoading() ? " Checking…" : " Check latest versions"}
                 </button>
             </div>
             <div class="toolchain-body">

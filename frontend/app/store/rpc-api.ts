@@ -1287,6 +1287,17 @@ class RpcApiType {
         return client.rpcCall("toolchain.env", {}, opts);
     }
 
+    // command "toolchain.versions" [call] — fetch latest published npm versions for
+    // a list of packages. Input: { packages: [{id, package}] }. Output: {id: version|null}.
+    // Each lookup is independent; a network error yields null for that entry.
+    ToolchainVersionsCommand(
+        client: RpcClient,
+        data: { packages: Array<{ id: string; package: string }> },
+        opts?: RpcOpts,
+    ): Promise<Record<string, string | null>> {
+        return client.rpcCall("toolchain.versions", data, opts);
+    }
+
     // command "widget.health" [call] — HTTP liveness probe for an external widget
     // server on localhost. Returns { healthy, status_code } — never throws on
     // connection failure so the UI can show a "not running" pill gracefully.
