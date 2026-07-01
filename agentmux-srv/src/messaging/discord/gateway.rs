@@ -421,7 +421,7 @@ fn handle_dispatch(
                 priority: None,
                 wait_for_idle: false,
                 jekt_tier: None,
-                delivery_tier: Some("host".to_string()),
+                delivery_tier: Some("wan".to_string()),
             };
             let result = handler.inject_message(req);
             if result.success {
