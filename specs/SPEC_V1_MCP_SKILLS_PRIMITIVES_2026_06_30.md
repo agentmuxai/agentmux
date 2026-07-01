@@ -4,7 +4,7 @@
 **Status:** Draft — implementation spec
 **Author:** AgentX
 **Parent:** `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the composable Trust Center model — Bundle · Account · Memory · MCP Server · Skill · Brief)
-**Related code:** `agentmux-srv/src/backend/storage/{skills.rs,content.rs,agents.rs}`, `server/agent_config.rs`, `server/app_api.rs` (`write_agent_config_files`, `preset.*`/`memory.*` handlers), `backend/rpc_types.rs`.
+**Related code:** `agentmux-srv/src/backend/storage/{skills.rs,content.rs,agents.rs}`, `backend/agent_config.rs`, `server/app_api.rs` (`write_agent_config_files`, `preset.*`/`memory.*` handlers), `backend/rpc_types.rs`.
 
 ---
 
@@ -72,12 +72,14 @@ drop the hard `agent_id` FK; add only `is_global` (no `owner_agent_id`).
 ### 4.2 `db_mcp_servers` (standalone — decomposed)
 ```
 id            TEXT PK
-name          TEXT          -- unique server name (the .mcp.json key)
+name          TEXT          -- the .mcp.json key; UNIQUE per (name, is_global=0 agent scope)
 transport     TEXT          -- "stdio" | "url"
 config        TEXT (JSON)   -- command/args/env or url/headers
 is_global     INTEGER       -- single ownership flag (as above)
 created_at    INTEGER
 updated_at    INTEGER
+-- UNIQUE(name, id) enforced via upsert guard: duplicate names per agent silently
+-- collide in build_mcp_config, so mcp.upsert rejects a name already bound to this agent
 ```
 One row = one server (vs. today's whole-`.mcp.json` blob). The auto-injected
 `agentmux-mcp` entry stays **synthetic** (added by `build_mcp_config`, never a
@@ -147,8 +149,10 @@ One-time, idempotent, behind the App API surface:
    record where names+content match (optional; safe default is per-agent copies).
 2. **MCP:** parse each agent's `AgentContent("mcp")` `.mcp.json` blob → one
    `db_mcp_servers` row per server entry (`is_global = 0`) + a `db_agent_mcp_ref`
-   per server (the ref establishes ownership). The synthetic `agentmux-mcp` entry is
-   **skipped** (it's re-injected at build time).
+   per server (the ref establishes ownership). **Skip the JSON key `"agentmux"`**
+   (the synthetic entry that `build_mcp_config` auto-injects, per `agent_config.rs:277`;
+   it has command `"agentmux-mcp"` but is identified by map *key*, not command value,
+   to avoid dropping a user-created server that happens to use the same command string).
 3. **Read alias / fallback:** keep the legacy tables readable; config-gen falls back
    to them for any agent without refs (until migration is confirmed complete).
 4. **Follow-on (not v1 plumbing): `soul`/`agentmd` → Skills.** Per the Brief stance
