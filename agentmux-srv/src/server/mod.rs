@@ -618,6 +618,7 @@ async fn handle_shell_create(
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),
+        capture_stdin: req.capture_stdin.unwrap_or(false),
     };
     tokio::spawn(runner.run());
 
