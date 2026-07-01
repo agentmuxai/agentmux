@@ -3548,11 +3548,9 @@ fn register_memory_write(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // ---------------------------------------------------------------------------
 
 /// Bind an account the agent already owns (via `db_agent_identity_links`) into
-/// its default identity bundle so the resolver injects the credential at next
-/// launch. Creates the bundle if it does not yet exist.
-///
-/// Security: ownership is verified (the account must be linked to `agent_id`)
-/// before the bundle write. No secret is touched.
+/// the caller-supplied `bundle_id` (the instance's `identity_id`) so the resolver
+/// injects the credential at next launch. Requires the account to already be
+/// linked to `agent_id` for the given provider; no secret is touched.
 pub(crate) async fn identity_bundle_link_impl(
     state: &AppState,
     agent_id: &str,

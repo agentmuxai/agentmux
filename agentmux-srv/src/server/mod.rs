@@ -740,7 +740,8 @@ fn app_api_agent_slug(
 fn app_api_error_status(e: &str) -> StatusCode {
     if e.starts_with("FORBIDDEN") {
         StatusCode::FORBIDDEN
-    } else if (e.starts_with("memory.") && e.contains("not found"))
+    } else if e.starts_with("memory.")           // all memory impl errors are client-originating
+        || (e.starts_with("preset.") && e.contains("not found"))
         || e.contains("provide ")
         || e.contains("not a regular file")
         || e.contains("too large")
