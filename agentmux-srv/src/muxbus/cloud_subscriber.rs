@@ -413,6 +413,8 @@ async fn handle_server_msg(
                         request_id: Some(inj.id.clone()),
                         priority: inj.priority.clone(),
                         wait_for_idle: false,
+                        jekt_tier: None,       // auto-detected from keywords
+                        delivery_tier: Some("wan".to_string()),
                     };
                     let delivery = handler.inject_message(req);
                     tracing::debug!(
