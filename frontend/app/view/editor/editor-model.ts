@@ -188,6 +188,7 @@ export class EditorViewModel implements ViewModel {
                 if (ev.type === "TabClosed") {
                     this._contentByTab.delete(ev.tabId);
                     this._encodingByTab.delete(ev.tabId);
+                    this._tabModes.delete(ev.tabId);
                 }
                 for (const sub of this._eventSubscribers) sub(ev);
             }
