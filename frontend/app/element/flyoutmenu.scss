@@ -115,6 +115,19 @@
     flex-shrink: 0;
 }
 
+// Inline color swatch square (exact hue) shown before a menu item's label —
+// used by the pane "Pane Color" submenu. A real DOM square, not an emoji, so
+// it matches the palette colors precisely.
+.menu-item-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    margin-right: var(--space-2);
+    flex-shrink: 0;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
 // Radio/checkbox indicator. More opaque + slightly larger than the
 // regular icon slot so the active selection actually pops at a glance.
 .menu-item-check {
