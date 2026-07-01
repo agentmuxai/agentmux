@@ -252,11 +252,19 @@ impl Handler {
             }
         };
 
-        // Determine effective jekt tier — escalate to sensitive if keywords found.
+        // Determine effective jekt tier.
+        // Escalation rules (spec §5.2):
+        //   1. WAN or LAN delivery → always SENSITIVE, regardless of declared tier
+        //      or keyword content (network-tier senders are not verified).
+        //   2. Host delivery + declared SENSITIVE → SENSITIVE.
+        //   3. Host delivery + keyword match → SENSITIVE.
+        //   4. Otherwise → use declared tier (default: coord).
         let declared_tier = req.jekt_tier.as_ref();
-        let is_sensitive = matches!(declared_tier, Some(super::types::JektTier::Sensitive))
-            || (declared_tier.map_or(true, |t| *t != super::types::JektTier::Sensitive)
-                && is_sensitive_message(&sanitized));
+        let delivery_tier = req.delivery_tier.as_deref().unwrap_or("host");
+        let is_network_tier = delivery_tier == "wan" || delivery_tier == "lan";
+        let is_sensitive = is_network_tier
+            || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
+            || is_sensitive_message(&sanitized);
         let effective_tier = if is_sensitive { "sensitive" } else {
             declared_tier.map_or("coord", |t| match t {
                 super::types::JektTier::Info => "info",
@@ -264,7 +272,6 @@ impl Handler {
                 super::types::JektTier::Sensitive => "sensitive",
             })
         };
-        let delivery_tier = req.delivery_tier.as_deref().unwrap_or("host");
         let priority = req.priority.as_deref().unwrap_or("normal");
 
         // Wrap in JEKT marker block (structured tag + human-readable header).
