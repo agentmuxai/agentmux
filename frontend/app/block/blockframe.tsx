@@ -64,9 +64,13 @@ function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
             click: () => setHue(blockData.oid, hue),
         })),
     ];
+    // Leading separator (not trailing): the caller may append a view-settings
+    // group that also starts with a separator. A trailing separator here would
+    // collide with it and render two consecutive dividers for views that
+    // implement getSettingsMenuItems (term, sysinfo).
     return [
-        { label: "Pane Color", type: "submenu" as const, submenu: colorItems },
         { type: "separator" as const },
+        { label: "Pane Color", type: "submenu" as const, submenu: colorItems },
     ];
 }
 
