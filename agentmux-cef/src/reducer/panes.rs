@@ -75,10 +75,12 @@ pub(super) fn handle_enqueue_browser_pane_close(state: &mut HostState, block_id:
 /// PR #5 — sole pane registration entry point. Replaces
 /// `pane::lifecycle::PaneStateMachine::try_register_live`.
 ///
-/// - Live entry exists → `AlreadyLive(label)`
-/// - Closing entry exists → `Closing`
-/// - No entry → generate label, insert Live, `Fresh(label)` + emit
-///   `BrowserPaneCreateRequested`
+/// - Live entry exists, create targets the SAME window → `AlreadyLive(label)`
+/// - Live entry exists, create targets a DIFFERENT window (tear-off / redock)
+///   → `AlreadyLiveElsewhere(label)` and stash the pending create for replay
+/// - Closing entry exists → `Closing` (stash pending for replay on close)
+/// - No entry → generate label, insert Live (recording the window), `Fresh(label)`
+///   + emit `BrowserPaneCreateRequested`
 pub(super) fn handle_try_register_browser_pane_live(
     state: &mut HostState,
     block_id: String,
