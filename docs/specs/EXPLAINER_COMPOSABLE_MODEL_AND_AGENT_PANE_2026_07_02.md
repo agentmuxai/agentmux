@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Author:** Agent1
-**Purpose:** Explain the composable agent model (what replaces "preset") in plain terms, and answer a specific question: *the agent pane's two title-bar icons — are they related to this?* **Yes.** This document connects the model to what a user actually touches.
+**Purpose:** Explain the composable agent model (what replaces "preset") in plain terms, connect it to what a user actually touches, and record the **agent-pane header decision**: replace the two icons (brain/Memory + id-card/Identity) with a **single `id-card` icon** opening a unified per-agent management modal (Accounts · Memory · MCP · Skills · Briefs · Bundle). See §4.
 **Companion docs:** `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the merged decision), `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (the implementation phases), `docs/specs/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (the umbrella rename).
 
 ---
@@ -41,11 +41,11 @@ There are two surfaces, and they play different roles:
 - **The Armory** (formerly "Trust Center") — the **library**. Where you *define and manage* primitives across all agents: Accounts, Memories, MCP Servers, Skills, Briefs, and Bundles. Global vs. agent-owned sharing lives here. Reached from the hamburger (≡) → Armory.
 - **The Agent Pane** — the **per-agent quick access**. Its title-bar icons let you jump straight to *this agent's* slice of the model without opening the whole Armory.
 
-So: Armory = manage the whole catalog; Agent pane icons = "what is THIS agent using, right now."
+So: Armory = manage the whole catalog; Agent pane icon = "open THIS agent's setup."
 
-## 4. The agent pane's two icons — the direct answer
+## 4. The agent pane icon — today vs. the decision
 
-The agent pane's title bar renders exactly two icon buttons (`frontend/app/view/agent/agent-model.ts:141`, `endIconButtons`):
+**Today** the agent pane's title bar renders **two** icon buttons (`frontend/app/view/agent/agent-model.ts:141`, `endIconButtons`):
 
 | Icon (today) | Title (today) | Opens | Primitive |
 |--------------|---------------|-------|-----------|
@@ -54,21 +54,27 @@ The agent pane's title bar renders exactly two icon buttons (`frontend/app/view/
 
 That second modal is *already* account management — its tabs are literally **Accounts** and **Assignments** (`frontend/app/view/identity/identity-model.ts:22`). It's only *labeled* "identity."
 
-**So yes — the two icons are Memory and Accounts, and it is the same refactor.** Under the composable model:
-- "Identity" is not a primitive; **Account** is. The `id-card` "Agent identity" button becomes the **Accounts** button (icon `id-card` → `key`, title "Agent identity" → "Accounts"), opening the account-assignment surface it already is.
-- The `brain` "Agent memory" button stays as **Memory** (the model keeps "Memory" as canonical; "brain" is just the nickname).
+### DECISION (product owner, 2026-07-02): consolidate to a **single icon**
 
-That gives the two-icon pane you described: **Memory + Accounts** — the two per-agent primitives you touch most, surfaced right on the pane; the rest (MCP Servers, Skills, Briefs, and Bundles) live in the Armory, reachable when you want to compose or share.
+Replace the two buttons with **one** `id-card` icon that opens a **unified agent-management modal** — the agent's own view over *all* its bound primitives: **Accounts, Memory, MCP Servers, Skills, Briefs** (and its **Bundle**, if any). No separate brain/id-card split; one entry point, "see all your stuff for this agent."
 
-## 5. Should the pane show more than two icons?
+- **Icon:** `id-card` (kept — it reads as "who/what this agent is and carries"). Not `brain`, not `key`.
+- **Title:** e.g. "Agent setup" / "Manage agent" (not "identity" — the modal is broader than identity now).
+- **Modal:** a tabbed surface = the Armory scoped to this agent. Tabs: **Accounts · Memory · MCP · Skills · Briefs · Bundle**. Reuses the Armory's primitive managers, filtered to this agent's bindings, with "add from library / create new" deep-linking to the full Armory.
 
-An open design question (not decided here). Options, once MCP/Skills/Brief are first-class:
+Rationale: with five+ primitives now first-class, a per-primitive icon each would crowd the title bar (§5's rejected option). One icon → one modal keeps the header clean and gives the user a single "what is this agent made of" view — which is exactly the "one-stop shop" the Bundle concept describes, surfaced per-agent.
 
-1. **Keep two** (Memory + Accounts) — the highest-frequency per-agent touchpoints; everything else via the Armory or the agent's Bundle. Least clutter. *(Recommended default.)*
-2. **Add a Bundle button** — one more icon that opens "this agent's Bundle" (its full reference set: accounts + memory + MCP + skills + brief in one view). This matches "a Bundle is the one-stop shop when you want one."
-3. **Surface all primitives** — five/six icons. Powerful but crowds the title bar; better suited to the Armory.
+**Net:** the pane header goes from `brain` + `id-card` → a single `id-card` "Agent setup" button. The Memory modal and the Accounts (née Identity) modal both fold into the unified modal as tabs.
 
-The model doesn't force a choice — because primitives bind directly, the pane can surface as few or as many as makes sense. The natural fit is **Memory + Accounts on the pane** (your two icons), with an optional **Bundle** affordance for "show me this agent's whole loadout."
+## 5. Why one icon, not two or six
+
+Options considered, once MCP/Skills/Brief are first-class:
+
+1. ~~**Keep two** (Memory + Accounts)~~ — still splits related config across two buttons and omits MCP/Skills/Brief.
+2. ~~**Surface all primitives**~~ — five/six icons crowd the title bar; that density belongs in the Armory, not a pane header.
+3. **One icon → unified modal** — **chosen.** A single `id-card` button opens the agent's full setup (all primitives as tabs). Clean header, complete picture, and it mirrors the Bundle "one-stop shop" idea at the per-agent level. Everything remains reachable; nothing is hidden — it's just consolidated behind one affordance instead of scattered across two.
+
+Because primitives bind directly, the modal simply lists what this agent is bound to, tab by tab; the Armory remains the place to define/share primitives across agents.
 
 ## 6. How this maps to the refactor phases
 
@@ -76,10 +82,10 @@ From `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`:
 
 - **Phase 1 (shipped):** MCP Servers + Skills became first-class primitives (`mcp.*`/`skill.*` App API).
 - **Phase 2 (in flight):** "Preset" → "Bundle" at the UI + App API layer.
-- **Phase 3 (needs product decisions):** collapse the identity-bundle layer → **Account-direct**; "Identity" becomes a derived view; the resolver moves to `instance/bundle → account`. **This is the phase that turns the pane's `id-card` "identity" button into the `key` "Accounts" button.**
+- **Phase 3 (needs product decisions):** collapse the identity-bundle layer → **Account-direct**; "Identity" becomes a derived view; the resolver moves to `instance/bundle → account`. **This is the phase that consolidates the pane header to a single `id-card` "Agent setup" button opening the unified management modal (§4 decision)** — the Memory and Accounts modals fold in as tabs alongside MCP / Skills / Briefs / Bundle.
 - **Phase 4:** storage rename (`db_memory_bundles → db_bundles`, `db_identity_accounts → db_accounts`, `db_identity_bundles` removed) — the honest end-state where "bundle" means exactly one thing.
 
-So the "Memory + Accounts" pane you're picturing is the **Phase 3 UI outcome**: the pane already opens the account surface; Phase 3 renames it from "Identity" to "Accounts" and makes the data model match.
+So the single-icon **Agent setup** pane is the **Phase 3 UI outcome**: the pane already opens the account surface (as "identity"); Phase 3 unifies it with Memory (and the other primitives) behind one modal and makes the data model match. Implementation note for Phase 3: in `agent-model.ts` `endIconButtons`, replace the two-button array with a single `id-card` button whose `click` opens the unified modal; retire `_openMemoryModal` / `_openIdentityModal` in favor of one `_openAgentSetupModal` (or reuse the Armory's tabbed manager scoped to the agent).
 
 ## 7. Open product decisions this depends on (proposal §9)
 
