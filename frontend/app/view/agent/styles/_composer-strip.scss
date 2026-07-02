@@ -38,7 +38,13 @@
     flex-shrink: 0;
 }
 
+// The drop-up trigger. Same slim pill as the former <select>, but a <button>
+// laying out a label + up-caret; the popup is a portaled FlyoutMenu (see below).
 .agent-composer-strip-select {
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 3px;
     appearance: none;
     -webkit-appearance: none;
     background: transparent;
@@ -69,10 +75,44 @@
         outline: 2px solid var(--accent-color);
         outline-offset: 1px;
     }
+}
 
-    option {
-        background: var(--main-bg-color, #222);
-        color: var(--main-text-color);
+.agent-composer-strip-select-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-composer-strip-select-caret {
+    font-size: 8px;
+    line-height: 1;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+// The drop-up popup itself (portaled to <body> by FlyoutMenu, so this is a
+// top-level global rule). Inherits the app's clean `.menu` chrome — the whole
+// point of ditching the native <select> — and just tightens rows to strip
+// scale so each entry matches the collapsed control's height/style.
+.menu.strip-flyout {
+    min-width: 0;
+    font-size: 10px;
+
+    .menu-item {
+        padding: 2px var(--space-1-5);
+        min-height: 0;
+    }
+
+    // Effort: options in a single horizontal row of equal-height chips.
+    &.strip-flyout--horizontal {
+        display: flex;
+        flex-direction: row;
+        gap: 2px;
+
+        .menu-item {
+            white-space: nowrap;
+            justify-content: center;
+        }
     }
 }
 
