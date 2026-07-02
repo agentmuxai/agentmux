@@ -137,6 +137,25 @@ host's existing `shadow_*` fields are the reference pattern (read-only projectio
 This demotion = Pillar 2 Stage 3 (demote `orphan_reconcile` + WRR to pure executors) + Pillar 1 (host
 topology becomes a projection).
 
+## 7b. Clarification (2026-07-02) — the intent-flip is NOT on Pillar 1's critical path
+Two goals were traveling together and must be separated:
+
+- **Disposable host (Pillar 1)** needs srv to be a **coherent single source of truth** for layout, so a
+  reprojecting host reads consistent state (not a raced/stale tree). That is satisfied by the **WEAK
+  single-writer**: retire the wcore-direct write path and route the frontend's full-tree push through the
+  reducer (`LayoutSetTree` carrying the computed tree), so the reducer's in-memory `TabRecord` stays
+  authoritative and matches `db_layout`. The frontend keeps **computing** the tree; there is **one write
+  path**. That is *all* Pillar 1 requires.
+- **Strong reducer-authority** (the intent-flip: frontend sends **intents**, the layout *algebra* lives in
+  srv/the durable tier) additionally moves the **logic** out of the disposable renderer. This is
+  architectural purity — valuable, and earlier decided "critical, not optional" (§7a spirit) — but it is
+  **above-and-beyond disposability, not on its critical path.**
+
+**Implication:** for the disposable-host goal, prefer the **weak cutover** (UpdateObject→`LayoutSetTree`,
+delete wcore-direct + `heal_layout`) — smaller, lower-risk, finishes #864's *coherence* requirement and
+unblocks Pillar 1. The full intent-flip (strong) can follow later, or be skipped, if only disposability
+matters. Pick per priority: **disposability → weak cutover; architectural purity → intent-flip.**
+
 ## 8. Next steps — see §"Best next steps" in the closing discussion / `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR` §6.
 Sequence: **Pillar 2 (wire `reconcile_quit`)** → **Pillar 3 (admission control)** → **Pillar 1 (host
 reproject)** → saga collapse + persistence pay-down (#864, agents Phase 3b/3c). Add the missing E2E
