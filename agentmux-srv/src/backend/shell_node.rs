@@ -13,7 +13,7 @@
 //! PTY support is a Phase 3 follow-up that requires portable-pty wiring
 //! similar to the existing ShellController).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -52,13 +52,23 @@ struct ShellEntry {
 /// Per-shell stop handles + status. `ShellStop` fires the oneshot; `ShellInput`
 /// sends to the stdin relay; `ShellStatus` reads the live status arc.
 /// Lives in `AppState.shell_sessions`.
+/// Max number of EXITED shell statuses retained for post-exit ShellStatus
+/// queries. Running shells are always kept regardless of this cap; only
+/// exited entries beyond it are evicted oldest-first. Bounds memory for
+/// long-lived sidecars that spawn many short shells.
+const MAX_EXITED_STATUS: usize = 512;
+
 #[derive(Default)]
 pub struct ShellSessionRegistry {
     shells: Mutex<HashMap<String, ShellEntry>>,
     // Status entries persist after exit so ShellStatus can query final
-    // exit_code/line_count. Bounded growth: one entry per shell per session.
-    // stop_all() clears everything on srv shutdown.
+    // exit_code/line_count. Exited entries are capped at MAX_EXITED_STATUS
+    // (oldest-first eviction via status_order); running entries are never
+    // evicted. stop_all() clears everything on srv shutdown.
     status_map: Mutex<HashMap<String, Arc<Mutex<ShellStatusInfo>>>>,
+    // Spawn-order queue of shell_ids, used to evict the oldest exited status
+    // entries first when over the cap.
+    status_order: Mutex<VecDeque<String>>,
 }
 
 impl ShellSessionRegistry {
@@ -81,7 +91,40 @@ impl ShellSessionRegistry {
         status: Arc<Mutex<ShellStatusInfo>>,
     ) {
         self.shells.lock().insert(shell_id.clone(), ShellEntry { stop_tx, stdin_tx });
-        self.status_map.lock().insert(shell_id, status);
+        self.status_map.lock().insert(shell_id.clone(), status);
+        self.status_order.lock().push_back(shell_id);
+        // Bound retained exited statuses; every spawn is a natural prune trigger.
+        self.prune_exited_statuses();
+    }
+
+    /// Evict oldest EXITED status entries beyond `MAX_EXITED_STATUS`. Running
+    /// shells are always retained (their status is read live via ShellStatus).
+    /// Also drops any order-queue ids whose status entry is already gone.
+    fn prune_exited_statuses(&self) {
+        let mut map = self.status_map.lock();
+        let mut order = self.status_order.lock();
+        let mut exited = map
+            .values()
+            .filter(|arc| !arc.lock().running)
+            .count();
+        let mut i = 0;
+        while exited > MAX_EXITED_STATUS && i < order.len() {
+            let id = order[i].clone();
+            match map.get(&id) {
+                // Exited entry over the cap → evict it.
+                Some(arc) if !arc.lock().running => {
+                    map.remove(&id);
+                    order.remove(i);
+                    exited -= 1;
+                }
+                // Still running → keep in place, advance.
+                Some(_) => i += 1,
+                // Stale order id (already removed) → drop from queue.
+                None => {
+                    order.remove(i);
+                }
+            }
+        }
     }
 
     /// Request stop of a running shell. Returns false if unknown or already exited.
@@ -111,6 +154,7 @@ impl ShellSessionRegistry {
     /// Stop every running shell. For srv-shutdown cleanup.
     pub fn stop_all(&self) -> usize {
         self.status_map.lock().clear();
+        self.status_order.lock().clear();
         let drained: Vec<_> = self.shells.lock().drain().map(|(_, e)| e.stop_tx).collect();
         let n = drained.len();
         for tx in drained {
@@ -455,6 +499,45 @@ mod tests {
         reg.stop_all();
         assert!(rx1.await.is_ok());
         assert!(rx2.await.is_ok());
+    }
+
+    fn register_exited(reg: &ShellSessionRegistry, id: &str, running: bool) {
+        let (tx, _rx) = oneshot::channel::<()>();
+        let status = Arc::new(Mutex::new(ShellStatusInfo {
+            running,
+            exit_code: if running { None } else { Some(0) },
+            line_count: 1,
+        }));
+        // _rx is intentionally dropped; we only exercise the status-map cap.
+        reg.register_full(id.to_string(), tx, None, status);
+    }
+
+    #[tokio::test]
+    async fn exited_statuses_are_capped_oldest_first() {
+        let reg = ShellSessionRegistry::new();
+        let total = MAX_EXITED_STATUS + 10;
+        for i in 0..total {
+            register_exited(&reg, &format!("s{i}"), false);
+        }
+        // Never exceeds the cap.
+        assert_eq!(reg.status_map.lock().len(), MAX_EXITED_STATUS);
+        // Oldest 10 evicted → get_status returns default (exit_code None).
+        assert!(reg.get_status("s0").exit_code.is_none());
+        assert!(reg.get_status("s9").exit_code.is_none());
+        // Newest retained with its real exit code.
+        assert_eq!(reg.get_status(&format!("s{}", total - 1)).exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn running_statuses_are_never_evicted() {
+        let reg = ShellSessionRegistry::new();
+        let total = MAX_EXITED_STATUS + 5;
+        for i in 0..total {
+            register_exited(&reg, &format!("r{i}"), true); // all running
+        }
+        // Running shells exceed the exited cap but none are evicted.
+        assert_eq!(reg.status_map.lock().len(), total);
+        assert!(reg.get_status("r0").running);
     }
 }
 
