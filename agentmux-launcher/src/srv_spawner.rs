@@ -380,7 +380,7 @@ pub async fn spawn_srv(
                 return Err(SrvSpawnError::JobAssignFailed(e));
             }
         }
-        if let Err(e) = crate::resume_main_thread(pid) {
+        if let Err(e) = crate::host_spawn::resume_main_thread(pid) {
             let _ = child.start_kill();
             return Err(SrvSpawnError::ResumeFailed(e));
         }
