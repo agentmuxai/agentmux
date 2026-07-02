@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.49.11 — 2026-07-02
+
+- chore(providers): pin Claude Code CLI to 2.1.198 (latest)
+- feat(agent): versioned, registry-driven model dropdowns (Opus 4.8 / Sonnet 4.6 / Haiku 4.5), sourced from the provider registry
+- fix(agent-log): one-toggle Log — remove the middle collapse layer
+
 ## 0.49.10 — 2026-06-30
 
 - fix(agent-pane): watchdog recovers a stalled rate-limited turn past retryAfterMs + liveness window
