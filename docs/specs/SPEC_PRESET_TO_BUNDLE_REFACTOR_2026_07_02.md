@@ -75,6 +75,15 @@ The proposal's "one real refactor" (§3.3, §7). Today: `instance → identity_b
 - Commands `listidentitybundles` / `getidentitybundle` / `upsertidentitybundle` / `deleteidentitybundle` / `bindidentityaccount` / `unbindidentityaccount` / `listidentitybindings` (commands.rs 164–170, incl. `COMMAND_DELETE_IDENTITY_BUNDLE` at 167) → mark deprecated; keep read paths for the compat window, stop new writes.
 - Trust Center: the **Identities** tab becomes a **derived view** ("what is this agent running as" over bound Accounts) — no stored identity-bundle object. Per the proposal IA (§5) there is **no Identities tab** in the target; fold it into the Accounts + Bundle surfaces. (This is a UI change — confirm the exact interim: hide the tab, or convert to read-only derived view for one release.)
 
+### 3.2b Agent-pane header: consolidate to a single icon (product-owner decision 2026-07-02)
+
+Replace the agent pane's **two** title-bar icons (`brain`/"Agent memory" + `id-card`/"Agent identity") with **one `id-card` icon** that opens a **unified per-agent management modal** — a tabbed surface over all of this agent's bound primitives: **Accounts · Memory · MCP · Skills · Briefs · Bundle** (the Armory, scoped to this agent). Details + rationale in `EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` §4.
+
+Implementation:
+- `frontend/app/view/agent/agent-model.ts` `endIconButtons` (~line 141): replace the two-button array with a single `id-card` button (title "Agent setup"/"Manage agent") whose `click` opens the unified modal.
+- Retire `_openMemoryModal` / `_openIdentityModal` (agent-model.ts:36-37, agent-view.tsx wiring) in favor of one `_openAgentSetupModal`, or reuse the Armory's tabbed manager component filtered to the agent's bindings with "add from library / create new" deep-linking to the full Armory.
+- Keep the icon as `id-card` (reads as "who/what this agent is + carries"); not `brain`, not `key`.
+
 ### 3.3 Data backfill
 
 - Migrate existing `db_identity_bundles` + `db_identity_bindings` rows into **direct account bindings** on the owning agent/Bundle before the tables are dropped in Phase 4. A one-shot migration reads each bundle's bindings and writes equivalent direct bindings.
