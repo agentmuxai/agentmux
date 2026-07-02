@@ -150,6 +150,45 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.sessionStats).toMatchObject({ input_tokens: 70000, output_tokens: 512 });
         });
 
+        // SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md — sessionTotals must
+        // accumulate across turns while sessionStats (per-turn) resets.
+        it("TurnEnd accumulates sessionTotals across multiple turns, unlike per-turn sessionStats", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, {
+                type: "TurnEnd",
+                stats: { input_tokens: 100, output_tokens: 50, cost_usd: 0.01 } as any,
+            }).state;
+            expect(s2.sessionStats).toMatchObject({ input_tokens: 100, output_tokens: 50, cost_usd: 0.01 });
+            expect(s2.sessionTotals).toMatchObject({
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_usd: 0.01,
+                num_turns: 1,
+            });
+
+            // Second query in the same pane — per-turn stats reset on
+            // TurnStart and are replaced (not summed) on TurnEnd, but
+            // sessionTotals must add on top of the first turn's totals.
+            const s3 = update(s2, { type: "TurnStart", at: 200 }).state;
+            expect(s3.sessionStats).toBe(null);
+            expect(s3.sessionTotals).toMatchObject({ input_tokens: 100, output_tokens: 50, cost_usd: 0.01 });
+
+            const s4 = update(s3, {
+                type: "TurnEnd",
+                stats: { input_tokens: 30, output_tokens: 20, cost_usd: 0.002 } as any,
+            }).state;
+            // Per-turn: only reflects this second query.
+            expect(s4.sessionStats).toMatchObject({ input_tokens: 30, output_tokens: 20, cost_usd: 0.002 });
+            // Running total: sum of both queries.
+            expect(s4.sessionTotals).toMatchObject({
+                input_tokens: 130,
+                output_tokens: 70,
+                cost_usd: expect.closeTo(0.012, 10),
+                num_turns: 2,
+            });
+        });
+
         it("TurnReset clears turn-scoped state but keeps subscription + pending", () => {
             const s0 = ready(100);
             const s1 = update(s0, {
@@ -167,6 +206,19 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.pending).toHaveLength(1); // preserved
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnPhase.kind).toBe("Idle");
+        });
+
+        it("TurnReset clears accumulated sessionTotals (session wipe)", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            const s2 = update(s1, {
+                type: "TurnEnd",
+                stats: { input_tokens: 100, output_tokens: 50, cost_usd: 0.01 } as any,
+            }).state;
+            expect(s2.sessionTotals).not.toBeNull();
+            const r = update(s2, { type: "TurnReset" });
+            expect(r.state.sessionStats).toBe(null);
+            expect(r.state.sessionTotals).toBe(null);
         });
     });
 

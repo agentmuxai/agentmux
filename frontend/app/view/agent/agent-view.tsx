@@ -212,6 +212,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             projections: {
                 streaming: a.streamingStateAtom[1],
                 sessionStats: a.sessionStatsAtom[1],
+                sessionTotals: a.sessionTotalsAtom[1],
                 currentTool: a.currentToolAtom[1],
                 turnTokens: a.turnTokensAtom[1],
                 contextTokens: a.contextTokensAtom[1],
@@ -981,7 +982,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     status.isLoading()
                     || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
                 }
-                sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                sessionTotals={agentAtoms().sessionTotalsAtom[0]()}
                 turnTokens={agentAtoms().turnTokensAtom[0]()}
                 processCount={processCount()}
                 onProcessBadgeClick={() => {

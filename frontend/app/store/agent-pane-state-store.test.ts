@@ -36,6 +36,7 @@ function noopProj(): AgentPaneProjections {
     return {
         streaming: () => {},
         sessionStats: () => {},
+        sessionTotals: () => {},
         currentTool: () => {},
         turnTokens: () => {},
         pending: () => {},

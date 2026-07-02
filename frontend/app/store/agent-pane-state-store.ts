@@ -41,6 +41,8 @@ import { type CommandSource, recordDispatch } from "./command-source";
 export interface AgentPaneProjections {
     streaming: (next: StreamingState) => void;
     sessionStats: (next: SessionStats | null) => void;
+    /** Cumulative session totals — see SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md. */
+    sessionTotals: (next: SessionStats | null) => void;
     currentTool: (next: string | null) => void;
     turnTokens: (next: TurnTokens | null) => void;
     pending: (next: PendingMessage[]) => void;
@@ -188,6 +190,7 @@ export function dispatch(
     };
     proj("streaming", prev.streaming, slot.state.streaming, slot.proj.streaming);
     proj("sessionStats", prev.sessionStats, slot.state.sessionStats, slot.proj.sessionStats);
+    proj("sessionTotals", prev.sessionTotals, slot.state.sessionTotals, slot.proj.sessionTotals);
     proj("currentTool", prev.currentTool, slot.state.currentTool, slot.proj.currentTool);
     proj("turnTokens", prev.turnTokens, slot.state.turnTokens, slot.proj.turnTokens);
     proj("contextTokens",
