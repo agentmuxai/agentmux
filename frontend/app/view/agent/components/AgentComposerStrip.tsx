@@ -5,13 +5,15 @@
  * AgentComposerStrip — slim 28-32px status row that sits directly above
  * the textarea in the agent pane composer region.
  *
- * LEFT:  Model <select> · Effort <select> · Log toggle button
+ * LEFT:  Mode <select> · Model <select> · Effort <select> · Log toggle
  * RIGHT: tokens (↑in ↓out) · elapsed · ⚙N process badge ·
- *        permission pill · context text (12.1k / 64k)
+ *        context text (12.1k / 64k)
  *
  * The strip bar itself is not clickable. "Log" is the sole toggle for
  * the ActivityLogPanel. Chevron and shell history panel removed per
- * SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md.
+ * SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md. Mode/Model/Effort are
+ * top-level dropdowns here (Mode was previously a read-only pill + a nested
+ * control in the Log region) per SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.
  */
 
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
@@ -23,14 +25,6 @@ import { getProvider } from "../providers";
 import type { AgentRuntimeConfig, EffortLevel, ModelChoice, PermissionMode, SessionStats, TurnTokens } from "../types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
-
-const PERMISSION_LABELS: Record<PermissionMode, string> = {
-    bypass: "Bypass",
-    auto: "Auto",
-    acceptEdits: "Accept Edits",
-    plan: "Plan",
-    default: "Default",
-};
 
 const PERMISSION_COLORS: Record<PermissionMode, string> = {
     bypass: "var(--error-color, #ef4444)",
@@ -105,8 +99,6 @@ interface AgentComposerStripProps {
     processCount?: number;
     /** Fires when the user clicks the ⚙N process badge. */
     onProcessBadgeClick?: () => void;
-    /** Permission mode — renders a color-coded pill when not `auto`. */
-    permissionMode?: PermissionMode;
     /** Reducer-projected: activity log panel open/closed. */
     logOpen: boolean;
     /** Dispatches `DetailsToggle` to the pane reducer. */
@@ -159,17 +151,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return parts.join("  ·  ");
     });
 
-    const hasOwn = Object.prototype.hasOwnProperty;
-    const showPermissionPill = (): boolean => {
-        const m = props.permissionMode;
-        return m != null && m !== "auto" && hasOwn.call(PERMISSION_LABELS, m);
-    };
-
-    // Model/effort — derived from blockAtom meta when available.
+    // Mode/model/effort — derived from blockAtom meta when available.
     const runtime = () =>
         props.blockAtom ? getRuntimeConfig(props.blockAtom()?.meta) : null;
 
-    const updateRuntime = async (patch: { model?: ModelChoice; effort?: EffortLevel }): Promise<void> => {
+    const updateRuntime = async (patch: { permissionMode?: PermissionMode; model?: ModelChoice; effort?: EffortLevel }): Promise<void> => {
         const r = runtime();
         if (!r || !props.blockId || !props.providerId) return;
         try {
@@ -210,13 +196,33 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             class="agent-composer-strip"
             classList={{ "agent-composer-strip--expanded": props.logOpen }}
         >
-            {/* Controls zone — model/effort selects + Log button */}
+            {/* Controls zone — mode/model/effort selects + Log button.
+                All three runtime controls now live here at the strip's top
+                level (Mode was previously a read-only pill + a nested control
+                inside the Log details region — see
+                SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02). Each reads its
+                value from `runtime()` (which falls back to
+                DEFAULT_RUNTIME_CONFIG), so the displayed state matches the
+                flags the agent actually runs with from first paint. */}
             <span class="agent-composer-strip-controls">
                 <Show when={showControls()}>
                     <select
-                        class="agent-composer-strip-select"
-                        title="Model"
-                        value={runtime()?.model}
+                        class="agent-composer-strip-select agent-composer-strip-select--mode"
+                        title="Permission mode — how the agent asks before running tools. Applies on the next turn."
+                        style={{ "border-left": `3px solid ${PERMISSION_COLORS[runtime()?.permissionMode ?? "default"]}` }}
+                        prop:value={runtime()?.permissionMode ?? "default"}
+                        onChange={(e) => void updateRuntime({ permissionMode: e.currentTarget.value as PermissionMode })}
+                    >
+                        <option value="bypass">Bypass (no prompts)</option>
+                        <option value="auto">Auto (AI classifier)</option>
+                        <option value="acceptEdits">Accept Edits</option>
+                        <option value="plan">Plan (read-only)</option>
+                        <option value="default">Default (prompt all)</option>
+                    </select>
+                    <select
+                        class="agent-composer-strip-select agent-composer-strip-select--model"
+                        title="Model — which model the agent uses. Applies on the next turn."
+                        prop:value={runtime()?.model}
                         onChange={(e) => void updateRuntime({ model: e.currentTarget.value as ModelChoice })}
                     >
                         {/* Registry-driven (single source shared with the /model
@@ -228,9 +234,9 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         ))}
                     </select>
                     <select
-                        class="agent-composer-strip-select"
-                        title="Effort"
-                        value={runtime()?.effort}
+                        class="agent-composer-strip-select agent-composer-strip-select--effort"
+                        title="Reasoning effort — how hard the model thinks per turn. Applies on the next turn."
+                        prop:value={runtime()?.effort}
                         onChange={(e) => void updateRuntime({ effort: e.currentTarget.value as EffortLevel })}
                     >
                         {EFFORT_OPTIONS.map((o) => (
@@ -242,14 +248,14 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     type="button"
                     class="agent-composer-strip-log-btn"
                     classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
-                    title={props.logOpen ? "Close activity log" : "Open activity log"}
+                    title={props.logOpen ? "Hide the activity log" : "Show the activity log (launch, tools, errors)"}
                     onClick={() => props.onToggleLog()}
                 >
                     Log
                 </button>
             </span>
 
-            {/* Right zone — stats + permission + context text */}
+            {/* Right zone — stats + process badge + context text */}
             <span class="agent-composer-strip-right">
                 <Show when={rightText()}>
                     <span class="agent-composer-strip-stats">{rightText()}</span>
@@ -265,15 +271,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         <span aria-hidden="true">⚙</span>
                         <span>{props.processCount}</span>
                     </button>
-                </Show>
-                <Show when={showPermissionPill()}>
-                    <span
-                        class="agent-composer-strip-perm-pill"
-                        style={{ color: PERMISSION_COLORS[props.permissionMode!] }}
-                        title={`Permission mode: ${PERMISSION_LABELS[props.permissionMode!]}`}
-                    >
-                        {PERMISSION_LABELS[props.permissionMode!]}
-                    </span>
                 </Show>
                 <Show when={ctxText()}>
                     <span
