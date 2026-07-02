@@ -34,6 +34,8 @@ mod session;
 mod identity;
 mod preset;
 mod memory;
+mod skill;
+mod mcp;
 
 /// Register all App API handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -46,6 +48,8 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     identity::register(engine, state);
     preset::register(engine, state);
     memory::register(engine, state);
+    skill::register(engine, state);
+    mcp::register(engine, state);
 }
 
 /// Core `pane.open` logic, shared by the WebSocket RPC handler
@@ -793,6 +797,14 @@ pub(super) fn check_s1(ctx: &RpcContext, req_agent_id: &str) -> Result<(), Strin
         return Err("FORBIDDEN: agent_id mismatch".to_string());
     }
     Ok(())
+}
+
+/// Current unix time in milliseconds (0 if the clock is before the epoch).
+pub(super) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Parse + validate a saved per-agent `ui:zoom` content blob for seeding a new

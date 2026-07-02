@@ -452,13 +452,60 @@ pub(super) fn write_agent_config_files(
             .or_insert(global_block);
     }
 
-    let config_files = crate::backend::agent_config::build_config_files(
+    // v1 skills: globals are always injected; the agent's OWN ref-bound skills
+    // are authoritative when present, otherwise fall back to legacy
+    // db_agent_skills. The fallback decision is gated on *own* refs only — NOT
+    // the global-inclusive list — so adding a global skill never discards a
+    // legacy-only agent's skills.
+    let visible_skills = wstore.skill_list(&agent.id).unwrap_or_default(); // own refs + globals
+    let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
+    let effective_skills: Vec<crate::backend::storage::AgentSkill> = if has_own_skill_refs {
+        // Ref-based path: own bound + globals (the full visible list).
+        crate::backend::agent_config::skills_to_agent_skills(&visible_skills, &agent.id)
+    } else {
+        // Legacy path: keep legacy skills, then inject globals on top.
+        // `visible_skills` here contains only globals (no own refs).
+        let mut merged = skills;
+        merged.extend(crate::backend::agent_config::skills_to_agent_skills(&visible_skills, &agent.id));
+        merged
+    };
+
+    let mut config_files = crate::backend::agent_config::build_config_files(
         &content_map,
-        &skills,
+        &effective_skills,
         &agent.name,
         &agent.id,
         agent_slug,
     );
+
+    // v1 MCP: same rule. Globals + synthetic "agentmux" are always emitted; the
+    // legacy blob's user servers are merged in ONLY when the agent has no own
+    // ref-bound servers (so a global server never wipes a legacy-only agent's
+    // .mcp.json). When the agent has own refs, those are authoritative.
+    let visible_mcp = wstore.mcp_server_list(&agent.id).unwrap_or_default(); // own refs + globals
+    let has_own_mcp_refs = visible_mcp.iter().any(|s| !s.is_global);
+    if !visible_mcp.is_empty() {
+        let blob_for_merge = if has_own_mcp_refs {
+            None
+        } else {
+            content_map.get("mcp").map(|s| s.as_str())
+        };
+        if let Some(mcp_json) = crate::backend::agent_config::build_mcp_config_from_refs(
+            &visible_mcp,
+            blob_for_merge,
+            agent_slug,
+            &agent.agent_bus_id,
+        ) {
+            if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
+                config_files[pos].content = mcp_json;
+            } else {
+                config_files.push(crate::backend::agent_config::AgentConfigFile {
+                    filename: ".mcp.json".to_string(),
+                    content: mcp_json,
+                });
+            }
+        }
+    }
 
     // Expand ~ in work_dir
     let expanded_dir = if work_dir.starts_with("~/") || work_dir == "~" {
