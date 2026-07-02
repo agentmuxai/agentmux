@@ -153,7 +153,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // stays alive for the paste. See docs / run_cli_login_pty.
         requiresLoginTty: true,
         npmPackage: "@anthropic-ai/claude-code",
-        pinnedVersion: "2.1.185",
+        // Keep in sync with agentmux-srv/src/backend/providers.rs `pinned_version`.
+        pinnedVersion: "2.1.198",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
