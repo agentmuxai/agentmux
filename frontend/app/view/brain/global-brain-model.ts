@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBrainViewModel — drives the Trust Center "Brain" tab: the
+// GlobalBrainViewModel — drives the Armory "Brain" tab: the
 // workspace-wide global brain that every agent inherits at launch.
 //
 // A "section" is a Memory bundle with is_global=true. The global brain is

@@ -269,6 +269,30 @@ impl BrowserPaneManager {
                 }
                 Ok(())
             }
+            RegisterResult::AlreadyLiveElsewhere(label) => {
+                // Cross-window move (tear-off / redock): the block is Live in a
+                // DIFFERENT window. The reducer stashed our pending create;
+                // close the old pane now. Its close-completion (CompleteBrowserPaneClose
+                // / DrainBrowserPaneByLabel) drains the entry and replays the
+                // stashed create as `Fresh` in the requested window — so the
+                // browser reappears in the new (floating) window instead of the
+                // requested window rendering black. See
+                // ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK_2026_06_15 §2.
+                tracing::info!(
+                    block_id,
+                    old_label = %label,
+                    requested_window = %window_label,
+                    rect = ?(rect.x, rect.y, rect.width, rect.height),
+                    "browser pane create is a cross-window move — closing old pane; reducer will replay create in requested window"
+                );
+                crate::browser_pane::trace::pane_trace(
+                    block_id,
+                    "create-cross-window-move",
+                    &format!("old_label={label} requested_win={window_label}"),
+                );
+                self.close(block_id, state);
+                Ok(())
+            }
             RegisterResult::Closing => {
                 // Old CEF Browser mid-teardown — don't overwrite (its
                 // on_before_close → DrainBrowserPaneByLabel would evict the NEW

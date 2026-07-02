@@ -208,7 +208,7 @@ pub enum ResolverError {
     OAuthConfigDirNotASecret,
 
     /// The OS keychain read failed (no entry, locked store, or no Secret
-    /// Service agent). Trust Center API keys (`SecretRef::Keychain`) live
+    /// Service agent). Armory API keys (`SecretRef::Keychain`) live
     /// in the OS keychain; this surfaces a resolution failure at spawn.
     #[error("keychain error: {0}")]
     KeychainError(String),
@@ -330,7 +330,7 @@ pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
             Err(ResolverError::OAuthConfigDirNotASecret)
         }
         SecretRef::Keychain { account, .. } => {
-            // Trust Center API keys: pull the plaintext from the OS
+            // Armory API keys: pull the plaintext from the OS
             // keychain at spawn time. The account string is
             // `acct:<account_id>`; secret_store reconstructs the key
             // from the id, so strip the namespace prefix here.

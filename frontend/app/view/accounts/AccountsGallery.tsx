@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AccountsGallery — the brand-tile landing for the Trust Center Accounts tab.
+ * AccountsGallery — the brand-tile landing for the Armory Accounts tab.
  * Renders a grid of service logos, each with a badge showing how many accounts
  * are connected for that brand. Clicking a tile opens a small chooser of the
  * brand's auth modes (OAuth / Key); picking one opens the Add-account form

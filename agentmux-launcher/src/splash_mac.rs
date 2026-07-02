@@ -213,7 +213,7 @@ unsafe extern "C" fn should_handle_reopen(
     match REOPEN_TARGET.get() {
         Some((data_dir, dir_hash)) => {
             crate::log("reopen-hook:fired proc=launcher — forwarding open_new_window");
-            crate::forward_open_new_window_or_log(data_dir, dir_hash);
+            crate::second_instance::forward_open_new_window_or_log(data_dir, dir_hash);
         }
         // Reopen fired before the socket was bound (host still starting): the
         // first window is already on its way, so do nothing (SPEC §6.4).

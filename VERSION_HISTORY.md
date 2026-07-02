@@ -1,5 +1,42 @@
 # AgentMux Version History
 
+## 0.49.12 — 2026-07-02
+
+- feat(toolchain): Check latest versions button — fetch latest npm versions for provider CLIs
+- fix(editor): restore preview/source toggle, remove split-screen default
+- feat(mcp): ShellInput + ShellStatus — Phase 3b of persistent shell
+- feat(ui): expand tab palette to 14 colors, add reusable ColorSwatchPalette, and show visual pane color panel on all pane header right-clicks
+- fix(browser-pane): unsubclass HWNDs on pane close to prevent focus storm after switching to external browser
+- fix(floating-pane): relabel promoted pane-pool windows floating-pool-* -> floating-* so the status bar counts them (Windows)
+- feat(jekt): JEKT markers, JektTier enum, sensitive-tier detection, and CLAUDE.md security rules
+- refactor(srv): split agent_handlers into submodules
+- refactor(srv): split app_api into submodules
+- feat(srv): persist the 7 granular layout events via the reducer→subscriber path (carry resulting tree; no algebra re-run)
+- feat(pane): add "Pane Color" context-menu submenu with inline color swatches
+- fix(menu): open hamburger, "More" widget dropdown, flyout menus, and popovers in place over browser/webview panes instead of floating to the window edge
+- refactor(srv): extract store.rs inline tests to submodule
+- refactor(srv): split rpc_types into domain submodules
+- refactor(srv): split service into concern submodules
+- feat(muxbus): point desktop sign-in at branded auth.muxbus.agentmux.ai
+- fix(browser-pane): fix black screen when tearing a browser off into a floating pane (cross-window AlreadyLive race)
+- feat(srv): v1 standalone MCP Server and Skill primitives (Trust Center)
+- refactor(cef): split ui_tasks into category submodules
+- feat(macos): window transparency/opacity via NSWindow alphaValue (Windows parity)
+- refactor(frontend): split rpc-api into domain modules
+- fix(test): acknowledge mcp/skill backend-only handlers in rpc contract baseline
+- refactor(frontend): extract hooks from agent-view
+- chore(providers): pin Claude Code CLI to 2.1.198 (latest)
+- fix(agent-log): Log button expands/collapses the full entries directly (remove middle collapse layer)
+- feat(agent): versioned model labels in the composer dropdowns, sourced from the provider registry
+- refactor(srv): split agent_session into submodules
+- refactor(cef): split client/mod.rs into submodules
+- feat(linux): window transparency/opacity via _NET_WM_WINDOW_OPACITY (Windows/macOS parity)
+- refactor(srv): split shell controller into submodules
+- refactor(launcher): extract main.rs logic into sibling modules
+- fix(launcher): qualify forward_open_new_window_or_log path in splash_mac (macOS build break from #1907)
+- feat(ui): restore Theme and Opacity submenus in hamburger menu
+
+
 ## 0.49.11 — 2026-07-02
 
 - chore(providers): pin Claude Code CLI to 2.1.198 (latest)
