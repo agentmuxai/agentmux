@@ -165,6 +165,14 @@ export type TurnPhase =
 export interface AgentPaneState {
     streaming: StreamingState;
     sessionStats: SessionStats | null;
+    /**
+     * Cumulative cost/tokens/duration across every completed turn in this
+     * pane's lifetime — unlike `sessionStats` (which is replaced, not
+     * accumulated, on each TurnEnd), this sums into the previous value.
+     * Feeds the composer-strip "totals" display near the input. Cleared
+     * only on TurnReset. See SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md.
+     */
+    sessionTotals: SessionStats | null;
     currentTool: string | null;
     /** First significant argument of the active tool (file path, command, etc.).
      *  Cleared alongside currentTool on ToolEnd / TurnEnd / TurnReset. */
@@ -238,6 +246,7 @@ export interface AgentPaneState {
 export const initialState = (agentId: string): AgentPaneState => ({
     streaming: { agentId, bufferSize: 0, lastEventTime: 0 },
     sessionStats: null,
+    sessionTotals: null,
     currentTool: null,
     currentToolArg: null,
     turnTokens: null,
