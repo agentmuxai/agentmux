@@ -5,13 +5,15 @@
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
     // === Activity log panel ===
-    // Collapsible log of per-session diagnostic entries (launch flow,
-    // subprocess lifecycle, slash-command outcomes, errors). Docked
-    // above the composer. Replaces the old always-visible
-    // `.agent-status-log` block that lived at the top of the
-    // conversation. Auto-opens when a new error arrives; otherwise
-    // default-collapsed with a one-line preview of the most recent entry.
-    // See `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
+    // Log of per-session diagnostic entries (launch flow, subprocess
+    // lifecycle, slash-command outcomes, errors). Docked above the
+    // composer and mounted only while the "Log" button is toggled on —
+    // that button is the sole show/hide control, so the panel renders its
+    // full entries list directly (no internal collapse layer). The only
+    // per-entry collapse is click-to-expand truncated ↔ full text.
+    // Replaces the old always-visible `.agent-status-log` block that lived
+    // at the top of the conversation. See
+    // `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
     .agent-activity-log {
         border-top: 1px solid var(--border-color);
         font-family: var(--fixed-font);

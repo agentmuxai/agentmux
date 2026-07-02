@@ -48,7 +48,7 @@ export const ActivityLogPanel = (props: ActivityLogPanelProps): JSX.Element => {
     return (
         <Show when={props.entries().length > 0}>
             <div
-                class="agent-activity-log agent-activity-log--open"
+                class="agent-activity-log"
                 classList={{
                     "agent-activity-log--has-error": lastLevel() === "error",
                     "agent-activity-log--has-warn": lastLevel() === "warn",
