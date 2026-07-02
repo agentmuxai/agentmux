@@ -219,7 +219,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         value={runtime()?.model}
                         onChange={(e) => void updateRuntime({ model: e.currentTarget.value as ModelChoice })}
                     >
-                        {MODEL_OPTIONS.map((o) => (
+                        {/* Registry-driven (single source shared with the /model
+                            command + AgentControlBar); labels carry the versioned
+                            model names. Falls back to the static list if the
+                            provider defines none. */}
+                        {(getProvider(props.providerId)?.models ?? MODEL_OPTIONS).map((o) => (
                             <option value={o.value}>{o.label}</option>
                         ))}
                     </select>
