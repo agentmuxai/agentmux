@@ -90,6 +90,17 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
         if (!panelRef) return;
         const onWheel = (e: WheelEvent) => {
             if (!e.ctrlKey) return;
+            // Only zoom the PREVIEW when the pointer is over the preview body.
+            // Over the file-path header (or anywhere else in the panel), let
+            // Ctrl+wheel bubble through to the pane zoom (term:zoom) — the header
+            // belongs to the pane, not the preview. Without this gate, Ctrl+wheel
+            // over the filename zoomed the preview, and there was no way to zoom
+            // the whole pane while hovering the tool block.
+            const t = e.target as HTMLElement | null;
+            const overPreviewBody =
+                !!t?.closest(".agent-tool-overlay-log") &&
+                !t.closest(".agent-tool-file-path, .agent-tool-file-path-row");
+            if (!overPreviewBody) return; // fall through → pane zoom
             e.preventDefault();
             e.stopPropagation();
             const delta = e.deltaY < 0 ? PREVIEW_ZOOM_STEP : -PREVIEW_ZOOM_STEP;
