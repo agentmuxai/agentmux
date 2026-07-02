@@ -39,7 +39,7 @@ struct SeedMemory {
     #[serde(default)]
     description: String,
     /// When true this bundle is injected into every agent's CLAUDE.md at
-    /// launch (Trust Center global tier). When false it is available in the
+    /// launch (Armory global tier). When false it is available in the
     /// Memory manager but must be selected per-agent.
     #[serde(default)]
     is_global: bool,

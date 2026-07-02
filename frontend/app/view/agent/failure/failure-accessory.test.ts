@@ -81,7 +81,7 @@ describe("failureToRow", () => {
         useExisting?.onClick();
         expect(on._calls.useExistingLogin).toBe(1);
 
-        const trust = action(row, "Trust Center → Accounts");
+        const trust = action(row, "Armory → Accounts");
         expect(trust).toBeTruthy();
         trust?.onClick();
         expect(on._calls.trustCenter).toBe(1);
@@ -107,9 +107,9 @@ describe("failureToRow", () => {
         expect(action(row, "Login Again")).toBeUndefined();
     });
 
-    it("usage_limit → Trust Center is the primary action", () => {
+    it("usage_limit → Armory is the primary action", () => {
         const row = failureToRow(mkFailure({ code: "usage_limit" }), mkView(), mkActions());
-        const trust = action(row, "Trust Center (switch / upgrade)");
+        const trust = action(row, "Armory (switch / upgrade)");
         expect(trust?.primary).toBe(true);
     });
 

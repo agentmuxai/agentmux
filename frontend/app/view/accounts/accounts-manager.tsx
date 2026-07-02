@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // AccountsManager — the context-free Accounts management UI, rendered as the
-// **Accounts** tab of the Trust Center (bundle-manager-modal). Phase 1 of
+// **Accounts** tab of the Armory (bundle-manager-modal). Phase 1 of
 // SPEC_TRUST_CENTER_2026_06_15.md: surface the existing IdentityAccount model
 // app-wide with no backend changes.
 //
@@ -11,7 +11,7 @@
 // blockId/nodeModel it carries for the ViewModel interface are inert here) and
 // composes the already-built `AccountsTab` + `AccountForm` so styling and the
 // add/edit/delete lifecycle come for free. Identity-bundle and Memory
-// management remain in their own Trust Center tabs.
+// management remain in their own Armory tabs.
 //
 // AgentMux Cloud is also surfaced here as a "virtual first-class account": it
 // is a single app-wide session (the `muxbus.*` singleton), NOT a pluralizable

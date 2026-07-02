@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuthConnectPanel — drives a Trust Center service-OAuth connect flow from the
+ * OAuthConnectPanel — drives a Armory service-OAuth connect flow from the
  * Accounts form. The backend (oauth_client.rs + account.oauth.* RPCs) does all
  * the work: it opens the browser / emits a device code, exchanges tokens, and
  * creates the account (keychain-backed). This panel just kicks it off and polls

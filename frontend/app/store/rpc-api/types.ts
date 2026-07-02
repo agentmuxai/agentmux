@@ -5,7 +5,7 @@
 // existing `import { ..., type OAuthFlowStatus } from ".../rpc-api"` keeps working.
 
 /**
- * Wire shape of a Trust Center service-OAuth flow status (account.oauth.*).
+ * Wire shape of a Armory service-OAuth flow status (account.oauth.*).
  * Mirrors `oauth_status_wire()` in agentmux-srv/src/server/agent_handlers.rs.
  *   pending       — flow starting up
  *   url-available — PKCE: open `authUrl` in the browser
