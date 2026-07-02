@@ -146,6 +146,13 @@ pub struct BrowserPaneEntry {
     pub block_id: String,
     pub label: String,
     pub lifecycle: BrowserPaneLifecycle,
+    /// The window this pane was created in (`main`, `floating-<uuid>`, …).
+    /// Used to detect a cross-window move (tear-off / redock): a create
+    /// request whose `window_label` differs from this must NOT be served by
+    /// re-navigating the existing browser in the OLD window (that leaves the
+    /// requested window black). See the `AlreadyLiveElsewhere` handling in
+    /// `reducer/panes.rs` + `browser_panes.rs`.
+    pub window_label: String,
 }
 
 // ── Pane window-placement state (pane-state reducer, Phase 0) ─────────────
@@ -1153,6 +1160,20 @@ impl AppState {
             .get(block_id)
             .filter(|e| e.lifecycle == BrowserPaneLifecycle::Live)
             .map(|e| e.label.clone())
+    }
+
+    /// The window a pane currently lives in (`main`, `floating-<uuid>`, …),
+    /// or `None` if there is no entry. Used to make `browser_pane_close`
+    /// window-aware: a close from a window that no longer owns the pane (e.g.
+    /// the source window's view unmounting after a tear-off moved the pane to a
+    /// floating window) must be ignored, else it destroys the pane that just
+    /// moved. Returns the label regardless of Live/Closing.
+    pub fn browser_pane_window_label(&self, block_id: &str) -> Option<String> {
+        self.host_state
+            .lock()
+            .browser_panes
+            .get(block_id)
+            .map(|e| e.window_label.clone())
     }
 
     /// Snapshot of all `Live` pane labels. Used by `defocus_all` etc.
