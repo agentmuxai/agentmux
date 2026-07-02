@@ -452,13 +452,44 @@ pub(super) fn write_agent_config_files(
             .or_insert(global_block);
     }
 
-    let config_files = crate::backend::agent_config::build_config_files(
+    // v1: prefer standalone skill refs over legacy db_agent_skills when present.
+    let standalone_skills = wstore.skill_list_for_config(&agent.id).unwrap_or_default();
+    let effective_skills: Vec<crate::backend::storage::AgentSkill> = if !standalone_skills.is_empty() {
+        crate::backend::agent_config::skills_to_agent_skills(&standalone_skills, &agent.id)
+    } else {
+        skills
+    };
+
+    let mut config_files = crate::backend::agent_config::build_config_files(
         &content_map,
-        &skills,
+        &effective_skills,
         &agent.name,
         &agent.id,
         agent_slug,
     );
+
+    // v1: if standalone MCP server refs exist, replace .mcp.json with the
+    // ref-built version (always keeps the synthetic "agentmux" entry). Falls
+    // back to the legacy blob path when no refs are bound.
+    let standalone_mcp = wstore.mcp_server_list_for_config(&agent.id).unwrap_or_default();
+    if !standalone_mcp.is_empty() {
+        let mcp_blob = content_map.get("mcp").map(|s| s.as_str());
+        if let Some(mcp_json) = crate::backend::agent_config::build_mcp_config_from_refs(
+            &standalone_mcp,
+            mcp_blob,
+            agent_slug,
+            &agent.agent_bus_id,
+        ) {
+            if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
+                config_files[pos].content = mcp_json;
+            } else {
+                config_files.push(crate::backend::agent_config::AgentConfigFile {
+                    filename: ".mcp.json".to_string(),
+                    content: mcp_json,
+                });
+            }
+        }
+    }
 
     // Expand ~ in work_dir
     let expanded_dir = if work_dir.starts_with("~/") || work_dir == "~" {

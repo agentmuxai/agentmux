@@ -306,6 +306,89 @@ pub fn build_mcp_config(
     }
 }
 
+/// Build `.mcp.json` from standalone McpServer ref rows (v1 composable model).
+///
+/// Always injects the synthetic "agentmux" entry. For each server row the
+/// `config` field is a JSON object that becomes the server value directly —
+/// callers store the full server object (including `"type"`) in that field.
+/// Falls back to `build_mcp_config` with the blob if `servers` is empty.
+pub fn build_mcp_config_from_refs(
+    servers: &[crate::backend::storage::McpServer],
+    user_mcp_blob: Option<&str>,
+    agent_slug: &str,
+    agent_bus_id: &str,
+) -> Option<String> {
+    if servers.is_empty() {
+        return build_mcp_config(user_mcp_blob, agent_slug, agent_bus_id);
+    }
+
+    let mut env_map = serde_json::Map::new();
+    if !agent_slug.is_empty() {
+        env_map.insert("AGENTMUX_AGENT_ID".to_string(), json!(agent_slug));
+    }
+    if !agent_bus_id.is_empty() {
+        env_map.insert("AGENTMUX_AGENT_BUS_ID".to_string(), json!(agent_bus_id));
+    }
+    let agentmux_server = json!({
+        "type": "stdio",
+        "command": "agentmux-mcp",
+        "args": [],
+        "env": Value::Object(env_map),
+    });
+
+    let mut mcp_servers = serde_json::Map::new();
+    mcp_servers.insert("agentmux".to_string(), agentmux_server);
+
+    for server in servers {
+        if server.name == "agentmux" {
+            continue; // synthetic entry wins; user cannot override the key
+        }
+        match serde_json::from_str::<Value>(&server.config) {
+            Ok(cfg) => {
+                mcp_servers.insert(server.name.clone(), cfg);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    id = %server.id,
+                    name = %server.name,
+                    error = %e,
+                    "agent_config: invalid JSON in mcp_server.config; skipping entry"
+                );
+            }
+        }
+    }
+
+    let result = json!({ "mcpServers": Value::Object(mcp_servers) });
+    match serde_json::to_string_pretty(&result) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::error!("agent_config: failed to serialize ref-based MCP config: {e}");
+            None
+        }
+    }
+}
+
+/// Convert standalone Skill records into the AgentSkill shape expected by
+/// `build_config_files`. Used when the v1 ref tables are non-empty.
+pub fn skills_to_agent_skills(
+    skills: &[crate::backend::storage::Skill],
+    agent_id: &str,
+) -> Vec<crate::backend::storage::AgentSkill> {
+    skills
+        .iter()
+        .map(|s| crate::backend::storage::AgentSkill {
+            id: s.id.clone(),
+            agent_id: agent_id.to_string(),
+            name: s.name.clone(),
+            trigger: s.trigger.clone(),
+            skill_type: s.skill_type.clone(),
+            description: s.description.clone(),
+            content: s.content.clone(),
+            created_at: s.created_at,
+        })
+        .collect()
+}
+
 /// Build `.claude/settings.json` content with the auto-injected
 /// PreToolUse Bash hook (under the `"hooks"` key) that redirects
 /// Bash invocations into the streaming wrapper

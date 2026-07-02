@@ -170,7 +170,7 @@ impl Store {
         Ok(rows > 0)
     }
 
-    /// Delete a skill by id. Returns true if a row was deleted.
+    /// Delete a legacy skill by id. Returns true if a row was deleted.
     pub fn agent_skill_delete(&self, id: &str) -> Result<bool, StoreError> {
         let (rows, agent_id) = {
             let conn = self.conn.lock().unwrap();
@@ -196,5 +196,170 @@ impl Store {
             }
         }
         Ok(rows > 0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v1 standalone Skill primitive
+// ---------------------------------------------------------------------------
+
+/// Standalone skill primitive (v1 composable model).
+/// Not bound to a specific agent at rest — agents reference via db_agent_skills_ref.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Skill {
+    pub id: String,
+    pub name: String,
+    pub trigger: String,
+    pub skill_type: String,
+    pub description: String,
+    pub content: String,
+    pub is_global: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl Store {
+    /// List all skills visible to an agent: own (referenced) + global.
+    pub fn skill_list(&self, agent_id: &str) -> Result<Vec<Skill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
+             FROM db_skills
+             WHERE is_global = 1
+                OR id IN (SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?1)
+             ORDER BY is_global DESC, updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |row| {
+            Ok(Skill {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                trigger: row.get(2)?,
+                skill_type: row.get(3)?,
+                description: row.get(4)?,
+                content: row.get(5)?,
+                is_global: row.get::<_, i64>(6)? != 0,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Get a standalone skill by id.
+    pub fn skill_get(&self, id: &str) -> Result<Option<Skill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.query_row(
+            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
+             FROM db_skills WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(Skill {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger: row.get(2)?,
+                    skill_type: row.get(3)?,
+                    description: row.get(4)?,
+                    content: row.get(5)?,
+                    is_global: row.get::<_, i64>(6)? != 0,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            },
+        );
+        match result {
+            Ok(s) => Ok(Some(s)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Sqlite(e)),
+        }
+    }
+
+    /// Upsert a standalone skill. Caller must have already stripped is_global escalation.
+    pub fn skill_upsert(&self, skill: &Skill) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
+               description=excluded.description, content=excluded.content,
+               updated_at=excluded.updated_at",
+            params![
+                skill.id,
+                skill.name,
+                skill.trigger,
+                skill.skill_type,
+                skill.description,
+                skill.content,
+                if skill.is_global { 1i64 } else { 0i64 },
+                skill.created_at,
+                skill.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a standalone skill and purge its ref rows. Returns true if deleted.
+    pub fn skill_delete(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        // Purge ref rows explicitly (FK cascades may be off on some builds).
+        conn.execute("DELETE FROM db_agent_skills_ref WHERE skill_id = ?1", params![id])?;
+        let rows = conn.execute("DELETE FROM db_skills WHERE id = ?1", params![id])?;
+        Ok(rows > 0)
+    }
+
+    /// Bind a skill to an agent (insert ref row). Idempotent.
+    pub fn skill_bind(&self, agent_id: &str, skill_id: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO db_agent_skills_ref (agent_id, skill_id) VALUES (?1, ?2)",
+            params![agent_id, skill_id],
+        )?;
+        Ok(())
+    }
+
+    /// Unbind a skill from an agent. Returns true if a row was removed.
+    pub fn skill_unbind(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_agent_skills_ref WHERE agent_id = ?1 AND skill_id = ?2",
+            params![agent_id, skill_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// List skills for config generation (own refs + globals, same as skill_list).
+    pub fn skill_list_for_config(&self, agent_id: &str) -> Result<Vec<Skill>, StoreError> {
+        self.skill_list(agent_id)
+    }
+
+    /// Return true if the given skill is accessible to the agent (global or bound).
+    /// Used for read and delete access checks.
+    pub fn skill_is_accessible_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_skills
+             WHERE id = ?1 AND (is_global = 1 OR id IN (
+               SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?2
+             ))",
+            rusqlite::params![skill_id, agent_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Return true if the agent has a direct ref binding to this skill (for delete/mutation).
+    /// Global skills are excluded — use the is_global guard separately.
+    pub fn skill_is_bound_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_agent_skills_ref WHERE agent_id = ?1 AND skill_id = ?2",
+            rusqlite::params![agent_id, skill_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 }
