@@ -449,6 +449,7 @@ export function update(
                 state: {
                     ...state,
                     sessionStats: merged,
+                    sessionTotals: accumulateStats(state.sessionTotals, merged),
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
@@ -474,6 +475,7 @@ export function update(
                 state: {
                     ...state,
                     sessionStats: null,
+                    sessionTotals: null,
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
@@ -927,4 +929,25 @@ function mergeStats(
         return { input_tokens: tokens.input, output_tokens: tokens.output };
     }
     return null;
+}
+
+/**
+ * Sum a just-completed turn's merged stats into the pane's running total.
+ * Unlike mergeStats (which replaces sessionStats per turn), this adds —
+ * missing numeric fields are treated as 0, num_turns falls back to 1 per
+ * completed turn so a CLI that omits it still counts as one query.
+ * See SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md.
+ */
+function accumulateStats(
+    totals: AgentPaneState["sessionTotals"],
+    merged: AgentPaneState["sessionStats"],
+): AgentPaneState["sessionTotals"] {
+    if (!merged) return totals;
+    return {
+        cost_usd: (totals?.cost_usd ?? 0) + (merged.cost_usd ?? 0),
+        duration_ms: (totals?.duration_ms ?? 0) + (merged.duration_ms ?? 0),
+        input_tokens: (totals?.input_tokens ?? 0) + (merged.input_tokens ?? 0),
+        output_tokens: (totals?.output_tokens ?? 0) + (merged.output_tokens ?? 0),
+        num_turns: (totals?.num_turns ?? 0) + (merged.num_turns ?? 1),
+    };
 }
