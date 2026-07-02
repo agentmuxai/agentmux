@@ -324,52 +324,21 @@
         }
     }
 
-    .agent-control-bar-header {
+    // === Session actions row ===
+    // The runtime controls (Mode/Model/Effort) that used to live here behind a
+    // "Controls" chevron moved to the top-level composer strip
+    // (SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02). What's left is session
+    // management, rendered directly. These buttons previously had NO styling and
+    // rendered as bare run-together text ("ArchiveExport") — they now read as
+    // real buttons with spacing and hover affordance.
+    .agent-session-row {
         display: flex;
         align-items: center;
-        gap: var(--space-1);
-        padding: 3px var(--space-1-5);
-        cursor: default;
-        user-select: none;
-        color: var(--secondary-text-color);
-
-        &:hover {
-            color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
-        }
-    }
-
-    .agent-control-chevron {
-        font-size: 9px;
-        width: 10px;
-        flex-shrink: 0;
-    }
-
-    .agent-control-summary {
-        display: flex;
-        align-items: center;
-        gap: var(--space-1);
-    }
-
-    .agent-control-nondefault {
-        color: var(--warning-color);
-        font-weight: 700;
-    }
-
-    .agent-control-bar-body {
-        display: flex;
-        flex-wrap: wrap;
         gap: var(--space-2);
-        padding: var(--space-1) var(--space-2) var(--space-1-5) var(--space-4);
+        padding: var(--space-1) var(--space-2) var(--space-1-5);
     }
 
-    .agent-control-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-1);
-    }
-
-    .agent-control-label {
+    .agent-session-row-label {
         color: var(--secondary-text-color);
         font-size: 10px;
         text-transform: uppercase;
@@ -377,24 +346,68 @@
         min-width: 36px;
     }
 
-    .agent-control-select {
-        background: var(--main-bg-color);
-        color: var(--main-text-color);
+    .agent-session-actions {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1-5);
+    }
+
+    // Shared button chrome for every session action (Archive / Export /
+    // Restore / Dismiss), including the copies inside the banners above.
+    .agent-session-btn {
+        appearance: none;
+        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
         border: 1px solid var(--border-color);
         border-radius: 0;
-        padding: var(--space-0-5) var(--space-1);
-        font-size: 11px;
-        font-family: inherit;
+        color: var(--main-text-color);
+        font: inherit;
+        font-size: 10px;
+        padding: 2px var(--space-1-5);
         cursor: default;
         outline: none;
+        white-space: nowrap;
+        transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
 
-        &:hover {
+        &:hover:not(:disabled) {
+            background: color-mix(in srgb, var(--accent-color) 14%, transparent);
             border-color: var(--accent-color);
+            color: var(--main-text-color);
         }
 
-        &:focus {
-            border-color: var(--accent-color);
-            box-shadow: 0 0 0 1px var(--accent-color);
+        &:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 1px;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+    }
+
+    // Archive is mildly destructive (compresses history) — warm accent border.
+    .agent-session-btn-archive:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--warning-color) 16%, transparent);
+        border-color: var(--warning-color);
+    }
+
+    // Archived badge row — matches the interrupted / large-session banners.
+    .agent-archived-banner {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+        border-bottom: 1px solid var(--border-color);
+        font-size: 11px;
+        color: var(--secondary-text-color);
+
+        .agent-archived-label {
+            flex: 1 1 auto;
+            min-width: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 10px;
         }
     }
 
