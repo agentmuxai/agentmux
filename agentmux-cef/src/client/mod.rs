@@ -21,13 +21,13 @@ use crate::state::AppState;
 /// state in one cycle; multiple consecutive crashes always indicate an
 /// unrecoverable state, not transient flakiness. See SPEC_SERVICE_SUPERVISION
 /// prime directive — "bounded recovery; never an infinite restart loop."
-pub(crate) const CRASH_BUDGET: usize = 3;
+const CRASH_BUDGET: usize = 3;
 
 /// Rolling window over which the crash budget is enforced. 10 s catches the
 /// 2026-05-28 incident pattern (108 crashes/sec for 22 min — would have
 /// tripped on the first batch in <30 ms) without false-positiving on a
 /// renderer that genuinely needed 2 retries to stabilise across a minute.
-pub(crate) const CRASH_BUDGET_WINDOW: Duration = Duration::from_secs(10);
+const CRASH_BUDGET_WINDOW: Duration = Duration::from_secs(10);
 
 /// Commit-free (available page file) floor, in MB, below which an OOM renderer
 /// termination is treated as transient SYSTEM memory pressure rather than a
@@ -36,7 +36,7 @@ pub(crate) const CRASH_BUDGET_WINDOW: Duration = Duration::from_secs(10);
 /// the give-up page. A fresh renderer's initial commit is ~100-200 MB; 512 MB
 /// leaves margin so a manual Resume doesn't instantly re-OOM.
 /// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.B/§7.
-pub(crate) const RESUME_FLOOR_MB: u64 = 512;
+const RESUME_FLOOR_MB: u64 = 512;
 
 /// Backstop for the memory-pause path: if a browser enters memory-pause more
 /// than this many times within `MEMORY_PAUSE_WINDOW` — i.e. commit is so
@@ -46,8 +46,8 @@ pub(crate) const RESUME_FLOOR_MB: u64 = 512;
 /// `CRASH_BUDGET`: this path is *expected* to repeat under sustained pressure,
 /// so it must not converge as fast. (Native-overlay handling of total
 /// exhaustion — rendering the paused UI without a renderer — is Phase 1b.)
-pub(crate) const MEMORY_PAUSE_BUDGET: usize = 5;
-pub(crate) const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
+const MEMORY_PAUSE_BUDGET: usize = 5;
+const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 
 mod handlers;
 pub(crate) mod helpers;
@@ -122,25 +122,25 @@ pub fn dlog(msg: &str) {
 
 /// Core handler state shared across all CEF callback interfaces.
 pub struct AgentMuxHandler {
-    pub(crate) browser_list: Vec<Browser>,
-    pub(crate) is_closing: bool,
-    pub(crate) state: Arc<AppState>,
-    pub(crate) ipc_port: u16,
-    pub(crate) is_browser_pane: bool,
+    browser_list: Vec<Browser>,
+    is_closing: bool,
+    state: Arc<AppState>,
+    ipc_port: u16,
+    is_browser_pane: bool,
     /// Per-browser ring of renderer-crash timestamps used by
     /// `on_render_process_terminated` to enforce `CRASH_BUDGET` within
     /// `CRASH_BUDGET_WINDOW`. Keyed by `Browser::identifier()`. Entries
     /// are pruned in-place on each crash event (entries older than the
     /// window are dropped); when a browser closes cleanly its entry is
     /// removed in `on_before_close`.
-    pub(crate) crash_history: HashMap<i32, VecDeque<Instant>>,
+    crash_history: HashMap<i32, VecDeque<Instant>>,
     /// Per-browser ring of memory-pause timestamps (OOM under low system
     /// commit). Separate from `crash_history` so transient system-memory
     /// pressure never trips the wedged-slot crash budget. Bounded by
     /// `MEMORY_PAUSE_BUDGET` within `MEMORY_PAUSE_WINDOW`; pruned in place and
     /// removed on clean close, exactly like `crash_history`.
     /// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.B.
-    pub(crate) memory_pause_history: HashMap<i32, VecDeque<Instant>>,
+    memory_pause_history: HashMap<i32, VecDeque<Instant>>,
 }
 
 impl AgentMuxHandler {
@@ -167,7 +167,7 @@ impl AgentMuxHandler {
     /// defaulting to `main` (the frontend treats a missing label as `main`,
     /// which would re-register/route the recovered window as the wrong one).
     /// (codex P2 on #1229.)
-    pub(crate) fn window_label_for(&self, browser: &mut Browser) -> Option<String> {
+    fn window_label_for(&self, browser: &mut Browser) -> Option<String> {
         self.state
             .list_browsers()
             .into_iter()
@@ -187,7 +187,7 @@ impl AgentMuxHandler {
     /// back to a reconstructed `?ipc_port&ipc_token&windowLabel` URL only when
     /// the frame URL isn't a live app URL (renderer died before committing one,
     /// or it's a prior data: recovery page). codex P2 #1229.
-    pub(crate) fn recovery_target_url(&self, owned: &mut Browser, base_url: &str) -> String {
+    fn recovery_target_url(&self, owned: &mut Browser, base_url: &str) -> String {
         // Only reuse the pre-crash URL if it's on the SAME origin we'd reload
         // from (`base_url`) — that's `http://127.0.0.1:<ipc_port>` for
         // installed/portable and `http://localhost:<vite_port>` for dev, so
