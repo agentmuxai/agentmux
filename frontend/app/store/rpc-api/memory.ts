@@ -1,0 +1,62 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// v7 memory bundles + native (brain) memory files. Split from the original
+// rpc-api.ts.
+
+import { RpcClient } from "../rpc-client";
+
+export const MemoryApi = {
+    ListMemoriesCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<Memory[]> {
+        return client.rpcCall("listmemories", data, opts);
+    },
+
+    GetMemoryCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<Memory> {
+        return client.rpcCall("getmemory", data, opts);
+    },
+
+    UpsertMemoryCommand(
+        client: RpcClient,
+        data: Partial<Memory>,
+        opts?: RpcOpts,
+    ): Promise<Memory> {
+        return client.rpcCall("upsertmemory", data, opts);
+    },
+
+    DeleteMemoryCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("deletememory", data, opts);
+    },
+
+    // `ids` is the full ordered list of global bundle ids.
+    ReorderGlobalBrainCommand(
+        client: RpcClient,
+        data: { ids: string[] },
+        opts?: RpcOpts,
+    ): Promise<{ updated: number }> {
+        return client.rpcCall("reorderglobalbrain", data, opts);
+    },
+
+    NativeMemoryListCommand(client: RpcClient, data: { agent_id: string }, opts?: RpcOpts): Promise<NativeMemoryListResult> {
+        return client.rpcCall("agent:memory:list", data, opts);
+    },
+
+    NativeMemoryReadFileCommand(client: RpcClient, data: { agent_id: string; filename: string }, opts?: RpcOpts): Promise<NativeMemoryReadFileResult> {
+        return client.rpcCall("agent:memory:read_file", data, opts);
+    },
+
+    NativeMemoryWriteFileCommand(client: RpcClient, data: { agent_id: string; filename: string; content: string }, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("agent:memory:write_file", data, opts);
+    },
+};
