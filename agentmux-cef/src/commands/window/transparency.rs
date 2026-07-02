@@ -12,6 +12,14 @@
 // used only by the two setters here. `find_all_own_windows` comes from the
 // sibling `lifecycle` module (the fallback when a label's HWND hasn't been
 // captured yet).
+//
+// Platform mechanisms (uniform whole-window alpha, post-render, stock-CEF-safe):
+//   Windows — WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_ALPHA), inline
+//             (Win32 window-style ops are safe from any thread).
+//   macOS   — [NSWindow setAlphaValue:], via ui_tasks::post_set_window_alpha
+//             (AppKit → must run on the UI thread).
+//   Linux   — not yet implemented (needs _NET_WM_WINDOW_OPACITY; owned by the
+//             Linux track of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01).
 
 use std::sync::Arc;
 
@@ -56,8 +64,22 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
         }
     }
 
+    // macOS — Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01: the
+    // WindowServer analogue of the Win32 layered-window alpha above.
+    // [NSWindow setAlphaValue:] fades the entire finished window (content,
+    // chrome, and shadow) over the desktop — uniform whole-window alpha,
+    // exactly the effect Windows ships. Needs no CEF/renderer cooperation.
+    // Per-pixel ("glass") transparency is the separate patched-libcef track.
+    #[cfg(target_os = "macos")]
+    {
+        let alpha = if transparent { opacity.clamp(0.0, 1.0) } else { 1.0 };
+        crate::ui_tasks::post_set_window_alpha(state, &label, alpha);
+    }
+
     let _ = state;
-    #[cfg(not(target_os = "windows"))]
+    // Linux — still a no-op here: uniform alpha needs _NET_WM_WINDOW_OPACITY
+    // (X11/XWayland); owned by the Linux track of the same spec.
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let _ = (transparent, opacity);
 
     Ok(serde_json::Value::Null)
@@ -149,6 +171,23 @@ pub fn set_window_opacity(
                 } else {
                     tracing::warn!("[opacity] set_window_opacity: no hwnd for label={} (clear)", ev_label);
                 }
+            }
+            _ => {}
+        }
+    }
+
+    // macOS mirror of the Windows arms above — same reducer events, same
+    // both-arms requirement (reagent P1 on #868: matching only Applied left
+    // windows semi-transparent after restore). Applies NSWindow.alphaValue
+    // on the UI thread via SetWindowAlphaTask.
+    #[cfg(target_os = "macos")]
+    for ev in &out.events {
+        match ev {
+            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
+                crate::ui_tasks::post_set_window_alpha(state, ev_label, *ev_opacity as f64);
+            }
+            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
+                crate::ui_tasks::post_set_window_alpha(state, ev_label, 1.0);
             }
             _ => {}
         }

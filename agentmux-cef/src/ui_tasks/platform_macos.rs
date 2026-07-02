@@ -9,6 +9,13 @@
 // The swizzled implementations check objc_getAssociatedObject on `self` — only the
 // specific overlay NSWindow instance is tagged, so pool windows (same class) are
 // unaffected and continue returning their real values.
+// `set_focus` on cef::BrowserHost is a trait method — the #1891 split dropped
+// the old monolith's `use cef::*`, leaving this module without the trait in
+// scope. Nothing compiles this file except macOS builds, so no CI caught it
+// (main was broken on macOS from #1891 until this line).
+#[cfg(target_os = "macos")]
+use cef::ImplBrowserHost;
+
 #[cfg(target_os = "macos")]
 pub(crate) static ORIG_IS_MAIN_WINDOW: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
