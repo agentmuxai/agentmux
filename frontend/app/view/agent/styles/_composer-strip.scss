@@ -51,9 +51,14 @@
     cursor: default;
     outline: none;
 
-    // Tight widths so the strip stays compact.
-    &:first-child { min-width: 62px; }   // model
-    &:nth-child(2) { min-width: 58px; }  // effort
+    // Tight widths so the strip stays compact. Keyed on explicit modifier
+    // classes (not :nth-child) so control order can change without breaking
+    // widths — see SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.
+    // Mode also carries a color-coded left border (permission mode); the extra
+    // left padding keeps its label clear of the accent stripe.
+    &--mode { min-width: 68px; padding-left: var(--space-1-5); }
+    &--model { min-width: 62px; }
+    &--effort { min-width: 58px; }
 
     &:hover {
         border-color: var(--border-color);
@@ -133,16 +138,6 @@
     &:hover {
         background: color-mix(in srgb, var(--accent-color) 20%, transparent);
     }
-}
-
-.agent-composer-strip-perm-pill {
-    padding: 1px var(--space-1);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    border: 1px solid currentColor;
-    border-radius: 0;
 }
 
 // Context text (replaces ContextWindowBar graphic).

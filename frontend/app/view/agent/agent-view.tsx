@@ -987,10 +987,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 onProcessBadgeClick={() => {
                     createBlock({ meta: { view: "swarm" } });
                 }}
-                permissionMode={
-                    (block()?.meta?.["agent:runtime"]?.permissionMode) as
-                        import("./types").PermissionMode | undefined
-                }
                 logOpen={agentAtoms().detailsOpenAtom[0]()}
                 onToggleLog={() =>
                     dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")
