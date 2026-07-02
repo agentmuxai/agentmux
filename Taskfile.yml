@@ -670,7 +670,18 @@ tasks:
                 # still works on the upstream cef-dll-sys fallback (no multi-hour CEF
                 # build required). Must run on the UNSTRIPPED framework, before the
                 # packaging strip. The hard release gate is in package-macos.sh.
-                bash scripts/verify-cef-framework-darwin.sh "$CEF_DIR" || true
+                # LOUD on failure (issue #1335 trap 1: an unpatched framework used to
+                # be bundled silently, wasting whole debugging sessions on features
+                # the binary could not have).
+                if ! bash scripts/verify-cef-framework-darwin.sh "$CEF_DIR"; then
+                    echo "" >&2
+                    echo "⚠️ ⚠️ ⚠️  BUNDLING AN UNPATCHED (stock upstream) CEF FRAMEWORK  ⚠️ ⚠️ ⚠️" >&2
+                    echo "    Native window drag and per-pixel window transparency will silently" >&2
+                    echo "    no-op in this build. To use the patched framework: stage it at" >&2
+                    echo "    ~/cef-build/darwin/aarch64 or set AGENTMUX_CEF_RUNTIME_DIR_DARWIN." >&2
+                    echo "    (Dev build continues anyway — this is advisory.)" >&2
+                    echo "" >&2
+                fi
                 mkdir -p dist/Frameworks dist/cef
                 rm -rf "dist/Frameworks/Chromium Embedded Framework.framework"
                 # `ditto` preserves the Versions/Current symlink chain that the

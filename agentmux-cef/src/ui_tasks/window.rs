@@ -184,6 +184,156 @@ pub fn post_focus_window(state: &Arc<AppState>, label: &str) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+// ── Window alpha (macOS uniform whole-window opacity) ────────────────────
+// Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01: the macOS analogue of
+// Windows' WS_EX_LAYERED + SetLayeredWindowAttributes(LWA_ALPHA) — a
+// WindowServer-level uniform fade of the finished window over the desktop.
+// Applied post-render, so it needs zero CEF/renderer cooperation and works on
+// stock and patched frameworks alike. Per-pixel ("glass") transparency is the
+// separate patched-libcef track and is orthogonal to this.
+
+#[cfg(target_os = "macos")]
+wrap_task! {
+    pub struct SetWindowAlphaTask {
+        state: Arc<AppState>,
+        label: String,
+        alpha: f64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let Some(window) = get_window_on_ui(&self.state, &self.label) else {
+                tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: no window for label");
+                return;
+            };
+            let nsview = window.window_handle() as *mut std::ffi::c_void;
+            if nsview.is_null() {
+                tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: null NSView handle");
+                return;
+            }
+            if unsafe { macos_set_nswindow_alpha(nsview, self.alpha) } {
+                tracing::info!(label = %self.label, alpha = self.alpha, "[opacity] applied NSWindow alphaValue");
+            } else {
+                // Reagent P2 on #1895: don't claim success when the NSView has
+                // no NSWindow yet (window not realized) — nothing was applied.
+                tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: NSView has no NSWindow; alpha not applied");
+                return;
+            }
+
+            // Codex P2 on #1895: browser-pane overlays are separate
+            // NativeWidgetMacNSWindow instances layered over this window
+            // (browser_pane/creation_views.rs) — child NSWindows do NOT
+            // inherit the parent's alphaValue, so without this a faded host
+            // window keeps fully-opaque pane rectangles floating on top.
+            // Resolve each overlay belonging to this window_label via the
+            // cached window numbers and fade it to the same alpha.
+            // try_lock (matching the overlay-wnum cache writers): missing a
+            // beat here only delays an overlay fade until the next opacity
+            // event, which beats risking a UI-thread stall.
+            let overlay_wnums: Vec<isize> = {
+                let (Some(overlays), Some(wnums)) = (
+                    self.state.browser_pane_overlays.try_lock(),
+                    self.state.browser_pane_overlay_wnums.try_lock(),
+                ) else {
+                    tracing::warn!(label = %self.label, "[opacity] overlay maps busy; pane overlays not faded this pass");
+                    return;
+                };
+                overlays
+                    .iter()
+                    .filter(|(_, (window_label, _))| window_label == &self.label)
+                    .filter_map(|(pane_label, _)| wnums.get(pane_label).copied())
+                    .collect()
+            };
+            for wnum in overlay_wnums {
+                if unsafe { macos_set_window_alpha_by_number(wnum, self.alpha) } {
+                    tracing::info!(label = %self.label, wnum, alpha = self.alpha, "[opacity] applied alphaValue to pane overlay window");
+                } else {
+                    tracing::warn!(label = %self.label, wnum, "[opacity] pane overlay NSWindow not found for wnum");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn post_set_window_alpha(state: &Arc<AppState>, label: &str, alpha: f64) {
+    let mut task = SetWindowAlphaTask::new(state.clone(), label.to_string(), alpha);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// `[[nsview window] setAlphaValue:alpha]` — raw libobjc FFI, mirroring
+/// `ensure_macos_native_window_buttons` in app.rs. `alphaValue` takes CGFloat
+/// (f64 on both arm64 and x86_64, passed in a float register, so plain
+/// objc_msgSend is correct). AppKit call — must run on the UI/main thread,
+/// which SetWindowAlphaTask guarantees. Returns false when the NSView has no
+/// NSWindow (nothing applied).
+#[cfg(target_os = "macos")]
+unsafe fn macos_set_nswindow_alpha(nsview: *mut std::ffi::c_void, alpha: f64) -> bool {
+    use std::ffi::{c_char, c_void};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend();
+    }
+
+    // nswindow = [nsview window]
+    let get_window: extern "C" fn(Id, Sel) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let nswindow = get_window(nsview, sel_registerName(b"window\0".as_ptr() as _));
+    if nswindow.is_null() {
+        return false;
+    }
+
+    // [nswindow setAlphaValue: alpha]
+    let set_alpha: extern "C" fn(Id, Sel, f64) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    set_alpha(nswindow, sel_registerName(b"setAlphaValue:\0".as_ptr() as _), alpha);
+    true
+}
+
+/// `[[NSApp windowWithWindowNumber:wnum] setAlphaValue:alpha]` — fade a
+/// window resolved by its WindowServer window number (the form the
+/// browser-pane overlay cache stores). Returns false when no window matches
+/// (overlay already closed / wnum stale). UI/main thread only.
+#[cfg(target_os = "macos")]
+unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
+    use std::ffi::{c_char, c_void};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn objc_msgSend();
+    }
+
+    let msg: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let nsapp = msg(
+        objc_getClass(b"NSApplication\0".as_ptr() as _),
+        sel_registerName(b"sharedApplication\0".as_ptr() as _),
+    );
+    if nsapp.is_null() {
+        return false;
+    }
+
+    // [nsapp windowWithWindowNumber: wnum]
+    let win_by_num: extern "C" fn(Id, Sel, isize) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let nswindow = win_by_num(
+        nsapp,
+        sel_registerName(b"windowWithWindowNumber:\0".as_ptr() as _),
+        wnum,
+    );
+    if nswindow.is_null() {
+        return false;
+    }
+
+    let set_alpha: extern "C" fn(Id, Sel, f64) =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    set_alpha(nswindow, sel_registerName(b"setAlphaValue:\0".as_ptr() as _), alpha);
+    true
+}
+
 // ── Move window ───────────────────────────────────────────────────────────
 
 wrap_task! {
