@@ -1406,6 +1406,13 @@ pub enum Event {
     },
     LayoutNodeInsertedAtIndex {
         tab_id: String,
+        /// The reducer's resulting tree (post-op, post-balance) for the
+        /// persist subscriber to write to `db_layout` — single-writer, no
+        /// algebra re-run (SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT). `None` =
+        /// empty tree. `#[serde(default)]` for forward-compat with senders
+        /// that predate the field.
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
         node: crate::LayoutNode,
         index_arr: Vec<usize>,
         correlation_id: String,
@@ -1433,6 +1440,9 @@ pub enum Event {
     },
     LayoutNodeMoved {
         tab_id: String,
+        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
         node_id: String,
         new_parent_id: String,
         index: usize,
@@ -1441,6 +1451,9 @@ pub enum Event {
     },
     LayoutNodesSwapped {
         tab_id: String,
+        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
         node1_id: String,
         node2_id: String,
         correlation_id: String,
@@ -1448,12 +1461,18 @@ pub enum Event {
     },
     LayoutNodesResized {
         tab_id: String,
+        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
         ops: Vec<crate::ResizeOp>,
         correlation_id: String,
         version: u64,
     },
     LayoutNodeReplaced {
         tab_id: String,
+        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
         target_id: String,
         new_node: crate::LayoutNode,
         correlation_id: String,
@@ -1461,6 +1480,9 @@ pub enum Event {
     },
     LayoutSplitHorizontalApplied {
         tab_id: String,
+        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
         target_id: String,
         new_node: crate::LayoutNode,
         position: crate::SplitPosition,
@@ -1469,6 +1491,9 @@ pub enum Event {
     },
     LayoutSplitVerticalApplied {
         tab_id: String,
+        /// Resulting tree for the persist subscriber (see LayoutNodeInsertedAtIndex).
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
         target_id: String,
         new_node: crate::LayoutNode,
         position: crate::SplitPosition,
