@@ -52,8 +52,8 @@ use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
 use crate::backend::wps::Broker;
 use agentmux_common::api_types::{
-    PaneTitleRequest, ShellCreateRequest, ShellCreateResponse, ShellInputRequest,
-    ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
+    PaneTitleRequest, ShellCreateRequest, ShellCreateResponse, ShellInputFailure,
+    ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
     TabActivateRequest, TabNameRequest, TabNewRequest, WindowFocusRequest, WindowNameRequest,
     WorkspaceNameRequest, WpsPublishRequest,
 };
@@ -651,20 +651,29 @@ async fn handle_shell_input(
 ) -> impl IntoResponse {
     // Non-blocking send to the stdin relay task — no mutex, no risk of
     // blocking if the child's pipe buffer is full (the relay owns that concern).
-    let stdin_tx = state.shell_sessions.get_stdin_tx(&req.shell_id);
-    let written = if let Some(tx) = stdin_tx {
-        let mut text = req.text.clone();
-        if !text.ends_with('\n') {
-            text.push('\n');
+    // resolve_stdin distinguishes "not running" from "running but no captured
+    // stdin" so the caller gets an actionable reason instead of a bare false.
+    let (written, reason) = match state.shell_sessions.resolve_stdin(&req.shell_id) {
+        Ok(tx) => {
+            let mut text = req.text.clone();
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            if tx.send(text).is_ok() {
+                tracing::debug!(shell_id = %req.shell_id, "shell.input: written");
+                (true, None)
+            } else {
+                // Relay task gone / channel closed — process closed its stdin.
+                tracing::debug!(shell_id = %req.shell_id, "shell.input: write failed");
+                (false, Some(ShellInputFailure::WriteFailed))
+            }
         }
-        let ok = tx.send(text).is_ok();
-        tracing::debug!(shell_id = %req.shell_id, written = ok, "shell.input");
-        ok
-    } else {
-        tracing::debug!(shell_id = %req.shell_id, written = false, "shell.input: not running");
-        false
+        Err(failure) => {
+            tracing::debug!(shell_id = %req.shell_id, ?failure, "shell.input: no target");
+            (false, Some(failure))
+        }
     };
-    (StatusCode::OK, Json(ShellInputResponse { written }))
+    (StatusCode::OK, Json(ShellInputResponse { written, reason }))
 }
 
 /// `POST /api/v1/shell/status` — query a shell's running state (Phase 3b).

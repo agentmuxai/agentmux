@@ -29,7 +29,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agentmux_common::api_types::{
     InjectRequest, PaneOpenRequest, PaneOpenResponse, ShellCreateRequest, ShellCreateResponse,
-    ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse,
+    ShellInputFailure, ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse,
     ShellStopRequest, ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest,
     WindowFocusRequest, WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest,
 };
@@ -84,7 +84,7 @@ const SHELL_STOP_TOOL: &str = r#"{
 
 const SHELL_INPUT_TOOL: &str = r#"{
   "name": "ShellInput",
-  "description": "Write text to the stdin of a running shell started by Shell(). A newline is appended automatically. Use for interactive prompts like 'Terminate batch job (Y/N)?' or REPL commands. Returns false if the shell is no longer running. Note: processes that block waiting for stdin-EOF (e.g. `cat` with no args) will not exit until ShellStop is called — ShellStop always unblocks them via kill.",
+  "description": "Write text to the stdin of a running shell started by Shell(). A newline is appended automatically. Use for interactive prompts like 'Terminate batch job (Y/N)?' or REPL commands. REQUIRES the shell to have been created with capture_stdin=true; otherwise its stdin is /dev/null and this returns an error telling you to recreate the shell. Also returns an error if the shell has exited. Note: processes that block waiting for stdin-EOF (e.g. `cat` with no args) will not exit until ShellStop is called — ShellStop always unblocks them via kill.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -737,7 +737,19 @@ async fn call_tool(
             Ok(if result.written {
                 format!("wrote to shell {shell_id}")
             } else {
-                format!("shell {shell_id} is not running — input discarded")
+                match result.reason {
+                    Some(ShellInputFailure::StdinNotCaptured) => format!(
+                        "shell {shell_id} is running but was started without capture_stdin=true — \
+                         its stdin is /dev/null. Recreate the shell with Shell(..., capture_stdin=true) \
+                         to send input."
+                    ),
+                    Some(ShellInputFailure::WriteFailed) => format!(
+                        "shell {shell_id} closed its stdin — input discarded"
+                    ),
+                    Some(ShellInputFailure::NotRunning) | None => format!(
+                        "shell {shell_id} is not running — input discarded"
+                    ),
+                }
             })
         }
         "ShellStatus" => {
