@@ -51,7 +51,10 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 2;
 ///   v9 — db_memory_bundles.sort_order: explicit ordering for the Trust
 ///        Center global brain (controls CLAUDE.md injection order). Existing
 ///        rows default to 0; the Brain tab assigns positions via reorder.
-pub const OBJECT_SCHEMA_VERSION: i64 = 9;
+///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref:
+///        standalone MCP Server and Skill primitives with per-agent ref tables
+///        (v1 composable model, SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md).
+pub const OBJECT_SCHEMA_VERSION: i64 = 10;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -396,6 +399,47 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_drone_runs_status
             ON db_drone_runs(status);
 
+        -- v10: Standalone skill and MCP server primitives (composable model).
+        CREATE TABLE IF NOT EXISTS db_skills (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            trigger     TEXT NOT NULL DEFAULT '',
+            skill_type  TEXT NOT NULL DEFAULT 'prompt',
+            description TEXT NOT NULL DEFAULT '',
+            content     TEXT NOT NULL DEFAULT '',
+            is_global   INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            updated_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_skills_is_global ON db_skills(is_global);
+
+        CREATE TABLE IF NOT EXISTS db_mcp_servers (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            transport   TEXT NOT NULL DEFAULT 'stdio',
+            config      TEXT NOT NULL DEFAULT '{}',
+            is_global   INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            updated_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_mcp_servers_is_global ON db_mcp_servers(is_global);
+
+        CREATE TABLE IF NOT EXISTS db_agent_skills_ref (
+            agent_id TEXT NOT NULL,
+            skill_id TEXT NOT NULL,
+            PRIMARY KEY (agent_id, skill_id),
+            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
+            FOREIGN KEY (skill_id) REFERENCES db_skills(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS db_agent_mcp_ref (
+            agent_id TEXT NOT NULL,
+            mcp_id   TEXT NOT NULL,
+            PRIMARY KEY (agent_id, mcp_id),
+            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
+            FOREIGN KEY (mcp_id)   REFERENCES db_mcp_servers(id) ON DELETE CASCADE
+        );
+
         -- v7: MuxBus cloud connectivity — global singleton PKCE token store.
         CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
             id             TEXT PRIMARY KEY DEFAULT 'global',
@@ -432,6 +476,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     //     populates them on first container spawn.
     // v7: create db_muxbus_credentials if it doesn't exist yet (existing DBs
     //     won't have it since it's a new table, not an added column).
+    // v10: standalone skill + MCP server tables (new tables, handled via
+    //     CREATE TABLE IF NOT EXISTS in the flat batch above; no ALTER needed).
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
             id             TEXT PRIMARY KEY DEFAULT 'global',

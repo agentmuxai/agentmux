@@ -298,6 +298,22 @@ pub const COMMAND_MEMORY_LIST: &str = "memory.list";
 pub const COMMAND_MEMORY_READ: &str = "memory.read";
 pub const COMMAND_MEMORY_WRITE: &str = "memory.write";
 
+// App API — v1 standalone Skill primitives
+pub const COMMAND_SKILL_LIST: &str = "skill.list";
+pub const COMMAND_SKILL_GET: &str = "skill.get";
+pub const COMMAND_SKILL_UPSERT: &str = "skill.upsert";
+pub const COMMAND_SKILL_DELETE: &str = "skill.delete";
+pub const COMMAND_SKILL_BIND: &str = "skill.bind";
+pub const COMMAND_SKILL_UNBIND: &str = "skill.unbind";
+
+// App API — v1 standalone MCP Server primitives
+pub const COMMAND_MCP_LIST: &str = "mcp.list";
+pub const COMMAND_MCP_GET: &str = "mcp.get";
+pub const COMMAND_MCP_UPSERT: &str = "mcp.upsert";
+pub const COMMAND_MCP_DELETE: &str = "mcp.delete";
+pub const COMMAND_MCP_BIND: &str = "mcp.bind";
+pub const COMMAND_MCP_UNBIND: &str = "mcp.unbind";
+
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
 pub const COMMAND_SESSION_RESTORE: &str = "session:restore";
