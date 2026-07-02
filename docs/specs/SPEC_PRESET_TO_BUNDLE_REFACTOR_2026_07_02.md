@@ -90,7 +90,19 @@ Implementation:
 
 **Phase 3 deliverable:** one PR (resolver + backfill + UI derived-view). Heaviest behavior change — needs the identity/keychain reconciliation tracked in **issue #1624** ("Reconcile per-agent keychain with the live identity-bundle system") to land compatibly; coordinate.
 
-**Open product decision (proposal §9.4/§9.6):** confirm the derived-Identity UX and whether a **Policy** primitive (hooks + `.claude/settings.json` permissions) is introduced here or deferred. Flag, don't assume.
+**Open product decision (proposal §9.6):** whether a **Policy** primitive (hooks + `.claude/settings.json` permissions) is introduced here or deferred. Flag, don't assume.
+
+### 3.4 RESOLVED product decisions (2026-07-02)
+
+These override the corresponding open items in `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md`:
+
+- **§9.1 / derived-Identity UX — RESOLVED:** the agent-pane header consolidates to a **single `id-card` icon** opening a unified per-agent management modal (see §3.2b); the standalone "Identities" concept folds in as the **Accounts** tab. "Identity" remains a derived view only.
+- **§3.4 / §9.7 — retire the always-on `CLAUDE.md`? — RESOLVED: NO. Retain `CLAUDE.md`.**
+  - **Why:** the Claude CLI **natively auto-loads `CLAUDE.md`** from the agent working directory as its standing project instructions. AgentMux already assembles it from `soul` + `agentmd` + `memory` + skills index (`agentmux-srv/src/backend/agent_config.rs:28,55-96`). Retiring it would break standing-instruction delivery for Claude agents — there is no equivalent always-on channel.
+  - **Therefore:** `soul` / `agentmd` / the static `memory` blob **stay in `CLAUDE.md`** (do NOT migrate them into Skills-only). The always-on instruction blob is kept.
+  - **Brief** stays defined as *the first message* (kickoff payload), but it is **additive to `CLAUDE.md`**, not a replacement for standing instructions. **Skills** remain on-demand modules, but they are **not** the sole home for instructional content — `CLAUDE.md` remains the standing-instruction home.
+  - **Impact on this refactor:** none of the Phase 2–4 storage/naming work depends on retiring `CLAUDE.md`; this decision simply removes the "migrate soul/agentmd → Skills / retire CLAUDE.md" strand from the composable-model rollout. The `agent_config.rs` CLAUDE.md assembly stays as-is.
+  - **Note:** `CLAUDE.md` is Claude-specific; other CLIs use their own native context files (e.g. `AGENTS.md`, `GEMINI.md`). "Retain CLAUDE.md" generalizes to "keep writing each provider's native standing-instruction file."
 
 ---
 
