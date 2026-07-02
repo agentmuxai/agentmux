@@ -12,9 +12,9 @@
  *     changed since the last save. Bounds crash-loss to ~30s.
  *
  * Extracted verbatim from agent-view.tsx — same effect ordering, same
- * onCleanup registration order. Uses onMount to defer creating the
- * interval/effect until after the caller has fully wired up, matching the
- * original inline placement (see caller for details).
+ * onCleanup registration order. The interval + createEffect are created
+ * synchronously when the hook is called, matching the original inline
+ * placement in the component body (see caller for ordering details).
  */
 
 import { createEffect, onCleanup } from "solid-js";

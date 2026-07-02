@@ -7,7 +7,6 @@ import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
 import {
-    dispatch as dispatchDoc,
     dispatchIfRegistered as dispatchDocIfRegistered,
 } from "@/app/store/agent-document-store";
 import {
