@@ -45,9 +45,15 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
     // "identity" was previously redirected here too, but as of PR-F.2
     // (#748) Identity is once again a first-class pane — `view: "identity"`
     // resolves to IdentityPaneViewModel via block-registry.ts.
+    //   * Armory rename (SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02):
+    //     the Trust Center pane was renamed to Armory. Existing user panes
+    //     persist `meta.view: "trust"`; this is a pure UI rename with no
+    //     SQLite migration, so redirect at the view-dispatch layer here
+    //     (same pattern as workflows→drone).
     let effectiveView = blockView;
     if (effectiveView === "forge") effectiveView = "agent";
     if (effectiveView === "workflows") effectiveView = "drone";
+    if (effectiveView === "trust") effectiveView = "armory";
     const ctor = getBlockViewClass(effectiveView);
     if (ctor != null) {
         return new ctor(blockId, nodeModel as any);

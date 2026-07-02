@@ -43,7 +43,7 @@ export interface AccountContext {
     anthropic_model?: string;
     endpoint?: string;
     description?: string;
-    // Trust Center key flow — non-secret display hint (e.g. "••••••••3f9a")
+    // Armory key flow — non-secret display hint (e.g. "••••••••3f9a")
     // and per-service validation metadata. Populated by account.key.verify.
     masked_tail?: string;
     openai_model_count?: number;
@@ -356,7 +356,7 @@ export class IdentityViewModel implements ViewModel {
         // Stay in sync with module-level cache updates from any source
         // (other panes, RPC events, etc.). The unsubscribe is stashed and
         // invoked in dispose() so callers that mount this model directly
-        // (e.g. the Trust Center Accounts tab) don't leak a listener per
+        // (e.g. the Armory Accounts tab) don't leak a listener per
         // open/close.
         this._unsubAccounts = subscribeAccountChanges((accounts) => {
             this.setAccounts(accounts);

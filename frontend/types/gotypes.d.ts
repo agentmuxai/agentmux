@@ -313,7 +313,7 @@ declare global {
         | { backend: "env"; env_var: string }
         | { backend: "secrets_manager"; sm_path: string; sm_json_path?: string }
         | { backend: "plaintext_dev"; plaintext_dev: string }
-        // Trust Center API keys: pointer into the OS keychain. Plaintext is
+        // Armory API keys: pointer into the OS keychain. Plaintext is
         // never carried here. See SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
         | { backend: "keychain"; service: string; account: string };
 
@@ -369,7 +369,7 @@ declare global {
         description?: string;
         is_blank?: boolean;
         /** When true this bundle is automatically injected into every agent's
-         *  CLAUDE.md at launch (Trust Center global tier). Managed in the
+         *  CLAUDE.md at launch (Armory global tier). Managed in the
          *  Identity & Memory hamburger modal. */
         is_global?: boolean;
         provider?: string;            // "claude" | "codex" | "gemini" | ""
@@ -381,7 +381,7 @@ declare global {
         mcp_servers?: string;
         /** JSON-encoded array of skill IDs. */
         skills?: string;
-        /** Explicit ordering within the Trust Center global brain (controls
+        /** Explicit ordering within the Armory global brain (controls
          *  CLAUDE.md injection order). Only meaningful for is_global bundles;
          *  0 otherwise. Owned by the reorderglobalbrain RPC. */
         sort_order?: number;

@@ -436,7 +436,7 @@ pub(super) fn write_agent_config_files(
         }
     }
 
-    // Inject global memory bundles (Trust Center global brain) into CLAUDE.md.
+    // Inject global memory bundles (Armory global brain) into CLAUDE.md.
     // All agents get these regardless of per-agent memory selection. Each
     // section carries a `# [Workspace] <name>` heading (see
     // format_global_brain_block) so the rules are attributable to the

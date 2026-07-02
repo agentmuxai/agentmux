@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBrainManager — the Trust Center "Brain" tab. Presents the
+// GlobalBrainManager — the Armory "Brain" tab. Presents the
 // workspace-wide global brain (is_global Memory bundles) as an ordered list
 // of editable sections that compose into every agent's CLAUDE.md at launch.
 //

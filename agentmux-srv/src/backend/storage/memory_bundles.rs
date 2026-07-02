@@ -30,7 +30,7 @@ pub struct Memory {
     #[serde(default)]
     pub is_blank: bool,
     /// Global bundles are injected into every agent's CLAUDE.md at launch,
-    /// regardless of per-agent memory selection. Managed in the Trust Center
+    /// regardless of per-agent memory selection. Managed in the Armory
     /// (Identity & Memory hamburger modal). Seeded from workspace-wide rule sets.
     #[serde(default)]
     pub is_global: bool,
@@ -50,7 +50,7 @@ pub struct Memory {
     /// JSON-encoded array of skill IDs.
     #[serde(default = "default_json_array_string")]
     pub skills: String,
-    /// Explicit ordering within the Trust Center global brain. Lower sorts
+    /// Explicit ordering within the Armory global brain. Lower sorts
     /// first; this is the order sections inject into CLAUDE.md at launch.
     /// Only meaningful for `is_global` bundles; 0 for the rest. Owned by the
     /// `reorderglobalbrain` RPC — `bundle_memory_upsert` never overwrites it
@@ -106,7 +106,7 @@ impl Store {
     /// Returns only the global bundles (`is_global = 1`), in explicit
     /// `sort_order` (then name as a stable tiebreak). Called at agent launch
     /// to inject workspace-wide rules into every agent in the order the user
-    /// arranged them in the Trust Center Brain tab.
+    /// arranged them in the Armory Brain tab.
     pub fn bundle_memory_list_global(&self) -> Result<Vec<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -202,7 +202,7 @@ impl Store {
     }
 
     /// Assign `sort_order` to the given bundle ids in the order supplied
-    /// (position 0, 1, 2, …). Drives the Trust Center global brain ordering,
+    /// (position 0, 1, 2, …). Drives the Armory global brain ordering,
     /// which in turn controls CLAUDE.md injection order. Ids not present in
     /// the table are skipped silently (a concurrently-deleted section is not
     /// an error). Runs in a single transaction so a partial reorder never

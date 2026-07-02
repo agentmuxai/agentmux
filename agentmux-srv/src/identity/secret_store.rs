@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! OS-native secret storage for Trust Center API keys.
+//! OS-native secret storage for Armory API keys.
 //!
 //! Backs `SecretRef::Keychain { service, account }`. The plaintext key
 //! lives only in the OS keychain (macOS Keychain / Windows Credential

@@ -415,7 +415,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [description, setDescription] = createSignal(editing()?.context.description ?? "");
     const [assignedAgents, setAssignedAgents] = createSignal(editing()?.assigned_agents.join(", ") ?? "");
 
-    // ── Trust Center secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
+    // ── Armory secure-key lifecycle (SPEC_TRUST_CENTER §5) ──
     // Active when secretBackend === "keychain": the user pastes a key and
     // clicks Validate (single user-initiated egress) or "Save without
     // validating". The plaintext is sent once to the backend, which stores it
