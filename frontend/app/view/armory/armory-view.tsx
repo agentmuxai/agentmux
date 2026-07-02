@@ -14,7 +14,7 @@ const RAIL: { id: ArmorySection; label: string; icon: string }[] = [
     { id: "accounts",   label: "Accounts",   icon: "key" },
     { id: "identities", label: "Identities", icon: "id-card" },
     { id: "brain",      label: "Brain",      icon: "brain" },
-    { id: "memories",   label: "Presets",    icon: "sliders" },
+    { id: "memories",   label: "Bundles",    icon: "layer-group" },
 ];
 
 export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Element {

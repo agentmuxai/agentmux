@@ -151,9 +151,9 @@ afterEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("AgentLaunchModal — memory change must not reset auth state (§6.10)", () => {
-    // The §6.10 requirement holds — changing the preset does NOT reset auth
-    // (asserted below). This test had gone stale on the "Memory bundle" → "Preset"
-    // rename (the select's aria-label is now "Preset"); the stale selector read as
+    // The §6.10 requirement holds — changing the bundle does NOT reset auth
+    // (asserted below). This test had gone stale on the "Memory bundle" → "Bundle"
+    // rename (the select's aria-label is now "Bundle"); the stale selector read as
     // an auth "regression" when CI first ran it. Selector fixed; logic unchanged.
     it("preserves auth-ready state across a Memory selection change", async () => {
         const user = userEvent.setup();
@@ -173,7 +173,7 @@ describe("AgentLaunchModal — memory change must not reset auth state (§6.10)"
         // BindingsLoaded.  The Identity selector renders once
         // identities are loaded.
         const identitySelect = await screen.findByLabelText("Identity bundle");
-        const memorySelect = await screen.findByLabelText("Preset");
+        const memorySelect = await screen.findByLabelText("Bundle");
 
         // Verify the auto-pick wired the bound identity. With Work
         // bundle bound to claude, the Connect panel must NOT mount.
