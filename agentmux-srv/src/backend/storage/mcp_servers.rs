@@ -130,11 +130,6 @@ impl Store {
         Ok(rows > 0)
     }
 
-    /// List MCP servers referenced by an agent (for config generation).
-    pub fn mcp_server_list_for_config(&self, agent_id: &str) -> Result<Vec<McpServer>, StoreError> {
-        self.mcp_server_list(agent_id)
-    }
-
     /// Return true if the given MCP server is accessible to the agent (global or bound).
     /// Used for read and mutation access checks.
     pub fn mcp_server_is_accessible_to(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {

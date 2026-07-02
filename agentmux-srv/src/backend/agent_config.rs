@@ -308,10 +308,15 @@ pub fn build_mcp_config(
 
 /// Build `.mcp.json` from standalone McpServer ref rows (v1 composable model).
 ///
-/// Always injects the synthetic "agentmux" entry. For each server row the
-/// `config` field is a JSON object that becomes the server value directly —
-/// callers store the full server object (including `"type"`) in that field.
-/// Falls back to `build_mcp_config` with the blob if `servers` is empty.
+/// Layering (later wins on key collision, except the reserved `agentmux` key):
+///   1. synthetic `agentmux` entry (always injected)
+///   2. `user_mcp_blob`'s `mcpServers` — the legacy per-agent blob, merged when
+///      the caller passes it (used so a global-only ref set never wipes a
+///      legacy agent's user servers)
+///   3. `servers` ref rows (the agent's own bound servers + globals)
+/// For each ref row the `config` field is a JSON object used as the server
+/// value directly. Falls back to `build_mcp_config` when there are no ref rows
+/// and no blob.
 pub fn build_mcp_config_from_refs(
     servers: &[crate::backend::storage::McpServer],
     user_mcp_blob: Option<&str>,
@@ -339,6 +344,27 @@ pub fn build_mcp_config_from_refs(
     let mut mcp_servers = serde_json::Map::new();
     mcp_servers.insert("agentmux".to_string(), agentmux_server);
 
+    // Layer 2: merge the legacy user blob's servers (skip the reserved key).
+    if let Some(raw) = user_mcp_blob {
+        match serde_json::from_str::<Value>(raw) {
+            Ok(Value::Object(user_obj)) => {
+                if let Some(Value::Object(user_servers)) = user_obj.get("mcpServers") {
+                    for (k, v) in user_servers {
+                        if k == "agentmux" {
+                            continue;
+                        }
+                        mcp_servers.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(_) => {
+                tracing::error!("agent_config: invalid MCP JSON in legacy blob; skipping blob merge");
+            }
+        }
+    }
+
+    // Layer 3: ref rows (own + global) overlay the blob.
     for server in servers {
         if server.name == "agentmux" {
             continue; // synthetic entry wins; user cannot override the key

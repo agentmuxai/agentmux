@@ -331,11 +331,6 @@ impl Store {
         Ok(rows > 0)
     }
 
-    /// List skills for config generation (own refs + globals, same as skill_list).
-    pub fn skill_list_for_config(&self, agent_id: &str) -> Result<Vec<Skill>, StoreError> {
-        self.skill_list(agent_id)
-    }
-
     /// Return true if the given skill is accessible to the agent (global or bound).
     /// Used for read and delete access checks.
     pub fn skill_is_accessible_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {

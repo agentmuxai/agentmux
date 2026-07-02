@@ -452,12 +452,22 @@ pub(super) fn write_agent_config_files(
             .or_insert(global_block);
     }
 
-    // v1: prefer standalone skill refs over legacy db_agent_skills when present.
-    let standalone_skills = wstore.skill_list_for_config(&agent.id).unwrap_or_default();
-    let effective_skills: Vec<crate::backend::storage::AgentSkill> = if !standalone_skills.is_empty() {
-        crate::backend::agent_config::skills_to_agent_skills(&standalone_skills, &agent.id)
+    // v1 skills: globals are always injected; the agent's OWN ref-bound skills
+    // are authoritative when present, otherwise fall back to legacy
+    // db_agent_skills. The fallback decision is gated on *own* refs only — NOT
+    // the global-inclusive list — so adding a global skill never discards a
+    // legacy-only agent's skills.
+    let visible_skills = wstore.skill_list(&agent.id).unwrap_or_default(); // own refs + globals
+    let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
+    let effective_skills: Vec<crate::backend::storage::AgentSkill> = if has_own_skill_refs {
+        // Ref-based path: own bound + globals (the full visible list).
+        crate::backend::agent_config::skills_to_agent_skills(&visible_skills, &agent.id)
     } else {
-        skills
+        // Legacy path: keep legacy skills, then inject globals on top.
+        // `visible_skills` here contains only globals (no own refs).
+        let mut merged = skills;
+        merged.extend(crate::backend::agent_config::skills_to_agent_skills(&visible_skills, &agent.id));
+        merged
     };
 
     let mut config_files = crate::backend::agent_config::build_config_files(
@@ -468,15 +478,21 @@ pub(super) fn write_agent_config_files(
         agent_slug,
     );
 
-    // v1: if standalone MCP server refs exist, replace .mcp.json with the
-    // ref-built version (always keeps the synthetic "agentmux" entry). Falls
-    // back to the legacy blob path when no refs are bound.
-    let standalone_mcp = wstore.mcp_server_list_for_config(&agent.id).unwrap_or_default();
-    if !standalone_mcp.is_empty() {
-        let mcp_blob = content_map.get("mcp").map(|s| s.as_str());
+    // v1 MCP: same rule. Globals + synthetic "agentmux" are always emitted; the
+    // legacy blob's user servers are merged in ONLY when the agent has no own
+    // ref-bound servers (so a global server never wipes a legacy-only agent's
+    // .mcp.json). When the agent has own refs, those are authoritative.
+    let visible_mcp = wstore.mcp_server_list(&agent.id).unwrap_or_default(); // own refs + globals
+    let has_own_mcp_refs = visible_mcp.iter().any(|s| !s.is_global);
+    if !visible_mcp.is_empty() {
+        let blob_for_merge = if has_own_mcp_refs {
+            None
+        } else {
+            content_map.get("mcp").map(|s| s.as_str())
+        };
         if let Some(mcp_json) = crate::backend::agent_config::build_mcp_config_from_refs(
-            &standalone_mcp,
-            mcp_blob,
+            &visible_mcp,
+            blob_for_merge,
             agent_slug,
             &agent.agent_bus_id,
         ) {
