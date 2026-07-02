@@ -54,13 +54,11 @@
     // Tight widths so the strip stays compact. Keyed on explicit modifier
     // classes (not :nth-child) so control order can change without breaking
     // widths — see SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.
-    &--mode { min-width: 68px; }
+    // Mode also carries a color-coded left border (permission mode); the extra
+    // left padding keeps its label clear of the accent stripe.
+    &--mode { min-width: 68px; padding-left: var(--space-1-5); }
     &--model { min-width: 62px; }
     &--effort { min-width: 58px; }
-
-    // Mode select carries a color-coded left border (permission mode); keep a
-    // touch of left padding so the label clears the accent stripe.
-    &--mode { padding-left: var(--space-1-5); }
 
     &:hover {
         border-color: var(--border-color);
