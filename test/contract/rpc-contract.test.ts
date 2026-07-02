@@ -127,8 +127,16 @@ function deriveContract(root: string): Contract {
     // binding from the contract (a guard that passes while drift slips
     // through). The per-method window also tolerates braces in return
     // types. Both rpcCall and rpcStream count as a binding.
-    const rpcApiPath = path.join(root, "frontend", "app", "store", "rpc-api.ts");
-    const rpcApiSrc = fs.readFileSync(rpcApiPath, "utf8");
+    // rpc-api was split from a single rpc-api.ts into a domain-module
+    // directory (rpc-api/{agent,block,file,...}.ts) composed by index.ts.
+    // Concatenate every domain file so the binding extractor still sees the
+    // full method surface.
+    const rpcApiDir = path.join(root, "frontend", "app", "store", "rpc-api");
+    const rpcApiSrc = fs
+        .readdirSync(rpcApiDir)
+        .filter((f) => f.endsWith(".ts"))
+        .map((f) => fs.readFileSync(path.join(rpcApiDir, f), "utf8"))
+        .join("\n");
     const sigRe = /(\w+)\s*\(\s*client:\s*RpcClient/g;
     const sigs: Array<{ name: string; idx: number }> = [];
     let sm: RegExpExecArray | null;
@@ -152,7 +160,7 @@ function deriveContract(root: string): Contract {
     // plus any direct `rpcCall("name")` outside rpc-api.ts.
     const feFiles = walk(path.join(root, "frontend"), [".ts", ".tsx"]).filter(
         (f) =>
-            !f.endsWith("rpc-api.ts") &&
+            !f.includes(`${path.sep}store${path.sep}rpc-api${path.sep}`) &&
             !/\.(test|spec)\.[tj]sx?$/.test(f) &&
             !f.includes(`${path.sep}__tests__${path.sep}`),
     );
