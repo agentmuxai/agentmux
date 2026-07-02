@@ -95,7 +95,6 @@ So the single-icon **Agent setup** pane is the **Phase 3 UI outcome**: the pane 
 1. ✅ **Derived-Identity UX** — the pane consolidates to one `id-card` "Agent setup" icon (§4); "Identities" folds in as the **Accounts** tab; identity stays a derived view.
 3. ✅ **Static `memory` blob & 4. `soul`/`agentmd`** — **`CLAUDE.md` is RETAINED.** The Claude CLI natively loads it as standing instructions; `soul`/`agentmd`/`memory` stay in `CLAUDE.md`. Brief (first message) and Skills (on-demand) are *additive*, not replacements. This reverses the proposal's §3.4 "retire CLAUDE.md" stance.
 
-**Still open:**
-2. **Policy primitive** — hooks + `.claude/settings.json` permissions: a distinct 7th primitive, or folded in? (Affects whether the pane/Armory grows another surface.)
+2. ✅ **Policy primitive** — hooks + `.claude/settings.json` permissions **will be a distinct 7th primitive** (a trust decision, like Accounts/MCP — deserves first-class review), **but deferred to a later phase.** Phase 3 leaves hooks/permissions writing exactly as today; Policy is broken out separately.
 
-The Policy question is the only remaining gate on Phase 3's full shape; the pane's transition to the single **Agent setup** icon can proceed regardless.
+**All §9 decisions are resolved.** Phase 3 is fully specced and unblocked: Account-direct resolver + identity-bundle collapse + backfill + the single **Agent setup** icon. Policy and the storage `_bundles` rename (Phase 4) follow after.
