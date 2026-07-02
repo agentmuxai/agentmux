@@ -549,7 +549,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             void model.backToPicker();
         },
         // P2 — real re-auth. An auth failure is a *CLI-provider* login lapse
-        // (e.g. claude's subscription OAuth expired), not a Armory
+        // (e.g. claude's subscription OAuth expired), not an Armory
         // service account. We must FORCE the login rather than re-run the gated
         // launch flow: a 401 means the token is bad, but `CheckCliAuth` still
         // reports it present (expired-but-present false positive), so the gated
