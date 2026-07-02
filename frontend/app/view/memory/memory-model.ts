@@ -128,7 +128,7 @@ export class MemoryViewModel implements ViewModel {
     // "sliders" (not "brain") — the brain icon is reserved for native memory.
     viewIcon: Accessor<string> = () => "sliders";
     viewName: Accessor<string>;
-    viewText: Accessor<string | HeaderElem[]> = () => "Presets";
+    viewText: Accessor<string | HeaderElem[]> = () => "Bundles";
     noPadding: Accessor<boolean> = () => false;
 
     get viewComponent(): ViewComponent {
@@ -175,7 +175,7 @@ export class MemoryViewModel implements ViewModel {
             : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
-            return (block?.meta?.["frame:title"] as string) ?? "Presets";
+            return (block?.meta?.["frame:title"] as string) ?? "Bundles";
         });
         this.selectedAtom = createMemo(() => {
             const id = this.selectedIdAtom();

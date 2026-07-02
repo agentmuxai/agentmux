@@ -31,15 +31,15 @@ import { openOrFocusPaneByView } from "@/app/store/global";
 import "./bundle-summary.scss";
 
 interface BundleSummaryPanelProps {
-    /** "Identity" | "Preset" — drives the heading + copy. */
-    kind: "Identity" | "Preset";
+    /** "Identity" | "Bundle" — drives the heading + copy. */
+    kind: "Identity" | "Bundle";
 }
 
 export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element => {
-    // Identity items are still called "bundles"; presets are not (they are
-    // provider-agnostic config presets). Compute the display strings per kind.
-    const title = props.kind === "Identity" ? "Identity bundles" : "Presets";
-    const lowerPlural = props.kind === "Identity" ? "identities" : "presets";
+    // Identity items are still called "identity bundles"; the config collections
+    // are now just "Bundles". Compute the display strings per kind.
+    const title = props.kind === "Identity" ? "Identity bundles" : "Bundles";
+    const lowerPlural = props.kind === "Identity" ? "identities" : "bundles";
 
     return (
         <div class="bundle-summary">
