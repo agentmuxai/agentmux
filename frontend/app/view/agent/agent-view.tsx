@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { getProvider } from "./providers";
 import { createAgentAtoms } from "./state";
@@ -13,7 +13,6 @@ import {
 import {
     dispatch as dispatchPane,
     dispatchIfRegistered as dispatchPaneIfRegistered,
-    fireEvent as firePaneEvent,
     snapshot as paneSnapshot,
 } from "@/app/store/agent-pane-state-store";
 import {
@@ -38,8 +37,7 @@ import { getRecentDispatches } from "@/app/store/command-source";
 import { getTrail } from "@/log/render-trail";
 import { useAgentStream } from "./useAgentStream";
 import { useActivityLog } from "./hooks/useActivityLog";
-import { useHistoryPagination, SNAPSHOT_SCHEMA_VERSION } from "./hooks/useHistoryPagination";
-// SNAPSHOT_SCHEMA_VERSION re-exported from useHistoryPagination; imported here for the write path.
+import { useHistoryPagination } from "./hooks/useHistoryPagination";
 import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useScrollToNode } from "./hooks/useScrollToNode";
@@ -54,13 +52,17 @@ import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
+import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
+import { useAgentDecisions } from "./hooks/useAgentDecisions";
+import { useAgentQuestions } from "./hooks/useAgentQuestions";
+import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { ActivityDock } from "./components/ActivityDock";
 import { ActivityLogPanel } from "./components/ActivityLogPanel";
 import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
-import { AgentQuestionPanel, type AnswerOutcome } from "./components/AgentQuestionPanel";
+import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
@@ -340,202 +342,33 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const [getDocument] = agentAtoms().documentAtom;
 
     // Agent-pane state-persistence (RFC #857 + spec
-    // SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md):
-    // (a) on pane close, write a snapshot of `nodes[]` so the next reopen
-    //     restores the full conversation via HistoryRestored rather than
-    //     the lossy 200-line NDJSON replay;
-    // (b) during the pane lifetime, write a snapshot every 30s if the
-    //     document changed since the last save. Bounds crash-loss to ~30s.
-    // Serialize concurrent writes through a single promise chain: the 30s
-    // interval and the on-close cleanup can both call writeSnapshotNow()
-    // with their own captured `nodes` snapshot, then race through an async
-    // line-count RPC and write. Without ordering, the older interval write
-    // can resolve LAST and overwrite the close-time snapshot, losing recent nodes.
-    let inFlightSnapshot: Promise<void> = Promise.resolve();
-    const writeSnapshotNow = () => {
-        // Don't let a cross-block continuation pane (one that mounted against a
-        // snapshot whose sourceBlockId names another block) overwrite the
-        // agent-anchored snapshot. It holds no durable history of its own, so a
-        // write would repoint the agent's snapshot at this near-empty block and
-        // make the original block's conversation unrestorable. See spec §15 / #1397.
-        if (history.snapshotIsForeignBlock()) {
-            return;
-        }
-        // Schema v2: capture the lightweight overlay state (DocumentState +
-        // pane flags) synchronously before the async RPC chain so we snapshot
-        // the values at trigger time, not after a potential 3 s round-trip.
-        // nodes[] is NOT included — the NDJSON output log is the source of
-        // truth and is replayed on restore. This keeps the payload under 1 KB
-        // regardless of conversation length, eliminating the renderer OOM.
-        // See docs/specs/SPEC_WRITE_STATE_NDJSON_RESTORE_2026_06_12.md.
-        const [docState] = agentAtoms().documentStateAtom;
-        const [detailsOpen] = agentAtoms().detailsOpenAtom;
-        const capturedDocState = docState();
-        const capturedDetailsOpen = detailsOpen();
-
-        inFlightSnapshot = inFlightSnapshot.then(async () => {
-            let highWaterMark = 0;
-            try {
-                const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
-                    block_id: model.blockId,
-                    filename: "output",
-                }, { timeout: 3000 });
-                highWaterMark = countResp?.count ?? 0;
-            } catch {
-                // Soft fail — snapshot still ships without the mark.
-            }
-            // Note: no historyOffset field — v2 restore derives the render window
-            // from highWaterMark (windowStart = hwm - RESTORE_WINDOW_LINES), so a
-            // persisted offset would be dead/misleading.
-            //
-            // sourceBlockId records which block's per-block NDJSON `output` the
-            // highWaterMark counted. The snapshot itself is agent-anchored
-            // (definition_id zone) and survives across blocks, but the NDJSON it
-            // references is per-block — so restore must read history from this
-            // block, not from a fresh continuation pane's empty block.
-            const snapshot = {
-                schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-                savedAt: new Date().toISOString(),
-                highWaterMark,
-                sourceBlockId: model.blockId,
-                documentState: {
-                    collapsedNodeIds: capturedDocState ? [...capturedDocState.collapsedNodes] : [],
-                    pinnedNodeIds: capturedDocState ? [...capturedDocState.pinnedNodes] : [],
-                    scrollPosition: capturedDocState?.scrollPosition ?? 0,
-                    filter: capturedDocState?.filter ?? {
-                        showThinking: false,
-                        showSuccessfulTools: true,
-                        showFailedTools: true,
-                        showIncoming: true,
-                        showOutgoing: true,
-                    },
-                },
-                paneState: {
-                    detailsOpen: capturedDetailsOpen ?? false,
-                },
-            };
-            await RpcApi.AgentSessionWriteStateCommand(TabRpcClient, {
-                definition_id: agentId,
-                content: JSON.stringify(snapshot),
-            }, { timeout: 10000 });
-        }).catch((e) => {
-            log("history", `snapshot write failed: ${e?.message ?? e}`, "warn");
-        });
-    };
-    // Dirty-flag interval: avoids resetting a debounce timer on every
-    // token chunk during streaming (would block all crash-time saves)
-    // and avoids dispatching a save on every reactive change. A change
-    // sets `dirty`; the 30s tick flushes if dirty and resets.
-    let dirty = false;
-    let lastNodes = getDocument();
-    createEffect(() => {
-        const next = getDocument();
-        if (next !== lastNodes) {
-            dirty = true;
-            lastNodes = next;
-        }
-    });
-    const SNAPSHOT_INTERVAL_MS = 30_000;
-    const snapshotInterval = setInterval(() => {
-        if (!dirty) return;
-        dirty = false;
-        writeSnapshotNow();
-    }, SNAPSHOT_INTERVAL_MS);
-    onCleanup(() => clearInterval(snapshotInterval));
-    onCleanup(() => {
-        if (!dirty) return;
-        writeSnapshotNow();
+    // SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md). See
+    // hooks/useSnapshotPersistence.ts.
+    useSnapshotPersistence({
+        blockId: model.blockId,
+        definitionId: agentId,
+        getAtoms: agentAtoms,
+        getDocument,
+        snapshotIsForeignBlock: () => history.snapshotIsForeignBlock(),
+        log,
     });
 
-    // Pending decision queue — every ToolNode whose
-    // `status === "pending_approval"`, oldest first. The decision
-    // panel renders the head; Allow / Deny clears the node by
-    // transitioning its status. Defer is HANDLED INSIDE THE PANEL
-    // (it minimizes locally) — per
-    // docs/specs/SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md §7,
-    // the parent must NOT filter pending.
-    const pendingDecisions = (): import("./types").ToolNode[] => {
-        const docs = getDocument();
-        const out: import("./types").ToolNode[] = [];
-        for (const n of docs) {
-            if (n.type === "tool" && n.status === "pending_approval") out.push(n);
-        }
-        return out;
-    };
+    // Permission decision queue + decide handler. See hooks/useAgentDecisions.ts.
+    const { pendingDecisions, handleDecide } = useAgentDecisions({
+        blockId: model.blockId,
+        getDocument,
+        log,
+    });
 
-    const handleDecide = (decision: import("./components/AgentDecisionPanel").DecisionOutcome) => {
-        // Optimistic UI update — flip the ToolNode out of
-        // pending_approval immediately so the panel disappears (or
-        // advances to the next pending request). The backend write
-        // happens in parallel; if it fails we log but don't try to
-        // roll back the visual transition.
-        // Dispatch through the reducer (StreamFlush.updatedNodes) so
-        // slot.state stays in sync. Find the matching pending tool node
-        // by request_id, then build the updated node.
-        const updated: import("./types").ToolNode[] = [];
-        for (const n of getDocument()) {
-            if (n.type !== "tool" || n.status !== "pending_approval") continue;
-            if (n.pendingPermission?.request_id !== decision.request_id) continue;
-            updated.push({
-                ...n,
-                status: decision.outcome === "allow" ? "running" : "denied",
-                pendingPermission: undefined,
-            });
-        }
-        if (updated.length > 0) {
-            dispatchDoc(
-                model.blockId,
-                { type: "StreamFlush", newNodes: [], updatedNodes: updated },
-                "user",
-            );
-        }
-        // Send the decision to the sidecar so it can record + audit it.
-        // Delivery routes: rules persistence (path 1) or interactive
-        // subprocess stdin (path 2) per SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
-        void RpcApi.ToolDecisionCommand(TabRpcClient, {
-            blockid: model.blockId,
-            request_id: decision.request_id,
-            outcome: decision.outcome,
-            scope: decision.scope,
-            feedback: decision.feedback,
-        }).catch((err: unknown) => {
-            log("error", `tool:decision failed: ${String(err)}`);
-        });
-    };
-
-    // Pending AskUserQuestion queue — every ToolNode in `awaiting_answer`,
-    // oldest first. The question panel renders the head; Submit transitions
-    // the node and delivers the answer to the agent CLI as a tool_result.
-    // Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
-    const pendingQuestions = (): import("./types").ToolNode[] => {
-        const docs = getDocument();
-        const out: import("./types").ToolNode[] = [];
-        for (const n of docs) {
-            if (n.type === "tool" && n.status === "awaiting_answer" && n.question) out.push(n);
-        }
-        return out;
-    };
-
-    // Play the waiting-ambient tone when an AskUserQuestion panel is active
-    // (agent blocked waiting for the user to pick an option). Stop it when
-    // all questions are answered or the pane closes.
-    let waitingToneActive = false;
-    createEffect(on(pendingQuestions, (qs, prevQs) => {
-        const hadAny = (prevQs?.length ?? 0) > 0;
-        const hasAny = qs.length > 0;
-        if (hasAny && !hadAny) {
-            waitingToneActive = true;
-            firePaneEvent(model.blockId, { type: "waiting-for-input" });
-        } else if (!hasAny && hadAny) {
-            waitingToneActive = false;
-            firePaneEvent(model.blockId, { type: "waiting-ended", reason: "submitted" });
-        }
-    }));
-    onCleanup(() => {
-        if (waitingToneActive) {
-            firePaneEvent(model.blockId, { type: "waiting-ended", reason: "closed" });
-            waitingToneActive = false;
-        }
+    // AskUserQuestion queue, waiting-ambient tone, and answer handler.
+    // See hooks/useAgentQuestions.ts. `sendMessage` is passed as a thunk so
+    // the non-persistent follow-up fallback (invoked only inside the async
+    // catch) can delegate to the handleSendMessage defined below.
+    const { pendingQuestions, handleAnswer } = useAgentQuestions({
+        blockId: model.blockId,
+        getDocument,
+        sendMessage: (message: string) => handleSendMessage(message),
+        log,
     });
 
     // Root element ref — declared before useAgentControllerStatus so its
@@ -603,60 +436,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
 
     // Pane-close confirm: when the user closes this pane with tracked
     // processes still alive, intercept the layout's `onClose` and raise
-    // a ConfirmModal. Accept → `agent.kill-tree` RPC then proceed with
-    // close. Cancel → abort, pane stays open. Zero tracked processes
-    // → original close path, no prompt.
-    //
-    // We wrap `nodeModel.onClose` in place rather than adding a new
-    // ViewModel hook — ViewModel has no `beforeClose` / `canClose`
-    // surface today, and threading one through would touch the layout
-    // + block-frame + pane-actions tree. A local wrapper is enough for
-    // v1 of this feature.
-    const [closeConfirm, setCloseConfirm] = createSignal<{
-        count: number;
-        originalClose: () => void;
-    } | null>(null);
-
-    onMount(() => {
-        const original = model.nodeModel.onClose;
-        const wrapped = () => {
-            const count = processCount();
-            if (count <= 0) {
-                original?.();
-                return;
-            }
-            // Stash the original close so the modal can invoke it on
-            // confirm. Not calling original() here keeps the pane open
-            // until the user decides.
-            setCloseConfirm({ count, originalClose: () => original?.() });
-        };
-        model.nodeModel.onClose = wrapped;
-        onCleanup(() => {
-            // Only restore if we're still the wrapper — avoids
-            // clobbering a later wrapper set by someone else.
-            if (model.nodeModel.onClose === wrapped) {
-                model.nodeModel.onClose = original;
-            }
-        });
+    // a ConfirmModal. See hooks/useAgentCloseConfirm.ts.
+    const { closeConfirm, setCloseConfirm, handleCloseConfirmAccept } = useAgentCloseConfirm({
+        blockId: model.blockId,
+        model,
+        processCount,
     });
-
-    const handleCloseConfirmAccept = async () => {
-        const info = closeConfirm();
-        if (!info) return;
-        try {
-            // Kill first, then proceed with layout close. The tracker's
-            // Drop impl in `delete_controller` will nuke what survived
-            // if the RPC errors — we've already committed to closing.
-            await RpcApi.AgentKillTreeCommand(TabRpcClient, {
-                block_id: model.blockId,
-            });
-        } catch {
-            // swallow — close proceeds regardless
-        } finally {
-            setCloseConfirm(null);
-            info.originalClose();
-        }
-    };
 
     // Subscribe to subprocess output and parse into DocumentNodes.
     // Mutations dispatch through agent-document-store; the reducer there
@@ -812,62 +597,6 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             void commands.flushHeldMessages();
         }
     });
-
-    // AskUserQuestion answer handler. Defined after handleSendMessage because
-    // the non-persistent fallback below delegates to it.
-    const handleAnswer = (outcome: AnswerOutcome) => {
-        // Optimistic transition: flip the node out of awaiting_answer so the
-        // panel dismisses immediately. We snapshot the original node(s) so a
-        // failed delivery can roll the transition back.
-        const originals: import("./types").ToolNode[] = [];
-        const updated: import("./types").ToolNode[] = [];
-        for (const n of getDocument()) {
-            if (n.type !== "tool" || n.status !== "awaiting_answer") continue;
-            if (n.question?.tool_use_id !== outcome.tool_use_id) continue;
-            originals.push(n);
-            updated.push({
-                ...n,
-                status: "success",
-                question: undefined,
-                summary: `❓ Answered — ${outcome.answer_text.replace(/\n/g, "; ")}`,
-            });
-        }
-        const applyDoc = (nodes: import("./types").ToolNode[]) => {
-            if (nodes.length > 0) {
-                dispatchDoc(model.blockId, { type: "StreamFlush", newNodes: [], updatedNodes: nodes }, "user");
-            }
-        };
-        applyDoc(updated);
-
-        // Phase 1 path: persistent (host) agents speak the control protocol, so
-        // the answer is delivered as a control_response (updatedInput.answers)
-        // that resumes the turn the CLI parked on the can_use_tool request.
-        void RpcApi.AgentAnswerCommand(TabRpcClient, {
-            blockid: model.blockId,
-            tool_use_id: outcome.tool_use_id,
-            answers: outcome.answers_map,
-        }).catch((err: unknown) => {
-            const msg = String(err);
-            // Phase 2 path: one-shot / container agents have no live stdin, and
-            // the CLI abandons the AskUserQuestion tool_use when the turn ends —
-            // a tool_result can no longer reach it (validated empirically:
-            // SPEC §10.1). Deliver the answer as a normal follow-up turn
-            // instead; the agent resumes the session and continues from the
-            // question with the answer as context. Keep the optimistic success.
-            if (msg.includes("UNSUPPORTED_CONTROLLER")) {
-                log("agent", "Delivering AskUserQuestion answer as a follow-up message (non-persistent agent)");
-                void handleSendMessage(outcome.answer_text).catch((e: unknown) => {
-                    log("error", `answer follow-up failed: ${String(e)}`);
-                    applyDoc(originals);
-                });
-                return;
-            }
-            // Any other failure: roll the node back so the panel re-surfaces
-            // rather than falsely showing "answered" while the agent is blocked.
-            log("error", `agent.answer failed: ${msg}`);
-            applyDoc(originals);
-        });
-    };
 
     // On first connect (no existing session), assemble a structured startup
     // payload from agent-definition + Identity data and send it as the opening turn.
