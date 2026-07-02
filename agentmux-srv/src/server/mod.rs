@@ -52,7 +52,8 @@ use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
 use crate::backend::wps::Broker;
 use agentmux_common::api_types::{
-    PaneTitleRequest, ShellCreateRequest, ShellCreateResponse, ShellStopRequest,
+    PaneTitleRequest, ShellCreateRequest, ShellCreateResponse, ShellInputFailure,
+    ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
     TabActivateRequest, TabNameRequest, TabNewRequest, WindowFocusRequest, WindowNameRequest,
     WorkspaceNameRequest, WpsPublishRequest,
 };
@@ -269,6 +270,10 @@ pub fn build_router(state: AppState) -> Router {
         // Stop a persistent shell (Phase 3). agentmux-mcp's `ShellStop` tool
         // POSTs here; tree-kills the shell's process group.
         .route("/api/v1/shell/stop", post(handle_shell_stop))
+        // Phase 3b — write to a running shell's stdin (for interactive prompts).
+        .route("/api/v1/shell/input", post(handle_shell_input))
+        // Phase 3b — query running state, exit code, and line count.
+        .route("/api/v1/shell/status", post(handle_shell_status))
         // Open a pane (editor/term/browser/…) from an agent tool call.
         // agentmux-mcp's OpenEditor tool POSTs `{view:"editor", file, …}` here;
         // shares the exact pane.open logic with the WebSocket RPC handler
@@ -613,6 +618,7 @@ async fn handle_shell_create(
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),
+        capture_stdin: req.capture_stdin.unwrap_or(false),
     };
     tokio::spawn(runner.run());
 
@@ -632,6 +638,59 @@ async fn handle_shell_stop(
     let stopped = state.shell_sessions.stop(&req.shell_id);
     tracing::info!(shell_id = %req.shell_id, stopped, "shell.stop");
     (StatusCode::OK, Json(json!({ "stopped": stopped })))
+}
+
+/// `POST /api/v1/shell/input` — write text to a running shell's stdin (Phase 3b).
+///
+/// Appends a newline so single answers like "y" work without the caller
+/// needing to know the line discipline. Returns `{ written: false }` if the
+/// shell is not running or the write fails (e.g. the process closed its stdin).
+async fn handle_shell_input(
+    State(state): State<AppState>,
+    Json(req): Json<ShellInputRequest>,
+) -> impl IntoResponse {
+    // Non-blocking send to the stdin relay task — no mutex, no risk of
+    // blocking if the child's pipe buffer is full (the relay owns that concern).
+    // resolve_stdin distinguishes "not running" from "running but no captured
+    // stdin" so the caller gets an actionable reason instead of a bare false.
+    let (written, reason) = match state.shell_sessions.resolve_stdin(&req.shell_id) {
+        Ok(tx) => {
+            let mut text = req.text.clone();
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            if tx.send(text).is_ok() {
+                tracing::debug!(shell_id = %req.shell_id, "shell.input: written");
+                (true, None)
+            } else {
+                // Relay task gone / channel closed — process closed its stdin.
+                tracing::debug!(shell_id = %req.shell_id, "shell.input: write failed");
+                (false, Some(ShellInputFailure::WriteFailed))
+            }
+        }
+        Err(failure) => {
+            tracing::debug!(shell_id = %req.shell_id, ?failure, "shell.input: no target");
+            (false, Some(failure))
+        }
+    };
+    (StatusCode::OK, Json(ShellInputResponse { written, reason }))
+}
+
+/// `POST /api/v1/shell/status` — query a shell's running state (Phase 3b).
+///
+/// Returns `{ running, exit_code, line_count }`. If the shell_id is unknown
+/// (never started or never seen by this sidecar), `running` is false and
+/// `exit_code` is absent.
+async fn handle_shell_status(
+    State(state): State<AppState>,
+    Json(req): Json<ShellStatusRequest>,
+) -> impl IntoResponse {
+    let s = state.shell_sessions.get_status(&req.shell_id);
+    (StatusCode::OK, Json(ShellStatusResponse {
+        running: s.running,
+        exit_code: s.exit_code,
+        line_count: s.line_count,
+    }))
 }
 
 /// `POST /api/v1/pane/open` — open a pane (editor/term/browser/…).
