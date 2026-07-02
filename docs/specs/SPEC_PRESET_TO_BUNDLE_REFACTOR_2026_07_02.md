@@ -72,7 +72,7 @@ The proposal's "one real refactor" (§3.3, §7). Today: `instance → identity_b
 
 ### 3.2 Deprecate the identity-bundle App API + UI
 
-- Commands `listidentitybundles` / `getidentitybundle` / `upsertidentitybundle` / `bindidentityaccount` / `unbindidentityaccount` / `listidentitybindings` (commands.rs 164–170) → mark deprecated; keep read paths for the compat window, stop new writes.
+- Commands `listidentitybundles` / `getidentitybundle` / `upsertidentitybundle` / `deleteidentitybundle` / `bindidentityaccount` / `unbindidentityaccount` / `listidentitybindings` (commands.rs 164–170, incl. `COMMAND_DELETE_IDENTITY_BUNDLE` at 167) → mark deprecated; keep read paths for the compat window, stop new writes.
 - Trust Center: the **Identities** tab becomes a **derived view** ("what is this agent running as" over bound Accounts) — no stored identity-bundle object. Per the proposal IA (§5) there is **no Identities tab** in the target; fold it into the Accounts + Bundle surfaces. (This is a UI change — confirm the exact interim: hide the tab, or convert to read-only derived view for one release.)
 
 ### 3.3 Data backfill
@@ -106,7 +106,7 @@ Now that "bundle" means one thing and the identity-bundle layer is gone, rename 
 ("db_memory_bundles",  "db_bundles"),
 ("db_identity_accounts","db_accounts"),
 ```
-Plus: drop/rename the associated indexes (the `_is_global` / `_is_blank` / provider indexes at lines 218, 240, 270), and update every **FK reference**:
+Plus: rename the associated indexes with their tables — `idx_memory_bundles_is_blank` (line 269) → `idx_bundles_is_blank`, `idx_identity_bundles_is_blank` (line 239, dropped with the table), and the `db_identity_accounts(provider)` index (line 218) → `db_accounts(provider)`. (Note: `is_global` is a *column* on `db_memory_bundles`, not an index — no index to rename there.) Then update every **FK reference**:
 - `db_identity_bindings … REFERENCES db_identity_accounts(id)` → `db_accounts(id)` (or removed with the table)
 - `agentmux-srv/src/registry/schema.rs:37,39` and `agentmux-srv/src/backend/rpc_types/instance.rs:34,70` — the FK/reference strings to `db_identity_bundles` / `db_memory_bundles`.
 
