@@ -9,6 +9,12 @@ projections. See `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` and
 
 ---
 
+> **Update 2026-07-02:** the srv-side single-writer machinery is complete (persist arms, `balance_node`,
+> 7 reducer arms, granular-event persistence all merged) and PR-time CI is in place. The remaining work is
+> all behavior-changing + app-running/E2E-gated: the **frontend `UpdateObject`→intents flip** (finishes #864
+> → unblocks Pillar 1), **Pillar 2 Stage 2**, then **Pillar 1** proper. Sections §3–§7 below are historical
+> (they predate this arc); the table above and this note are current.
+
 ## 1. Where we are (one-glance)
 
 | Workstream | State |
@@ -18,8 +24,9 @@ projections. See `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` and
 | **Pillar 2 — single lifecycle authority** | 🟡 Stage 1 merged (#1850); Stage 2 designed, blocked on runtime verification; Stage 3 pending |
 | Pillar 3 — commit-aware admission control | ✅ Merged (#1853); follow-ons (queue-and-drain, per-agent cap, badge) pending |
 | Pillar 1 — host reproject | 🟡 Q1–Q4 resolved (`SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30`); blocked on #864 |
-| #864 — layout single writer (Pillar 1 prereq) | 🟡 = **Phase 1** of strong reducer-authority (below); spec `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30` |
-| **Strong reducer-authority (layout)** | 🟡 Full spec `SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`; ~70% prebuilt (algebra+commands exist), keystone = port `balance_node`; 6-phase plan, not started. **Decided critical, not optional.** |
+| #864 — layout single writer (Pillar 1 prereq) | 🟡 **srv-side single-writer machinery COMPLETE** (below); remaining = frontend intent-flip + wcore-direct retirement (the behavior-changing collapse) |
+| **Strong reducer-authority (layout)** | 🟡 srv side merged: persist arms (#1862), `balance_node` (#1866), 7 reducer arms (#1868), granular-event persistence (#1883). Reducer now **authors + normalizes + persists every layout op** — still **behavior-neutral** (no prod dispatcher; wcore-direct still the writer). Remaining: **Phase-4 frontend `UpdateObject`→intents flip** (E2E-gated) → delete backstops (`heal_layout`). |
+| PR-time CI + test-build unbreak | ✅ Merged (#1885) — `ci-pr.yml` runs `check --tests` + `test` + vitest on PRs (root-caused #1823/#1876 breaks: no PR CI). **TODO(owner):** add as *required* status checks in branch protection to actually gate. |
 | Saga collapse + persistence paydown | ⬜ After Pillars 1–3 |
 | Disk cleanup + tooling | ✅ Done (~107 GB reclaimed; `bin/clean-agentmux-builds.ps1`) |
 
