@@ -146,6 +146,13 @@ pub struct BrowserPaneEntry {
     pub block_id: String,
     pub label: String,
     pub lifecycle: BrowserPaneLifecycle,
+    /// The window this pane was created in (`main`, `floating-<uuid>`, …).
+    /// Used to detect a cross-window move (tear-off / redock): a create
+    /// request whose `window_label` differs from this must NOT be served by
+    /// re-navigating the existing browser in the OLD window (that leaves the
+    /// requested window black). See the `AlreadyLiveElsewhere` handling in
+    /// `reducer/panes.rs` + `browser_panes.rs`.
+    pub window_label: String,
 }
 
 // ── Pane window-placement state (pane-state reducer, Phase 0) ─────────────
