@@ -391,9 +391,11 @@ pub(super) fn handle_layout_move_node(
     }
     let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     reconcile_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutNodeMoved {
         tab_id,
+        new_tree,
         node_id,
         new_parent_id,
         index,
@@ -416,9 +418,11 @@ pub(super) fn handle_layout_swap_nodes(
     }
     let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     reconcile_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutNodesSwapped {
         tab_id,
+        new_tree,
         node1_id,
         node2_id,
         correlation_id,
@@ -439,9 +443,11 @@ pub(super) fn handle_layout_resize_nodes(
     }
     let tab = state.tabs.get_mut(&tab_id).expect("tab present after apply_atomic");
     reconcile_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutNodesResized {
         tab_id,
+        new_tree,
         ops,
         correlation_id,
         version: v,
@@ -468,9 +474,11 @@ pub(super) fn handle_layout_replace_node(
         tab.focused_node_id = new_id;
     }
     reconcile_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutNodeReplaced {
         tab_id,
+        new_tree,
         target_id,
         new_node: new_node_event,
         correlation_id,
@@ -499,9 +507,11 @@ pub(super) fn handle_layout_split_horizontal(
         tab.focused_node_id = new_id;
     }
     reconcile_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutSplitHorizontalApplied {
         tab_id,
+        new_tree,
         target_id,
         new_node: new_node_event,
         position,
@@ -531,9 +541,11 @@ pub(super) fn handle_layout_split_vertical(
         tab.focused_node_id = new_id;
     }
     reconcile_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutSplitVerticalApplied {
         tab_id,
+        new_tree,
         target_id,
         new_node: new_node_event,
         position,
@@ -591,9 +603,11 @@ pub(super) fn handle_layout_insert_node_at_index(
         tab.magnified_node_id = new_id;
     }
     reconcile_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutNodeInsertedAtIndex {
         tab_id,
+        new_tree,
         node: node_event,
         index_arr,
         correlation_id,
