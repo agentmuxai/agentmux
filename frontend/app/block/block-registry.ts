@@ -6,6 +6,7 @@
 // the view model's own module) — block.tsx never needs to change.
 
 import { AgentViewModel } from "@/app/view/agent";
+import { ArmoryViewModel } from "@/app/view/armory/armory";
 import { BrowserViewModel } from "@/app/view/browser/browser";
 import { DroneViewModel } from "@/app/view/drone/drone";
 import { EditorViewModel } from "@/app/view/editor/editor";
@@ -17,7 +18,6 @@ import { SubagentViewModel } from "@/app/view/subagent/subagent";
 import { SwarmViewModel } from "@/app/view/swarm/swarm";
 import { SysinfoViewModel } from "@/app/view/sysinfo/sysinfo";
 import { ToolchainViewModel } from "@/app/view/toolchain/toolchain";
-import { TrustViewModel } from "@/app/view/trust/trust";
 import { WardenViewModel } from "@/app/view/warden/warden";
 import { HelpViewModel } from "@/view/helpview/helpview";
 import { TermViewModel } from "@/view/term/term";
@@ -39,7 +39,7 @@ blockViewRegistry.set("identity", IdentityPaneViewModel as any);
 blockViewRegistry.set("drone", DroneViewModel as any);
 blockViewRegistry.set("warden", WardenViewModel as any);
 blockViewRegistry.set("toolchain", ToolchainViewModel as any);
-blockViewRegistry.set("trust", TrustViewModel as any);
+blockViewRegistry.set("armory", ArmoryViewModel as any);
 blockViewRegistry.set("settings", SettingsViewModel as any);
 
 export function registerBlockView(viewType: string, cls: ViewModelClass): void {

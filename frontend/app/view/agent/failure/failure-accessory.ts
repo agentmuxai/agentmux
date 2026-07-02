@@ -27,7 +27,7 @@ export interface FailureActions {
     useExistingLogin: () => void;
     /** Open a real terminal window so the browser OAuth can open, then poll for creds. */
     loginViaTerminal: () => void;
-    /** Open Trust Center → Accounts. */
+    /** Open Armory → Accounts. */
     trustCenter: () => void;
     /** Start a fresh agent session — recovery for a context-window overflow,
      *  where resuming the same (full) session would only re-fail. */
@@ -101,7 +101,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
         disabled: view.retrying, onClick: on.retry,
     };
     const trustCenter: PaneRowAction = {
-        glyph: "⚙", label: "Trust Center → Accounts", title: "Open Trust Center → Accounts", onClick: on.trustCenter,
+        glyph: "⚙", label: "Armory → Accounts", title: "Open Armory → Accounts", onClick: on.trustCenter,
     };
 
     const actions: PaneRowAction[] = [];
@@ -125,7 +125,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             }
             break;
         case "usage_limit":
-            actions.push({ ...trustCenter, label: "Trust Center (switch / upgrade)", primary: true });
+            actions.push({ ...trustCenter, label: "Armory (switch / upgrade)", primary: true });
             break;
         case "spawn_failure":
             actions.push({ ...trustCenter, glyph: "🧩", label: "Provider setup", title: "Fix the provider install", primary: true });

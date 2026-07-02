@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Live API-key validation for the Trust Center.
+//! Live API-key validation for the Armory.
 //!
 //! Each supported service has a probe that makes a single minimal
 //! authenticated request and maps the response to non-secret metadata

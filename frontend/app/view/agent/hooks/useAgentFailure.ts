@@ -8,7 +8,7 @@
  * `AgentFailure` from a non-zero exit), holds the transient view state
  * (expanded body, retrying, the 5-second auto-retry countdown), and exposes a
  * `<PaneRow>` descriptor via `failureToRow`. The actual recovery *effects*
- * (re-run the turn, re-auth, open Trust Center) are passed in by the caller so
+ * (re-run the turn, re-auth, open Armory) are passed in by the caller so
  * this hook stays presentation-only.
  *
  * Auto-retry: for transient classes (rate-limit / overload / network) a 5 s
@@ -37,7 +37,7 @@ export interface UseAgentFailureOptions {
     onUseExistingLogin: () => void;
     /** Open a real terminal window for browser-based OAuth (Claude v2.1.x). */
     onLoginViaTerminal: () => void;
-    /** Open Trust Center → Accounts. */
+    /** Open Armory → Accounts. */
     onTrustCenter: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
     onNewSession: () => void;

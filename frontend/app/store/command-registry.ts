@@ -372,7 +372,7 @@ export function registerDefaultCommands(): void {
         label: "Identity & Memory",
         category: "App",
         icon: "id-card",
-        execute: () => void openOrFocusPaneByView("trust"),
+        execute: () => void openOrFocusPaneByView("armory"),
     });
     commandRegistry.register({
         id: "help:docs",

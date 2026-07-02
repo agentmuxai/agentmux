@@ -29,7 +29,7 @@ use crate::backend::storage::store::{
 
 use super::super::AppState;
 
-/// Request for `account.key.verify` (Trust Center key flow). The `api_key`
+/// Request for `account.key.verify` (Armory key flow). The `api_key`
 /// field is a secret — never log this struct.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -188,7 +188,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // Trust Center: validate (optional) + securely store an API key.
+    // Armory: validate (optional) + securely store an API key.
     // The plaintext goes to the OS keychain; the DB row keeps only the
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
     // See specs/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
@@ -340,7 +340,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // ── Trust Center service OAuth (scaffold) ──
+    // ── Armory service OAuth (scaffold) ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
     let oauth_wstore = state.id_store.clone();

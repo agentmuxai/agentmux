@@ -115,9 +115,9 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 onClick: () => openModal(CommandPaletteModal),
             },
             {
-                label: "Trust Center",
-                icon: "id-card",
-                onClick: () => fireAndForget(() => openOrFocusPaneByView("trust")),
+                label: "Armory",
+                icon: "shield-halved",
+                onClick: () => fireAndForget(() => openOrFocusPaneByView("armory")),
             },
             {
                 label: "Toolchain",
