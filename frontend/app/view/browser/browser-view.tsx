@@ -397,7 +397,14 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         // that haven't reached the backend yet get no-op'd there instead of
         // racing a mid-destruction HWND. See SPEC_BROWSER_PANE_LIFECYCLE.md §5.
         if (paneCreated()) {
-            invokeCommand("browser_pane_close", { block_id: model.blockId }).catch(() => {});
+            // Pass window_label so the host can ignore a stale close from a
+            // window that no longer owns the pane. On tear-off/redock the pane
+            // moves to another window and is recreated there; this old
+            // component then unmounts and fires this close — without the label,
+            // the host (which keys close on block_id) would destroy the moved
+            // pane and black out the new window. See browser_pane_close in
+            // ipc.rs + the AlreadyLiveElsewhere fix.
+            invokeCommand("browser_pane_close", { block_id: model.blockId, window_label: windowLabel }).catch(() => {});
         }
         resizeObserver?.disconnect();
         if (positionInterval) {

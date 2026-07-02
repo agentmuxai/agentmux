@@ -425,6 +425,38 @@ async fn route_command(
         }
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            // Window-aware close (tear-off / redock race fix). During a
+            // cross-window move the pane is closed in the old window and
+            // re-created in the new one (see browser_panes::create's
+            // AlreadyLiveElsewhere arm). The OLD window's browser-view then
+            // unmounts and fires this close — but by now the pane's entry
+            // points at the NEW window. Honoring that stale close would destroy
+            // the just-moved pane, leaving the new window black. So: if the
+            // caller passed its window_label and it no longer matches the pane's
+            // current window, ignore the close. Frontends that don't send
+            // window_label keep the old unconditional behavior.
+            let requesting_window = args
+                .get("window_label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !requesting_window.is_empty() {
+                if let Some(current) = state.browser_pane_window_label(block_id) {
+                    if current != requesting_window {
+                        tracing::info!(
+                            block_id,
+                            requesting_window,
+                            current_window = %current,
+                            "[browser_pane_close] ignoring stale close from a window that no longer owns the pane (moved via tear-off/redock)"
+                        );
+                        crate::browser_pane::trace::pane_trace(
+                            block_id,
+                            "close-ignored-stale-window",
+                            &format!("from={requesting_window} current={current}"),
+                        );
+                        return Ok(serde_json::json!(true));
+                    }
+                }
+            }
             // Cancel any pending HTTP-auth callbacks parked for this
             // pane before tearing it down. Without this, closing a
             // pane mid-auth-prompt leaks the CEF AuthCallback refcount

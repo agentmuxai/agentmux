@@ -1162,6 +1162,20 @@ impl AppState {
             .map(|e| e.label.clone())
     }
 
+    /// The window a pane currently lives in (`main`, `floating-<uuid>`, …),
+    /// or `None` if there is no entry. Used to make `browser_pane_close`
+    /// window-aware: a close from a window that no longer owns the pane (e.g.
+    /// the source window's view unmounting after a tear-off moved the pane to a
+    /// floating window) must be ignored, else it destroys the pane that just
+    /// moved. Returns the label regardless of Live/Closing.
+    pub fn browser_pane_window_label(&self, block_id: &str) -> Option<String> {
+        self.host_state
+            .lock()
+            .browser_panes
+            .get(block_id)
+            .map(|e| e.window_label.clone())
+    }
+
     /// Snapshot of all `Live` pane labels. Used by `defocus_all` etc.
     pub fn live_browser_pane_labels(&self) -> Vec<String> {
         self.host_state
