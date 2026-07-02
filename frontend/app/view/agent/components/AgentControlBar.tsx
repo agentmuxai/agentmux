@@ -92,7 +92,11 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
         const r = runtime();
         return [
             PERMISSION_LABELS[r.permissionMode],
-            MODEL_LABELS[r.model] || r.model,
+            // Prefer the registry's versioned label (single source); fall back
+            // to the static map / raw value.
+            getProvider(providerId)?.models?.find((m) => m.value === r.model)?.label
+                ?? MODEL_LABELS[r.model]
+                ?? r.model,
             `Effort: ${EFFORT_LABELS[r.effort] || r.effort}`,
         ].join(" · ");
     };
@@ -291,9 +295,12 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                             value={runtime().model}
                             onChange={(e) => updateRuntime({ model: e.target.value as ModelChoice })}
                         >
-                            <option value="opus">Opus</option>
-                            <option value="sonnet">Sonnet</option>
-                            <option value="haiku">Haiku</option>
+                            {/* Registry-driven (single source shared with the
+                                /model command + AgentComposerStrip); labels carry
+                                the versioned model names. */}
+                            {(getProvider(providerId)?.models ?? []).map((m) => (
+                                <option value={m.value}>{m.label}</option>
+                            ))}
                         </select>
                     </div>
                     <div class="agent-control-row">
