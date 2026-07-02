@@ -20,6 +20,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::backend::wps::{Broker, WaveEvent, EVENT_SHELL_CHUNK};
+use agentmux_common::api_types::ShellInputFailure;
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -122,6 +123,25 @@ impl ShellSessionRegistry {
     /// Sending to the clone is non-blocking — the relay task handles the write.
     pub fn get_stdin_tx(&self, shell_id: &str) -> Option<mpsc::UnboundedSender<String>> {
         self.shells.lock().get(shell_id).and_then(|e| e.stdin_tx.clone())
+    }
+
+    /// Resolve where a `ShellInput` write should go, distinguishing the two
+    /// failure modes that `get_stdin_tx` collapses into `None`:
+    /// - `Ok(tx)`            — running with captured stdin
+    /// - `Err(StdinNotCaptured)` — running but created without capture_stdin
+    /// - `Err(NotRunning)`   — unknown id or already exited
+    pub fn resolve_stdin(
+        &self,
+        shell_id: &str,
+    ) -> Result<mpsc::UnboundedSender<String>, ShellInputFailure> {
+        let shells = self.shells.lock();
+        match shells.get(shell_id) {
+            Some(entry) => match &entry.stdin_tx {
+                Some(tx) => Ok(tx.clone()),
+                None => Err(ShellInputFailure::StdinNotCaptured),
+            },
+            None => Err(ShellInputFailure::NotRunning),
+        }
     }
 
     /// Return a snapshot of the shell's status. Returns `running: false` if unknown.

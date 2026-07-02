@@ -79,8 +79,26 @@ pub struct ShellInputRequest {
 /// Response from `POST /api/v1/shell/input`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellInputResponse {
-    /// false if the shell is not running or stdin write failed.
+    /// false if the shell is not running, has no captured stdin, or the write failed.
     pub written: bool,
+    /// Why the write did not happen (None when `written` is true). Lets callers
+    /// distinguish "shell exited" from "shell is running but was created without
+    /// capture_stdin=true", which are otherwise indistinguishable from `written`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ShellInputFailure>,
+}
+
+/// Reason a `ShellInput` write did not happen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellInputFailure {
+    /// The shell id is unknown or the process has already exited.
+    NotRunning,
+    /// The shell is running but was created without `capture_stdin=true`, so its
+    /// stdin is `/dev/null` — recreate it with capture_stdin to send input.
+    StdinNotCaptured,
+    /// The stdin relay is gone / the write channel is closed (process closed stdin).
+    WriteFailed,
 }
 
 /// `POST /api/v1/shell/status` — query whether a shell is still running.
