@@ -48,8 +48,8 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 2;
 ///        Cognito PKCE tokens (access, refresh, id) + expiry + user email
 ///   v8 — db_memory_bundles.is_global: global-tier flag for Armory
 ///        bundles injected into every agent's CLAUDE.md at launch
-///   v9 — db_memory_bundles.sort_order: explicit ordering for the Trust
-///        Center global brain (controls CLAUDE.md injection order). Existing
+///   v9 — db_memory_bundles.sort_order: explicit ordering for the Armory
+///        global brain (controls CLAUDE.md injection order). Existing
 ///        rows default to 0; the Brain tab assigns positions via reorder.
 ///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref:
 ///        standalone MCP Server and Skill primitives with per-agent ref tables
