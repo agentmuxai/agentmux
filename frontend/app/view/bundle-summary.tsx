@@ -7,13 +7,13 @@
 //
 // Before this PR the `view: "identity"` / `view: "memory"` panes
 // rendered the full-CRUD `IdentityManagerBody` / `MemoryManagerBody`.
-// §4 of the spec consolidated all bundle CRUD into the Trust Center pane;
+// §4 of the spec consolidated all bundle CRUD into the Armory pane;
 // the per-agent settings tabs are now *consumers*, not editors.
 //
 // This panel is intentionally context-free and CRUD-free: it shows a
 // short pointer explaining that bundles are app-wide data managed in one
-// place, plus a "Manage in Identity & Memory" button that opens the Trust
-// Center via `openOrFocusPaneByView("trust")`.
+// place, plus a "Manage in Identity & Memory" button that opens the
+// Armory via `openOrFocusPaneByView("armory")`.
 //
 // Per-agent bundle resolution — DATA GAP: the spec's ideal is to show
 // "this agent uses Identity: X". The launched identity/memory bundle ids
@@ -58,7 +58,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 <button
                     type="button"
                     class="bundle-summary-btn"
-                    onClick={() => void openOrFocusPaneByView("trust")}
+                    onClick={() => void openOrFocusPaneByView("armory")}
                 >
                     Manage in Identity &amp; Memory
                 </button>

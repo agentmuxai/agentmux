@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Identity accounts + bundles, Trust Center key/OAuth flows, agent-identity
+// Identity accounts + bundles, Armory key/OAuth flows, agent-identity
 // links, and the pre-launch OAuth / install / prereq flows. Split from the
 // original rpc-api.ts.
 
@@ -43,7 +43,7 @@ export const IdentityApi = {
         return client.rpcCall("deleteidentityaccount", data, opts);
     },
 
-    // Trust Center: optionally validate (validate=true → single user-initiated
+    // Armory: optionally validate (validate=true → single user-initiated
     // outbound probe) then store an API key in the OS keychain. The plaintext
     // is never returned; on success the response carries only the masked tail +
     // non-secret metadata. See SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
@@ -71,7 +71,7 @@ export const IdentityApi = {
         return client.rpcCall("account.key.verify", data, opts);
     },
 
-    // Trust Center service OAuth (SPEC_TRUST_CENTER §4.2/§12.1). Resolves the
+    // Armory service OAuth (SPEC_TRUST_CENTER §4.2/§12.1). Resolves the
     // provider's OAuth config (built-in public client id, or BYO clientId/secret),
     // spawns the flow (PKCE loopback or device), and returns a session id + the
     // initial status. A "not configured" / unknown-provider case comes back as a
