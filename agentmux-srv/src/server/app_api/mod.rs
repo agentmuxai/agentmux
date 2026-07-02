@@ -32,7 +32,7 @@ mod pane;
 mod blockfile;
 mod session;
 mod identity;
-mod preset;
+mod bundle;
 mod memory;
 mod skill;
 mod mcp;
@@ -46,7 +46,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     blockfile::register(engine, state);
     session::register(engine, state);
     identity::register(engine, state);
-    preset::register(engine, state);
+    bundle::register(engine, state);
     memory::register(engine, state);
     skill::register(engine, state);
     mcp::register(engine, state);
@@ -530,52 +530,56 @@ pub(crate) async fn identity_account_validate_stored_impl(
     }))
 }
 
-pub(crate) async fn preset_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
-    let memories = state.id_store.bundle_memory_list().map_err(|e| format!("preset.list: {e}"))?;
-    let presets: Vec<_> = memories.iter().map(|m| json!({
+pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
+    let memories = state.id_store.bundle_memory_list().map_err(|e| format!("bundle.list: {e}"))?;
+    let bundles: Vec<_> = memories.iter().map(|m| json!({
         "id": m.id, "name": m.name, "description": m.description,
         "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
     })).collect();
-    Ok(json!({ "presets": presets }))
+    // Emit both keys during the Preset→Bundle alias window: new callers of
+    // `bundle.list` read `bundles`; the retained `preset.list` alias's existing
+    // agent/REST consumers still read `presets`. Drop the `presets` key in
+    // Phase 4 when the alias is removed (SPEC_PRESET_TO_BUNDLE_REFACTOR §2.1/§4.4).
+    Ok(json!({ "bundles": bundles, "presets": bundles }))
 }
 
-pub(crate) async fn preset_get_impl(
+pub(crate) async fn bundle_get_impl(
     state: &AppState,
     id: &str,
     name: &str,
 ) -> Result<serde_json::Value, String> {
     let memory = if !id.is_empty() {
-        state.id_store.bundle_memory_get(id).map_err(|e| format!("preset.get: {e}"))?
-            .ok_or_else(|| format!("preset.get: not found id={id}"))?
+        state.id_store.bundle_memory_get(id).map_err(|e| format!("bundle.get: {e}"))?
+            .ok_or_else(|| format!("bundle.get: not found id={id}"))?
     } else if !name.is_empty() {
-        let all = state.id_store.bundle_memory_list().map_err(|e| format!("preset.get: {e}"))?;
+        let all = state.id_store.bundle_memory_list().map_err(|e| format!("bundle.get: {e}"))?;
         all.into_iter().filter(|m| m.name == name).max_by_key(|m| m.updated_at)
-            .ok_or_else(|| format!("preset.get: not found name={name}"))?
+            .ok_or_else(|| format!("bundle.get: not found name={name}"))?
     } else {
-        return Err("preset.get: provide id or name".to_string());
+        return Err("bundle.get: provide id or name".to_string());
     };
     serde_json::to_value(&memory).map_err(|e| e.to_string())
 }
 
-pub(crate) async fn preset_self_get_impl(
+pub(crate) async fn bundle_self_get_impl(
     state: &AppState,
     agent_id: &str,
 ) -> Result<serde_json::Value, String> {
     let instance = state.wstore.instance_get_by_name(agent_id)
-        .map_err(|e| format!("preset.self.get: {e}"))?;
+        .map_err(|e| format!("bundle.self.get: {e}"))?;
     let memory_id = instance.as_ref()
         .and_then(|i| if i.memory_id.is_empty() { None } else { Some(i.memory_id.clone()) });
     let memory = if let Some(mid) = memory_id {
-        state.id_store.bundle_memory_get(&mid).map_err(|e| format!("preset.self.get: {e}"))?
-            .ok_or_else(|| format!("preset.self.get: memory_id {mid} not found"))?
+        state.id_store.bundle_memory_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
+            .ok_or_else(|| format!("bundle.self.get: memory_id {mid} not found"))?
     } else {
-        // No preset bound: return the blank singleton (two-step — list to find
+        // No bundle bound: return the blank singleton (two-step — list to find
         // the blank id, then fetch the full object).
-        let all = state.id_store.bundle_memory_list().map_err(|e| format!("preset.self.get: {e}"))?;
+        let all = state.id_store.bundle_memory_list().map_err(|e| format!("bundle.self.get: {e}"))?;
         let blank_id = all.into_iter().find(|m| m.is_blank).map(|m| m.id)
-            .ok_or_else(|| "preset.self.get: blank singleton not found".to_string())?;
-        state.id_store.bundle_memory_get(&blank_id).map_err(|e| format!("preset.self.get: {e}"))?
-            .ok_or_else(|| "preset.self.get: blank singleton row missing".to_string())?
+            .ok_or_else(|| "bundle.self.get: blank singleton not found".to_string())?;
+        state.id_store.bundle_memory_get(&blank_id).map_err(|e| format!("bundle.self.get: {e}"))?
+            .ok_or_else(|| "bundle.self.get: blank singleton row missing".to_string())?
     };
     serde_json::to_value(&memory).map_err(|e| e.to_string())
 }
@@ -1076,26 +1080,26 @@ mod agent_zoom_seed_tests {
 }
 
 #[cfg(test)]
-mod preset_upsert_input_tests {
-    use super::preset::normalize_preset_upsert_input;
+mod bundle_upsert_input_tests {
+    use super::bundle::normalize_bundle_upsert_input;
     use serde_json::json;
 
     #[test]
     fn fills_missing_or_null_id_with_empty_string() {
-        let no_id = normalize_preset_upsert_input(json!({ "name": "p" }));
+        let no_id = normalize_bundle_upsert_input(json!({ "name": "p" }));
         assert_eq!(no_id["id"], json!(""));
 
-        let null_id = normalize_preset_upsert_input(json!({ "id": null, "name": "p" }));
+        let null_id = normalize_bundle_upsert_input(json!({ "id": null, "name": "p" }));
         assert_eq!(null_id["id"], json!(""));
 
         // A real id is preserved untouched.
-        let kept = normalize_preset_upsert_input(json!({ "id": "abc", "name": "p" }));
+        let kept = normalize_bundle_upsert_input(json!({ "id": "abc", "name": "p" }));
         assert_eq!(kept["id"], json!("abc"));
     }
 
     #[test]
     fn encodes_array_fields_to_json_strings() {
-        let out = normalize_preset_upsert_input(json!({
+        let out = normalize_bundle_upsert_input(json!({
             "name": "p",
             "context_files": [{ "path": "a.md", "content": "x" }],
             "mcp_servers": [],
@@ -1109,7 +1113,7 @@ mod preset_upsert_input_tests {
 
     #[test]
     fn leaves_string_fields_untouched() {
-        let out = normalize_preset_upsert_input(json!({
+        let out = normalize_bundle_upsert_input(json!({
             "name": "p",
             "context_files": "[]",
             "skills": "[\"already\"]",

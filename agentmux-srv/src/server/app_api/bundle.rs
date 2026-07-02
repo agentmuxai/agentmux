@@ -1,14 +1,14 @@
 use super::*;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    register_preset_list(engine, state);
-    register_preset_get(engine, state);
-    register_preset_upsert(engine, state);
-    register_preset_delete(engine, state);
-    register_preset_self_get(engine, state);
+    register_bundle_list(engine, state);
+    register_bundle_get(engine, state);
+    register_bundle_upsert(engine, state);
+    register_bundle_delete(engine, state);
+    register_bundle_self_get(engine, state);
 }
 
-/// Normalize a `preset.upsert` request body into the shape the `Memory` struct
+/// Normalize a `bundle.upsert` request body into the shape the `Memory` struct
 /// deserializes from, so the App API accepts the request exactly as documented
 /// in the spec:
 ///   - `id` may be omitted to create (the struct has no serde default), so an
@@ -18,7 +18,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 ///     on the struct, but the spec shows them as JSON arrays. Array values are
 ///     re-encoded to their JSON string form; values already given as strings
 ///     pass through untouched.
-pub(super) fn normalize_preset_upsert_input(mut data: serde_json::Value) -> serde_json::Value {
+pub(super) fn normalize_bundle_upsert_input(mut data: serde_json::Value) -> serde_json::Value {
     if let serde_json::Value::Object(ref mut map) = data {
         match map.get("id") {
             Some(serde_json::Value::String(_)) => {}
@@ -39,21 +39,25 @@ pub(super) fn normalize_preset_upsert_input(mut data: serde_json::Value) -> serd
     data
 }
 
-fn register_preset_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let state = state.clone();
-    engine.register_handler(
-        COMMAND_PRESET_LIST,
+// Each handler is registered under BOTH the new `bundle.*` command and the
+// deprecated `preset.*` alias (one-release compat window, spec Phase 2). The
+// alias forwards to the same logic; remove it in Phase 4. The two
+// `register_handler` calls per fn pass explicit command constants (not a loop
+// variable) so the rpc-contract extractor can resolve every registered name.
+
+fn register_bundle_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
         Box::new(move |_data, _ctx| {
             let state = state.clone();
-            Box::pin(async move { Ok(Some(preset_list_impl(&state).await?)) })
-        }),
-    );
+            Box::pin(async move { Ok(Some(bundle_list_impl(&state).await?)) })
+        })
+    };
+    engine.register_handler(COMMAND_BUNDLE_LIST, make(state.clone()));
+    engine.register_handler(COMMAND_PRESET_LIST, make(state.clone()));
 }
 
-fn register_preset_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let state = state.clone();
-    engine.register_handler(
-        COMMAND_PRESET_GET,
+fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
         Box::new(move |data, _ctx| {
             let state = state.clone();
             Box::pin(async move {
@@ -63,39 +67,40 @@ fn register_preset_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     #[serde(default)] name: String,
                 }
                 let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("preset.get: {e}"))?;
-                Ok(Some(preset_get_impl(&state, &req.id, &req.name).await?))
+                    .map_err(|e| format!("bundle.get: {e}"))?;
+                Ok(Some(bundle_get_impl(&state, &req.id, &req.name).await?))
             })
-        }),
-    );
+        })
+    };
+    engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
+    engine.register_handler(COMMAND_PRESET_GET, make(state.clone()));
 }
 
-fn register_preset_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_PRESET_UPSERT,
+fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
+        let id_store = state.id_store.clone();
+        let broker = state.broker.clone();
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let mut memory: Memory =
-                    serde_json::from_value(normalize_preset_upsert_input(data))
-                        .map_err(|e| format!("preset.upsert: {e}"))?;
+                    serde_json::from_value(normalize_bundle_upsert_input(data))
+                        .map_err(|e| format!("bundle.upsert: {e}"))?;
 
                 // S4: guard on the target id, not the caller-supplied is_blank flag
                 // (which defaults false and can be omitted to bypass is_blank check).
                 if memory.id == "blank" || memory.id.starts_with("seed-") || memory.is_blank {
-                    return Err("FORBIDDEN: cannot mutate a protected preset".to_string());
+                    return Err("FORBIDDEN: cannot mutate a protected bundle".to_string());
                 }
-                // Guard existing global presets: an agent must not be able to demote or
+                // Guard existing global bundles: an agent must not be able to demote or
                 // corrupt a shared global brain bundle it doesn't own by supplying its id.
                 if !memory.id.is_empty() {
                     if let Some(existing) = id_store.bundle_memory_get(&memory.id)
-                        .map_err(|e| format!("preset.upsert: {e}"))?
+                        .map_err(|e| format!("bundle.upsert: {e}"))?
                     {
                         if existing.is_global {
-                            return Err("FORBIDDEN: cannot mutate a global preset".to_string());
+                            return Err("FORBIDDEN: cannot mutate a global bundle".to_string());
                         }
                     }
                 }
@@ -114,22 +119,23 @@ fn register_preset_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 memory.updated_at = now;
 
                 id_store.bundle_memory_upsert(&memory)
-                    .map_err(|e| format!("preset.upsert: {e}"))?;
+                    .map_err(|e| format!("bundle.upsert: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
                 Ok(Some(serde_json::to_value(&memory).map_err(|e| e.to_string())?))
             })
-        }),
-    );
+        })
+    };
+    engine.register_handler(COMMAND_BUNDLE_UPSERT, make(state));
+    engine.register_handler(COMMAND_PRESET_UPSERT, make(state));
 }
 
-fn register_preset_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
-    let broker = state.broker.clone();
-    engine.register_handler(
-        COMMAND_PRESET_DELETE,
+fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
+        let id_store = state.id_store.clone();
+        let broker = state.broker.clone();
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
             let broker = broker.clone();
@@ -137,7 +143,7 @@ fn register_preset_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 #[derive(serde::Deserialize)]
                 struct Req { id: String }
                 let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("preset.delete: {e}"))?;
+                    .map_err(|e| format!("bundle.delete: {e}"))?;
 
                 if req.id == "blank" {
                     return Err("FORBIDDEN: cannot delete a seeded bundle".to_string());
@@ -158,27 +164,29 @@ fn register_preset_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     {
                         Err(format!("FORBIDDEN: cannot delete a seeded bundle"))
                     }
-                    Err(e) => Err(format!("preset.delete: {e}")),
+                    Err(e) => Err(format!("bundle.delete: {e}")),
                 }
             })
-        }),
-    );
+        })
+    };
+    engine.register_handler(COMMAND_BUNDLE_DELETE, make(state));
+    engine.register_handler(COMMAND_PRESET_DELETE, make(state));
 }
 
-fn register_preset_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let state = state.clone();
-    engine.register_handler(
-        COMMAND_PRESET_SELF_GET,
+fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
         Box::new(move |data, ctx| {
             let state = state.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("preset.self.get: {e}"))?;
+                    .map_err(|e| format!("bundle.self.get: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                Ok(Some(preset_self_get_impl(&state, &req.agent_id).await?))
+                Ok(Some(bundle_self_get_impl(&state, &req.agent_id).await?))
             })
-        }),
-    );
+        })
+    };
+    engine.register_handler(COMMAND_BUNDLE_SELF_GET, make(state.clone()));
+    engine.register_handler(COMMAND_PRESET_SELF_GET, make(state.clone()));
 }
