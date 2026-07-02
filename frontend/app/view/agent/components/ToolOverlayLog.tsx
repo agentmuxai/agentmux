@@ -274,6 +274,9 @@ function renderRead(node: ToolNode): JSX.Element {
     // the conversation DOM; HighlightedCode stays simple (it injects
     // innerHTML, so capping here is cleaner than inside it).
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    // Render markdown files as formatted markdown, matching renderWrite. Without
+    // this a .md Read shows raw source instead of a rendered preview.
+    const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-read">
             <div class="agent-tool-file-path">{filePath}</div>
@@ -285,11 +288,20 @@ function renderRead(node: ToolNode): JSX.Element {
                     </Show>
                 }
             >
-                <HighlightedCode
-                    code={capped!.text}
-                    lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
-                    class="agent-tool-read-content"
-                />
+                <Show
+                    when={isMarkdown}
+                    fallback={
+                        <HighlightedCode
+                            code={capped!.text}
+                            lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
+                            class="agent-tool-read-content"
+                        />
+                    }
+                >
+                    <div class="agent-tool-read-content agent-tool-read-md">
+                        <Markdown text={capped!.text} />
+                    </div>
+                </Show>
                 <Show when={capped!.hiddenLines > 0}>
                     <OutputHiddenMarker hidden={capped!.hiddenLines} noun="line" from="head" />
                 </Show>
