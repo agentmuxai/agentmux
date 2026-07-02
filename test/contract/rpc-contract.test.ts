@@ -276,7 +276,12 @@ const KNOWN_DECLARED_UNREGISTERED = [
     "wslstatus",
 ];
 
-/** Backend registers these handlers, but rpc-api.ts has no method. */
+/**
+ * Backend registers these handlers, but rpc-api.ts has no method.
+ * Note: the `mcp.*` / `skill.*` entries are the standalone MCP Server + Skill
+ * primitives (Trust Center) — intentionally backend-only for now; frontend
+ * bindings land when the UI is wired. Shrink this baseline as they get bound.
+ */
 const KNOWN_REGISTERED_UNDECLARED = [
     "agent.define",
     "agent.list",
@@ -293,6 +298,12 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "identity.account.validate",
     "identity.self.accounts",
     "identity.self.unlink",
+    "mcp.bind",
+    "mcp.delete",
+    "mcp.get",
+    "mcp.list",
+    "mcp.unbind",
+    "mcp.upsert",
     "memory.list",
     "memory.read",
     "memory.write",
@@ -302,6 +313,12 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "preset.list",
     "preset.self.get",
     "preset.upsert",
+    "skill.bind",
+    "skill.delete",
+    "skill.get",
+    "skill.list",
+    "skill.unbind",
+    "skill.upsert",
     "slow",
 ];
 
