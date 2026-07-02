@@ -211,6 +211,110 @@ confirm the `prop:value` artifact is the actual cause vs. a genuine swap under p
 here due to current machine memory pressure — the fix is cheap once confirmed, but shouldn't be shipped
 on a hypothesis.
 
+## 5d. Fix 7 — Replace the native `<select>`s with custom **drop-up** menus
+
+**Symptom (user-reported):** the expanded Mode/Model/Effort dropdowns "have very strange style." That's
+the browser's **native `<select>` popup** — OS-themed chrome, mismatched fonts, inconsistent row heights,
+a scrollbar, and it opens *downward* (wrong: the strip sits at the bottom of the pane, so a native popup
+either overflows the pane or renders below the text input). We want a **drop-up**: a custom menu that
+opens **upward**, styled to match the strip, where each option row is the **same height and style as the
+collapsed control**. Effort specifically should present its options **horizontally**.
+
+### Where the strip sits (why "up")
+```
+┌ agent pane ───────────────────────────────────────────────┐
+│  … conversation …                                          │
+│                                                            │
+│  ┌───────────────────────────────────────────────────────┐│
+│  │ [Bypass ⌃][Sonnet 5 ⌃][X-High ⌃]  [Log]   ↑2k ↓1k 12k ││ ← composer strip
+│  └───────────────────────────────────────────────────────┘│
+│  ┌───────────────────────────────────────────────────────┐│
+│  │ Message AgentA…                                        ││ ← text input (bottom)
+│  └───────────────────────────────────────────────────────┘│
+└────────────────────────────────────────────────────────────┘
+   the strip is one row off the bottom → menus must open UPWARD.
+```
+
+### Before — native `<select>` (the "strange style")
+```
+click [Sonnet 4.6 ▾]
+        ┌──────────────────────┐  ← OS-drawn: wrong font, taller rows than the
+        │  Opus 4.8            │     strip, native highlight color, scrollbar,
+        │  Sonnet 4.6      ✓   │     inconsistent padding — and it opens DOWN,
+        │  Haiku 4.5          │     off the bottom of the pane.
+        └──────────────────────┘
+```
+
+### After — vertical drop-up (Mode, Model)
+Opens upward; every row is the same height/font/padding as the collapsed control; the selected row is
+tinted + checked; hover is a subtle tint. Mode rows keep the permission color as a left accent bar.
+```
+   ┌────────────────────┐   ← menu floats directly ABOVE the control, its bottom
+   │  Opus 4.8          │     edge flush with the control's top edge.
+   │  Sonnet 5       ✓  │   ← selected: accent tint + trailing check
+   │  Sonnet 4.6        │   ← each row height == control height (~24px), 10px font,
+   │  Haiku 4.5         │     same padding; hover row = accent 8% tint
+   └────────────────────┘
+   ┌────────────────────┐
+   │  Sonnet 5       ⌃  │   ← the trigger (collapsed control); chevron flips ⌄→⌃
+   └────────────────────┘     when open. Same pill as today, no native chrome.
+
+  Mode variant — permission color as a left bar (matches the collapsed pill):
+   ┌────────────────────┐
+   │▎ Bypass         ✓  │   red bar   (▎ = 3px color-left, per PERMISSION_COLORS)
+   │▎ Auto              │   blue bar
+   │▎ Accept Edits      │   amber bar
+   │▎ Plan              │   green bar
+   │▎ Default           │   neutral
+   └────────────────────┘
+```
+
+### After — horizontal drop-up (Effort)
+Per the user's "horizontal popup": the 5 effort options sit in a **single row** that pops up above the
+Effort control. Each chip is the same height as the control; the selected chip is filled.
+```
+   ┌───────────────────────────────────────────────┐
+   │  Low   Med   High   ▐X-High▌   Max            │  ← one row of equal-height
+   └───────────────────────────────────────────────┘     chips; selected = filled
+   ┌───────────┐                                          (▐ ▌), hover = tint
+   │ X-High ⌃  │  ← the Effort control
+   └───────────┘
+```
+
+### Styling rules (kills the "strange style")
+- **No native `<select>`.** Trigger is the existing strip pill (`.agent-composer-strip-select`
+  look — 1px border, `border-radius:0`, 10px font); only the popup changes.
+- **Menu container:** solid `--main-bg-color`, 1px `--border-color`, `border-radius:0` (matches strip),
+  a subtle elevation shadow; no scrollbar at these list sizes.
+- **Row = collapsed-control parity:** same height (~22–24px content box), same 10px font, same
+  `1px var(--space-1-5)` padding. This is the "each entry same height/style as the selected" requirement.
+- **Selected:** `color-mix(--accent-color 12%)` tint + trailing check (reuse `FlyoutMenu`'s `checked`).
+- **Hover:** `color-mix(--accent-color 8%)` tint (no OS blue).
+- **Mode:** 3px `PERMISSION_COLORS[mode]` left bar on each row (mirrors the collapsed pill's stripe).
+- **Effort horizontal:** flex row, equal-width chips, selected chip filled with the accent tint.
+
+### Implementation — reuse `FlyoutMenu` (`frontend/app/element/flyoutmenu.tsx`)
+`FlyoutMenu` already does everything needed: `placement` (pass **`"top-start"`** = drop-up), floating-ui
+`autoUpdate` + `flip()` (so it drops *down* only if there's genuinely no room above), `Portal` +
+`data-pane-overlay` (renders over native/browser panes — same reason the strip needed it), click-outside,
+and a `checked` field per item for the selected mark. So each control becomes:
+- **Trigger** (`children`): the current strip pill showing the selected label + an up-chevron.
+- **Items**: the option list with `checked: value === current`, `onClick: () => updateRuntime({...})`.
+- **Mode/Model → vertical** (default `FlyoutMenu` layout). **Effort → horizontal**: add a
+  `--horizontal` modifier class (via `className`) that flips the menu to `display:flex; flex-direction:row`
+  and renders equal-height chips (or a small dedicated `EffortFlyout` using the same positioning).
+- Drop `prop:value`/native `<option>` from Fix 1/Fix 5 once the flyout replaces the `<select>` — the
+  SolidJS controlled-`<select>` binding artifact (Bug 2) **disappears entirely** with a custom menu, so
+  Fix 7 also *supersedes* Fix 5's defensive `prop:value` workaround.
+
+### Relationship to other fixes / specs
+- **Supersedes Fix 5's `prop:value`** (no native select → no controlled-select desync).
+- **Composes with the model catalog** (`SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md`): the flyout's item
+  list is just `getProvider(providerId)?.models`, so once that's API-sourced, the drop-up shows
+  "Sonnet 5" etc. automatically.
+- Realizes the deferred `SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md §3` ("Model/Effort selects
+  should open upward via FlyoutMenu `placement="top-start"` instead of native `<select>` — not yet done").
+
 ## 6. Files touched
 
 | File | Change |
