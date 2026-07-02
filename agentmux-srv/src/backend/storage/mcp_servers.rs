@@ -130,6 +130,55 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// Atomically upsert an MCP server enforcing per-agent name uniqueness, and
+    /// (when `bind_new`) bind it — all in one transaction so concurrent
+    /// `mcp.upsert` calls for the same name can't both pass a check and insert
+    /// duplicate-named bindings. Returns an error if another server visible to
+    /// the agent (bound or global) already uses the name.
+    pub fn mcp_server_upsert_unique(
+        &self,
+        agent_id: &str,
+        server: &McpServer,
+        bind_new: bool,
+    ) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let dup: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_mcp_servers
+             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
+               SELECT mcp_id FROM db_agent_mcp_ref WHERE agent_id = ?3
+             ))",
+            params![server.name, server.id, agent_id],
+            |r| r.get(0),
+        )?;
+        if dup > 0 {
+            return Err(StoreError::Other(format!(
+                "server name '{}' already bound to this agent",
+                server.name
+            )));
+        }
+        tx.execute(
+            "INSERT INTO db_mcp_servers (id, name, transport, config, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, transport=excluded.transport, config=excluded.config,
+               updated_at=excluded.updated_at",
+            params![
+                server.id, server.name, server.transport, server.config,
+                if server.is_global { 1i64 } else { 0i64 },
+                server.created_at, server.updated_at,
+            ],
+        )?;
+        if bind_new {
+            tx.execute(
+                "INSERT OR IGNORE INTO db_agent_mcp_ref (agent_id, mcp_id) VALUES (?1, ?2)",
+                params![agent_id, server.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Return true if the given MCP server is accessible to the agent (global or bound).
     /// Used for read and mutation access checks.
     pub fn mcp_server_is_accessible_to(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {

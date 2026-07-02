@@ -107,18 +107,6 @@ fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 };
 
-                // Reject a duplicate name already bound to this agent (mirrors
-                // mcp.upsert). Excludes the row being updated so a no-op rename
-                // to itself is allowed.
-                let bound = wstore.skill_list(&req.agent_id)
-                    .map_err(|e| format!("skill.upsert: {e}"))?;
-                if bound.iter().any(|s| s.name == req.name && s.id != id) {
-                    return Err(format!(
-                        "skill.upsert: skill name '{}' already bound to this agent",
-                        req.name
-                    ));
-                }
-
                 let skill = crate::backend::storage::Skill {
                     id: id.clone(),
                     name: req.name,
@@ -130,11 +118,10 @@ fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                wstore.skill_upsert(&skill).map_err(|e| format!("skill.upsert: {e}"))?;
-                if req.id.is_empty() {
-                    wstore.skill_bind(&req.agent_id, &id)
-                        .map_err(|e| format!("skill.upsert: bind: {e}"))?;
-                }
+                // Atomic: name-uniqueness check + upsert + (bind on create) in one
+                // transaction, so concurrent same-name upserts can't both pass.
+                wstore.skill_upsert_unique(&req.agent_id, &skill, req.id.is_empty())
+                    .map_err(|e| format!("skill.upsert: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "skills:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,

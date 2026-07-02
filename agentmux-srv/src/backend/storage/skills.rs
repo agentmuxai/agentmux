@@ -331,6 +331,58 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// Atomically upsert a skill enforcing per-agent name uniqueness, and (when
+    /// `bind_new`) bind it to the agent — all in one transaction so concurrent
+    /// `skill.upsert` calls for the same name can't both pass a separate check
+    /// and insert duplicates (the check+write is not split across lock releases).
+    /// Returns `NameConflict` if another skill visible to the agent (bound or
+    /// global) already uses the name.
+    pub fn skill_upsert_unique(
+        &self,
+        agent_id: &str,
+        skill: &Skill,
+        bind_new: bool,
+    ) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let dup: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_skills
+             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
+               SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?3
+             ))",
+            params![skill.name, skill.id, agent_id],
+            |r| r.get(0),
+        )?;
+        if dup > 0 {
+            return Err(StoreError::Other(format!(
+                "skill name '{}' already bound to this agent",
+                skill.name
+            )));
+        }
+        tx.execute(
+            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
+               description=excluded.description, content=excluded.content,
+               updated_at=excluded.updated_at",
+            params![
+                skill.id, skill.name, skill.trigger, skill.skill_type,
+                skill.description, skill.content,
+                if skill.is_global { 1i64 } else { 0i64 },
+                skill.created_at, skill.updated_at,
+            ],
+        )?;
+        if bind_new {
+            tx.execute(
+                "INSERT OR IGNORE INTO db_agent_skills_ref (agent_id, skill_id) VALUES (?1, ?2)",
+                params![agent_id, skill.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Return true if the given skill is accessible to the agent (global or bound).
     /// Used for read and delete access checks.
     pub fn skill_is_accessible_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {

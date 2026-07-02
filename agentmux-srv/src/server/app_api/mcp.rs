@@ -115,17 +115,6 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 };
 
-                // Reject a duplicate name already bound to this agent (excluding
-                // the row being updated, so a rename-to-self is allowed).
-                let bound = wstore.mcp_server_list(&req.agent_id)
-                    .map_err(|e| format!("mcp.upsert: {e}"))?;
-                if bound.iter().any(|s| s.name == req.name && s.id != id) {
-                    return Err(format!(
-                        "mcp.upsert: server name '{}' already bound to this agent",
-                        req.name
-                    ));
-                }
-
                 let server = crate::backend::storage::McpServer {
                     id: id.clone(),
                     name: req.name,
@@ -135,12 +124,10 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                wstore.mcp_server_upsert(&server)
+                // Atomic: name-uniqueness check + upsert + (bind on create) in one
+                // transaction, so concurrent same-name upserts can't both pass.
+                wstore.mcp_server_upsert_unique(&req.agent_id, &server, req.id.is_empty())
                     .map_err(|e| format!("mcp.upsert: {e}"))?;
-                if req.id.is_empty() {
-                    wstore.mcp_server_bind(&req.agent_id, &id)
-                        .map_err(|e| format!("mcp.upsert: bind: {e}"))?;
-                }
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "mcp:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
