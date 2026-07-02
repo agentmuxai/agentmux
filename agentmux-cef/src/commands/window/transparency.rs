@@ -18,8 +18,9 @@
 //             (Win32 window-style ops are safe from any thread).
 //   macOS   — [NSWindow setAlphaValue:], via ui_tasks::post_set_window_alpha
 //             (AppKit → must run on the UI thread).
-//   Linux   — not yet implemented (needs _NET_WM_WINDOW_OPACITY; owned by the
-//             Linux track of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01).
+//   Linux   — EWMH _NET_WM_WINDOW_OPACITY (X11/XWayland — the default ozone),
+//             via ui_tasks::post_set_window_alpha (CEF Views handle → must run
+//             on the UI thread). Native-Wayland ozone: no protocol, no-op.
 
 use std::sync::Arc;
 
@@ -76,11 +77,17 @@ pub fn set_window_transparency(state: &Arc<AppState>, args: &serde_json::Value) 
         crate::ui_tasks::post_set_window_alpha(state, &label, alpha);
     }
 
+    // Linux — Track 1 (SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01): EWMH
+    // _NET_WM_WINDOW_OPACITY, the X11/XWayland analogue of the Win32 layered
+    // window and NSWindow.alphaValue arms above. Native-Wayland ozone has no
+    // uniform-alpha protocol; the UI task warns and no-ops there.
+    #[cfg(target_os = "linux")]
+    {
+        let alpha = if transparent { opacity.clamp(0.0, 1.0) } else { 1.0 };
+        crate::ui_tasks::post_set_window_alpha(state, &label, alpha);
+    }
+
     let _ = state;
-    // Linux — still a no-op here: uniform alpha needs _NET_WM_WINDOW_OPACITY
-    // (X11/XWayland); owned by the Linux track of the same spec.
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let _ = (transparent, opacity);
 
     Ok(serde_json::Value::Null)
 }
@@ -181,6 +188,22 @@ pub fn set_window_opacity(
     // windows semi-transparent after restore). Applies NSWindow.alphaValue
     // on the UI thread via SetWindowAlphaTask.
     #[cfg(target_os = "macos")]
+    for ev in &out.events {
+        match ev {
+            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
+                crate::ui_tasks::post_set_window_alpha(state, ev_label, *ev_opacity as f64);
+            }
+            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
+                crate::ui_tasks::post_set_window_alpha(state, ev_label, 1.0);
+            }
+            _ => {}
+        }
+    }
+
+    // Linux mirror — same reducer events, same both-arms requirement
+    // (reagent P1 on #868). Applies _NET_WM_WINDOW_OPACITY on the UI thread
+    // via SetWindowAlphaTask.
+    #[cfg(target_os = "linux")]
     for ev in &out.events {
         match ev {
             crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {

@@ -1133,7 +1133,7 @@ fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
 
 // --- Settings helpers (ported from src-tauri/src/commands/platform.rs) ---
 
-fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
     if !path.exists() {
         return serde_json::Map::new();
     }
