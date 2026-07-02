@@ -242,6 +242,75 @@ fn try_register_browser_pane_live_already_live_returns_existing_label() {
     assert!(out.events.is_empty(), "no event for AlreadyLive — caller just navigates");
 }
 
+fn pending_in(window: &str) -> crate::state::PendingBrowserPaneCreate {
+    crate::state::PendingBrowserPaneCreate {
+        url: "https://agentmux.ai".into(),
+        x: 0,
+        y: 0,
+        width: 800,
+        height: 600,
+        window_label: window.into(),
+    }
+}
+
+#[test]
+fn try_register_same_window_relive_returns_already_live() {
+    // A re-create targeting the SAME window the pane already lives in is a
+    // genuine re-navigation — keep the AlreadyLive path, no pending stash.
+    let mut state = HostState::default();
+    let first = match update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: Some(pending_in("main")) },
+    ).browser_pane_register_result
+    {
+        Some(RegisterResult::Fresh(l)) => l,
+        _ => unreachable!(),
+    };
+    assert_eq!(state.browser_panes["b1"].window_label, "main");
+    let out = update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: Some(pending_in("main")) },
+    );
+    match out.browser_pane_register_result {
+        Some(RegisterResult::AlreadyLive(l)) => assert_eq!(l, first),
+        other => panic!("expected AlreadyLive, got {:?}", other),
+    }
+    assert!(!state.pending_browser_pane_creates.contains_key("b1"), "same-window re-nav must not stash a pending create");
+}
+
+#[test]
+fn try_register_cross_window_returns_already_live_elsewhere_and_stashes() {
+    // A create targeting a DIFFERENT window (tear-off / redock) must NOT
+    // re-navigate in place — it returns AlreadyLiveElsewhere and stashes the
+    // pending create so the caller's close-completion replays it in the new
+    // window. This is the black-screen fix.
+    let mut state = HostState::default();
+    let first = match update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive { block_id: "b1".into(), pending: Some(pending_in("main")) },
+    ).browser_pane_register_result
+    {
+        Some(RegisterResult::Fresh(l)) => l,
+        _ => unreachable!(),
+    };
+    let out = update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive {
+            block_id: "b1".into(),
+            pending: Some(pending_in("floating-abc")),
+        },
+    );
+    match out.browser_pane_register_result {
+        Some(RegisterResult::AlreadyLiveElsewhere(l)) => assert_eq!(l, first),
+        other => panic!("expected AlreadyLiveElsewhere, got {:?}", other),
+    }
+    // Pending create was stashed, targeting the new window, for replay on close.
+    let stashed = state.pending_browser_pane_creates.get("b1").expect("pending create must be stashed");
+    assert_eq!(stashed.window_label, "floating-abc");
+    // The old entry is still Live (caller will close it next).
+    assert!(matches!(state.browser_panes["b1"].lifecycle, BrowserPaneLifecycle::Live));
+}
+
 #[test]
 fn try_register_browser_pane_live_closing_returns_closing() {
     let mut state = HostState::default();
