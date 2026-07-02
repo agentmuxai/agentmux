@@ -468,7 +468,13 @@
     // We wrap in our own <pre class="agent-highlighted-code"> and inject innerHTML.
     .agent-highlighted-code {
         font-family: var(--termfontfamily, "JetBrains Mono", monospace);
-        font-size: 12px;
+        // 1em (relative), not a fixed 12px: the overlay-log's preview-zoom
+        // (`font-size: <scale>%`) sets the em base, so the code body scales with
+        // Ctrl+scroll over the preview. An absolute px here silently ignored the
+        // cascade — the preview zoom only moved the file-path header (which
+        // inherits the %) and left the code fixed. Base is the panel's 12px, so
+        // 1em == 12px at 1× zoom.
+        font-size: 1em;
         line-height: 1.5;
         margin: 0;
         overflow-x: auto;
@@ -1097,6 +1103,11 @@
             color: var(--accent-color);
             margin-bottom: var(--space-1);
             font-weight: 500;
+            // Fixed size: the file-path header belongs to the PANE, not the
+            // preview. The overlay-log's preview-zoom (`font-size: %`) must not
+            // scale it — otherwise Ctrl+scroll over the body also grows the
+            // filename. Pane zoom (CSS `zoom` on .agent-view) still scales it.
+            font-size: 12px;
         }
 
         .agent-tool-read-content {
@@ -1111,6 +1122,21 @@
                 background: var(--main-bg-color) !important; /* stylelint-disable-line declaration-no-important */
             }
         }
+
+        // Markdown Read preview (.md/.mdx) — mirrors .agent-tool-write-md.
+        .agent-tool-read-md {
+            padding: 4px var(--space-1);
+            overflow-x: auto;
+            user-select: text;
+            cursor: text;
+
+            .markdown,
+            .markdown > .content {
+                display: block;
+                height: auto;
+                overflow: visible;
+            }
+        }
     }
 
     // === Write Tool ===
@@ -1119,6 +1145,8 @@
             color: var(--accent-color);
             margin-bottom: var(--space-0-5);
             font-weight: 500;
+            // See Read tool: pane-owned header, immune to the preview zoom.
+            font-size: 12px;
         }
 
         .agent-tool-write-info {
