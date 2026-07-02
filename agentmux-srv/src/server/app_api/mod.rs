@@ -532,11 +532,15 @@ pub(crate) async fn identity_account_validate_stored_impl(
 
 pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
     let memories = state.id_store.bundle_memory_list().map_err(|e| format!("bundle.list: {e}"))?;
-    let presets: Vec<_> = memories.iter().map(|m| json!({
+    let bundles: Vec<_> = memories.iter().map(|m| json!({
         "id": m.id, "name": m.name, "description": m.description,
         "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
     })).collect();
-    Ok(json!({ "presets": presets }))
+    // Emit both keys during the Preset→Bundle alias window: new callers of
+    // `bundle.list` read `bundles`; the retained `preset.list` alias's existing
+    // agent/REST consumers still read `presets`. Drop the `presets` key in
+    // Phase 4 when the alias is removed (SPEC_PRESET_TO_BUNDLE_REFACTOR §2.1/§4.4).
+    Ok(json!({ "bundles": bundles, "presets": bundles }))
 }
 
 pub(crate) async fn bundle_get_impl(
