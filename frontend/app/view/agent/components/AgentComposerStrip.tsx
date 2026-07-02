@@ -97,8 +97,12 @@ function contextTitle(tokens: number, contextWindow: number | undefined): string
 interface AgentComposerStripProps {
     /** True while a turn is in flight. */
     loading?: boolean;
-    /** Final session totals; non-null after the first TurnEnd. */
-    sessionStats?: SessionStats | null;
+    /**
+     * Cumulative cost/tokens/duration across every completed turn in this
+     * pane's lifetime; non-null after the first TurnEnd. Sums, rather than
+     * replaces, on each turn — see SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md.
+     */
+    sessionTotals?: SessionStats | null;
     /** Live tokens for the in-flight turn. */
     turnTokens?: TurnTokens | null;
     /** Count of OS processes tracked for this agent block. */
@@ -147,8 +151,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         if (props.loading) {
             if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
             parts.push(fmtElapsed(elapsedMs()));
-        } else if (props.sessionStats) {
-            const s = props.sessionStats;
+        } else if (props.sessionTotals) {
+            const s = props.sessionTotals;
             if (s.input_tokens != null || s.output_tokens != null) {
                 parts.push(fmtTokens({ input: s.input_tokens ?? 0, output: s.output_tokens ?? 0 }));
             }

@@ -53,6 +53,12 @@ export interface AgentAtoms {
      */
     streamingStateAtom: SignalPair<StreamingState>;
     sessionStatsAtom: SignalPair<SessionStats | null>;
+    /**
+     * Cumulative cost/tokens/duration across every completed turn this
+     * pane's lifetime — feeds the composer-strip totals display. See
+     * SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md.
+     */
+    sessionTotalsAtom: SignalPair<SessionStats | null>;
     currentToolAtom: SignalPair<string | null>;
     turnTokensAtom: SignalPair<TurnTokens | null>;
     /**
@@ -154,6 +160,7 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
             lastEventTime: 0,
         }),
         sessionStatsAtom: createSignal<SessionStats | null>(null),
+        sessionTotalsAtom: createSignal<SessionStats | null>(null),
         currentToolAtom: createSignal<string | null>(null),
         turnTokensAtom: createSignal<TurnTokens | null>(null),
         contextTokensAtom: createSignal<number | null>(null),
