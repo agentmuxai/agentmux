@@ -188,9 +188,14 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // stays the family alias (opus/sonnet/haiku), which `--model` resolves
         // to exactly that version; when a family ever has TWO live versions,
         // switch those entries to concrete `--model` IDs (e.g. claude-sonnet-4-6).
+        // `default: true` marks the family the runtime falls back to when no
+        // model is set — it MUST match DEFAULT_RUNTIME_CONFIG.model (types.ts),
+        // which is `sonnet` (faster default for routine turns). A mismatch here
+        // desyncs the strip's Model dropdown from the actual default and is a
+        // trap for any `models.find(m => m.default)` reader.
         models: [
-            { value: "opus", label: "Opus 4.8", default: true, description: "Claude Opus 4.8 — highest quality", aliases: ["claude-opus"] },
-            { value: "sonnet", label: "Sonnet 4.6", description: "Claude Sonnet 4.6 — balanced", aliases: ["claude-sonnet"] },
+            { value: "opus", label: "Opus 4.8", description: "Claude Opus 4.8 — highest quality", aliases: ["claude-opus"] },
+            { value: "sonnet", label: "Sonnet 4.6", default: true, description: "Claude Sonnet 4.6 — balanced", aliases: ["claude-sonnet"] },
             { value: "haiku", label: "Haiku 4.5", description: "Claude Haiku 4.5 — fastest", aliases: ["claude-haiku"] },
         ],
     },

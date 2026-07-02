@@ -2,22 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentControlBar - Collapsible runtime controls for permission mode,
- * model, and effort level. Changes take effect on the next turn.
+ * AgentControlBar — session-lifecycle controls for the agent pane, shown in
+ * the composer details region (below the Log toggle).
  *
- * Also shows Archive / Export / Restore session management buttons
- * when the session has data (session:line_count > 0).
+ * Runtime controls (permission Mode, Model, Effort) used to live here behind a
+ * collapsible "Controls" chevron. They were promoted to top-level dropdowns in
+ * `AgentComposerStrip` and this nested duplicate was removed — see
+ * SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02. What remains is purely session
+ * management: the interrupted / large-session / archived banners and the
+ * Archive / Export / Restore actions. These render directly (no inner
+ * chevron) — the Log button is the single toggle for this whole region.
  */
 
 import { createSignal, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
-import type { AgentRuntimeConfig, PermissionMode, ModelChoice, EffortLevel } from "../types";
-import { DEFAULT_RUNTIME_CONFIG } from "../types";
-import { getRuntimeConfig } from "../buildRuntimeArgs";
-import { applyRuntimeChange } from "../runtime-apply";
-import { getProvider } from "../providers";
 
 interface AgentControlBarProps {
     blockId: string;
@@ -25,81 +25,10 @@ interface AgentControlBarProps {
     providerId: string;
 }
 
-const PERMISSION_LABELS: Record<PermissionMode, string> = {
-    bypass: "Bypass",
-    auto: "Auto",
-    acceptEdits: "Accept Edits",
-    plan: "Plan",
-    default: "Default",
-};
-
-const PERMISSION_COLORS: Record<PermissionMode, string> = {
-    bypass: "var(--error-color, #ef4444)",
-    auto: "var(--accent-color, #3b82f6)",
-    acceptEdits: "var(--warning-color, #eab308)",
-    plan: "var(--success-color, #22c55e)",
-    default: "var(--main-text-color)",
-};
-
-const MODEL_LABELS: Record<string, string> = {
-    "": "Default",
-    opus: "Opus",
-    sonnet: "Sonnet",
-    haiku: "Haiku",
-};
-
-const EFFORT_LABELS: Record<string, string> = {
-    "": "Default",
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "X-High",
-    max: "Max",
-};
-
 export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControlBarProps): JSX.Element => {
-    const [expanded, setExpanded] = createSignal(false);
     const [archiveBusy, setArchiveBusy] = createSignal(false);
     const [exportBusy, setExportBusy] = createSignal(false);
     const [restoreBusy, setRestoreBusy] = createSignal(false);
-
-    const runtime = (): AgentRuntimeConfig => getRuntimeConfig(blockAtom()?.meta);
-
-    const isNonDefault = (): boolean => {
-        const r = runtime();
-        return (
-            r.permissionMode !== DEFAULT_RUNTIME_CONFIG.permissionMode ||
-            r.model !== DEFAULT_RUNTIME_CONFIG.model ||
-            r.effort !== DEFAULT_RUNTIME_CONFIG.effort
-        );
-    };
-
-    const updateRuntime = async (patch: Partial<AgentRuntimeConfig>) => {
-        const updated = { ...runtime(), ...patch };
-        try {
-            // Persist + (for persistent Claude) rebuild args & force-restart so
-            // the change applies to the running agent. Previously this wrote
-            // only `agent:runtime` meta, which silently no-op'd for persistent
-            // Claude — picking Opus/Sonnet here didn't take effect. Now shared
-            // with the /model slash path via applyRuntimeChange.
-            await applyRuntimeChange(blockId, getProvider(providerId), updated);
-        } catch {
-            // Silently ignore — settings will retry on next change
-        }
-    };
-
-    const compactSummary = (): string => {
-        const r = runtime();
-        return [
-            PERMISSION_LABELS[r.permissionMode],
-            // Prefer the registry's versioned label (single source); fall back
-            // to the static map / raw value.
-            getProvider(providerId)?.models?.find((m) => m.value === r.model)?.label
-                ?? MODEL_LABELS[r.model]
-                ?? r.model,
-            `Effort: ${EFFORT_LABELS[r.effort] || r.effort}`,
-        ].join(" · ");
-    };
 
     // ── Session management helpers ──────────────────────────────────────────────
 
@@ -205,7 +134,7 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                     <button
                         class="agent-session-btn agent-session-btn-dismiss"
                         onClick={dismissInterrupted}
-                        title="Dismiss this notice"
+                        title="Dismiss this notice — your next message resumes the session either way"
                     >
                         Dismiss
                     </button>
@@ -222,7 +151,7 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                         class="agent-session-btn agent-session-btn-archive"
                         disabled={archiveBusy()}
                         onClick={handleArchive}
-                        title="Archive this session and start fresh"
+                        title="Compress and archive this session's history to free disk space, then start fresh"
                     >
                         {archiveBusy() ? "Archiving…" : "Archive"}
                     </button>
@@ -239,7 +168,7 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                         class="agent-session-btn agent-session-btn-restore"
                         disabled={restoreBusy()}
                         onClick={handleRestore}
-                        title="Restore session data from archive"
+                        title="Restore this session's history from the archive"
                     >
                         {restoreBusy() ? "Restoring…" : "Restore"}
                     </button>
@@ -247,101 +176,35 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                         class="agent-session-btn agent-session-btn-export"
                         disabled={exportBusy()}
                         onClick={handleExport}
-                        title="Export session as .jsonl"
+                        title="Download this session's history as a .jsonl file"
                     >
                         {exportBusy() ? "Exporting…" : "Export"}
                     </button>
                 </div>
             </Show>
 
-            <div
-                class="agent-control-bar-header"
-                onClick={() => setExpanded(!expanded())}
-            >
-                <span class="agent-control-chevron">{expanded() ? "▾" : "▸"}</span>
-                <span class="agent-control-summary">
-                    <Show when={!expanded()}>
-                        {compactSummary()}
-                        <Show when={isNonDefault()}>
-                            <span class="agent-control-nondefault" title="Non-default settings active">*</span>
-                        </Show>
-                    </Show>
-                    <Show when={expanded()}>
-                        Controls
-                    </Show>
-                </span>
-            </div>
-            <Show when={expanded()}>
-                <div class="agent-control-bar-body">
-                    <div class="agent-control-row">
-                        <label class="agent-control-label">Mode</label>
-                        <select
-                            class="agent-control-select"
-                            value={runtime().permissionMode}
-                            style={{ "border-left": `3px solid ${PERMISSION_COLORS[runtime().permissionMode]}` }}
-                            onChange={(e) => updateRuntime({ permissionMode: e.target.value as PermissionMode })}
+            {/* ── Session actions (shown when there is history and it's live) ── */}
+            <Show when={lineCount() > 0 && !isArchived()}>
+                <div class="agent-session-row">
+                    <span class="agent-session-row-label">Session</span>
+                    <div class="agent-session-actions">
+                        <button
+                            class="agent-session-btn agent-session-btn-archive"
+                            disabled={archiveBusy()}
+                            onClick={handleArchive}
+                            title="Compress and archive this session's history to free disk space, then start fresh"
                         >
-                            <option value="bypass">Bypass (no prompts)</option>
-                            <option value="auto">Auto (AI classifier)</option>
-                            <option value="acceptEdits">Accept Edits</option>
-                            <option value="plan">Plan (read-only)</option>
-                            <option value="default">Default (prompt all)</option>
-                        </select>
-                    </div>
-                    <div class="agent-control-row">
-                        <label class="agent-control-label">Model</label>
-                        <select
-                            class="agent-control-select"
-                            value={runtime().model}
-                            onChange={(e) => updateRuntime({ model: e.target.value as ModelChoice })}
+                            {archiveBusy() ? "Archiving…" : "Archive"}
+                        </button>
+                        <button
+                            class="agent-session-btn agent-session-btn-export"
+                            disabled={exportBusy()}
+                            onClick={handleExport}
+                            title="Download this session's history as a .jsonl file"
                         >
-                            {/* Registry-driven (single source shared with the
-                                /model command + AgentComposerStrip); labels carry
-                                the versioned model names. */}
-                            {(getProvider(providerId)?.models ?? []).map((m) => (
-                                <option value={m.value}>{m.label}</option>
-                            ))}
-                        </select>
+                            {exportBusy() ? "Exporting…" : "Export"}
+                        </button>
                     </div>
-                    <div class="agent-control-row">
-                        <label class="agent-control-label">Effort</label>
-                        <select
-                            class="agent-control-select"
-                            value={runtime().effort}
-                            onChange={(e) => updateRuntime({ effort: e.target.value as EffortLevel })}
-                        >
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                            <option value="xhigh">X-High (coding/agentic)</option>
-                            <option value="max">Max (Opus only)</option>
-                        </select>
-                    </div>
-
-                    {/* ── Session management buttons (shown when there is history) ── */}
-                    <Show when={lineCount() > 0 && !isArchived()}>
-                        <div class="agent-control-row agent-control-row-session">
-                            <label class="agent-control-label">Session</label>
-                            <div class="agent-session-actions">
-                                <button
-                                    class="agent-session-btn agent-session-btn-archive"
-                                    disabled={archiveBusy()}
-                                    onClick={handleArchive}
-                                    title="Compress and archive session history to free disk space"
-                                >
-                                    {archiveBusy() ? "Archiving…" : "Archive"}
-                                </button>
-                                <button
-                                    class="agent-session-btn agent-session-btn-export"
-                                    disabled={exportBusy()}
-                                    onClick={handleExport}
-                                    title="Download session history as .jsonl"
-                                >
-                                    {exportBusy() ? "Exporting…" : "Export"}
-                                </button>
-                            </div>
-                        </div>
-                    </Show>
                 </div>
             </Show>
         </div>
