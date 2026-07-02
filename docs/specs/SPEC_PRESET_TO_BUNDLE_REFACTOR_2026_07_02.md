@@ -90,8 +90,6 @@ Implementation:
 
 **Phase 3 deliverable:** one PR (resolver + backfill + UI derived-view). Heaviest behavior change — needs the identity/keychain reconciliation tracked in **issue #1624** ("Reconcile per-agent keychain with the live identity-bundle system") to land compatibly; coordinate.
 
-**Open product decision (proposal §9.6):** whether a **Policy** primitive (hooks + `.claude/settings.json` permissions) is introduced here or deferred. Flag, don't assume.
-
 ### 3.4 RESOLVED product decisions (2026-07-02)
 
 These override the corresponding open items in `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md`:
@@ -103,6 +101,12 @@ These override the corresponding open items in `PROPOSAL_COMPOSABLE_AGENT_MODEL_
   - **Brief** stays defined as *the first message* (kickoff payload), but it is **additive to `CLAUDE.md`**, not a replacement for standing instructions. **Skills** remain on-demand modules, but they are **not** the sole home for instructional content — `CLAUDE.md` remains the standing-instruction home.
   - **Impact on this refactor:** none of the Phase 2–4 storage/naming work depends on retiring `CLAUDE.md`; this decision simply removes the "migrate soul/agentmd → Skills / retire CLAUDE.md" strand from the composable-model rollout. The `agent_config.rs` CLAUDE.md assembly stays as-is.
   - **Note:** `CLAUDE.md` is Claude-specific; other CLIs use their own native context files (e.g. `AGENTS.md`, `GEMINI.md`). "Retain CLAUDE.md" generalizes to "keep writing each provider's native standing-instruction file."
+- **§9.6 / Policy primitive — RESOLVED: YES, it's a distinct 7th primitive — but DEFERRED to a follow-on phase (call it Phase 5), NOT part of Phase 3.**
+  - **Why first-class:** hooks + `.claude/settings.json` permissions are a *trust decision* (allow/deny tool rules, hook execution) — the same class as Accounts and MCP servers. The model's thesis is that security-sensitive config gets explicit review, not burial in agent config. So Policy earns first-class, reviewable, shareable status in the target model, surfaced in the Armory + the per-agent setup modal.
+  - **Why deferred:** it has zero dependency on Phase 3's resolver/identity work, and Phase 3 is already the heaviest phase. Bundling Policy in would expand scope and risk for no sequencing benefit.
+  - **Therefore Phase 3 leaves hooks + `.claude/settings.json` writing EXACTLY as today** (no behavior change). Policy is broken out later: a `db`-backed Policy primitive + Armory surface, referenced by Bundles/agents like the other primitives, with an ownership/global guard (§6). Track as a follow-up; not gating Phase 3.
+
+**Phase 3 is now fully specced and unblocked** — all §9 decisions resolved (Policy explicitly deferred).
 
 ---
 
