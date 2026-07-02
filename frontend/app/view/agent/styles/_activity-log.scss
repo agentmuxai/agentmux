@@ -20,76 +20,20 @@
         user-select: text;
         flex-shrink: 0;
 
-        &--has-error .agent-activity-log-header {
-            color: var(--error-color);
+        // Latest-entry accent. The header (which used to carry this tint)
+        // was removed with the middle collapse layer, so accent the panel's
+        // own top border instead.
+        &--has-error {
+            border-top-color: var(--error-color);
         }
-        &--has-warn .agent-activity-log-header {
-            color: var(--warning-color);
-        }
-
-        .agent-activity-log-header {
-            display: flex;
-            align-items: center;
-            gap: var(--space-1-5);
-            width: 100%;
-            padding: var(--space-0-5) var(--space-1-5);
-            background: transparent;
-            border: none;
-            color: var(--secondary-text-color);
-            font: inherit;
-            text-align: left;
-            cursor: default;
-            transition: background 80ms ease;
-
-            &:hover {
-                background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
-            }
-        }
-
-        .agent-activity-log-chevron {
-            display: inline-block;
-            width: 10px;
-            text-align: center;
-            opacity: 0.7;
-        }
-
-        .agent-activity-log-label {
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            opacity: 0.8;
-            flex-shrink: 0;
-        }
-
-        .agent-activity-log-preview {
-            flex: 1;
-            min-width: 0;
-            display: inline-flex;
-            align-items: center;
-            gap: var(--space-1);
-            overflow: hidden;
-            white-space: nowrap;
-            text-overflow: ellipsis;
-            opacity: 0.65;
-        }
-
-        .agent-activity-log-preview-text {
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .agent-activity-log-count {
-            font-size: 10px;
-            opacity: 0.5;
-            flex-shrink: 0;
-            font-variant-numeric: tabular-nums;
+        &--has-warn {
+            border-top-color: var(--warning-color);
         }
 
         .agent-activity-log-body {
             max-height: 30vh;
             overflow-y: auto;
             padding: var(--space-0-5) var(--space-1) var(--space-1);
-            border-top: 1px solid var(--border-color);
         }
     }
 
