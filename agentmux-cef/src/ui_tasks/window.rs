@@ -334,6 +334,88 @@ unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
     true
 }
 
+// ── Window alpha (Linux/X11 uniform whole-window opacity) ────────────────
+// Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01, Linux arm: the EWMH
+// analogue of Win32 LWA_ALPHA / NSWindow.alphaValue. The compositor (Mutter,
+// KWin, picom, xfwm4) fades the finished window over the desktop — including
+// under XWayland, which is AgentMux's default ozone platform. Post-render:
+// needs no CEF/renderer cooperation. Native-Wayland ozone has no equivalent
+// protocol; there we log once and no-op (per-pixel Track 2 is the only route).
+
+#[cfg(target_os = "linux")]
+wrap_task! {
+    pub struct SetWindowAlphaTask {
+        state: Arc<AppState>,
+        label: String,
+        alpha: f64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // browser_view.window() returns None post-load on Linux (same
+            // CEF behaviour that broke GetWindowPositionTask — see the
+            // state.windows fallback there). state.windows is populated at
+            // on_window_created and stays valid for the window's lifetime.
+            let window = get_window_on_ui(&self.state, &self.label)
+                .or_else(|| self.state.windows.lock().get(&self.label).cloned());
+            let Some(window) = window else {
+                tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: no window for label");
+                return;
+            };
+            // Under ozone-x11 `window_handle()` is the X11 Window XID. Under
+            // native Wayland it is not an XID and there is no uniform-alpha
+            // protocol at all — the host routes `window:transparent=true`
+            // sessions through XWayland (app.rs ozone selection), so this
+            // guard only fires on an explicit AGENTMUX_OZONE_PLATFORM=wayland
+            // override or when opacity is requested with transparency off.
+            if crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) == Some("wayland") {
+                tracing::warn!("[opacity] uniform window alpha unsupported on native Wayland (no protocol); set window:transparent=true (XWayland) or use per-pixel transparency");
+                return;
+            }
+            let xid = window.window_handle() as u32;
+            if xid == 0 {
+                tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: null X11 window handle");
+                return;
+            }
+            match x11_set_window_opacity(xid, self.alpha) {
+                Ok(()) => tracing::info!(label = %self.label, alpha = self.alpha, "[opacity] applied _NET_WM_WINDOW_OPACITY"),
+                Err(e) => tracing::warn!(label = %self.label, "[opacity] X11 property set failed: {e}"),
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn post_set_window_alpha(state: &Arc<AppState>, label: &str, alpha: f64) {
+    let mut task = SetWindowAlphaTask::new(state.clone(), label.to_string(), alpha);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// Set (or clear, when alpha >= 1.0) the EWMH `_NET_WM_WINDOW_OPACITY`
+/// CARDINAL/32 property on the toplevel client window. Value is
+/// alpha × 0xFFFFFFFF. Modern compositors read it from the client window.
+#[cfg(target_os = "linux")]
+fn x11_set_window_opacity(xid: u32, alpha: f64) -> Result<(), Box<dyn std::error::Error>> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
+    use x11rb::wrapper::ConnectionExt as _;
+
+    let (conn, _screen) = x11rb::connect(None)?;
+    let atom = conn
+        .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
+        .reply()?
+        .atom;
+    if alpha >= 1.0 {
+        conn.delete_property(xid, atom)?.check()?;
+    } else {
+        let value = (alpha.clamp(0.0, 1.0) * u32::MAX as f64) as u32;
+        conn.change_property32(PropMode::REPLACE, xid, atom, AtomEnum::CARDINAL, &[value])?
+            .check()?;
+    }
+    conn.flush()?;
+    Ok(())
+}
+
 // ── Move window ───────────────────────────────────────────────────────────
 
 wrap_task! {

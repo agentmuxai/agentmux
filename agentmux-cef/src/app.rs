@@ -572,20 +572,68 @@ unsafe fn ensure_macos_native_window_buttons(nsview: *mut std::ffi::c_void) {
 // CefApp + BrowserProcessHandler
 // ---------------------------------------------------------------------------
 
+/// The ozone platform this process appended to the command line (Linux).
+/// Unset when nothing was appended (pure X11 session → Chromium's X11
+/// default). Read by `ui_tasks::SetWindowAlphaTask` to decide whether
+/// `window_handle()` is an X11 XID that `_NET_WM_WINDOW_OPACITY` can target.
+#[cfg(target_os = "linux")]
+pub static SELECTED_OZONE_PLATFORM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 /// Read `window:transparent` from the user's settings.json before CefInitialize.
 /// Gates the transparent-compositing command-line flags so non-transparent
 /// windows don't pay the LCD-text and opacity-flash penalties. Returns false
 /// if the file is absent or the key is missing (default = opaque).
 fn read_window_transparent_setting() -> bool {
-    fn inner() -> Option<bool> {
-        let config_dir = std::env::var_os("AGENTMUX_CONFIG_DIR")
-            .map(std::path::PathBuf::from)
-            .or_else(|| agentmux_common::DataPaths::from_env().map(|p| p.config_dir))?;
-        let text = std::fs::read_to_string(config_dir.join("settings.json")).ok()?;
-        let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-        v.get("window:transparent").and_then(|v| v.as_bool())
+    // Candidate locations for the LIVE settings.json, in priority order —
+    // mirrors srv's `config_watcher_fs::resolve_settings_dir()` (the file the
+    // settings UI actually edits), then legacy/per-instance fallbacks:
+    //   1. $AGENTMUX_SETTINGS_DIR/settings.json (explicit override)
+    //   2. $AGENTMUX_CONFIG_HOME/../../settings.json (channels-root shared
+    //      file — the modern location, e.g. ~/.agentmux/channels/settings.json)
+    //   3. $AGENTMUX_CONFIG_DIR/settings.json (per-instance config dir)
+    //   4. ~/.agentmux/channels/settings.json
+    //   5. ~/.agentmux/settings.json (legacy)
+    // First file that exists wins. The old code checked ONLY (3), which is
+    // empty in every real deployment — so `window:transparent` silently read
+    // `false` for everyone on Linux/macOS.
+    fn candidates() -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        if let Some(d) = std::env::var_os("AGENTMUX_SETTINGS_DIR").filter(|s| !s.is_empty()) {
+            out.push(std::path::PathBuf::from(d).join("settings.json"));
+        }
+        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_HOME").filter(|s| !s.is_empty()) {
+            let p = std::path::PathBuf::from(d);
+            if let Some(root) = p.parent().and_then(|p| p.parent()) {
+                out.push(root.join("settings.json"));
+            }
+        }
+        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR").filter(|s| !s.is_empty()) {
+            out.push(std::path::PathBuf::from(d).join("settings.json"));
+        } else if let Some(p) = agentmux_common::DataPaths::from_env().map(|p| p.config_dir) {
+            out.push(p.join("settings.json"));
+        }
+        if let Some(home) = dirs::home_dir() {
+            out.push(home.join(".agentmux").join("channels").join("settings.json"));
+            out.push(home.join(".agentmux").join("settings.json"));
+        }
+        out
     }
-    inner().unwrap_or(false)
+    for path in candidates() {
+        if !path.exists() {
+            continue;
+        }
+        // settings.json is JSONC (comments + trailing commas) — a strict
+        // serde_json parse fails on the shipped template. Use the same
+        // lenient reader the settings command path uses.
+        let map = crate::commands::platform::read_settings_jsonc(&path);
+        if let Some(v) = map.get("window:transparent").and_then(|v| v.as_bool()) {
+            tracing::info!("window:transparent={} (from {})", v, path.display());
+            return v;
+        }
+        // File exists but has no (uncommented) key → default false, but keep
+        // scanning lower-priority locations in case an older file has it.
+    }
+    false
 }
 
 wrap_app! {
@@ -725,12 +773,31 @@ wrap_app! {
                         let on_wayland = std::env::var("WAYLAND_DISPLAY")
                             .map(|s| !s.is_empty())
                             .unwrap_or(false);
-                        on_wayland.then(|| "wayland".to_string())
+                        if !on_wayland {
+                            return None;
+                        }
+                        // Track 1 window transparency (uniform whole-window
+                        // alpha, SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01) is
+                        // delivered via the EWMH `_NET_WM_WINDOW_OPACITY` X11
+                        // property — native Wayland has no equivalent protocol
+                        // Chromium supports. Route transparent windows through
+                        // XWayland (the universal default until CEF 148) so the
+                        // property applies; opaque users keep native Wayland.
+                        // An explicit AGENTMUX_OZONE_PLATFORM still wins above.
+                        if read_window_transparent_setting() {
+                            tracing::info!(
+                                "window:transparent=true → ozone-platform=x11 (XWayland) for _NET_WM_WINDOW_OPACITY"
+                            );
+                            Some("x11".to_string())
+                        } else {
+                            Some("wayland".to_string())
+                        }
                     });
                     if let Some(platform) = ozone {
                         let oz_key = CefString::from("ozone-platform");
                         let oz_val = CefString::from(platform.as_str());
                         cmd.append_switch_with_value(Some(&oz_key), Some(&oz_val));
+                        let _ = crate::app::SELECTED_OZONE_PLATFORM.set(platform);
                     }
 
                     // Linux sandbox: use kernel namespace isolation instead of the setuid
