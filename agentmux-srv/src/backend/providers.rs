@@ -143,7 +143,8 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &["CLAUDECODE"],
     npm_package: "@anthropic-ai/claude-code",
-    pinned_version: "2.1.185",
+    // Keep in sync with frontend/app/view/agent/providers/index.ts `pinnedVersion`.
+    pinned_version: "2.1.198",
     icon: "sparkles",
     docs_url: "https://docs.anthropic.com/claude-code",
 };
