@@ -183,8 +183,11 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId }: AgentControl
                 </div>
             </Show>
 
-            {/* ── Session actions (shown when there is history and it's live) ── */}
-            <Show when={lineCount() > 0 && !isArchived()}>
+            {/* ── Session actions (shown when there is history and it's live) ──
+                Excludes large sessions: the large-session banner above already
+                surfaces an Archive button, so rendering the row here too would
+                double it (reagent #1912 P1). */}
+            <Show when={lineCount() > 0 && !isArchived() && !isLargeSession()}>
                 <div class="agent-session-row">
                     <span class="agent-session-row-label">Session</span>
                     <div class="agent-session-actions">
