@@ -802,7 +802,7 @@ async fn handle_agent_memory_write(
 /// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary
 /// fields only). Backs the `PresetList` MCP tool.
 async fn handle_agent_preset_list(State(state): State<AppState>) -> impl IntoResponse {
-    app_api_response(app_api::preset_list_impl(&state).await)
+    app_api_response(app_api::bundle_list_impl(&state).await)
 }
 
 #[derive(serde::Deserialize)]
@@ -830,9 +830,9 @@ async fn handle_agent_preset_get(
             )
                 .into_response();
         }
-        return app_api_response(app_api::preset_self_get_impl(&state, &q.agent_id).await);
+        return app_api_response(app_api::bundle_self_get_impl(&state, &q.agent_id).await);
     }
-    app_api_response(app_api::preset_get_impl(&state, &q.id, &q.name).await)
+    app_api_response(app_api::bundle_get_impl(&state, &q.id, &q.name).await)
 }
 
 #[derive(serde::Deserialize)]

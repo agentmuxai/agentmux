@@ -289,6 +289,14 @@ pub const COMMAND_IDENTITY_SELF_ACCOUNTS: &str = "identity.self.accounts";
 pub const COMMAND_IDENTITY_ACCOUNT_UPSERT: &str = "identity.account.upsert";
 pub const COMMAND_IDENTITY_ACCOUNT_VALIDATE: &str = "identity.account.validate";
 pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
+// Bundle App API commands (Preset → Bundle, spec Phase 2). The `preset.*`
+// constants below are retained as wire aliases for one release.
+pub const COMMAND_BUNDLE_LIST: &str = "bundle.list";
+pub const COMMAND_BUNDLE_GET: &str = "bundle.get";
+pub const COMMAND_BUNDLE_UPSERT: &str = "bundle.upsert";
+pub const COMMAND_BUNDLE_DELETE: &str = "bundle.delete";
+pub const COMMAND_BUNDLE_SELF_GET: &str = "bundle.self.get";
+// Deprecated `preset.*` aliases — kept wired for one release (remove in Phase 4).
 pub const COMMAND_PRESET_LIST: &str = "preset.list";
 pub const COMMAND_PRESET_GET: &str = "preset.get";
 pub const COMMAND_PRESET_UPSERT: &str = "preset.upsert";
