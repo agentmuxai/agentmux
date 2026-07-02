@@ -396,24 +396,72 @@ pub fn post_set_window_alpha(state: &Arc<AppState>, label: &str, alpha: f64) {
 /// alpha × 0xFFFFFFFF. Modern compositors read it from the client window.
 #[cfg(target_os = "linux")]
 fn x11_set_window_opacity(xid: u32, alpha: f64) -> Result<(), Box<dyn std::error::Error>> {
+    use std::cell::RefCell;
     use x11rb::connection::Connection;
-    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
+    use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, PropMode};
+    use x11rb::rust_connection::RustConnection;
     use x11rb::wrapper::ConnectionExt as _;
 
-    let (conn, _screen) = x11rb::connect(None)?;
-    let atom = conn
-        .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
-        .reply()?
-        .atom;
-    if alpha >= 1.0 {
-        conn.delete_property(xid, atom)?.check()?;
-    } else {
-        let value = (alpha.clamp(0.0, 1.0) * u32::MAX as f64) as u32;
-        conn.change_property32(PropMode::REPLACE, xid, atom, AtomEnum::CARDINAL, &[value])?
-            .check()?;
+    // One connection + interned atom, cached per thread — this only ever runs
+    // on the CEF UI thread (SetWindowAlphaTask), so thread_local needs no
+    // locking. Avoids a fresh socket + intern_atom round-trip per event when
+    // the user drags the opacity slider (reagent P1 on #1905). On an X error
+    // the cache is dropped and we reconnect once — covers an XWayland restart
+    // without reintroducing per-event churn on the happy path.
+    thread_local! {
+        static X11_OPACITY_CONN: RefCell<Option<(RustConnection, Atom)>> =
+            const { RefCell::new(None) };
     }
-    conn.flush()?;
-    Ok(())
+
+    fn connect() -> Result<(RustConnection, Atom), Box<dyn std::error::Error>> {
+        let (conn, _screen) = x11rb::connect(None)?;
+        let atom = conn
+            .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
+            .reply()?
+            .atom;
+        Ok((conn, atom))
+    }
+
+    fn apply(
+        conn: &RustConnection,
+        atom: Atom,
+        xid: u32,
+        alpha: f64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if alpha >= 1.0 {
+            conn.delete_property(xid, atom)?.check()?;
+        } else {
+            let value = (alpha.clamp(0.0, 1.0) * u32::MAX as f64) as u32;
+            conn.change_property32(PropMode::REPLACE, xid, atom, AtomEnum::CARDINAL, &[value])?
+                .check()?;
+        }
+        conn.flush()?;
+        Ok(())
+    }
+
+    X11_OPACITY_CONN.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(connect()?);
+        }
+        let (conn, atom) = slot.as_ref().expect("slot populated above");
+        match apply(conn, *atom, xid, alpha) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                // Cached connection may be dead — retry once on a fresh one,
+                // and only re-cache it if the retry succeeds (a persistent
+                // error like BadWindow shouldn't evict a healthy connection
+                // slot with a doomed one… nor cache anything at all).
+                *slot = None;
+                let (fresh_conn, fresh_atom) = connect()?;
+                let out = apply(&fresh_conn, fresh_atom, xid, alpha);
+                if out.is_ok() {
+                    *slot = Some((fresh_conn, fresh_atom));
+                }
+                out
+            }
+        }
+    })
 }
 
 // ── Move window ───────────────────────────────────────────────────────────
