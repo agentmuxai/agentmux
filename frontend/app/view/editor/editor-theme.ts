@@ -69,7 +69,7 @@ const editorChromeTheme = EditorView.theme(
 
         // ── Find/replace panel ──────────────────────────────────────────
         // Tight spacing + hard corners (app convention) + accent woven in via
-        // color-mix, mirroring the Trust Center gallery (accounts-gallery.scss:
+        // color-mix, mirroring the Armory gallery (accounts-gallery.scss:
         // accent-mixed borders/hover, accent toggles). theme.scss tokens only.
         ".cm-panels.cm-panels-top": {
             borderBottom: "1px solid color-mix(in srgb, var(--accent-color) 30%, var(--border-color))",
@@ -114,7 +114,7 @@ const editorChromeTheme = EditorView.theme(
             borderColor: "var(--accent-color)",
         },
         // Accent-tinted buttons — hard corners, theme accent via color-mix
-        // (same technique as the Trust Center tiles), brighter on hover.
+        // (same technique as the Armory tiles), brighter on hover.
         ".cm-button": {
             backgroundColor: "color-mix(in srgb, var(--accent-color) 12%, transparent)",
             backgroundImage: "none",

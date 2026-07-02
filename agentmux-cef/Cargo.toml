@@ -111,6 +111,10 @@ libc = "0.2"
 # the host already bundles libvulkan.so.1. See app.rs `has_hardware_vulkan` and
 # docs/specs/SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md.
 ash = "0.38"
+# EWMH `_NET_WM_WINDOW_OPACITY` for Track 1 uniform window alpha
+# (SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01, Linux arm). Same crate the
+# launcher's splash already uses.
+x11rb = "0.13"
 
 [dev-dependencies]
 # Property tests for the shadow projection (master spec §8.14

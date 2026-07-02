@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * provider-brand — unify the two account namespaces in the Trust Center UI.
+ * provider-brand — unify the two account namespaces in the Armory UI.
  *
  * A provider-CLI OAuth login (concept A — e.g. the Claude CLI's
  * `~/.claude/.credentials.json`, stored as an IdentityAccount with
@@ -19,7 +19,7 @@
 
 import type { AccountProvider } from "@/app/view/identity/identity-model";
 
-/** CLI-OAuth provider id → Trust Center brand. Only providers whose login
+/** CLI-OAuth provider id → Armory brand. Only providers whose login
  *  authorizes a brand we show as a tile are mapped; everything else passes
  *  through unchanged. */
 const CLI_PROVIDER_TO_BRAND: Record<string, AccountProvider> = {

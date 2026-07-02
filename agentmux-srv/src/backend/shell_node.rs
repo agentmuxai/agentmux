@@ -13,13 +13,14 @@
 //! PTY support is a Phase 3 follow-up that requires portable-pty wiring
 //! similar to the existing ShellController).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::backend::wps::{Broker, WaveEvent, EVENT_SHELL_CHUNK};
+use agentmux_common::api_types::ShellInputFailure;
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -28,13 +29,46 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
-/// Per-shell stop handles. `ShellStop` (MCP tool / UI button) looks up a
-/// `shell_id` and fires the oneshot, which makes the owning `ShellNodeRunner`
-/// tree-kill its child. Mirrors `InstallSessionRegistry`; lives in
-/// `AppState.shell_sessions`. Phase 3 of SPEC_PERSISTENT_SHELL_NODE.
+/// Live status of a running (or recently exited) shell. Updated by
+/// `ShellNodeRunner` as output arrives and on exit.
+#[derive(Clone, Default)]
+pub struct ShellStatusInfo {
+    pub running: bool,
+    pub exit_code: Option<i32>,
+    pub line_count: u64,
+}
+
+// Per-shell registry entry: stop handle + optional stdin channel (Phase 3b).
+// The stdin_tx is an mpsc sender to a relay task that owns the real ChildStdin.
+// Sending text is non-blocking (unbounded channel); the relay handles the
+// actual write. When all senders are dropped, the channel closes, the relay
+// exits, ChildStdin is dropped, and the child sees EOF on stdin.
+struct ShellEntry {
+    stop_tx: oneshot::Sender<()>,
+    // None for entries created by unit tests (no relay task / ChildStdin).
+    stdin_tx: Option<mpsc::UnboundedSender<String>>,
+}
+
+/// Per-shell stop handles + status. `ShellStop` fires the oneshot; `ShellInput`
+/// sends to the stdin relay; `ShellStatus` reads the live status arc.
+/// Lives in `AppState.shell_sessions`.
+/// Max number of EXITED shell statuses retained for post-exit ShellStatus
+/// queries. Running shells are always kept regardless of this cap; only
+/// exited entries beyond it are evicted oldest-first. Bounds memory for
+/// long-lived sidecars that spawn many short shells.
+const MAX_EXITED_STATUS: usize = 512;
+
 #[derive(Default)]
 pub struct ShellSessionRegistry {
-    shells: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    shells: Mutex<HashMap<String, ShellEntry>>,
+    // Status entries persist after exit so ShellStatus can query final
+    // exit_code/line_count. Exited entries are capped at MAX_EXITED_STATUS
+    // (oldest-first eviction via status_order); running entries are never
+    // evicted. stop_all() clears everything on srv shutdown.
+    status_map: Mutex<HashMap<String, Arc<Mutex<ShellStatusInfo>>>>,
+    // Spawn-order queue of shell_ids, used to evict the oldest exited status
+    // entries first when over the cap.
+    status_order: Mutex<VecDeque<String>>,
 }
 
 impl ShellSessionRegistry {
@@ -42,39 +76,124 @@ impl ShellSessionRegistry {
         Arc::new(Self::default())
     }
 
+    // Used by unit tests — registers a stop handle with no stdin relay/status.
     fn insert(&self, shell_id: String, tx: oneshot::Sender<()>) {
-        self.shells.lock().insert(shell_id, tx);
+        self.shells.lock().insert(shell_id, ShellEntry { stop_tx: tx, stdin_tx: None });
     }
 
-    /// Request stop of a running shell. Returns false if the id is unknown
-    /// (never started, or already exited). Removing here also closes the
-    /// window for the runner's own natural-exit `remove`.
+    // Full registration called by the runner after spawning the child.
+    // stdin_tx is None when capture_stdin is false (stdin is /dev/null).
+    fn register_full(
+        &self,
+        shell_id: String,
+        stop_tx: oneshot::Sender<()>,
+        stdin_tx: Option<mpsc::UnboundedSender<String>>,
+        status: Arc<Mutex<ShellStatusInfo>>,
+    ) {
+        self.shells.lock().insert(shell_id.clone(), ShellEntry { stop_tx, stdin_tx });
+        self.status_map.lock().insert(shell_id.clone(), status);
+        self.status_order.lock().push_back(shell_id);
+        // Bound retained exited statuses; every spawn is a natural prune trigger.
+        self.prune_exited_statuses();
+    }
+
+    /// Evict oldest EXITED status entries beyond `MAX_EXITED_STATUS`. Running
+    /// shells are always retained (their status is read live via ShellStatus).
+    /// Also drops any order-queue ids whose status entry is already gone.
+    fn prune_exited_statuses(&self) {
+        let mut map = self.status_map.lock();
+        let mut order = self.status_order.lock();
+        let mut exited = map
+            .values()
+            .filter(|arc| !arc.lock().running)
+            .count();
+        let mut i = 0;
+        while exited > MAX_EXITED_STATUS && i < order.len() {
+            let id = order[i].clone();
+            match map.get(&id) {
+                // Exited entry over the cap → evict it.
+                Some(arc) if !arc.lock().running => {
+                    map.remove(&id);
+                    order.remove(i);
+                    exited -= 1;
+                }
+                // Still running → keep in place, advance.
+                Some(_) => i += 1,
+                // Stale order id (already removed) → drop from queue.
+                None => {
+                    order.remove(i);
+                }
+            }
+        }
+    }
+
+    /// Request stop of a running shell. Returns false if unknown or already exited.
+    /// Dropping the stdin_tx here closes the relay channel → ChildStdin drops →
+    /// child sees EOF, unblocking any stdin-reading process before the kill.
     pub fn stop(&self, shell_id: &str) -> bool {
-        if let Some(tx) = self.shells.lock().remove(shell_id) {
-            let _ = tx.send(());
+        // Do NOT remove from status_map here — the runner task is still live
+        // and will persist the final exit status after child.wait() returns.
+        if let Some(entry) = self.shells.lock().remove(shell_id) {
+            // stdin_tx dropped here → relay closes → child gets stdin EOF
+            let _ = entry.stop_tx.send(());
             true
         } else {
             false
         }
     }
 
-    /// Drop a shell's handle without signalling — called by the runner on
-    /// natural exit so its `kill_task` resolves `Err` (= not stopped).
+    /// Called by the runner on natural exit (stdout/stderr closed). Removes the
+    /// shells entry (dropping stdin_tx → child gets stdin EOF). Status entry is
+    /// intentionally kept so ShellStatus can query the final exit code/line count.
     fn remove(&self, shell_id: &str) {
         self.shells.lock().remove(shell_id);
+        // status_map entry is NOT removed — it persists so get_status() can
+        // return the final running:false / exit_code / line_count after exit.
     }
 
-    /// Stop every running shell. For srv-shutdown cleanup so long-running
-    /// children (`task dev` → `task.exe`/`node`) don't orphan and hold ports.
-    /// Returns the number of shells signalled (so the caller can skip the
-    /// grace-period sleep when there was nothing to stop).
+    /// Stop every running shell. For srv-shutdown cleanup.
     pub fn stop_all(&self) -> usize {
-        let drained: Vec<_> = self.shells.lock().drain().map(|(_, tx)| tx).collect();
+        self.status_map.lock().clear();
+        self.status_order.lock().clear();
+        let drained: Vec<_> = self.shells.lock().drain().map(|(_, e)| e.stop_tx).collect();
         let n = drained.len();
         for tx in drained {
             let _ = tx.send(());
         }
         n
+    }
+
+    /// Clone the stdin sender for `ShellInput`. Returns None if not running.
+    /// Sending to the clone is non-blocking — the relay task handles the write.
+    pub fn get_stdin_tx(&self, shell_id: &str) -> Option<mpsc::UnboundedSender<String>> {
+        self.shells.lock().get(shell_id).and_then(|e| e.stdin_tx.clone())
+    }
+
+    /// Resolve where a `ShellInput` write should go, distinguishing the two
+    /// failure modes that `get_stdin_tx` collapses into `None`:
+    /// - `Ok(tx)`            — running with captured stdin
+    /// - `Err(StdinNotCaptured)` — running but created without capture_stdin
+    /// - `Err(NotRunning)`   — unknown id or already exited
+    pub fn resolve_stdin(
+        &self,
+        shell_id: &str,
+    ) -> Result<mpsc::UnboundedSender<String>, ShellInputFailure> {
+        let shells = self.shells.lock();
+        match shells.get(shell_id) {
+            Some(entry) => match &entry.stdin_tx {
+                Some(tx) => Ok(tx.clone()),
+                None => Err(ShellInputFailure::StdinNotCaptured),
+            },
+            None => Err(ShellInputFailure::NotRunning),
+        }
+    }
+
+    /// Return a snapshot of the shell's status. Returns `running: false` if unknown.
+    pub fn get_status(&self, shell_id: &str) -> ShellStatusInfo {
+        self.status_map.lock()
+            .get(shell_id)
+            .map(|arc| arc.lock().clone())
+            .unwrap_or_default()
     }
 }
 
@@ -114,6 +233,10 @@ pub struct ShellNodeRunner {
     /// Stop registry — the runner registers its `shell_id` here so
     /// `ShellStop` can tree-kill it, and removes itself on natural exit.
     pub registry: Arc<ShellSessionRegistry>,
+    /// If true, pipe stdin and start the relay task so ShellInput() works.
+    /// If false (default), stdin is /dev/null — avoids blocking programs that
+    /// read stdin to EOF (e.g. `cat` with no args).
+    pub capture_stdin: bool,
 }
 
 impl ShellNodeRunner {
@@ -158,14 +281,15 @@ impl ShellNodeRunner {
 
         child_cmd.stdout(std::process::Stdio::piped());
         child_cmd.stderr(std::process::Stdio::piped());
-        // Null stdin (CRITICAL). The shell runs non-interactively and the srv's
-        // own stdin is not a usable TTY. Without this the child inherits the srv
-        // stdin, and tools that probe/read stdin at startup HANG before doing any
-        // work — e.g. `npm run dev` spawned npm-cli.js but it never launched the
-        // vite script (no output, never bound its port). Confirmed: the same
-        // command with `< NUL` starts vite instantly (agentx/fix-shell-dev-server).
-        // (When ShellInput lands — Phase 3b — this becomes a piped stdin.)
-        child_cmd.stdin(std::process::Stdio::null());
+        // stdin: piped only when capture_stdin=true (opt-in). Default is null so
+        // programs that read stdin to EOF (e.g. `cat` with no args) don't block
+        // forever. When piped, a relay task forwards ShellInput() writes; when all
+        // senders drop the relay exits, ChildStdin drops, and the child sees EOF.
+        if self.capture_stdin {
+            child_cmd.stdin(std::process::Stdio::piped());
+        } else {
+            child_cmd.stdin(std::process::Stdio::null());
+        }
         // Windows: suppress the console window that Windows auto-creates for
         // CUI-subsystem processes (cmd.exe). stdout/stderr are piped so no
         // output is lost — the window was decorative noise only.
@@ -194,13 +318,34 @@ impl ShellNodeRunner {
             }
         };
 
-        // Register a stop handle. `ShellStop` fires `cancel_rx`, and `kill_task`
-        // tree-kills this child. On natural exit we drop the sender (via
-        // registry.remove) so `kill_task` resolves Err → "not stopped".
         let pid = child.id();
-        tracing::info!(shell_id = %shell_id, pid = ?pid, "shell.spawn");
+        tracing::info!(shell_id = %shell_id, pid = ?pid, capture_stdin = self.capture_stdin, "shell.spawn");
+
+        // Spawn stdin relay only when capture_stdin=true.
+        let stdin_tx: Option<mpsc::UnboundedSender<String>> = if self.capture_stdin {
+            let child_stdin = child.stdin.take().expect("stdin piped");
+            let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+            tokio::spawn(async move {
+                let mut writer = BufWriter::new(child_stdin);
+                while let Some(text) = rx.recv().await {
+                    if writer.write_all(text.as_bytes()).await.is_err() { break; }
+                    if writer.flush().await.is_err() { break; }
+                }
+                // All senders dropped or write error → ChildStdin dropped → child EOF
+            });
+            Some(tx)
+        } else {
+            None
+        };
+
+        let status_arc = Arc::new(Mutex::new(ShellStatusInfo { running: true, exit_code: None, line_count: 0 }));
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        self.registry.insert(shell_id.clone(), cancel_tx);
+        self.registry.register_full(
+            shell_id.clone(),
+            cancel_tx,
+            stdin_tx,
+            Arc::clone(&status_arc),
+        );
         let kill_task = tokio::spawn(async move {
             match cancel_rx.await {
                 Ok(()) => {
@@ -246,6 +391,7 @@ impl ShellNodeRunner {
         let mut line_count: u64 = 0;
         while let Some((kind, content, ts)) = rx.recv().await {
             line_count += 1;
+            status_arc.lock().line_count = line_count;
             publish_chunk(&broker, &block_id, &shell_id, kind, &content, ts);
         }
 
@@ -262,6 +408,15 @@ impl ShellNodeRunner {
 
         let was_stopped = kill_task.await.unwrap_or(false);
         tracing::info!(shell_id = %shell_id, exit_code, was_stopped, line_count, "shell.exit");
+
+        // Persist final status in the status_map so ShellStatus can still query it.
+        {
+            let mut s = status_arc.lock();
+            s.running = false;
+            s.exit_code = Some(exit_code);
+            s.line_count = line_count;
+        }
+
         publish_exit(&broker, &block_id, &shell_id, exit_code, was_stopped, now_ms());
     }
 }
@@ -344,6 +499,45 @@ mod tests {
         reg.stop_all();
         assert!(rx1.await.is_ok());
         assert!(rx2.await.is_ok());
+    }
+
+    fn register_exited(reg: &ShellSessionRegistry, id: &str, running: bool) {
+        let (tx, _rx) = oneshot::channel::<()>();
+        let status = Arc::new(Mutex::new(ShellStatusInfo {
+            running,
+            exit_code: if running { None } else { Some(0) },
+            line_count: 1,
+        }));
+        // _rx is intentionally dropped; we only exercise the status-map cap.
+        reg.register_full(id.to_string(), tx, None, status);
+    }
+
+    #[tokio::test]
+    async fn exited_statuses_are_capped_oldest_first() {
+        let reg = ShellSessionRegistry::new();
+        let total = MAX_EXITED_STATUS + 10;
+        for i in 0..total {
+            register_exited(&reg, &format!("s{i}"), false);
+        }
+        // Never exceeds the cap.
+        assert_eq!(reg.status_map.lock().len(), MAX_EXITED_STATUS);
+        // Oldest 10 evicted → get_status returns default (exit_code None).
+        assert!(reg.get_status("s0").exit_code.is_none());
+        assert!(reg.get_status("s9").exit_code.is_none());
+        // Newest retained with its real exit code.
+        assert_eq!(reg.get_status(&format!("s{}", total - 1)).exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn running_statuses_are_never_evicted() {
+        let reg = ShellSessionRegistry::new();
+        let total = MAX_EXITED_STATUS + 5;
+        for i in 0..total {
+            register_exited(&reg, &format!("r{i}"), true); // all running
+        }
+        // Running shells exceed the exited cap but none are evicted.
+        assert_eq!(reg.status_map.lock().len(), total);
+        assert!(reg.get_status("r0").running);
     }
 }
 

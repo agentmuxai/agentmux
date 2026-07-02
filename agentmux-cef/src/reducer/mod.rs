@@ -222,6 +222,13 @@ pub enum RegisterResult {
     /// Entry already existed and is `Live`; caller should re-navigate the
     /// existing browser at `label`.
     AlreadyLive(String),
+    /// Entry already existed, is `Live`, but in a DIFFERENT window than the
+    /// create request targets (tear-off / redock). Carries the existing
+    /// `label`. The reducer has stashed the pending create; the caller must
+    /// `close()` the old pane — its close-completion replays the stashed
+    /// create as `Fresh` in the requested window. Re-navigating in place (the
+    /// `AlreadyLive` behavior) would leave the requested window black.
+    AlreadyLiveElsewhere(String),
     /// Entry exists and is `Closing`; caller must reject the re-create
     /// because the old browser's `on_before_close` will drain the entry,
     /// and overwriting now would lose the new entry instead of the old.

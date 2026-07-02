@@ -42,6 +42,11 @@ pub struct ShellCreateRequest {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env: Option<HashMap<String, String>>,
+    /// If true, pipe the child's stdin so ShellInput() can write to it.
+    /// Default false (stdin is /dev/null) — avoids blocking programs that
+    /// read stdin to EOF (e.g. `cat` with no args).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_stdin: Option<bool>,
 }
 
 /// Response from `POST /api/v1/shell/create`
@@ -60,6 +65,55 @@ pub struct ShellStopRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellStopResponse {
     pub stopped: bool,
+}
+
+/// `POST /api/v1/shell/input` — write text to a running shell's stdin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellInputRequest {
+    pub shell_id: String,
+    /// Text to write. A newline is appended automatically so single answers
+    /// like "y" work without the caller knowing the line discipline.
+    pub text: String,
+}
+
+/// Response from `POST /api/v1/shell/input`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellInputResponse {
+    /// false if the shell is not running, has no captured stdin, or the write failed.
+    pub written: bool,
+    /// Why the write did not happen (None when `written` is true). Lets callers
+    /// distinguish "shell exited" from "shell is running but was created without
+    /// capture_stdin=true", which are otherwise indistinguishable from `written`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ShellInputFailure>,
+}
+
+/// Reason a `ShellInput` write did not happen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShellInputFailure {
+    /// The shell id is unknown or the process has already exited.
+    NotRunning,
+    /// The shell is running but was created without `capture_stdin=true`, so its
+    /// stdin is `/dev/null` — recreate it with capture_stdin to send input.
+    StdinNotCaptured,
+    /// The stdin relay is gone / the write channel is closed (process closed stdin).
+    WriteFailed,
+}
+
+/// `POST /api/v1/shell/status` — query whether a shell is still running.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStatusRequest {
+    pub shell_id: String,
+}
+
+/// Response from `POST /api/v1/shell/status`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellStatusResponse {
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    pub line_count: u64,
 }
 
 // ── Inject (SendMessage + Loop) ───────────────────────────────────────────────

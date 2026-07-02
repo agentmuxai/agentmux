@@ -334,6 +334,136 @@ unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
     true
 }
 
+// ── Window alpha (Linux/X11 uniform whole-window opacity) ────────────────
+// Track 1 of SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01, Linux arm: the EWMH
+// analogue of Win32 LWA_ALPHA / NSWindow.alphaValue. The compositor (Mutter,
+// KWin, picom, xfwm4) fades the finished window over the desktop — including
+// under XWayland, which is AgentMux's default ozone platform. Post-render:
+// needs no CEF/renderer cooperation. Native-Wayland ozone has no equivalent
+// protocol; there we log once and no-op (per-pixel Track 2 is the only route).
+
+#[cfg(target_os = "linux")]
+wrap_task! {
+    pub struct SetWindowAlphaTask {
+        state: Arc<AppState>,
+        label: String,
+        alpha: f64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // browser_view.window() returns None post-load on Linux (same
+            // CEF behaviour that broke GetWindowPositionTask — see the
+            // state.windows fallback there). state.windows is populated at
+            // on_window_created and stays valid for the window's lifetime.
+            let window = get_window_on_ui(&self.state, &self.label)
+                .or_else(|| self.state.windows.lock().get(&self.label).cloned());
+            let Some(window) = window else {
+                tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: no window for label");
+                return;
+            };
+            // Under ozone-x11 `window_handle()` is the X11 Window XID. Under
+            // native Wayland it is not an XID and there is no uniform-alpha
+            // protocol at all — the host routes `window:transparent=true`
+            // sessions through XWayland (app.rs ozone selection), so this
+            // guard only fires on an explicit AGENTMUX_OZONE_PLATFORM=wayland
+            // override or when opacity is requested with transparency off.
+            if crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) == Some("wayland") {
+                tracing::warn!("[opacity] uniform window alpha unsupported on native Wayland (no protocol); set window:transparent=true (XWayland) or use per-pixel transparency");
+                return;
+            }
+            let xid = window.window_handle() as u32;
+            if xid == 0 {
+                tracing::warn!(label = %self.label, "[opacity] SetWindowAlphaTask: null X11 window handle");
+                return;
+            }
+            match x11_set_window_opacity(xid, self.alpha) {
+                Ok(()) => tracing::info!(label = %self.label, alpha = self.alpha, "[opacity] applied _NET_WM_WINDOW_OPACITY"),
+                Err(e) => tracing::warn!(label = %self.label, "[opacity] X11 property set failed: {e}"),
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn post_set_window_alpha(state: &Arc<AppState>, label: &str, alpha: f64) {
+    let mut task = SetWindowAlphaTask::new(state.clone(), label.to_string(), alpha);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+/// Set (or clear, when alpha >= 1.0) the EWMH `_NET_WM_WINDOW_OPACITY`
+/// CARDINAL/32 property on the toplevel client window. Value is
+/// alpha × 0xFFFFFFFF. Modern compositors read it from the client window.
+#[cfg(target_os = "linux")]
+fn x11_set_window_opacity(xid: u32, alpha: f64) -> Result<(), Box<dyn std::error::Error>> {
+    use std::cell::RefCell;
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, PropMode};
+    use x11rb::rust_connection::RustConnection;
+    use x11rb::wrapper::ConnectionExt as _;
+
+    // One connection + interned atom, cached per thread — this only ever runs
+    // on the CEF UI thread (SetWindowAlphaTask), so thread_local needs no
+    // locking. Avoids a fresh socket + intern_atom round-trip per event when
+    // the user drags the opacity slider (reagent P1 on #1905). On an X error
+    // the cache is dropped and we reconnect once — covers an XWayland restart
+    // without reintroducing per-event churn on the happy path.
+    thread_local! {
+        static X11_OPACITY_CONN: RefCell<Option<(RustConnection, Atom)>> =
+            const { RefCell::new(None) };
+    }
+
+    fn connect() -> Result<(RustConnection, Atom), Box<dyn std::error::Error>> {
+        let (conn, _screen) = x11rb::connect(None)?;
+        let atom = conn
+            .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")?
+            .reply()?
+            .atom;
+        Ok((conn, atom))
+    }
+
+    fn apply(
+        conn: &RustConnection,
+        atom: Atom,
+        xid: u32,
+        alpha: f64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if alpha >= 1.0 {
+            conn.delete_property(xid, atom)?.check()?;
+        } else {
+            let value = (alpha.clamp(0.0, 1.0) * u32::MAX as f64) as u32;
+            conn.change_property32(PropMode::REPLACE, xid, atom, AtomEnum::CARDINAL, &[value])?
+                .check()?;
+        }
+        conn.flush()?;
+        Ok(())
+    }
+
+    X11_OPACITY_CONN.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(connect()?);
+        }
+        let (conn, atom) = slot.as_ref().expect("slot populated above");
+        match apply(conn, *atom, xid, alpha) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                // Cached connection may be dead — retry once on a fresh one,
+                // and only re-cache it if the retry succeeds (a persistent
+                // error like BadWindow shouldn't evict a healthy connection
+                // slot with a doomed one… nor cache anything at all).
+                *slot = None;
+                let (fresh_conn, fresh_atom) = connect()?;
+                let out = apply(&fresh_conn, fresh_atom, xid, alpha);
+                if out.is_ok() {
+                    *slot = Some((fresh_conn, fresh_atom));
+                }
+                out
+            }
+        }
+    })
+}
+
 // ── Move window ───────────────────────────────────────────────────────────
 
 wrap_task! {

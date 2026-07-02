@@ -29,6 +29,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agentmux_common::api_types::{
     InjectRequest, PaneOpenRequest, PaneOpenResponse, ShellCreateRequest, ShellCreateResponse,
+    ShellInputFailure, ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse,
     ShellStopRequest, ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest,
     WindowFocusRequest, WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest,
 };
@@ -59,10 +60,11 @@ const SHELL_TOOL: &str = r#"{
   "inputSchema": {
     "type": "object",
     "properties": {
-      "cmd":   { "type": "string",  "description": "Command to run (passed to sh -c / cmd /C)" },
-      "cwd":   { "type": "string",  "description": "Working directory (defaults to agent workdir)" },
-      "title": { "type": "string",  "description": "Display label shown in the conversation row (defaults to cmd)" },
-      "env":   { "type": "object",  "description": "Extra environment variables", "additionalProperties": { "type": "string" } }
+      "cmd":            { "type": "string",  "description": "Command to run (passed to sh -c / cmd /C)" },
+      "cwd":            { "type": "string",  "description": "Working directory (defaults to agent workdir)" },
+      "title":          { "type": "string",  "description": "Display label shown in the conversation row (defaults to cmd)" },
+      "env":            { "type": "object",  "description": "Extra environment variables", "additionalProperties": { "type": "string" } },
+      "capture_stdin":  { "type": "boolean", "description": "Pipe stdin so ShellInput() can write to it. Default false — avoids blocking programs that read stdin to EOF (e.g. `cat` with no args). Set true only when you intend to use ShellInput()." }
     },
     "required": ["cmd"]
   }
@@ -71,6 +73,31 @@ const SHELL_TOOL: &str = r#"{
 const SHELL_STOP_TOOL: &str = r#"{
   "name": "ShellStop",
   "description": "Stop a running shell started by Shell(). Pass the shell_id returned by Shell. Tree-kills the whole process group (e.g. `task dev` and its child task.exe/node processes), so prefer this over kill/taskkill — those can hit other agents' or the host's processes by name.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id": { "type": "string", "description": "The shell_id returned by a prior Shell() call" }
+    },
+    "required": ["shell_id"]
+  }
+}"#;
+
+const SHELL_INPUT_TOOL: &str = r#"{
+  "name": "ShellInput",
+  "description": "Write text to the stdin of a running shell started by Shell(). A newline is appended automatically. Use for interactive prompts like 'Terminate batch job (Y/N)?' or REPL commands. REQUIRES the shell to have been created with capture_stdin=true; otherwise its stdin is /dev/null and this returns an error telling you to recreate the shell. Also returns an error if the shell has exited. Note: processes that block waiting for stdin-EOF (e.g. `cat` with no args) will not exit until ShellStop is called — ShellStop always unblocks them via kill.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id": { "type": "string", "description": "The shell_id returned by a prior Shell() call" },
+      "text":     { "type": "string", "description": "Text to write to stdin (newline appended automatically)" }
+    },
+    "required": ["shell_id", "text"]
+  }
+}"#;
+
+const SHELL_STATUS_TOOL: &str = r#"{
+  "name": "ShellStatus",
+  "description": "Query whether a shell started by Shell() is still running. Returns running status, exit code (when exited), and total line count so far. Use to poll for completion or check if a dev server is still up before starting a second one.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -449,6 +476,8 @@ async fn main() {
             "tools/list" => {
                 let shell: Value = serde_json::from_str(SHELL_TOOL).expect("static json");
                 let shell_stop: Value = serde_json::from_str(SHELL_STOP_TOOL).expect("static json");
+                let shell_input: Value = serde_json::from_str(SHELL_INPUT_TOOL).expect("static json");
+                let shell_status: Value = serde_json::from_str(SHELL_STATUS_TOOL).expect("static json");
                 let open_editor: Value = serde_json::from_str(OPEN_EDITOR_TOOL).expect("static json");
                 let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
                 let discover_agents: Value =
@@ -481,7 +510,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, send_message, discover_agents, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -600,12 +629,14 @@ async fn call_tool(
                 "{}/api/v1/shell/create",
                 local_url.trim_end_matches('/')
             );
+            let capture_stdin = arguments.get("capture_stdin").and_then(|v| v.as_bool());
             let req = ShellCreateRequest {
                 agent_block_id: block_id.to_string(),
                 cmd: cmd.to_string(),
                 title: Some(title.to_string()),
                 cwd,
                 env,
+                capture_stdin,
             };
 
             let resp = client
@@ -665,6 +696,99 @@ async fn call_tool(
                 format!("stopped shell {shell_id}")
             } else {
                 format!("shell {shell_id} was not running (unknown or already exited)")
+            })
+        }
+        "ShellInput" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+            let text = arguments
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: text"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/shell/input", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&ShellInputRequest { shell_id: shell_id.to_string(), text: text.to_string() })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("shell/input failed: HTTP {status} — {body}");
+            }
+
+            let result: ShellInputResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(if result.written {
+                format!("wrote to shell {shell_id}")
+            } else {
+                match result.reason {
+                    Some(ShellInputFailure::StdinNotCaptured) => format!(
+                        "shell {shell_id} is running but was started without capture_stdin=true — \
+                         its stdin is /dev/null. Recreate the shell with Shell(..., capture_stdin=true) \
+                         to send input."
+                    ),
+                    Some(ShellInputFailure::WriteFailed) => format!(
+                        "shell {shell_id} closed its stdin — input discarded"
+                    ),
+                    Some(ShellInputFailure::NotRunning) | None => format!(
+                        "shell {shell_id} is not running — input discarded"
+                    ),
+                }
+            })
+        }
+        "ShellStatus" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/shell/status", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&ShellStatusRequest { shell_id: shell_id.to_string() })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("shell/status failed: HTTP {status} — {body}");
+            }
+
+            let result: ShellStatusResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(if result.running {
+                format!("shell {shell_id} is running ({} lines so far)", result.line_count)
+            } else {
+                let code = result.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
+                format!("shell {shell_id} has exited — exit_code: {code}, {} lines total", result.line_count)
             })
         }
         "OpenEditor" => {
