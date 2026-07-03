@@ -265,7 +265,7 @@ fn handle_result(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEve
     });
 }
 
-fn parse_usage(usage: Option<&Value>) -> TokenCounts {
+pub(crate) fn parse_usage(usage: Option<&Value>) -> TokenCounts {
     let Some(usage) = usage.and_then(|v| v.as_object()) else {
         return TokenCounts::default();
     };

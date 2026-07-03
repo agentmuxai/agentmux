@@ -9,6 +9,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import { WOS } from "@/app/store/global";
 import { callBackendService } from "@/store/wos";
 import { BlockService } from "@/app/store/services";
+import { readActivitySummary } from "@/app/store/activitySummary";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -218,8 +219,7 @@ export class SwarmViewModel implements ViewModel {
                 "Agent";
             const agentProvider =
                 (block?.meta?.["agentProvider"] as string | undefined)?.trim() || null;
-            const activitySummary =
-                (block?.meta?.["term:activity"] as string | undefined)?.trim() || null;
+            const activitySummary = readActivitySummary(block?.meta)?.trim() || null;
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";

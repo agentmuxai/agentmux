@@ -14,6 +14,7 @@ import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { Logger } from "@/util/logger";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
+import { readActivitySummary } from "@/app/store/activitySummary";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -56,14 +57,15 @@ export class AgentViewModel implements ViewModel {
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentViewWrapper as any;
 
-        // Flash signal: set true briefly when term:activity changes to a new
-        // non-empty value. Compare to previous so unrelated meta writes (status,
-        // agentName, etc.) during an active turn don't trigger spurious flashes.
+        // Flash signal: set true briefly when the activity summary changes to a
+        // new non-empty value. Compare to previous so unrelated meta writes
+        // (status, agentName, etc.) during an active turn don't trigger
+        // spurious flashes.
         const [activityFlash, setActivityFlash] = createSignal(false);
         let flashTimer: ReturnType<typeof setTimeout> | undefined;
         let prevActivity: string | undefined;
         createEffect(() => {
-            const activity = this.blockAtom()?.meta?.["term:activity"] as string | undefined;
+            const activity = readActivitySummary(this.blockAtom()?.meta);
             if (activity && activity !== prevActivity) {
                 clearTimeout(flashTimer);
                 setActivityFlash(true);
@@ -106,10 +108,11 @@ export class AgentViewModel implements ViewModel {
         this.viewText = (): HeaderElem[] => {
             const elems: HeaderElem[] = [];
 
-            // Per-turn live mini-summary from useAgentActivitySummary (Haiku on
-            // every turn completion). Persists across turns; flashes briefly when
-            // a new summary lands.
-            const activity = this.blockAtom()?.meta?.["term:activity"] as string | undefined;
+            // Per-turn live mini-summary — prefers the Haiku-derived
+            // term:ambient_summary (useAgentActivitySummary.ts), falling back to
+            // the free CLI-emitted term:osc_title (useBlockActivity.ts). Persists
+            // across turns; flashes briefly when a new summary lands.
+            const activity = readActivitySummary(this.blockAtom()?.meta);
             if (activity && activity.length > 0) {
                 elems.push({
                     elemtype: "text",

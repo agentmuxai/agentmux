@@ -2223,11 +2223,18 @@ declare global {
     type CommandActivitySummaryData = {
         block_id: string;
         word_target?: number;
+        // Caller's monotonic turn counter for this block. The ambient-call
+        // gateway uses it to cancel a stale in-flight request for the same
+        // block and reject a request that arrives out of order.
+        generation: number;
     };
 
     // wshrpc.ActivitySummaryResult
     type ActivitySummaryResult = {
         summary: string;
+        // Absent when the request was rejected as stale-on-arrival or the
+        // underlying call failed/was cancelled.
+        tokens?: TokenCounts;
     };
 
     // wshrpc.CommandSessionArchiveData
