@@ -214,6 +214,14 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             saga::handle_report_saga_action_failed(state, saga_id, reason)
         }
+        // Startup-stage telemetry is NOT mirrored State — it's forwarded
+        // directly into the launcher's StartupEventSink by a short-circuit
+        // in ipc/server.rs BEFORE the command ever reaches this reducer
+        // (same pattern as GetEvents). These arms exist only to satisfy
+        // exhaustiveness; they are unreachable at runtime.
+        Command::ReportStartupStageBegin { .. } | Command::ReportStartupStageEnd { .. } => {
+            vec![]
+        }
         Command::ReportHostCounts { windows, pool } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportHostCounts") {
                 return vec![err];
