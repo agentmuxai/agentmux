@@ -116,7 +116,7 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             },
             {
                 label: "Armory",
-                icon: "shield-halved",
+                icon: "vault",
                 onClick: () => fireAndForget(() => openOrFocusPaneByView("armory")),
             },
             {
