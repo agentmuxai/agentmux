@@ -585,37 +585,62 @@ export class AgentViewModel implements ViewModel {
                 );
             }
 
-            // Write-through: mirror the selected Identity bundle's bindings
-            // as direct agent<->account links, in addition to (not instead
-            // of) the bundle-based instance.identity_id above. The resolver
-            // (agentmux-srv/src/identity/resolver.rs) already prefers direct
-            // links over bundle bindings when both exist — this just makes
-            // sure every NEWLY launched agent has direct links from day one,
-            // so the bundle-fallback path can eventually be removed without
-            // a live-credential regression. Best-effort, same as the
-            // instance-row write above: a failure here doesn't abort the
-            // launch, since the agent already started and the bundle path
-            // still works as a fallback. See
+            // Write-through: RECONCILE this agent definition's direct
+            // agent<->account links to exactly match the selected Identity
+            // bundle's bindings (add/update AND remove), in addition to
+            // (not instead of) the bundle-based instance.identity_id above.
+            //
+            // Must be a full reconcile, not additive-only: the resolver
+            // (agentmux-srv/src/identity/resolver.rs's
+            // resolve_bindings_for_instance) treats ANY existing direct
+            // link for this definition as authoritative and skips the
+            // bundle path entirely. So on a relaunch/continue of the SAME
+            // definition with a different bundle — one that drops a
+            // provider, or "blank" for ambient creds — a stale direct link
+            // left over from an earlier launch would keep silently
+            // overriding the new selection. Reagent P1 on #1950 caught
+            // this in the additive-only version.
+            //
+            // This just makes sure every launch's direct-link set matches
+            // its bundle pick from day one, so the bundle-fallback path
+            // can eventually be removed without a live-credential
+            // regression. Best-effort, same as the instance-row write
+            // above: a failure here doesn't abort the launch, since the
+            // agent already started and the bundle path still works as a
+            // fallback. See
             // docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.
-            const identityId = overrides?.identityId;
-            if (identityId && identityId !== "blank") {
-                try {
-                    const bindings = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
-                        identity_id: identityId,
-                    });
-                    for (const binding of bindings ?? []) {
-                        await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
+            try {
+                const identityId = overrides?.identityId;
+                const bindings =
+                    identityId && identityId !== "blank"
+                        ? await RpcApi.ListIdentityBindingsCommand(TabRpcClient, { identity_id: identityId })
+                        : [];
+                const targetProviders = new Set((bindings ?? []).map((b) => b.provider));
+
+                const existingLinks = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                    agent_id: agent.id,
+                });
+                for (const link of existingLinks ?? []) {
+                    if (!targetProviders.has(link.provider)) {
+                        await RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, {
                             agent_id: agent.id,
-                            account_id: binding.account_id,
-                            provider: binding.provider,
+                            provider: link.provider,
                         });
                     }
-                } catch (e: any) {
-                    Logger.warn(
-                        "agent",
-                        `direct identity link write-through failed: ${e?.message ?? String(e)}`,
-                    );
                 }
+
+                for (const binding of bindings ?? []) {
+                    await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
+                        agent_id: agent.id,
+                        account_id: binding.account_id,
+                        provider: binding.provider,
+                    });
+                }
+            } catch (e: any) {
+                Logger.warn(
+                    "agent",
+                    `direct identity link write-through failed: ${e?.message ?? String(e)}`,
+                );
             }
         } catch (e: any) {
             Logger.error("agent", "Failed to launch agent definition", { error: String(e) });
