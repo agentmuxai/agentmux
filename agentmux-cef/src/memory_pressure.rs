@@ -11,10 +11,15 @@
 //! renderer purge, the low-memory banner — later PRs) and any operator tooling
 //! can read a single, stable signal instead of re-deriving thresholds.
 //!
-//! This PR is **detection + observability only**: a structured `mem_pressure`
-//! log line on every transition and a published `PRESSURE_LEVEL` atom. It
-//! deliberately takes **no** action on renderers, windows, or the pool — those
-//! responses need runtime verification and land in their own slices.
+//! Originally detection + observability only: a structured `mem_pressure` log
+//! line on every transition and a published `PRESSURE_LEVEL` atom, with no
+//! action taken on renderers, windows, or the pool. The first proactive
+//! shedding response now reads it: `commands/window_pool.rs`'s
+//! `spawn_pool_window` / `spawn_pane_pool_window` refuse to grow the warm
+//! pool while pressure is non-Normal (issue #1936 /
+//! `docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md`
+//! §B.5(b)) — refill suppression only, not active eviction of an
+//! already-warm pool window (that needs its own saga-aware design).
 //!
 //! The classifier is pure and unit-tested; hysteresis prevents banner/log flap
 //! when commit oscillates around a threshold (the same anti-flap discipline the
@@ -64,10 +69,11 @@ impl PressureLevel {
 /// responses + tooling. `Normal` until the first sample.
 static PRESSURE_LEVEL: AtomicU8 = AtomicU8::new(PressureLevel::Normal as u8);
 
-/// The current debounced pressure level (last published by the tracker). The
-/// proactive-shedding responses (warm-pool drain, CDP purge, banner — later
-/// PRs) read this; unused in this detection-only slice.
-#[allow(dead_code)]
+/// The current debounced pressure level (last published by the tracker).
+/// Read by proactive-shedding responses — currently the warm-pool refill
+/// guard (`commands/window_pool.rs::spawn_pool_window` /
+/// `spawn_pane_pool_window`) — and available for future CDP purge / banner
+/// consumers.
 pub fn current_level() -> PressureLevel {
     PressureLevel::from_u8(PRESSURE_LEVEL.load(Ordering::Relaxed))
 }

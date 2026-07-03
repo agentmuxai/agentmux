@@ -83,26 +83,33 @@ impl ShellSessionRegistry {
 
     // Full registration called by the runner after spawning the child.
     // stdin_tx is None when capture_stdin is false (stdin is /dev/null).
+    // Returns shell_ids evicted by the prune pass — the caller (which holds
+    // the Broker, unlike this registry) purges their `shell:<id>` persisted
+    // WaveEvent history so the broker's persist_map key set stays bounded
+    // in step with this registry's own MAX_EXITED_STATUS cap.
     fn register_full(
         &self,
         shell_id: String,
         stop_tx: oneshot::Sender<()>,
         stdin_tx: Option<mpsc::UnboundedSender<String>>,
         status: Arc<Mutex<ShellStatusInfo>>,
-    ) {
+    ) -> Vec<String> {
         self.shells.lock().insert(shell_id.clone(), ShellEntry { stop_tx, stdin_tx });
         self.status_map.lock().insert(shell_id.clone(), status);
         self.status_order.lock().push_back(shell_id);
         // Bound retained exited statuses; every spawn is a natural prune trigger.
-        self.prune_exited_statuses();
+        self.prune_exited_statuses()
     }
 
     /// Evict oldest EXITED status entries beyond `MAX_EXITED_STATUS`. Running
     /// shells are always retained (their status is read live via ShellStatus).
     /// Also drops any order-queue ids whose status entry is already gone.
-    fn prune_exited_statuses(&self) {
+    /// Returns the shell_ids actually evicted (status entry removed) so the
+    /// caller can purge their broker-side persisted history too.
+    fn prune_exited_statuses(&self) -> Vec<String> {
         let mut map = self.status_map.lock();
         let mut order = self.status_order.lock();
+        let mut evicted = Vec::new();
         let mut exited = map
             .values()
             .filter(|arc| !arc.lock().running)
@@ -116,6 +123,7 @@ impl ShellSessionRegistry {
                     map.remove(&id);
                     order.remove(i);
                     exited -= 1;
+                    evicted.push(id);
                 }
                 // Still running → keep in place, advance.
                 Some(_) => i += 1,
@@ -125,6 +133,7 @@ impl ShellSessionRegistry {
                 }
             }
         }
+        evicted
     }
 
     /// Request stop of a running shell. Returns false if unknown or already exited.
@@ -340,12 +349,15 @@ impl ShellNodeRunner {
 
         let status_arc = Arc::new(Mutex::new(ShellStatusInfo { running: true, exit_code: None, line_count: 0 }));
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
-        self.registry.register_full(
+        let evicted = self.registry.register_full(
             shell_id.clone(),
             cancel_tx,
             stdin_tx,
             Arc::clone(&status_arc),
         );
+        for evicted_id in evicted {
+            broker.purge_scope(&format!("shell:{evicted_id}"));
+        }
         let kill_task = tokio::spawn(async move {
             match cancel_rx.await {
                 Ok(()) => {
