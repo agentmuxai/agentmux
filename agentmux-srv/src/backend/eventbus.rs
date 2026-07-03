@@ -221,9 +221,9 @@ impl EventBus {
             }
         };
         let watches = self.watches.lock().unwrap();
-        for watch in watches.values() {
+        for (conn_id, watch) in watches.iter() {
             if watch.tab_id == tab_id {
-                let _ = watch.sender(Lane::Priority).try_send(data.clone());
+                Self::try_send_lane(conn_id, watch.sender(Lane::Priority), data.clone());
             }
         }
     }
