@@ -326,9 +326,35 @@ pub(crate) async fn run_unix(
             std::ffi::OsString::from(host_runtime),
         ));
     }
+    // "host" stage currently covers process-spawn latency only (begin →
+    // spawn_host_unix returning a live Child), not full first-paint — the
+    // signal for "host painted its first frame" (AGENTMUX_SPLASH_READY_FILE)
+    // is written by the host process itself and consumed exclusively by the
+    // splash's own poll loop (splash_mac.rs / splash_linux); having the
+    // supervisor also poll/remove that file risks a race with the splash's
+    // consumer. Extending this stage to span to first-paint is a follow-up
+    // once a race-safe signal exists (see SPEC_MACOS_LAUNCH_SPEED_AND_
+    // SPLASH_TELEMETRY_2026_07_02.md §B.7). Spawn latency is still a real,
+    // independently useful number.
+    startup_sink.stage_begin("host", "Host startup");
+    let host_spawn_t = std::time::Instant::now();
     let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false) {
-        Some(c) => c,
+        Some(c) => {
+            startup_sink.stage_end(
+                "host",
+                host_spawn_t.elapsed().as_millis() as u64,
+                startup_events::StartupStatus::Ok,
+                None,
+            );
+            c
+        }
         None => {
+            startup_sink.stage_end(
+                "host",
+                host_spawn_t.elapsed().as_millis() as u64,
+                startup_events::StartupStatus::Error,
+                Some("spawn failed".to_string()),
+            );
             log("FATAL: could not start CEF host — terminating");
             eprintln!("Failed to launch AgentMux.");
             terminate_child_gracefully(&srv_child);
