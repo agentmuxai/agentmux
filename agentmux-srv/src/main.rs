@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod agents;
+mod ambient;
 mod backend;
 mod config;
 mod event_log;

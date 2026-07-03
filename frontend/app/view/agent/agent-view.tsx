@@ -404,11 +404,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     useControllerStatusEvents({ blockId: model.blockId, log });
 
     // Subscribe to Claude Code OSC window-title extractions and write them
-    // to term:activity block metadata for the tab label.
+    // to term:osc_title block metadata (free fallback signal — see
+    // readActivitySummary()'s precedence in agent-model.ts).
     useBlockActivity({ blockId: model.blockId });
 
-    // Haiku-powered live mini-summary: generates a fresh phrase in the pane header
-    // on every completed agent turn, replacing the non-functional OSC path.
+    // Haiku-powered live mini-summary: generates a fresh phrase in
+    // term:ambient_summary on every completed agent turn, preferred over
+    // the OSC title above when both are present. Routed through the
+    // backend's Ambient Model Call gateway — see
+    // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
     useAgentActivitySummary({
         blockId: model.blockId,
         turnPhase: agentAtoms().turnPhaseAtom[0],

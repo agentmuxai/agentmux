@@ -106,6 +106,14 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
     );
 }
 
+/// Ambient-call purpose tag for the per-turn activity summary. Also usable
+/// as the token-usage/cost-dashboard category for this call site.
+const AMBIENT_PURPOSE_ACTIVITY_SUMMARY: &str = "activity_summary";
+
+fn empty_summary_result() -> serde_json::Value {
+    serde_json::to_value(&ActivitySummaryResult { summary: String::new(), tokens: None }).unwrap()
+}
+
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let filestore = state.filestore.clone();
@@ -118,6 +126,22 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
             Box::pin(async move {
                 let cmd: CommandActivitySummaryData = serde_json::from_value(data)
                     .map_err(|e| format!("session:activity_summary: {e}"))?;
+
+                // Admit through the Ambient Model Call gateway BEFORE doing any
+                // work: a stale (superseded) request does zero FileStore reads
+                // or prompt building, not just skips the CLI spawn. See
+                // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
+                let key = crate::ambient::AmbientCallKey::new(
+                    cmd.block_id.clone(),
+                    AMBIENT_PURPOSE_ACTIVITY_SUMMARY,
+                );
+                let guard = match crate::ambient::gateway().admit(key, cmd.generation) {
+                    crate::ambient::Admission::Proceed(guard) => guard,
+                    crate::ambient::Admission::StaleOnArrival => {
+                        return Ok(Some(empty_summary_result()));
+                    }
+                };
+                let cancel = guard.cancellation();
 
                 let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
 
@@ -153,24 +177,18 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 let window: Vec<&str> = all_lines[start..].iter().map(|s| s.as_str()).collect();
 
                 if window.is_empty() {
-                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
-                        summary: String::new(),
-                    }).unwrap()));
+                    return Ok(Some(empty_summary_result()));
                 }
 
                 let extracted = extract_digest_text(&window);
                 if extracted.is_empty() {
-                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
-                        summary: String::new(),
-                    }).unwrap()));
+                    return Ok(Some(empty_summary_result()));
                 }
 
                 let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
                 if cli_path.is_empty() {
                     tracing::debug!(block_id = %cmd.block_id, "session:activity_summary: no CLI path in meta");
-                    return Ok(Some(serde_json::to_value(&ActivitySummaryResult {
-                        summary: String::new(),
-                    }).unwrap()));
+                    return Ok(Some(empty_summary_result()));
                 }
 
                 let prompt = format!(
@@ -179,27 +197,47 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                      Recent activity:\n\n{extracted}"
                 );
 
-                let summary = invoke_cli_for_activity(&cli_path, &prompt, &block.meta).await
-                    .unwrap_or_else(|e| {
-                        tracing::debug!(block_id = %cmd.block_id, error = %e, "session:activity_summary: CLI failed");
-                        String::new()
-                    });
+                let (summary, tokens) =
+                    invoke_cli_for_activity(&cli_path, &prompt, &block.meta, cancel).await
+                        .unwrap_or_else(|e| {
+                            tracing::debug!(block_id = %cmd.block_id, error = %e, "session:activity_summary: CLI failed or was superseded");
+                            (String::new(), None)
+                        });
 
-                // The frontend writes `term:activity` after receiving this response so it
-                // can discard results from turns that were superseded before they returned.
-                Ok(Some(serde_json::to_value(&ActivitySummaryResult { summary }).unwrap()))
+                // guard is held until here so the in-flight entry stays
+                // registered (and cancellable by a newer request) for the
+                // full duration of the CLI call.
+                drop(guard);
+
+                // The frontend writes `term:ambient_summary` after receiving this
+                // response so it can discard results from turns that were
+                // superseded before they returned (belt-and-suspenders on top of
+                // the gateway's own cancellation).
+                Ok(Some(serde_json::to_value(&ActivitySummaryResult { summary, tokens }).unwrap()))
             })
         }),
     );
 }
 
-/// Invoke the Claude CLI with Haiku model for a lightweight per-turn activity summary.
-/// Uses `--model claude-haiku-4-5-20251001` and a 15s timeout.
+/// Invoke the Claude CLI with Haiku model for a lightweight per-turn activity
+/// summary. Uses `--model claude-haiku-4-5-20251001` and a 15s timeout.
+///
+/// `cancel` is this call's Ambient Model Call gateway cancellation token — if
+/// a newer request for the same `(block_id, "activity_summary")` key is
+/// admitted while this one is still running, `cancel` fires and the child
+/// process is killed immediately rather than left to run to completion (and
+/// keep burning tokens) only to have its result discarded on arrival.
+///
+/// Returns the summary text plus token usage parsed from the CLI's `result`
+/// stream-json line (same `usage` shape the main turn pipeline parses —
+/// see `agents::translator::claude::parse_usage`), so ambient calls are
+/// never silently excluded from token accounting.
 pub(super) async fn invoke_cli_for_activity(
     cli_path: &str,
     prompt: &str,
     meta: &obj::MetaMapType,
-) -> Result<String, String> {
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
     let auth_env: std::collections::HashMap<String, String> = match meta.get("cmd:env") {
         Some(serde_json::Value::Object(obj_map)) => obj_map
             .iter()
@@ -227,35 +265,63 @@ pub(super) async fn invoke_cli_for_activity(
             .map_err(|e| format!("activity CLI stdin shutdown: {e}"))?;
     }
 
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        child.wait_with_output(),
-    )
-    .await
-    .map_err(|_| "activity CLI timed out after 15s".to_string())?
-    .map_err(|e| format!("activity CLI wait: {e}"))?;
+    // `child.wait()` only borrows (unlike `wait_with_output()`, which
+    // consumes `child` by value and would make the cancel branch's
+    // `child.kill()` below impossible). Drain stdout concurrently via a
+    // separate task — same rationale `wait_with_output()` itself uses
+    // internally — so a chatty response can't fill the OS pipe buffer and
+    // deadlock the child waiting to write while nothing is reading.
+    let mut stdout_pipe = child.stdout.take()
+        .ok_or_else(|| "activity CLI: no stdout pipe".to_string())?;
+    let stdout_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf).await;
+        buf
+    });
 
-    if !output.status.success() {
-        return Err(format!("activity CLI exited with status {}", output.status));
+    let status = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            let _ = child.kill().await;
+            return Err("cancelled: superseded by a newer activity-summary request".to_string());
+        }
+        result = tokio::time::timeout(std::time::Duration::from_secs(15), child.wait()) => {
+            result.map_err(|_| "activity CLI timed out after 15s".to_string())?
+                .map_err(|e| format!("activity CLI wait: {e}"))?
+        }
+    };
+
+    if !status.success() {
+        return Err(format!("activity CLI exited with status {status}"));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout_bytes = stdout_task.await
+        .map_err(|e| format!("activity CLI stdout reader task: {e}"))?;
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
     let mut last_text = String::new();
+    let mut tokens: Option<crate::agents::TokenCounts> = None;
     for line in stdout.lines() {
         let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else { continue };
-        if val.get("type").and_then(|v| v.as_str()) == Some("assistant") {
-            if let Some(content) = val.get("message")
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_array())
-            {
-                for block in content {
-                    if block.get("type").and_then(|v| v.as_str()) == Some("text") {
-                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                            last_text = text.trim().to_string();
+        match val.get("type").and_then(|v| v.as_str()) {
+            Some("assistant") => {
+                if let Some(content) = val.get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+                {
+                    for block in content {
+                        if block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                                last_text = text.trim().to_string();
+                            }
                         }
                     }
                 }
             }
+            Some("result") => {
+                tokens = Some(crate::agents::translator::claude::parse_usage(val.get("usage")));
+            }
+            _ => {}
         }
     }
 
@@ -263,7 +329,7 @@ pub(super) async fn invoke_cli_for_activity(
         return Err("no text in activity CLI response".to_string());
     }
 
-    Ok(last_text)
+    Ok((last_text, tokens))
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.

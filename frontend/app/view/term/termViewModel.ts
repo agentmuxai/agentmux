@@ -188,7 +188,7 @@ class TermViewModel implements ViewModel {
             }
             if (!isCmd) {
                 const blockMeta = this.blockAtom()?.meta;
-                const activity = blockMeta?.["term:activity"] as string | undefined;
+                const activity = blockMeta?.["term:osc_title"] as string | undefined;
                 if (activity && activity.length > 0) {
                     rtn.push({
                         elemtype: "text",

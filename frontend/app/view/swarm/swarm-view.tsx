@@ -158,13 +158,19 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
 // ── Status derived from TurnPhase ────────────────────────────────────────
 
-type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected";
+type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected" | "unknown";
 
 function phaseToDisplayStatus(blockId: string, _fallback: "running" | "idle"): AgentDisplayStatus {
     const phaseAccessor = getBlockTurnPhase(blockId);
-    // shellprocstatus "running" only means the process is alive, not that it's
-    // doing LLM work. Without a registered TurnPhase, default to idle.
-    if (!phaseAccessor) return "idle";
+    // A block only has a registered TurnPhase while its pane is mounted in
+    // THIS renderer (registerActivity() in agentActivity.ts runs from the
+    // mounted agent-pane component). A subagent running in an unmounted
+    // pane, a background tab, or another workspace has no entry here — that
+    // does NOT mean it's idle, it means we have no visibility into it from
+    // here. Conflating the two used to render active agents as flatly
+    // "idle" ("nothing in progress" when something clearly was) — see
+    // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md §1.4/§3.5.
+    if (!phaseAccessor) return "unknown";
     const phase = phaseAccessor();
     switch (phase.kind) {
         case "Submitting":    return "working";
@@ -278,6 +284,7 @@ const STATUS_LABEL: Record<AgentDisplayStatus, string> = {
     idle:         "idle",
     error:        "error",
     disconnected: "offline",
+    unknown:      "unknown",
 };
 
 function AgentStatusChip({ status }: { status: AgentDisplayStatus }): JSX.Element {

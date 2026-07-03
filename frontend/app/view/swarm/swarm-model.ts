@@ -9,6 +9,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import { WOS } from "@/app/store/global";
 import { callBackendService } from "@/store/wos";
 import { BlockService } from "@/app/store/services";
+import { readActivitySummary } from "@/app/store/activitySummary";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -119,9 +120,10 @@ export class SwarmViewModel implements ViewModel {
         });
         if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
 
-        // Block:activity meta changes (term:activity) — force re-read of block meta.
-        // The block atom in WOS updates reactively, so the memo in the view
-        // already reacts; no explicit handler needed here beyond the WOS atom.
+        // term:osc_title / term:ambient_summary meta changes — force re-read
+        // of block meta. The block atom in WOS updates reactively, so the
+        // memo in the view already reacts; no explicit handler needed here
+        // beyond the WOS atom.
     }
 
     loadAll = async (): Promise<void> => {
@@ -218,8 +220,7 @@ export class SwarmViewModel implements ViewModel {
                 "Agent";
             const agentProvider =
                 (block?.meta?.["agentProvider"] as string | undefined)?.trim() || null;
-            const activitySummary =
-                (block?.meta?.["term:activity"] as string | undefined)?.trim() || null;
+            const activitySummary = readActivitySummary(block?.meta)?.trim() || null;
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";

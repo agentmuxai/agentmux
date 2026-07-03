@@ -227,6 +227,14 @@
         background: var(--secondary-text-color);
         opacity: 0.25;
     }
+    // Distinct from --idle: this block has no registered TurnPhase in this
+    // renderer (unmounted pane / other workspace) — we genuinely don't know
+    // its state, so it must not look like a confirmed-idle solid dot.
+    &--unknown {
+        background: transparent;
+        border: 1px solid var(--secondary-text-color);
+        opacity: 0.5;
+    }
 }
 
 @keyframes swarm-pulse {

@@ -7,22 +7,35 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::TokenCounts;
+
 // ---- Session activity summary types ----
 
-/// Request for session:activity_summary — generate a per-turn live summary via Haiku.
+/// Request for session:activity_summary — generate a per-turn live summary via
+/// Haiku, routed through the Ambient Model Call gateway (`crate::ambient`).
+/// See docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CommandActivitySummaryData {
     pub block_id: String,
     /// Target word count, derived from pane width. Defaults to 7.
     pub word_target: Option<u32>,
+    /// Caller's monotonic turn counter for this block (bumped on every new
+    /// turn). Used by the ambient gateway to cancel a stale in-flight call
+    /// for the same block and reject a request that arrives out of order.
+    pub generation: u64,
 }
 
-/// Response from session:activity_summary. The backend also writes `term:activity` to block meta.
+/// Response from session:activity_summary. The backend also writes
+/// `term:ambient_summary` to block meta. `tokens` is `None` when the request
+/// was rejected as stale-on-arrival or the underlying call failed/was
+/// cancelled — callers should only record usage when it's `Some`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ActivitySummaryResult {
     pub summary: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<TokenCounts>,
 }
 
 // ---- Session archival types ----

@@ -6,7 +6,7 @@
 //! Parses OSC 0 and OSC 2 sequences from PTY output and normalises
 //! Claude Code window-title payloads into bare conversation-topic strings.
 //! Used by the agent-pane PTY read loop to surface the session topic as
-//! `term:activity` block metadata without leaking raw escape bytes into
+//! `term:osc_title` block metadata without leaking raw escape bytes into
 //! the FileStore.
 //!
 //! Design notes:

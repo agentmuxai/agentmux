@@ -164,7 +164,7 @@ export function handleOscTitleCommand(data: string, blockId: string, loaded: boo
         titleUpdateDebounceMap.delete(blockId);
         fireAndForget(async () => {
             await services.ObjectService.UpdateObjectMeta(WOS.makeORef("block", blockId), {
-                "term:activity": activity,
+                "term:osc_title": activity,
             } as any);
         });
     }, TITLE_UPDATE_DEBOUNCE_MS);
