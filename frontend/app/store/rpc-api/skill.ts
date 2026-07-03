@@ -7,8 +7,9 @@
 // these only work from an authenticated agent connection. Distinct from the
 // legacy agent-scoped AgentSkill (`agent_skill_*` / `db_agent_skills`,
 // `AgentSkillCard.tsx` et al.) — this is the v1 standalone primitive
-// (`db_skills`). There is no window-scoped "list every skill" command yet —
-// see skill.catalog.* (Armory-level, global-only) for that surface.
+// (`db_skills`). The skill.catalog.* commands are the window-scoped
+// counterpart (no agent_id, global rows only) — that's what the Armory's
+// Skills tab uses.
 
 import { RpcClient } from "../rpc-client";
 
@@ -67,5 +68,38 @@ export const SkillApi = {
         opts?: RpcOpts,
     ): Promise<{ unbound: boolean }> {
         return client.rpcCall("skill.unbind", data, opts);
+    },
+
+    // ── Armory catalog (global skills only, no agent_id) ────────────────────
+
+    SkillCatalogListCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<Skill[]> {
+        return client.rpcCall("skill.catalog.list", data, opts);
+    },
+
+    SkillCatalogUpsertCommand(
+        client: RpcClient,
+        data: {
+            id?: string;
+            name: string;
+            trigger?: string;
+            skill_type?: string;
+            description?: string;
+            content?: string;
+        },
+        opts?: RpcOpts,
+    ): Promise<Skill> {
+        return client.rpcCall("skill.catalog.upsert", data, opts);
+    },
+
+    SkillCatalogDeleteCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("skill.catalog.delete", data, opts);
     },
 };

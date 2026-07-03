@@ -314,6 +314,12 @@ pub const COMMAND_SKILL_DELETE: &str = "skill.delete";
 pub const COMMAND_SKILL_BIND: &str = "skill.bind";
 pub const COMMAND_SKILL_UNBIND: &str = "skill.unbind";
 
+// App API — Armory-level Skill catalog (global skills only, window-scoped —
+// no agent_id, no check_s1 — mirrors bundle.* auth shape).
+pub const COMMAND_SKILL_CATALOG_LIST: &str = "skill.catalog.list";
+pub const COMMAND_SKILL_CATALOG_UPSERT: &str = "skill.catalog.upsert";
+pub const COMMAND_SKILL_CATALOG_DELETE: &str = "skill.catalog.delete";
+
 // App API — v1 standalone MCP Server primitives
 pub const COMMAND_MCP_LIST: &str = "mcp.list";
 pub const COMMAND_MCP_GET: &str = "mcp.get";
@@ -321,6 +327,12 @@ pub const COMMAND_MCP_UPSERT: &str = "mcp.upsert";
 pub const COMMAND_MCP_DELETE: &str = "mcp.delete";
 pub const COMMAND_MCP_BIND: &str = "mcp.bind";
 pub const COMMAND_MCP_UNBIND: &str = "mcp.unbind";
+
+// App API — Armory-level MCP Server catalog (global servers only,
+// window-scoped — no agent_id, no check_s1 — mirrors bundle.* auth shape).
+pub const COMMAND_MCP_CATALOG_LIST: &str = "mcp.catalog.list";
+pub const COMMAND_MCP_CATALOG_UPSERT: &str = "mcp.catalog.upsert";
+pub const COMMAND_MCP_CATALOG_DELETE: &str = "mcp.catalog.delete";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";

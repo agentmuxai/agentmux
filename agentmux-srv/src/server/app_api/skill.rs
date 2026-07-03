@@ -3,6 +3,10 @@
 
 //! App API handlers for the v1 standalone Skill primitive.
 //! skill.list / skill.get / skill.upsert / skill.delete / skill.bind / skill.unbind
+//!
+//! Plus the Armory-level catalog (skill.catalog.*): global skills only,
+//! window-scoped — no `agent_id`, no `check_s1` (mirrors bundle.* auth
+//! shape, since the Armory has no agent connection context to gate on).
 
 use super::*;
 
@@ -13,6 +17,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_delete(engine, state);
     register_skill_bind(engine, state);
     register_skill_unbind(engine, state);
+    register_skill_catalog_list(engine, state);
+    register_skill_catalog_upsert(engine, state);
+    register_skill_catalog_delete(engine, state);
 }
 
 fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -222,6 +229,122 @@ fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let unbound = wstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.unbind: {e}"))?;
                 Ok(Some(json!({ "unbound": unbound })))
+            })
+        }),
+    );
+}
+
+fn register_skill_catalog_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_SKILL_CATALOG_LIST,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let skills = wstore.skill_list_global()
+                    .map_err(|e| format!("skill.catalog.list: {e}"))?;
+                Ok(Some(serde_json::to_value(&skills).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_SKILL_CATALOG_UPSERT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    #[serde(default)] id: String,
+                    name: String,
+                    #[serde(default)] trigger: String,
+                    #[serde(default = "default_skill_type")] skill_type: String,
+                    #[serde(default)] description: String,
+                    #[serde(default)] content: String,
+                }
+                fn default_skill_type() -> String { "prompt".to_string() }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
+
+                let now = now_ms();
+                let (id, created_at) = if req.id.is_empty() {
+                    (uuid::Uuid::new_v4().to_string(), now)
+                } else {
+                    let existing = wstore.skill_get(&req.id)
+                        .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
+                    match existing {
+                        // No agent_id/check_s1 here to verify ownership of a private
+                        // skill, so the catalog surface may only create new global
+                        // rows or edit ones that are ALREADY global — never promote
+                        // a private skill into the catalog by supplying its id.
+                        Some(s) if !s.is_global => {
+                            return Err("FORBIDDEN: cannot promote a private skill via the catalog".to_string());
+                        }
+                        Some(s) => (req.id.clone(), s.created_at),
+                        None => (req.id.clone(), now),
+                    }
+                };
+
+                let skill = crate::backend::storage::Skill {
+                    id: id.clone(),
+                    name: req.name,
+                    trigger: req.trigger,
+                    skill_type: req.skill_type,
+                    description: req.description,
+                    content: req.content,
+                    is_global: true,
+                    created_at,
+                    updated_at: now,
+                };
+                // Global-scoped uniqueness (not skill_upsert_unique's
+                // per-agent check) — same defense-in-depth as the mcp.catalog
+                // fix, reagent P1 on #1948.
+                wstore.skill_upsert_unique_global(&skill)
+                    .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "skills:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                Ok(Some(serde_json::to_value(&skill).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+fn register_skill_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_SKILL_CATALOG_DELETE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("skill.catalog.delete: {e}"))?;
+                if let Some(existing) = wstore.skill_get(&req.id)
+                    .map_err(|e| format!("skill.catalog.delete: {e}"))?
+                {
+                    if !existing.is_global {
+                        return Err("FORBIDDEN: cannot delete a private skill via the catalog".to_string());
+                    }
+                }
+                let deleted = wstore.skill_delete(&req.id)
+                    .map_err(|e| format!("skill.catalog.delete: {e}"))?;
+                if deleted {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "skills:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
+                Ok(Some(json!({ "deleted": deleted })))
             })
         }),
     );
