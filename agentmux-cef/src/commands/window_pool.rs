@@ -249,6 +249,21 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         return;
     }
 
+    // Commit-pressure guard (SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02
+    // §B.5(b)) — refuse to grow the warm pool while commit is tight. This is
+    // refill-suppression only: it never destroys an already-queued pool
+    // window (that needs its own saga-aware design, tracked in #1936),
+    // it just stops the pool from re-filling back to POOL_TARGET_SIZE
+    // every time a window is promoted while the system is under pressure.
+    if crate::memory_pressure::current_level() != crate::memory_pressure::PressureLevel::Normal {
+        tracing::debug!(
+            target: "dnd:tearoff:pool",
+            level = crate::memory_pressure::current_level().as_str(),
+            "[pool] spawn skipped — commit pressure"
+        );
+        return;
+    }
+
     // PR #6 H.7 — refuse pool refill while any pane is mid-close. Pool
     // windows are CEF top-levels just like user-visible ones; the v146
     // deadlock fires regardless of whether the new window is on-screen.
@@ -1337,6 +1352,15 @@ pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
     // instead of None. The early-return guard that blocked spawning on Windows
     // was not removed in that PR; removing it here enables the pool on Windows.
     if state.is_quitting() {
+        return;
+    }
+    // Commit-pressure guard — see the matching comment in spawn_pool_window.
+    if crate::memory_pressure::current_level() != crate::memory_pressure::PressureLevel::Normal {
+        tracing::debug!(
+            target: "pool:pane",
+            level = crate::memory_pressure::current_level().as_str(),
+            "[pane-pool] spawn skipped — commit pressure"
+        );
         return;
     }
     if state.any_browser_pane_closing() {

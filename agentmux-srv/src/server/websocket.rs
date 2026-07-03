@@ -309,7 +309,7 @@ fn background_event_key(event: &serde_json::Value) -> String {
 /// order in the returned Vec is first-seen (stable across coalescing rounds).
 fn coalesce_background(
     first: serde_json::Value,
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+    rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>,
 ) -> Vec<serde_json::Value> {
     let mut order: Vec<String> = Vec::new();
     let mut map: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
