@@ -18,9 +18,11 @@ import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/A
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
+import { AgentSetupModal } from "@/app/view/agent/components/AgentSetupModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/agent/components/AgentIdentityModal.scss";
+import "@/app/view/agent/components/AgentSetupModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
 
 import type { ModalLayerApi, ModalLayerRequest } from "./modal-layer";
@@ -45,6 +47,8 @@ export function requestLabel(req: ModalLayerRequest): string {
             return `Identity — ${req.agent.name}`;
         case "agent-memory":
             return `Memory — ${req.agentName}`;
+        case "agent-setup":
+            return "Agent setup";
     }
 }
 
@@ -294,6 +298,21 @@ export function renderRequest(
                         agentId={req.agentId}
                         agentName={req.agentName}
                         workingDirectory={req.workingDirectory}
+                        onClose={api.close}
+                    />
+                ),
+            };
+        case "agent-setup":
+            return {
+                label: requestLabel(req),
+                panel: (
+                    <AgentSetupModal
+                        agent={req.agent}
+                        agentId={req.agentId}
+                        agentName={req.agentName}
+                        workingDirectory={req.workingDirectory}
+                        blockId={req.blockId}
+                        initialTab={req.initialTab}
                         onClose={api.close}
                     />
                 ),

@@ -1,0 +1,59 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentSetupModal — unified tabbed container hosting the Accounts (identity)
+// and Memory (native memory) panels. The inner panels keep their own styling
+// (_identity-panel.scss / AgentNativeMemoryModal.scss); this file only styles
+// the top tab bar + panel wrapper.
+
+.agent-setup-modal {
+    display: flex;
+    flex-direction: column;
+    min-width: 480px;
+    max-width: 720px;
+}
+
+.agent-setup-modal-tabs {
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-4) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.agent-setup-modal-tab {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--secondary-text-color);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: default;
+
+    &:hover:not(.is-active) {
+        color: var(--main-text-color);
+    }
+
+    &.is-active {
+        color: var(--main-text-color);
+        border-bottom-color: var(--accent-color);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
+}
+
+.agent-setup-modal-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.agent-setup-modal-empty {
+    padding: var(--space-6) var(--space-5);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.5;
+}

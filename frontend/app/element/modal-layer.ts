@@ -24,7 +24,8 @@ export type ModalLayerRequest =
     | CreateFromTemplateRequest
     | BrowserAuthRequest
     | AgentIdentityRequest
-    | AgentMemoryRequest;
+    | AgentMemoryRequest
+    | AgentSetupRequest;
 
 export interface LaunchAgentRequest {
     kind: "launch-agent";
@@ -278,9 +279,11 @@ export interface BrowserAuthRequest {
 }
 
 /**
- * Agent pane identity modal — opened by the id-card icon in the agent
- * pane header. Replaces the cog → Identity tab flow with a pane-scoped
- * modal. Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
+ * Agent pane identity modal — formerly opened by the id-card icon in the
+ * agent pane header. Superseded by agent-setup (the unified tabbed modal
+ * now hosts this panel as the "Accounts" tab); kept for the dispatch case
+ * and any future direct callers. Spec:
+ * SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
  */
 export interface AgentIdentityRequest {
     kind: "agent-identity";
@@ -291,10 +294,11 @@ export interface AgentIdentityRequest {
 }
 
 /**
- * Agent pane memory modal — opened by the brain icon in the agent
- * pane header. Shows the native memory folder for the agent.
- * Phase 1: placeholder UI. Phase 3 adds the full file browser + editor.
- * Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
+ * Agent pane memory modal — formerly opened by the brain icon in the
+ * agent pane header. Shows the native memory folder for the agent.
+ * Superseded by agent-setup (the unified tabbed modal now hosts this
+ * panel as the "Memory" tab); kept for the dispatch case and any future
+ * direct callers. Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md.
  */
 export interface AgentMemoryRequest {
     kind: "agent-memory";
@@ -302,6 +306,31 @@ export interface AgentMemoryRequest {
     agentName: string;
     /** Agent's working directory — used to compute the memory folder path. */
     workingDirectory: string;
+}
+
+/**
+ * Agent setup modal — opened by the single id-card icon in the agent
+ * pane header. Unified tabbed container hosting the former Identity
+ * ("Accounts") + native Memory surfaces as tabs; supersedes the separate
+ * agent-identity / agent-memory icons. Structured so future primitives
+ * (MCP Servers · Skills · Briefs · Bundle) slot in as additional tabs.
+ * Spec: SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.2b.
+ */
+export interface AgentSetupRequest {
+    kind: "agent-setup";
+    /** Agent definition to show/edit accounts for (Accounts tab). May be
+     *  null for quick-launch panes with no loadable definition — the
+     *  Accounts tab renders its own empty state in that case. */
+    agent: AgentDefinition | null;
+    /** Provider/definition id — used by the Memory tab. */
+    agentId: string;
+    agentName: string;
+    /** Agent's working directory — used to compute the memory folder path. */
+    workingDirectory: string;
+    /** Block id of the pane — used to construct the IdentityViewModel. */
+    blockId: string;
+    /** Which tab to open on. Defaults to "accounts". */
+    initialTab?: "accounts" | "memory";
 }
 
 // ── Context API ──────────────────────────────────────────────────────────────
