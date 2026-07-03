@@ -120,9 +120,10 @@ export class SwarmViewModel implements ViewModel {
         });
         if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
 
-        // Block:activity meta changes (term:activity) — force re-read of block meta.
-        // The block atom in WOS updates reactively, so the memo in the view
-        // already reacts; no explicit handler needed here beyond the WOS atom.
+        // term:osc_title / term:ambient_summary meta changes — force re-read
+        // of block meta. The block atom in WOS updates reactively, so the
+        // memo in the view already reacts; no explicit handler needed here
+        // beyond the WOS atom.
     }
 
     loadAll = async (): Promise<void> => {

@@ -15,12 +15,20 @@
  * panes can accommodate up to 12.
  *
  * This call is routed through the backend's Ambient Model Call gateway
- * (`crate::ambient`): the turn counter sent as `generation` lets the gateway
- * cancel a still-running Haiku call from a superseded turn (killing the
- * subprocess, not just discarding its result) and reject an out-of-order
- * request before any work happens. The `activeTurnId !== myTurnId` check
- * below is belt-and-suspenders on top of that — the gateway is the primary
- * guard now, this is a second, independent check at the write boundary.
+ * (`crate::ambient`), keyed by block_id: the gateway persists its
+ * per-block generation state across pane remounts (tab-switch), but this
+ * hook's own state does not (a fresh `activeTurnId` starts at 0 on every
+ * mount — confirmed by useBlockActivity.ts's own comment on remount
+ * behavior). Sending the local counter as `generation` would mean a remount
+ * right after a high-generation turn could send a *lower* number than the
+ * gateway already has recorded for this block, getting rejected as
+ * stale-on-arrival for up to 15s (until the still-in-flight prior call's
+ * guard drops) even though it's a legitimately new request. `Date.now()` is
+ * used for the wire `generation` instead — always increasing regardless of
+ * remounts, since real time never goes backwards for this purpose. The
+ * local `activeTurnId !== myTurnId` check below is unaffected by this (it's
+ * scoped to a single mount's closures) and remains a second, independent
+ * guard at the write boundary on top of the gateway's own cancellation.
  *
  * The summary is never cleared on our own — it persists across turns so the
  * header always shows the last known activity. It's cleared elsewhere
@@ -45,9 +53,9 @@ export interface UseAgentActivitySummaryOptions {
 export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): void {
     const { blockId, turnPhase, getRootWidth } = opts;
 
-    // Monotonically increasing turn ID. Bumped on every Submitting transition;
-    // sent to the backend as `generation` (ambient-gateway cancellation key)
-    // and re-checked locally when the response lands.
+    // Monotonically increasing turn ID, scoped to this mount. Bumped on every
+    // Submitting transition and re-checked locally when the response lands
+    // (NOT sent to the backend — see the module doc comment above for why).
     let activeTurnId = 0;
 
     createEffect(on(turnPhase, (phase) => {
@@ -64,7 +72,7 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
 
             RpcApi.AgentActivitySummaryCommand(
                 TabRpcClient,
-                { block_id: blockId, word_target: wordTarget, generation: myTurnId },
+                { block_id: blockId, word_target: wordTarget, generation: Date.now() },
                 { timeout: 20_000 },
             ).then((result) => {
                 if (activeTurnId !== myTurnId) return; // superseded by a newer turn
