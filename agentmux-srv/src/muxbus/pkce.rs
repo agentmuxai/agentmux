@@ -19,6 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpSocket;
 
 use crate::backend::storage::muxbus::MuxBusCredentials;
+use crate::util::open_browser;
 
 pub const LOGIN_TIMEOUT_SECS: u64 = 300;
 
@@ -346,19 +347,3 @@ fn extract_jwt_claims(token: &str) -> (String, String) {
     (email, sub)
 }
 
-fn open_browser(url: &str) {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("open").arg(url).spawn();
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-    }
-}
