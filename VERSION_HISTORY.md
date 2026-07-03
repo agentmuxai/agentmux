@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.49.13 — 2026-07-02
+
+- fix(agent): promote Mode to composer strip, un-nest Controls from Log, style Session buttons
+- fix(agent): compute real running totals for composer strip instead of reusing per-query stats
+- fix(agent): render markdown in Read-tool preview; zoom the preview body (not the filepath) and route filename/pane zoom by hover
+- feat(ui): rename Trust Center to Armory
+- feat(armory): rename Preset to Bundle (App API + UI, phase 2)
+- feat(agent): consolidate pane header to a single Agent setup icon + unified modal
+- fix(agent): Mode/Model/Effort drop-ups (open upward) replace native <select>; stop hiding controls on narrow panes
+- feat(srv): model catalog fetch layer (GET /v1/models via OAuth) — foundation for API-sourced model dropdown
+- feat(agent): `providers.models` RPC + live model-catalog overlay for the strip drop-up
+- feat(identity): revive direct agent-account bindings (additive, dual-read + backfill)
+- docs: remove legacy pre-Drone "Workflows" lineage specs; free the term for Claude's workflows feature
+
+
 ## 0.49.12 — 2026-07-02
 
 - feat(toolchain): Check latest versions button — fetch latest npm versions for provider CLIs
