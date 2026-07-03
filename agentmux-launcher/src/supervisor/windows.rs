@@ -352,6 +352,7 @@ pub(crate) async fn run_windows(
                 events_tx,
                 event_log,
                 host_pipe: std::sync::Arc::clone(&host_pipe),
+                startup_sink: Some(startup_sink.clone()),
             },
         );
         log(&format!("IPC server started on {}", pipe_path));
