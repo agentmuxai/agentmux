@@ -15,9 +15,11 @@ import { AgentApi } from "./agent";
 import { BlockApi } from "./block";
 import { FileApi } from "./file";
 import { IdentityApi } from "./identity";
+import { McpApi } from "./mcp";
 import { MemoryApi } from "./memory";
 import { MiscApi } from "./misc";
 import { SessionApi } from "./session";
+import { SkillApi } from "./skill";
 import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
@@ -32,4 +34,6 @@ export const RpcApi = {
     ...IdentityApi,
     ...MemoryApi,
     ...SessionApi,
+    ...McpApi,
+    ...SkillApi,
 };

@@ -389,6 +389,39 @@ declare global {
         updated_at: number;
     };
 
+    // ── v1 composable model — standalone MCP Server + Skill primitives ─────
+    // Mirrors agentmux-srv/src/backend/storage/mcp_servers.rs::McpServer and
+    // skills.rs::Skill (the v1 struct, not the legacy agent-scoped AgentSkill).
+
+    /** A standalone MCP Server primitive. `config` is a JSON-encoded object
+     *  (command/args/env for stdio; url/headers for sse) merged into
+     *  `.mcp.json` at agent launch. Global servers (`is_global`) are visible
+     *  to every agent and cannot be mutated/deleted by agent-scoped RPCs. */
+    type McpServer = {
+        id: string;
+        name: string;
+        transport: string; // "stdio" | "sse"
+        config: string;
+        is_global: boolean;
+        created_at: number;
+        updated_at: number;
+    };
+
+    /** A standalone Skill primitive — an on-demand instruction/knowledge
+     *  module, loaded when invoked. Global skills (`is_global`) are visible
+     *  to every agent and cannot be mutated/deleted by agent-scoped RPCs. */
+    type Skill = {
+        id: string;
+        name: string;
+        trigger: string;
+        skill_type: string; // "prompt" | ...
+        description: string;
+        content: string;
+        is_global: boolean;
+        created_at: number;
+        updated_at: number;
+    };
+
     /** Drone pane (issue #753 Phase 1). Mirrors the Rust types in
      *  agentmux-srv/src/drone/types.rs. */
     type DroneDefinition = {
