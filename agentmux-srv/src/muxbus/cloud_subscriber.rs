@@ -37,7 +37,11 @@ const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 // AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
 // server-initiated keepalive of their own — the connection is dropped on
 // silence in both directions. Ping well under that so a quiet connection
-// (no inject_available traffic) survives indefinitely.
+// (no inject_available traffic) survives indefinitely. The ping is an
+// app-level ClientMsg::Ping frame, not a WS-protocol-level Message::Ping —
+// API Gateway does not reliably relay raw protocol ping/pong control frames,
+// so a normal data frame is what actually keeps the connection alive in
+// production (see ClientMsg::Ping's doc comment).
 const CLIENT_PING_INTERVAL_SECS: u64 = 240;
 
 // ── Wire protocol ─────────────────────────────────────────────────────────────
@@ -51,6 +55,11 @@ enum ClientMsg {
     #[serde(rename = "subscribe:remove")]
     SubscribeRemove { agents: Vec<String> },
     // Ack removed — ACK is sent via REST POST /reactive/ack, not WS
+    // App-level keepalive — see CLIENT_PING_INTERVAL_SECS. AWS API Gateway
+    // WebSocket APIs (the production transport) do not reliably relay raw
+    // WS-protocol Ping/Pong control frames, so the keepalive must be a normal
+    // data frame the server's $default route can see and reply to.
+    Ping,
 }
 
 #[derive(Deserialize)]
@@ -300,7 +309,9 @@ async fn connect_and_run(
         tokio::select! {
             // Keepalive — see CLIENT_PING_INTERVAL_SECS.
             _ = ping_interval.tick() => {
-                if let Err(e) = write.send(Message::Ping(Vec::new().into())).await {
+                let ping_msg = serde_json::to_string(&ClientMsg::Ping)
+                    .map_err(|e| format!("serialize ping: {e}"))?;
+                if let Err(e) = write.send(Message::Text(ping_msg.into())).await {
                     return Err(format!("send ping: {e}"));
                 }
             }
