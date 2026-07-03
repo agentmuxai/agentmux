@@ -393,6 +393,17 @@ pub(crate) async fn run_windows(
     // Prevents two running releases from overwriting each other's port
     // file (codex P1 on #1227).
     host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash)));
+    // "host" stage covers process-spawn latency (begin → spawn_host_supervised
+    // returning a live Child), including the suspend → job-assign → resume
+    // dance (see resume_main_thread's Toolhelp32 snapshot walk in
+    // host_spawn.rs) — not full first-paint. The first-paint signal
+    // (splash_event_name) is consumed exclusively by the splash's own wait;
+    // having the supervisor also wait on it risks double-signaling semantics
+    // on the named event. Extending this stage to span to first-paint is a
+    // follow-up once a race-safe signal exists (see SPEC_MACOS_LAUNCH_SPEED_
+    // AND_SPLASH_TELEMETRY_2026_07_02.md §B.7). Mirrors unix.rs's "host" stage.
+    startup_sink.stage_begin("host", "Host startup");
+    let host_spawn_t = std::time::Instant::now();
     let mut host_child = match spawn_host_supervised(
         real_exe,
         args,
@@ -404,8 +415,22 @@ pub(crate) async fn run_windows(
         splash_event_name.as_deref(),
         false,
     ) {
-        Some(c) => c,
+        Some(c) => {
+            startup_sink.stage_end(
+                "host",
+                host_spawn_t.elapsed().as_millis() as u64,
+                startup_events::StartupStatus::Ok,
+                None,
+            );
+            c
+        }
         None => {
+            startup_sink.stage_end(
+                "host",
+                host_spawn_t.elapsed().as_millis() as u64,
+                startup_events::StartupStatus::Error,
+                Some("spawn failed".to_string()),
+            );
             // First-launch failure is fatal. Happy path: drop(job) →
             // KILL_ON_JOB_CLOSE reaps srv. Degraded path (J0 absent):
             // kill srv explicitly or it orphans (kill_on_drop is false).
