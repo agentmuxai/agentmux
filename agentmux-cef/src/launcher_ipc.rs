@@ -996,12 +996,13 @@ pub fn report_monitor_topology_changed(rects: Vec<agentmux_common::ipc::Rect>) {
 /// 2026_07_02.md.
 pub fn report_startup_stage_begin(stage: impl Into<String>, label: impl Into<String>) {
     let Some(tx) = COMMAND_TX.get() else {
+        tracing::debug!("[launcher-ipc] report_startup_stage_begin: no launcher connection, skipped");
         return;
     };
-    let cmd = Command::ReportStartupStageBegin {
-        stage: stage.into(),
-        label: label.into(),
-    };
+    let stage = stage.into();
+    let label = label.into();
+    tracing::debug!(stage = %stage, label = %label, "[launcher-ipc] report_startup_stage_begin");
+    let cmd = Command::ReportStartupStageBegin { stage, label };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!("[launcher-ipc] report_startup_stage_begin: channel closed ({})", e);
     }
@@ -1016,10 +1017,18 @@ pub fn report_startup_stage_end(
     detail: Option<String>,
 ) {
     let Some(tx) = COMMAND_TX.get() else {
+        tracing::debug!("[launcher-ipc] report_startup_stage_end: no launcher connection, skipped");
         return;
     };
+    let stage = stage.into();
+    tracing::debug!(
+        stage = %stage,
+        duration_ms,
+        status,
+        "[launcher-ipc] report_startup_stage_end"
+    );
     let cmd = Command::ReportStartupStageEnd {
-        stage: stage.into(),
+        stage,
         duration_ms,
         status: status.to_string(),
         detail,
