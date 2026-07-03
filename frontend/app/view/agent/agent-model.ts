@@ -584,6 +584,39 @@ export class AgentViewModel implements ViewModel {
                     `agent instance row create failed: ${e?.message ?? String(e)}`,
                 );
             }
+
+            // Write-through: mirror the selected Identity bundle's bindings
+            // as direct agent<->account links, in addition to (not instead
+            // of) the bundle-based instance.identity_id above. The resolver
+            // (agentmux-srv/src/identity/resolver.rs) already prefers direct
+            // links over bundle bindings when both exist — this just makes
+            // sure every NEWLY launched agent has direct links from day one,
+            // so the bundle-fallback path can eventually be removed without
+            // a live-credential regression. Best-effort, same as the
+            // instance-row write above: a failure here doesn't abort the
+            // launch, since the agent already started and the bundle path
+            // still works as a fallback. See
+            // docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.
+            const identityId = overrides?.identityId;
+            if (identityId && identityId !== "blank") {
+                try {
+                    const bindings = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
+                        identity_id: identityId,
+                    });
+                    for (const binding of bindings ?? []) {
+                        await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
+                            agent_id: agent.id,
+                            account_id: binding.account_id,
+                            provider: binding.provider,
+                        });
+                    }
+                } catch (e: any) {
+                    Logger.warn(
+                        "agent",
+                        `direct identity link write-through failed: ${e?.message ?? String(e)}`,
+                    );
+                }
+            }
         } catch (e: any) {
             Logger.error("agent", "Failed to launch agent definition", { error: String(e) });
         }
