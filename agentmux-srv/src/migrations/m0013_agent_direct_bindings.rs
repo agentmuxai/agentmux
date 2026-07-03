@@ -52,7 +52,8 @@ pub struct M0013AgentDirectBindings;
 
 /// Sentinel identity ids that mean "no bundle → ambient creds". Never
 /// backfilled (they have no bindings and no meaningful direct link).
-fn is_sentinel_identity(identity_id: &str) -> bool {
+/// `pub(crate)` so `m0014` (latest-instance-only rerun) can reuse it.
+pub(crate) fn is_sentinel_identity(identity_id: &str) -> bool {
     identity_id.is_empty() || identity_id == "blank"
 }
 
@@ -64,37 +65,48 @@ impl Migration for M0013AgentDirectBindings {
     }
 
     fn up(&self, ctx: &MigrationContext) -> Result<(), MigrationError> {
-        let shared = Store::open_shared(&ctx.shared_store_path)
-            .map_err(|e| MigrationError(format!("agent_direct_bindings: open shared: {}", e)))?;
-
-        // Collect the channel stores that hold `db_agent_instances`.
-        // The shared store has no instances table, so — like m0011 — we
-        // read them from the current channel store plus any siblings.
-        let mut sibling_stores: Vec<Store> = Vec::new();
-        if ctx.channel_store_path.exists() {
-            match Store::open_source_readonly(&ctx.channel_store_path) {
-                Ok(s) => sibling_stores.push(s),
-                Err(e) => tracing::debug!(
-                    path = %ctx.channel_store_path.display(),
-                    error = %e,
-                    "agent_direct_bindings: skip current channel store"
-                ),
-            }
-        }
-        for path in registry::enumerate_objects_dbs(&ctx.home) {
-            if path == ctx.channel_store_path { continue; }
-            match Store::open_source_readonly(&path) {
-                Ok(s) => sibling_stores.push(s),
-                Err(e) => tracing::debug!(
-                    path = %path.display(),
-                    error = %e,
-                    "agent_direct_bindings: skip sibling"
-                ),
-            }
-        }
-
+        let (shared, sibling_stores) = open_shared_and_instance_sources(ctx, "agent_direct_bindings")?;
         backfill_direct_links(&shared, &sibling_stores)
     }
+}
+
+/// Open the shared store plus every channel store that might hold
+/// `db_agent_instances` rows (the current channel + any siblings under
+/// `~/.agentmux`). The shared store has no instances table, so — like
+/// `m0011` — instance data has to be read from the per-channel stores
+/// separately. Shared by `m0013` and `m0014` (reagent P2 on #1952 — this
+/// was duplicated verbatim between the two before).
+pub(crate) fn open_shared_and_instance_sources(
+    ctx: &MigrationContext,
+    log_target: &str,
+) -> Result<(Store, Vec<Store>), MigrationError> {
+    let shared = Store::open_shared(&ctx.shared_store_path)
+        .map_err(|e| MigrationError(format!("{log_target}: open shared: {e}")))?;
+
+    let mut sibling_stores: Vec<Store> = Vec::new();
+    if ctx.channel_store_path.exists() {
+        match Store::open_source_readonly(&ctx.channel_store_path) {
+            Ok(s) => sibling_stores.push(s),
+            Err(e) => tracing::debug!(
+                path = %ctx.channel_store_path.display(),
+                error = %e,
+                "{log_target}: skip current channel store"
+            ),
+        }
+    }
+    for path in registry::enumerate_objects_dbs(&ctx.home) {
+        if path == ctx.channel_store_path { continue; }
+        match Store::open_source_readonly(&path) {
+            Ok(s) => sibling_stores.push(s),
+            Err(e) => tracing::debug!(
+                path = %path.display(),
+                error = %e,
+                "{log_target}: skip sibling"
+            ),
+        }
+    }
+
+    Ok((shared, sibling_stores))
 }
 
 /// Core backfill. Extracted so tests can drive it against an in-memory
