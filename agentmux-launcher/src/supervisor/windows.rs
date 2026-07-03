@@ -246,103 +246,120 @@ pub(crate) async fn run_windows(
         }
     };
 
-    // LSD-3 — startup recovery walker. Walks the durable saga log,
-    // marks any saga still in `running` / `compensating` / `failed`
-    // (left over from a crashed prior run) as `failed_compensation`
-    // so operators see them in `--diag sagas` and the next coordinator
-    // run can't accidentally double-act on partially-applied effects.
-    // MUST run BEFORE `tokio::spawn(saga::run_coordinator(..))` below
-    // (LSD spec §5 risk #5: don't spawn while recovery is in progress).
-    // Spec `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.5.
-    startup_sink.stage_begin("saga", "Saga recovery");
-    let saga_t = std::time::Instant::now();
-    if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
-        log(&format!(
-            "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn; prior crashed sagas remain unresolved until next restart",
-            e
-        ));
-    }
-
-    // Vacuum terminal saga rows older than the configured retention window.
-    {
-        let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
-        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-        match saga_log.vacuum_older_than(cutoff) {
-            Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
-            Ok(_) => {}
-            Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
-        }
-    }
-
-    startup_sink.stage_end(
-        "saga",
-        saga_t.elapsed().as_millis() as u64,
-        startup_events::StartupStatus::Ok,
-        None,
-    );
-
-    // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
-    // the host's IPC connection (installed by the per-connection
-    // handler in `ipc::server` once the host registers) and exposes
-    // `send_command` / `send_event` to the rest of the launcher.
-    // CPD-2 wires the wrapper + refactors event fanout for the host
-    // connection to flow through here. CPD-3 wires this into the
-    // saga coordinator's `apply_action` so `IssueCmd::Host` actions
-    // dispatch live (no longer log-only).
-    let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
-        events_tx.clone(),
-        std::sync::Arc::clone(&state),
-    ));
-
-    // Phase E.1a — saga coordinator task. Subscribes to the broadcast
-    // bus, drives in-flight sagas. E.1a registry is empty — framework
-    // only. E.5 adds the first concrete saga consumer (tear-off).
-    // LSD-2 — durable saga log is now installed; every lifecycle
-    // transition is persisted.
-    // CPD-3 — install `host_pipe` so saga `IssueCmd::Host` actions
-    // dispatch through the launcher → host wire instead of being
-    // log-only.
-    //
-    // Subscribe BEFORE spawning so the race window between construction
-    // and first `recv()` doesn't drop early events. (reagent P2 PR #609.)
-    // Same pattern as the disk writer above.
-    // with_log() can fail if max_saga_id() fails (e.g. corrupted SQLite
-    // file). Treat as fatal — continuing with a default next_saga_id=1
-    // while the log is attached would let the coordinator silently
-    // mutate prior saga history on restart. Better to crash loudly so
-    // operators see + investigate. (codex P1 PR #645 round 2.)
-    let saga_coord_inner = saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
-        .with_log(std::sync::Arc::clone(&saga_log))
-        .unwrap_or_else(|e| {
+    // Saga recovery/vacuum/coordinator-setup/IPC-server-startup run
+    // concurrently with the srv boot below (tokio::join!) instead of
+    // sequentially before it. Neither branch depends on the other's
+    // output: this setup never reads srv_result, and srv never connects
+    // back to the launcher's IPC pipe during its own startup — the
+    // sequential ordering was incidental program order, not a real
+    // dependency. LSD-3's "recovery MUST run before coordinator spawn"
+    // requirement is still honored — both happen inside the same
+    // `launcher_setup` future, in order, just no longer serialized
+    // against srv. See SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_
+    // 2026_07_02.md §A.4 item 5 (full parallelization with host spawn
+    // was investigated and found genuinely blocked — see item 1 there —
+    // this overlap is the safe subset that doesn't have that problem).
+    let launcher_setup = async {
+        // LSD-3 — startup recovery walker. Walks the durable saga log,
+        // marks any saga still in `running` / `compensating` / `failed`
+        // (left over from a crashed prior run) as `failed_compensation`
+        // so operators see them in `--diag sagas` and the next coordinator
+        // run can't accidentally double-act on partially-applied effects.
+        // MUST run BEFORE `tokio::spawn(saga::run_coordinator(..))` below
+        // (LSD spec §5 risk #5: don't spawn while recovery is in progress).
+        // Spec `docs/specs/SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md` §3.5.
+        startup_sink.stage_begin("saga", "Saga recovery");
+        let saga_t = std::time::Instant::now();
+        if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
             log(&format!(
-                "[main] FATAL: failed to seed saga_id allocator from launcher_saga.max(saga_id): {} — refusing to start with degraded coordinator",
+                "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn; prior crashed sagas remain unresolved until next restart",
                 e
             ));
-            std::process::exit(1);
-        })
-        .with_host_pipe(std::sync::Arc::clone(&host_pipe));
-    let saga_coord = std::sync::Arc::new(saga_coord_inner);
-    let saga_rx = events_tx.subscribe();
-    tokio::spawn(saga::run_coordinator(
-        std::sync::Arc::clone(&saga_coord),
-        saga_rx,
-    ));
+        }
 
-    let _ipc_handle = ipc::run_ipc_server(
-        pipe_path.clone(),
-        first_pipe,
-        ipc::server::ServerCtx {
-            launcher_pid: std::process::id(),
-            launcher_version: env!("CARGO_PKG_VERSION").to_string(),
-            state,
-            events_tx,
-            event_log,
-            host_pipe: std::sync::Arc::clone(&host_pipe),
-        },
-    );
-    log(&format!("IPC server started on {}", pipe_path));
+        // Vacuum terminal saga rows older than the configured retention window.
+        {
+            let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+            let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+            match saga_log.vacuum_older_than(cutoff) {
+                Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
+                Ok(_) => {}
+                Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
+            }
+        }
 
-    // 3b. Spawn srv first. Host needs srv's endpoints to skip its own
+        startup_sink.stage_end(
+            "saga",
+            saga_t.elapsed().as_millis() as u64,
+            startup_events::StartupStatus::Ok,
+            None,
+        );
+
+        // CPD-2 — launcher → host pipe wrapper. Owns the writer half of
+        // the host's IPC connection (installed by the per-connection
+        // handler in `ipc::server` once the host registers) and exposes
+        // `send_command` / `send_event` to the rest of the launcher.
+        // CPD-2 wires the wrapper + refactors event fanout for the host
+        // connection to flow through here. CPD-3 wires this into the
+        // saga coordinator's `apply_action` so `IssueCmd::Host` actions
+        // dispatch live (no longer log-only).
+        let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
+            events_tx.clone(),
+            std::sync::Arc::clone(&state),
+        ));
+
+        // Phase E.1a — saga coordinator task. Subscribes to the broadcast
+        // bus, drives in-flight sagas. E.1a registry is empty — framework
+        // only. E.5 adds the first concrete saga consumer (tear-off).
+        // LSD-2 — durable saga log is now installed; every lifecycle
+        // transition is persisted.
+        // CPD-3 — install `host_pipe` so saga `IssueCmd::Host` actions
+        // dispatch through the launcher → host wire instead of being
+        // log-only.
+        //
+        // Subscribe BEFORE spawning so the race window between construction
+        // and first `recv()` doesn't drop early events. (reagent P2 PR #609.)
+        // Same pattern as the disk writer above.
+        // with_log() can fail if max_saga_id() fails (e.g. corrupted SQLite
+        // file). Treat as fatal — continuing with a default next_saga_id=1
+        // while the log is attached would let the coordinator silently
+        // mutate prior saga history on restart. Better to crash loudly so
+        // operators see + investigate. (codex P1 PR #645 round 2.)
+        let saga_coord_inner = saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
+            .with_log(std::sync::Arc::clone(&saga_log))
+            .unwrap_or_else(|e| {
+                log(&format!(
+                    "[main] FATAL: failed to seed saga_id allocator from launcher_saga.max(saga_id): {} — refusing to start with degraded coordinator",
+                    e
+                ));
+                std::process::exit(1);
+            })
+            .with_host_pipe(std::sync::Arc::clone(&host_pipe));
+        let saga_coord = std::sync::Arc::new(saga_coord_inner);
+        let saga_rx = events_tx.subscribe();
+        tokio::spawn(saga::run_coordinator(
+            std::sync::Arc::clone(&saga_coord),
+            saga_rx,
+        ));
+
+        let ipc_handle = ipc::run_ipc_server(
+            pipe_path.clone(),
+            first_pipe,
+            ipc::server::ServerCtx {
+                launcher_pid: std::process::id(),
+                launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+                state,
+                events_tx,
+                event_log,
+                host_pipe: std::sync::Arc::clone(&host_pipe),
+            },
+        );
+        log(&format!("IPC server started on {}", pipe_path));
+
+        (saga_coord, ipc_handle)
+    };
+
+    // 3b. Spawn srv. Host needs srv's endpoints to skip its own
     // spawn_backend path. Srv signals readiness via AGENTMUXSRV-ESTART on
     // stderr; the spawner returns once we see that line (or after a
     // 30s timeout).
@@ -352,15 +369,12 @@ pub(crate) async fn run_windows(
     let srv_pipe_path = ipc::srv_pipe_name(&dir_hash);
     log(&format!("[ipc] srv pipe path = {}", srv_pipe_path));
 
-    let (srv_result, mut srv_child) = match srv_spawner::spawn_srv(
-        launcher_exe_dir,
-        &paths,
-        &srv_pipe_path,
-        job_handle,
-        &startup_sink,
-    )
-    .await
-    {
+    let (setup_result, srv_spawn_result) = tokio::join!(
+        launcher_setup,
+        srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, job_handle, &startup_sink)
+    );
+    let (saga_coord, _ipc_handle) = setup_result;
+    let (srv_result, mut srv_child) = match srv_spawn_result {
         Ok(pair) => pair,
         Err(e) => {
             log(&format!("FATAL: srv spawn failed: {}", e));
