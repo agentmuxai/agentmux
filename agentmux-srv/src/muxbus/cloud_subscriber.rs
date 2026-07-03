@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Cloud push subscription — replaces per-agent polling with a single
-//! sidecar-level WebSocket to muxbus.agentmux.ai.
+//! sidecar-level WebSocket to muxbus-ws.agentmux.ai.
 //!
 //! When MUXBUS_TOKEN is present, the subscriber:
-//!   1. Opens wss://muxbus.agentmux.ai/ws with the bearer token.
+//!   1. Opens wss://muxbus-ws.agentmux.ai with the bearer token.
 //!   2. Listens for { type: "inject_available" } broadcast wake signals (zero metadata).
 //!   3. On each signal, polls REST GET /reactive/pending/:id for every locally-registered agent.
 //!   4. Delivers via ReactiveHandler; ACKs successful deliveries via REST POST /reactive/ack.
