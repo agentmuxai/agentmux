@@ -18,6 +18,7 @@ mod state;
 mod drone;
 mod messaging;
 mod muxbus;
+mod util;
 #[cfg(windows)]
 mod crash_monitor;
 
