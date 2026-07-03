@@ -270,6 +270,7 @@ pub fn resolve_client(
 // ── Flow execution ──────────────────────────────────────────────────────────
 
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
+use crate::util::open_browser;
 
 fn http() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
@@ -280,21 +281,6 @@ fn http() -> &'static reqwest::Client {
             .build()
             .expect("reqwest client build failed")
     })
-}
-
-fn open_browser(url: &str) {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("open").arg(url).spawn();
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-    }
 }
 
 /// Tokens returned by an exchange. Stored as a keychain JSON blob — never the
