@@ -64,7 +64,8 @@ same cadence as the curated model metadata already is.
 ## 2. Goals / non-goals
 
 **Goals**
-1. The Effort drop-up shows **only levels valid for the currently-selected model**.
+1. The Effort control is a **titled, pitted spectrum slider** (faster → smarter) that
+   exposes **only levels valid for the currently-selected model** and locks onto one.
 2. `--effort` is emitted **iff** the model supports effort — replacing the `!== "haiku"`
    special case with data-driven gating (Sonnet 4.5 is also unsupported today and slips
    through).
@@ -166,23 +167,49 @@ export function resolveEffortCapability(providerId: string, modelValue: string):
 export function clampEffort(providerId: string, modelValue: string, desired: EffortLevel): EffortLevel | null;
 ```
 
-### 4.1 UI — Effort drop-up (`AgentComposerStrip.tsx`)
+### 4.1 UI — Effort **spectrum slider** (pitted), not a menu
 
-`EFFORT_OPTIONS` becomes derived, not static:
+Effort is an **ordinal** scale (`low < medium < high < xhigh < max`), unlike Mode/Model
+which are categorical. So its expanded panel is a **detented ("pitted") slider** that
+snaps + locks to one level, with a title and endpoint framing — it communicates the
+ordering and lets you step a notch faster than picking from a list. Mode/Model keep their
+drop-ups.
 
-```tsx
-const effortOptions = createMemo(() => {
-    const cap = resolveEffortCapability(props.providerId ?? "", runtime()?.model ?? "");
-    return EFFORT_OPTIONS_ALL.filter((o) => cap.allowed.includes(o.value as EffortLevel));
-});
+**Trigger** (collapsed, in the strip): unchanged shape — a compact pill showing the current
+level and the up-caret, e.g. `high ▴`. Clicking opens the panel below.
+
+**Expanded panel** (the flyout, `placement="top-start"`):
+
+```
+┌───────────────────────────────┐
+│ Effort                        │   ← panel title
+│                               │
+│ faster  ●──●──◉──●──●  smarter│   ← pitted spectrum; ◉ = locked thumb (current)
+│         low md high xh max    │   (per-level ticks; labels shown on hover/active)
+└───────────────────────────────┘
 ```
 
-- If `cap.allowed` is empty (model doesn't support effort, e.g. Haiku): **hide the Effort
-  drop-up entirely** (render nothing) rather than an empty menu. This is cleaner than a
-  disabled trigger and needs no new `MenuItem` field.
-- **Why filter, not grey-out:** the global `MenuItem` type (`custom.d.ts:405`) has no
-  `disabled`/`enabled` field, so a disabled row would require extending `MenuItem` +
-  FlyoutMenu render. Filtering needs neither. Greying-out is deferred to §7 (optional).
+- **Pits = the valid levels.** The thumb **snaps to the nearest detent on release and
+  locks** (no in-between values); ←/→ step one pit; the active pit's label shows inline,
+  others on hover.
+- **Endpoints frame the scale:** left = **faster** (`low`), right = **smarter** (`max`).
+  These are fixed captions, not selectable — they orient the user on what the axis means.
+- **Per-model capability shrinks the track** (this replaces the earlier "filter the menu"
+  idea — same data, better fit for a slider):
+  - Levels above `maxLevel` render as **disabled/greyed pits** past a hard stop, so the
+    thumb cannot land on them, e.g. a `max`-incapable model:
+    ```
+    faster  ●──●──◉──●──╳  smarter     (max pit disabled — thumb stops at xhigh)
+    ```
+  - If the model supports **no** effort (Haiku): **hide the whole Effort control**
+    (trigger + panel). A slider with one pit is meaningless.
+
+**Component:** new `EffortSpectrum` (SolidJS) rendered inside the flyout. Back it with a
+native `<input type="range" min=0 max=allowed.length-1 step=1>` for free snapping +
+keyboard + a11y, with the pits/track/labels styled over it (`_composer-strip.scss`). The
+index maps into `cap.allowed` (already ordered), so a shrunk track is just a shorter range.
+`onChange` → `updateRuntime({ effort: cap.allowed[idx] })`. No `MenuItem`/FlyoutMenu change
+needed (the panel hosts a custom body, not menu rows).
 
 ### 4.2 `/effort` slash command (`commands/global/runtime.ts`)
 
