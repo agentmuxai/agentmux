@@ -24,7 +24,7 @@ hardcoded string check.
 
 | Concern | Where | Behavior |
 |---|---|---|
-| Effort list is static + universal | `AgentComposerStrip.tsx:44` (`EFFORT_OPTIONS`) | `Low/Med/High/XHigh/Max` rendered identically for every model; no per-model filtering. |
+| Effort list is static + universal | `AgentComposerStrip.tsx:44` (`EFFORT_OPTIONS`) | `low/medium/high/xhigh/max` rendered identically for every model; no per-model filtering. |
 | `/effort` slash command likewise | `commands/global/runtime.ts:105-109` (`effortChoices`) | Same five choices, unconditional. |
 | Only guard that exists | `buildRuntimeArgs.ts:110` | `if ((!providerId || providerId === "claude") && config.model !== "haiku") args.push("--effort", …)` — a single literal `!== "haiku"`. |
 | Effort type | `types.ts:626` | `type EffortLevel = "low" \| "medium" \| "high" \| "xhigh" \| "max"` |

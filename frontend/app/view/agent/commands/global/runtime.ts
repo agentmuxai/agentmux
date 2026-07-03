@@ -102,11 +102,11 @@ function effortChoices(ctx: SlashCommandContext): SlashChoice[] {
         aliases,
     });
     return [
-        make("low", "Low", "Minimal reasoning effort", "low"),
-        make("medium", "Medium", "Balanced reasoning effort", "medium", ["med"]),
-        make("high", "High", "High reasoning effort", "high"),
-        make("xhigh", "XHigh", "Best for coding/agentic (Claude Code default)", "xhigh", ["extra-high", "x-high"]),
-        make("max", "Max", "Maximum reasoning effort", "max"),
+        make("low", "low", "Minimal reasoning effort", "low"),
+        make("medium", "medium", "Balanced reasoning effort", "medium", ["med"]),
+        make("high", "high", "High reasoning effort", "high"),
+        make("xhigh", "xhigh", "Best for coding/agentic (Claude Code default)", "xhigh", ["extra-high", "x-high"]),
+        make("max", "max", "Maximum reasoning effort", "max"),
     ];
 }
 
