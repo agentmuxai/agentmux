@@ -249,6 +249,38 @@ impl Store {
         Ok(out)
     }
 
+    /// List every GLOBAL skill — the Armory catalog view. Unlike
+    /// `skill_list`, this takes no `agent_id` and never includes an agent's
+    /// private skills; it backs the window-scoped `skill.catalog.*` App API
+    /// (no `check_s1`, so there is no agent context to scope by).
+    pub fn skill_list_global(&self) -> Result<Vec<Skill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
+             FROM db_skills
+             WHERE is_global = 1
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Skill {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                trigger: row.get(2)?,
+                skill_type: row.get(3)?,
+                description: row.get(4)?,
+                content: row.get(5)?,
+                is_global: row.get::<_, i64>(6)? != 0,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Get a standalone skill by id.
     pub fn skill_get(&self, id: &str) -> Result<Option<Skill>, StoreError> {
         let conn = self.conn.lock().unwrap();

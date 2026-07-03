@@ -54,6 +54,36 @@ impl Store {
         Ok(out)
     }
 
+    /// List every GLOBAL MCP server — the Armory catalog view. Unlike
+    /// `mcp_server_list`, this takes no `agent_id` and never includes an
+    /// agent's private servers; it backs the window-scoped `mcp.catalog.*`
+    /// App API (no `check_s1`, so there is no agent context to scope by).
+    pub fn mcp_server_list_global(&self) -> Result<Vec<McpServer>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, transport, config, is_global, created_at, updated_at
+             FROM db_mcp_servers
+             WHERE is_global = 1
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(McpServer {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                transport: row.get(2)?,
+                config: row.get(3)?,
+                is_global: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Get a standalone MCP server by id.
     pub fn mcp_server_get(&self, id: &str) -> Result<Option<McpServer>, StoreError> {
         let conn = self.conn.lock().unwrap();
