@@ -205,9 +205,15 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             //
             // Tradeoff of `biased;`: a SUSTAINED priority-lane flood (e.g.
             // `! yes` pumping terminal output continuously) keeps the priority
-            // branches ready, so this lane is starved and its unbounded receiver
-            // accumulates sysinfo/blockstats until the flood pauses, then
-            // flushes as a stale burst. Acceptable for now because telemetry
+            // branches ready, so this lane is starved and events queue here
+            // until the flood pauses, then flush as a stale burst. As of B.2
+            // (SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02) this is a
+            // bounded `mpsc::channel(BACKGROUND_LANE_CAPACITY)` with
+            // `try_send` drop-on-full semantics (see eventbus.rs), not an
+            // unbounded receiver — a starvation period long enough to fill
+            // all 256 slots drops each new event as it arrives (the queued
+            // events already in the channel are unaffected) rather than
+            // growing commit without limit. Acceptable for now because telemetry
             // ingress is low-rate (sysinfo ~1/s) and a flood also saturates the
             // socket writes — during which the priority lanes do drain, so this
             // lane gets serviced — making true never-empty starvation the rare
