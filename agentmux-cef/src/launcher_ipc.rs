@@ -985,6 +985,50 @@ pub fn report_monitor_topology_changed(rects: Vec<agentmux_common::ipc::Rect>) {
     }
 }
 
+/// Startup-stage telemetry — sync API: report the start of a named
+/// host-side startup phase. No-op if the launcher isn't in the loop
+/// (`dev:standalone`, or `connect_to_launcher` hasn't run/succeeded
+/// yet — see the doc comment on `Command::ReportStartupStageBegin`
+/// for which phases can and can't use this live). Forwarded by the
+/// launcher into its `StartupEventSink`, rendering in the splash
+/// telemetry panel alongside the launcher's own `saga`/`backend`/
+/// `host` stages. See SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_
+/// 2026_07_02.md.
+pub fn report_startup_stage_begin(stage: impl Into<String>, label: impl Into<String>) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportStartupStageBegin {
+        stage: stage.into(),
+        label: label.into(),
+    };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_startup_stage_begin: channel closed ({})", e);
+    }
+}
+
+/// Companion to `report_startup_stage_begin`. `status` is one of
+/// `"ok"` / `"warn"` / `"error"`.
+pub fn report_startup_stage_end(
+    stage: impl Into<String>,
+    duration_ms: u64,
+    status: &str,
+    detail: Option<String>,
+) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportStartupStageEnd {
+        stage: stage.into(),
+        duration_ms,
+        status: status.to_string(),
+        detail,
+    };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!("[launcher-ipc] report_startup_stage_end: channel closed ({})", e);
+    }
+}
+
 /// Phase B.4 follow-up — compute the host's authoritative counts
 /// from `AppState` and report them. Callers invoke this AFTER
 /// each window/pool transition.

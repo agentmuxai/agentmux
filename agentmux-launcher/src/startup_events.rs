@@ -51,7 +51,7 @@ pub enum StartupEvent {
 }
 
 /// Clone-able sender half — one per startup stage, cloned as needed.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StartupEventSink {
     tx: std::sync::mpsc::Sender<StartupEvent>,
 }
