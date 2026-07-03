@@ -30,7 +30,15 @@ use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 
-const MUXBUS_WS_URL: &str = "wss://muxbus.agentmux.ai/ws";
+// Dedicated custom domain on the API Gateway WebSocket API (apigatewayv2
+// DomainName + ApiMapping), not a path under muxbus.agentmux.ai's CloudFront
+// distribution — see agentmux-cloud's
+// muxbus/PLAN_WEBSOCKET_RELAY_REDESIGN_2026_07_03.md for why (a CloudFront
+// path behavior would have forwarded this client's literal /ws request path
+// prefixed by originPath, landing at /{stage}/ws on the origin — but the WS
+// handshake endpoint only exists at exactly /{stage}). No path suffix here:
+// the domain root maps directly to the API's default stage.
+const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
