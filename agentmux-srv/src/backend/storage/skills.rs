@@ -249,6 +249,38 @@ impl Store {
         Ok(out)
     }
 
+    /// List every GLOBAL skill — the Armory catalog view. Unlike
+    /// `skill_list`, this takes no `agent_id` and never includes an agent's
+    /// private skills; it backs the window-scoped `skill.catalog.*` App API
+    /// (no `check_s1`, so there is no agent context to scope by).
+    pub fn skill_list_global(&self) -> Result<Vec<Skill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
+             FROM db_skills
+             WHERE is_global = 1
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Skill {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                trigger: row.get(2)?,
+                skill_type: row.get(3)?,
+                description: row.get(4)?,
+                content: row.get(5)?,
+                is_global: row.get::<_, i64>(6)? != 0,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Get a standalone skill by id.
     pub fn skill_get(&self, id: &str) -> Result<Option<Skill>, StoreError> {
         let conn = self.conn.lock().unwrap();
@@ -379,6 +411,45 @@ impl Store {
                 params![agent_id, skill.id],
             )?;
         }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Atomically upsert a GLOBAL skill enforcing catalog-wide name
+    /// uniqueness (no `agent_id` — unlike `skill_upsert_unique`, this checks
+    /// for a duplicate name among *every* global row, not just those visible
+    /// to one agent). Same defense-in-depth as
+    /// `McpServer::mcp_server_upsert_unique_global` (reagent P1 on #1948) —
+    /// two same-named global skills would at minimum produce a confusing
+    /// duplicate bullet in the assembled CLAUDE.md skills index.
+    /// `skill.is_global` must already be `true`; caller's job.
+    pub fn skill_upsert_unique_global(&self, skill: &Skill) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let dup: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_skills WHERE name = ?1 AND id <> ?2 AND is_global = 1",
+            params![skill.name, skill.id],
+            |r| r.get(0),
+        )?;
+        if dup > 0 {
+            return Err(StoreError::Other(format!(
+                "a global skill named '{}' already exists",
+                skill.name
+            )));
+        }
+        tx.execute(
+            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
+               description=excluded.description, content=excluded.content,
+               updated_at=excluded.updated_at",
+            params![
+                skill.id, skill.name, skill.trigger, skill.skill_type,
+                skill.description, skill.content,
+                skill.created_at, skill.updated_at,
+            ],
+        )?;
         tx.commit()?;
         Ok(())
     }
