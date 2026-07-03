@@ -51,7 +51,10 @@ pub fn masked_tail(secret: &str) -> String {
     format!("••••••••{tail}")
 }
 
-fn client() -> &'static reqwest::Client {
+/// Shared HTTP client for outbound provider calls (key validation, model
+/// catalog fetch). Reused by `backend::model_catalog` so we don't build a
+/// parallel `reqwest::Client` singleton (reagent #1923 P2).
+pub(crate) fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
         reqwest::Client::builder()

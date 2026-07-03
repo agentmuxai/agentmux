@@ -30,8 +30,8 @@
 //!     and converge the strip / `/model` dropdowns to read it.
 
 use std::path::Path;
-use std::sync::OnceLock;
-use std::time::Duration;
+
+use crate::identity::key_validator::client;
 
 /// One entry in the model dropdown. `id` is the concrete `--model` value the
 /// CLI accepts (e.g. `claude-sonnet-5`); `display_name` is the label to show
@@ -40,17 +40,6 @@ use std::time::Duration;
 pub struct CatalogModel {
     pub id: String,
     pub display_name: String,
-}
-
-fn client() -> &'static reqwest::Client {
-    static C: OnceLock<reqwest::Client> = OnceLock::new();
-    C.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .user_agent("AgentMux")
-            .build()
-            .expect("build reqwest client for model catalog")
-    })
 }
 
 /// Read the Claude OAuth access token from an isolated auth dir's
