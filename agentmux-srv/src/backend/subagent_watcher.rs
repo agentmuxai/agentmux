@@ -71,6 +71,14 @@ struct SessionWatch {
     subagents: HashMap<String, SubagentState>,
 }
 
+/// Cap on `SubagentState.events` — without it, a long-running subagent (or a
+/// long-lived srv process accumulating many subagents) grows this Vec
+/// unboundedly; `info.event_count` still tracks the true total separately
+/// (mirrors `wps.rs`'s `arr_total_adds` vs. capped `PersistEventWrap.events`).
+/// `get_history`'s `limit` is a request ceiling, not a guarantee — this is
+/// the hard ceiling on what's retained to serve it from.
+const MAX_SUBAGENT_EVENTS: usize = 2048;
+
 struct SubagentState {
     info: SubagentInfo,
     file_offset: u64,
@@ -254,14 +262,39 @@ impl SubagentWatcher {
     ///
     /// Without this, `watched_agents` was push-only: every distinct agent that
     /// ever ran leaked one OS watch handle + channel + idle task for the rest of
-    /// the process lifetime, even after its pane/agent was deleted. (Session
-    /// records in `sessions` are plain data, not handles, and are left as-is.)
+    /// the process lifetime, even after its pane/agent was deleted.
+    ///
+    /// Also prunes `sessions`: every subagent whose `info.parent_agent` is
+    /// this agent (across all sessions — subagents are keyed by session_id,
+    /// not by parent), and any session left with no subagents afterward.
+    /// The parent agent is gone, so nothing can query this data again — it
+    /// was previously left as plain data forever, growing `sessions` by one
+    /// entry set per distinct agent that ever ran a subagent.
     pub fn unwatch_agent(&self, agent_id: &str) {
         let mut watched = self.watched_agents.lock().unwrap();
         let before = watched.len();
         watched.retain(|w| w.agent_id != agent_id);
         if watched.len() != before {
             tracing::info!(agent = %agent_id, "stopped watching subagent dir");
+        }
+        drop(watched);
+
+        let mut sessions = self.sessions.lock().unwrap();
+        let mut pruned_subagents = 0usize;
+        sessions.retain(|_session_id, session| {
+            let before = session.subagents.len();
+            session
+                .subagents
+                .retain(|_agent_id, state| state.info.parent_agent != agent_id);
+            pruned_subagents += before - session.subagents.len();
+            !session.subagents.is_empty()
+        });
+        if pruned_subagents > 0 {
+            tracing::debug!(
+                agent = %agent_id,
+                pruned_subagents,
+                "pruned subagent session state for unwatched agent"
+            );
         }
     }
 
@@ -417,6 +450,12 @@ impl SubagentWatcher {
                 state.info.event_count += 1;
                 state.info.last_event_at = event.timestamp;
                 state.events.push(event.clone());
+            }
+            // Trim to the cap, oldest-first — event_count above already
+            // recorded the true cumulative total before this truncation.
+            if state.events.len() > MAX_SUBAGENT_EVENTS {
+                let excess = state.events.len() - MAX_SUBAGENT_EVENTS;
+                state.events.drain(..excess);
             }
 
             // Check last event for result type (completion)
@@ -740,4 +779,105 @@ pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
         .join(".config")
         .join(format!("claude-{}", agent_id.to_lowercase()));
     Some(config_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_watcher() -> SubagentWatcher {
+        SubagentWatcher::new(Arc::new(EventBus::new()))
+    }
+
+    fn fixture_state(parent_agent: &str, agent_id: &str, session_id: &str) -> SubagentState {
+        SubagentState {
+            info: SubagentInfo {
+                agent_id: agent_id.to_string(),
+                slug: String::new(),
+                jsonl_path: String::new(),
+                parent_agent: parent_agent.to_string(),
+                parent_block_id: String::new(),
+                session_id: session_id.to_string(),
+                last_event_at: 0,
+                status: SubagentStatus::Active,
+                event_count: 0,
+                model: None,
+            },
+            file_offset: 0,
+            events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn unwatch_agent_prunes_only_matching_parent_subagents() {
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            // Two sessions; session "s1" has subagents from two different
+            // parents, session "s2" has a subagent from a third parent.
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+            s1.subagents.insert("sub-b".to_string(), fixture_state("parent-2", "sub-b", "s1"));
+            sessions.insert("s1".to_string(), s1);
+
+            let mut s2 = SessionWatch { subagents: HashMap::new() };
+            s2.subagents.insert("sub-c".to_string(), fixture_state("parent-1", "sub-c", "s2"));
+            sessions.insert("s2".to_string(), s2);
+        }
+
+        watcher.unwatch_agent("parent-1");
+
+        let sessions = watcher.sessions.lock().unwrap();
+        // s1: parent-1's subagent gone, parent-2's remains.
+        let s1 = sessions.get("s1").expect("s1 still has parent-2's subagent, should not be dropped");
+        assert!(!s1.subagents.contains_key("sub-a"));
+        assert!(s1.subagents.contains_key("sub-b"));
+        // s2: its only subagent belonged to parent-1, so the whole session
+        // entry is pruned (not left behind as an empty HashMap).
+        assert!(!sessions.contains_key("s2"), "session left with zero subagents must be removed, not left empty");
+    }
+
+    #[test]
+    fn unwatch_agent_on_unknown_agent_is_noop() {
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        watcher.unwatch_agent("never-watched");
+
+        let sessions = watcher.sessions.lock().unwrap();
+        assert!(sessions.get("s1").unwrap().subagents.contains_key("sub-a"));
+    }
+
+    #[test]
+    fn subagent_events_are_capped_at_max() {
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        // Simulate what process_jsonl_change's push+trim loop does, without
+        // going through real JSONL files.
+        for i in 0..(MAX_SUBAGENT_EVENTS + 100) {
+            state.info.event_count += 1;
+            state.events.push(SubagentEvent {
+                agent_id: "sub-a".to_string(),
+                event_type: SubagentEventType::Text { content: i.to_string() },
+                timestamp: i as u64,
+            });
+        }
+        if state.events.len() > MAX_SUBAGENT_EVENTS {
+            let excess = state.events.len() - MAX_SUBAGENT_EVENTS;
+            state.events.drain(..excess);
+        }
+
+        assert_eq!(state.events.len(), MAX_SUBAGENT_EVENTS);
+        // event_count kept the true cumulative total despite truncation.
+        assert_eq!(state.info.event_count, MAX_SUBAGENT_EVENTS + 100);
+        // Oldest events were dropped — the retained window is the newest ones.
+        let SubagentEventType::Text { content } = &state.events[0].event_type else {
+            panic!("expected Text event");
+        };
+        assert_eq!(content, "100"); // first 100 (0..100) were trimmed away
+    }
 }

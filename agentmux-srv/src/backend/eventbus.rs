@@ -29,12 +29,27 @@ pub enum Lane {
     Background,
 }
 
+/// Egress channel capacities. Bounded (not unbounded) so a stalled/hidden-
+/// renderer WS consumer can't grow sidecar commit without limit — a healthy
+/// connection drains far below these depths; hitting the cap is itself the
+/// signal that the consumer isn't keeping up. See
+/// docs/specs/SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md §B.2.
+///
+/// Priority carries terminal echo + interactive events, which must not be
+/// silently dropped in normal operation — sized generously so legitimate
+/// bursts (e.g. `cat` of a large file) never hit the cap.
+const PRIORITY_LANE_CAPACITY: usize = 8192;
+/// Background carries droppable perf telemetry (sysinfo ~1/s, per-block
+/// stats) already coalesced-to-latest by the receive loop — a healthy
+/// consumer never queues more than a couple of entries.
+const BACKGROUND_LANE_CAPACITY: usize = 256;
+
 /// The pair of receivers handed to a WebSocket connection on registration.
 /// Terminal echo + interactive events arrive on `priority`; perf telemetry on
 /// `background`.
 pub struct WsReceivers {
-    pub priority: tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
-    pub background: tokio::sync::mpsc::UnboundedReceiver<serde_json::Value>,
+    pub priority: tokio::sync::mpsc::Receiver<serde_json::Value>,
+    pub background: tokio::sync::mpsc::Receiver<serde_json::Value>,
 }
 
 // ---- Types ----
@@ -50,15 +65,15 @@ pub struct WSEventType {
 
 struct WindowWatchData {
     /// Interactive lane: terminal echo, RPC-routed wave events, obj updates.
-    priority: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+    priority: tokio::sync::mpsc::Sender<serde_json::Value>,
     /// Background lane: droppable perf telemetry (sysinfo, blockstats).
-    background: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+    background: tokio::sync::mpsc::Sender<serde_json::Value>,
     #[allow(dead_code)]
     tab_id: String,
 }
 
 impl WindowWatchData {
-    fn sender(&self, lane: Lane) -> &tokio::sync::mpsc::UnboundedSender<serde_json::Value> {
+    fn sender(&self, lane: Lane) -> &tokio::sync::mpsc::Sender<serde_json::Value> {
         match lane {
             Lane::Priority => &self.priority,
             Lane::Background => &self.background,
@@ -81,8 +96,8 @@ impl EventBus {
     /// Register a WebSocket connection for receiving events.
     /// Returns the priority + background receiver pair for the connection.
     pub fn register_ws(&self, conn_id: &str, tab_id: &str) -> WsReceivers {
-        let (priority_tx, priority_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (background_tx, background_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (priority_tx, priority_rx) = tokio::sync::mpsc::channel(PRIORITY_LANE_CAPACITY);
+        let (background_tx, background_rx) = tokio::sync::mpsc::channel(BACKGROUND_LANE_CAPACITY);
         let mut watches = self.watches.lock().unwrap();
         watches.insert(
             conn_id.to_string(),
@@ -148,9 +163,7 @@ impl EventBus {
         };
         let watches = self.watches.lock().unwrap();
         if let Some(watch) = watches.get(conn_id) {
-            if watch.sender(lane).send(data).is_err() {
-                tracing::warn!("failed to send event to conn {}", conn_id);
-            }
+            Self::try_send_lane(conn_id, watch.sender(lane), data);
         }
     }
 
@@ -170,7 +183,28 @@ impl EventBus {
         };
         let watches = self.watches.lock().unwrap();
         for (conn_id, watch) in watches.iter() {
-            if watch.sender(lane).send(data.clone()).is_err() {
+            Self::try_send_lane(conn_id, watch.sender(lane), data.clone());
+        }
+    }
+
+    /// Non-blocking send with distinct logging for a genuinely-full lane
+    /// (stalled/hidden-renderer consumer — see `PRIORITY_LANE_CAPACITY` /
+    /// `BACKGROUND_LANE_CAPACITY`) vs. a closed one (connection already
+    /// gone). Never blocks the caller — callers hold the `watches` lock.
+    fn try_send_lane(
+        conn_id: &str,
+        sender: &tokio::sync::mpsc::Sender<serde_json::Value>,
+        data: serde_json::Value,
+    ) {
+        match sender.try_send(data) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!(
+                    "ws egress lane full for conn {} — consumer stalled, dropping event",
+                    conn_id
+                );
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                 tracing::warn!("failed to send event to conn {}", conn_id);
             }
         }
@@ -187,9 +221,9 @@ impl EventBus {
             }
         };
         let watches = self.watches.lock().unwrap();
-        for watch in watches.values() {
+        for (conn_id, watch) in watches.iter() {
             if watch.tab_id == tab_id {
-                let _ = watch.sender(Lane::Priority).send(data.clone());
+                Self::try_send_lane(conn_id, watch.sender(Lane::Priority), data.clone());
             }
         }
     }
@@ -326,6 +360,36 @@ mod tests {
         bus.send_to_conn_lane("conn-1", &event, Lane::Priority);
         assert!(rx.background.try_recv().is_err()); // nothing on background
         assert!(rx.priority.try_recv().is_ok()); // interactive on priority
+    }
+
+    #[test]
+    fn test_stalled_consumer_drops_instead_of_growing_unbounded() {
+        // A consumer that never drains must not let the channel grow past its
+        // bound — this is the memory-safety property B.2 exists for. Fill the
+        // background lane (small capacity) past its cap without ever calling
+        // recv(), then drain and count: the received count must be bounded
+        // by the channel capacity, proving excess sends were dropped
+        // (try_send Full) rather than queued without limit.
+        let bus = EventBus::new();
+        let mut rx = bus.register_ws("conn-1", "tab-1"); // never drained during the flood
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: None,
+        };
+        let sent = BACKGROUND_LANE_CAPACITY * 4;
+        for _ in 0..sent {
+            bus.send_to_conn_lane("conn-1", &event, Lane::Background);
+        }
+        let mut received = 0;
+        while rx.background.try_recv().is_ok() {
+            received += 1;
+        }
+        assert!(
+            received <= BACKGROUND_LANE_CAPACITY,
+            "received {received} events from a lane capped at {BACKGROUND_LANE_CAPACITY} — sends were not bounded"
+        );
+        assert!(received < sent, "no events were dropped despite flooding well past capacity");
     }
 
     #[test]

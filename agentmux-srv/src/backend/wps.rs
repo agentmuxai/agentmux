@@ -309,6 +309,19 @@ impl Broker {
         inner.replayed.retain(|(r, _, _)| r != route_id);
     }
 
+    /// Purge all persisted history for a scope (e.g. `block:<id>` or
+    /// `shell:<id>`), regardless of event name. Call when the underlying
+    /// block/shell is deleted — `persist_map`'s key set is otherwise never
+    /// pruned (each key's event Vec is capped, but the map only grows over
+    /// a session's cumulative block/shell count). Also drops matching
+    /// `replayed` entries so a stale scope can't linger across route
+    /// reconnects.
+    pub fn purge_scope(&self, scope: &str) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.persist_map.retain(|k, _| k.scope != scope);
+        inner.replayed.retain(|(_, _, s)| s != scope);
+    }
+
     fn unsubscribe_nolock(inner: &mut BrokerInner, route_id: &str, event_name: &str) {
         let bs = match inner.sub_map.get_mut(event_name) {
             Some(bs) => bs,
@@ -908,6 +921,55 @@ mod tests {
         // Read scoped history
         let scoped = broker.read_event_history(EVENT_SYS_INFO, "cpu", 2);
         assert_eq!(scoped.len(), 2);
+    }
+
+    #[test]
+    fn test_purge_scope_removes_only_matching_scope() {
+        let broker = Broker::new();
+
+        // Two different event names persisted under the same scope
+        // (block:abc), plus one persisted under a different scope
+        // (block:xyz) that must survive the purge.
+        broker.publish(WaveEvent {
+            event: "install_progress".to_string(),
+            scopes: vec!["block:abc".to_string()],
+            sender: String::new(),
+            persist: 5,
+            data: Some(serde_json::json!("a")),
+        });
+        broker.publish(WaveEvent {
+            event: EVENT_BLOCK_ACTIVITY.to_string(),
+            scopes: vec!["block:abc".to_string()],
+            sender: String::new(),
+            persist: 5,
+            data: Some(serde_json::json!("b")),
+        });
+        broker.publish(WaveEvent {
+            event: "install_progress".to_string(),
+            scopes: vec!["block:xyz".to_string()],
+            sender: String::new(),
+            persist: 5,
+            data: Some(serde_json::json!("c")),
+        });
+
+        assert_eq!(broker.read_event_history("install_progress", "block:abc", 10).len(), 1);
+        assert_eq!(broker.read_event_history(EVENT_BLOCK_ACTIVITY, "block:abc", 10).len(), 1);
+        assert_eq!(broker.read_event_history("install_progress", "block:xyz", 10).len(), 1);
+
+        broker.purge_scope("block:abc");
+
+        // Both event names under the purged scope are gone...
+        assert_eq!(broker.read_event_history("install_progress", "block:abc", 10).len(), 0);
+        assert_eq!(broker.read_event_history(EVENT_BLOCK_ACTIVITY, "block:abc", 10).len(), 0);
+        // ...but the other scope is untouched.
+        assert_eq!(broker.read_event_history("install_progress", "block:xyz", 10).len(), 1);
+    }
+
+    #[test]
+    fn test_purge_scope_on_unknown_scope_is_noop() {
+        // Purging a scope with no persisted entries must not panic.
+        let broker = Broker::new();
+        broker.purge_scope("block:never-existed");
     }
 
     #[test]
