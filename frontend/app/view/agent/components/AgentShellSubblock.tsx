@@ -15,7 +15,7 @@
  * onCleanup, which calls DeleteSubBlockCommand).
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sendWSCommand } from "@/app/store/ws";
@@ -28,6 +28,17 @@ interface AgentShellSubblockProps {
     cwd: string;
     existingSubBlockId: string | undefined;
     onSubBlockCreated: (subBlockId: string) => void;
+    /**
+     * The agent pane's OWN zoom factor (agent-view.tsx's `zoomFactor()`,
+     * applied as CSS `zoom` on the `.agent-view` root — an ancestor of this
+     * component). CSS `zoom` cascades to descendants, so without correction
+     * the terminal's rendered glyph size would silently ride along with
+     * whatever the outer pane is zoomed to, on top of this component's own
+     * independent `term:zoom`. Dividing it out of the raw pixel fontSize we
+     * feed xterm cancels that cascade — the two zooms become fully
+     * independent controls (see `termFontSize` below).
+     */
+    agentPaneZoom: Accessor<number>;
 }
 
 const BASE_FONT_SIZE = 13;
@@ -54,9 +65,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
         return Math.max(0.5, Math.min(2.0, z));
     });
-    const termFontSize = createMemo(() =>
-        Math.max(4, Math.min(64, Math.round(BASE_FONT_SIZE * termZoom())))
-    );
+    const termFontSize = createMemo(() => {
+        const paneZoom = props.agentPaneZoom() || 1;
+        return Math.max(4, Math.min(64, Math.round((BASE_FONT_SIZE * termZoom()) / paneZoom)));
+    });
 
     // Apply zoom-driven font-size changes to the live terminal in place —
     // mirrors term.tsx:234-241.

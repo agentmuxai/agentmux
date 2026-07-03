@@ -1023,6 +1023,12 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                                 parentBlockId={model.blockId}
                                 cwd={block()?.meta?.["cmd:cwd"] ?? ""}
                                 existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                                // Passed so the shell can cancel it out of its own
+                                // font-size math -- total decoupling: the pane's
+                                // zoom (this) and the shell's own zoom (term:zoom
+                                // on the sub-block) are independent controls, and
+                                // neither should visually leak into the other.
+                                agentPaneZoom={zoomFactor}
                                 onSubBlockCreated={(subBlockId) => {
                                     void RpcApi.SetMetaCommand(TabRpcClient, {
                                         oref: WOS.makeORef("block", model.blockId),
