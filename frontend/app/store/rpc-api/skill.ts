@@ -25,7 +25,7 @@ export const SkillApi = {
         client: RpcClient,
         data: { agent_id: string; id: string },
         opts?: RpcOpts,
-    ): Promise<Skill> {
+    ): Promise<Skill | null> {
         return client.rpcCall("skill.get", data, opts);
     },
 
