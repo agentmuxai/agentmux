@@ -414,6 +414,64 @@ pub async fn inject_identity_env_async(
     }
 }
 
+/// Resolve the identity bindings for an instance, preferring the
+/// **direct** agent↔account links over the bundle bindings.
+///
+/// Phase 3 slice 2 PR-A dual-read: the resolver historically walked
+/// `instance.identity_id → db_identity_bindings (bundle)`. This helper
+/// first consults `db_agent_identity_links` keyed on the instance's
+/// DEFINITION id (`agent_id` in that table == `AgentDefinition.id`).
+/// When any direct link exists it is authoritative and the bundle path
+/// is skipped; otherwise we fall back to the bundle bindings, giving
+/// byte-identical behavior on DBs that have no direct links yet.
+///
+/// The direct links carry no `identity_id` of their own, so the mapped
+/// `IdentityBinding` reuses `instance.identity_id` for that field — the
+/// injection loop only reads `.provider` and `.account_id`, so the
+/// `identity_id` value there is cosmetic (used only in log lines).
+fn resolve_bindings_for_instance(
+    id_store: &Store,
+    instance: &crate::backend::storage::store::AgentInstance,
+) -> Vec<crate::backend::storage::store::IdentityBinding> {
+    use crate::backend::storage::store::IdentityBinding;
+
+    // 1. Direct links on the DEFINITION (revived path).
+    let direct = id_store
+        .agent_identity_list_for_agent(&instance.definition_id)
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                target: "identity",
+                "direct-link lookup failed for definition {}: {} — falling back to bundle bindings",
+                instance.definition_id,
+                e,
+            );
+            Vec::new()
+        });
+    if !direct.is_empty() {
+        return direct
+            .into_iter()
+            .map(|l| IdentityBinding {
+                identity_id: instance.identity_id.clone(),
+                provider: l.provider,
+                account_id: l.account_id,
+            })
+            .collect();
+    }
+
+    // 2. Fall back to bundle bindings (existing behavior).
+    id_store
+        .bundle_identity_bindings(&instance.identity_id)
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                target: "identity",
+                "bindings lookup failed for identity {}: {}",
+                instance.identity_id,
+                e,
+            );
+            Vec::new()
+        })
+}
+
 pub fn inject_identity_env_with_broker(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
@@ -452,18 +510,15 @@ pub fn inject_identity_env_with_broker(
     }
 
     // Step 3: bindings — global, reads from id_store.
-    let bindings = match id_store.bundle_identity_bindings(&instance.identity_id) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::warn!(
-                target: "identity",
-                "bindings lookup failed for identity {}: {}",
-                instance.identity_id,
-                e,
-            );
-            return;
-        }
-    };
+    //
+    // Dual-read (Phase 3 slice 2 PR-A): prefer the DIRECT
+    // agent↔account links keyed on the instance's definition; fall back
+    // to the bundle bindings when no direct links exist. On existing DBs
+    // nothing has populated `db_agent_identity_links` at spawn time, so
+    // the direct set is empty and the bundle path is taken — identical
+    // behavior. The m0013 backfill copies the bundle bindings into direct
+    // links 1:1, so the direct path resolves to the SAME accounts.
+    let bindings = resolve_bindings_for_instance(&id_store, &instance);
 
     if bindings.is_empty() {
         // Identity exists but has no accounts bound. Nothing to inject.
@@ -1077,6 +1132,174 @@ mod tests {
         assert_eq!(
             env.get("ANTHROPIC_API_KEY").map(String::as_str),
             Some("sk-ant-round_trip"),
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_via_direct_link_round_trip() {
+        // Phase 3 slice 2 PR-A: with a DIRECT agent↔account link (and
+        // NO bundle binding), the resolver injects the same env vars it
+        // would from a bundle binding. Mirrors
+        // `inject_full_round_trip_plaintext_dev` but seeds
+        // `agent_identity_link(definition_id, ...)` instead.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        // Identity bundle exists (so the instance's identity_id is a
+        // real, non-sentinel id) but has NO bindings — the direct link
+        // is the only resolution path.
+        let identity = Identity {
+            id: "id-direct".to_string(),
+            name: "Direct".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        let github = make_account(
+            "acct-gh",
+            "github",
+            SecretRef::PlaintextDev {
+                plaintext_dev: "ghp_direct".to_string(),
+            },
+        );
+        store.identity_upsert(&github).unwrap();
+        // DIRECT link on the definition — no bundle binding.
+        store
+            .agent_identity_link("def-1", "acct-gh", "github")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-direct", "def-1");
+        let inst = make_instance("block-direct", "id-direct");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store, "block-direct", &mut env);
+
+        assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_direct"));
+        assert_eq!(env.get("GH_TOKEN").map(String::as_str), Some("ghp_direct"));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_direct_link_wins_over_bundle_binding() {
+        // When BOTH a direct link and a bundle binding exist for the
+        // same provider, the DIRECT link is authoritative (dual-read
+        // preference). The bundle binding points at a different account
+        // whose secret must NOT be injected.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let identity = Identity {
+            id: "id-both".to_string(),
+            name: "Both".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        // Bundle-bound account (should LOSE).
+        let bundle_acct = make_account(
+            "acct-bundle",
+            "github",
+            SecretRef::PlaintextDev {
+                plaintext_dev: "ghp_from_bundle".to_string(),
+            },
+        );
+        store.identity_upsert(&bundle_acct).unwrap();
+        store
+            .bundle_identity_bind("id-both", "github", "acct-bundle")
+            .unwrap();
+
+        // Direct-linked account (should WIN).
+        let direct_acct = make_account(
+            "acct-direct",
+            "github",
+            SecretRef::PlaintextDev {
+                plaintext_dev: "ghp_from_direct".to_string(),
+            },
+        );
+        store.identity_upsert(&direct_acct).unwrap();
+        store
+            .agent_identity_link("def-1", "acct-direct", "github")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-both", "def-1");
+        let inst = make_instance("block-both", "id-both");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store, "block-both", &mut env);
+
+        // Direct link wins — the bundle account's secret is NOT injected.
+        assert_eq!(
+            env.get("GITHUB_TOKEN").map(String::as_str),
+            Some("ghp_from_direct"),
+        );
+        assert_eq!(
+            env.get("GH_TOKEN").map(String::as_str),
+            Some("ghp_from_direct"),
         );
     }
 

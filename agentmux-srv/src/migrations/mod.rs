@@ -28,6 +28,7 @@ mod m0009_transcript_backfill;
 mod m0010_session_ids;
 mod m0011_shared_store_backfill;
 mod m0012_dedup_identity_accounts;
+mod m0013_agent_direct_bindings;
 mod runner;
 
 pub use runner::count_pending_migrations;
@@ -116,4 +117,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0010_session_ids::M0010SessionIds,
     &m0011_shared_store_backfill::M0011SharedStoreBackfill,
     &m0012_dedup_identity_accounts::M0012DedupIdentityAccounts,
+    &m0013_agent_direct_bindings::M0013AgentDirectBindings,
 ];
