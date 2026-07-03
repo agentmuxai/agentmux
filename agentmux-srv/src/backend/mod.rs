@@ -8,6 +8,7 @@ pub mod blockcontroller;
 /// Phase E.4.B Phase 4 — pure layout-tree helpers (Rust port of layoutTree.ts).
 pub mod layout;
 pub mod providers;
+pub mod model_catalog;
 pub mod config_watcher_fs;
 pub mod ijson;
 pub mod docsite;
