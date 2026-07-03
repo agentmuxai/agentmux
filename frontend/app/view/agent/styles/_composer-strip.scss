@@ -217,6 +217,10 @@
 }
 
 @container modal-mount (max-width: 320px) {
-    .agent-composer-strip-select { display: none; }
+    // Keep the runtime controls visible — the drop-up pills are compact enough.
+    // (Previously `.agent-composer-strip-select { display:none }` here hid
+    // Mode/Model/Effort on any pane ≤320px, leaving only Log — see
+    // SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02. Progressive
+    // collapse — short/icon/combined forms — is the follow-up.)
     .agent-composer-strip-log-btn { font-size: 9px; padding: 1px 3px; }
 }
