@@ -898,6 +898,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Tool store handlers (gettoolstatus, installtool)
     super::tool_handlers::register_tool_handlers(engine, &state);
 
+    // Provider model catalog (providers.models → authoritative /v1/models list)
+    super::providers_handlers::register_providers_handlers(engine, &state);
+
     // eventreadhistory → read persisted event history from the WPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(

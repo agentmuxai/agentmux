@@ -1,0 +1,81 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! RPC: `providers.models` — authoritative model catalog for a provider,
+//! fetched from the Anthropic Models API with the account-global OAuth token.
+//!
+//! Best-effort by design: any missing token (e.g. macOS Keychain), expiry, or
+//! network failure returns an empty `models` list, and the frontend keeps its
+//! bundled static catalog. Only Claude has an authoritative Models API today;
+//! other providers return empty. See `backend/model_catalog.rs` and
+//! `docs/specs/SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md`.
+
+use std::sync::Arc;
+
+use crate::backend::model_catalog::{fetch_model_catalog, read_oauth_access_token, CatalogModel};
+use crate::backend::providers::get_provider;
+use crate::backend::rpc::engine::WshRpcEngine;
+
+use super::AppState;
+
+#[derive(serde::Deserialize)]
+struct ProvidersModelsParams {
+    provider_id: String,
+}
+
+#[derive(serde::Serialize)]
+struct ProvidersModelsResult {
+    /// `CatalogModel` serializes to `{ id, display_name }`.
+    models: Vec<CatalogModel>,
+}
+
+fn empty_result() -> Result<Option<serde_json::Value>, String> {
+    serde_json::to_value(ProvidersModelsResult { models: vec![] })
+        .map(Some)
+        .map_err(|e| format!("serialize: {e}"))
+}
+
+pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState) {
+    // providers.models → authoritative model list for a provider (Claude only
+    // today). Reads the account-global OAuth token and hits GET /v1/models.
+    engine.register_handler(
+        "providers.models",
+        Box::new(move |data, _ctx| {
+            Box::pin(async move {
+                let params: ProvidersModelsParams = serde_json::from_value(data)
+                    .map_err(|e| format!("providers.models: {e}"))?;
+
+                // Only Claude exposes an authoritative Models API; others fall
+                // back to the frontend's static catalog.
+                let provider = match get_provider(&params.provider_id) {
+                    Some(p) => p,
+                    None => return Err(format!("unknown provider: {}", params.provider_id)),
+                };
+                if provider.id != "claude" {
+                    return empty_result();
+                }
+
+                // Account-GLOBAL shared creds dir (version/channel-independent).
+                // If data paths can't be resolved (CI / unusual env), stay
+                // best-effort per the module contract: empty list → FE keeps its
+                // static catalog, rather than erroring the RPC.
+                let paths = match agentmux_common::DataPaths::from_env() {
+                    Some(p) => p,
+                    None => return empty_result(),
+                };
+                let dir = paths.provider_auth_dir(provider.auth_dir_name);
+                let token = match read_oauth_access_token(&dir) {
+                    Some(t) => t,
+                    // No token here (logged out, or macOS Keychain) → empty →
+                    // frontend keeps its static fallback.
+                    None => return empty_result(),
+                };
+
+                let models = fetch_model_catalog(&token).await.unwrap_or_default();
+                serde_json::to_value(ProvidersModelsResult { models })
+                    .map(Some)
+                    .map_err(|e| format!("serialize: {e}"))
+            })
+        }),
+    );
+}

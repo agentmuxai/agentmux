@@ -42,11 +42,11 @@ const MODEL_OPTIONS = [
 ] as const;
 
 const EFFORT_OPTIONS = [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Med" },
-    { value: "high", label: "High" },
-    { value: "xhigh", label: "X-High" },
-    { value: "max", label: "Max" },
+    { value: "low", label: "low" },
+    { value: "medium", label: "medium" },
+    { value: "high", label: "high" },
+    { value: "xhigh", label: "xhigh" },
+    { value: "max", label: "max" },
 ] as const;
 
 // Mode: trigger shows the short `label`; the menu shows `menuLabel` (the

@@ -41,6 +41,18 @@ export const MiscApi = {
         return client.rpcCall("notify", data, opts);
     },
 
+    // command "providers.models" [call] — authoritative model catalog for a
+    // provider, fetched server-side from the Anthropic Models API with the
+    // account OAuth token. Returns [] (never throws for the model list) when
+    // the token is absent/expired; the frontend then keeps its static catalog.
+    ProvidersModelsCommand(
+        client: RpcClient,
+        data: { provider_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ models: Array<{ id: string; display_name: string }> }> {
+        return client.rpcCall("providers.models", data, opts);
+    },
+
     RecordTEventCommand(client: RpcClient, data: TEvent, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("recordtevent", data, opts);
     },
