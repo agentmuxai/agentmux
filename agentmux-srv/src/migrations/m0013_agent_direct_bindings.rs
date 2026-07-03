@@ -114,8 +114,18 @@ pub(crate) fn backfill_direct_links(
     // reproducible run-to-run.
     let mut instances: Vec<crate::backend::storage::store::AgentInstance> = Vec::new();
     for src in instance_sources {
-        for inst in src.instance_list(None, None).unwrap_or_default() {
-            instances.push(inst);
+        match src.instance_list(None, None) {
+            Ok(list) => instances.extend(list),
+            // Don't silently drop instances on a query error — a partial read
+            // would leave the direct-binding backfill quietly incomplete (some
+            // agents never get their credentials migrated). Log loudly so the
+            // gap is visible; the dual-read resolver still falls back to the
+            // bundle path for any un-backfilled instance, so this is not fatal.
+            Err(e) => tracing::warn!(
+                "m0013: instance_list failed for a source store; those instances \
+                 will not be backfilled to direct links (bundle fallback still \
+                 applies): {e}"
+            ),
         }
     }
     instances.sort_by(|a, b| {
