@@ -14,6 +14,7 @@ mod reactive;
 pub(crate) mod service;
 mod shell_handlers;
 mod tool_handlers;
+mod providers_handlers;
 mod voice;
 pub(crate) mod wave_obj_bridge;
 mod websocket;

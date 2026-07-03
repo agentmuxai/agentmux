@@ -51,6 +51,7 @@ import { isHostApp } from "@/app/init/host-detect";
 import { showStartupError } from "@/app/init/error-display";
 import { withTimeout } from "@/app/init/timeout";
 import { fireAndForget } from "@/util/util";
+import { setProviderModels } from "@/app/view/agent/providers";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
@@ -1018,6 +1019,19 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     // See docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md.
     const { installSoundService } = await import("@/app/notification/sound");
     installSoundService();
+
+    // Refresh the Claude model catalog from the authoritative /v1/models list
+    // (backend `providers.models`, account OAuth token). Fire-and-forget: the
+    // model drop-up shows the curated static list until this resolves, then
+    // re-renders with fresh labels (Sonnet 5, …) + any new families (Fable).
+    // Best-effort — returns [] with no token (logged out / macOS Keychain).
+    fireAndForget(async () => {
+        const res = await RpcApi.ProvidersModelsCommand(TabRpcClient, { provider_id: "claude" });
+        setProviderModels(
+            "claude",
+            (res?.models ?? []).map((m) => ({ value: m.id, label: m.display_name })),
+        );
+    });
 
     tlog("TOTAL initWave", t0);
 
