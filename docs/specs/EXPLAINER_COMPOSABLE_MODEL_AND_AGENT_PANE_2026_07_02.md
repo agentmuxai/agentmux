@@ -26,9 +26,11 @@ The merged proposal (product-owner decision) **retires "preset"** and separates 
 | **Account** | The provider login + credential the agent runs as (OAuth/key, per-account config dir). "Identity" is just a *derived view* over an agent's bound accounts — **not** a stored object. | at pane open (env injection: `GH_TOKEN`, `ANTHROPIC_API_KEY`, …) |
 | **Memory** | Persistent learned knowledge (the native memory store). "The brain" is a nickname, not the canonical term. | recalled at startup |
 | **MCP Server** | An external tool/connection surface (URL/stdio + which tools). Broken out of preset. | connects at startup; tools on demand |
-| **Skill** | An on-demand instruction/knowledge module (a folder). Broken out of preset. **All instructional/behavioral content lives here** — there is no always-on instruction blob. | only when invoked |
-| **Brief** | **The first message** injected when a pane opens — the startup/kickoff payload. That is *all* it is; not standing instructions. | as the first user message |
+| **Skill** | An on-demand instruction/knowledge module (a folder), loaded when invoked. Broken out of preset. Complements — does **not** replace — the standing instructions in `CLAUDE.md` (see the standing-instructions note below). | only when invoked |
+| **Brief** | **The first message** injected when a pane opens — the startup/kickoff payload. It is *additive to* `CLAUDE.md`, not a replacement for standing instructions. | as the first user message |
 | **Bundle** | The optional **named collection** — references (not copies of) the primitives above, so you can apply a whole set in one step and share it. Replaces "preset". | resolves to its referenced primitives |
+
+> **Standing instructions stay in `CLAUDE.md` (product decision, 2026-07-02).** The Claude CLI natively auto-loads `CLAUDE.md` from the working dir as its always-on project instructions; AgentMux assembles it from `soul` + `agentmd` + `memory` + skills index (`agent_config.rs:28`). We are **retaining** it — an earlier proposal draft (§3.4) floated retiring it, but that would break standing-instruction delivery for Claude agents. So `soul`/`agentmd` stay in `CLAUDE.md`; Brief and Skills are additive, not replacements. (Other CLIs get their own native file — `AGENTS.md`, `GEMINI.md`, etc.)
 
 **The key mental shift:** an agent binds primitives **directly** (any number of MCP servers + skills, one Brief, ≤1 Account per provider, a Memory). A **Bundle** is *sugar* — a saved, shareable set of those bindings — **not** a required wrapper. Effective config = direct bindings ∪ included Bundles, with a direct binding overriding the same item from a Bundle.
 
@@ -87,12 +89,12 @@ From `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`:
 
 So the single-icon **Agent setup** pane is the **Phase 3 UI outcome**: the pane already opens the account surface (as "identity"); Phase 3 unifies it with Memory (and the other primitives) behind one modal and makes the data model match. Implementation note for Phase 3: in `agent-model.ts` `endIconButtons`, replace the two-button array with a single `id-card` button whose `click` opens the unified modal; retire `_openMemoryModal` / `_openIdentityModal` in favor of one `_openAgentSetupModal` (or reuse the Armory's tabbed manager scoped to the agent).
 
-## 7. Open product decisions this depends on (proposal §9)
+## 7. Product decisions (proposal §9)
 
-Phase 3 (hence the icon relabel) is gated on:
-1. **Derived-Identity UX** — drop the "Identities" tab entirely, or keep a read-only derived view for one release?
-2. **Policy primitive** — hooks + `.claude/settings.json` permissions: a distinct 7th primitive, or folded in? (Affects whether the pane/Armory grows another surface.)
-3. **Static `memory` blob** (in today's CLAUDE.md) → merge into Brief vs. native Memory.
-4. **`soul`/`agentmd` → Skills** — retire the always-on CLAUDE.md instruction blob (proposal's stance) as part of this, or separately.
+**Resolved (2026-07-02):**
+1. ✅ **Derived-Identity UX** — the pane consolidates to one `id-card` "Agent setup" icon (§4); "Identities" folds in as the **Accounts** tab; identity stays a derived view.
+3. ✅ **Static `memory` blob & 4. `soul`/`agentmd`** — **`CLAUDE.md` is RETAINED.** The Claude CLI natively loads it as standing instructions; `soul`/`agentmd`/`memory` stay in `CLAUDE.md`. Brief (first message) and Skills (on-demand) are *additive*, not replacements. This reverses the proposal's §3.4 "retire CLAUDE.md" stance.
 
-Answering these unblocks the pane's transition to the clean **Memory + Accounts** (+ optional Bundle) surface.
+2. ✅ **Policy primitive** — hooks + `.claude/settings.json` permissions **will be a distinct 7th primitive** (a trust decision, like Accounts/MCP — deserves first-class review), **but deferred to a later phase.** Phase 3 leaves hooks/permissions writing exactly as today; Policy is broken out separately.
+
+**All §9 decisions are resolved.** Phase 3 is fully specced and unblocked: Account-direct resolver + identity-bundle collapse + backfill + the single **Agent setup** icon. Policy and the storage `_bundles` rename (Phase 4) follow after.
