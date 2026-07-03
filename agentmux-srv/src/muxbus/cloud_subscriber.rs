@@ -34,6 +34,11 @@ const MUXBUS_WS_URL: &str = "wss://muxbus.agentmux.ai/ws";
 const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
+// AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
+// server-initiated keepalive of their own — the connection is dropped on
+// silence in both directions. Ping well under that so a quiet connection
+// (no inject_available traffic) survives indefinitely.
+const CLIENT_PING_INTERVAL_SECS: u64 = 240;
 
 // ── Wire protocol ─────────────────────────────────────────────────────────────
 
@@ -287,8 +292,19 @@ async fn connect_and_run(
         .await
         .map_err(|e| format!("send subscribe: {e}"))?;
 
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(CLIENT_PING_INTERVAL_SECS));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ping_interval.tick().await; // first tick fires immediately — consume it, we just connected
+
     loop {
         tokio::select! {
+            // Keepalive — see CLIENT_PING_INTERVAL_SECS.
+            _ = ping_interval.tick() => {
+                if let Err(e) = write.send(Message::Ping(Vec::new().into())).await {
+                    return Err(format!("send ping: {e}"));
+                }
+            }
+
             // Incoming WebSocket message from cloud
             msg = read.next() => {
                 match msg {
