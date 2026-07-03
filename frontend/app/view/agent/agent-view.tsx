@@ -135,26 +135,14 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     const agentDefinitions = useAgentDefinitions();
     const currentAgent = createMemo(() => agentDefinitions().find((a) => a.id === agentId));
 
-    // Wire pane-scoped modal callbacks into the model so the title-bar icon
-    // buttons (brain / id-card) can open modals without holding a SolidJS
-    // context in the model. Mirrors the former _setOverlayTab pattern.
+    // Wire the pane-scoped modal callback into the model so the single
+    // title-bar "Agent setup" (id-card) icon can open the unified tabbed
+    // modal (Accounts + Memory) without holding a SolidJS context in the
+    // model. Mirrors the former _setOverlayTab pattern; supersedes the
+    // separate _openIdentityModal / _openMemoryModal callbacks.
     const modalLayer = useModalLayer();
-    // Drive model._agentDefLoaded via a createEffect so endIconButtons
-    // has a proper SolidJS reactive dependency on the async definition
-    // list. A plain function-mutation (_hasAgentDef = () => ...) would
-    // not create a tracking subscription — BlockFrame evaluates
-    // endIconButtons once with the default () => false and the id-card
-    // button never appears without a reactive signal atom.
-    createEffect(() => {
-        model._agentDefLoaded._set(currentAgent() != null);
-    });
     onMount(() => {
-        model._openIdentityModal = () => {
-            const agent = currentAgent();
-            if (!agent) return;
-            modalLayer.open({ kind: "agent-identity", agent, blockId: model.blockId });
-        };
-        model._openMemoryModal = () => {
+        model._openAgentSetupModal = () => {
             // Prefer cmd:cwd (actual launch cwd, set by launchAgentDefinition)
             // over AgentDefinition.working_directory, which is often empty or a
             // stale default for template-launched and continuation agents.
@@ -163,18 +151,23 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 (block?.meta?.["cmd:cwd"] as string) ||
                 currentAgent()?.working_directory ||
                 "";
+            const agent = currentAgent() ?? null;
             modalLayer.open({
-                kind: "agent-memory",
+                kind: "agent-setup",
+                agent,
                 agentId,
                 agentName: agentName(),
                 workingDirectory,
+                blockId: model.blockId,
+                // No loadable definition (quick-launch pane) → default to
+                // the Memory tab, which needs no AgentDefinition; the
+                // Accounts tab still renders its own empty state.
+                initialTab: agent ? "accounts" : "memory",
             });
         };
     });
     onCleanup(() => {
-        model._openIdentityModal = null;
-        model._openMemoryModal = null;
-        model._agentDefLoaded._set(false);
+        model._openAgentSetupModal = null;
     });
 
     const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
