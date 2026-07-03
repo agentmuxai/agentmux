@@ -302,6 +302,14 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         horizontal
                     />
                 </Show>
+            </span>
+
+            {/* Right zone — Shell toggle + stats + process badge + context text.
+                Floats right via margin-left:auto (not space-between) so it stays
+                pinned right whether it's sharing the row with the controls zone
+                or has wrapped onto its own line at narrow widths — see the
+                flex-wrap rules in _composer-strip.scss. */}
+            <span class="agent-composer-strip-right">
                 <button
                     type="button"
                     class="agent-composer-strip-log-btn"
@@ -311,10 +319,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 >
                     Shell
                 </button>
-            </span>
-
-            {/* Right zone — stats + process badge + context text */}
-            <span class="agent-composer-strip-right">
                 <Show when={rightText()}>
                     <span class="agent-composer-strip-stats">{rightText()}</span>
                 </Show>

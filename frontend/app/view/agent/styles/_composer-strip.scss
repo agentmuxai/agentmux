@@ -1,19 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// AgentComposerStrip — slim 28-32px status row above the textarea.
-//   LEFT:  model select · effort select · Log button
-//   RIGHT: token stats · elapsed · process badge · perm pill · context text
+// AgentComposerStrip — slim 28-32px status row above the textarea, growing to
+// two rows at narrow widths (see the flex-wrap rules below).
+//   LEFT:  mode select · model select · effort select
+//   RIGHT: Shell toggle · token stats · elapsed · process badge · context text
+//          (floats right via margin-left:auto; wraps onto its own row below
+//          the controls zone once both zones no longer fit on one line)
 
 @use "../../../mixins.scss";
 
 .agent-composer-strip {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: var(--space-2);
+    row-gap: var(--space-1);
     min-height: 28px;
-    max-height: 32px;
     padding: var(--space-1) var(--space-2);
     font-size: 11px;
     line-height: 1.4;
@@ -116,21 +120,25 @@
     }
 }
 
+// Shell toggle — deliberately accent-colored at rest (not just when open) so
+// it reads as a distinct, always-reachable action rather than blending in
+// with the neutral Mode/Model/Effort pills to its left.
 .agent-composer-strip-log-btn {
-    background: transparent;
-    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
     border-radius: 0;
-    color: var(--secondary-text-color);
+    color: var(--accent-color);
     font: inherit;
     font-size: 10px;
+    font-weight: 600;
     padding: 1px var(--space-1-5);
     cursor: default;
     outline: none;
     transition: color 0.08s, border-color 0.08s, background 0.08s;
 
     &:hover {
-        border-color: var(--border-color);
-        color: var(--main-text-color);
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
     }
 
     &:focus-visible {
@@ -139,19 +147,23 @@
     }
 
     &--active {
-        color: var(--accent-color);
-        border-color: color-mix(in srgb, var(--accent-color) 50%, transparent);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        color: var(--main-bg-color);
+        border-color: var(--accent-color);
+        background: var(--accent-color);
     }
 }
 
 // ── Right zone ──────────────────────────────────────────────────────────────
+// margin-left:auto (not space-between on the parent) pins this zone to the
+// right edge whether it's sharing the row with the controls zone or has
+// wrapped onto its own row — see .agent-composer-strip's flex-wrap.
 
 .agent-composer-strip-right {
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
     flex-shrink: 0;
+    margin-left: auto;
 }
 
 .agent-composer-strip-stats {
