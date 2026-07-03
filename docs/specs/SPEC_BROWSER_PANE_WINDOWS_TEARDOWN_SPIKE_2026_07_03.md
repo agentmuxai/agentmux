@@ -61,36 +61,74 @@ of record, not a hunch.
 
 ## 3. Candidate designs for the spike
 
-### Candidate A — detach-before-close (reparent, then close_browser) — untried, primary candidate
+### Candidate A — detach-before-close (reparent, then destroy) — untried for embedded panes, but backed by a WORKING precedent already in this codebase
 
-Hypothesis: the Alloy-level coupling is keyed on the *live* `WS_CHILD`
-parent/child HWND relationship at the moment `close_browser()` is called.
-If the pane's HWND is reparented **away** from main's top-level (e.g. via
-Win32 `SetParent` to a hidden message-only window, or to `HWND_DESKTOP`)
-*before* `close_browser()` is invoked, Alloy's teardown for the
-now-un-parented pane browser should no longer have a structural link to
-main, and should proceed independently — closer to how the Linux/macOS
-Views-embedded pane is decoupled from the start.
+**This is not a novel hypothesis — it is a close mirror of a pattern that
+already ships and works, for a structurally adjacent case: floating
+(torn-off) panes.** `agentmux-cef/src/floating_pane.rs` (~L4-14, ~L726-743)
+embeds a browser pane inside a `WS_POPUP` Win32 window that has **no Win32
+owner** (explicitly not a child of main — issue #1560 removed the owner
+relationship specifically to fix z-order bugs). Its documented close path:
 
-This is genuinely untried — `git log --grep="reparent|SetParent|detach.*hwnd"`
-across the whole repo history turns up nothing in this area.
+> 1. User clicks X → `DefWindowProcW(WM_CLOSE)` → `DestroyWindow` (on the
+>    floater's OWN un-owned top-level HWND, not a WS_CHILD of anything)
+> 2. Outer HWND's `WM_DESTROY` cascades into the CEF child HWND (which
+>    *is* `WS_CHILD` of the floater's own outer HWND)
+> 3. CEF's wndproc on the child runs its destroy handler → `OnBeforeClose`
+>    fires on `AgentMuxHandler` → reducer `UnregisterBrowser` cleans
+>    `state.browsers` + `window_meta` — a **clean, complete teardown**.
+
+This works precisely *because* the HWND being destroyed is a genuine,
+un-owned top-level window — not a `WS_CHILD` of main. Compare to the
+buggy embedded-pane path: `browser_pane/creation.rs:145`'s
+`set_as_child(main_hwnd, rect)` makes the *embedded* pane's outer HWND a
+literal `WS_CHILD` of **main's** top-level, and destroying (or
+close_browser-ing) a non-top-level `WS_CHILD` that CEF didn't create as an
+independent top-level is exactly the case CEF's own docs warn is
+unreliable (`SPEC_BROWSER_PANE_LIFECYCLE.md` §8: "`DoClose` is NOT called
+when the host window is destroyed via parent hierarchy tear-down").
+
+**Hypothesis (sharpened from the original detach-then-close_browser idea):**
+before closing an *embedded* pane, first promote its outer HWND out of the
+`WS_CHILD`-of-main relationship — e.g. `SetParent(pane_hwnd, NULL)` (making
+it a genuine top-level, un-owned window, matching the floater's own
+structure) — then destroy it the same way the floater does (`DestroyWindow`
+on that now-top-level HWND, letting `WM_DESTROY` cascade into CEF's own
+child teardown and fire `OnBeforeClose` normally). This does **not**
+necessarily need an explicit `close_browser()` call at all — the floater
+precedent gets a clean teardown via `DestroyWindow`-on-your-own-top-level,
+not via `close_browser()`. That may sidestep the entire Alloy
+`close_browser(pane)`-conflates-with-main coupling from §2, since that
+coupling was specifically about the `close_browser()` API call, not about
+`WM_DESTROY` cascading through a window's own child hierarchy (which is
+the normal, correct pattern the floater already proves works on this
+exact CEF/Alloy build).
+
+This is genuinely untried *for embedded panes* — `git log
+--grep="reparent|SetParent|detach.*hwnd"` across the whole repo history
+turns up nothing in `browser_panes.rs`/`browser_pane/`. But structurally,
+it's the closest thing to a proven pattern this spike has, since the
+floater is effectively "Candidate B, achieved on Windows via raw Win32
+rather than CEF Views" — already shipping, for a different code path.
 
 Open questions a spike must answer:
-- Does CEF's Alloy runtime cache the *original* parent HWND internally at
-  `browser_host_create_browser` time (in which case reparenting the live
-  Win32 window doesn't change what Alloy's teardown logic keys on), or does
-  it consult the live Win32 parent relationship at close time?
-- Does `SetParent` on a CEF-owned HWND desync CEF's own internal window
-  bookkeeping (it manages this HWND's lifecycle; an external `SetParent`
-  call is not a documented CEF API)? Concretely: does the render surface
-  keep painting/compositing correctly post-reparent, or does it go blank
-  (breaking the "briefly visible during teardown" case, which is
-  acceptable, vs. corrupting a *different*, still-open pane's compositor
-  chain, which is not)?
-- What's the right reparent target? `HWND_MESSAGE` (message-only window,
-  invisible, no z-order) is the standard Win32 idiom for "detach this
-  window from the visible tree without destroying it" and is the leading
-  candidate.
+- Does `SetParent(pane_hwnd, NULL)` on a live CEF-owned `WS_CHILD` HWND
+  work cleanly mid-session (the floater is *created* with no owner from
+  the start — this spike needs to *transition* an existing embedded pane
+  out of its WS_CHILD relationship after the fact, which is a different,
+  untested operation)? Does the render surface keep compositing correctly
+  through the reparent (matters only briefly, since the very next step
+  destroys it), or does reparenting itself glitch/corrupt neighboring
+  panes' compositor chains?
+- Does the resulting un-parented top-level HWND need `WS_EX_TOOLWINDOW` /
+  its own window class (matching the floater's setup at
+  `floating_pane.rs` `CLASS_REGISTERED`) to destroy cleanly, or is a bare
+  reparent-then-`DestroyWindow` on the pane's *existing* class sufficient?
+- Whether an explicit `close_browser()` call is still needed/beneficial
+  after the reparent+destroy (e.g. to get `beforeunload` to run, which
+  the current `DestroyWindow`-only approach explicitly forgoes), or
+  whether that reintroduces §2's coupling and should be skipped entirely,
+  matching the floater's own approach of never calling it.
 
 ### Candidate B — match Linux/macOS: embed panes as CefBrowserViews instead of separate native HWNDs
 
@@ -191,6 +229,11 @@ insufficient signal on its own.
 - `agentmux-cef/src/browser_pane/creation.rs` (`set_as_child`, ~L145 — where
   the parent relationship is originally established; Candidate A's
   reparent call is the mirror-image operation)
+- `agentmux-cef/src/floating_pane.rs` (~L4-14, ~L726-743) — **read as
+  reference, not modified**: the working precedent Candidate A mirrors.
+  Worth re-reading in full before writing any code, including the wndproc
+  (`floating_pane_wndproc`) that handles the floater's `WM_CLOSE`/
+  `WM_DESTROY` sequence.
 - `agentmux-cef/src/client/lifecycle.rs` (`do_close`, `on_before_close`) —
   read-only for this spike unless Candidate A needs a callback change
 - Possibly `agentmux-cef/src/browser_panes.rs` tests (`close_with_*`,
