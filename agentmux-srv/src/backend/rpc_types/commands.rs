@@ -339,7 +339,8 @@ pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
 pub const COMMAND_SESSION_RESTORE: &str = "session:restore";
 pub const COMMAND_SESSION_EXPORT: &str = "session:export";
 
-// Per-turn live activity summary (Haiku-powered, writes term:activity)
+// Per-turn live activity summary (Haiku-powered, writes term:ambient_summary;
+// routed through the Ambient Model Call gateway, crate::ambient)
 pub const COMMAND_SESSION_ACTIVITY_SUMMARY: &str = "session:activity_summary";
 
 // Option E (PR 1 of 2) — agent-anchored session zones.
