@@ -118,18 +118,26 @@ fn main() {
                 .block_on(launcher_main(None));
             return;
         }
-        let splash = splash_mac::Splash::show();
+        // Create the startup-event sink/receiver here (before the splash
+        // window exists) and thread the sink into launcher_main on the
+        // worker thread, the receiver into the splash on the main thread —
+        // mirrors the Linux branch below. Closes the gap where macOS
+        // previously always passed None and the receiver got dropped
+        // unread in run_unix. See SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_
+        // TELEMETRY_2026_07_02.md §B.3-B.4.
+        let (startup_sink, startup_rx) = startup_events::StartupEventSink::new();
+        let splash = splash_mac::Splash::show(startup_rx);
         std::thread::Builder::new()
             .name("launcher-supervisor".into())
-            .spawn(|| {
+            .spawn(move || {
                 // Catch panics so a supervisor crash always exits the process
                 // rather than leaving the main-thread AppKit runloop spinning
                 // as an invisible orphan.
-                let result = std::panic::catch_unwind(|| {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     tokio::runtime::Runtime::new()
                         .expect("failed to build Tokio runtime")
-                        .block_on(launcher_main(None));
-                });
+                        .block_on(launcher_main(Some(startup_sink)));
+                }));
                 if result.is_err() {
                     eprintln!("AgentMux launcher supervisor panicked — exiting");
                     std::process::exit(1);
@@ -207,7 +215,33 @@ fn splash_selftest() {
     }
     #[cfg(target_os = "macos")]
     {
-        let splash = splash_mac::Splash::show();
+        let (sink, rx) = startup_events::StartupEventSink::new();
+        // Fire fake startup events so the stage panel is exercised — same
+        // fixture shape as the Linux branch above.
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            sink.stage_begin("saga", "Saga recovery");
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            sink.stage_end("saga", 120, startup_events::StartupStatus::Ok, None);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            sink.stage_begin("migrations", "Migrations");
+            sink.sub_begin("migrations", "0009", "cron_schema");
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            sink.sub_end("migrations", "0009", 80, startup_events::StartupStatus::Ok, None);
+            sink.sub_begin("migrations", "0010", "identity_dedup");
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            sink.sub_end("migrations", "0010", 40, startup_events::StartupStatus::Ok, None);
+            sink.stage_end("migrations", 220, startup_events::StartupStatus::Ok, None);
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            sink.stage_begin("backend", "Backend startup");
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            sink.stage_end("backend", 1500, startup_events::StartupStatus::Ok, None);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            sink.stage_begin("host", "Host startup");
+            std::thread::sleep(std::time::Duration::from_millis(90));
+            sink.stage_end("host", 90, startup_events::StartupStatus::Ok, None);
+        });
+        let splash = splash_mac::Splash::show(rx);
         if let Ok(p) = std::env::var("AGENTMUX_SPLASH_DUMP_PNG") {
             splash.dump_png(&p);
         }
