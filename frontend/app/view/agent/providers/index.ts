@@ -608,5 +608,8 @@ export function getProvider(id: string): ProviderDefinition | undefined {
 }
 
 export function getProviderList(): ProviderDefinition[] {
-    return Object.values(PROVIDERS);
+    // Route through getProvider so list consumers that read `.models` see the
+    // same API-sourced overlay (refreshed labels / new families) as callers of
+    // getProvider(), not the raw static list.
+    return Object.keys(PROVIDERS).map((id) => getProvider(id)!);
 }
