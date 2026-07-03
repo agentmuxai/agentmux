@@ -8,7 +8,7 @@ export class ArmoryViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel;
 
-    viewIcon = () => "shield-halved";
+    viewIcon = () => "vault";
     viewName = () => "Armory";
     // wired in armory.tsx to avoid circular import
     declare viewComponent: ViewComponent<ArmoryViewModel>;
