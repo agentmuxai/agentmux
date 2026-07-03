@@ -1,0 +1,81 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// AgentSetupModal — unified tabbed container hosting the Accounts (identity)
+// and Memory (native memory) panels. The inner panels keep their own styling
+// (_identity-panel.scss / AgentNativeMemoryModal.scss); this file only styles
+// the top tab bar + panel wrapper.
+
+.agent-setup-modal {
+    display: flex;
+    flex-direction: column;
+    // One fixed size for the whole modal so the frame doesn't resize between
+    // tabs. Sized to fit the widest/tallest embedded panel (the Memory panel,
+    // which is 780×520 in its standalone form) plus the tab bar.
+    width: 780px;
+    max-width: 92vw;
+    height: 560px;
+    max-height: 85vh;
+    min-width: 0;
+}
+
+.agent-setup-modal-tabs {
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-4) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.agent-setup-modal-tab {
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--secondary-text-color);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: default;
+
+    &:hover:not(.is-active) {
+        color: var(--main-text-color);
+    }
+
+    &.is-active {
+        color: var(--main-text-color);
+        border-bottom-color: var(--accent-color);
+    }
+
+    &:focus-visible {
+        outline: none;
+        box-shadow: var(--shadow-focus-ring);
+    }
+}
+
+.agent-setup-modal-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+
+    // Neutralize the embedded panels' standalone-modal sizing so each tab fills
+    // the shared panel area at one consistent size — no horizontal overflow past
+    // the 780px frame, and no height jump when switching tabs (the Memory panel
+    // otherwise forces its own 780×520; the Accounts body is auto-height).
+    .agent-memory-modal,
+    .agent-identity-modal-body {
+        width: 100%;
+        height: 100%;
+        max-width: none;
+        max-height: none;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+}
+
+.agent-setup-modal-empty {
+    padding: var(--space-6) var(--space-5);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.5;
+}
