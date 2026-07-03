@@ -8,7 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 - **Date:** 2026-06-11
 - **Status:** Draft / proposed
 - **Area:** `agentmux-srv` agent runner + translator; `frontend/app` agent-pane state; drone run records
-- **Related:** `SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`, `docs/specs/agent-health-design.md`, `docs/specs/backend-status-tests.md`
+- **Related:** `docs/specs/agent-health-design.md`, `docs/specs/backend-status-tests.md`
 
 ---
 
@@ -225,7 +225,7 @@ TS mirror in `frontend/types/gotypes.d.ts`; the agent-pane reducer reads `failur
 ---
 
 ## 10. Open questions
-1. Should the interactive PTY path and the headless runner converge on one capture/classify helper now, or stay separate per `SPEC_UNIFIED_AGENT_TYPES` (runner.rs:14-19 keeps spawn separate, translator shared)? Recommended: share `classify()` only.
+1. Should the interactive PTY path and the headless runner converge on one capture/classify helper now, or stay separate (runner.rs:14-19 keeps spawn separate, translator shared)? Recommended: share `classify()` only.
 2. Retryable failures — inline banner only, or also a transient toast?
 3. `model_context_window_exceeded` is a failure *and* a context-window concern — does its messaging live here or in the parked context-window spec? Recommended: classify it here (`ContextExceeded`), link the remediation there.
 
