@@ -207,94 +207,114 @@ pub(crate) async fn run_unix(
         s
     });
 
-    // Startup recovery walker: mark any saga left running from a prior
-    // crashed run as failed_compensation. Must run BEFORE coordinator
-    // spawn (LSD-3).
-    startup_sink.stage_begin("saga", "Saga recovery");
-    let saga_t = std::time::Instant::now();
-    if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
-        log(&format!(
-            "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn",
-            e
-        ));
-    }
-
-    // Vacuum terminal saga rows older than the configured retention window.
-    // Runs after crash recovery so in-flight sagas are never vacuumed by accident.
-    {
-        let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
-        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
-        match saga_log.vacuum_older_than(cutoff) {
-            Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
-            Ok(_) => {}
-            Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
+    // Saga recovery/vacuum/coordinator-setup/IPC-server-startup run
+    // concurrently with the srv boot below (tokio::join!) instead of
+    // sequentially before it. Neither branch depends on the other's
+    // output: this setup never reads srv_result, and srv never connects
+    // back to the launcher's IPC socket during its own startup (no
+    // AGENTMUX_LAUNCHER_PIPE-equivalent is passed into spawn_srv's env)
+    // — the sequential ordering was incidental program order, not a real
+    // dependency. See SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_
+    // 2026_07_02.md §A.4 item 5 (full parallelization with host spawn
+    // was investigated and found genuinely blocked — see item 1 there —
+    // this overlap is the safe subset that doesn't have that problem).
+    let launcher_setup = async {
+        // Startup recovery walker: mark any saga left running from a prior
+        // crashed run as failed_compensation. Must run BEFORE coordinator
+        // spawn (LSD-3) — still enforced here, just no longer serialized
+        // against srv's own boot.
+        startup_sink.stage_begin("saga", "Saga recovery");
+        let saga_t = std::time::Instant::now();
+        if let Err(e) = saga::compensate_unresolved_launcher_sagas(&saga_log).await {
+            log(&format!(
+                "[saga-recovery] WARN: walker failed: {} — coordinator will still spawn",
+                e
+            ));
         }
-    }
 
-    startup_sink.stage_end(
-        "saga",
-        saga_t.elapsed().as_millis() as u64,
-        startup_events::StartupStatus::Ok,
-        None,
-    );
+        // Vacuum terminal saga rows older than the configured retention window.
+        // Runs after crash recovery so in-flight sagas are never vacuumed by accident.
+        {
+            let retention_days = config::load_saga_retention_days(&paths.user_home_dir, |w| log(w));
+            let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+            match saga_log.vacuum_older_than(cutoff) {
+                Ok(n) if n > 0 => log(&format!("[saga-vacuum] removed {} terminal rows older than {} days", n, retention_days)),
+                Ok(_) => {}
+                Err(e) => log(&format!("[saga-vacuum] WARN: vacuum failed: {}", e)),
+            }
+        }
 
-    // Host pipe wrapper for saga-issued Commands → host. The IPC
-    // server's per-connection handler installs the host's writer once
-    // the host registers (see ipc/server.rs handle_connection's
-    // ClientKind::Host branch).
-    let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
-        events_tx.clone(),
-        std::sync::Arc::clone(&state),
-    ));
+        startup_sink.stage_end(
+            "saga",
+            saga_t.elapsed().as_millis() as u64,
+            startup_events::StartupStatus::Ok,
+            None,
+        );
 
-    // Saga coordinator. Same construction + error handling as the
-    // Windows path; the coordinator itself is platform-neutral.
-    let saga_coord_inner =
-        saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
-            .with_log(std::sync::Arc::clone(&saga_log))
-            .unwrap_or_else(|e| {
-                log(&format!(
-                    "[main] FATAL: failed to seed saga_id allocator: {}",
-                    e
-                ));
-                std::process::exit(1);
-            })
-            .with_host_pipe(std::sync::Arc::clone(&host_pipe));
-    let saga_coord = std::sync::Arc::new(saga_coord_inner);
-    let saga_rx = events_tx.subscribe();
-    tokio::spawn(saga::run_coordinator(
-        std::sync::Arc::clone(&saga_coord),
-        saga_rx,
-    ));
+        // Host pipe wrapper for saga-issued Commands → host. The IPC
+        // server's per-connection handler installs the host's writer once
+        // the host registers (see ipc/server.rs handle_connection's
+        // ClientKind::Host branch).
+        let host_pipe = std::sync::Arc::new(host_pipe::HostPipe::new(
+            events_tx.clone(),
+            std::sync::Arc::clone(&state),
+        ));
 
-    let _ipc_handle = ipc::run_ipc_server(
-        socket_path.clone(),
-        first_socket,
-        ipc::server::ServerCtx {
-            launcher_pid: std::process::id(),
-            launcher_version: env!("CARGO_PKG_VERSION").to_string(),
-            state,
-            events_tx,
-            event_log,
-            host_pipe: std::sync::Arc::clone(&host_pipe),
-        },
-    );
-    log(&format!("IPC server started on {}", socket_path));
+        // Saga coordinator. Same construction + error handling as the
+        // Windows path; the coordinator itself is platform-neutral.
+        let saga_coord_inner =
+            saga::SagaCoordinator::new(events_tx.clone(), std::sync::Arc::clone(&state))
+                .with_log(std::sync::Arc::clone(&saga_log))
+                .unwrap_or_else(|e| {
+                    log(&format!(
+                        "[main] FATAL: failed to seed saga_id allocator: {}",
+                        e
+                    ));
+                    std::process::exit(1);
+                })
+                .with_host_pipe(std::sync::Arc::clone(&host_pipe));
+        let saga_coord = std::sync::Arc::new(saga_coord_inner);
+        let saga_rx = events_tx.subscribe();
+        tokio::spawn(saga::run_coordinator(
+            std::sync::Arc::clone(&saga_coord),
+            saga_rx,
+        ));
+
+        let ipc_handle = ipc::run_ipc_server(
+            socket_path.clone(),
+            first_socket,
+            ipc::server::ServerCtx {
+                launcher_pid: std::process::id(),
+                launcher_version: env!("CARGO_PKG_VERSION").to_string(),
+                state,
+                events_tx,
+                event_log,
+                host_pipe: std::sync::Arc::clone(&host_pipe),
+            },
+        );
+        log(&format!("IPC server started on {}", socket_path));
+
+        (saga_coord, ipc_handle)
+    };
 
     // 2b. Spawn srv. The srv pipe path is the launcher-owned socket
     //    path scope (srv will gain its own Unix-socket bind in a
     //    follow-up; for now we still pass an empty string so srv's
     //    Windows-only IPC code stays disabled).
     let srv_pipe_path = String::new();
-    let (srv_result, mut srv_child) =
-        match srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink).await {
-            Ok(pair) => pair,
-            Err(e) => {
-                log(&format!("FATAL: srv spawn failed: {}", e));
-                eprintln!("Failed to start backend: {}", e);
-                std::process::exit(1);
-            }
-        };
+    let (setup_result, srv_spawn_result) = tokio::join!(
+        launcher_setup,
+        srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, &startup_sink)
+    );
+    let (saga_coord, _ipc_handle) = setup_result;
+    let (srv_result, mut srv_child) = match srv_spawn_result {
+        Ok(pair) => pair,
+        Err(e) => {
+            log(&format!("FATAL: srv spawn failed: {}", e));
+            eprintln!("Failed to start backend: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // CRITICAL (same rationale as run_windows): take srv's stdin out of
     // the Child so tokio's wait() can't close it and trip srv's
