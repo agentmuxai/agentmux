@@ -31,8 +31,11 @@
 
 use std::os::raw::c_char;
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+use crate::startup_events::{StartupEvent, StartupStatus};
 
 // The brain logo (transparent PNG). NSImage decodes it natively at runtime.
 static BRAIN_PNG: &[u8] = include_bytes!("../resources/brain.png");
@@ -49,7 +52,11 @@ const FOOTER_PAD: f64 = 10.0;
 const FOOTER_BAND_H: f64 = FOOTER_PAD * 2.0 + FOOTER_LINE_H * 2.0; // 56
 /// Full card: width = brain region; height = brain region + footer band.
 const SPLASH_W: f64 = SPLASH_PX;
-const SPLASH_H: f64 = SPLASH_PX + FOOTER_BAND_H;
+/// Brain region + stage-telemetry panel + footer. STAGE_AREA_H is defined
+/// further below (stage-telemetry panel constants) — const items can
+/// reference later ones in the same module, so declaration order here
+/// doesn't matter.
+const SPLASH_H: f64 = SPLASH_PX + STAGE_AREA_H + FOOTER_BAND_H;
 // Muted footer text color #8A8A93.
 const FOOTER_R: f64 = 0x8A as f64 / 255.0;
 const FOOTER_G: f64 = 0x8A as f64 / 255.0;
@@ -64,6 +71,214 @@ const BG_B: f64 = 31.0 / 255.0;
 /// splash down anyway so it can't get stuck on screen.
 const DISMISS_TIMEOUT: Duration = Duration::from_secs(10);
 const FADE_OUT: f64 = 0.16; // seconds
+
+// ── Startup-stage telemetry panel ───────────────────────────────────────────
+// Renders StartupEvent stage/sub-item timing live, between the brain and the
+// footer — the macOS counterpart of splash.rs's (Windows) software-blitted
+// panel and splash_linux's StageList. Deliberately a separate, self-contained
+// implementation rather than sharing Windows'/Linux's code: consolidating all
+// three into one shared module is a real cleanup opportunity (flagged in
+// SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md §B.4.3) but
+// doing it in this PR would mean editing two already-working splashes I
+// cannot build or run to verify — safer to add macOS purely additively here
+// and do the consolidation as its own reviewable follow-up.
+//
+// Uses native NSTextField rows (retained-mode) instead of a software glyph
+// blitter — matches the existing footer's implementation, and setStringValue:
+// is a simpler live-update primitive than Windows' manual DIB compositing.
+const MAX_STAGE_ROWS: usize = 12;
+const STAGE_ROW_H: f64 = 16.0;
+const STAGE_PAD_TOP: f64 = 8.0;
+const STAGE_PAD_BOTTOM: f64 = 6.0;
+const STAGE_MARGIN_L: f64 = 14.0;
+const STAGE_MARGIN_R: f64 = 10.0;
+const STAGE_AREA_H: f64 = STAGE_PAD_TOP + MAX_STAGE_ROWS as f64 * STAGE_ROW_H + STAGE_PAD_BOTTOM;
+/// Split point between the name column and the right-aligned time column,
+/// as a fraction of SPLASH_W.
+const STAGE_NAME_FRAC: f64 = 0.60;
+const STAGE_LABEL_MAX_CHARS: usize = 16;
+const SUB_LABEL_MAX_CHARS: usize = 13;
+const STAGE_INDENT: f64 = 14.0;
+
+// Colors — same values as splash.rs (Windows) for visual consistency.
+const STAGE_R: f64 = 0xC0 as f64 / 255.0;
+const STAGE_G: f64 = 0xC0 as f64 / 255.0;
+const STAGE_B: f64 = 0xCC as f64 / 255.0;
+const TIME_DONE_R: f64 = 0x60 as f64 / 255.0;
+const TIME_DONE_G: f64 = 0xCC as f64 / 255.0;
+const TIME_DONE_B: f64 = 0x80 as f64 / 255.0;
+const TIME_RUN_R: f64 = 0x70 as f64 / 255.0;
+const TIME_RUN_G: f64 = 0x90 as f64 / 255.0;
+const TIME_RUN_B: f64 = 0xFF as f64 / 255.0;
+const SUB_R: f64 = 0x7A as f64 / 255.0;
+const SUB_G: f64 = 0x7A as f64 / 255.0;
+const SUB_B: f64 = 0x82 as f64 / 255.0;
+const STATUS_OK_R: f64 = 0x44 as f64 / 255.0;
+const STATUS_OK_G: f64 = 0xBB as f64 / 255.0;
+const STATUS_OK_B: f64 = 0x44 as f64 / 255.0;
+const STATUS_WARN_R: f64 = 0xCC as f64 / 255.0;
+const STATUS_WARN_G: f64 = 0xAA as f64 / 255.0;
+const STATUS_WARN_B: f64 = 0x33 as f64 / 255.0;
+const STATUS_ERR_R: f64 = 0xCC as f64 / 255.0;
+const STATUS_ERR_G: f64 = 0x44 as f64 / 255.0;
+const STATUS_ERR_B: f64 = 0x44 as f64 / 255.0;
+
+struct SubRow {
+    id: String,
+    label: String,
+    started_at: Instant,
+    done: Option<(u64, StartupStatus, Option<String>)>,
+}
+
+struct StageRow {
+    stage: &'static str,
+    label: &'static str,
+    started_at: Instant,
+    done: Option<(u64, StartupStatus, Option<String>)>,
+    subs: Vec<SubRow>,
+}
+
+/// Same state machine as splash.rs's (Windows) `apply_event` /
+/// splash_linux's `StageList::apply` — see the module doc above for why this
+/// isn't shared code yet.
+fn apply_event(stages: &mut Vec<StageRow>, ev: StartupEvent) {
+    match ev {
+        StartupEvent::StageBegin { stage, label } => {
+            stages.push(StageRow {
+                stage,
+                label,
+                started_at: Instant::now(),
+                done: None,
+                subs: Vec::new(),
+            });
+        }
+        StartupEvent::StageEnd { stage, duration_ms, status, detail } => {
+            if let Some(row) = stages.iter_mut().rev().find(|r| r.stage == stage) {
+                row.done = Some((duration_ms, status, detail));
+            }
+        }
+        StartupEvent::SubBegin { stage, id, label } => {
+            if let Some(row) = stages.iter_mut().rev().find(|r| r.stage == stage) {
+                row.subs.push(SubRow {
+                    id,
+                    label,
+                    started_at: Instant::now(),
+                    done: None,
+                });
+            }
+        }
+        StartupEvent::SubEnd { stage, id, duration_ms, status, detail } => {
+            if let Some(row) = stages.iter_mut().rev().find(|r| r.stage == stage) {
+                if let Some(sub) = row.subs.iter_mut().rev().find(|s| s.id == id) {
+                    sub.done = Some((duration_ms, status, detail));
+                }
+            }
+        }
+    }
+}
+
+fn trunc(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        s.to_string()
+    } else {
+        chars[..max].iter().collect::<String>() + ".."
+    }
+}
+
+fn format_ms(ms: u64) -> String {
+    if ms >= 10_000 {
+        format!("{:.0}s", ms as f64 / 1000.0)
+    } else if ms >= 1_000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{}ms", ms)
+    }
+}
+
+fn format_running(started_at: Instant) -> String {
+    let s = started_at.elapsed().as_secs_f32();
+    if s >= 10.0 {
+        format!("> {:.0}s", s)
+    } else {
+        format!("> {:.1}s", s)
+    }
+}
+
+/// One flattened display row: (indent, label, time_text, label_color,
+/// time_color) — computed fresh each tick from the current `Vec<StageRow>`.
+struct FlatRow {
+    indented: bool,
+    label: String,
+    time_text: String,
+    label_color: (f64, f64, f64),
+    time_color: (f64, f64, f64),
+}
+
+fn flatten_rows(stages: &[StageRow], total_ms: Option<u64>) -> Vec<FlatRow> {
+    let mut out = Vec::new();
+    for stage in stages {
+        if out.len() >= MAX_STAGE_ROWS {
+            break;
+        }
+        let (time_text, time_color) = match &stage.done {
+            Some((ms, _status, _detail)) => (format_ms(*ms), (TIME_DONE_R, TIME_DONE_G, TIME_DONE_B)),
+            None => (format_running(stage.started_at), (TIME_RUN_R, TIME_RUN_G, TIME_RUN_B)),
+        };
+        out.push(FlatRow {
+            indented: false,
+            label: trunc(stage.label, STAGE_LABEL_MAX_CHARS),
+            time_text,
+            label_color: (STAGE_R, STAGE_G, STAGE_B),
+            time_color,
+        });
+        for sub in &stage.subs {
+            if out.len() >= MAX_STAGE_ROWS {
+                break;
+            }
+            // NSTextField is one color per field — combine the status glyph
+            // into the time text and color the whole thing by status once
+            // done (Windows shows the glyph as a separately-colored swatch
+            // next to a SUB_COLOR time; that needs a 3rd field per row,
+            // which isn't worth the extra layout complexity here).
+            let (time_text, time_color) = match &sub.done {
+                Some((ms, status, _detail)) => {
+                    let glyph = match status {
+                        StartupStatus::Ok => "+",
+                        StartupStatus::Warn => "!",
+                        StartupStatus::Error => "X",
+                    };
+                    let color = match status {
+                        StartupStatus::Ok => (STATUS_OK_R, STATUS_OK_G, STATUS_OK_B),
+                        StartupStatus::Warn => (STATUS_WARN_R, STATUS_WARN_G, STATUS_WARN_B),
+                        StartupStatus::Error => (STATUS_ERR_R, STATUS_ERR_G, STATUS_ERR_B),
+                    };
+                    (format!("{} {}", format_ms(*ms), glyph), color)
+                }
+                None => (format_running(sub.started_at), (TIME_RUN_R, TIME_RUN_G, TIME_RUN_B)),
+            };
+            out.push(FlatRow {
+                indented: true,
+                label: trunc(&sub.label, SUB_LABEL_MAX_CHARS),
+                time_text,
+                label_color: (SUB_R, SUB_G, SUB_B),
+                time_color,
+            });
+        }
+    }
+    if let Some(ms) = total_ms {
+        if out.len() < MAX_STAGE_ROWS {
+            out.push(FlatRow {
+                indented: false,
+                label: String::new(),
+                time_text: format!("total: {}", format_ms(ms)),
+                label_color: (SUB_R, SUB_G, SUB_B),
+                time_color: (SUB_R, SUB_G, SUB_B),
+            });
+        }
+    }
+    out
+}
 
 #[allow(non_camel_case_types)]
 type id = *mut std::ffi::c_void;
@@ -171,6 +386,22 @@ unsafe fn nsstring(s: &str) -> id {
         class(b"NSString\0"),
         sel(b"stringWithUTF8String:\0"),
         cstr.as_ptr(),
+    )
+}
+
+/// `[NSColor colorWithSRGBRed:green:blue:alpha:1.0]` — autoreleased, so
+/// callers outside build_window()'s explicit pool must run inside their own
+/// (see update_stage_fields).
+unsafe fn color(r: f64, g: f64, b: f64) -> id {
+    let f: extern "C" fn(id, SEL, f64, f64, f64, f64) -> id =
+        std::mem::transmute(objc_msgSend as *const ());
+    f(
+        class(b"NSColor\0"),
+        sel(b"colorWithSRGBRed:green:blue:alpha:\0"),
+        r,
+        g,
+        b,
+        1.0,
     )
 }
 
@@ -286,14 +517,19 @@ pub struct Splash {
     window: id,
     image_view: id,
     ready_file: PathBuf,
+    /// Pre-allocated (label_field, time_field) NSTextField pairs, one per
+    /// potential stage/sub-item row — hidden/empty until an event fills them.
+    stage_fields: Vec<(id, id)>,
+    startup_rx: Receiver<StartupEvent>,
 }
 
 impl Splash {
     /// Create the `AGENTMUX_SPLASH_READY_FILE` env path and the window, paint
     /// it, and return the handle. MUST be called on the process main thread,
     /// before the supervisor thread spawns the host (so the host inherits the
-    /// env var).
-    pub fn show() -> Splash {
+    /// env var). `startup_rx` delivers `StartupEvent`s from the supervisor
+    /// worker thread — drained each tick in `run_until_dismissed`.
+    pub fn show(startup_rx: Receiver<StartupEvent>) -> Splash {
         let ready_file =
             std::env::temp_dir().join(format!("agentmux-splash-ready-{}", std::process::id()));
         let _ = std::fs::remove_file(&ready_file);
@@ -305,7 +541,7 @@ impl Splash {
         // before we return. Without it, the pool from the thread's implicit
         // NSApplication runloop hasn't been set up yet and autorelease
         // messages queue to a nil pool — leaking on pre-macOS-12 targets.
-        let (window, image_view) = unsafe {
+        let (window, image_view, stage_fields) = unsafe {
             let pool = send(class(b"NSAutoreleasePool\0"), sel(b"alloc\0"));
             let pool = send(pool, sel(b"init\0"));
             let result = build_window();
@@ -320,31 +556,110 @@ impl Splash {
             window,
             image_view,
             ready_file,
+            stage_fields,
+            startup_rx,
         }
     }
 
     /// Dev affordance (used by `--splash-selftest` + `AGENTMUX_SPLASH_DUMP_PNG`):
-    /// pump the runloop briefly so layout/draw settle, then render the splash's
-    /// content view to a PNG at `path` — lets us eyeball footer centering without
-    /// Screen Recording permission. Offscreen `cacheDisplayInRect:` only.
+    /// pump the runloop briefly — draining any pending startup events into
+    /// the stage panel along the way, same as run_until_dismissed's tick —
+    /// so layout/draw settle, then render the splash's content view to a PNG
+    /// at `path`. Lets us eyeball footer + stage-panel layout without Screen
+    /// Recording permission. Offscreen `cacheDisplayInRect:` only.
     pub fn dump_png(&self, path: &str) {
-        for _ in 0..25 {
+        let mut stages: Vec<StageRow> = Vec::new();
+        for _ in 0..60 {
             unsafe {
                 CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.016, 0);
+            }
+            let mut changed = false;
+            while let Ok(ev) = self.startup_rx.try_recv() {
+                apply_event(&mut stages, ev);
+                changed = true;
+            }
+            if changed {
+                unsafe {
+                    self.update_stage_fields(&stages, None);
+                }
             }
             std::thread::sleep(Duration::from_millis(8));
         }
         unsafe { dump_window_png(self.window, path) };
     }
 
-    /// Pump the splash runloop on the main thread: animate the brain pulse, and
-    /// once the host signals first paint (ready-file appears) — or the safety
-    /// timeout elapses — fade the whole splash out and order it away. Then keep
-    /// the runloop turning (so the removal flushes) until the supervisor thread
-    /// exits the process.
+    /// Refresh the pre-allocated stage_fields rows from the current stage
+    /// list. Runs every tick while the host is still starting, so its
+    /// NSString/NSColor allocations are wrapped in their own autorelease
+    /// pool — show()'s explicit pool has already drained by the time this
+    /// runs, and this loop's manual `pump_app_events` (unlike a real
+    /// `-[NSApplication run]`) doesn't establish a per-iteration pool itself.
+    unsafe fn update_stage_fields(&self, stages: &[StageRow], total_ms: Option<u64>) {
+        let pool = send(class(b"NSAutoreleasePool\0"), sel(b"alloc\0"));
+        let pool = send(pool, sel(b"init\0"));
+
+        let rows = flatten_rows(stages, total_ms);
+        for (i, (name_field, time_field)) in self.stage_fields.iter().enumerate() {
+            match rows.get(i) {
+                Some(row) => {
+                    if row.indented {
+                        let cur: CGRect = {
+                            let f: extern "C" fn(id, SEL) -> CGRect =
+                                std::mem::transmute(objc_msgSend as *const ());
+                            f(*name_field, sel(b"frame\0"))
+                        };
+                        let indented = CGRect {
+                            origin: CGPoint { x: STAGE_MARGIN_L + STAGE_INDENT, y: cur.origin.y },
+                            size: cur.size,
+                        };
+                        send_void_rect(*name_field, sel(b"setFrame:\0"), indented);
+                    } else {
+                        let cur: CGRect = {
+                            let f: extern "C" fn(id, SEL) -> CGRect =
+                                std::mem::transmute(objc_msgSend as *const ());
+                            f(*name_field, sel(b"frame\0"))
+                        };
+                        let flush = CGRect {
+                            origin: CGPoint { x: STAGE_MARGIN_L, y: cur.origin.y },
+                            size: cur.size,
+                        };
+                        send_void_rect(*name_field, sel(b"setFrame:\0"), flush);
+                    }
+                    send_void_id(*name_field, sel(b"setStringValue:\0"), nsstring(&row.label));
+                    let (lr, lg, lb) = row.label_color;
+                    send_void_id(*name_field, sel(b"setTextColor:\0"), color(lr, lg, lb));
+                    send_void_bool(*name_field, sel(b"setHidden:\0"), 0);
+
+                    send_void_id(*time_field, sel(b"setStringValue:\0"), nsstring(&row.time_text));
+                    let (tr, tg, tb) = row.time_color;
+                    send_void_id(*time_field, sel(b"setTextColor:\0"), color(tr, tg, tb));
+                    send_void_bool(*time_field, sel(b"setHidden:\0"), 0);
+                }
+                None => {
+                    send_void_bool(*name_field, sel(b"setHidden:\0"), 1);
+                    send_void_bool(*time_field, sel(b"setHidden:\0"), 1);
+                }
+            }
+        }
+
+        send_void(pool, sel(b"drain\0"));
+    }
+
+    /// Pump the splash runloop on the main thread: animate the brain pulse,
+    /// drain startup events into the stage panel, and once the host signals
+    /// first paint (ready-file appears) — or the safety timeout elapses —
+    /// hold on the completed timeline for AGENTMUX_SPLASH_HOLD_MS (mirrors
+    /// splash.rs's Windows hold, default 3000ms / capped at 1000ms for very
+    /// fast starts), then fade the whole splash out and order it away. Then
+    /// keep the runloop turning (so the removal flushes) until the
+    /// supervisor thread exits the process.
     pub fn run_until_dismissed(self) {
         let start = Instant::now();
         let mut fade_start: Option<Instant> = None;
+        let mut ready_at: Option<Instant> = None;
+        let mut hold_duration = Duration::ZERO;
+        let mut total_ms: u64 = 0;
+        let mut stages: Vec<StageRow> = Vec::new();
 
         loop {
             // NSApp event pump (not bare CFRunLoop) so a reopen Apple Event that
@@ -352,6 +667,14 @@ impl Splash {
             unsafe {
                 pump_app_events(0.016);
             }
+
+            // Drain pending startup events (non-blocking) into the stage list.
+            let mut changed = false;
+            while let Ok(ev) = self.startup_rx.try_recv() {
+                apply_event(&mut stages, ev);
+                changed = true;
+            }
+
             let t = start.elapsed().as_secs_f64();
 
             // Brain pulse: fade in 0→1 over 200 ms, then 1.1 Hz sine 0.73..1.0
@@ -366,12 +689,39 @@ impl Splash {
                 send_void_f64(self.image_view, sel(b"setAlphaValue:\0"), brain_alpha);
             }
 
-            // Trigger the fade-out once the host is ready (or we time out).
-            if fade_start.is_none()
+            // Detect first-paint (or timeout): capture total elapsed and
+            // compute the hold duration once, same convention as Windows'
+            // AGENTMUX_SPLASH_HOLD_MS handling.
+            if ready_at.is_none()
                 && (self.ready_file.exists() || start.elapsed() > DISMISS_TIMEOUT)
             {
-                fade_start = Some(Instant::now());
+                ready_at = Some(Instant::now());
                 let _ = std::fs::remove_file(&self.ready_file);
+                total_ms = start.elapsed().as_millis() as u64;
+                let hold_ms = std::env::var("AGENTMUX_SPLASH_HOLD_MS")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(3000);
+                let hold_ms = if total_ms < 500 { hold_ms.min(1000) } else { hold_ms };
+                hold_duration = Duration::from_millis(hold_ms);
+                changed = true; // force one final refresh showing the "total:" row
+            }
+
+            // Refresh the stage panel: live every tick while still running
+            // (so the running-time counters visibly tick up), or only on
+            // change once frozen for the hold.
+            if changed || ready_at.is_none() {
+                let total_for_display = ready_at.map(|_| total_ms);
+                unsafe {
+                    self.update_stage_fields(&stages, total_for_display);
+                }
+            }
+
+            // Start the fade once the hold has elapsed.
+            if let Some(r0) = ready_at {
+                if fade_start.is_none() && r0.elapsed() >= hold_duration {
+                    fade_start = Some(Instant::now());
+                }
             }
 
             if let Some(f0) = fade_start {
@@ -488,8 +838,10 @@ unsafe fn dump_window_png(window: id, path: &str) {
 }
 
 /// Build the splash window: a dark rounded backdrop with the brain centered on
-/// it. Returns (window, image_view) — the image_view's alpha is pulsed.
-unsafe fn build_window() -> (id, id) {
+/// it. Returns (window, image_view, stage_fields) — the image_view's alpha is
+/// pulsed; stage_fields are pre-allocated (label, time) NSTextField pairs
+/// updated live by `update_stage_fields`.
+unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
     // NSApplication, as an accessory app: no Dock tile (the host sets .regular
     // and owns the single tile). Accessory == 1.
     let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
@@ -584,12 +936,12 @@ unsafe fn build_window() -> (id, id) {
     send_void_f64(layer, sel(b"setCornerRadius:\0"), CORNER_RADIUS);
     send_void_bool(layer, sel(b"setMasksToBounds:\0"), 1);
 
-    // Brain image view in the upper (brain) region, above the footer band.
-    // macOS Y is bottom-up, so a larger y sits higher.
+    // Brain image view in the upper (brain) region, above the stage panel
+    // and footer band. macOS Y is bottom-up, so a larger y sits higher.
     let brain_rect = CGRect {
         origin: CGPoint {
             x: PAD_PX,
-            y: FOOTER_BAND_H + PAD_PX,
+            y: FOOTER_BAND_H + STAGE_AREA_H + PAD_PX,
         },
         size: CGSize {
             width: BRAIN_PX,
@@ -659,11 +1011,47 @@ unsafe fn build_window() -> (id, id) {
         }
     }
 
+    // Stage-telemetry rows: MAX_STAGE_ROWS pre-allocated (label, time) field
+    // pairs between the footer band and the brain region, hidden/empty until
+    // update_stage_fields fills them in. Row 0 sits at the top of the panel
+    // (closest to the brain); later rows go downward (macOS Y decreases).
+    let stage_font = send_id_f64(class(b"NSFont\0"), sel(b"userFixedPitchFontOfSize:\0"), 11.0);
+    let area_top = FOOTER_BAND_H + STAGE_AREA_H;
+    let name_w = SPLASH_W * STAGE_NAME_FRAC - STAGE_MARGIN_L;
+    let time_x = SPLASH_W * STAGE_NAME_FRAC;
+    let time_w = SPLASH_W - STAGE_MARGIN_R - time_x;
+    let mut stage_fields: Vec<(id, id)> = Vec::with_capacity(MAX_STAGE_ROWS);
+    for i in 0..MAX_STAGE_ROWS {
+        let y = area_top - STAGE_PAD_TOP - (i as f64 + 1.0) * STAGE_ROW_H;
+        let name_rect = CGRect {
+            origin: CGPoint { x: STAGE_MARGIN_L, y },
+            size: CGSize { width: name_w, height: STAGE_ROW_H },
+        };
+        let time_rect = CGRect {
+            origin: CGPoint { x: time_x, y },
+            size: CGSize { width: time_w, height: STAGE_ROW_H },
+        };
+        let name_field = send_id(class(b"NSTextField\0"), sel(b"labelWithString:\0"), nsstring(""));
+        send_void_rect(name_field, sel(b"setFrame:\0"), name_rect);
+        send_void_id(name_field, sel(b"setFont:\0"), stage_font);
+        send_void_bool(name_field, sel(b"setHidden:\0"), 1);
+        send_void_id(backdrop, sel(b"addSubview:\0"), name_field);
+
+        let time_field = send_id(class(b"NSTextField\0"), sel(b"labelWithString:\0"), nsstring(""));
+        send_void_rect(time_field, sel(b"setFrame:\0"), time_rect);
+        send_void_id(time_field, sel(b"setFont:\0"), stage_font);
+        send_void_i64(time_field, sel(b"setAlignment:\0"), 2); // NSTextAlignmentRight
+        send_void_bool(time_field, sel(b"setHidden:\0"), 1);
+        send_void_id(backdrop, sel(b"addSubview:\0"), time_field);
+
+        stage_fields.push((name_field, time_field));
+    }
+
     send_void_id(window, sel(b"setContentView:\0"), backdrop);
 
     // Bring the app + window up immediately.
     send_void(app, sel(b"finishLaunching\0"));
     send_void_bool(app, sel(b"activateIgnoringOtherApps:\0"), 1);
     send_void(window, sel(b"orderFrontRegardless\0"));
-    (window, image_view)
+    (window, image_view, stage_fields)
 }
