@@ -34,8 +34,11 @@ set "GIT_BIN=C:\Program Files\Git\bin"
 set "GIT_USR=C:\Program Files\Git\usr\bin"
 set "PATH=%GIT_BIN%;%GIT_USR%;%PATH%"
 
-:: Call task.exe by explicit extension (Gap A fix — no bash lookup needed here).
-:: task is installed as task.exe (via go install / WinGet), not task.cmd.
+:: Call bare `task` (no extension) — this .cmd wrapper itself runs under cmd.exe
+:: (Gap A only applies to bash resolving .cmd files, not to us), so PATHEXT
+:: resolution finds task.exe (go install / WinGet) OR task.cmd (npm global
+:: install) transparently. Do NOT hardcode an extension — which one exists
+:: depends on how `task` was installed on the machine.
 :: Merge stderr into stdout so shell viewers don't color build progress red
 :: (cargo writes all output to stderr, not stdout).
-task.exe dev %* 2>&1
+task dev %* 2>&1
