@@ -1,5 +1,5 @@
 ---
-type: patch
+type: minor
 ---
 
 feat(agent): `providers.models` RPC + live model-catalog overlay for the strip drop-up

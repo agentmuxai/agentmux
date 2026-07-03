@@ -56,9 +56,12 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                 }
 
                 // Account-GLOBAL shared creds dir (version/channel-independent).
+                // If data paths can't be resolved (CI / unusual env), stay
+                // best-effort per the module contract: empty list → FE keeps its
+                // static catalog, rather than erroring the RPC.
                 let paths = match agentmux_common::DataPaths::from_env() {
                     Some(p) => p,
-                    None => return Err("DataPaths::from_env() failed".to_string()),
+                    None => return empty_result(),
                 };
                 let dir = paths.provider_auth_dir(provider.auth_dir_name);
                 let token = match read_oauth_access_token(&dir) {
