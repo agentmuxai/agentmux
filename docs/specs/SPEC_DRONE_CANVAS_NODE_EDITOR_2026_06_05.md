@@ -5,14 +5,14 @@
 - **Status:** Draft / proposed
 - **Widget:** `defwidget@drone` → view `drone` (pinned)
 - **Scope:** Frontend (SolidJS) canvas rewrite + small backend touch-ups. Backend execution engine is **out of scope** (Phase-1 complete).
-- **Related:** `SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18.md`, `SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`, `REPORT_DRONE_VS_WORKFLOW_ENGINE_2026_05_08.md`
+- **Related:** `SPEC_DRONE_INLINE_NODE_PARAMS_2026_06_05.md`, `SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md`
 - **Tracking:** GitHub **issue #753** (RFC: Workflows pane — Sim-modeled DAG executor) and **discussion #832** (Workflows pane — long-term tracking thread). ⚠️ **Both have drifted from the shipped code — see §0.1.**
 
 ### 0.1 Relationship to the existing RFC (#753) — this spec supersedes two stale decisions
 
 The feature is tracked by **issue #753** + **discussion #832**, but the RFC predates the code as shipped and is wrong on two points this spec corrects:
 
-1. **Naming.** #753 proposes renaming Drone → "Workflows" with code under `frontend/app/view/workflows/`. That was **reversed** by `SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18.md` (dated *after* the RFC); the widget is `defwidget@drone` and the code lives in `frontend/app/view/drone/`. This spec uses the shipped names.
+1. **Naming.** The feature shipped as **Drone**: the widget is `defwidget@drone` and the code lives in `frontend/app/view/drone/`. ("Workflows" is unrelated — that term now refers strictly to Claude's own workflows feature.) This spec uses the shipped names.
 2. **Canvas library.** #753's headline decision (§2 Q1) was "drop the ~750-LOC custom canvas, adopt `solid-flow` (miguelsalesvieira/solid-flow)." The team **did not** do this — a custom SVG canvas shipped instead. Independent research (2026-06-05) confirms `miguelsalesvieira/solid-flow` is **abandoned since 2022** (v1.0.4, Oct 2022; different non-xyflow API), and the alternative `@dschz/solid-flow` is a single-maintainer v0.1.x alpha. So the team's instinct to keep a custom canvas was correct. §3 here formalizes that: **build custom, borrow `@xyflow/system` for the d3/geometry math + `@dagrejs/dagre` for layout.**
 
 Everything else in #753 (5-block taxonomy, Mustache `{{...}}` interpolation, Agent-block-references-identity, SQLite run history, validator rules) **matches the shipped backend** and stands. Recommend posting this spec under discussion #832 and adding a correcting note to #753 rather than opening a new tracking issue.
