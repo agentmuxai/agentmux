@@ -236,3 +236,50 @@
     // collapse — short/icon/combined forms — is the follow-up.)
     .agent-composer-strip-log-btn { font-size: 9px; padding: 1px 3px; }
 }
+
+// ── Resizable details drawer (ResizableDetailsDrawer.tsx) ──────────────────
+// Wraps ActivityLogPanel + AgentShellSubblock in a drag-to-height container.
+// AgentControlBar stays outside it as a fixed-height footer (see agent-view.tsx).
+
+.agent-composer-details-resizable {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.agent-composer-details-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: ns-resize;
+    background: transparent;
+    border-top: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+
+    &:hover,
+    &--active {
+        background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        border-top-color: var(--accent-color);
+    }
+}
+
+.agent-composer-details-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+
+    // ActivityLogPanel's own .agent-activity-log-body already scrolls
+    // internally (max-height: 30vh) — keep it from stealing space the
+    // terminal below it needs.
+    .agent-activity-log {
+        flex-shrink: 0;
+    }
+}
+
+.agent-shell-subblock {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}

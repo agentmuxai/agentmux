@@ -67,6 +67,7 @@ import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellSubblock } from "./components/AgentShellSubblock";
+import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
@@ -1006,21 +1007,30 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 {/* Details panel — activity log + control bar. */}
                 <Show when={agentAtoms().detailsOpenAtom[0]()}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
-                        <ActivityLogPanel entries={logLines} />
-                        {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
-                            real xterm+PTY terminal, spawned lazily on first
-                            drawer open via a headless term sub-block. */}
-                        <AgentShellSubblock
-                            parentBlockId={model.blockId}
-                            cwd={block()?.meta?.["cmd:cwd"] ?? ""}
-                            existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
-                            onSubBlockCreated={(subBlockId) => {
-                                void RpcApi.SetMetaCommand(TabRpcClient, {
-                                    oref: WOS.makeORef("block", model.blockId),
-                                    meta: { "term:shellsubblockid": subBlockId } as any,
-                                });
-                            }}
-                        />
+                        {/* Drag-to-height drawer wrapping the log + terminal — the
+                            actual scrollable/resizable content. AgentControlBar
+                            stays outside it as a fixed-height footer.
+                            SPEC_LOG_TO_SHELL_PANE_2026_07_02.md §5.1. */}
+                        <ResizableDetailsDrawer
+                            blockId={model.blockId}
+                            persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
+                        >
+                            <ActivityLogPanel entries={logLines} />
+                            {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
+                                real xterm+PTY terminal, spawned lazily on first
+                                drawer open via a headless term sub-block. */}
+                            <AgentShellSubblock
+                                parentBlockId={model.blockId}
+                                cwd={block()?.meta?.["cmd:cwd"] ?? ""}
+                                existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                                onSubBlockCreated={(subBlockId) => {
+                                    void RpcApi.SetMetaCommand(TabRpcClient, {
+                                        oref: WOS.makeORef("block", model.blockId),
+                                        meta: { "term:shellsubblockid": subBlockId } as any,
+                                    });
+                                }}
+                            />
+                        </ResizableDetailsDrawer>
                         <AgentControlBar
                             blockId={model.blockId}
                             blockAtom={block}

@@ -35,6 +35,7 @@ const BASE_FONT_SIZE = 13;
 export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element => {
     let containerRef: HTMLDivElement | undefined;
     let termWrap: TermWrap | undefined;
+    let resizeObserver: ResizeObserver | undefined;
     let disposed = false;
 
     const [subBlockId, setSubBlockId] = createSignal<string | undefined>(props.existingSubBlockId);
@@ -140,12 +141,28 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             );
             termWrap = wrap;
             await wrap.init();
+
+            // Reflow the PTY grid whenever the container is resized — drag-
+            // resizing the details drawer (ResizableDetailsDrawer), the pane
+            // itself, or the window. Without this the container can change
+            // size (e.g. via the drawer's drag handle) with the terminal
+            // never re-fitting to it. Mirrors term.tsx's rszObs pattern.
+            // Plain DOM API, not a Solid primitive, so it's safe to set up
+            // here post-await; teardown is registered synchronously below
+            // via the `resizeObserver` closure var, not a second onCleanup.
+            if (!disposed && containerRef) {
+                resizeObserver = new ResizeObserver(() => {
+                    termWrap?.handleResize_debounced();
+                });
+                resizeObserver.observe(containerRef);
+            }
         })();
     });
 
     onCleanup(() => {
         disposed = true;
         termWrap?.dispose();
+        resizeObserver?.disconnect();
     });
 
     return <div class="agent-shell-subblock" ref={containerRef} />;
