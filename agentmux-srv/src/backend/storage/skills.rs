@@ -415,6 +415,45 @@ impl Store {
         Ok(())
     }
 
+    /// Atomically upsert a GLOBAL skill enforcing catalog-wide name
+    /// uniqueness (no `agent_id` — unlike `skill_upsert_unique`, this checks
+    /// for a duplicate name among *every* global row, not just those visible
+    /// to one agent). Same defense-in-depth as
+    /// `McpServer::mcp_server_upsert_unique_global` (reagent P1 on #1948) —
+    /// two same-named global skills would at minimum produce a confusing
+    /// duplicate bullet in the assembled CLAUDE.md skills index.
+    /// `skill.is_global` must already be `true`; caller's job.
+    pub fn skill_upsert_unique_global(&self, skill: &Skill) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let dup: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_skills WHERE name = ?1 AND id <> ?2 AND is_global = 1",
+            params![skill.name, skill.id],
+            |r| r.get(0),
+        )?;
+        if dup > 0 {
+            return Err(StoreError::Other(format!(
+                "a global skill named '{}' already exists",
+                skill.name
+            )));
+        }
+        tx.execute(
+            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
+               description=excluded.description, content=excluded.content,
+               updated_at=excluded.updated_at",
+            params![
+                skill.id, skill.name, skill.trigger, skill.skill_type,
+                skill.description, skill.content,
+                skill.created_at, skill.updated_at,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Return true if the given skill is accessible to the agent (global or bound).
     /// Used for read and delete access checks.
     pub fn skill_is_accessible_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {

@@ -301,7 +301,10 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                wstore.skill_upsert(&skill)
+                // Global-scoped uniqueness (not skill_upsert_unique's
+                // per-agent check) — same defense-in-depth as the mcp.catalog
+                // fix, reagent P1 on #1948.
+                wstore.skill_upsert_unique_global(&skill)
                     .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "skills:changed".to_string(),

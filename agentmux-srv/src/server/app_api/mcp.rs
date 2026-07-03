@@ -313,7 +313,12 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                wstore.mcp_server_upsert(&server)
+                // Global-scoped uniqueness (not mcp_server_upsert_unique's
+                // per-agent check): agent_config.rs merges servers into a
+                // JSON object keyed by name, so two same-named global
+                // servers would silently clobber each other's config for
+                // every agent that has either bound. Reagent P1 on #1948.
+                wstore.mcp_server_upsert_unique_global(&server)
                     .map_err(|e| format!("mcp.catalog.upsert: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "mcp:changed".to_string(),

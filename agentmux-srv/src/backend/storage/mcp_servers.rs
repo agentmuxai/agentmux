@@ -209,6 +209,43 @@ impl Store {
         Ok(())
     }
 
+    /// Atomically upsert a GLOBAL MCP server enforcing catalog-wide name
+    /// uniqueness (no `agent_id` — unlike `mcp_server_upsert_unique`, this
+    /// checks for a duplicate name among *every* global row, not just those
+    /// visible to one agent). Reagent P1 on #1948: `agent_config.rs`'s
+    /// `build_mcp_config_from_refs` merges servers into a JSON object keyed
+    /// by `server.name` — two same-named global servers would silently
+    /// clobber each other's config for every agent that has either bound.
+    /// `server.is_global` must already be `true`; caller's job.
+    pub fn mcp_server_upsert_unique_global(&self, server: &McpServer) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let dup: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_mcp_servers WHERE name = ?1 AND id <> ?2 AND is_global = 1",
+            params![server.name, server.id],
+            |r| r.get(0),
+        )?;
+        if dup > 0 {
+            return Err(StoreError::Other(format!(
+                "a global server named '{}' already exists",
+                server.name
+            )));
+        }
+        tx.execute(
+            "INSERT INTO db_mcp_servers (id, name, transport, config, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, transport=excluded.transport, config=excluded.config,
+               updated_at=excluded.updated_at",
+            params![
+                server.id, server.name, server.transport, server.config,
+                server.created_at, server.updated_at,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Return true if the given MCP server is accessible to the agent (global or bound).
     /// Used for read and mutation access checks.
     pub fn mcp_server_is_accessible_to(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
