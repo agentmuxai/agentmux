@@ -149,9 +149,23 @@ pub(crate) fn backfill_direct_links(
             continue;
         }
 
-        let bindings = shared
-            .bundle_identity_bindings(&inst.identity_id)
-            .unwrap_or_default();
+        let bindings = match shared.bundle_identity_bindings(&inst.identity_id) {
+            Ok(b) => b,
+            // Same rationale as the instance_list guard above: don't silently
+            // drop this instance's bindings on a query error — log the gap
+            // (the dual-read resolver still covers it via the bundle path).
+            Err(e) => {
+                tracing::warn!(
+                    target: "identity",
+                    definition_id = %inst.definition_id,
+                    identity_id = %inst.identity_id,
+                    "m0013: bundle_identity_bindings failed; this definition will \
+                     not be backfilled to direct links (bundle fallback still \
+                     applies): {e}"
+                );
+                continue;
+            }
+        };
 
         for b in bindings {
             let key = (inst.definition_id.clone(), b.provider.clone());
