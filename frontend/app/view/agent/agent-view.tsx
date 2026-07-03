@@ -66,6 +66,7 @@ import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
+import { AgentShellSubblock } from "./components/AgentShellSubblock";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
@@ -251,6 +252,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
             handleAgentIdChange(model.blockId, undefined);
+
+            // Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §7):
+            // the PTY is kept alive across drawer open/close (see
+            // AgentShellSubblock) but MUST die with the pane — a lingering
+            // shell is exactly the leak class issue #1936 tracks.
+            const shellSubBlockId = block()?.meta?.["term:shellsubblockid"] as string | undefined;
+            if (shellSubBlockId) {
+                void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: shellSubBlockId });
+            }
         });
 
         // Mirror context token count to block meta so the Swarm view can read
@@ -997,6 +1007,20 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 <Show when={agentAtoms().detailsOpenAtom[0]()}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
                         <ActivityLogPanel entries={logLines} />
+                        {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
+                            real xterm+PTY terminal, spawned lazily on first
+                            drawer open via a headless term sub-block. */}
+                        <AgentShellSubblock
+                            parentBlockId={model.blockId}
+                            cwd={block()?.meta?.["cmd:cwd"] ?? ""}
+                            existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                            onSubBlockCreated={(subBlockId) => {
+                                void RpcApi.SetMetaCommand(TabRpcClient, {
+                                    oref: WOS.makeORef("block", model.blockId),
+                                    meta: { "term:shellsubblockid": subBlockId } as any,
+                                });
+                            }}
+                        />
                         <AgentControlBar
                             blockId={model.blockId}
                             blockAtom={block}
