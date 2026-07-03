@@ -169,6 +169,7 @@ pub(crate) fn backfill_direct_links(
 
         for b in bindings {
             let key = (inst.definition_id.clone(), b.provider.clone());
+            let is_overwrite = winner.contains_key(&key);
             if let Some(prev_identity) = winner.get(&key) {
                 if prev_identity != &inst.identity_id {
                     collisions += 1;
@@ -192,7 +193,12 @@ pub(crate) fn backfill_direct_links(
                     inst.definition_id, b.provider, e
                 )))?;
             winner.insert(key, inst.identity_id.clone());
-            written += 1;
+            // Count DISTINCT (definition, provider) rows, not upsert calls: an
+            // overwrite from a collision replaces an existing row, so the logged
+            // `written` stays equal to the actual row count in db_agent_identity_links.
+            if !is_overwrite {
+                written += 1;
+            }
         }
     }
 
