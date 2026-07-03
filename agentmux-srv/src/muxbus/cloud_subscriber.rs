@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Cloud push subscription — replaces per-agent polling with a single
-//! sidecar-level WebSocket to muxbus.agentmux.ai.
+//! sidecar-level WebSocket to muxbus-ws.agentmux.ai.
 //!
 //! When MUXBUS_TOKEN is present, the subscriber:
-//!   1. Opens wss://muxbus.agentmux.ai/ws with the bearer token.
+//!   1. Opens wss://muxbus-ws.agentmux.ai with the bearer token.
 //!   2. Listens for { type: "inject_available" } broadcast wake signals (zero metadata).
 //!   3. On each signal, polls REST GET /reactive/pending/:id for every locally-registered agent.
 //!   4. Delivers via ReactiveHandler; ACKs successful deliveries via REST POST /reactive/ack.
@@ -30,7 +30,15 @@ use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 
-const MUXBUS_WS_URL: &str = "wss://muxbus.agentmux.ai/ws";
+// Dedicated custom domain on the API Gateway WebSocket API (apigatewayv2
+// DomainName + ApiMapping), not a path under muxbus.agentmux.ai's CloudFront
+// distribution. A CloudFront path behavior would have forwarded this
+// client's literal /ws request path prefixed by originPath, landing at
+// /{stage}/ws on the origin — but the WS handshake endpoint only exists at
+// exactly /{stage}. No path suffix here: the domain root maps directly to
+// the API's default stage. Full design/history in the agentmux-cloud repo's
+// muxbus/ directory (search for the WebSocket relay redesign writeup).
+const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
