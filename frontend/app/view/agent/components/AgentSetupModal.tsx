@@ -6,12 +6,14 @@
  * opened by the single "Agent setup" (id-card) icon in the agent pane
  * header. Consolidates the former two icons (identity + native memory)
  * into one modal with tabs:
- *   - Accounts — the former Identity panel (AgentIdentityModalPanel).
- *   - Memory   — the native-memory browser (AgentNativeMemoryModal).
+ *   - Accounts    — the former Identity panel (AgentIdentityModalPanel).
+ *   - Memory      — the native-memory browser (AgentNativeMemoryModal).
+ *   - MCP Servers — the standalone MCP Server primitive (AgentMcpModal).
+ *   - Skills      — the standalone Skill primitive (AgentSkillsModal).
  *
  * The tab list is a data array so future primitives slot in trivially.
- * Behavior-preserving: the two hosted panels are reused as-is; only the
- * entry point (one icon + tabs) changed.
+ * Briefs · Bundle are not wired here — Briefs has no backend primitive at
+ * all yet (tracked separately); Bundle already has its own Armory tab.
  *
  * Spec: SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.2b +
  *       EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md §4.
@@ -19,10 +21,12 @@
 
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { AgentIdentityModalPanel } from "./AgentIdentityModal";
+import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
+import { AgentSkillsModal } from "./AgentSkillsModal";
 import "./AgentSetupModal.scss";
 
-type SetupTabId = "accounts" | "memory";
+type SetupTabId = "accounts" | "memory" | "mcp" | "skills";
 
 interface AgentSetupModalProps {
     /** Agent definition for the Accounts tab. Null for quick-launch panes
@@ -42,12 +46,13 @@ interface SetupTabDef {
 }
 
 export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
-    // Data-driven tab list — future primitives (Phase 3+): MCP Servers ·
-    // Skills · Briefs · Bundle slot in here as additional entries plus a
-    // render branch below. Do NOT build those managers yet.
+    // Data-driven tab list — Briefs · Bundle slot in here later (Briefs has
+    // no backend primitive yet; Bundle has its own Armory tab already).
     const tabs: SetupTabDef[] = [
         { id: "accounts", label: "Accounts" },
         { id: "memory", label: "Memory" },
+        { id: "mcp", label: "MCP Servers" },
+        { id: "skills", label: "Skills" },
     ];
 
     const [activeTab, setActiveTab] = createSignal<SetupTabId>(props.initialTab ?? "accounts");
@@ -100,7 +105,15 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
                     />
                 </Show>
 
-                {/* Future primitives (Phase 3+): MCP Servers · Skills · Briefs · Bundle */}
+                <Show when={activeTab() === "mcp"}>
+                    <AgentMcpModal agentId={props.agentId} />
+                </Show>
+
+                <Show when={activeTab() === "skills"}>
+                    <AgentSkillsModal agentId={props.agentId} />
+                </Show>
+
+                {/* Future primitives: Briefs · Bundle */}
             </div>
         </div>
     );
