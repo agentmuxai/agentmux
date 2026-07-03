@@ -78,6 +78,14 @@ pub struct ServerCtx {
     /// `HostFrame` envelope and traverse the pending-buffer path
     /// when the host reconnects).
     pub host_pipe: std::sync::Arc<HostPipe>,
+    /// Startup-stage telemetry sink — `ReportStartupStageBegin`/`End`
+    /// commands from the host are forwarded here (bypassing the
+    /// reducer entirely, see the match arm in `handle_connection`) so
+    /// they flow into the same splash-panel display as the launcher's
+    /// own internal stages. `None` when the splash is disabled or on
+    /// platforms/paths that don't yet wire a sink through (mirrors the
+    /// existing `Option<StartupEventSink>` plumbing in unix.rs/windows.rs).
+    pub startup_sink: Option<crate::startup_events::StartupEventSink>,
 }
 
 /// Bind the first named-pipe instance synchronously.
@@ -508,6 +516,46 @@ where
             continue;
         }
 
+        // Startup-stage telemetry — forwarded directly into the
+        // launcher's StartupEventSink (same short-circuit-before-the-
+        // reducer pattern as GetEvents above). Not mirrored State, not
+        // broadcast: this is a side-channel purely for the splash
+        // panel, ephemeral for the life of the process. No-op if
+        // startup_sink is None (splash disabled, or a code path that
+        // doesn't wire a sink through).
+        match &cmd {
+            Command::ReportStartupStageBegin { stage, label } => {
+                if let Some(sink) = &ctx.startup_sink {
+                    // StartupEvent::StageBegin's fields are `&'static str` —
+                    // every existing caller passes a compile-time constant.
+                    // The host's stage/label strings are runtime JSON
+                    // values, so leak them to get a 'static lifetime rather
+                    // than widening the shared StartupEvent type (which
+                    // Windows' splash.rs and Linux's splash_linux/ also
+                    // consume, and neither can be built/verified here).
+                    // Bounded: a handful of small strings per process
+                    // lifetime (one launch's worth of stages), not a loop.
+                    let stage: &'static str = Box::leak(stage.clone().into_boxed_str());
+                    let label: &'static str = Box::leak(label.clone().into_boxed_str());
+                    sink.stage_begin(stage, label);
+                }
+                continue;
+            }
+            Command::ReportStartupStageEnd { stage, duration_ms, status, detail } => {
+                if let Some(sink) = &ctx.startup_sink {
+                    let stage: &'static str = Box::leak(stage.clone().into_boxed_str());
+                    let status = match status.as_str() {
+                        "warn" => crate::startup_events::StartupStatus::Warn,
+                        "error" => crate::startup_events::StartupStatus::Error,
+                        _ => crate::startup_events::StartupStatus::Ok,
+                    };
+                    sink.stage_end(stage, *duration_ms, status, detail.clone());
+                }
+                continue;
+            }
+            _ => {}
+        }
+
         // Dispatch through the reducer. Mutex held briefly — compute
         // the timestamp BEFORE acquiring so syscalls + string
         // formatting don't show up in lock-hold time. (gemini
@@ -765,6 +813,16 @@ async fn enforce_register_first(
         // commands above.
         Command::ReportSagaActionFailed { .. } => {
             ("ReportSagaActionFailed before Register".to_string(), true)
+        }
+        // Startup-stage telemetry — host-only reports, same
+        // fatal-before-Register treatment as the other Report*
+        // commands. Unreachable in practice: connect_to_launcher's
+        // handshake always sends Register first.
+        Command::ReportStartupStageBegin { .. } => {
+            ("ReportStartupStageBegin before Register".to_string(), true)
+        }
+        Command::ReportStartupStageEnd { .. } => {
+            ("ReportStartupStageEnd before Register".to_string(), true)
         }
         Command::ReportHostCounts { .. } => {
             ("ReportHostCounts before Register".to_string(), true)
