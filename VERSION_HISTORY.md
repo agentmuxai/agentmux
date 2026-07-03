@@ -1,5 +1,25 @@
 # AgentMux Version History
 
+## 0.49.14 — 2026-07-03
+
+- docs: correct CLAUDE.md stale claim about macOS/Linux dev-mode launcher bypass
+- feat(launcher): instrument host-spawn latency as a startup stage (unix + windows)
+- perf(launcher): overlap saga recovery/IPC-server setup with srv spawn
+- feat(launcher): macOS splash shows live startup-stage load times
+- docs: correct launch-speed audit finding, close out spec status
+- fix(armory): distinct vault icon + Trust Center comment sweep
+- fix(scripts): resolve task via PATHEXT instead of hardcoded .exe extension in agent bridge scripts
+- fix(muxbus): quote Windows browser-open URL so cmd.exe doesn't truncate it at the first &
+- fix(memory): pagefile hygiene fixes — WPS persist_map pruning, bounded WS egress, SubagentWatcher capping, pool refill guard under commit pressure
+- feat(armory): mcp.ts/skill.ts rpc-api bindings for the standalone MCP Server + Skill primitives
+- feat(armory): MCP Servers + Skills tabs in the Agent setup modal
+- feat(armory): MCP Servers + Skills catalog tabs
+- feat(identity): launch flow writes direct account links alongside the bundle pick
+- fix(muxbus): cloud_subscriber sends periodic WS ping to survive API Gateway idle timeout
+- fix(identity): re-run direct-link backfill to catch the m0013-to-write-through gap
+- fix(muxbus): cloud_subscriber keepalive uses app-level ping, not WS-protocol ping
+
+
 ## 0.49.13 — 2026-07-02
 
 - fix(agent): promote Mode to composer strip, un-nest Controls from Log, style Session buttons
