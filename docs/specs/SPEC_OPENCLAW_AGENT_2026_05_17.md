@@ -230,9 +230,8 @@ wizard inside the launch modal.
 
 The prior draft flagged this and it's still real. `agentmux-srv/src/agents/
 runner.rs:82-117` hard-codes `claude --print --output-format=stream-json` and
-the Claude translator. The runner is the **workflow Agent block** path
-(`SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` §4.2) — one-shot, headless agent
-spawns from inside a workflow.
+the Claude translator. The runner is the **Drone Agent-block** path —
+one-shot, headless agent spawns from inside a Drone.
 
 **Impact on OpenClaw:** the interactive agent-pane path goes through
 `blockcontroller/acp.rs`, not `runner.rs`. OpenClaw users launching from the
@@ -524,7 +523,6 @@ After Phase δ:
 - `agentmux-srv/forge-seed.json` — seed personas (openclaw at 124-147)
 - `docs/specs/openclaw-agent-runtime.md` — earlier `openclaw tui` integration spec; useful gateway-lifecycle context
 - `docs/specs/openclaw-widget.md` — openclaw web dashboard widget spec (companion, not in scope here)
-- `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` — Phase B unified-runner plan (governs §5 / Phase ζ)
 - `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` — launch flow + auth pattern reference
 - `docs/specs/provider-auth-isolation.md` — per-provider `{dataDir}/auth/<provider>/` model
 - `docs/specs/SPEC_ACP_CONTROLLER_2026_04_16.md` — ACP controller design

@@ -3,7 +3,7 @@
 **Date:** 2026-07-02
 **Decision:** Name is **Armory** (chosen over Loadout). See `SPEC_TRUST_CENTER_RENAME_2026_07_02.md` for the rationale.
 **Type:** User-facing rename + view-key migration. Behavior-preserving.
-**Precedent to follow:** `SPEC_RENAME_WORKFLOWS_TO_DRONE_2026_05_18` — same shape (Workflows→Drone renamed a first-class pane, migrated the persisted `view` key via a block-dispatch shim, renamed the widget). Mirror its approach.
+**Precedent to follow:** the earlier Drone pane rename — same shape (renamed a first-class pane, migrated the persisted `view` key via a block-dispatch shim, renamed the widget). Mirror that approach.
 
 ---
 
