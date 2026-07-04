@@ -162,7 +162,13 @@ pub(crate) async fn run_agent_with_bin(
     cmd.arg("--print")
         .arg("--output-format=stream-json")
         .arg("--verbose")
-        .arg("--include-partial-messages");
+        .arg("--include-partial-messages")
+        // Moves per-machine sections (cwd, env info, memory paths, git status)
+        // out of the system prompt into the first user message, matching the
+        // persistent-controller launch args in providers.rs. This spawn path
+        // builds its own args independent of ProviderConfig, so the flag has
+        // to be added here too — reagent P1 on PR #1964.
+        .arg("--exclude-dynamic-system-prompt-sections");
     // Forward the configured turn cap so the CLI enforces it.
     // Previously stored on AgentTask but never passed to the
     // subprocess — silently ignored. Reagent P1 + codex P2 on
