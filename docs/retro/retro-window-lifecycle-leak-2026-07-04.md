@@ -74,3 +74,7 @@ Separately, and probably the more user-visible contributor here: the main window
 ## Remediation of the current live session
 
 Not attempted in this session — closing/pruning the 8 orphaned window entries directly (e.g. via manual `window.CloseWindow` calls or a restart) would itself be a live-session mutation of the kind flagged as needing confirmation earlier today. Left for the user to decide: restart the instance (clears all in-memory reducer state cleanly) vs. leave it running for further diagnosis.
+
+## Code fix
+
+Action items 1–2 (make `backend_close_window` observable, fix the silent-skip gate via a bounded retry) are implemented in **PR #1965** (`fix(window): retry backend_window_id lookup on close so CloseWindow reliably reaches srv`), design in `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`. Action items 3–6 remain open, tracked as tasks #8–#10 in this session (main-window reload/version bug, window-level test coverage, pagefile-spec cross-reference) plus the still-undecided `SystemProcessInfo`/reconciliation proposal (task #4).
