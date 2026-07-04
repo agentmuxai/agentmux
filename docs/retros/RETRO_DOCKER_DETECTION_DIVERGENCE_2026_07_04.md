@@ -37,7 +37,7 @@ See PR for the full diff and `frontend/app/store/toolchain-capabilities.test.ts`
 
 - `cargo check`/`cargo test -p agentmux-srv` — 1296 passed, including the container module's existing unit tests.
 - `npx tsc --noEmit` and the full `vitest` suite — 1590 passed across 106 files, including the new store's tests and the existing `AgentCreateFromTemplateModal.test.tsx`/`AgentLaunchModal.integration.test.tsx` suites (updated to route their Docker mocks through the shared store).
-- Manual, live: stopped Docker Desktop, confirmed the Toolchain widget and the create-agent modal agreed ("not detected" in both). Started Docker Desktop with AgentMux still running — both flipped to available within the store's poll interval, with no manual refresh and no AgentMux restart. Launched an actual container-mode agent afterward to confirm the reconnected manager was visible to the real launch path, not just the status probe.
+- **Not yet live-tested end-to-end** in a running dev instance (stop/start Docker Desktop while `task dev` is up, confirm the Toolchain widget and create-agent modal agree throughout, then launch an actual container-mode agent to confirm the reconnected manager reaches the real launch path, not just the status probe). The automated coverage above exercises the dispatch logic, caching, de-dup, and polling lifecycle directly, but the live cross-view-agreement scenario this fix targets should still get a manual pass before/shortly after merge.
 
 ## Explicit follow-ups (found during this investigation, not fixed here)
 
