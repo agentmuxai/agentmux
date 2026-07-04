@@ -1,7 +1,9 @@
 # Spec: Scroll Chaining for Nested Tool-Preview Regions
 
 **Date:** 2026-07-03
-**Status:** proposed
+**Status:** Phase 1 shipped (d190dff7 / #1956) and found insufficient by live
+reproduction on 2026-07-04; Phase 2 implemented same day. See "Addendum"
+at the bottom.
 **Related:** `docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md` (owns
 `AgentDocumentVirtualList.handleScroll` — this spec must not fight its stick-to-bottom
 gating), `frontend/app/view/agent/components/ToolBlock.tsx` (existing Ctrl+wheel zoom
@@ -184,3 +186,49 @@ unnecessary given CEF's fixed, modern Chromium.
 - Confirm stick-to-bottom (new streaming output auto-scrolls) and scroll-driven
   tool-collapse (per the companion spec) still behave correctly when scrolling the outer
   pane directly.
+
+## Addendum (2026-07-04): Phase 1 was insufficient — this was a dead zone, not a jerk
+
+A same-day double-scrollbar fix (`frontend/app/view/agent/styles/_document-nodes.scss`)
+removed the `max-height`/`overflow-y` from the ~8 secondary nested boxes this spec
+targeted (they shouldn't have been independently scrollable in the first place — that was
+the actual cause of the double-scrollbar bug). That left exactly one tool-preview scroll
+container per tool block: `.agent-tool-overlay-log`.
+
+Reproducing against that single container (live, via CDP `Input.dispatchMouseEvent` against
+the running dev build, scripted wheel ticks with `scrollTop` logged after each) showed Phase
+1 does not deliver the handoff this spec describes. Once `.agent-tool-overlay-log` hit
+either scroll boundary, **further wheel ticks did nothing at all** — `.agent-document`'s
+`scrollTop` stayed frozen through 10+ additional ticks in both directions. Not a jerk, a
+dead zone.
+
+**Why Phase 1's premise was wrong:** `overscroll-behavior: contain` does exactly what MDN
+says — it stops the browser's native scroll chain from reaching the ancestor once the
+container's own range is exhausted. That's an isolation primitive, not a handoff primitive.
+The "smooth handoff, no dead zone, no jump" behavior this spec's Problem section asks for is
+actually what `overscroll-behavior: auto` (the pre-existing default) already does — chaining
+to the ancestor is the *default* browser behavior once a container is exhausted. What Phase
+1 actually changed was trading the old jerk/bounce feel of that default chaining for a hard
+stop, not implementing a cleaner version of chaining.
+
+**Fix:** implemented this spec's own Phase 2 (previously deferred, "only if Phase 1 proves
+insufficient in practice" — it did). `ToolOverlayLog.tsx` now attaches a non-passive `wheel`
+listener to `.agent-tool-overlay-log`: when the box is at a scroll boundary in the wheel's
+direction, it manually forwards the same `deltaY` to `.agent-document.scrollTop` and calls
+`preventDefault()`. This is a deliberate manual relay, not "let the event bubble" — bubbling
+doesn't help here, since `contain` blocks the browser's own scroll-chaining regardless of
+whether a JS listener calls `preventDefault()`; only directly mutating the ancestor's
+`scrollTop` produces the handoff. `overscroll-behavior: contain` stays in place — it still
+suppresses the native bounce/rubber-band, and the JS supplies the intentional handoff in its
+place.
+
+Only `.agent-tool-overlay-log` needed this — the ~8 secondary boxes are no longer
+independent scroll containers post-double-scrollbar-fix, so there's nothing nested left to
+hand off from at that level. `.agent-document`'s own `overscroll-behavior: contain` (stopping
+the chain from reaching the OS level) is untouched and unaffected, since the fix mutates
+`scrollTop` directly rather than relying on native chaining.
+
+Verified live the same way as the initial repro: synthetic markup matching the real
+(post-fix) DOM shape injected into the running dev window, wheel ticks driven via CDP in
+both directions, `scrollTop` asserted after each tick. Confirmed the outer pane now picks up
+immediately and smoothly at both the top and bottom boundary, with no dead zone.
