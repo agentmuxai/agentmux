@@ -633,10 +633,21 @@ impl AgentMuxHandler {
         // already runs on, never the UI thread — gives that race a
         // bounded chance to resolve before we give up. See
         // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
+        //
+        // IMPORTANT (reagent P1 on PR #1965): `report_backend_window_id_unregistered`
+        // is deliberately NOT called here, unconditionally, the way it used
+        // to be. That report tells the launcher to drop its own canonical
+        // `backend_window_ids[label]` entry and broadcasts
+        // `BackendWindowIdUnregistered`, which purges this host's shadow
+        // map too (launcher_ipc.rs). Firing it before we know whether the
+        // retry below will need that very entry would race the unregister
+        // against the pending register — exactly the case the retry
+        // exists to recover from. It is now called once the outcome is
+        // known, at each of the call sites below (immediate success,
+        // retry success, retry exhausted) — never before.
         let backend_window_id = label.as_deref().and_then(|lbl| {
             let wid = self.state.backend_window_id(lbl);
             dlog(&format!("backend_window_id({:?}) => {:?}", lbl, wid));
-            crate::launcher_ipc::report_backend_window_id_unregistered(lbl.to_string());
             wid
         });
 
@@ -932,9 +943,16 @@ impl AgentMuxHandler {
             if let Some(window_id) = backend_window_id {
                 let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
                 let auth_key = self.state.auth_key.lock().clone();
+                // Safe to report here (reagent P1 on PR #1965): we already
+                // resolved the window_id, so there's no pending retry left
+                // to race against.
+                let unregister_lbl = label.clone();
                 dlog(&format!("spawning backend_close_window thread for window_id={}", window_id));
                 std::thread::spawn(move || {
                     backend_close_window(&web_endpoint, &auth_key, &window_id);
+                    if let Some(lbl) = unregister_lbl {
+                        crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
+                    }
                 });
             } else if let Some(lbl) = label.clone() {
                 // The immediate shadow lookup missed. This is expected and
@@ -965,6 +983,11 @@ impl AgentMuxHandler {
                                 lbl
                             ));
                             backend_close_window(&web_endpoint, &auth_key, &window_id);
+                            // Report the unregister only now (reagent P1 on
+                            // PR #1965) — the retry just succeeded using
+                            // this mapping, so it's safe to tell the
+                            // launcher to drop it.
+                            crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
                         }
                         None => {
                             let warn = format!(
@@ -975,6 +998,11 @@ impl AgentMuxHandler {
                             );
                             dlog(&warn);
                             tracing::warn!("{}", warn);
+                            // Retries exhausted — nothing left to protect
+                            // against racing; report the unregister so the
+                            // launcher's bookkeeping doesn't keep a stale
+                            // entry for a label that's now definitely gone.
+                            crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
                         }
                     }
                 });

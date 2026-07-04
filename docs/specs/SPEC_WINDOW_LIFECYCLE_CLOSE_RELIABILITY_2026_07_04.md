@@ -31,6 +31,12 @@ In `on_before_close`, move the `backend_window_id` resolution off the single syn
 
 A 1-second window comfortably covers the registration round trip observed in this session (windows promoted ~2 seconds apart with no visible lag) while staying well clear of ordinary user-perceived latency for a window that's already closing.
 
+### 2.1a Ordering fix: don't unregister ahead of the retry (reagent P1 on PR #1965)
+
+The first version of this fix retained a pre-existing call to `report_backend_window_id_unregistered` inside the immediate-lookup step, unconditionally — including when the lookup missed. That call tells the launcher to drop its own canonical `backend_window_ids[label]` entry and broadcasts `BackendWindowIdUnregistered`, which purges *this host's* shadow map too. Left unconditional, it would race ahead of the very retry meant to catch a delayed registration — potentially unregistering a mapping the moment before (or while) it actually lands, defeating the fix for the exact case it targets.
+
+Fixed by deferring the unregister report until the outcome is actually known: it now fires once, at each of the three terminal points (immediate success, retry success, retry exhausted) — never before the retry has had its chance.
+
 ### 2.2 Make `backend_close_window` observably fail
 
 Today it is explicitly fire-and-forget (`helpers.rs:53`, own doc comment: *"we write the request and don't read the response"*). Read the HTTP status line back and log `tracing::error!` (not silently drop) on anything other than a 200, and on any connection/write failure. This doesn't change behavior on the happy path — it just stops swallowing the failure case that made this bug invisible for however long it's been happening.
