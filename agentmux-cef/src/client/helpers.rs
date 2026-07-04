@@ -45,11 +45,16 @@ pub(crate) fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Synchronously tell the backend to close a window's workspace/tabs/shells.
+/// Tell the backend to close a window's workspace/tabs/shells.
 ///
 /// Uses a raw TCP connection so no async runtime or extra crate is needed.
 /// Called from a background thread in `on_before_close` so the CEF UI thread
-/// is not blocked. Fire-and-forget: we write the request and don't read the response.
+/// is not blocked. No longer fire-and-forget as of
+/// docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md: the
+/// response is read and a non-200 status, write failure, or connect
+/// failure is logged via `tracing::error!` — still asynchronous from the
+/// caller's perspective (this whole function runs off the UI thread), but
+/// failures are no longer silently swallowed.
 pub(super) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
     use std::io::Write;
 
@@ -91,16 +96,47 @@ pub(super) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id
             match stream.write_all(request.as_bytes()) {
                 Ok(_) => {
                     dlog(&format!("backend_close_window: sent request for window_id={}", window_id));
-                    // Read response to confirm the backend received it
+                    // Read the response so a failed/rejected CloseWindow call
+                    // is actually visible instead of silently dropped — this
+                    // was previously "fire-and-forget: we write the request
+                    // and don't read the response" (see
+                    // docs/retro/retro-window-lifecycle-leak-2026-07-04.md,
+                    // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md
+                    // §2.2). Not fully synchronous from the caller's
+                    // perspective — this still runs on its own background
+                    // thread — but the outcome is no longer swallowed.
                     use std::io::Read;
                     let mut resp = String::new();
                     let _ = stream.read_to_string(&mut resp);
                     let first_line = resp.lines().next().unwrap_or("(empty)").to_string();
                     dlog(&format!("backend_close_window: response first line: {}", first_line));
+                    if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
+                        tracing::error!(
+                            window_id = %window_id,
+                            response = %first_line,
+                            "[backend_close_window] CloseWindow request did not succeed — \
+                             window_id will remain orphaned in the reducer's state.windows"
+                        );
+                    }
                 }
-                Err(e) => dlog(&format!("backend_close_window: write failed: {}", e)),
+                Err(e) => {
+                    dlog(&format!("backend_close_window: write failed: {}", e));
+                    tracing::error!(
+                        window_id = %window_id,
+                        error = %e,
+                        "[backend_close_window] write failed — CloseWindow never reached the backend"
+                    );
+                }
             }
         }
-        Err(e) => dlog(&format!("backend_close_window: connect failed to {}: {}", addr, e)),
+        Err(e) => {
+            dlog(&format!("backend_close_window: connect failed to {}: {}", addr, e));
+            tracing::error!(
+                window_id = %window_id,
+                addr = %addr,
+                error = %e,
+                "[backend_close_window] connect failed — CloseWindow never reached the backend"
+            );
+        }
     }
 }
