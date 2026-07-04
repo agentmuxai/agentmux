@@ -495,7 +495,26 @@ async fn handle_server_msg(
                 let claimed: AckResp = match claim_resp.json().await {
                     Ok(b) => b,
                     Err(e) => {
-                        tracing::warn!(error = %e, "cloud_subscriber: parse claim response failed");
+                        // The server processed the claim (status was 2xx) before this
+                        // body failed to parse — some subset of `all_ids` may now be
+                        // flipped to "delivered" server-side with no local delivery
+                        // and no way for us to release them, since we don't know
+                        // which ids succeeded or their delivered_at stamp (required
+                        // by /reactive/release). We deliberately do NOT guess (e.g.
+                        // via /reactive/status) and release whatever looks delivered:
+                        // some of `all_ids` may have been legitimately claimed and
+                        // delivered by a *different* concurrent poller (another
+                        // channel/seat racing for the same agent_id), and blindly
+                        // releasing those would reintroduce the exact duplicate-
+                        // delivery bug this change exists to fix. Logging every
+                        // affected id loudly is the safe tradeoff: rare silent
+                        // message loss here, never a resurrected duplicate.
+                        tracing::error!(
+                            agent_id = %agent_id,
+                            injection_ids = ?all_ids,
+                            error = %e,
+                            "cloud_subscriber: parse claim response failed — these injections may be claimed server-side with no local delivery and cannot be safely auto-recovered"
+                        );
                         continue;
                     }
                 };
