@@ -124,8 +124,14 @@ static CLAUDE: ProviderConfig = ProviderConfig {
         // out of the system prompt into the first user message, so the system
         // prompt stays byte-identical across agents/machines and the 1hr
         // prompt cache (docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md) isn't
-        // invalidated by per-instance dynamic content. No-op unless
-        // --system-prompt is also passed (it isn't, here).
+        // invalidated by per-instance dynamic content. No-op if the default
+        // system prompt is overridden — not guaranteed here, since
+        // `agent.provider_flags` (app_api/agent_open.rs) is a free-form
+        // user-configurable string appended after these args; a user-set
+        // `--system-prompt` there would silently no-op this flag. Harmless
+        // either way (that's the flag's own documented ignore-if-overridden
+        // behavior), just not something this hardcoded default can prevent.
+        // reagent P2 on PR #1964.
         "--exclude-dynamic-system-prompt-sections",
     ],
     persistent_launch_args: Some(&[
