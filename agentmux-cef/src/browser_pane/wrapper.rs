@@ -169,9 +169,10 @@ fn register_class_once() {
 /// already does for CEF's own HWND today (that code still runs too, now
 /// operating one level down — harmless single-child no-op there).
 ///
-/// Returns the wrapper HWND on success. Caller is responsible for calling
-/// `cache_wrapper_hwnd` once the label is known (creation resolves the
-/// label before this point in practice, so callers pass it directly).
+/// Returns the wrapper HWND on success. Caches it into `PANE_WRAPPER_HWNDS`
+/// under `label` internally before returning — callers must NOT also call
+/// `cache_wrapper_hwnd` themselves, or the entry gets redundantly
+/// overwritten with the same value.
 pub(crate) fn create_wrapper(
     label: &str,
     parent_hwnd: *mut std::ffi::c_void,
