@@ -198,6 +198,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // either store unregisters, so any deferred dispatcher landing in
     // the cleanup window observes disposed=true and silently drops.
     // See agent-pane-model.ts for the rationale.
+    // Last-known shell sub-block id, tracked outside Solid's reactive graph.
+    // On the "silent dispose by an outer owner" path documented in the
+    // onCleanup below, `block()` (model.blockAtom) is ALREADY null by the
+    // time cleanup runs — the outer <Show> in block.tsx unmounts this pane
+    // in response to the same blockData→null transition, and Solid tears
+    // down children before/without re-reading their props at a stale value.
+    // Reading `block()?.meta?.["term:shellsubblockid"]` directly inside
+    // onCleanup would silently resolve to undefined on that path and the
+    // sub-block's PTY would leak. This effect mirrors the id into a plain
+    // variable on every change (skipping null so it keeps the last-known
+    // value instead of clearing it), so cleanup always has it regardless of
+    // what `block()` reads at that instant.
+    let shellSubBlockIdRef: string | undefined;
+    createEffect(() => {
+        const id = block()?.meta?.["term:shellsubblockid"] as string | undefined;
+        if (id) shellSubBlockIdRef = id;
+    });
+
     let paneModel: AgentPaneModel;
     {
         const a = agentAtoms();
@@ -257,10 +275,13 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             // Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §7):
             // the PTY is kept alive across drawer open/close (see
             // AgentShellSubblock) but MUST die with the pane — a lingering
-            // shell is exactly the leak class issue #1936 tracks.
-            const shellSubBlockId = block()?.meta?.["term:shellsubblockid"] as string | undefined;
-            if (shellSubBlockId) {
-                void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: shellSubBlockId });
+            // shell is exactly the leak class issue #1936 tracks. Reads the
+            // plain-variable mirror (shellSubBlockIdRef above), NOT block()
+            // directly — block() can already be null here on the silent
+            // outer-owner dispose path, which would otherwise drop this
+            // delete silently and leak the PTY.
+            if (shellSubBlockIdRef) {
+                void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: shellSubBlockIdRef });
             }
         });
 

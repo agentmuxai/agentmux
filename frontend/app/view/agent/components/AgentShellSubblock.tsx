@@ -50,6 +50,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     let disposed = false;
 
     const [subBlockId, setSubBlockId] = createSignal<string | undefined>(props.existingSubBlockId);
+    const [error, setError] = createSignal<string | null>(null);
 
     // Reactive accessor for the sub-block's OWN meta — the same wave-object
     // atom mechanism TermViewModel uses (termViewModel.ts:86,237-246), just
@@ -107,66 +108,74 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         onCleanup(() => containerRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
 
         void (async () => {
-            let id = subBlockId();
-            if (!id) {
-                const oref = await RpcApi.CreateSubBlockCommand(TabRpcClient, {
-                    parentblockid: props.parentBlockId,
-                    blockdef: {
-                        meta: {
-                            view: "term",
-                            controller: "shell",
-                            "cmd:cwd": props.cwd,
+            try {
+                let id = subBlockId();
+                if (!id) {
+                    const oref = await RpcApi.CreateSubBlockCommand(TabRpcClient, {
+                        parentblockid: props.parentBlockId,
+                        blockdef: {
+                            meta: {
+                                view: "term",
+                                controller: "shell",
+                                "cmd:cwd": props.cwd,
+                            },
                         },
-                    },
-                });
-                // ORef wire format is always "<otype>:<oid>" (wos.ts makeORef) —
-                // oid is a UUID, never contains a colon, so a single split is safe.
-                id = oref.slice(oref.indexOf(":") + 1);
-                setSubBlockId(id);
-                props.onSubBlockCreated(id);
-            }
-            if (disposed || !containerRef) return;
-            const wrap = new TermWrap(
-                id,
-                containerRef,
-                {
-                    fontSize: termFontSize(),
-                    fontFamily: "Hack",
-                    allowTransparency: false,
-                    scrollback: 2000,
-                    allowProposedApi: true,
-                },
-                {
-                    useWebGl: true,
-                    // Bare sendDataHandler mirroring TermViewModel's fast path
-                    // (termViewModel.ts:370-379) — blockinput, not the
-                    // controllerinput RPC, so consecutive keystrokes stay in
-                    // TCP order. No chunked-paste handling for this spike.
-                    sendDataHandler: (data: string) => {
-                        sendWSCommand({
-                            wscommand: "blockinput",
-                            blockid: id,
-                            inputdata64: stringToBase64(data),
-                        } as BlockInputWSCommand);
-                    },
+                    });
+                    // ORef wire format is always "<otype>:<oid>" (wos.ts makeORef) —
+                    // oid is a UUID, never contains a colon, so a single split is safe.
+                    id = oref.slice(oref.indexOf(":") + 1);
+                    setSubBlockId(id);
+                    props.onSubBlockCreated(id);
                 }
-            );
-            termWrap = wrap;
-            await wrap.init();
+                if (disposed || !containerRef) return;
+                const wrap = new TermWrap(
+                    id,
+                    containerRef,
+                    {
+                        fontSize: termFontSize(),
+                        fontFamily: "Hack",
+                        allowTransparency: false,
+                        scrollback: 2000,
+                        allowProposedApi: true,
+                    },
+                    {
+                        useWebGl: true,
+                        // Bare sendDataHandler mirroring TermViewModel's fast path
+                        // (termViewModel.ts:370-379) — blockinput, not the
+                        // controllerinput RPC, so consecutive keystrokes stay in
+                        // TCP order. No chunked-paste handling for this spike.
+                        sendDataHandler: (data: string) => {
+                            sendWSCommand({
+                                wscommand: "blockinput",
+                                blockid: id,
+                                inputdata64: stringToBase64(data),
+                            } as BlockInputWSCommand);
+                        },
+                    }
+                );
+                termWrap = wrap;
+                await wrap.init();
 
-            // Reflow the PTY grid whenever the container is resized — drag-
-            // resizing the details drawer (ResizableDetailsDrawer), the pane
-            // itself, or the window. Without this the container can change
-            // size (e.g. via the drawer's drag handle) with the terminal
-            // never re-fitting to it. Mirrors term.tsx's rszObs pattern.
-            // Plain DOM API, not a Solid primitive, so it's safe to set up
-            // here post-await; teardown is registered synchronously below
-            // via the `resizeObserver` closure var, not a second onCleanup.
-            if (!disposed && containerRef) {
-                resizeObserver = new ResizeObserver(() => {
-                    termWrap?.handleResize_debounced();
-                });
-                resizeObserver.observe(containerRef);
+                // Reflow the PTY grid whenever the container is resized — drag-
+                // resizing the details drawer (ResizableDetailsDrawer), the pane
+                // itself, or the window. Without this the container can change
+                // size (e.g. via the drawer's drag handle) with the terminal
+                // never re-fitting to it. Mirrors term.tsx's rszObs pattern.
+                // Plain DOM API, not a Solid primitive, so it's safe to set up
+                // here post-await; teardown is registered synchronously below
+                // via the `resizeObserver` closure var, not a second onCleanup.
+                if (!disposed && containerRef) {
+                    resizeObserver = new ResizeObserver(() => {
+                        termWrap?.handleResize_debounced();
+                    });
+                    resizeObserver.observe(containerRef);
+                }
+            } catch (e) {
+                // Without this, a rejection here (e.g. createsubblock failing)
+                // was an unhandled promise rejection and the drawer silently
+                // never rendered a terminal — no user-facing error at all.
+                console.error("AgentShellSubblock: failed to start shell:", e);
+                if (!disposed) setError(e instanceof Error ? e.message : String(e));
             }
         })();
     });
@@ -177,5 +186,9 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         resizeObserver?.disconnect();
     });
 
-    return <div class="agent-shell-subblock" ref={containerRef} />;
+    return (
+        <div class="agent-shell-subblock" ref={containerRef}>
+            {error() && <div class="agent-shell-subblock-error">Shell failed to start: {error()}</div>}
+        </div>
+    );
 };

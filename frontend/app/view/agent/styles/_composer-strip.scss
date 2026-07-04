@@ -301,3 +301,10 @@
     // resolving against some distant positioned ancestor instead.
     position: relative;
 }
+
+.agent-shell-subblock-error {
+    padding: var(--space-2);
+    color: var(--error-color);
+    font-size: 11px;
+    font-family: var(--termfontfamily, monospace);
+}

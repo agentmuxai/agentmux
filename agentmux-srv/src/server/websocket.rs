@@ -799,24 +799,36 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .map_err(|e| format!("createsubblock: {e}"))?;
 
                 let mut meta = cmd.blockdef.meta.clone();
-                if let Some(raw_cwd) = meta
+                let raw_cwd = meta
                     .get(blockcontroller::META_KEY_CMD_CWD)
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
-                {
+                    .map(str::to_string);
+                if let Some(raw_cwd) = raw_cwd {
                     // The PTY spawn path (blockcontroller/shell/lifecycle.rs)
                     // reads cmd:cwd raw with no MSYS→Windows conversion, unlike
                     // shellexec — normalize here so a Git-Bash-style path
-                    // doesn't hit os error 267 on Windows.
-                    let norm = normalize_working_dir(raw_cwd)
-                        .filter(|p| std::path::Path::new(p).is_absolute())
-                        .ok_or_else(|| {
-                            format!("createsubblock: invalid or non-absolute cmd:cwd: {raw_cwd:?}")
-                        })?;
-                    meta.insert(
-                        blockcontroller::META_KEY_CMD_CWD.to_string(),
-                        serde_json::Value::String(norm),
-                    );
+                    // doesn't hit os error 267 on Windows. Mirrors
+                    // server/mod.rs's shellexec cwd-fallback precedent: an
+                    // invalid/non-absolute value degrades to no cwd rather
+                    // than failing the whole call — this is a best-effort
+                    // convenience derived from the parent's meta, not a
+                    // caller-supplied value worth hard-rejecting.
+                    match normalize_working_dir(&raw_cwd).filter(|p| std::path::Path::new(p).is_absolute()) {
+                        Some(norm) => {
+                            meta.insert(
+                                blockcontroller::META_KEY_CMD_CWD.to_string(),
+                                serde_json::Value::String(norm),
+                            );
+                        }
+                        None => {
+                            tracing::warn!(
+                                raw_cwd = %raw_cwd,
+                                "createsubblock: invalid or non-absolute cmd:cwd, dropping (no cwd)"
+                            );
+                            meta.remove(blockcontroller::META_KEY_CMD_CWD);
+                        }
+                    }
                 }
 
                 let child_id = uuid::Uuid::new_v4().to_string();
