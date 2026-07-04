@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::oref::ORef;
-use crate::backend::obj::MetaMapType;
+use crate::backend::obj::{BlockDef, MetaMapType};
 
 /// Matches Go's `CommandGetMetaData`
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +92,26 @@ pub struct CommandBlockInputData {
     /// Per-TermViewModel monotonic counter for seq-based input ordering (optional, shell only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<u64>,
+}
+
+/// Matches TS `CommandCreateSubBlockData` (frontend/types/gotypes.d.ts:238-241).
+/// Creates a headless sub-block (no tab/layout entry) parented to
+/// `parentblockid` — e.g. a `term`-view PTY embedded in an agent
+/// pane's details drawer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandCreateSubBlockData {
+    pub parentblockid: String,
+    pub blockdef: BlockDef,
+}
+
+/// Matches TS `CommandDeleteBlockData` as used by `DeleteSubBlockCommand`
+/// (frontend/app/store/rpc-api/block.ts:64-66) — same shape as a plain
+/// block delete, but routed to the sub-block teardown path (kills the
+/// controller, deletes the row, unlinks from the parent's `subblockids`;
+/// does not touch tab bookkeeping since sub-blocks are never tab-referenced).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandDeleteSubBlockData {
+    pub blockid: String,
 }
 
 /// Data for `tooldecision` — frontend's reply to a per-tool-call

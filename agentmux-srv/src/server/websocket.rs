@@ -18,16 +18,19 @@ use serde_json::json;
 use crate::backend::blockcontroller;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    CommandBlockInputData, CommandControllerResyncData, CommandEventReadHistoryData,
+    CommandBlockInputData, CommandControllerResyncData, CommandCreateSubBlockData,
+    CommandDeleteSubBlockData, CommandEventReadHistoryData,
     CommandGetMetaData, CommandSetMetaData, CommandToolDecisionData,
     RpcMessage, COMMAND_CONTROLLER_INPUT,
-    COMMAND_CONTROLLER_RESYNC, COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
+    COMMAND_CONTROLLER_RESYNC, COMMAND_CREATE_SUB_BLOCK, COMMAND_DELETE_SUB_BLOCK,
+    COMMAND_EVENT_READ_HISTORY, COMMAND_EVENT_SUB, COMMAND_EVENT_UNSUB,
     COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META,
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_TOOL_DECISION, COMMAND_AGENT_ANSWER,
     CommandAgentAnswerData,
 };
+use crate::backend::base::normalize_working_dir;
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
 use super::service::{update_object_meta, schedule_agent_zoom_mirror};
 
@@ -783,6 +786,132 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .map_err(|e| format!("controllerinput: {e}"))?;
                 let input = parse_block_input(&cmd)?;
                 blockcontroller::send_input(&cmd.blockid, input, cmd.seq)?;
+                Ok(None)
+            })
+        }),
+    );
+
+    // createsubblock → create a headless sub-block (no tab/layout entry)
+    // parented to an existing block, e.g. a `term`-view PTY embedded in an
+    // agent pane's details drawer. Spec:
+    // docs/specs/SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §4.
+    let wstore_csb = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_CREATE_SUB_BLOCK,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_csb.clone();
+            Box::pin(async move {
+                let cmd: CommandCreateSubBlockData = serde_json::from_value(data)
+                    .map_err(|e| format!("createsubblock: {e}"))?;
+
+                let mut meta = cmd.blockdef.meta.clone();
+                let raw_cwd = meta
+                    .get(blockcontroller::META_KEY_CMD_CWD)
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                if let Some(raw_cwd) = raw_cwd {
+                    // The PTY spawn path (blockcontroller/shell/lifecycle.rs)
+                    // reads cmd:cwd raw with no MSYS→Windows conversion, unlike
+                    // shellexec — normalize here so a Git-Bash-style path
+                    // doesn't hit os error 267 on Windows. Mirrors
+                    // server/mod.rs's shellexec cwd-fallback precedent: an
+                    // invalid/non-absolute value degrades to no cwd rather
+                    // than failing the whole call — this is a best-effort
+                    // convenience derived from the parent's meta, not a
+                    // caller-supplied value worth hard-rejecting.
+                    match normalize_working_dir(&raw_cwd).filter(|p| std::path::Path::new(p).is_absolute()) {
+                        Some(norm) => {
+                            meta.insert(
+                                blockcontroller::META_KEY_CMD_CWD.to_string(),
+                                serde_json::Value::String(norm),
+                            );
+                        }
+                        None => {
+                            tracing::warn!(
+                                raw_cwd = %raw_cwd,
+                                "createsubblock: invalid or non-absolute cmd:cwd, dropping (no cwd)"
+                            );
+                            meta.remove(blockcontroller::META_KEY_CMD_CWD);
+                        }
+                    }
+                }
+
+                let child_id = uuid::Uuid::new_v4().to_string();
+                let mut block = Block {
+                    oid: child_id.clone(),
+                    parentoref: format!("block:{}", cmd.parentblockid),
+                    meta,
+                    ..Default::default()
+                };
+                wstore
+                    .insert(&mut block)
+                    .map_err(|e| format!("createsubblock: insert: {e}"))?;
+
+                // Best-effort link into the parent's subblockids. Not a CAS
+                // (Store::update is a blind version-bump) — an acceptable
+                // race for a single lazily-created shell per agent pane.
+                if let Ok(mut parent) = wstore.must_get::<Block>(&cmd.parentblockid) {
+                    parent
+                        .subblockids
+                        .get_or_insert_with(Vec::new)
+                        .push(child_id.clone());
+                    let _ = wstore.update(&mut parent);
+                }
+
+                tracing::info!(
+                    child_id = %child_id,
+                    parent_id = %cmd.parentblockid,
+                    "CreateSubBlock"
+                );
+                // TS `CreateSubBlockCommand` resolves `Promise<ORef>`, and
+                // `ORef` (gotypes.d.ts:1258) is a plain string — return the
+                // bare "block:<id>" string, not a wrapper object.
+                Ok(Some(serde_json::Value::String(format!("block:{child_id}"))))
+            })
+        }),
+    );
+
+    // deletesubblock → tear down a sub-block created via createsubblock.
+    // Kill-first ordering matches sagas/delete_block.rs; unlike that saga,
+    // this does NOT touch tab bookkeeping — sub-blocks are never
+    // tab-referenced, so delete_block.rs's precondition would reject them.
+    let wstore_dsb = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_DELETE_SUB_BLOCK,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_dsb.clone();
+            Box::pin(async move {
+                let cmd: CommandDeleteSubBlockData = serde_json::from_value(data)
+                    .map_err(|e| format!("deletesubblock: {e}"))?;
+
+                // Kill process FIRST — a lingering PTY tree is worse than a
+                // delayed row delete.
+                blockcontroller::delete_controller(&cmd.blockid);
+
+                let parent_id = wstore
+                    .get::<Block>(&cmd.blockid)
+                    .ok()
+                    .flatten()
+                    .and_then(|b| b.parentoref.strip_prefix("block:").map(str::to_string));
+
+                wstore
+                    .delete::<Block>(&cmd.blockid)
+                    .map_err(|e| format!("deletesubblock: delete: {e}"))?;
+
+                // Best-effort unlink from the parent's subblockids — the
+                // controller is already dead and the row is already gone
+                // either way, so don't fail the call over this step.
+                if let Some(parent_id) = parent_id {
+                    if let Ok(mut parent) = wstore.must_get::<Block>(&parent_id) {
+                        if let Some(ids) = parent.subblockids.as_mut() {
+                            ids.retain(|id| id != &cmd.blockid);
+                            let _ = wstore.update(&mut parent);
+                        }
+                    }
+                }
+
+                tracing::info!(block_id = %cmd.blockid, "DeleteSubBlock");
                 Ok(None)
             })
         }),
