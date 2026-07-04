@@ -66,6 +66,8 @@ import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
+import { AgentShellSubblock } from "./components/AgentShellSubblock";
+import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
@@ -196,6 +198,24 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // either store unregisters, so any deferred dispatcher landing in
     // the cleanup window observes disposed=true and silently drops.
     // See agent-pane-model.ts for the rationale.
+    // Last-known shell sub-block id, tracked outside Solid's reactive graph.
+    // On the "silent dispose by an outer owner" path documented in the
+    // onCleanup below, `block()` (model.blockAtom) is ALREADY null by the
+    // time cleanup runs — the outer <Show> in block.tsx unmounts this pane
+    // in response to the same blockData→null transition, and Solid tears
+    // down children before/without re-reading their props at a stale value.
+    // Reading `block()?.meta?.["term:shellsubblockid"]` directly inside
+    // onCleanup would silently resolve to undefined on that path and the
+    // sub-block's PTY would leak. This effect mirrors the id into a plain
+    // variable on every change (skipping null so it keeps the last-known
+    // value instead of clearing it), so cleanup always has it regardless of
+    // what `block()` reads at that instant.
+    let shellSubBlockIdRef: string | undefined;
+    createEffect(() => {
+        const id = block()?.meta?.["term:shellsubblockid"] as string | undefined;
+        if (id) shellSubBlockIdRef = id;
+    });
+
     let paneModel: AgentPaneModel;
     {
         const a = agentAtoms();
@@ -251,6 +271,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
             handleAgentIdChange(model.blockId, undefined);
+
+            // Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §7):
+            // the PTY is kept alive across drawer open/close (see
+            // AgentShellSubblock) but MUST die with the pane — a lingering
+            // shell is exactly the leak class issue #1936 tracks. Reads the
+            // plain-variable mirror (shellSubBlockIdRef above), NOT block()
+            // directly — block() can already be null here on the silent
+            // outer-owner dispose path, which would otherwise drop this
+            // delete silently and leak the PTY.
+            if (shellSubBlockIdRef) {
+                void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: shellSubBlockIdRef });
+            }
         });
 
         // Mirror context token count to block meta so the Swarm view can read
@@ -1000,7 +1032,36 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 {/* Details panel — activity log + control bar. */}
                 <Show when={agentAtoms().detailsOpenAtom[0]()}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
-                        <ActivityLogPanel entries={logLines} />
+                        {/* Drag-to-height drawer wrapping the log + terminal — the
+                            actual scrollable/resizable content. AgentControlBar
+                            stays outside it as a fixed-height footer.
+                            SPEC_LOG_TO_SHELL_PANE_2026_07_02.md §5.1. */}
+                        <ResizableDetailsDrawer
+                            blockId={model.blockId}
+                            persistedHeight={block()?.meta?.["term:shellheight"] as number | undefined}
+                        >
+                            <ActivityLogPanel entries={logLines} />
+                            {/* Phase 0 spike (SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md):
+                                real xterm+PTY terminal, spawned lazily on first
+                                drawer open via a headless term sub-block. */}
+                            <AgentShellSubblock
+                                parentBlockId={model.blockId}
+                                cwd={block()?.meta?.["cmd:cwd"] ?? ""}
+                                existingSubBlockId={block()?.meta?.["term:shellsubblockid"] as string | undefined}
+                                // Passed so the shell can cancel it out of its own
+                                // font-size math -- total decoupling: the pane's
+                                // zoom (this) and the shell's own zoom (term:zoom
+                                // on the sub-block) are independent controls, and
+                                // neither should visually leak into the other.
+                                agentPaneZoom={zoomFactor}
+                                onSubBlockCreated={(subBlockId) => {
+                                    void RpcApi.SetMetaCommand(TabRpcClient, {
+                                        oref: WOS.makeORef("block", model.blockId),
+                                        meta: { "term:shellsubblockid": subBlockId } as any,
+                                    });
+                                }}
+                            />
+                        </ResizableDetailsDrawer>
                         <AgentControlBar
                             blockId={model.blockId}
                             blockAtom={block}

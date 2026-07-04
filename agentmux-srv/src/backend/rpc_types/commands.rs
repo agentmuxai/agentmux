@@ -42,6 +42,15 @@ pub const COMMAND_SET_META: &str = "setmeta";
 pub const COMMAND_CONTROLLER_INPUT: &str = "controllerinput";
 pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
+/// Create a headless sub-block (no tab/layout entry) parented to an
+/// existing block — e.g. a `term`-view PTY embedded in an agent pane's
+/// details drawer. Spec: docs/specs/SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §4.
+pub const COMMAND_CREATE_SUB_BLOCK: &str = "createsubblock";
+/// Tear down a sub-block created via `createsubblock`: kills its
+/// controller first, then deletes the block row and unlinks it from
+/// its parent's `subblockids`.
+pub const COMMAND_DELETE_SUB_BLOCK: &str = "deletesubblock";
+
 /// Per-tool-call permission decision RPC. Frontend sends after the
 /// user clicks Allow / Deny in `AgentDecisionPanel`. Today the
 /// handler validates the payload and logs the decision (audit

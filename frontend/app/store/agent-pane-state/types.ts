@@ -215,10 +215,10 @@ export interface AgentPaneState {
      * a per-session ephemeral preference, same contract today's
      * AgentControlBar uses.
      *
-     * Auto-collapses on `TurnStart` (sending a message hides the
-     * panel so users don't send-blind into a still-open dropdown).
-     *
-     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
+     * SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4. Previously
+     * auto-collapsed on `TurnStart`; removed once the panel started
+     * hosting a live interactive shell (AgentShellSubblock) that needs
+     * to survive sending more messages, not close on every send.
      */
     detailsOpen: boolean;
     /**

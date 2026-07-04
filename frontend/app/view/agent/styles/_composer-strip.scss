@@ -1,19 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// AgentComposerStrip — slim 28-32px status row above the textarea.
-//   LEFT:  model select · effort select · Log button
-//   RIGHT: token stats · elapsed · process badge · perm pill · context text
+// AgentComposerStrip — slim 28-32px status row above the textarea, growing to
+// two rows at narrow widths (see the flex-wrap rules below).
+//   LEFT:  mode select · model select · effort select
+//   RIGHT: Shell toggle · token stats · elapsed · process badge · context text
+//          (floats right via margin-left:auto; wraps onto its own row below
+//          the controls zone once both zones no longer fit on one line)
 
 @use "../../../mixins.scss";
 
 .agent-composer-strip {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: var(--space-2);
+    row-gap: var(--space-1);
     min-height: 28px;
-    max-height: 32px;
     padding: var(--space-1) var(--space-2);
     font-size: 11px;
     line-height: 1.4;
@@ -116,21 +120,25 @@
     }
 }
 
+// Shell toggle — deliberately accent-colored at rest (not just when open) so
+// it reads as a distinct, always-reachable action rather than blending in
+// with the neutral Mode/Model/Effort pills to its left.
 .agent-composer-strip-log-btn {
-    background: transparent;
-    border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+    background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 35%, transparent);
     border-radius: 0;
-    color: var(--secondary-text-color);
+    color: var(--accent-color);
     font: inherit;
     font-size: 10px;
+    font-weight: 600;
     padding: 1px var(--space-1-5);
     cursor: default;
     outline: none;
     transition: color 0.08s, border-color 0.08s, background 0.08s;
 
     &:hover {
-        border-color: var(--border-color);
-        color: var(--main-text-color);
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
     }
 
     &:focus-visible {
@@ -139,19 +147,23 @@
     }
 
     &--active {
-        color: var(--accent-color);
-        border-color: color-mix(in srgb, var(--accent-color) 50%, transparent);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+        color: var(--main-bg-color);
+        border-color: var(--accent-color);
+        background: var(--accent-color);
     }
 }
 
 // ── Right zone ──────────────────────────────────────────────────────────────
+// margin-left:auto (not space-between on the parent) pins this zone to the
+// right edge whether it's sharing the row with the controls zone or has
+// wrapped onto its own row — see .agent-composer-strip's flex-wrap.
 
 .agent-composer-strip-right {
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
     flex-shrink: 0;
+    margin-left: auto;
 }
 
 .agent-composer-strip-stats {
@@ -223,4 +235,76 @@
     // SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02. Progressive
     // collapse — short/icon/combined forms — is the follow-up.)
     .agent-composer-strip-log-btn { font-size: 9px; padding: 1px 3px; }
+}
+
+// ── Resizable details drawer (ResizableDetailsDrawer.tsx) ──────────────────
+// Wraps ActivityLogPanel + AgentShellSubblock in a drag-to-height container.
+// AgentControlBar stays outside it as a fixed-height footer (see agent-view.tsx).
+
+.agent-composer-details-resizable {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.agent-composer-details-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: ns-resize;
+    background: transparent;
+    border-top: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+
+    &:hover,
+    &--active {
+        background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+        border-top-color: var(--accent-color);
+    }
+}
+
+.agent-composer-details-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+
+    // Cap the log to a SHARE OF THE DRAWER, not ActivityLogPanel's own
+    // viewport-relative 30vh (agent-activity-log:36-39) -- that assumes it's
+    // the only content in a tall pane. Here it shares a resizable drawer with
+    // the terminal below it; an oversized log combined with flex-shrink:0
+    // would squeeze the terminal toward zero height whenever 30vh of the
+    // window exceeds the drawer's own (often much smaller) height -- this
+    // was almost certainly why the terminal appeared to render over/under
+    // the log instead of the two being cleanly stacked, separately
+    // scrollable panels.
+    .agent-activity-log {
+        flex-shrink: 0;
+        max-height: 45%;
+        overflow: hidden;
+
+        .agent-activity-log-body {
+            max-height: 100%;
+        }
+    }
+}
+
+.agent-shell-subblock {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    // Containing block for xterm's own internal absolutely-positioned layers
+    // (viewport/screen), matching the real Terminal pane's .view-term
+    // { position: relative } (term.scss:20) -- defends against them
+    // resolving against some distant positioned ancestor instead.
+    position: relative;
+}
+
+.agent-shell-subblock-error {
+    padding: var(--space-2);
+    color: var(--error-color);
+    font-size: 11px;
+    font-family: var(--termfontfamily, monospace);
 }

@@ -390,8 +390,11 @@ export function update(
                         submittedAt: command.at,
                         pendingContent: "",
                     },
-                    // Auto-collapse the log panel on send — don't obscure the turn start.
-                    detailsOpen: false,
+                    // Previously auto-collapsed the details panel on send (don't
+                    // obscure the turn start). The panel now also hosts a live
+                    // interactive shell (AgentShellSubblock) whose whole point is
+                    // surviving across turns, so force-closing it on every message
+                    // would fight that — leave detailsOpen as the user set it.
                 },
                 events,
             };
