@@ -9,6 +9,9 @@ import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type 
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
+import { makeORef } from "@/app/store/wos";
+import { ObjectService } from "@/app/store/services";
+import { fireAndForget } from "@/util/util";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
@@ -209,9 +212,19 @@ interface AgentFooterProps {
      * AgentViewModel — used to register a textarea-backed
      * PaneVoiceHandle so the frame-header mic button can write
      * transcripts into the composer. Optional so tests / older
-     * callers that haven't been updated still type-check.
+     * callers that haven't been updated still type-check. Also read for
+     * the ghost-text next-prompt suggestion (term:next_prompt_suggestion —
+     * see docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md).
      */
     viewModel?: AgentViewModel;
+    /**
+     * Exposes an `isEmpty()` check on the (uncontrolled) textarea up to the
+     * parent, called once on mount. useNextPromptSuggestion.ts needs this at
+     * RPC-response time (which happens outside this component) to avoid
+     * writing a suggestion after the user has already started typing — see
+     * that hook's doc comment, guard 2.
+     */
+    isComposerEmptyRef?: (fn: () => boolean) => void;
 }
 
 /**
@@ -313,15 +326,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         return props.getCompletions(p);
     });
 
-    // Composer ghost text. While voice is listening AND this pane owns the
-    // session, switch to "Speak to <agent>…" so it's obvious transcription is
-    // live and routed here (the mic button also shows a red recording ring).
-    // Otherwise the normal "Send message to <agent>…" prompt. Reactive: reads
-    // the voice singleton's SignalAtoms so it flips the instant the mic toggles
-    // or retargets to another pane.
+    // Composer placeholder text, in precedence order:
+    //   1. Ghost-text next-prompt suggestion (term:next_prompt_suggestion) —
+    //      Haiku-predicted next message, accept with Tab (see handleKeyDown
+    //      below). Only meaningful while the box is empty, which is exactly
+    //      when a native `placeholder` attribute renders anyway.
+    //   2. "Speak to <agent>…" while voice is listening AND this pane owns
+    //      the session, so it's obvious transcription is live and routed here.
+    //   3. The default "Send message to <agent>…" prompt.
+    // Reactive: reads the block meta atom + the voice singleton's SignalAtoms
+    // so it flips the instant either changes.
     const voice = getVoiceSession();
     const placeholder = createMemo(() => {
         const vm = props.viewModel;
+        const suggestion = vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined;
+        if (suggestion) return suggestion;
         const listeningHere =
             !!vm && voice.isListening() && voice.currentTargetId() === vm.blockId;
         return listeningHere
@@ -391,6 +410,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
         markStart("agent-keystroke");
+        // First character typed into a previously-empty box dismisses any
+        // pending ghost-text suggestion — it must not silently reappear if
+        // the user later deletes back to empty. Length===1 check keeps this
+        // O(1) on every other keystroke (no-op past the first character).
+        // See docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md §4.3.
+        if (textareaRef?.value.length === 1) {
+            const vm = props.viewModel;
+            if (vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"]) {
+                fireAndForget(() =>
+                    ObjectService.UpdateObjectMeta(makeORef("block", vm.blockId), {
+                        "term:next_prompt_suggestion": null,
+                    } as any)
+                );
+            }
+        }
         updateAutocomplete();
         setIsBangCmd(textareaRef?.value.startsWith("!") ?? false);
         const cb = props.onTyping;
@@ -413,6 +447,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         });
         markEnd("agent-keystroke", "scheduled");
     };
+
+    // Expose an isEmpty() check on this uncontrolled textarea up to the
+    // parent — useNextPromptSuggestion.ts needs it at RPC-response time
+    // (outside this component) to avoid writing a stale ghost-text
+    // suggestion after the user already started typing.
+    onMount(() => {
+        props.isComposerEmptyRef?.(() => (textareaRef?.value.length ?? 0) === 0);
+    });
 
     // ── Voice input handle ───────────────────────────────────────────
     // Registers a textarea-backed PaneVoiceHandle on the AgentViewModel
@@ -506,6 +548,26 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // events without setting `isComposing`. Both checks are
         // load-bearing. See SPEC_INPUT_RESPONSIVENESS §6.2.
         if (e.isComposing || e.keyCode === 229) return;
+        // Ghost-text next-prompt suggestion: Tab accepts it into the real
+        // input, matching Claude Code CLI's own terminal UX (see
+        // docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md).
+        // Only reachable when the textarea is empty, which is also the only
+        // state the slash-autocomplete branch below can't be in (it requires
+        // a `/prefix`) — the two Tab handlers never compete.
+        if (e.key === "Tab" && textareaRef && textareaRef.value.length === 0) {
+            const vm = props.viewModel;
+            const suggestion = vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined;
+            if (suggestion) {
+                e.preventDefault();
+                setComposerValue(suggestion);
+                fireAndForget(() =>
+                    ObjectService.UpdateObjectMeta(makeORef("block", vm!.blockId), {
+                        "term:next_prompt_suggestion": null,
+                    } as any)
+                );
+                return;
+            }
+        }
         // Autocomplete keys take precedence when the dropdown is open
         // and has at least one match. Tab/Enter accept the selection;
         // arrows navigate; Esc dismisses without affecting text.

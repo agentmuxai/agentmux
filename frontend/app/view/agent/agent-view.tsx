@@ -47,6 +47,7 @@ import { useSubagentEvents } from "./hooks/useSubagentEvents";
 import { useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
 import { useBlockActivity } from "./hooks/useBlockActivity";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
+import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
 import { useAgentCommands } from "./hooks/useAgentCommands";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { PaneRow } from "./components/PaneRow";
@@ -449,6 +450,17 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         blockId: model.blockId,
         turnPhase: agentAtoms().turnPhaseAtom[0],
         getRootWidth: () => rootRef?.offsetWidth,
+    });
+
+    // Ghost-text next-prompt suggestion (composer). Populated by AgentFooter
+    // via its isComposerEmptyRef prop below. Defaults to "empty" if the
+    // footer hasn't mounted yet — matches the common case (no suggestion
+    // exists yet either, since one only appears after a completed turn).
+    let composerIsEmptyFn: (() => boolean) | null = null;
+    useNextPromptSuggestion({
+        blockId: model.blockId,
+        turnPhase: agentAtoms().turnPhaseAtom[0],
+        isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
     });
 
     // Subagent event subscriptions. See hooks/useSubagentEvents.ts.
@@ -1098,6 +1110,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onRecallLatestQueued={commands.recallLatestHeld}
                     getCompletions={commands.completions}
                     viewModel={model}
+                    isComposerEmptyRef={(fn) => { composerIsEmptyFn = fn; }}
                 />
             </div>
             {/* AgentActionBar (Add / Import / Export) lives in the

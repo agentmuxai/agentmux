@@ -34,6 +34,10 @@ export const SessionApi = {
         return client.rpcCall("session:activity_summary", data, opts);
     },
 
+    NextPromptSuggestionCommand(client: RpcClient, data: CommandNextPromptSuggestionData, opts?: RpcOpts): Promise<NextPromptSuggestionResult> {
+        return client.rpcCall("session:next_prompt_suggestion", data, opts);
+    },
+
     SessionArchiveCommand(client: RpcClient, data: CommandSessionArchiveData, opts?: RpcOpts): Promise<SessionArchiveResult> {
         return client.rpcCall("session:archive", data, opts);
     },
