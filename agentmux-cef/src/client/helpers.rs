@@ -45,11 +45,16 @@ pub(crate) fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Synchronously tell the backend to close a window's workspace/tabs/shells.
+/// Tell the backend to close a window's workspace/tabs/shells.
 ///
 /// Uses a raw TCP connection so no async runtime or extra crate is needed.
 /// Called from a background thread in `on_before_close` so the CEF UI thread
-/// is not blocked. Fire-and-forget: we write the request and don't read the response.
+/// is not blocked. No longer fire-and-forget as of
+/// docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md: the
+/// response is read and a non-200 status, write failure, or connect
+/// failure is logged via `tracing::error!` — still asynchronous from the
+/// caller's perspective (this whole function runs off the UI thread), but
+/// failures are no longer silently swallowed.
 pub(super) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
     use std::io::Write;
 
