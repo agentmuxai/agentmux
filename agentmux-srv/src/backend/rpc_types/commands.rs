@@ -352,6 +352,11 @@ pub const COMMAND_SESSION_EXPORT: &str = "session:export";
 // routed through the Ambient Model Call gateway, crate::ambient)
 pub const COMMAND_SESSION_ACTIVITY_SUMMARY: &str = "session:activity_summary";
 
+// Per-turn ghost-text next-prompt suggestion (Haiku-powered, writes
+// term:next_prompt_suggestion; routed through the Ambient Model Call gateway,
+// crate::ambient). See docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md.
+pub const COMMAND_SESSION_NEXT_PROMPT_SUGGESTION: &str = "session:next_prompt_suggestion";
+
 // Option E (PR 1 of 2) — agent-anchored session zones.
 // A session zone is bound to the *agent definition* (`definition_id`),
 // not the identity bundle. Every block of the same agent reads/writes
