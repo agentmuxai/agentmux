@@ -630,11 +630,12 @@
         }
 
         .agent-bash-output {
+            // No max-height/overflow here — the enclosing
+            // `.agent-tool-overlay-log` is the single scroll container
+            // (bounded by `.agent-tool-panel`'s 50vh). A second inner
+            // scrollbar here produced the double-scrollbar bug.
             padding: 3px var(--space-1-5);
             margin: 0;
-            max-height: 400px;
-            overflow-y: auto;
-            overscroll-behavior: contain;
 
             &.has-error {
                 border-left: 2px solid var(--error-color);
@@ -1114,12 +1115,11 @@
         }
 
         .agent-tool-read-content {
+            // No max-height/overflow here — see .agent-bash-output above;
+            // the overlay-log is the single scroll container.
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
             border-radius: 0;
-            max-height: 400px;
-            overflow-y: auto;
-            overscroll-behavior: contain;
             margin: 0;
             // Shiki <pre> override: ensure our bg wins
             &[style*="background"] {
@@ -1172,24 +1172,20 @@
             border: 1px solid var(--border-color);
             padding: var(--space-1) var(--space-1-5);
             border-radius: 0;
-            max-height: 400px;
-            overflow-y: auto;
-            overscroll-behavior: contain;
             margin: 0;
             font-size: 11px;
         }
     }
 
     // === Generic Tool ===
+    // No max-height/overflow on any of these — see .agent-bash-output
+    // above; the overlay-log is the single scroll container.
     .agent-tool-generic,
     .agent-tool-task-info {
         background: var(--main-bg-color);
         border: 1px solid var(--border-color);
         padding: var(--space-1) var(--space-1-5);
         border-radius: 0;
-        max-height: 400px;
-        overflow-y: auto;
-        overscroll-behavior: contain;
         margin: 0;
         font-size: 11px;
     }
@@ -1227,13 +1223,11 @@
         }
 
         .agent-tool-compact-json {
+            // No max-height/overflow here — see .agent-bash-output above.
             background: var(--main-bg-color);
             border: 1px solid var(--border-color);
             padding: var(--space-1) var(--space-1-5);
             border-radius: 0;
-            max-height: 400px;
-            overflow-y: auto;
-            overscroll-behavior: contain;
             margin: var(--space-1) 0 0 0;
             font-size: 11px;
             white-space: pre-wrap;
@@ -1245,10 +1239,10 @@
 // Record table (RecordTable.tsx) — a top-level array of flat records renders as
 // a table instead of a JSON blob (unknown-tool path).
 .agent-tool-record-table {
+    // No max-height/overflow here — the enclosing `.agent-tool-overlay-log`
+    // is the single scroll container (bounded by `.agent-tool-panel`'s
+    // 50vh). A second inner scrollbar here produced the double-scrollbar bug.
     margin: var(--space-1) 0 0 0;
-    max-height: 400px;
-    overflow: auto;
-    overscroll-behavior: contain;
 
     table {
         border-collapse: collapse;
@@ -1285,13 +1279,11 @@
 // Web-search result cards (SearchResults.tsx) — replaces the JSON blob for
 // WebSearch-shaped results. Each card opens its URL in the system browser.
 .agent-tool-search-results {
+    // No max-height/overflow here — see .agent-tool-record-table above.
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
     margin: var(--space-1) 0 0 0;
-    max-height: 480px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
 
     .agent-search-header {
         display: flex;
@@ -1476,13 +1468,11 @@
     }
 
     .agent-fetch-content {
+        // No max-height/overflow here — see .agent-tool-record-table above.
         white-space: pre-wrap;
         word-break: break-word;
         font-size: 11px;
         line-height: 1.5;
-        max-height: calc(100vh - 240px);
-        overflow-y: auto;
-        overscroll-behavior: contain;
         padding: var(--space-0-5);
         border-radius: var(--border-radius-sm);
         background: var(--secondary-bg-color);
@@ -1545,14 +1535,12 @@
 // capped panel rendering AnsiLine rows. Replaces the JSON blob for results that
 // carry a terminal string body (stdout/output/content).
 .agent-terminal-output {
+    // No max-height/overflow here — see .agent-tool-record-table above.
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 0;
     padding: var(--space-1) var(--space-1-5);
     margin: var(--space-1) 0 0 0;
-    max-height: 400px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
     font-family: var(--fixed-font, monospace);
     font-size: 11px;
     line-height: 1.45;
