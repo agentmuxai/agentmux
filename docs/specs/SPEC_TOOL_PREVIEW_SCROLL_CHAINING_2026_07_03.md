@@ -154,16 +154,18 @@ unnecessary given CEF's fixed, modern Chromium.
 ## Edits (Phase 1)
 
 1. `frontend/app/view/agent/styles/_document-nodes.scss` — add
-   `overscroll-behavior: contain;` to the ~7 selectors listed above.
+   `overscroll-behavior: contain;` to the ~10 nested scroll-box selectors listed above.
 2. `frontend/app/view/agent/styles/_document.scss` — add to `.agent-document`.
-3. `frontend/app/view/agent/components/PaneRegions.scss` — add to `.pane-region--stream`.
+3. `frontend/app/view/agent/components/PaneRegions.scss` — **skipped**: `.pane-region--stream`
+   is `overflow: hidden`, not an actual scroll container, so the property would be an inert
+   no-op there (see Risks table below).
 4. No `.tsx`/`.ts` changes — Phase 1 is pure SCSS.
 
 ## Risks & edge cases
 
 | Risk | Mitigation |
 |---|---|
-| `overscroll-behavior` set on an element that isn't a real scroll container has no effect (silently) | Verified against the actual `overflow-y: auto` + `max-height` selectors from the codebase audit above — all target elements are real scroll containers. |
+| `overscroll-behavior` set on an element that isn't a real scroll container has no effect (silently) | Verified against the actual `overflow-y`/`overflow: auto` + `max-height` selectors before applying it to each target — this is exactly why `.pane-region--stream` (`overflow: hidden`, not a scroll container) was excluded rather than "fixed" alongside the others. |
 | Interaction with `ToolBlock.tsx`'s Ctrl+wheel zoom handler | That handler only branches on `e.ctrlKey`; unrelated to normal scroll and untouched by this change — confirm with a manual Ctrl+scroll test post-change regardless. |
 | Interaction with `AgentDocumentVirtualList`'s stick-to-bottom / near-top pagination / scroll-driven tool-collapse logic (`PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`) | `contain` on inner boxes prevents the outer `handleScroll` from firing during inner-box scrolling — verify live that pagination/collapse still trigger correctly when scrolling the *outer* pane itself (unaffected path) and don't fire spuriously while scrolling *inside* a tool preview (should now be impossible, which is the fix). |
 | Nested-within-nested scroll (a scroll box inside `.agent-tool-overlay-log`, which is itself inside `.agent-document`) | Each level's own `contain` stops the chain at that level independently — no compounding needed; three independently-contained levels behave correctly. |
