@@ -120,6 +120,19 @@ static CLAUDE: ProviderConfig = ProviderConfig {
         "--verbose",
         "--include-partial-messages",
         "--dangerously-skip-permissions",
+        // Moves per-machine sections (cwd, env info, memory paths, git status)
+        // out of the system prompt into the first user message, so the system
+        // prompt stays byte-identical across agents/machines and the 1hr
+        // prompt cache (docs/analysis/TOKEN_TAX_ANALYSIS_2026_06_19.md) isn't
+        // invalidated by per-instance dynamic content. No-op if the default
+        // system prompt is overridden — not guaranteed here, since
+        // `agent.provider_flags` (app_api/agent_open.rs) is a free-form
+        // user-configurable string appended after these args; a user-set
+        // `--system-prompt` there would silently no-op this flag. Harmless
+        // either way (that's the flag's own documented ignore-if-overridden
+        // behavior), just not something this hardcoded default can prevent.
+        // reagent P2 on PR #1964.
+        "--exclude-dynamic-system-prompt-sections",
     ],
     persistent_launch_args: Some(&[
         "--input-format",
@@ -128,6 +141,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
         "stream-json",
         "--verbose",
         "--include-partial-messages",
+        "--exclude-dynamic-system-prompt-sections",
         // Enable the control protocol so the sidecar can answer can_use_tool /
         // AskUserQuestion. Replaces --dangerously-skip-permissions (which bypasses it).
         "--permission-prompt-tool",
