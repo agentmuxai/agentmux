@@ -514,7 +514,24 @@ impl BrowserPaneManager {
     /// so this is a no-op in that case — but `on_before_close` may still
     /// fire async as Chromium's refcount hits zero, and `DrainBrowserPaneByLabel`
     /// is idempotent so the callback is safe.
+    ///
+    /// Also destroys the app-owned wrapper HWND (`browser_pane::wrapper`) if
+    /// one is still registered for this label — reagent P1 on PR #1957: if
+    /// CEF's `OnBeforeClose` fires WITHOUT `close()` having run first (a
+    /// crash, or something else calling `close_browser()` directly on this
+    /// pane), CEF tears down its own child HWND on its own initiative, but
+    /// that never touches OUR wrapper (destroying a child never destroys its
+    /// parent) — the wrapper would otherwise survive as a permanently
+    /// orphaned, childless window with nothing left to ever clean it up,
+    /// since the only other destroy site is `close_with` in the explicit
+    /// path. `take_wrapper_hwnd` is a no-op `None` when `close()` already
+    /// destroyed it, keeping this idempotent like the rest of the function.
     pub fn drain_closed_label(&self, state: &Arc<AppState>, label: &str) {
+        #[cfg(target_os = "windows")]
+        if let Some(wrapper_hwnd) = crate::browser_pane::wrapper::take_wrapper_hwnd(label) {
+            crate::browser_pane::wrapper::destroy_wrapper_hwnd(wrapper_hwnd as *mut std::ffi::c_void);
+        }
+
         let out = state.host_dispatch(
             crate::reducer::HostCommand::DrainBrowserPaneByLabel {
                 label: label.to_string(),
