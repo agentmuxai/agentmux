@@ -80,6 +80,11 @@
 .agent-launch-modal-hint {
     font-size: 11px;
     color: color-mix(in srgb, var(--secondary-text-color) 70%, transparent);
+
+    &--warn {
+        display: block;
+        color: var(--warning-color, #f59e0b);
+    }
 }
 
 .agent-launch-modal-runtime {

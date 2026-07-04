@@ -29,6 +29,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { AgentCreateFromTemplateModalPanel } from "./AgentCreateFromTemplateModal";
+import { resetCapabilities } from "@/app/store/toolchain-capabilities";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
@@ -54,6 +55,11 @@ const template: AgentDefinition = {
 
 beforeEach(async () => {
     vi.clearAllMocks();
+    // toolchain-capabilities is a module-level singleton shared across every
+    // test in this file (and every real consumer in the app) — reset it so
+    // one test's mocked ContainerRuntimeAvailableCommand result can't leak
+    // into the next via the shared cache.
+    resetCapabilities();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
     vi.mocked(RpcApi.ListIdentityBundlesCommand).mockResolvedValue([
         { id: "id-work", name: "Work", description: "", is_blank: false } as any,
@@ -61,7 +67,9 @@ beforeEach(async () => {
     vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([
         { id: "mem-notes", name: "Notes", is_blank: false } as any,
     ]);
-    // Default: Docker daemon not reachable → host-only.
+    // Default: Docker daemon not reachable → host-only. Consumed via the
+    // shared toolchain-capabilities store, not called directly by the
+    // component anymore — see docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: false });
 });
 

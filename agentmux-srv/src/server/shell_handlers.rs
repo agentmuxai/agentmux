@@ -83,7 +83,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // ── Container agents ─────────────────────────────────────────
                 if agent_mode == "container" {
-                    let cm = cm_opt.as_deref().ok_or_else(|| {
+                    let cm = cm_opt.get().await.ok_or_else(|| {
                         "shellexec: Docker not available on this host; \
                          cannot exec in container agent".to_string()
                     })?;

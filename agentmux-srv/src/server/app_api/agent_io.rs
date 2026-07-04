@@ -220,7 +220,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // secrets in argv). Host agent branch: regular CLI subprocess.
                     let agent_mode = obj::meta_get_string(&block.meta, "agentMode", "host");
                     if agent_mode == "container" {
-                        let cm = container_manager.as_deref()
+                        let cm = container_manager.get().await
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
                         let container_image = {
                             let img = obj::meta_get_string(&block.meta, "agent:container_image", "");
