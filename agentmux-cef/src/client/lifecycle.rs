@@ -16,6 +16,36 @@ use super::install_main_window_floater_cascade_hook;
 #[cfg(target_os = "windows")]
 use super::wndproc::{install_top_level_focus_restore_hook, set_window_icon, skip_taskbar};
 
+/// Bounded retry window for the `backend_window_id` shadow-map lookup in
+/// `on_before_close` — see docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
+/// 5 attempts * 200ms comfortably covers the host->launcher->host
+/// `register_backend_window` round trip observed in the 2026-07-04
+/// pagefile-test session (windows promoted ~2s apart, no visible lag),
+/// while staying well clear of user-perceived latency for a window that's
+/// already closing.
+const BACKEND_WINDOW_ID_RETRY_ATTEMPTS: u32 = 5;
+const BACKEND_WINDOW_ID_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Poll `lookup` up to `max_attempts` times, sleeping `delay` between each
+/// attempt (via the injected `sleep` so tests don't have to wait in real
+/// time), returning the first `Some` result or `None` if every attempt
+/// misses. Extracted from `on_before_close`'s backend_window_id retry so
+/// the race-closing behavior is unit-testable without a real CEF `Browser`.
+fn retry_backend_window_id_lookup(
+    max_attempts: u32,
+    delay: std::time::Duration,
+    mut lookup: impl FnMut() -> Option<String>,
+    sleep: impl Fn(std::time::Duration),
+) -> Option<String> {
+    for _ in 0..max_attempts {
+        sleep(delay);
+        if let Some(window_id) = lookup() {
+            return Some(window_id);
+        }
+    }
+    None
+}
+
 impl AgentMuxHandler {
     pub(crate) fn on_after_created(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
@@ -587,12 +617,22 @@ impl AgentMuxHandler {
 
         // Phase B.5 (window_id_map step d) — host no longer mutates
         // `window_id_map`. The launcher's `state.backend_window_ids`
-        // (B.5 step a) is the sole authority; we look up the wid
-        // via the shadow-first helper before notifying the launcher
-        // to drop it. The wid lookup at close time is safe even
-        // without the host fallback because the frontend's original
-        // `register_backend_window` ran long before close — shadow
-        // has been populated for the entire window lifetime.
+        // (B.5 step a) is the sole authority; we look up the wid via
+        // the shadow-first helper before notifying the launcher to
+        // drop it.
+        //
+        // The immediate lookup below is a best-effort first try, kept
+        // for the dlog trace and the common case. It is NOT assumed
+        // reliable on its own: a window promoted and closed in rapid
+        // succession (confirmed in the 2026-07-04 pagefile-test
+        // session, docs/retro/retro-window-lifecycle-leak-2026-07-04.md)
+        // can reach `on_before_close` before the host→launcher→host
+        // `register_backend_window` round trip has populated the
+        // shadow map. When the immediate check misses, the retry
+        // below — on the same background thread `backend_close_window`
+        // already runs on, never the UI thread — gives that race a
+        // bounded chance to resolve before we give up. See
+        // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
         let backend_window_id = label.as_deref().and_then(|lbl| {
             let wid = self.state.backend_window_id(lbl);
             dlog(&format!("backend_window_id({:?}) => {:?}", lbl, wid));
@@ -896,6 +936,48 @@ impl AgentMuxHandler {
                 std::thread::spawn(move || {
                     backend_close_window(&web_endpoint, &auth_key, &window_id);
                 });
+            } else if let Some(lbl) = label.clone() {
+                // The immediate shadow lookup missed. This is expected and
+                // permanent for pre-promote pool-window churn (never had a
+                // backend_window_id, never will) — but it's also exactly
+                // what happens when a window is promoted and closed fast
+                // enough that the host->launcher->host register_backend_window
+                // round trip hasn't landed yet, confirmed in the 2026-07-04
+                // pagefile-test session (docs/retro/retro-window-lifecycle-leak-2026-07-04.md).
+                // Retry on this same background thread (never the UI thread)
+                // for a bounded window before giving up — closes that race
+                // without a larger reconciliation mechanism. See
+                // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
+                let state = self.state.clone();
+                let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
+                let auth_key = self.state.auth_key.lock().clone();
+                std::thread::spawn(move || {
+                    let sleep_fn = |d: std::time::Duration| std::thread::sleep(d);
+                    match retry_backend_window_id_lookup(
+                        BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
+                        BACKEND_WINDOW_ID_RETRY_DELAY,
+                        || state.backend_window_id(&lbl),
+                        sleep_fn,
+                    ) {
+                        Some(window_id) => {
+                            dlog(&format!(
+                                "backend_window_id({:?}) resolved on retry — spawning backend_close_window",
+                                lbl
+                            ));
+                            backend_close_window(&web_endpoint, &auth_key, &window_id);
+                        }
+                        None => {
+                            let warn = format!(
+                                "[on_before_close] no backend window ID registered for label={:?} after {} retries ({}ms) — shells may orphan",
+                                lbl,
+                                BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
+                                BACKEND_WINDOW_ID_RETRY_ATTEMPTS * BACKEND_WINDOW_ID_RETRY_DELAY.as_millis() as u32
+                            );
+                            dlog(&warn);
+                            tracing::warn!("{}", warn);
+                        }
+                    }
+                });
             } else {
                 let warn = format!(
                     "[on_before_close] no backend window ID registered for label={:?} — shells may orphan",
@@ -911,5 +993,74 @@ impl AgentMuxHandler {
             "[trace] on_before_close EXIT label={:?} self.browser_list.len()={}",
             label, self.browser_list.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod backend_window_id_retry_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    // No-op sleep — these tests exercise attempt counting and result
+    // selection, not real timing, so they run instantly.
+    fn no_sleep(_d: Duration) {}
+
+    #[test]
+    fn resolves_on_a_later_attempt_within_the_budget() {
+        // Simulates the confirmed race: the shadow map is empty on the
+        // first couple of checks (registration still in flight) and then
+        // populates — exactly what should now recover instead of orphaning
+        // the window, per docs/retro/retro-window-lifecycle-leak-2026-07-04.md.
+        let calls = RefCell::new(0u32);
+        let result = retry_backend_window_id_lookup(5, Duration::from_millis(1), || {
+            *calls.borrow_mut() += 1;
+            if *calls.borrow() >= 3 {
+                Some("wid-123".to_string())
+            } else {
+                None
+            }
+        }, no_sleep);
+        assert_eq!(result, Some("wid-123".to_string()));
+        assert_eq!(*calls.borrow(), 3, "should stop retrying as soon as it resolves");
+    }
+
+    #[test]
+    fn resolves_on_the_very_last_attempt() {
+        let calls = RefCell::new(0u32);
+        let result = retry_backend_window_id_lookup(5, Duration::from_millis(1), || {
+            *calls.borrow_mut() += 1;
+            if *calls.borrow() == 5 {
+                Some("wid-last".to_string())
+            } else {
+                None
+            }
+        }, no_sleep);
+        assert_eq!(result, Some("wid-last".to_string()));
+    }
+
+    #[test]
+    fn gives_up_after_exhausting_all_attempts() {
+        // The permanent, benign case (pre-promote pool-window churn):
+        // never had a backend_window_id and never will. Must still give
+        // up cleanly after exactly `max_attempts` tries, not loop forever.
+        let calls = RefCell::new(0u32);
+        let result = retry_backend_window_id_lookup(5, Duration::from_millis(1), || {
+            *calls.borrow_mut() += 1;
+            None::<String>
+        }, no_sleep);
+        assert_eq!(result, None);
+        assert_eq!(*calls.borrow(), 5);
+    }
+
+    #[test]
+    fn resolves_immediately_without_needless_extra_attempts() {
+        let calls = RefCell::new(0u32);
+        let result = retry_backend_window_id_lookup(5, Duration::from_millis(1), || {
+            *calls.borrow_mut() += 1;
+            Some("wid-fast".to_string())
+        }, no_sleep);
+        assert_eq!(result, Some("wid-fast".to_string()));
+        assert_eq!(*calls.borrow(), 1);
     }
 }
