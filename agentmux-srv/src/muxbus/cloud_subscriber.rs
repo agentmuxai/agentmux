@@ -8,7 +8,12 @@
 //!   1. Opens wss://muxbus-ws.agentmux.ai with the bearer token.
 //!   2. Listens for { type: "inject_available" } broadcast wake signals (zero metadata).
 //!   3. On each signal, polls REST GET /reactive/pending/:id for every locally-registered agent.
-//!   4. Delivers via ReactiveHandler; ACKs successful deliveries via REST POST /reactive/ack.
+//!   4. Claims all pending injections via REST POST /reactive/ack (atomic
+//!      pending->delivered transition server-side) *before* delivering — only
+//!      ids this call actually won the claim on get delivered via
+//!      ReactiveHandler. A claimed injection that fails local delivery is
+//!      released back to pending via REST POST /reactive/release so it's
+//!      retried, rather than silently dropped.
 //!   5. Reconnects with exponential back-off on any disconnect.
 //!
 //! The server broadcasts to ALL connected sidecars on every injection, so a subscriber
@@ -475,6 +480,18 @@ async fn handle_server_msg(
                         continue; // nothing claimed — retried on the next wake/poll
                     }
                 };
+                if claim_resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+                    // Token expired during session — reconnect to refresh.
+                    return Err("reconnect:token_expired".to_string());
+                }
+                if !claim_resp.status().is_success() {
+                    tracing::warn!(
+                        status = %claim_resp.status(),
+                        agent_id = %agent_id,
+                        "cloud_subscriber: claim request non-2xx"
+                    );
+                    continue; // nothing claimed — retried on the next wake/poll
+                }
                 let claimed: AckResp = match claim_resp.json().await {
                     Ok(b) => b,
                     Err(e) => {
@@ -518,7 +535,7 @@ async fn handle_server_msg(
                         // it's retried, instead of silently dropping it now
                         // that claiming already marked it "delivered".
                         let release_url = format!("{}/reactive/release", MUXBUS_REST_URL);
-                        let _ = http
+                        match http
                             .post(&release_url)
                             .header("Authorization", format!("Bearer {}", token))
                             .header("X-Agent-ID", agent_id)
@@ -527,7 +544,29 @@ async fn handle_server_msg(
                                 "delivered_at": delivered_at,
                             }))
                             .send()
-                            .await;
+                            .await
+                        {
+                            Ok(r) if r.status().is_success() => {}
+                            Ok(r) => {
+                                // Claim is stranded as "delivered" with no local
+                                // delivery and no retry until this is visible —
+                                // log loudly rather than discarding silently.
+                                tracing::warn!(
+                                    injection_id = %inj.id,
+                                    agent_id = %agent_id,
+                                    status = %r.status(),
+                                    "cloud_subscriber: release request non-2xx — injection stranded as delivered, message lost"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    injection_id = %inj.id,
+                                    agent_id = %agent_id,
+                                    error = %e,
+                                    "cloud_subscriber: release request failed — injection stranded as delivered, message lost"
+                                );
+                            }
+                        }
                     }
                 }
             }
