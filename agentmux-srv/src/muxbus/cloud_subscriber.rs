@@ -8,7 +8,12 @@
 //!   1. Opens wss://muxbus-ws.agentmux.ai with the bearer token.
 //!   2. Listens for { type: "inject_available" } broadcast wake signals (zero metadata).
 //!   3. On each signal, polls REST GET /reactive/pending/:id for every locally-registered agent.
-//!   4. Delivers via ReactiveHandler; ACKs successful deliveries via REST POST /reactive/ack.
+//!   4. Claims all pending injections via REST POST /reactive/ack (atomic
+//!      pending->delivered transition server-side) *before* delivering — only
+//!      ids this call actually won the claim on get delivered via
+//!      ReactiveHandler. A claimed injection that fails local delivery is
+//!      released back to pending via REST POST /reactive/release so it's
+//!      retried, rather than silently dropped.
 //!   5. Reconnects with exponential back-off on any disconnect.
 //!
 //! The server broadcasts to ALL connected sidecars on every injection, so a subscriber
@@ -400,6 +405,11 @@ async fn handle_server_msg(
                 message: String,
                 priority: Option<String>,
             }
+            #[derive(Deserialize)]
+            struct AckResp {
+                acknowledged: Vec<String>,
+                delivered_at: String,
+            }
 
             let handler = get_global_handler();
             for agent_id in &registered {
@@ -439,8 +449,87 @@ async fn handle_server_msg(
                     }
                 };
 
-                let mut ack_ids: Vec<String> = Vec::new();
+                if body.injections.is_empty() {
+                    continue;
+                }
+
+                // Claim BEFORE delivering, not after: this is what prevents
+                // double-delivery when the same agent_id is concurrently
+                // registered by another AgentMux channel on this host (an
+                // intentionally-supported "two seats" workflow — see
+                // docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md).
+                // /reactive/ack now performs an atomic pending->delivered
+                // transition server-side; only injection ids that come back
+                // in `acknowledged` were actually won by this call and get
+                // delivered locally below. A previous version of this code
+                // delivered first and only acked successes afterward, which
+                // let two concurrent pollers both deliver the same injection.
+                let all_ids: Vec<String> = body.injections.iter().map(|inj| inj.id.clone()).collect();
+                let ack_url = format!("{}/reactive/ack", MUXBUS_REST_URL);
+                let claim_resp = match http
+                    .post(&ack_url)
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("X-Agent-ID", agent_id)
+                    .json(&serde_json::json!({ "injection_ids": all_ids }))
+                    .send()
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: claim request failed");
+                        continue; // nothing claimed — retried on the next wake/poll
+                    }
+                };
+                if claim_resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+                    // Token expired during session — reconnect to refresh.
+                    return Err("reconnect:token_expired".to_string());
+                }
+                if !claim_resp.status().is_success() {
+                    tracing::warn!(
+                        status = %claim_resp.status(),
+                        agent_id = %agent_id,
+                        "cloud_subscriber: claim request non-2xx"
+                    );
+                    continue; // nothing claimed — retried on the next wake/poll
+                }
+                let claimed: AckResp = match claim_resp.json().await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        // The server processed the claim (status was 2xx) before this
+                        // body failed to parse — some subset of `all_ids` may now be
+                        // flipped to "delivered" server-side with no local delivery
+                        // and no way for us to release them, since we don't know
+                        // which ids succeeded or their delivered_at stamp (required
+                        // by /reactive/release). We deliberately do NOT guess (e.g.
+                        // via /reactive/status) and release whatever looks delivered:
+                        // some of `all_ids` may have been legitimately claimed and
+                        // delivered by a *different* concurrent poller (another
+                        // channel/seat racing for the same agent_id), and blindly
+                        // releasing those would reintroduce the exact duplicate-
+                        // delivery bug this change exists to fix. Logging every
+                        // affected id loudly is the safe tradeoff: rare silent
+                        // message loss here, never a resurrected duplicate.
+                        tracing::error!(
+                            agent_id = %agent_id,
+                            injection_ids = ?all_ids,
+                            error = %e,
+                            "cloud_subscriber: parse claim response failed — these injections may be claimed server-side with no local delivery and cannot be safely auto-recovered"
+                        );
+                        continue;
+                    }
+                };
+                let delivered_at = claimed.delivered_at;
+                let claimed_ids: std::collections::HashSet<String> =
+                    claimed.acknowledged.into_iter().collect();
+
                 for inj in &body.injections {
+                    if !claimed_ids.contains(&inj.id) {
+                        // Another concurrent poller (this account's other
+                        // channel/seat) already won this claim — expected
+                        // under the "two seats" workflow, not an error.
+                        continue;
+                    }
+
                     let req = InjectionRequest {
                         target_agent: agent_id.clone(),
                         message: inj.message.clone(),
@@ -458,22 +547,46 @@ async fn handle_server_msg(
                         success = delivery.success,
                         "cloud_subscriber: delivered injection"
                     );
-                    // Only ACK successfully delivered injections — failed deliveries stay
-                    // in the queue so the cloud can retry (e.g. rate-limited or agent not ready).
-                    if delivery.success {
-                        ack_ids.push(inj.id.clone());
-                    }
-                }
 
-                if !ack_ids.is_empty() {
-                    let ack_url = format!("{}/reactive/ack", MUXBUS_REST_URL);
-                    let _ = http
-                        .post(&ack_url)
-                        .header("Authorization", format!("Bearer {}", token))
-                        .header("X-Agent-ID", agent_id)
-                        .json(&serde_json::json!({ "injection_ids": ack_ids }))
-                        .send()
-                        .await;
+                    if !delivery.success {
+                        // We hold the claim but local delivery failed (e.g.
+                        // agent not ready) — release it back to pending so
+                        // it's retried, instead of silently dropping it now
+                        // that claiming already marked it "delivered".
+                        let release_url = format!("{}/reactive/release", MUXBUS_REST_URL);
+                        match http
+                            .post(&release_url)
+                            .header("Authorization", format!("Bearer {}", token))
+                            .header("X-Agent-ID", agent_id)
+                            .json(&serde_json::json!({
+                                "injection_id": inj.id,
+                                "delivered_at": delivered_at,
+                            }))
+                            .send()
+                            .await
+                        {
+                            Ok(r) if r.status().is_success() => {}
+                            Ok(r) => {
+                                // Claim is stranded as "delivered" with no local
+                                // delivery and no retry until this is visible —
+                                // log loudly rather than discarding silently.
+                                tracing::warn!(
+                                    injection_id = %inj.id,
+                                    agent_id = %agent_id,
+                                    status = %r.status(),
+                                    "cloud_subscriber: release request non-2xx — injection stranded as delivered, message lost"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    injection_id = %inj.id,
+                                    agent_id = %agent_id,
+                                    error = %e,
+                                    "cloud_subscriber: release request failed — injection stranded as delivered, message lost"
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
