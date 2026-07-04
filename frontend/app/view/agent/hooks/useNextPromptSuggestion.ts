@@ -22,7 +22,7 @@
  *
  * Unlike the read-only activity summary (which persists across turns), a
  * stale suggestion here is a correctness bug, not a cosmetic one — it can
- * put words in the user's mouth. Three independent guards:
+ * put words in the user's mouth. Four independent guards:
  *   1. Cleared the instant a new turn starts (`Submitting`) — a suggestion
  *      from turn N is meaningless (and misleading) once turn N+1 has begun.
  *      `term:ambient_summary` deliberately persists across turns; this key
@@ -38,6 +38,13 @@
  *      *after* the user already typed something: without this check, a late
  *      response could silently overwrite whatever cleared the suggestion
  *      when typing started (see AgentFooter.tsx's handleInput).
+ *   4. Cleared on session end (process exit) — but NOT by this hook.
+ *      useBlockActivity.ts's `clearActivity` owns that transition (it
+ *      already clears `term:osc_title`/`term:ambient_summary` there) and
+ *      clears this key too, so a suggestion from a finished session can't
+ *      persist into a brand-new session started in the same pane. Don't
+ *      duplicate that listener here — one `ControllerStatus` subscription
+ *      per pane for this purpose is enough.
  */
 
 import { createEffect, on, type Accessor } from "solid-js";
