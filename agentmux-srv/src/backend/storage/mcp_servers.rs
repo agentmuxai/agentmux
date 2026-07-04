@@ -25,26 +25,44 @@ pub struct McpServer {
     pub updated_at: i64,
 }
 
+/// `mcp_server_list`'s response shape: the server plus whether the requesting
+/// agent specifically holds a `db_agent_mcp_ref` row for it. A global server
+/// is always visible to every agent (see the query below), but `is_global`
+/// alone can't tell the UI whether *this* agent has bound it — without
+/// `bound_to_agent`, bind/unbind in the per-agent modal has no way to render
+/// as a stateful toggle (see docs/specs, "bound to me" gap tracked in #1960).
+#[derive(Debug, Clone, Serialize)]
+pub struct McpServerListItem {
+    #[serde(flatten)]
+    pub server: McpServer,
+    pub bound_to_agent: bool,
+}
+
 impl Store {
-    /// List all MCP servers visible to an agent: own (referenced) + global.
-    pub fn mcp_server_list(&self, agent_id: &str) -> Result<Vec<McpServer>, StoreError> {
+    /// List all MCP servers visible to an agent: own (referenced) + global,
+    /// each annotated with whether this specific agent holds the bind ref.
+    pub fn mcp_server_list(&self, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, transport, config, is_global, created_at, updated_at
-             FROM db_mcp_servers
-             WHERE is_global = 1
-                OR id IN (SELECT mcp_id FROM db_agent_mcp_ref WHERE agent_id = ?1)
-             ORDER BY is_global DESC, updated_at DESC",
+            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
+                    EXISTS(SELECT 1 FROM db_agent_mcp_ref r WHERE r.mcp_id = s.id AND r.agent_id = ?1) AS bound_to_agent
+             FROM db_mcp_servers s
+             WHERE s.is_global = 1
+                OR s.id IN (SELECT mcp_id FROM db_agent_mcp_ref WHERE agent_id = ?1)
+             ORDER BY s.is_global DESC, s.updated_at DESC",
         )?;
         let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(McpServer {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                transport: row.get(2)?,
-                config: row.get(3)?,
-                is_global: row.get::<_, i64>(4)? != 0,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+            Ok(McpServerListItem {
+                server: McpServer {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    transport: row.get(2)?,
+                    config: row.get(3)?,
+                    is_global: row.get::<_, i64>(4)? != 0,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                },
+                bound_to_agent: row.get::<_, i64>(7)? != 0,
             })
         })?;
         let mut out = Vec::new();

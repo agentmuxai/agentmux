@@ -3,9 +3,9 @@
 
 /**
  * AgentMcpModal — the "MCP Servers" tab body inside AgentSetupModal.
- * List/create/edit/delete for this agent's own MCP servers, plus
- * bind/unbind for global ones. See AgentMcpModel's doc comment for the
- * bound-status caveat.
+ * List/create/edit/delete for this agent's own MCP servers, plus a
+ * bound-state-aware Bind/Unbind toggle for global ones (driven by
+ * `bound_to_agent` — see AgentMcpModel's doc comment).
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
@@ -42,6 +42,12 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
                                     <span class="agent-primitive-modal-list-item-name">{server.name}</span>
                                     <Show when={server.is_global}>
                                         <span class="agent-primitive-modal-list-item-badge">global</span>
+                                        <span
+                                            class="agent-primitive-modal-list-item-badge"
+                                            classList={{ "is-bound": server.bound_to_agent }}
+                                        >
+                                            {server.bound_to_agent ? "bound" : "not bound"}
+                                        </span>
                                     </Show>
                                 </button>
                             )}
@@ -81,20 +87,24 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
                                             <Show
                                                 when={!server().is_global}
                                                 fallback={
-                                                    <>
+                                                    <Show
+                                                        when={server().bound_to_agent}
+                                                        fallback={
+                                                            <button
+                                                                class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
+                                                                onClick={() => void model.bind(server().id)}
+                                                            >
+                                                                Bind
+                                                            </button>
+                                                        }
+                                                    >
                                                         <button
                                                             class="agent-primitive-modal-btn"
                                                             onClick={() => void model.unbind(server().id)}
                                                         >
                                                             Unbind
                                                         </button>
-                                                        <button
-                                                            class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
-                                                            onClick={() => void model.bind(server().id)}
-                                                        >
-                                                            Bind
-                                                        </button>
-                                                    </>
+                                                    </Show>
                                                 }
                                             >
                                                 <button

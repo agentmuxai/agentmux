@@ -8,12 +8,12 @@
  * agentmux-srv/src/server/app_api/mcp.rs).
  *
  * `mcp.list` returns both this agent's own (non-global) servers AND every
- * global server, regardless of whether this agent is bound to it — the
- * response carries no per-row "bound to me" flag. Own (`!is_global`) rows
- * are always editable/deletable here; global rows are read-only (upsert/
- * delete on a global row is backend-FORBIDDEN) and only exposed as
- * Bind/Unbind actions, which are idempotent on the backend so the toggle
- * works correctly even without a live bound-state indicator.
+ * global server, each annotated with `bound_to_agent` — whether *this*
+ * agent specifically holds the bind ref (own rows are always true; a global
+ * row may or may not be). Own (`!is_global`) rows are always editable/
+ * deletable here; global rows are read-only (upsert/delete on a global row
+ * is backend-FORBIDDEN) and only exposed as a Bind/Unbind toggle driven by
+ * `bound_to_agent`.
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -38,8 +38,8 @@ function draftFromServer(s: McpServer): McpDraft {
 export class AgentMcpModel {
     readonly agentId: string;
 
-    private _servers = createSignal<McpServer[]>([]);
-    serversAtom: Accessor<McpServer[]> = this._servers[0];
+    private _servers = createSignal<McpServerListItem[]>([]);
+    serversAtom: Accessor<McpServerListItem[]> = this._servers[0];
     private setServers = this._servers[1];
 
     private _selectedId = createSignal<string | null>(null);
@@ -58,7 +58,7 @@ export class AgentMcpModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    selectedAtom: Accessor<McpServer | null>;
+    selectedAtom: Accessor<McpServerListItem | null>;
 
     constructor(agentId: string) {
         this.agentId = agentId;
@@ -80,7 +80,7 @@ export class AgentMcpModel {
         }
     }
 
-    handleSelect(server: McpServer): void {
+    handleSelect(server: McpServerListItem): void {
         this.setError(null);
         this.setDraft(null);
         this.setSelectedId(server.id);
@@ -92,7 +92,7 @@ export class AgentMcpModel {
         this.setSelectedId(null);
     }
 
-    startEdit(server: McpServer): void {
+    startEdit(server: McpServerListItem): void {
         if (server.is_global) {
             this.setError("Global MCP servers are managed in the Armory, not here.");
             return;

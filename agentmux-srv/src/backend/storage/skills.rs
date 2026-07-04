@@ -218,28 +218,44 @@ pub struct Skill {
     pub updated_at: i64,
 }
 
+/// `skill_list`'s response shape: the skill plus whether the requesting agent
+/// specifically holds a `db_agent_skills_ref` row for it. Mirrors
+/// `McpServerListItem` — see its doc comment for why `is_global` alone isn't
+/// enough to render bind/unbind as a stateful toggle (tracked in #1960).
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillListItem {
+    #[serde(flatten)]
+    pub skill: Skill,
+    pub bound_to_agent: bool,
+}
+
 impl Store {
-    /// List all skills visible to an agent: own (referenced) + global.
-    pub fn skill_list(&self, agent_id: &str) -> Result<Vec<Skill>, StoreError> {
+    /// List all skills visible to an agent: own (referenced) + global, each
+    /// annotated with whether this specific agent holds the bind ref.
+    pub fn skill_list(&self, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
-             FROM db_skills
-             WHERE is_global = 1
-                OR id IN (SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?1)
-             ORDER BY is_global DESC, updated_at DESC",
+            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
+                    EXISTS(SELECT 1 FROM db_agent_skills_ref r WHERE r.skill_id = s.id AND r.agent_id = ?1) AS bound_to_agent
+             FROM db_skills s
+             WHERE s.is_global = 1
+                OR s.id IN (SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?1)
+             ORDER BY s.is_global DESC, s.updated_at DESC",
         )?;
         let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(Skill {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                trigger: row.get(2)?,
-                skill_type: row.get(3)?,
-                description: row.get(4)?,
-                content: row.get(5)?,
-                is_global: row.get::<_, i64>(6)? != 0,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
+            Ok(SkillListItem {
+                skill: Skill {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger: row.get(2)?,
+                    skill_type: row.get(3)?,
+                    description: row.get(4)?,
+                    content: row.get(5)?,
+                    is_global: row.get::<_, i64>(6)? != 0,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                },
+                bound_to_agent: row.get::<_, i64>(9)? != 0,
             })
         })?;
         let mut out = Vec::new();

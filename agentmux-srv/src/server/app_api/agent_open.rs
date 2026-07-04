@@ -457,7 +457,14 @@ pub(super) fn write_agent_config_files(
     // db_agent_skills. The fallback decision is gated on *own* refs only — NOT
     // the global-inclusive list — so adding a global skill never discards a
     // legacy-only agent's skills.
-    let visible_skills = wstore.skill_list(&agent.id).unwrap_or_default(); // own refs + globals
+    // skill_list now returns each skill wrapped with a per-agent bound_to_agent
+    // flag (for the App API's "bound to me" indicator, tracked in #1960) —
+    // this config-generation path doesn't need it, so unwrap immediately.
+    let visible_skills: Vec<crate::backend::storage::Skill> = wstore.skill_list(&agent.id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| item.skill)
+        .collect(); // own refs + globals
     let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
     let effective_skills: Vec<crate::backend::storage::AgentSkill> = if has_own_skill_refs {
         // Ref-based path: own bound + globals (the full visible list).
@@ -482,7 +489,12 @@ pub(super) fn write_agent_config_files(
     // legacy blob's user servers are merged in ONLY when the agent has no own
     // ref-bound servers (so a global server never wipes a legacy-only agent's
     // .mcp.json). When the agent has own refs, those are authoritative.
-    let visible_mcp = wstore.mcp_server_list(&agent.id).unwrap_or_default(); // own refs + globals
+    // Same unwrap as visible_skills above — this path doesn't need bound_to_agent.
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.mcp_server_list(&agent.id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| item.server)
+        .collect(); // own refs + globals
     let has_own_mcp_refs = visible_mcp.iter().any(|s| !s.is_global);
     if !visible_mcp.is_empty() {
         let blob_for_merge = if has_own_mcp_refs {

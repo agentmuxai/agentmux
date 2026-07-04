@@ -18,7 +18,7 @@ export const SkillApi = {
         client: RpcClient,
         data: { agent_id: string },
         opts?: RpcOpts,
-    ): Promise<Skill[]> {
+    ): Promise<SkillListItem[]> {
         return client.rpcCall("skill.list", data, opts);
     },
 
