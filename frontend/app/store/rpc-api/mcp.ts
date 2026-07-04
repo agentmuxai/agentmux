@@ -15,7 +15,7 @@ export const McpApi = {
         client: RpcClient,
         data: { agent_id: string },
         opts?: RpcOpts,
-    ): Promise<McpServer[]> {
+    ): Promise<McpServerListItem[]> {
         return client.rpcCall("mcp.list", data, opts);
     },
 

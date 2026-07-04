@@ -3,11 +3,12 @@
 
 /**
  * AgentSkillsModal — the "Skills" tab body inside AgentSetupModal.
- * List/create/edit/delete for this agent's own skills, plus bind/unbind
- * for global ones. See AgentSkillModel's doc comment for the bound-status
- * caveat. Distinct from the legacy AgentSkillCard/AgentSkillsPanel (the
- * agent-definition `agent_skill_*` surface) — this is the v1 standalone
- * Skill primitive (`skill.*` / `db_skills`).
+ * List/create/edit/delete for this agent's own skills, plus a
+ * bound-state-aware Bind/Unbind toggle for global ones (driven by
+ * `bound_to_agent` — see AgentSkillModel's doc comment). Distinct from the
+ * legacy AgentSkillCard/AgentSkillsPanel (the agent-definition
+ * `agent_skill_*` surface) — this is the v1 standalone Skill primitive
+ * (`skill.*` / `db_skills`).
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
@@ -44,6 +45,12 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                     <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
                                     <Show when={skill.is_global}>
                                         <span class="agent-primitive-modal-list-item-badge">global</span>
+                                        <span
+                                            class="agent-primitive-modal-list-item-badge"
+                                            classList={{ "is-bound": skill.bound_to_agent }}
+                                        >
+                                            {skill.bound_to_agent ? "bound" : "not bound"}
+                                        </span>
                                     </Show>
                                 </button>
                             )}
@@ -89,20 +96,24 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                             <Show
                                                 when={!skill().is_global}
                                                 fallback={
-                                                    <>
+                                                    <Show
+                                                        when={skill().bound_to_agent}
+                                                        fallback={
+                                                            <button
+                                                                class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
+                                                                onClick={() => void model.bind(skill().id)}
+                                                            >
+                                                                Bind
+                                                            </button>
+                                                        }
+                                                    >
                                                         <button
                                                             class="agent-primitive-modal-btn"
                                                             onClick={() => void model.unbind(skill().id)}
                                                         >
                                                             Unbind
                                                         </button>
-                                                        <button
-                                                            class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
-                                                            onClick={() => void model.bind(skill().id)}
-                                                        >
-                                                            Bind
-                                                        </button>
-                                                    </>
+                                                    </Show>
                                                 }
                                             >
                                                 <button

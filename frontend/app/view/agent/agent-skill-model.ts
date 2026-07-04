@@ -6,8 +6,8 @@
  * AgentSetupModal). Drives the list + create/edit/delete/bind lifecycle
  * over the standalone Skill primitive (`skill.*` App API,
  * agentmux-srv/src/server/app_api/skill.rs). Same shape as AgentMcpModel —
- * see its doc comment for the is_global / bound-status caveat, which
- * applies identically here.
+ * see its doc comment for the is_global / bound_to_agent details, which
+ * apply identically here.
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -41,8 +41,8 @@ function draftFromSkill(s: Skill): SkillDraft {
 export class AgentSkillModel {
     readonly agentId: string;
 
-    private _skills = createSignal<Skill[]>([]);
-    skillsAtom: Accessor<Skill[]> = this._skills[0];
+    private _skills = createSignal<SkillListItem[]>([]);
+    skillsAtom: Accessor<SkillListItem[]> = this._skills[0];
     private setSkills = this._skills[1];
 
     private _selectedId = createSignal<string | null>(null);
@@ -61,7 +61,7 @@ export class AgentSkillModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    selectedAtom: Accessor<Skill | null>;
+    selectedAtom: Accessor<SkillListItem | null>;
 
     constructor(agentId: string) {
         this.agentId = agentId;
@@ -83,7 +83,7 @@ export class AgentSkillModel {
         }
     }
 
-    handleSelect(skill: Skill): void {
+    handleSelect(skill: SkillListItem): void {
         this.setError(null);
         this.setDraft(null);
         this.setSelectedId(skill.id);
@@ -95,7 +95,7 @@ export class AgentSkillModel {
         this.setSelectedId(null);
     }
 
-    startEdit(skill: Skill): void {
+    startEdit(skill: SkillListItem): void {
         if (skill.is_global) {
             this.setError("Global skills are managed in the Armory, not here.");
             return;

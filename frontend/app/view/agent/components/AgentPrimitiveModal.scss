@@ -86,6 +86,11 @@
     padding: 1px 5px;
     color: var(--accent-color);
     background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+
+    &.is-bound {
+        color: var(--success-color);
+        background: color-mix(in srgb, var(--success-color) 12%, transparent);
+    }
 }
 
 .agent-primitive-modal-new-btn {
