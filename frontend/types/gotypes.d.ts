@@ -422,6 +422,15 @@ declare global {
         updated_at: number;
     };
 
+    /** `mcp.list`'s response shape: an McpServer plus whether the requesting
+     *  agent specifically holds the bind ref (as opposed to just being able
+     *  to see it because it's global). Only `mcp.list` (agent-scoped) carries
+     *  this — `mcp.get`/`mcp.upsert`/`mcp.catalog.list` return bare McpServer. */
+    type McpServerListItem = McpServer & { bound_to_agent: boolean };
+
+    /** `skill.list`'s response shape — see McpServerListItem. */
+    type SkillListItem = Skill & { bound_to_agent: boolean };
+
     /** Drone pane (issue #753 Phase 1). Mirrors the Rust types in
      *  agentmux-srv/src/drone/types.rs. */
     type DroneDefinition = {
