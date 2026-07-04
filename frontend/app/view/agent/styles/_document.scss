@@ -8,6 +8,10 @@
     .agent-document {
         flex: 1;
         overflow-y: auto;
+        // Stop scroll chaining from leaving the pane once it hits its own
+        // top/bottom (e.g. OS-level swipe-navigation gestures). Nested tool
+        // previews get their own `contain` too — see SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.
+        overscroll-behavior: contain;
         padding: var(--space-0-5) var(--space-1);
         display: flex;
         flex-direction: column;
