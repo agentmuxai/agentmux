@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.50.0 — 2026-07-03
+
+- feat(cef): report CEF dlopen + cef_init sub-stages to splash telemetry
+- feat(agent): headless term sub-block spike for the Shell drawer (createsubblock/deletesubblock RPCs)
+- feat(ambient): unified gateway for background model calls (activity-summary coalescing, cancellation, token accounting)
+- fix(muxbus): cloud_subscriber connects to dedicated wss://muxbus-ws.agentmux.ai domain
+
+
 ## 0.49.14 — 2026-07-03
 
 - docs: correct CLAUDE.md stale claim about macOS/Linux dev-mode launcher bypass
