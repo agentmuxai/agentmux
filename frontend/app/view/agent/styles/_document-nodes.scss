@@ -374,6 +374,7 @@
                 overflow-wrap: anywhere;
                 max-height: 200px;
                 overflow-y: auto;
+                overscroll-behavior: contain;
             }
         }
 
@@ -633,6 +634,7 @@
             margin: 0;
             max-height: 400px;
             overflow-y: auto;
+            overscroll-behavior: contain;
 
             &.has-error {
                 border-left: 2px solid var(--error-color);
@@ -917,6 +919,7 @@
             // overlay's tail when the agent pane is in a sub-region
             // of the window (codex P2 round 2 on PR #1021).
             overflow-y: auto;
+            overscroll-behavior: contain;
             // Fully OPAQUE background — the overlay covers other
             // rows, so any transparency would let neighbor content
             // bleed through. Use `--block-bg-solid-color` directly
@@ -1116,6 +1119,7 @@
             border-radius: 0;
             max-height: 400px;
             overflow-y: auto;
+            overscroll-behavior: contain;
             margin: 0;
             // Shiki <pre> override: ensure our bg wins
             &[style*="background"] {
@@ -1170,6 +1174,7 @@
             border-radius: 0;
             max-height: 400px;
             overflow-y: auto;
+            overscroll-behavior: contain;
             margin: 0;
             font-size: 11px;
         }
@@ -1184,6 +1189,7 @@
         border-radius: 0;
         max-height: 400px;
         overflow-y: auto;
+        overscroll-behavior: contain;
         margin: 0;
         font-size: 11px;
     }
@@ -1227,6 +1233,7 @@
             border-radius: 0;
             max-height: 400px;
             overflow-y: auto;
+            overscroll-behavior: contain;
             margin: var(--space-1) 0 0 0;
             font-size: 11px;
             white-space: pre-wrap;
@@ -1241,6 +1248,7 @@
     margin: var(--space-1) 0 0 0;
     max-height: 400px;
     overflow: auto;
+    overscroll-behavior: contain;
 
     table {
         border-collapse: collapse;
@@ -1283,6 +1291,7 @@
     margin: var(--space-1) 0 0 0;
     max-height: 480px;
     overflow-y: auto;
+    overscroll-behavior: contain;
 
     .agent-search-header {
         display: flex;
@@ -1473,6 +1482,7 @@
         line-height: 1.5;
         max-height: calc(100vh - 240px);
         overflow-y: auto;
+        overscroll-behavior: contain;
         padding: var(--space-0-5);
         border-radius: var(--border-radius-sm);
         background: var(--secondary-bg-color);
@@ -1542,6 +1552,7 @@
     margin: var(--space-1) 0 0 0;
     max-height: 400px;
     overflow-y: auto;
+    overscroll-behavior: contain;
     font-family: var(--fixed-font, monospace);
     font-size: 11px;
     line-height: 1.45;
