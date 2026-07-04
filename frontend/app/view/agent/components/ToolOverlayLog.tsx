@@ -102,6 +102,39 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         stickToBottom = dist < 40;
     };
 
+    // Scroll-chaining handoff to the outer pane (SPEC_TOOL_PREVIEW_SCROLL_
+    // CHAINING_2026_07_03.md Phase 2). This box carries `overscroll-behavior:
+    // contain` (_tool-overlay-portal.scss) so the browser's native chaining —
+    // which would otherwise hand excess wheel delta to `.agent-document` once
+    // this box hits its scroll limit — never fires; `contain` blocks that
+    // relay unconditionally, regardless of any JS listener. Verified live via
+    // CDP: with only the CSS (Phase 1), reaching either boundary of this box
+    // hard-dead-ends further wheel ticks — `.agent-document`'s scrollTop never
+    // moves. So the handoff has to be done by hand: once this box can't
+    // consume more scroll in the wheel's direction, forward the same delta to
+    // the outer pane directly (not "let it bubble" — bubbling the event
+    // doesn't help, `contain` isn't an event-propagation setting).
+    onMount(() => {
+        const el = scrollRef;
+        if (!el) return;
+        const onWheel = (e: WheelEvent) => {
+            // Ctrl+wheel is the preview font-zoom gesture (ToolBlock.tsx) —
+            // leave it alone.
+            if (e.ctrlKey) return;
+            const atTop = el.scrollTop <= 0;
+            const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+            const scrollingUp = e.deltaY < 0;
+            const scrollingDown = e.deltaY > 0;
+            if (!((atTop && scrollingUp) || (atBottom && scrollingDown))) return;
+            const outerPane = el.closest<HTMLElement>(".agent-document");
+            if (!outerPane) return;
+            e.preventDefault();
+            outerPane.scrollTop += e.deltaY;
+        };
+        el.addEventListener("wheel", onWheel, { passive: false });
+        onCleanup(() => el.removeEventListener("wheel", onWheel));
+    });
+
     // Track whether the overlay panel is collapsed (content-visibility: hidden).
     // Accessing layout-forcing properties (scrollHeight, scrollTop) on an element
     // inside a content-visibility:hidden subtree forces a synchronous subtree
