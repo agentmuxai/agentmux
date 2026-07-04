@@ -54,6 +54,13 @@ pub trait BrowserPaneCloseOps {
 
 /// Production implementation of `BrowserPaneCloseOps` backed by `AppState.browsers`
 /// and Win32 `DestroyWindow`.
+///
+/// SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md: `take_browser_hwnd`
+/// now returns the app-owned WRAPPER's HWND (`browser_pane::wrapper`), not
+/// CEF's own HWND — `destroy_hwnd` destroys the wrapper, never CEF's own
+/// window directly and never via `close_browser()`. See that module's doc
+/// comment for why this reliably releases the renderer without risking the
+/// close_browser-cascades-into-main bug three earlier attempts hit.
 struct AppStateCloseOps<'a>(&'a Arc<AppState>);
 
 impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
@@ -72,62 +79,41 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
         let browser = out.removed_browser?;
 
         #[cfg(target_os = "windows")]
-        let hwnd = browser.host().and_then(|h| {
-            let wh = h.window_handle();
-            if wh.0.is_null() {
-                None
-            } else {
-                Some(wh.0 as usize)
+        {
+            // Forget any stale focus-tracking entry for CEF's OWN hwnd
+            // (LAST_FOCUSED_BY_ROOT is keyed by whatever HWND actually
+            // received SetFocus — always CEF's own hwnd/descendants, never
+            // our wrapper, which never itself receives focus). Belt-and-
+            // suspenders: `on_before_close_browser_pane` also runs a more
+            // thorough sweep via `uninstall_focus_redirect_for_block` once
+            // CEF's OnBeforeClose fires (which the wrapper teardown below
+            // is what makes reliable) — this covers the gap before that.
+            if let Some(host) = browser.host() {
+                let wh = host.window_handle();
+                if !wh.0.is_null() {
+                    crate::browser_pane::hwnd::forget_focus_for_child(wh.0 as *mut _);
+                }
             }
-        });
-        #[cfg(not(target_os = "windows"))]
-        let hwnd: Option<usize> = None;
+        }
 
         // Drop our Arc before returning so Chromium's refcount doesn't wait
         // for the caller's scope to unwind.
         drop(browser);
-        hwnd
+
+        #[cfg(target_os = "windows")]
+        {
+            crate::browser_pane::wrapper::take_wrapper_hwnd(label).map(|h| h as usize)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            None
+        }
     }
 
     fn destroy_hwnd(&self, hwnd: usize) {
         #[cfg(target_os = "windows")]
-        unsafe {
-            use windows_sys::Win32::UI::WindowsAndMessaging::{
-                DestroyWindow, GetParent, ShowWindow, SW_HIDE,
-            };
-            use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
-            let h = hwnd as *mut std::ffi::c_void;
-
-            // Capture the parent BEFORE we destroy the HWND — GetParent(h)
-            // on a destroyed HWND returns null.
-            let parent = GetParent(h);
-
-            // Hide first so DWM stops compositing the pane's GPU surface.
-            // Without this, even after DestroyWindow the Chromium compositor's
-            // last-rendered frame can stay "stuck" on-screen because the GPU
-            // process is still alive and DWM was caching that layer. Observed
-            // in v0.33.259 with a loaded google.com pane — close fires,
-            // lifecycle entry clears, HWND is gone — but the page pixels
-            // persist over the main frame until a resize/redraw.
-            ShowWindow(h, SW_HIDE);
-
-            DestroyWindow(h);
-
-            // Drop any focus-tracking entry that pointed at this now-dead HWND
-            // so the WM_ACTIVATE restore hook never tries to SetFocus it. The
-            // actual focus handoff to the surviving window's render widget is
-            // posted by the close()/drain caller (the keyboard-focus orphaning
-            // fix). See ANALYSIS_BROWSER_PANE_REDOCK_BLACK_TYPING_LOCK §1.
-            crate::browser_pane::hwnd::forget_focus_for_child(h);
-
-            // Ask the parent (main's top-level) to repaint the area where the
-            // pane used to sit. Without InvalidateRect + UpdateWindow, DWM
-            // may keep showing the cached pane surface until unrelated UI
-            // activity happens to repaint over it.
-            if !parent.is_null() {
-                InvalidateRect(parent, std::ptr::null(), 1 /* TRUE erase */);
-                UpdateWindow(parent);
-            }
+        {
+            crate::browser_pane::wrapper::destroy_wrapper_hwnd(hwnd as *mut std::ffi::c_void);
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -352,19 +338,27 @@ impl BrowserPaneManager {
     }
 
     pub fn resize(&self, block_id: &str, rect: Rect, state: &Arc<AppState>) {
+        // Windows: resize the wrapper (its own WM_SIZE handler cascades to
+        // CEF's child automatically — see browser_pane::wrapper) instead of
+        // SetWindowPos-ing CEF's HWND directly. Still need the live Browser
+        // to call notify_move_or_resize_started (a CEF-side hint, unrelated
+        // to which HWND owns the actual on-screen rect).
         #[cfg(target_os = "windows")]
         if let Some(browser) = self.live_browser(state, block_id) {
-            if let Some(host) = browser.host() {
-                let hwnd = host.window_handle();
-                if !hwnd.0.is_null() {
-                    unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::SetWindowPos(
-                            hwnd.0 as _,
-                            std::ptr::null_mut(),
-                            rect.x, rect.y, rect.width, rect.height,
-                            0x0010, // SWP_NOACTIVATE
-                        );
-                    }
+            let resized = state
+                .live_browser_pane_label(block_id)
+                .and_then(|label| crate::browser_pane::wrapper::peek_wrapper_hwnd(&label))
+                .map(|wrapper_hwnd| {
+                    crate::browser_pane::wrapper::resize_wrapper(
+                        wrapper_hwnd as *mut std::ffi::c_void,
+                        &rect,
+                    );
+                })
+                .is_some();
+            // Only notify CEF if we actually resized something — matches the
+            // original hwnd-null gating this replaced.
+            if resized {
+                if let Some(host) = browser.host() {
                     host.notify_move_or_resize_started();
                 }
             }
@@ -383,8 +377,8 @@ impl BrowserPaneManager {
         }
     }
 
-    /// Close a pane by destroying its child HWND directly and dropping the
-    /// Browser Arc.
+    /// Close a pane by destroying its app-owned wrapper HWND (not CEF's own
+    /// HWND, and never via `close_browser()`) and dropping the Browser Arc.
     ///
     /// We deliberately do **not** call `host.close_browser(force)`. Empirically
     /// (host-log trace v0.33.251 and v0.33.252 in `SPEC_BROWSER_PANE_LIFECYCLE.md`
@@ -395,14 +389,20 @@ impl BrowserPaneManager {
     /// quit the whole app or orphaned the pane's pixels while blocking the
     /// pane's own teardown.
     ///
-    /// Instead:
+    /// As of `SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md`, instead:
     /// 1. Remove the Browser from `state.browsers` so subsequent lookups miss.
-    /// 2. Win32 `DestroyWindow` on the pane's outer HWND. The pane HWND is a
-    ///    `WS_CHILD`; `WM_DESTROY` cascades to descendants only, never to the
-    ///    parent. Main stays up.
-    /// 3. Drop our `Browser` Arc. CEF still holds refs (browser_list etc.);
-    ///    `on_before_close` *may* eventually fire on the now-destroyed Browser,
-    ///    which is why `drain_closed_label` is idempotent.
+    /// 2. Win32 `DestroyWindow` on our own app-owned wrapper HWND
+    ///    (`browser_pane::wrapper`) — never on CEF's own HWND directly, and
+    ///    never `close_browser()`. Win32's native `WM_DESTROY` cascade tears
+    ///    down CEF's child HWND as a side effect, which is the same pattern
+    ///    `floating_pane.rs` already uses successfully for torn-off panes:
+    ///    destroying a window we own reliably fires CEF's `OnBeforeClose`,
+    ///    unlike destroying CEF's own HWND directly (the pre-2026-07-03
+    ///    approach, which only "may eventually" fire it) or calling
+    ///    `close_browser()` (the cascade above).
+    /// 3. Drop our `Browser` Arc. `on_before_close` should now fire reliably
+    ///    via the wrapper's WM_DESTROY cascade; `drain_closed_label` stays
+    ///    idempotent as a backstop for any remaining async-timing edge case.
     ///
     /// Trade-off: because we bypass `close_browser`, Chromium's `beforeunload`
     /// handler doesn't run. Acceptable for a browser pane (no form data the
@@ -514,7 +514,24 @@ impl BrowserPaneManager {
     /// so this is a no-op in that case — but `on_before_close` may still
     /// fire async as Chromium's refcount hits zero, and `DrainBrowserPaneByLabel`
     /// is idempotent so the callback is safe.
+    ///
+    /// Also destroys the app-owned wrapper HWND (`browser_pane::wrapper`) if
+    /// one is still registered for this label — reagent P1 on PR #1957: if
+    /// CEF's `OnBeforeClose` fires WITHOUT `close()` having run first (a
+    /// crash, or something else calling `close_browser()` directly on this
+    /// pane), CEF tears down its own child HWND on its own initiative, but
+    /// that never touches OUR wrapper (destroying a child never destroys its
+    /// parent) — the wrapper would otherwise survive as a permanently
+    /// orphaned, childless window with nothing left to ever clean it up,
+    /// since the only other destroy site is `close_with` in the explicit
+    /// path. `take_wrapper_hwnd` is a no-op `None` when `close()` already
+    /// destroyed it, keeping this idempotent like the rest of the function.
     pub fn drain_closed_label(&self, state: &Arc<AppState>, label: &str) {
+        #[cfg(target_os = "windows")]
+        if let Some(wrapper_hwnd) = crate::browser_pane::wrapper::take_wrapper_hwnd(label) {
+            crate::browser_pane::wrapper::destroy_wrapper_hwnd(wrapper_hwnd as *mut std::ffi::c_void);
+        }
+
         let out = state.host_dispatch(
             crate::reducer::HostCommand::DrainBrowserPaneByLabel {
                 label: label.to_string(),
@@ -623,7 +640,7 @@ impl BrowserPaneManager {
             RGN_DIFF,
         };
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetAncestor, GetParent, GetWindowRect, GA_ROOT,
+            GetAncestor, GetWindowRect, GA_ROOT,
         };
 
         // Resolve the requesting window's top-level HWND so we can filter
@@ -724,7 +741,18 @@ impl BrowserPaneManager {
                 // client coords so we can translate overlay rects (which
                 // arrive in main-window client coords from the frontend)
                 // into pane-local coords for the region API.
-                let parent = GetParent(pane_hwnd as _);
+                //
+                // GA_ROOT, not single-hop GetParent: since
+                // SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md,
+                // `pane_hwnd` (CEF's own HWND) is a WS_CHILD of our own
+                // wrapper HWND, not directly of main — GetParent would
+                // resolve to the wrapper (whose client coords are always
+                // (0,0)-origin at the pane's own size), not main, silently
+                // breaking this translation. GA_ROOT walks past any number
+                // of intermediate layers to the actual top-level window,
+                // which is what "main window client coords" means here —
+                // same pattern already used above for requesting_top_level.
+                let parent = GetAncestor(pane_hwnd as _, GA_ROOT);
                 if parent.is_null() {
                     continue;
                 }

@@ -13,6 +13,8 @@ pub mod creation;
 pub mod trace;
 #[cfg(target_os = "windows")]
 pub mod hwnd;
+#[cfg(target_os = "windows")]
+pub mod wrapper;
 #[cfg(not(target_os = "windows"))]
 pub mod creation_views;
 

@@ -132,17 +132,52 @@ wrap_task! {
                     },
                 );
 
+                let dequeue = || {
+                    self.state.host_dispatch(
+                        crate::reducer::HostCommand::DequeuePendingWindowCreation,
+                    );
+                };
+
+                // App-owned wrapper HWND, WS_CHILD of the target window at the
+                // pane's rect — CEF's browser embeds INTO this instead of
+                // directly into the target window. See browser_pane::wrapper's
+                // module doc for why: destroying our own wrapper later (not
+                // CEF's own HWND, not close_browser()) is what gets a reliable
+                // renderer teardown without risking the close_browser cascade
+                // into main. SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md.
+                let wrapper_hwnd = match crate::browser_pane::wrapper::create_wrapper(
+                    &self.label,
+                    parent_hwnd_raw,
+                    &self.rect,
+                ) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        tracing::error!(block_id = %self.block_id, label = %self.label, error = %e, "[pane-wrapper] create failed — aborting browser pane creation");
+                        dequeue();
+                        return;
+                    }
+                };
+
                 let handler = crate::client::AgentMuxHandler::new_with_browser_pane(self.state.clone(), 0, true);
                 let mut client = Some(crate::client::AgentMuxClient::new(handler, true));
 
                 let url_cef = CefString::from(self.url.as_str());
                 let settings = BrowserSettings::default();
 
-                let parent_hwnd = sys::HWND(parent_hwnd_raw as *mut _);
+                let parent_hwnd = sys::HWND(wrapper_hwnd as *mut _);
+                // CEF's browser fills the wrapper's entire client area — the
+                // wrapper itself already sits at self.rect within the target
+                // window, so CEF's local rect is (0,0)-origin at the same size.
+                let local_rect = Rect {
+                    x: 0,
+                    y: 0,
+                    width: self.rect.width,
+                    height: self.rect.height,
+                };
                 // Use the clean set_as_child helper — it fills style/parent/bounds
                 // correctly and leaves other fields zeroed (in particular `window`
                 // which is an OUTPUT field filled by CEF).
-                let mut window_info = WindowInfo::default().set_as_child(parent_hwnd, &self.rect);
+                let mut window_info = WindowInfo::default().set_as_child(parent_hwnd, &local_rect);
                 // Match the main process runtime style (ALLOY throughout the app).
                 window_info.runtime_style = RuntimeStyle::ALLOY;
 
@@ -157,6 +192,12 @@ wrap_task! {
 
                 if result == 0 {
                     tracing::error!(block_id = %self.block_id, "browser_host_create_browser returned 0");
+                    // Cleanup-on-failure — mirrors floating_pane.rs: the wrapper
+                    // was already created + shown; without destroying it here it
+                    // sits on screen as a phantom empty child window.
+                    crate::browser_pane::wrapper::take_wrapper_hwnd(&self.label);
+                    crate::browser_pane::wrapper::destroy_wrapper_hwnd(wrapper_hwnd);
+                    dequeue();
                     return;
                 }
 
