@@ -4,9 +4,9 @@
 // v1 composable model — standalone MCP Server primitive
 // (agentmux-srv/src/server/app_api/mcp.rs). Agent-scoped: every command is
 // `check_s1`-gated (ctx.agent_id must equal the request's agent_id), so
-// these only work from an authenticated agent connection. There is no
-// window-scoped "list every MCP server" command yet — see mcp.catalog.*
-// (Armory-level, global-only) for that surface.
+// these only work from an authenticated agent connection. The mcp.catalog.*
+// commands are the window-scoped counterpart (no agent_id, global rows
+// only) — that's what the Armory's MCP Servers tab uses.
 
 import { RpcClient } from "../rpc-client";
 
@@ -57,5 +57,31 @@ export const McpApi = {
         opts?: RpcOpts,
     ): Promise<{ unbound: boolean }> {
         return client.rpcCall("mcp.unbind", data, opts);
+    },
+
+    // ── Armory catalog (global servers only, no agent_id) ──────────────────
+
+    McpCatalogListCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<McpServer[]> {
+        return client.rpcCall("mcp.catalog.list", data, opts);
+    },
+
+    McpCatalogUpsertCommand(
+        client: RpcClient,
+        data: { id?: string; name: string; transport?: string; config?: string },
+        opts?: RpcOpts,
+    ): Promise<McpServer> {
+        return client.rpcCall("mcp.catalog.upsert", data, opts);
+    },
+
+    McpCatalogDeleteCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("mcp.catalog.delete", data, opts);
     },
 };

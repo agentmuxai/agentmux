@@ -758,6 +758,43 @@ pub enum Command {
         saga_id: u64,
         reason: String,
     },
+    /// Host reports the start of a named startup phase, forwarded by
+    /// the launcher into its `StartupEventSink` so it renders live in
+    /// the splash telemetry panel — same stage/label shape as the
+    /// launcher's own internal `saga`/`backend`/`host` stages
+    /// (`agentmux-launcher/src/startup_events.rs`), just sourced from
+    /// inside the host process instead.
+    ///
+    /// The host can only send this AFTER `connect_to_launcher`
+    /// succeeds, so phases that finish before the IPC connection
+    /// exists (e.g. the CEF framework `dlopen` on macOS, which
+    /// happens before the connection is even opened) can't be
+    /// reported live — the host times those with a local `Instant`
+    /// and sends both `ReportStartupStageBegin` + `ReportStartupStageEnd`
+    /// back-to-back once connected, with the already-elapsed duration
+    /// on the `End` message. Phases that start after the connection
+    /// exists (CEF `cef::initialize`, first-paint) are reported live.
+    ReportStartupStageBegin {
+        /// Stable machine-readable stage key (e.g. `"dlopen"`,
+        /// `"cef_init"`, `"first_paint"`) — matches
+        /// `StartupEvent::StageBegin`'s `stage` field on the launcher
+        /// side.
+        stage: String,
+        /// Human-readable label shown in the splash panel.
+        label: String,
+    },
+    /// Companion to `ReportStartupStageBegin` — see its doc comment.
+    ReportStartupStageEnd {
+        stage: String,
+        duration_ms: u64,
+        /// `"ok"` | `"warn"` | `"error"` — kept as a plain string on
+        /// the wire rather than importing `agentmux-launcher`'s
+        /// `StartupStatus` (which lives in the launcher binary crate,
+        /// not a shared crate); the launcher's IPC handler maps it to
+        /// `StartupStatus` when forwarding into the sink.
+        status: String,
+        detail: Option<String>,
+    },
 }
 
 /// Phase B.9.1 — rectangle in Win32 screen coordinates (pixels).

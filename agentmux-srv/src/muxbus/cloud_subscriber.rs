@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Cloud push subscription — replaces per-agent polling with a single
-//! sidecar-level WebSocket to muxbus.agentmux.ai.
+//! sidecar-level WebSocket to muxbus-ws.agentmux.ai.
 //!
 //! When MUXBUS_TOKEN is present, the subscriber:
-//!   1. Opens wss://muxbus.agentmux.ai/ws with the bearer token.
+//!   1. Opens wss://muxbus-ws.agentmux.ai with the bearer token.
 //!   2. Listens for { type: "inject_available" } broadcast wake signals (zero metadata).
 //!   3. On each signal, polls REST GET /reactive/pending/:id for every locally-registered agent.
 //!   4. Delivers via ReactiveHandler; ACKs successful deliveries via REST POST /reactive/ack.
@@ -30,10 +30,27 @@ use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 
-const MUXBUS_WS_URL: &str = "wss://muxbus.agentmux.ai/ws";
+// Dedicated custom domain on the API Gateway WebSocket API (apigatewayv2
+// DomainName + ApiMapping), not a path under muxbus.agentmux.ai's CloudFront
+// distribution. A CloudFront path behavior would have forwarded this
+// client's literal /ws request path prefixed by originPath, landing at
+// /{stage}/ws on the origin — but the WS handshake endpoint only exists at
+// exactly /{stage}. No path suffix here: the domain root maps directly to
+// the API's default stage. Full design/history in the agentmux-cloud repo's
+// muxbus/ directory (search for the WebSocket relay redesign writeup).
+const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
 const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_RECONNECT_DELAY_SECS: u64 = 60;
+// AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
+// server-initiated keepalive of their own — the connection is dropped on
+// silence in both directions. Ping well under that so a quiet connection
+// (no inject_available traffic) survives indefinitely. The ping is an
+// app-level ClientMsg::Ping frame, not a WS-protocol-level Message::Ping —
+// API Gateway does not reliably relay raw protocol ping/pong control frames,
+// so a normal data frame is what actually keeps the connection alive in
+// production (see ClientMsg::Ping's doc comment).
+const CLIENT_PING_INTERVAL_SECS: u64 = 240;
 
 // ── Wire protocol ─────────────────────────────────────────────────────────────
 
@@ -46,6 +63,11 @@ enum ClientMsg {
     #[serde(rename = "subscribe:remove")]
     SubscribeRemove { agents: Vec<String> },
     // Ack removed — ACK is sent via REST POST /reactive/ack, not WS
+    // App-level keepalive — see CLIENT_PING_INTERVAL_SECS. AWS API Gateway
+    // WebSocket APIs (the production transport) do not reliably relay raw
+    // WS-protocol Ping/Pong control frames, so the keepalive must be a normal
+    // data frame the server's $default route can see and reply to.
+    Ping,
 }
 
 #[derive(Deserialize)]
@@ -287,8 +309,21 @@ async fn connect_and_run(
         .await
         .map_err(|e| format!("send subscribe: {e}"))?;
 
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(CLIENT_PING_INTERVAL_SECS));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    ping_interval.tick().await; // first tick fires immediately — consume it, we just connected
+
     loop {
         tokio::select! {
+            // Keepalive — see CLIENT_PING_INTERVAL_SECS.
+            _ = ping_interval.tick() => {
+                let ping_msg = serde_json::to_string(&ClientMsg::Ping)
+                    .map_err(|e| format!("serialize ping: {e}"))?;
+                if let Err(e) = write.send(Message::Text(ping_msg.into())).await {
+                    return Err(format!("send ping: {e}"));
+                }
+            }
+
             // Incoming WebSocket message from cloud
             msg = read.next() => {
                 match msg {

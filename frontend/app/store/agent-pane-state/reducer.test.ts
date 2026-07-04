@@ -1947,14 +1947,15 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.detailsOpen).toBe(false);
         });
 
-        it("TurnStart auto-collapses an open details panel", () => {
-            // Cross-arm interaction: sending a message hides the panel
-            // so the user isn't dropdown-staring as the turn begins.
+        it("TurnStart leaves an open details panel open", () => {
+            // The panel now hosts a live interactive shell (AgentShellSubblock)
+            // that must survive sending more messages, so TurnStart no longer
+            // force-closes it — the auto-collapse-on-send behavior was removed.
             let s = ready(100);
             s = update(s, { type: "DetailsExpand" }).state;
             expect(s.detailsOpen).toBe(true);
             const r = update(s, { type: "TurnStart", at: 200 });
-            expect(r.state.detailsOpen).toBe(false);
+            expect(r.state.detailsOpen).toBe(true);
             expect(r.state.turnPhase.kind).toBe("Submitting");
         });
     });

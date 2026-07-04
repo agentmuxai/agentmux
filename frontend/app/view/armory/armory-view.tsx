@@ -7,6 +7,8 @@ import { IdentityManager } from "@/app/view/identity/identity-manager";
 import { MemoryManager } from "@/app/view/memory/memory-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
+import { McpManager } from "@/app/view/mcp/mcp-manager";
+import { SkillManager } from "@/app/view/skill/skill-manager";
 import type { ArmorySection, ArmoryViewModel } from "./armory-model";
 import "./armory-view.scss";
 
@@ -15,6 +17,8 @@ const RAIL: { id: ArmorySection; label: string; icon: string }[] = [
     { id: "identities", label: "Identities", icon: "id-card" },
     { id: "brain",      label: "Brain",      icon: "brain" },
     { id: "memories",   label: "Bundles",    icon: "layer-group" },
+    { id: "mcp",        label: "MCP Servers", icon: "plug" },
+    { id: "skills",     label: "Skills",      icon: "wand-magic-sparkles" },
 ];
 
 export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
@@ -44,8 +48,8 @@ export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Ele
                 </nav>
                 <div class="bundle-manager-section">
                     {/*
-                     * All four managers stay mounted — toggling is instant and
-                     * never re-fetches. Both stay consistent via WPS *:changed events.
+                     * All six managers stay mounted — toggling is instant and
+                     * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
                         <AccountsManager />
@@ -58,6 +62,12 @@ export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Ele
                     </div>
                     <div class="bundle-manager-pane bundle-manager-pane--memories" classList={{ "is-hidden": section() !== "memories" }}>
                         <MemoryManager />
+                    </div>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "mcp" }}>
+                        <McpManager />
+                    </div>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "skills" }}>
+                        <SkillManager />
                     </div>
                 </div>
                 <nav class="bundle-manager-tab-bar" aria-label="Armory section">

@@ -259,6 +259,18 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
 
     // macOS: load the CEF framework library explicitly.
     // For subprocesses this load happens within the Seatbelt policy established above.
+    //
+    // Timed locally (Instant, not IPC) because this happens before
+    // connect_to_launcher runs — there's no live launcher connection yet
+    // to report through. The duration is sent retroactively as soon as
+    // the connection exists (see the report_startup_stage_* call right
+    // after connect_to_launcher below). Reported for every process role
+    // that reaches here (browser + subprocesses), but only the browser
+    // process ever has a live COMMAND_TX to actually send through —
+    // report_startup_stage_* silently no-ops otherwise, so no extra
+    // role-gating is needed here.
+    #[cfg(target_os = "macos")]
+    let dlopen_started_at = std::time::Instant::now();
     #[cfg(target_os = "macos")]
     let _library = {
         let exe = std::env::current_exe().unwrap();
@@ -276,6 +288,8 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         assert!(loader.load(), "Failed to load CEF framework");
         loader
     };
+    #[cfg(target_os = "macos")]
+    let dlopen_ms = dlopen_started_at.elapsed().as_millis() as u64;
 
     // Initialize the CEF API hash for version verification.
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
@@ -551,6 +565,18 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     } else {
         None
     };
+
+    // Report the CEF framework dlopen timing now that a launcher
+    // connection exists (it didn't when dlopen actually happened, above).
+    // Sent as a StageBegin+StageEnd pair with the already-elapsed
+    // duration on the End message — the launcher's splash renders this
+    // like any other completed stage. No-op if _launcher_ipc is None
+    // (dev:standalone, or this is a subprocess role that never connects).
+    #[cfg(target_os = "macos")]
+    {
+        launcher_ipc::report_startup_stage_begin("dlopen", "Load CEF framework");
+        launcher_ipc::report_startup_stage_end("dlopen", dlopen_ms, "ok", None);
+    }
 
     // Phase E.2c.5a — connect to the srv reducer's pipe. Forwards
     // srv events (workspace / tab / block lifecycle) to every
@@ -845,6 +871,12 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     //   24 CEF_RESULT_CODE_NORMAL_EXIT_PROCESS_NOTIFIED  ← singleton relaunch
     //   36 CEF_RESULT_CODE_NORMAL_EXIT_PACK_EXTENSION_SUCCESS
     //   38 CEF_RESULT_CODE_NORMAL_EXIT_AUTO_DE_ELEVATED
+    // Live-reportable on every platform: connect_to_launcher (above)
+    // always runs before cef::initialize, so a launcher connection
+    // exists by this point wherever one exists at all. No-op if it
+    // doesn't (dev:standalone, subprocess roles).
+    let cef_init_started_at = std::time::Instant::now();
+    launcher_ipc::report_startup_stage_begin("cef_init", "CEF initialize");
     let init_result = initialize(
         Some(args.as_main_args()),
         Some(&settings),
@@ -913,6 +945,12 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         }
     }
 
+    launcher_ipc::report_startup_stage_end(
+        "cef_init",
+        cef_init_started_at.elapsed().as_millis() as u64,
+        "ok",
+        None,
+    );
     tracing::info!("CEF initialized, entering message loop");
 
     // Claim a Dock tile, THEN paint the icon onto it. A bare Mach-O launched

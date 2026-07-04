@@ -42,6 +42,15 @@ pub const COMMAND_SET_META: &str = "setmeta";
 pub const COMMAND_CONTROLLER_INPUT: &str = "controllerinput";
 pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
+/// Create a headless sub-block (no tab/layout entry) parented to an
+/// existing block — e.g. a `term`-view PTY embedded in an agent pane's
+/// details drawer. Spec: docs/specs/SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §4.
+pub const COMMAND_CREATE_SUB_BLOCK: &str = "createsubblock";
+/// Tear down a sub-block created via `createsubblock`: kills its
+/// controller first, then deletes the block row and unlinks it from
+/// its parent's `subblockids`.
+pub const COMMAND_DELETE_SUB_BLOCK: &str = "deletesubblock";
+
 /// Per-tool-call permission decision RPC. Frontend sends after the
 /// user clicks Allow / Deny in `AgentDecisionPanel`. Today the
 /// handler validates the payload and logs the decision (audit
@@ -314,6 +323,12 @@ pub const COMMAND_SKILL_DELETE: &str = "skill.delete";
 pub const COMMAND_SKILL_BIND: &str = "skill.bind";
 pub const COMMAND_SKILL_UNBIND: &str = "skill.unbind";
 
+// App API — Armory-level Skill catalog (global skills only, window-scoped —
+// no agent_id, no check_s1 — mirrors bundle.* auth shape).
+pub const COMMAND_SKILL_CATALOG_LIST: &str = "skill.catalog.list";
+pub const COMMAND_SKILL_CATALOG_UPSERT: &str = "skill.catalog.upsert";
+pub const COMMAND_SKILL_CATALOG_DELETE: &str = "skill.catalog.delete";
+
 // App API — v1 standalone MCP Server primitives
 pub const COMMAND_MCP_LIST: &str = "mcp.list";
 pub const COMMAND_MCP_GET: &str = "mcp.get";
@@ -322,12 +337,19 @@ pub const COMMAND_MCP_DELETE: &str = "mcp.delete";
 pub const COMMAND_MCP_BIND: &str = "mcp.bind";
 pub const COMMAND_MCP_UNBIND: &str = "mcp.unbind";
 
+// App API — Armory-level MCP Server catalog (global servers only,
+// window-scoped — no agent_id, no check_s1 — mirrors bundle.* auth shape).
+pub const COMMAND_MCP_CATALOG_LIST: &str = "mcp.catalog.list";
+pub const COMMAND_MCP_CATALOG_UPSERT: &str = "mcp.catalog.upsert";
+pub const COMMAND_MCP_CATALOG_DELETE: &str = "mcp.catalog.delete";
+
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
 pub const COMMAND_SESSION_RESTORE: &str = "session:restore";
 pub const COMMAND_SESSION_EXPORT: &str = "session:export";
 
-// Per-turn live activity summary (Haiku-powered, writes term:activity)
+// Per-turn live activity summary (Haiku-powered, writes term:ambient_summary;
+// routed through the Ambient Model Call gateway, crate::ambient)
 pub const COMMAND_SESSION_ACTIVITY_SUMMARY: &str = "session:activity_summary";
 
 // Option E (PR 1 of 2) — agent-anchored session zones.

@@ -5,12 +5,13 @@
  * AgentComposerStrip — slim 28-32px status row that sits directly above
  * the textarea in the agent pane composer region.
  *
- * LEFT:  Mode · Model · Effort drop-ups (open upward) · Log toggle
+ * LEFT:  Mode · Model · Effort drop-ups (open upward) · Shell toggle
  * RIGHT: tokens (↑in ↓out) · elapsed · ⚙N process badge ·
  *        context text (12.1k / 64k)
  *
- * The strip bar itself is not clickable. "Log" is the sole toggle for
- * the ActivityLogPanel. Chevron and shell history panel removed per
+ * The strip bar itself is not clickable. "Shell" is the sole toggle for
+ * the details drawer (ActivityLogPanel + the AgentShellSubblock terminal,
+ * SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md). Chevron and shell history panel removed per
  * SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md. Mode/Model/Effort are
  * top-level dropdowns here (Mode was previously a read-only pill + a nested
  * control in the Log region) per SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.
@@ -301,19 +302,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         horizontal
                     />
                 </Show>
+            </span>
+
+            {/* Right zone — Shell toggle + stats + process badge + context text.
+                Floats right via margin-left:auto (not space-between) so it stays
+                pinned right whether it's sharing the row with the controls zone
+                or has wrapped onto its own line at narrow widths — see the
+                flex-wrap rules in _composer-strip.scss. */}
+            <span class="agent-composer-strip-right">
                 <button
                     type="button"
                     class="agent-composer-strip-log-btn"
                     classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
-                    title={props.logOpen ? "Hide the activity log" : "Show the activity log (launch, tools, errors)"}
+                    title={props.logOpen ? "Hide the shell" : "Show the shell (activity log + interactive terminal)"}
                     onClick={() => props.onToggleLog()}
                 >
-                    Log
+                    Shell
                 </button>
-            </span>
-
-            {/* Right zone — stats + process badge + context text */}
-            <span class="agent-composer-strip-right">
                 <Show when={rightText()}>
                     <span class="agent-composer-strip-stats">{rightText()}</span>
                 </Show>
