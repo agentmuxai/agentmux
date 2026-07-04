@@ -483,18 +483,20 @@ jobs:
   winget:
     name: Submit WinGet update
     needs: [verify, publish]
-    runs-on: ubuntu-latest
+    # microsoft/winget-create's release no longer ships a Linux binary (only
+    # wingetcreate.exe) — mirrors the ms-store job's runner below.
+    runs-on: windows-latest
     continue-on-error: true
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
       - name: Install wingetcreate
+        shell: pwsh
         run: |
-          curl -fsSL -o wingetcreate \
-            "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate-linux"
-          chmod +x wingetcreate
+          Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile wingetcreate.exe
 
       - name: Submit WinGet manifest PR
+        shell: bash
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -511,7 +513,7 @@ jobs:
             exit 1
           fi
           echo "WinGet installer URL: $INSTALLER_URL"
-          ./wingetcreate update AgentMux.AgentMux \
+          ./wingetcreate.exe update AgentMux.AgentMux \
             --version "${VERSION}" \
             --urls "$INSTALLER_URL" \
             --submit \
