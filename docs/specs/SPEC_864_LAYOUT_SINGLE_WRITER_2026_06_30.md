@@ -22,6 +22,12 @@ while two writers race one `db_layout` row. This must land before Pillar 1.
 
 ---
 
+> **Scope note (2026-07-02):** for **Pillar 1 (disposable host)** the minimum is the **weak cutover** —
+> retire wcore-direct and route the frontend's full-tree push through `LayoutSetTree` (the frontend keeps
+> *computing* the tree) so there is ONE coherent writer of `db_layout`. The strong reducer-authority /
+> intent-flip (`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT`) is a separate, above-and-beyond goal, not a Pillar-1
+> blocker. See `DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE` §7b.
+
 ## 0. TL;DR
 
 The layout tree is already persisted in srv (`db_layout`), so it survives host death. The problem
