@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getPlatform } from "@/util/platformutil";
+
 /**
  * Core toolchain catalog — the system tools AgentMux relies on beyond the
  * provider CLIs: Node.js, npm, Git, and Docker. The Toolchain modal renders
@@ -11,9 +13,24 @@
  * Detection reuses the existing `resolvecli` RPC (versioned-install-dir →
  * system PATH → `--version`), so a core tool with an empty `npmPackage` simply
  * resolves on PATH. See docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md §5.
+ *
+ * `checkKind` distinguishes what "installed" actually means for a tool:
+ * `"path"` (the default) means the binary resolves on PATH — correct for
+ * static tools (git, node, python) that have no separate running-or-not
+ * state. `"liveness"` means the binary being on PATH is NOT sufficient —
+ * the tool is backed by a daemon/service that can be installed but not
+ * running (Docker being the motivating case: `docker --version` succeeds
+ * even when Docker Desktop is stopped). See `frontend/app/store/
+ * toolchain-capabilities.ts` — the single point of entry that dispatches
+ * to the right backend check based on this field, instead of every
+ * consumer deciding for itself which check answers "is it available."
+ * docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md has the
+ * incident this field exists to prevent from recurring for the next
+ * daemon-backed tool.
  */
 
 export type Platform = "windows" | "macos" | "linux";
+export type CheckKind = "path" | "liveness";
 
 export interface CoreTool {
     /** Stable id. */
@@ -40,11 +57,25 @@ export interface CoreTool {
     installCommand?: Partial<Record<Platform, string>>;
     /** Homebrew formula — enables the P3 one-click install when brew exists. */
     brewFormula?: string;
+    /** What "available" means for this tool. Defaults to `"path"` when omitted. */
+    checkKind?: CheckKind;
 }
 
 /** Resolve the CLI command for the current platform. */
 export function cliCommandForPlatform(tool: CoreTool, plat: Platform): string {
     return tool.cliCommandByPlatform?.[plat] ?? tool.cliCommand;
+}
+
+/**
+ * The current OS as a `Platform`. Single implementation — was previously
+ * duplicated as a local `platformKey()` in toolchain-view.tsx.
+ */
+export function currentPlatform(): Platform {
+    switch (getPlatform()) {
+        case "win32": return "windows";
+        case "darwin": return "macos";
+        default: return "linux";
+    }
 }
 
 const NODE_DOWNLOAD = "https://nodejs.org/en/download";
@@ -103,6 +134,11 @@ export const CORE_TOOLS: CoreTool[] = [
             linux: "https://docs.docker.com/engine/install/",
         },
         brewFormula: "docker",
+        // The CLI binary being on PATH doesn't mean the daemon is running
+        // (Docker Desktop can be installed but stopped) — this tool needs
+        // a liveness check, not a path check. See the `checkKind` doc
+        // comment above.
+        checkKind: "liveness",
     },
     {
         id: "python",

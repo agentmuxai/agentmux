@@ -21,6 +21,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentLaunchModalPanel } from "./AgentLaunchModal";
+import { resetCapabilities } from "@/app/store/toolchain-capabilities";
 
 // ── Module mocks ────────────────────────────────────────────────────
 
@@ -30,6 +31,12 @@ vi.mock("@/app/store/rpc-api", () => {
         ListMemoriesCommand: vi.fn(),
         ListIdentityBindingsCommand: vi.fn(),
         ListNamedAgentsCommand: vi.fn(),
+        // Backs the shared toolchain-capabilities store's Docker liveness
+        // probe — this modal polls it (watchCapability("docker")) for the
+        // non-blocking sandbox hint. An unconfigured vi.fn() resolves to
+        // undefined, which the store treats as "unavailable"; fine as a
+        // default for tests that don't care about Docker state.
+        ContainerRuntimeAvailableCommand: vi.fn(),
     };
     return { RpcApi };
 });
@@ -137,6 +144,7 @@ let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
 beforeEach(async () => {
     vi.clearAllMocks();
+    resetCapabilities();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
     vi.mocked(RpcApi.ListIdentityBundlesCommand).mockResolvedValue([workIdentity]);
     vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([notesMemory, personalMemory]);

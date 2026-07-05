@@ -1,16 +1,16 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { createStore } from "solid-js/store";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi, createBlock } from "@/store/global";
-import { getPlatform } from "@/util/platformutil";
-import { CORE_TOOLS, cliCommandForPlatform, type Platform } from "@/app/view/agent/providers/toolchain-catalog";
+import { CORE_TOOLS, cliCommandForPlatform, currentPlatform } from "@/app/view/agent/providers/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
+import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import type { ToolchainViewModel } from "./toolchain-model";
 import "./toolchain-view.scss";
 
@@ -73,6 +73,9 @@ interface WidgetRow {
     healthLoading: boolean;
     running: boolean;
     statusCode?: number;
+    /** Toolchain ids this widget needs (e.g. ["python"], ["docker"]) — see
+     *  widget-catalog.ts's ExternalWidget.requires. */
+    requires: string[];
 }
 
 interface ToolEnv {
@@ -80,14 +83,6 @@ interface ToolEnv {
     pathSource: string;
     os: string;
     arch: string;
-}
-
-function platformKey(): Platform {
-    switch (getPlatform()) {
-        case "win32": return "windows";
-        case "darwin": return "macos";
-        default:       return "linux";
-    }
 }
 
 function pathSourceLabel(src: string): string {
@@ -101,7 +96,7 @@ function pathSourceLabel(src: string): string {
 // ── View component ────────────────────────────────────────────────────────────
 
 export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): JSX.Element {
-    const plat = platformKey();
+    const plat = currentPlatform();
     const [env, setEnv] = createSignal<ToolEnv | null>(null);
     const [showPath, setShowPath] = createSignal(false);
 
@@ -129,6 +124,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
             installPkg: w.install.kind !== "manual" ? w.install.package : undefined,
             customPort: savedPorts[w.id],
             cliLoading: true, cliFound: false, healthLoading: false, running: false,
+            requires: w.requires,
         }))
     );
 
@@ -155,10 +151,20 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
         }
     };
 
-    const probe = async (idx: number) => {
+    // Rows whose catalog entry declares checkKind:"liveness" (currently just
+    // docker) don't probe here directly — they go through the shared
+    // toolchain-capabilities store (see the sync effect below) so this view
+    // can never disagree with any other consumer (create-agent modal, launch
+    // pre-flight) about whether the tool is actually available. See
+    // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    const probe = async (idx: number, opts?: { force?: boolean }) => {
         const row = rows[idx];
         const def = row.kind === "core" ? CORE_TOOLS.find((t) => t.id === row.id) : getProviderList().find((p) => p.id === row.id);
         if (!def) { setRows(idx, { loading: false, found: false }); return; }
+        if (row.kind === "core" && (def as any).checkKind === "liveness") {
+            await ensureCapability(row.id, { force: opts?.force });
+            return; // row update happens via the sync effect, from the shared store
+        }
         const cliCmd = row.kind === "core" ? cliCommandForPlatform(def as any, plat) : (def as any).cliCommand;
         const data = { provider_id: row.id, cli_command: cliCmd, npm_package: "", pinned_version: "", windows_install_command: "", unix_install_command: "" };
         try {
@@ -169,15 +175,47 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
         }
     };
 
+    // Keep liveness-kind rows' visual state synced to the shared store,
+    // including updates driven by this row's own background poll below
+    // (watchCapability) — not just the initial probe.
+    for (const [idx, row] of rows.entries()) {
+        if (row.kind !== "core") continue;
+        const def = CORE_TOOLS.find((t) => t.id === row.id);
+        if (def?.checkKind !== "liveness") continue;
+        createEffect(() => {
+            const cap = getCapability(row.id);
+            if (cap.status === "unknown") return; // not probed yet — keep the initial "Checking…" state
+            setRows(idx, {
+                loading: cap.status === "checking",
+                found: cap.status === "available",
+                version: cap.version,
+                path: cap.path,
+                source: cap.source,
+            });
+        });
+    }
+
     onMount(() => {
         RpcApi.ToolchainEnvCommand(TabRpcClient, { timeout: 8000 }).then(setEnv).catch(() => setEnv(null));
         rows.forEach((_, i) => void probe(i));
         wrows.forEach((_, i) => void probeWidget(i));
+        // Background-poll liveness tools (docker) so this view self-heals —
+        // e.g. reflects "user just started Docker Desktop" — within a few
+        // seconds, with no manual refresh needed.
+        for (const row of rows) {
+            const def = row.kind === "core" ? CORE_TOOLS.find((t) => t.id === row.id) : undefined;
+            if (def?.checkKind === "liveness") onCleanup(watchCapability(row.id));
+        }
+        // Probe every toolchain id any widget declares via `requires` so the
+        // "Requires: X" hint below has a real answer, not just "unknown".
+        // First real consumer of widget-catalog.ts's `requires` field.
+        const requiredIds = new Set(wrows.flatMap((w) => w.requires));
+        for (const id of requiredIds) void ensureCapability(id);
     });
 
     const refresh = () => {
         rows.forEach((_, i) => setRows(i, { loading: true, found: false, version: undefined }));
-        rows.forEach((_, i) => void probe(i));
+        rows.forEach((_, i) => void probe(i, { force: true }));
         wrows.forEach((_, i) => setWrows(i, { cliLoading: true, cliFound: false, healthLoading: false, running: false, statusCode: undefined }));
         wrows.forEach((_, i) => void probeWidget(i));
     };
@@ -352,6 +390,11 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                                         </Show>
                                     </div>
                                     <div class="toolchain-row-path toolchain-widget-desc">{row.description}</div>
+                                    <Show when={!row.running && row.requires.some((id) => !isAvailable(id))}>
+                                        <div class="toolchain-row-path">
+                                            Requires: {row.requires.filter((id) => !isAvailable(id)).join(", ")}
+                                        </div>
+                                    </Show>
                                     <div class="toolchain-widget-port">
                                         <span class="toolchain-widget-port-label">Port</span>
                                         <input

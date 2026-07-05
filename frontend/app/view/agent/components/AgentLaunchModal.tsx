@@ -18,6 +18,7 @@ import { createEffect, createMemo, createResource, createSignal, For, onCleanup,
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 
 import { waveEventSubscribe } from "@/app/store/wps";
 import {
@@ -386,6 +387,17 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
 
     const hasName = () => name().trim().length > 0;
     const containerSupported = () => catalog()?.containerSupported ?? true;
+
+    // Live Docker-availability signal, purely informational here — see the
+    // inline hint near the sandbox radio below. Deliberately NOT part of the
+    // gating logic: unlike the create-from-template modal, this modal also
+    // drives relaunch/continue of already-configured container agents, and
+    // hard-disabling on a possibly-stale probe at modal-open time risks
+    // blocking a legitimate continue. `containerSupported` (does this
+    // provider ship a container image at all) remains the only thing that
+    // actually disables the radio. See
+    // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    onCleanup(watchCapability("docker"));
 
     // If the catalog says this provider can't run in a container, coerce
     // runtime to "host" regardless of the form default ("container").
@@ -787,6 +799,13 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         ? "Slower to start, but the agent can't touch files outside its own workspace. Recommended for untrusted tasks."
                                         : "Not available for this agent."}
                                 </span>
+                                {/* Non-blocking — see the `watchCapability("docker")` comment
+                                    above for why this doesn't gate `disabled`. */}
+                                <Show when={containerSupported() && !isAvailable("docker")}>
+                                    <span class="agent-launch-modal-hint agent-launch-modal-hint--warn">
+                                        Docker daemon not detected — start Docker Desktop, then try again.
+                                    </span>
+                                </Show>
                             </span>
                         </label>
                     </fieldset>

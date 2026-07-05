@@ -972,25 +972,26 @@ async fn main() {
         ),
         install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
         container_manager: {
-            match crate::backend::container::ContainerManager::connect() {
-                Ok(mgr) => {
-                    // Ping is async — spawn a task; the manager is still exposed
-                    // so container agents can start even before the ping resolves.
-                    let mgr = std::sync::Arc::new(mgr);
-                    let mgr_check = mgr.clone();
-                    tokio::spawn(async move {
-                        match mgr_check.check_available().await {
-                            Ok(()) => tracing::info!("Docker daemon available — container agent panes enabled"),
-                            Err(e) => tracing::warn!(error = %e, "Docker daemon not reachable; container agent panes will fail to start"),
-                        }
-                    });
-                    Some(mgr)
+            // Self-healing: unlike a plain `Option<ContainerManager>` fixed at
+            // boot, `ContainerRuntimeHandle` retries the connect on demand, so
+            // a daemon that starts after this point is picked up by later
+            // calls without an app restart. See
+            // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+            let handle = std::sync::Arc::new(
+                crate::backend::container::ContainerRuntimeHandle::connect_at_startup(),
+            );
+            let handle_check = handle.clone();
+            tokio::spawn(async move {
+                if handle_check.is_available().await {
+                    tracing::info!("Docker daemon available — container agent panes enabled");
+                } else {
+                    tracing::warn!(
+                        "Docker daemon not reachable at startup; container agent panes will \
+                         become available automatically once Docker is running"
+                    );
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Docker not available; container agent panes disabled");
-                    None
-                }
-            }
+            });
+            handle
         },
         shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
         cron_scheduler: crate::backend::cron::CronScheduler::new(

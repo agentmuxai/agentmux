@@ -349,7 +349,7 @@ mod recent_sessions_tests {
             saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
-            container_manager: None,
+            container_manager: Arc::new(crate::backend::container::ContainerRuntimeHandle::disabled()),
             shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
             cron_scheduler: crate::backend::cron::CronScheduler::new(
                 None,
@@ -647,7 +647,7 @@ mod recent_sessions_tests {
             saga_log: Arc::new(crate::sagas::log::SagaLog::open_in_memory().unwrap()),
             auth_session_manager: Arc::new(crate::identity::auth_session::AuthSessionManager::new()),
             install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
-            container_manager: None,
+            container_manager: Arc::new(crate::backend::container::ContainerRuntimeHandle::disabled()),
             shell_sessions: crate::backend::shell_node::ShellSessionRegistry::new(),
             cron_scheduler: crate::backend::cron::CronScheduler::new(
                 None,

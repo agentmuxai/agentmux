@@ -246,23 +246,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // containerruntimeavailable → does the Docker DAEMON answer a ping
     // right now? Returns `{ available: bool }`. The create-from-template
-    // modal uses this to gate/default the container runtime. Distinct
-    // from `resolvecli docker`, which only confirms the CLI binary is on
-    // PATH — that false-positives when Docker is installed but the daemon
-    // is stopped, steering users into a container agent that can't start
-    // (codex P1 on #1576). `None` manager (Docker absent at startup) →
-    // false; `Some` → live `check_available()` ping so a daemon that
-    // came up or went down since launch is reflected.
+    // modal (via the frontend's shared toolchain-capabilities store) uses
+    // this to gate/default the container runtime. Distinct from
+    // `resolvecli docker`, which only confirms the CLI binary is on PATH —
+    // that false-positives when Docker is installed but the daemon is
+    // stopped, steering users into a container agent that can't start
+    // (codex P1 on #1576). `ContainerRuntimeHandle::is_available()` retries
+    // the connection on demand, so a daemon that came up or went down
+    // since launch is reflected without an app restart.
     let container_manager_cra = state.container_manager.clone();
     engine.register_handler(
         COMMAND_CONTAINER_RUNTIME_AVAILABLE,
         Box::new(move |_data, _ctx| {
             let cm = container_manager_cra.clone();
             Box::pin(async move {
-                let available = match cm {
-                    Some(mgr) => mgr.check_available().await.is_ok(),
-                    None => false,
-                };
+                let available = cm.is_available().await;
                 Ok(Some(serde_json::json!({ "available": available })))
             })
         }),

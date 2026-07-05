@@ -289,7 +289,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         &block.meta, "agentMode", "host",
                     );
                     if agent_mode == "container" {
-                        let cm = container_manager.as_deref()
+                        let cm = container_manager.get().await
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
                         let container_image = {
                             let img = crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", "");

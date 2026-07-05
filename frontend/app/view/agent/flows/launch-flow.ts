@@ -33,6 +33,7 @@
 import { translateError } from "@/app/errors/translate";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { ensureCapability, getCapability } from "@/app/store/toolchain-capabilities";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
@@ -75,26 +76,26 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
 
     const oref = WOS.makeORef("block", blockId);
 
-    // Phase 0: Container agents require a container runtime
+    // Phase 0: Container agents require a container runtime. Reads the
+    // shared toolchain-capabilities store (forced fresh, since staleness
+    // right before an actual launch is exactly the failure mode being
+    // guarded against) rather than its own CLI-on-PATH check — previously
+    // this used ResolveCliCommand directly, which only confirms the `docker`
+    // binary is on PATH and can't tell the daemon is stopped, so an agent
+    // could pass this gate and still fail deeper in container spawn. See
+    // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     const blockData = WOS.getWaveObjectAtom<Block>(oref)();
     const agentMode = blockData?.meta?.agentMode ?? "host";
     if (agentMode === "container") {
         log("docker", "container agent — checking for container runtime...");
-        try {
-            const dockerResult = await RpcApi.ResolveCliCommand(TabRpcClient, {
-                provider_id: "docker",
-                cli_command: "docker",
-                npm_package: "",
-                pinned_version: "",
-                windows_install_command: "",
-                unix_install_command: "",
-            }, { timeout: 10000 });
-            log("docker", `found: ${dockerResult.cli_path} (${dockerResult.version})`);
-        } catch {
+        await ensureCapability("docker", { force: true });
+        const docker = getCapability("docker");
+        if (docker.status !== "available") {
             log("docker", "Container runtime not found", "error");
             log("docker", "Container agents require a compatible container runtime (e.g. Docker) to run.", "error");
             return "fatal";
         }
+        log("docker", "container runtime available");
     }
 
     // Phase 1: CLI Detection / Installation

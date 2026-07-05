@@ -22,12 +22,13 @@
  * universal modal system per `feedback_use_universal_modal_system`.
  */
 
-import { createEffect, createMemo, createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 
 export interface CreateFromTemplateFormData {
     name: string;
@@ -69,37 +70,28 @@ export const AgentCreateFromTemplateModalPanel = (
     // agent always actually starts; container can never be the silent
     // default on a box without Docker (the bug this fixes).
     const [runtime, setRuntime] = createSignal<"host" | "container">("host");
-    // undefined = still probing; true/false = Docker daemon answered the
-    // ping (ContainerRuntimeAvailableCommand) or not — NOT a CLI-on-PATH check.
-    const [dockerAvailable, setDockerAvailable] = createSignal<boolean | undefined>(undefined);
-    // Once the user touches the dropdown we stop auto-defaulting so the
-    // Docker-probe result can't yank their choice out from under them.
+    // Once the user touches the dropdown we stop auto-defaulting so a
+    // Docker-availability change can't yank their choice out from under them.
     let runtimeTouched = false;
 
     const containerSupported = createMemo(
         () => getCliCatalogEntry(props.template.provider)?.containerSupported ?? true,
     );
-    const canPickContainer = () => containerSupported() && dockerAvailable() === true;
+    // Reads the shared toolchain-capabilities store rather than probing
+    // Docker itself — this is what guarantees this modal can never disagree
+    // with the Toolchain widget or the launch pre-flight check about whether
+    // Docker is actually available. That store's "docker" entry is checked
+    // via a DAEMON ping (ContainerRuntimeAvailableCommand), not just whether
+    // the CLI binary is on PATH — a binary-only check would false-positive
+    // when Docker is installed but the daemon is stopped, re-creating the
+    // exact trap this modal exists to avoid: defaulting to a container agent
+    // that then can't start (codex P1 on #1576). See
+    // docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    const canPickContainer = () => containerSupported() && isAvailable("docker");
 
-    // Probe for a usable container runtime: ask the backend whether the
-    // Docker DAEMON answers a ping right now — not just whether the
-    // `docker` CLI is on PATH. A binary-only check (resolvecli) would
-    // false-positive when Docker is installed but the daemon is stopped,
-    // re-creating the exact trap this modal exists to avoid: defaulting
-    // to a container agent that then can't start (codex P1 on #1576).
-    // Any failure → treat as unavailable (host-only), the safe fallback.
-    onMount(() => {
-        void (async () => {
-            try {
-                const r = await RpcApi.ContainerRuntimeAvailableCommand(TabRpcClient, {
-                    timeout: 10000,
-                });
-                setDockerAvailable(r?.available === true);
-            } catch {
-                setDockerAvailable(false);
-            }
-        })();
-    });
+    // Poll while this modal is open so a user who starts Docker Desktop
+    // mid-flow sees the option unlock within a few seconds, no restart.
+    onMount(() => onCleanup(watchCapability("docker")));
 
     // Default-pick the runtime once the probe lands: honour the
     // template's suggested mode when container is genuinely usable,
