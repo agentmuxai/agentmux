@@ -1690,6 +1690,7 @@ mod tests {
                 actionid: "a1".into(),
                 blockid: "b-new".into(),
                 nodesize: None,
+                nodesizefraction: None,
                 indexarr: None,
                 focused: true,
                 magnified: false,

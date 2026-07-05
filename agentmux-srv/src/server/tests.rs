@@ -531,6 +531,7 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
             actionid: "a1".into(),
             blockid: "b-x".into(),
             nodesize: None,
+            nodesizefraction: None,
             indexarr: None,
             focused: false,
             magnified: false,
