@@ -400,6 +400,15 @@ impl AgentMuxHandler {
     pub(crate) fn do_close(&mut self, _browser: Option<&mut Browser>) -> bool {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
+        // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
+        // 2026-07-05): do_close firing means CEF actually initiated browser
+        // destruction — the missing middle link when secondary-window closes
+        // leak the browser/renderer.
+        dlog(&format!(
+            "do_close fired; browser_list.len()={}",
+            self.browser_list.len()
+        ));
+
         if self.browser_list.len() == 1 {
             self.is_closing = true;
         }

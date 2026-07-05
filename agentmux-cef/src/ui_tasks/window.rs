@@ -60,55 +60,75 @@ wrap_task! {
             // already being destroyed (e.g. macOS windowShouldClose racing this
             // queued IPC task) — is handled by the is_closed() guard below.
             if let Some(window) = get_window_on_ui(&self.state, &self.label) {
-                if window.is_closed() == 0 {
-                    window.close();
-                }
-                // CEF 148 Views: `window.close()` tears down the Window but
-                // leaves the hosted browser HIDDEN/RECYCLED — `on_before_close`
-                // never fires (the same property the quit path works around in
-                // lib.rs with a hard TerminateProcess; Discussion #1680). For
-                // MID-SESSION secondary-window closes there was no
-                // compensation at all, so every open+close of an extra window
-                // permanently leaked a live renderer process (~100MB commit),
-                // the reducer `browsers` entry, and — because the
-                // `on_before_close` → `backend_close_window` chain never ran —
-                // the entire srv-side window/workspace/tab/block state.
+                // CEF 148 Views: closing the WINDOW FIRST tears down the
+                // Window but leaves the hosted browser HIDDEN/RECYCLED —
+                // `on_before_close` never fires (the same property the quit
+                // path works around in lib.rs with a hard TerminateProcess;
+                // Discussion #1680). For MID-SESSION secondary-window closes
+                // there was no compensation at all, so every open+close of an
+                // extra window permanently leaked a live renderer process
+                // (~100MB commit), the reducer `browsers` entry, and — because
+                // the `on_before_close` → `backend_close_window` chain never
+                // ran — the entire srv-side window/workspace/tab/block state.
                 // Confirmed empirically with AGENTMUX_DEBUG_CLOSE=1 tracing:
-                // renderer count grew +1 per open/close cycle and no
-                // `on_before_close` entry was ever written. See
-                // docs/retro/retro-window-lifecycle-leak-2026-07-04.md (§ Code
-                // fix, round 2) and
+                // renderer count grew +1 per open/close cycle, no
+                // `on_before_close` was ever written, and a round-2 attempt
+                // that forced `close_browser(1)` AFTER `window.close()` was
+                // ALSO a no-op — once the Views window teardown has detached
+                // the browser, no CEF close API reaches it anymore. See
+                // docs/retro/retro-window-lifecycle-leak-2026-07-04.md and
                 // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
                 //
-                // Force the browser itself closed so the renderer dies and the
-                // on_before_close cleanup chain (UnregisterBrowser + backend
-                // CloseWindow) actually runs. force=1 skips unload handlers —
-                // correct here: the content is our own frontend, not user web
-                // content with unsaved state.
+                // Round 3: BROWSER-FIRST teardown for non-main labels — force
+                // `close_browser(1)` while the browser is still attached and
+                // healthy, then close the window. This matches the standard
+                // CEF Views pattern (can_close → try_close_browser → browser
+                // destruction drives window close), just force-initiated from
+                // our side so the destruction is guaranteed to start.
+                // force=1 skips unload handlers — correct here: the content
+                // is our own frontend, not user web content with unsaved
+                // state.
                 //
-                // Scope: NOT for "main" — main's close feeds the wrr
-                // last-window quit sequence (BeginDrain → quit_message_loop →
-                // hard exit), which is tuned around the recycled-browser state
-                // and reaps everything at process exit anyway. Secondary
-                // windows are independent top-level Views widgets, so unlike
-                // the April browser-pane cascade (WS_CHILD entanglement,
-                // SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md §2),
-                // close_browser on them cannot conflate with main's teardown.
+                // Scope: NOT for "main" — main's close feeds the tuned wrr
+                // last-window quit sequence and process exit reaps everything
+                // there. Secondary windows are independent top-level Views
+                // widgets, so unlike the April browser-pane cascade (WS_CHILD
+                // entanglement, teardown-spike spec §2), close_browser on
+                // them cannot conflate with main's teardown.
                 if self.label != "main" {
                     if let Some(mut browser) = self.state.get_browser(&self.label) {
                         if let Some(host) = browser.host() {
                             tracing::info!(
                                 target: "wrr",
                                 label = %self.label,
-                                "[close-window] forcing browser teardown after Views window close \
-                                 (recycle-on-close leaves the renderer alive otherwise)"
+                                "[close-window] browser-first teardown: close_browser(1) before window.close()"
                             );
+                            crate::client::dlog(&format!(
+                                "CloseWindowTask({}): close_browser(1) BEFORE window.close()",
+                                self.label
+                            ));
                             host.close_browser(1);
                         }
                     }
                 }
+                if window.is_closed() == 0 {
+                    crate::client::dlog(&format!(
+                        "CloseWindowTask({}): window.close()",
+                        self.label
+                    ));
+                    window.close();
+                } else {
+                    crate::client::dlog(&format!(
+                        "CloseWindowTask({}): window already closed — skipping window.close()",
+                        self.label
+                    ));
+                }
                 return;
             }
+            crate::client::dlog(&format!(
+                "CloseWindowTask({}): no CefWindow resolved — fallback try_close_browser",
+                self.label
+            ));
             // Fallback: no CefWindow for this label (non-Views path / pre-init
             // teardown) — close the browser handle directly.
             if let Some(mut browser) = self.state.get_browser(&self.label) {

@@ -92,3 +92,23 @@ Post-merge verification on a fresh isolated build (`g183aecc4`, channel `verify-
 Also disproven by the trace: the PR #1965 hypothesis that the `backend_window_id` registration race was the trigger for THIS incident — the mapping was registered and available at close time; the callback that would have consumed it simply never executed. (#1965's fix remains correct and load-bearing for the race it targets, and its cleanup chain is exactly what round 2 re-activates.)
 
 **Round-2 fix:** in `CloseWindowTask` (`ui_tasks/window.rs`), after `window.close()` on the Views path, force the browser itself closed with `close_browser(1)` for non-`main` labels. This makes `on_before_close` actually fire, which re-activates the entire existing cleanup chain (UnregisterBrowser → HWND-cache eviction → launcher mirror → `backend_close_window` with the #1965 retry → srv `CloseWindow` → `delete_workspace` cascade). Safe for secondary windows because they are independent top-level Views widgets — the April pane-cascade failure mode (`WS_CHILD` entanglement, teardown-spike spec §2) structurally cannot occur. `main` is excluded: its close feeds the tuned wrr last-window quit sequence, and process exit reaps everything there anyway.
+
+## Round 2 verification: FAILED. Round 3: break point isolated to inside CEF, between `do_close` and `on_before_close` (2026-07-05)
+
+**Round 2 (close_browser(1) AFTER window.close()) did not work.** Fresh-build verification (channel `verify-round2`): the forcing log line fired 4/4 times, but counts still leaked (srv windows 1→9, renderers 5→9, zero `on_before_close`). Once the Views window teardown has detached the browser, no CEF close API reaches it.
+
+**Round 3 instrumented every link of the cascade** (`can_close`, `do_close`, `on_window_destroyed`, `CloseWindowTask` branches — all dlog-traced) **and swapped the order** to browser-first teardown (`close_browser(1)` *before* `window.close()`). Verification (channel `verify-round3`) still leaks (1→9 windows, 5→9 renderers), but the trace now pins the exact break point. Per closed window:
+
+```
+CloseWindowTask(label): close_browser(1) BEFORE window.close()   <- fires
+CloseWindowTask(label): window.close()                            <- fires
+can_close(label): try_close_browser -> 1                          <- fires, returns "safe to close"
+do_close fired; browser_list.len()=N                               <- FIRES — CEF initiated browser destruction
+on_before_close                                                    <- NEVER — destruction never completes
+```
+
+`browser_list.len()` grows monotonically across closes (4→5→6→7): browsers are appended in `on_after_created` and only removed in `on_before_close`, which never runs. The closed windows' top-level HWNDs *are* destroyed (verified via EnumWindows both rounds — only main + current pool + pane-pool floater remain), so the state after close is: **no Window, no HWND, `do_close` completed, browser parked/detached with its renderer alive, unreachable by any further CEF close call** (a second `close_browser(1)` on it — round 2 — was a no-op).
+
+**Conclusion: the break is inside CEF 148's Views/Alloy teardown, after `do_close` returns false (proceed) — CEF parks/"recycles" the browser instead of completing destruction.** No host-side ordering of `window.close()` / `close_browser()` fixes this; both sanctioned close paths funnel into the same parked state. This matches, and finally explains mechanically, the pre-existing `lib.rs` quit-path comment ("browsers are HIDDEN/recycled (the close never fires on_before_close)").
+
+**Recommended round 4 (not yet attempted — handed off):** bypass the Views close entirely for secondary windows and destroy the top-level HWND natively (`DestroyWindow`, NOT `PostMessage(WM_CLOSE)` — WM_CLOSE routes back through Views' wndproc, which is the old #1680 hide-the-frame failure). The native WM_DESTROY parent→child cascade destroying CEF's browser child HWND is the **exact mechanism PR #1957 proved reliably fires `OnBeforeClose`** for browser panes, and the floating-pane teardown has shipped on it for months. The top-level HWND is resolvable via `state.window_hwnds` / `resolve_window_hwnd` (`commands/window/lifecycle.rs`). Open question for round 4: whether to call `close_browser(1)` first (unload/JS teardown niceties) and then `DestroyWindow`, or `DestroyWindow` alone (what panes/floaters do). Second candidate if that fails: stop leaking at the source — re-enqueue closed promoted windows into the pool (embrace the recycle) — much bigger surgery, pool expects windows with live `cef::Window` handles.
