@@ -132,6 +132,27 @@ pub fn find_node_by_id_mut<'a>(tree: &'a mut LayoutNode, id: &str) -> Option<&'a
     None
 }
 
+/// Find the id of the (first) leaf node whose `data.block_id` matches
+/// `block_id`. SPEC_864 site #6 — lets `LayoutDeleteNodeByBlock` resolve a
+/// block to its layout node inside the reducer arm (the reducer owns the
+/// tree; callers like the `delete_block` saga only know the block id).
+/// Blocks appear at most once in a well-formed tree; first match wins.
+pub fn find_node_id_by_block(tree: &LayoutNode, block_id: &str) -> Option<String> {
+    if tree
+        .data
+        .as_ref()
+        .is_some_and(|d| d.block_id == block_id)
+    {
+        return Some(tree.id.clone());
+    }
+    for child in &tree.children {
+        if let Some(found) = find_node_id_by_block(child, block_id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 // ── Insert-location heuristic ──────────────────────────────────────────────
 
 /// Candidate for insertion location, collected during tree traversal.

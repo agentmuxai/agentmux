@@ -321,15 +321,53 @@ pub(super) fn handle_layout_delete_node(
         tab.magnified_node_id = String::new();
     }
 
+    // SPEC_864 site #6 — carry the resulting tree so the persist
+    // subscriber can write db_layout without re-running the algebra
+    // (same single-writer shape as the 7 structural arms). A delete is
+    // the one structural op that can legitimately EMPTY the tree
+    // (root-orphan case), so `tree_cleared` disambiguates a real clear
+    // from a version-skewed sender's absent field.
+    let new_tree = tab.rootnode.clone();
+    let tree_cleared = new_tree.is_none();
     let v = state.bump_version();
     vec![Event::LayoutNodeDeleted {
         tab_id,
         node_id,
+        new_tree,
+        tree_cleared,
         was_focused,
         was_magnified,
         correlation_id,
         version: v,
     }]
+}
+
+/// SPEC_864 site #6 — delete the layout node holding `block_id`.
+/// Resolution happens here because the reducer owns the tree; the
+/// caller (the `delete_block` saga) only knows the block id.
+///
+/// Unresolved block → silent idempotent no-op (empty event vec), NOT an
+/// error: every `delete_block` saga run dispatches this, and a block
+/// may legitimately have no layout node (the frontend's own delete
+/// flow already pushed a pruned tree via `LayoutSetTree`, the block
+/// was floating/never laid out, or the tab tree is empty).
+pub(super) fn handle_layout_delete_node_by_block(
+    state: &mut State,
+    tab_id: String,
+    block_id: String,
+    correlation_id: String,
+) -> Vec<Event> {
+    let node_id = match state
+        .tabs
+        .get(&tab_id)
+        .and_then(|tab| tab.rootnode.as_ref())
+        .and_then(|root| crate::backend::layout::find_node_id_by_block(root, &block_id))
+    {
+        Some(id) => id,
+        // Unknown tab, empty tree, or block not in the tree — no-op.
+        None => return Vec::new(),
+    };
+    handle_layout_delete_node(state, tab_id, node_id, correlation_id)
 }
 
 // ── Phase 3 — remaining structural arms ─────────────────────────────────────

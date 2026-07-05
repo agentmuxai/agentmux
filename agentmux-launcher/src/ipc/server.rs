@@ -987,6 +987,7 @@ async fn enforce_register_first(
         Command::LayoutInsertNode { .. }
         | Command::LayoutInsertNodeAtIndex { .. }
         | Command::LayoutDeleteNode { .. }
+        | Command::LayoutDeleteNodeByBlock { .. }
         | Command::LayoutMoveNode { .. }
         | Command::LayoutSwapNodes { .. }
         | Command::LayoutResizeNodes { .. }

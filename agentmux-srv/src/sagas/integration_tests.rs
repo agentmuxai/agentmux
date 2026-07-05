@@ -257,7 +257,11 @@ async fn delete_block_happy_path_removes_block_across_all_surfaces() {
         .find(|s| s.name == "delete_block")
         .expect("delete_block saga not in snapshot");
     assert_eq!(del.state, "completed");
-    assert_eq!(del.step_count, 1);
+    // SPEC_864 site #6 — the saga now dispatches two steps: DeleteBlock
+    // (row deletes) + LayoutDeleteNodeByBlock (reducer-routed layout
+    // prune). The durable log records both dispatches even when the
+    // second no-ops (block not in any layout tree, as here).
+    assert_eq!(del.step_count, 2);
 }
 
 #[tokio::test]

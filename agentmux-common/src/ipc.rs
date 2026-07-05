@@ -527,6 +527,18 @@ pub enum Command {
         node_id: String,
         correlation_id: String,
     },
+    /// Remove the node holding `block_id`; collapse empty parents.
+    /// SPEC_864 site #6 — the block→node resolution happens in the
+    /// reducer arm (the reducer owns the tree), so callers that only
+    /// know a block id (the `delete_block` saga) don't need tree
+    /// access. Resolving to no node is a silent idempotent no-op:
+    /// blocks may legitimately have no layout node (already pruned by
+    /// a frontend push, or never laid out).
+    LayoutDeleteNodeByBlock {
+        tab_id: String,
+        block_id: String,
+        correlation_id: String,
+    },
     /// Reparent a node to a new parent at the given child index.
     LayoutMoveNode {
         tab_id: String,
@@ -1467,6 +1479,24 @@ pub enum Event {
     LayoutNodeDeleted {
         tab_id: String,
         node_id: String,
+        /// The reducer's resulting tree (post-delete, post-collapse) for
+        /// the persist subscriber to write to `db_layout` — single-writer,
+        /// no algebra re-run (SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT /
+        /// SPEC_864 site #6). Unlike the other structural events, a delete
+        /// CAN legitimately empty the tree (root-orphan case) — `None`
+        /// alone is ambiguous with a version-skewed pre-change sender, so
+        /// `tree_cleared` below disambiguates. `#[serde(default)]` for
+        /// forward-compat.
+        #[serde(default)]
+        new_tree: Option<crate::LayoutNode>,
+        /// True when the delete legitimately emptied the tree (the deleted
+        /// node WAS the root). The persist subscriber clears `db_layout`'s
+        /// rootnode only when `new_tree.is_none() && tree_cleared` — a bare
+        /// `None` (old sender / replayed pre-change JSON) is ignored rather
+        /// than erasing the persisted layout (same skew concern as codex
+        /// P2 on #1883). `#[serde(default)]` = false for old JSON.
+        #[serde(default)]
+        tree_cleared: bool,
         /// True if the deleted node was the focused one (subscribers may
         /// need to refocus).
         was_focused: bool,
