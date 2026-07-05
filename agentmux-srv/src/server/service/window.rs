@@ -192,13 +192,26 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
                         }
 
                         if seeded_ids.len() == 3 {
-                            if let Err(e) = crate::backend::wcore::write_default_three_pane_layout(
-                                store,
+                            // SPEC_864 Phase 3 — post-bootstrap seed routes
+                            // through the reducer (single writer of
+                            // db_layout); the tree shape is shared with the
+                            // pre-bootstrap store-direct first-launch seed
+                            // via `default_three_pane_tree`.
+                            let (tree, focused, leaforder) =
+                                crate::backend::wcore::default_three_pane_tree(
+                                    &seeded_ids[0],
+                                    &seeded_ids[1],
+                                    &seeded_ids[2],
+                                );
+                            if let Err(e) = super::reducer_helpers::seed_layout_via_reducer(
+                                state,
                                 &new_tab_id,
-                                &seeded_ids[0],
-                                &seeded_ids[1],
-                                &seeded_ids[2],
-                            ) {
+                                tree,
+                                focused,
+                                leaforder,
+                            )
+                            .await
+                            {
                                 tracing::warn!(
                                     tab_id = %new_tab_id,
                                     error = %e,
