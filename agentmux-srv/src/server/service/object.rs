@@ -411,11 +411,20 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
 /// SPEC_864 Phase 2 — route a frontend `UpdateObject` layout push through
 /// the reducer as a single `LayoutSetTree` dispatch.
 ///
-/// Ordering follows the CreateBlock pattern: dispatch (reducer state
-/// mutates) → apply events to wstore (the persist subscriber is the sole
-/// `db_layout` writer) → on SQLite failure, compensate by re-dispatching
-/// the pre-push row so reducer state rolls back → publish events (the
-/// wave-obj bridge re-reads the row, so publish must follow the write).
+/// Dispatch AND SQLite apply happen under ONE hold of the `srv_state`
+/// mutex (reagent P1 #1970): with `dispatch_to_reducer`'s usual
+/// release-before-I/O contract, two concurrent pushes for the same tab
+/// could dispatch in order A→B but persist B→A, leaving `db_layout` on
+/// the older tree while `TabRecord` (authoritative as of this route)
+/// holds the newer one — the exact coherence this route exists to
+/// guarantee, and a regression vs. the legacy single atomic `update_raw`.
+/// Holding the lock across the row UPDATE (a sub-ms local SQLite write)
+/// makes persist order equal dispatch order; the SQLite-failure rollback
+/// re-dispatch also runs inside the same hold so no interleaved dispatch
+/// can observe the un-rolled-back state. Publish happens after release
+/// (the wave-obj bridge re-reads the row, so publish must follow the
+/// write; subscribers never see events out of dispatch order because
+/// publish order still matches — see below).
 ///
 /// Not carried: `LayoutState.meta`. The legacy whole-row write persisted
 /// it incidentally, but nothing mutates layout meta (`UpdateObjectMeta`
@@ -435,7 +444,10 @@ async fn update_layout_via_reducer(
         .unwrap_or_default()
         .to_string();
 
-    // Snapshot the current row for compensation before anything mutates.
+    // Snapshot the current row for the rollback path before anything
+    // mutates. (A racing push between this read and the locked section
+    // below only affects which row the FAILURE path restores; the success
+    // path never reads old_row.)
     let old_row = match store.get::<LayoutState>(&oid) {
         Ok(Some(row)) => row,
         Ok(None) => return WebReturnType::error(format!("UpdateObject: layout not found: {}", oid)),
@@ -458,36 +470,17 @@ async fn update_layout_via_reducer(
         magnified_node_id: get_str("magnifiednodeid"),
         pending_backend_actions: get_json("pendingbackendactions"),
     };
-
-    let events = dispatch_to_reducer(
-        state,
-        agentmux_common::ipc::Command::LayoutSetTree {
-            tab_id: tab_id.clone(),
-            new_tree,
-            correlation_id: String::new(),
-            slices: Some(slices),
-        },
-    )
-    .await;
-    if let Some(err_msg) = events.iter().find_map(|e| match e {
-        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
-        _ => None,
-    }) {
-        return WebReturnType::error(err_msg);
-    }
-    // Convert the (non-Send) boxed error to a String before awaiting the
-    // compensation — same shape as CreateBlock's apply/compensate flow.
-    let mut apply_err: Option<String> = None;
-    for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
-            apply_err = Some(e.to_string());
-            break;
-        }
-    }
-    if let Some(err) = apply_err {
-        // Roll the reducer back to the pre-push row so its in-memory
-        // tree doesn't diverge from the (unwritten) DB row.
-        let old_slices = agentmux_common::LayoutClientSlices {
+    let cmd = agentmux_common::ipc::Command::LayoutSetTree {
+        tab_id: tab_id.clone(),
+        new_tree,
+        correlation_id: String::new(),
+        slices: Some(slices),
+    };
+    let rollback_cmd = agentmux_common::ipc::Command::LayoutSetTree {
+        tab_id,
+        new_tree: old_row.rootnode.clone(),
+        correlation_id: String::new(),
+        slices: Some(agentmux_common::LayoutClientSlices {
             leaforder: old_row
                 .leaforder
                 .as_ref()
@@ -498,18 +491,54 @@ async fn update_layout_via_reducer(
                 .pendingbackendactions
                 .as_ref()
                 .and_then(|v| serde_json::to_value(v).ok()),
+        }),
+    };
+
+    // ── single critical section: dispatch + persist (+ rollback) ──
+    let mut apply_err: Option<String> = None;
+    let events = {
+        let mut s = state.srv_state.lock().await;
+        let ctx = crate::reducer::Ctx {
+            now_rfc3339: chrono::Utc::now().to_rfc3339(),
+            conn_id: 0,
+            registered_pid: None,
         };
-        compensate_via_reducer(
-            state,
-            agentmux_common::ipc::Command::LayoutSetTree {
-                tab_id,
-                new_tree: old_row.rootnode.clone(),
-                correlation_id: String::new(),
-                slices: Some(old_slices),
-            },
-            store,
-        )
-        .await;
+        let events = crate::reducer::update(&mut s, cmd, &ctx);
+        let has_error = events
+            .iter()
+            .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
+        if !has_error {
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
+                }
+            }
+            if apply_err.is_some() {
+                // Roll the reducer back to the pre-push row inside the
+                // same lock hold so no concurrent dispatch can observe
+                // the divergent state; best-effort mirror to SQLite.
+                let rb_events = crate::reducer::update(&mut s, rollback_cmd, &ctx);
+                for ev in &rb_events {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                        tracing::warn!(
+                            error = %e,
+                            "UpdateObject: layout rollback SQLite mirror failed"
+                        );
+                    }
+                }
+            }
+        }
+        events
+    };
+
+    if let Some(err_msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return WebReturnType::error(err_msg);
+    }
+    if let Some(err) = apply_err {
         return WebReturnType::error(format!("UpdateObject: SQLite write failed: {}", err));
     }
     publish_events(state, &events);
