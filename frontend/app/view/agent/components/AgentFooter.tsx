@@ -374,9 +374,27 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         }
     };
 
+    // Tracks the box's emptiness immediately BEFORE the current edit — used
+    // by the ghost-text clear check in handleInput below (SPEC_AMBIENT_GHOST_
+    // TEXT_NEXT_PROMPT_2026_07_03.md §4.3). Every programmatic write to
+    // textareaRef.value MUST go through writeComposerValue (never assign
+    // `.value` directly) so this stays in sync — none of these writers
+    // dispatch a real `input` event, so handleInput never sees them, and a
+    // stale flag either misses clearing a real stale suggestion or
+    // re-triggers the clear check on an edit that isn't actually the first
+    // one from empty. Seeded `true` (safe default: even if wrong for a mount
+    // with restored draft text, ghost text is only ever shown for an empty
+    // composer, so there's nothing to dismiss in that case anyway).
+    let boxWasEmpty = true;
+    const writeComposerValue = (text: string): void => {
+        if (!textareaRef) return;
+        textareaRef.value = text;
+        boxWasEmpty = text.length === 0;
+    };
+
     const acceptCompletion = (cmd: SlashCommand): void => {
         if (!textareaRef) return;
-        textareaRef.value = `/${cmd.name} `;
+        writeComposerValue(`/${cmd.name} `);
         setAutocompletePrefix(null);
         setIsBangCmd(false);
         textareaRef.focus();
@@ -390,7 +408,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // it never trips the history-cursor reset in handleInput.
     const setComposerValue = (text: string): void => {
         if (!textareaRef) return;
-        textareaRef.value = text;
+        writeComposerValue(text);
         textareaRef.setSelectionRange(text.length, text.length);
         setIsBangCmd(text.startsWith("!"));
         updateAutocomplete();
@@ -401,13 +419,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // frame collapses to one callback; even rapid typing costs ~1 callback
     // per 16ms. Flag is per-component-instance (captured in closure).
     let typingScrollPending = false;
-    // Tracks the box's emptiness immediately BEFORE the current edit, for
-    // the ghost-text clear check below. Updated at the end of every
-    // handleInput call to hold for the next one. Seeded `true` (safe
-    // default: even if wrong for a mount with restored draft text, ghost
-    // text is only ever shown for an empty composer, so there's nothing to
-    // dismiss in that case anyway).
-    let boxWasEmpty = true;
     const handleInput = () => {
         // A manual edit exits history navigation — the next ArrowUp starts
         // again from the newest sent message. (Programmatic recall writes the
@@ -541,7 +552,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             }
             histPos = sentHistory.length;
             histDraft = "";
-            textareaRef.value = "";
+            writeComposerValue("");
             setAutocompletePrefix(null);
             setIsBangCmd(false);
             // Scroll the new user message into view. SolidJS flushes the
@@ -675,7 +686,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             if (!textareaRef) return;
             if (textareaRef.value.trim().length > 0) {
                 e.preventDefault();
-                textareaRef.value = "";
+                writeComposerValue("");
                 setIsBangCmd(false);
                 // Clearing exits history navigation — park the cursor at the
                 // newest message so the next ArrowUp doesn't skip an entry.
