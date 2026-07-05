@@ -83,12 +83,10 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         Command::SetMagnifiedNode { tab_id, node_id } => {
             layout::handle_set_magnified_node(state, tab_id, node_id)
         }
-        // Phase E.4.B Phase 5 — layout tree mutation arms. Currently
-        // dormant scaffolding (no production callers; Phase 7 migrates
-        // the wcore-direct writers to dispatch through these). 4 of 11
-        // arms shipped in this PR; remaining 7 (insert_at_index, move,
-        // swap, resize, replace, split_horizontal, split_vertical) are
-        // structurally identical and follow in subsequent PRs.
+        // Phase E.4.B Phase 5 — layout tree mutation arms. All 11 arms are
+        // wired. First production dispatcher: the `UpdateObject`→
+        // `LayoutSetTree` reroute (SPEC_864 Phase 2, `object.rs`); the
+        // remaining wcore-direct writers migrate in SPEC_864 Phases 3–5.
         Command::LayoutClear {
             tab_id,
             correlation_id,
@@ -97,7 +95,8 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             tab_id,
             new_tree,
             correlation_id,
-        } => layout::handle_layout_set_tree(state, tab_id, new_tree, correlation_id),
+            slices,
+        } => layout::handle_layout_set_tree(state, tab_id, new_tree, correlation_id, slices),
         Command::LayoutInsertNode {
             tab_id,
             node,
@@ -2535,6 +2534,7 @@ mod tests {
                 tab_id: tab_id.clone(),
                 new_tree: new_tree.clone(),
                 correlation_id: "corr-set".into(),
+                slices: None,
             },
             &ctx(1),
         );
@@ -2554,10 +2554,70 @@ mod tests {
                 tab_id: tab_id.clone(),
                 new_tree: None,
                 correlation_id: "corr".into(),
+                slices: None,
             },
             &ctx(1),
         );
         assert!(state.tabs[&tab_id].rootnode.is_none());
+    }
+
+    /// SPEC_864 Phase 2 — a slice-carrying full-row push applies focus/
+    /// magnify to the TabRecord (empty = clear) and echoes the slices on
+    /// the emitted event for the persist subscriber.
+    #[test]
+    fn layout_set_tree_with_slices_applies_focus_magnify() {
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "stale".into();
+
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(leaf_node("n1", "b1")),
+                correlation_id: "corr".into(),
+                slices: Some(agentmux_common::LayoutClientSlices {
+                    leaforder: None,
+                    focused_node_id: "n1".into(),
+                    magnified_node_id: String::new(),
+                    pending_backend_actions: None,
+                }),
+            },
+            &ctx(1),
+        );
+
+        assert_eq!(state.tabs[&tab_id].focused_node_id, "n1");
+        assert!(
+            state.tabs[&tab_id].magnified_node_id.is_empty(),
+            "empty slice value clears stale magnify"
+        );
+        assert!(matches!(
+            &events[0],
+            Event::LayoutTreeReplaced { slices: Some(_), .. }
+        ));
+    }
+
+    /// Empty-tree contract wins over slices: wiping the tree clears focus/
+    /// magnify even if the (skewed) push carried non-empty ids.
+    #[test]
+    fn layout_set_tree_none_tree_overrides_slice_focus() {
+        let (mut state, tab_id) = fresh_tab();
+        let _ = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: None,
+                correlation_id: "corr".into(),
+                slices: Some(agentmux_common::LayoutClientSlices {
+                    leaforder: None,
+                    focused_node_id: "dangling".into(),
+                    magnified_node_id: "dangling".into(),
+                    pending_backend_actions: None,
+                }),
+            },
+            &ctx(1),
+        );
+        assert!(state.tabs[&tab_id].focused_node_id.is_empty());
+        assert!(state.tabs[&tab_id].magnified_node_id.is_empty());
     }
 
     #[test]
@@ -2654,6 +2714,7 @@ mod tests {
                 tab_id: tab_id.clone(),
                 new_tree: None,
                 correlation_id: "corr".into(),
+                slices: None,
             },
             &ctx(1),
         );
@@ -2676,6 +2737,7 @@ mod tests {
                 tab_id: tab_id.clone(),
                 new_tree: Some(leaf_node("n", "b")),
                 correlation_id: "corr".into(),
+                slices: None,
             },
             &ctx(1),
         );

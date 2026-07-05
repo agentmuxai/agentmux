@@ -270,7 +270,7 @@ pub struct StickerType {
 
 // ---- LayoutActionData / LeafOrderEntry ----
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LayoutActionData {
     pub actiontype: String,
     pub actionid: String,
@@ -299,7 +299,7 @@ pub struct LayoutActionData {
     pub position: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LeafOrderEntry {
     pub nodeid: String,
     pub blockid: String,

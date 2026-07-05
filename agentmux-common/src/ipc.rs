@@ -585,10 +585,19 @@ pub enum Command {
     },
     /// Bulk-replace the tree. Used during Phase 7a writer migration and
     /// for tear-off where the whole subtree changes atomically.
+    ///
+    /// SPEC_864 Phase 2 — when the command originates from the frontend's
+    /// full-row `UpdateObject` push, `slices` carries the remaining
+    /// frontend-owned `LayoutState` columns (leaforder / focus / magnify /
+    /// pendingbackendactions) with REPLACE semantics, so the single
+    /// dispatch fully supersedes the legacy `update_raw` whole-row write.
+    /// `slices: None` (tree-only callers) leaves those columns untouched.
     LayoutSetTree {
         tab_id: String,
         new_tree: Option<crate::LayoutNode>,
         correlation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slices: Option<crate::LayoutClientSlices>,
     },
 
     /// Phase D.3 — request an `Event::EventList` reply containing the
@@ -1542,10 +1551,16 @@ pub enum Event {
         correlation_id: String,
         version: u64,
     },
+    /// SPEC_864 Phase 2 — `slices` mirrors the command's field: when
+    /// present, the persist subscriber also writes leaforder / focus /
+    /// magnify / pendingbackendactions (REPLACE semantics). `None` =
+    /// tree-only replace; those columns stay untouched.
     LayoutTreeReplaced {
         tab_id: String,
         new_tree: Option<crate::LayoutNode>,
         correlation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slices: Option<crate::LayoutClientSlices>,
         version: u64,
     },
 
