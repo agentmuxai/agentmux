@@ -2,6 +2,7 @@ use super::*;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_session_activity_summary(engine, state);
+    register_session_next_prompt_suggestion(engine, state);
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
     register_session_export_handler(engine, state);
@@ -150,40 +151,9 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map_err(|e| format!("session:activity_summary: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                // Read the last 32 KB of agent output from FileStore. EVENT_BLOCK_FILE
-                // events have persist: 0 so the ring buffer is always empty — FileStore
-                // is the only reliable source. We tail-read to avoid loading multi-MB
-                // output files on every turn; 32 KB comfortably covers 30 stream-json lines.
-                const TAIL_BYTES: i64 = 32 * 1024;
-                let all_lines: Vec<String> = match filestore.stat(&cmd.block_id, "output") {
-                    Ok(Some(ref wf)) if wf.size > 0 => {
-                        let tail_offset = (wf.size - TAIL_BYTES).max(0);
-                        match filestore.read_at(&cmd.block_id, "output", tail_offset, TAIL_BYTES) {
-                            Ok((_, bytes)) => {
-                                let text = String::from_utf8_lossy(&bytes);
-                                text.lines()
-                                    .filter(|l| !l.trim().is_empty())
-                                    .map(|l| l.to_string())
-                                    .collect()
-                            }
-                            _ => Vec::new(),
-                        }
-                    }
-                    _ => Vec::new(),
+                let Some(extracted) = read_recent_activity_digest(&filestore, &cmd.block_id) else {
+                    return Ok(Some(empty_summary_result()));
                 };
-
-                let n = all_lines.len();
-                let start = n.saturating_sub(30);
-                let window: Vec<&str> = all_lines[start..].iter().map(|s| s.as_str()).collect();
-
-                if window.is_empty() {
-                    return Ok(Some(empty_summary_result()));
-                }
-
-                let extracted = extract_digest_text(&window);
-                if extracted.is_empty() {
-                    return Ok(Some(empty_summary_result()));
-                }
 
                 let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
                 if cli_path.is_empty() {
@@ -198,7 +168,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 );
 
                 let (summary, tokens) =
-                    invoke_cli_for_activity(&cli_path, &prompt, &block.meta, cancel).await
+                    invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await
                         .unwrap_or_else(|e| {
                             tracing::debug!(block_id = %cmd.block_id, error = %e, "session:activity_summary: CLI failed or was superseded");
                             (String::new(), None)
@@ -219,20 +189,147 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
     );
 }
 
-/// Invoke the Claude CLI with Haiku model for a lightweight per-turn activity
-/// summary. Uses `--model claude-haiku-4-5-20251001` and a 15s timeout.
+/// Ambient-call purpose tag for the ghost-text next-prompt suggestion. See
+/// docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md.
+const AMBIENT_PURPOSE_NEXT_PROMPT_SUGGESTION: &str = "next_prompt_suggestion";
+
+fn empty_suggestion_result() -> serde_json::Value {
+    serde_json::to_value(&NextPromptSuggestionResult { suggestion: String::new(), tokens: None }).unwrap()
+}
+
+fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let filestore = state.filestore.clone();
+
+    engine.register_handler(
+        COMMAND_SESSION_NEXT_PROMPT_SUGGESTION,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let filestore = filestore.clone();
+            Box::pin(async move {
+                let cmd: CommandNextPromptSuggestionData = serde_json::from_value(data)
+                    .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?;
+
+                // Same admission discipline as activity_summary — see that
+                // handler's comment. Ghost text has a sharper failure mode
+                // than the read-only summary (a stale suggestion can put
+                // words in the user's mouth), so admitting before any work
+                // matters just as much here.
+                let key = crate::ambient::AmbientCallKey::new(
+                    cmd.block_id.clone(),
+                    AMBIENT_PURPOSE_NEXT_PROMPT_SUGGESTION,
+                );
+                let guard = match crate::ambient::gateway().admit(key, cmd.generation) {
+                    crate::ambient::Admission::Proceed(guard) => guard,
+                    crate::ambient::Admission::StaleOnArrival => {
+                        return Ok(Some(empty_suggestion_result()));
+                    }
+                };
+                let cancel = guard.cancellation();
+
+                let block: Block = wstore
+                    .get(&cmd.block_id)
+                    .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?
+                    .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
+
+                let Some(extracted) = read_recent_activity_digest(&filestore, &cmd.block_id) else {
+                    return Ok(Some(empty_suggestion_result()));
+                };
+
+                let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+                if cli_path.is_empty() {
+                    tracing::debug!(block_id = %cmd.block_id, "session:next_prompt_suggestion: no CLI path in meta");
+                    return Ok(Some(empty_suggestion_result()));
+                }
+
+                let prompt = format!(
+                    "Based on this recent activity, predict ONE short, natural next \
+                     message the user might send to continue the conversation. \
+                     Respond with just that message and nothing else — no quotes, \
+                     no explanation, no preamble. If nothing plausible comes to mind, \
+                     respond with an empty string.\n\n\
+                     Recent activity:\n\n{extracted}"
+                );
+
+                let (suggestion, tokens) =
+                    invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await
+                        .unwrap_or_else(|e| {
+                            tracing::debug!(block_id = %cmd.block_id, error = %e, "session:next_prompt_suggestion: CLI failed or was superseded");
+                            (String::new(), None)
+                        });
+
+                // guard is held until here — same rationale as activity_summary.
+                drop(guard);
+
+                Ok(Some(serde_json::to_value(&NextPromptSuggestionResult { suggestion, tokens }).unwrap()))
+            })
+        }),
+    );
+}
+
+/// Read the last 32 KB of a block's FileStore output, take the most recent
+/// ~30 non-empty lines, and extract digest text from them (`extract_digest_text`).
+/// Shared by both ambient call sites (activity_summary, next_prompt_suggestion)
+/// so their tail-read window stays identical. Returns `None` when there's
+/// nothing usable — callers should return an empty ambient result in that
+/// case without invoking the CLI.
+///
+/// EVENT_BLOCK_FILE events have persist: 0 so the ring buffer is always
+/// empty — FileStore is the only reliable source. Tail-reading avoids
+/// loading multi-MB output files on every turn; 32 KB comfortably covers
+/// 30 stream-json lines.
+fn read_recent_activity_digest(
+    filestore: &crate::backend::storage::filestore::FileStore,
+    block_id: &str,
+) -> Option<String> {
+    const TAIL_BYTES: i64 = 32 * 1024;
+    let all_lines: Vec<String> = match filestore.stat(block_id, "output") {
+        Ok(Some(ref wf)) if wf.size > 0 => {
+            let tail_offset = (wf.size - TAIL_BYTES).max(0);
+            match filestore.read_at(block_id, "output", tail_offset, TAIL_BYTES) {
+                Ok((_, bytes)) => {
+                    let text = String::from_utf8_lossy(&bytes);
+                    text.lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .map(|l| l.to_string())
+                        .collect()
+                }
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    };
+
+    let n = all_lines.len();
+    let start = n.saturating_sub(30);
+    let window: Vec<&str> = all_lines[start..].iter().map(|s| s.as_str()).collect();
+    if window.is_empty() {
+        return None;
+    }
+
+    let extracted = extract_digest_text(&window);
+    if extracted.is_empty() {
+        return None;
+    }
+    Some(extracted)
+}
+
+/// Invoke the Claude CLI with Haiku model for a lightweight ambient call
+/// (activity summary, ghost-text next-prompt suggestion, or any future
+/// purpose routed through the Ambient Model Call gateway). Uses
+/// `--model claude-haiku-4-5-20251001` and a 15s timeout.
 ///
 /// `cancel` is this call's Ambient Model Call gateway cancellation token — if
-/// a newer request for the same `(block_id, "activity_summary")` key is
-/// admitted while this one is still running, `cancel` fires and the child
-/// process is killed immediately rather than left to run to completion (and
-/// keep burning tokens) only to have its result discarded on arrival.
+/// a newer request for the same `(block_id, purpose)` key is admitted while
+/// this one is still running, `cancel` fires and the child process is killed
+/// immediately rather than left to run to completion (and keep burning
+/// tokens) only to have its result discarded on arrival.
 ///
-/// Returns the summary text plus token usage parsed from the CLI's `result`
+/// Returns the response text plus token usage parsed from the CLI's `result`
 /// stream-json line (same `usage` shape the main turn pipeline parses —
 /// see `agents::translator::claude::parse_usage`), so ambient calls are
 /// never silently excluded from token accounting.
-pub(super) async fn invoke_cli_for_activity(
+pub(super) async fn invoke_ambient_haiku_call(
     cli_path: &str,
     prompt: &str,
     meta: &obj::MetaMapType,

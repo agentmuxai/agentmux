@@ -19,6 +19,16 @@
  * docs/specs/SPEC_AGENT_OSC_TITLE_ACTIVITY_2026_06_18.md.
  *
  * Terminal panes write the same key via termosc.ts.
+ *
+ * This is also the one place that reacts to session end (`shellprocstatus
+ * === "done"`), so `clearActivity` doubles as the session-end clear point
+ * for `term:next_prompt_suggestion` (useNextPromptSuggestion.ts) too —
+ * without it, a ghost-text suggestion from a finished session would persist
+ * into a brand-new session started in the same pane and render as the
+ * composer placeholder before any new turn completes. That key gets its own
+ * mid-session clears (new turn start, superseded turn) from
+ * useNextPromptSuggestion.ts directly; this hook only owns the
+ * session-boundary case, matching term:osc_title/term:ambient_summary.
  */
 
 import { onCleanup, onMount } from "solid-js";
@@ -37,6 +47,7 @@ function clearActivity(blockId: string): void {
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
             "term:osc_title": null,
             "term:ambient_summary": null,
+            "term:next_prompt_suggestion": null,
         } as any)
     );
 }
@@ -62,13 +73,15 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
             },
         });
 
-        // Clear both term:osc_title and term:ambient_summary on session end
-        // (process exit) so a subsequent session in the same pane starts
-        // without a stale topic/summary from the finished one. These keys
-        // are persisted in the block store and survive tab-switch remounts,
-        // so we must NOT clear in onCleanup — doing so would blank the label
-        // every time the pane remounts (tab switch), and Claude Code only
-        // emits OSC titles once per session so no new event would restore it.
+        // Clear term:osc_title, term:ambient_summary, and
+        // term:next_prompt_suggestion on session end (process exit) so a
+        // subsequent session in the same pane starts without a stale
+        // topic/summary/ghost-text-suggestion from the finished one. These
+        // keys are persisted in the block store and survive tab-switch
+        // remounts, so we must NOT clear in onCleanup — doing so would blank
+        // the label every time the pane remounts (tab switch), and Claude
+        // Code only emits OSC titles once per session so no new event would
+        // restore it.
         const unsubStatus = waveEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: makeORef("block", opts.blockId),

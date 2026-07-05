@@ -38,6 +38,35 @@ pub struct ActivitySummaryResult {
     pub tokens: Option<TokenCounts>,
 }
 
+// ---- Ghost-text next-prompt suggestion types ----
+
+/// Request for session:next_prompt_suggestion — predict a plausible next
+/// user message via Haiku, routed through the Ambient Model Call gateway
+/// (same shape as CommandActivitySummaryData). See
+/// docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandNextPromptSuggestionData {
+    pub block_id: String,
+    /// Caller's generation for this block — see CommandActivitySummaryData's
+    /// doc comment for the wall-clock-vs-remount rationale (identical here).
+    pub generation: u64,
+}
+
+/// Response from session:next_prompt_suggestion. The FRONTEND writes
+/// `term:next_prompt_suggestion` to block meta after receiving this response
+/// (useNextPromptSuggestion.ts) — the handler itself never touches block
+/// meta, same as session:activity_summary's handler (see the inline comment
+/// at its call site in `register_session_activity_summary`). `tokens` is
+/// `None` under the same conditions as ActivitySummaryResult.tokens.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct NextPromptSuggestionResult {
+    pub suggestion: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<TokenCounts>,
+}
+
 // ---- Session archival types ----
 
 /// Request for session:archive — compress and archive a session's FileStore output.
