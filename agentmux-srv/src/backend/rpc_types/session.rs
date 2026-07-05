@@ -53,9 +53,12 @@ pub struct CommandNextPromptSuggestionData {
     pub generation: u64,
 }
 
-/// Response from session:next_prompt_suggestion. The backend also writes
-/// `term:next_prompt_suggestion` to block meta. `tokens` is `None` under the
-/// same conditions as ActivitySummaryResult.tokens.
+/// Response from session:next_prompt_suggestion. The FRONTEND writes
+/// `term:next_prompt_suggestion` to block meta after receiving this response
+/// (useNextPromptSuggestion.ts) — the handler itself never touches block
+/// meta, same as session:activity_summary's handler (see the inline comment
+/// at its call site in `register_session_activity_summary`). `tokens` is
+/// `None` under the same conditions as ActivitySummaryResult.tokens.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct NextPromptSuggestionResult {
