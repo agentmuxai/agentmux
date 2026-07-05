@@ -359,6 +359,15 @@ pub enum HostCommand {
     /// as `is_pool: false`.
     PromotePoolWindow { label: String },
 
+    /// Round 6 (pool demote) — a promoted pool window is being closed;
+    /// return it to the pool instead of destroying it (CEF 148 parks the
+    /// browser on every destroy sequence — see
+    /// retro-window-lifecycle-leak-2026-07-04). Flips the browser handle
+    /// back to `is_pool: true` and re-inserts the label into `unpromoted`;
+    /// the queue re-entry then rides the normal `PoolWindowReady`
+    /// handshake after the caller reloads the window to its pool boot URL.
+    DemotePoolWindow { label: String },
+
     /// PR #5 H.4 — atomic pop+promote front of pool queue. Returns the
     /// popped label via `DispatchOutput::promoted_pool_label`, or None
     /// if the queue is empty. Replaces the legacy
@@ -535,6 +544,10 @@ impl std::fmt::Debug for HostCommand {
                 .finish(),
             HostCommand::PromotePoolWindow { label } => f
                 .debug_struct("PromotePoolWindow")
+                .field("label", label)
+                .finish(),
+            HostCommand::DemotePoolWindow { label } => f
+                .debug_struct("DemotePoolWindow")
                 .field("label", label)
                 .finish(),
             HostCommand::PopAndPromoteFrontPoolWindow => f.write_str("PopAndPromoteFrontPoolWindow"),
@@ -868,6 +881,11 @@ pub struct DispatchOutput {
     pub pool_size_after: Option<usize>,
     pub pool_destroyed_was_unpromoted: bool,
     pub promoted_pool_label: Option<String>,
+    /// Round 6 — set by `DemotePoolWindow` when the label was accepted back
+    /// into the pool (`is_pool` flipped, inserted into `unpromoted`). False
+    /// = already pool-side or unknown browser; caller falls back to the
+    /// destroy path.
+    pub pool_demote_accepted: bool,
     // Pane pool fields (parallel to tab pool above)
     pub pane_pool_spawn_proceeding: bool,
     pub pane_pool_size_after: Option<usize>,
@@ -1014,6 +1032,7 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         // H.4 pool
         HostCommand::PoolWindowSpawnStart { label } => pool::handle_pool_spawn_start(state, label),
         HostCommand::PoolWindowReady { label } => pool::handle_pool_ready(state, label),
+        HostCommand::DemotePoolWindow { label } => pool::handle_demote_pool_window(state, label),
         HostCommand::PoolWindowDestroyedBeforePromote { label } => {
             pool::handle_pool_destroyed_before_promote(state, label)
         }

@@ -138,6 +138,17 @@ wrap_window_delegate! {
         }
 
         fn on_window_destroyed(&self, _window: Option<&mut Window>) {
+            // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
+            // 2026-07-05): trace window destruction so the close-debug file
+            // shows whether the Window died with or without a browser
+            // teardown having been initiated first.
+            crate::client::dlog(&format!(
+                "on_window_destroyed({})",
+                self.window_registration
+                    .as_ref()
+                    .map(|(_, l)| l.as_str())
+                    .unwrap_or("<unregistered>")
+            ));
             let mut browser_view = self.browser_view.borrow_mut();
             *browser_view = None;
 
@@ -155,16 +166,47 @@ wrap_window_delegate! {
         }
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
+            // Close-cascade diagnostics (window-lifecycle-leak retro round 3,
+            // 2026-07-05): can_close + do_close + on_before_close are the
+            // three links that decide whether a Views window close actually
+            // destroys the hosted browser. None were observed firing for
+            // secondary-window closes — instrument every outcome so the break
+            // point is visible in the close-debug trace.
+            let label_owned;
+            let label = match self.window_registration.as_ref() {
+                Some((_, l)) => l.as_str(),
+                None => {
+                    label_owned = String::from("<unregistered>");
+                    label_owned.as_str()
+                }
+            };
             let browser_view = self.browser_view.borrow();
             let Some(browser_view) = browser_view.as_ref() else {
+                crate::client::dlog(&format!(
+                    "can_close({label}): browser_view=None -> allow close WITHOUT browser teardown"
+                ));
                 return 1;
             };
             if let Some(browser) = browser_view.browser() {
                 match browser.host() {
-                    Some(host) => host.try_close_browser(),
-                    None => 1, // no host yet (pre-init teardown) — allow close
+                    Some(host) => {
+                        let r = host.try_close_browser();
+                        crate::client::dlog(&format!(
+                            "can_close({label}): try_close_browser -> {r}"
+                        ));
+                        r
+                    }
+                    None => {
+                        crate::client::dlog(&format!(
+                            "can_close({label}): no host -> allow close"
+                        ));
+                        1 // no host yet (pre-init teardown) — allow close
+                    }
                 }
             } else {
+                crate::client::dlog(&format!(
+                    "can_close({label}): browser_view has no browser -> allow close"
+                ));
                 1
             }
         }
