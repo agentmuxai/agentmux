@@ -196,7 +196,7 @@ PKG_V="$(node -p "require('./package.json').version" 2>/dev/null || echo '<unrea
 [[ "$PKG_V" == "$NEW_VERSION" ]] || \
     INCONSISTENCIES+=("package.json version=$PKG_V")
 
-CARGO_V="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"$/\1/p}' Cargo.toml | head -1)"
+CARGO_V="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"$/\1/p;}' Cargo.toml | head -1)"
 [[ "$CARGO_V" == "$NEW_VERSION" ]] || \
     INCONSISTENCIES+=("Cargo.toml [workspace.package].version=$CARGO_V")
 
