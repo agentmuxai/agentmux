@@ -2279,6 +2279,20 @@ declare global {
         tokens?: TokenCounts;
     };
 
+    // wshrpc.CommandNextPromptSuggestionData
+    type CommandNextPromptSuggestionData = {
+        block_id: string;
+        // Same generation contract as CommandActivitySummaryData.
+        generation: number;
+    };
+
+    // wshrpc.NextPromptSuggestionResult
+    type NextPromptSuggestionResult = {
+        suggestion: string;
+        // Absent under the same conditions as ActivitySummaryResult.tokens.
+        tokens?: TokenCounts;
+    };
+
     // wshrpc.CommandSessionArchiveData
     type CommandSessionArchiveData = {
         block_id: string;
