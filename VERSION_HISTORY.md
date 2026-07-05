@@ -1,5 +1,17 @@
 # AgentMux Version History
 
+## 0.50.1 — 2026-07-05
+
+- fix(ci): winget-create no longer ships a Linux binary, use windows-latest
+- fix(agent-pane): contain scroll chaining in nested tool-preview boxes
+- fix(browser-pane): app-owned wrapper HWND fixes Windows renderer leak on pane close
+- fix(muxbus): claim injections before local delivery to prevent cross-channel duplicates
+- feat(armory): bound_to_agent flag on mcp.list/skill.list — stateful bind/unbind toggle
+- fix(agent-pane): tool-preview scroll dead-zone at overscroll boundary
+- fix(agent): exclude dynamic system-prompt sections from Claude Code launch args to improve cross-instance prompt-cache reuse
+- fix(window): retry backend_window_id lookup on close so window.CloseWindow reliably reaches srv
+
+
 ## 0.50.0 — 2026-07-03
 
 - feat(cef): report CEF dlopen + cef_init sub-stages to splash telemetry

@@ -47,7 +47,7 @@ log() { (( QUIET )) && return; echo "$*"; }
 
 # ── Read every location ───────────────────────────────────────────────
 PKG_V="$(node -p "require('./package.json').version" 2>/dev/null || echo '<unreadable>')"
-CARGO_V="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"$/\1/p}' Cargo.toml | head -1)"
+CARGO_V="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"$/\1/p;}' Cargo.toml | head -1)"
 PL_V="$(node -p "require('./package-lock.json').version" 2>/dev/null || echo '<unreadable>')"
 CL_V="$(sed -n '/^name = "agentmux-cef"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)"
 VH_V="$(awk '/^## /{print $2; exit}' VERSION_HISTORY.md)"
