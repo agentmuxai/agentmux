@@ -482,16 +482,6 @@ async fn update_layout_via_reducer(
         .unwrap_or_default()
         .to_string();
 
-    // Snapshot the current row for the rollback path before anything
-    // mutates. (A racing push between this read and the locked section
-    // below only affects which row the FAILURE path restores; the success
-    // path never reads old_row.)
-    let old_row = match store.get::<LayoutState>(&oid) {
-        Ok(Some(row)) => row,
-        Ok(None) => return WebReturnType::error(format!("UpdateObject: layout not found: {}", oid)),
-        Err(e) => return WebReturnType::error(format!("UpdateObject: {}", e)),
-    };
-
     let get_str = |key: &str| -> String {
         wave_obj_value
             .get(key)
@@ -514,62 +504,91 @@ async fn update_layout_via_reducer(
         correlation_id: String::new(),
         slices: Some(slices),
     };
-    let rollback_cmd = agentmux_common::ipc::Command::LayoutSetTree {
-        tab_id,
-        new_tree: old_row.rootnode.clone(),
-        correlation_id: String::new(),
-        slices: Some(agentmux_common::LayoutClientSlices {
-            leaforder: old_row
-                .leaforder
-                .as_ref()
-                .and_then(|v| serde_json::to_value(v).ok()),
-            focused_node_id: old_row.focusednodeid.clone(),
-            magnified_node_id: old_row.magnifiednodeid.clone(),
-            pending_backend_actions: old_row
-                .pendingbackendactions
-                .as_ref()
-                .and_then(|v| serde_json::to_value(v).ok()),
-        }),
-    };
 
-    // ── single critical section: dispatch + persist (+ rollback) ──
+    // ── single critical section: snapshot + dispatch + persist (+ rollback) ──
     let mut apply_err: Option<String> = None;
+    let mut early_err: Option<String> = None;
     let events = {
         let mut s = state.srv_state.lock().await;
-        let ctx = crate::reducer::Ctx {
-            now_rfc3339: chrono::Utc::now().to_rfc3339(),
-            conn_id: 0,
-            registered_pid: None,
-        };
-        let events = crate::reducer::update(&mut s, cmd, &ctx);
-        let has_error = events
-            .iter()
-            .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
-        if !has_error {
-            for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
-                    apply_err = Some(e.to_string());
-                    break;
-                }
+        // Snapshot the current row for the rollback path INSIDE the
+        // critical section (reagent P1 #1970, review 4): a pre-lock
+        // snapshot could be overtaken by a concurrent push committing
+        // between the read and this lock acquisition — a subsequent
+        // rollback would then restore the STALE snapshot, clobbering the
+        // concurrently-committed newer state in both TabRecord and
+        // db_layout. Read under the lock, immediately before the forward
+        // dispatch, no interleaving is possible.
+        let old_row = match store.get::<LayoutState>(&oid) {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                early_err = Some(format!("UpdateObject: layout not found: {}", oid));
+                LayoutState::default()
             }
-            if apply_err.is_some() {
-                // Roll the reducer back to the pre-push row inside the
-                // same lock hold so no concurrent dispatch can observe
-                // the divergent state; best-effort mirror to SQLite.
-                let rb_events = crate::reducer::update(&mut s, rollback_cmd, &ctx);
-                for ev in &rb_events {
+            Err(e) => {
+                early_err = Some(format!("UpdateObject: {}", e));
+                LayoutState::default()
+            }
+        };
+        if early_err.is_some() {
+            Vec::new()
+        } else {
+            let ctx = crate::reducer::Ctx {
+                now_rfc3339: chrono::Utc::now().to_rfc3339(),
+                conn_id: 0,
+                registered_pid: None,
+            };
+            let events = crate::reducer::update(&mut s, cmd, &ctx);
+            let has_error = events
+                .iter()
+                .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
+            if !has_error {
+                for ev in &events {
                     if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
-                        tracing::warn!(
-                            error = %e,
-                            "UpdateObject: layout rollback SQLite mirror failed"
-                        );
+                        apply_err = Some(e.to_string());
+                        break;
+                    }
+                }
+                if apply_err.is_some() {
+                    // Roll the reducer back to the pre-push row inside the
+                    // same lock hold so no concurrent dispatch can observe
+                    // the divergent state; best-effort mirror to SQLite.
+                    let rollback_cmd = agentmux_common::ipc::Command::LayoutSetTree {
+                        tab_id,
+                        new_tree: old_row.rootnode.clone(),
+                        correlation_id: String::new(),
+                        slices: Some(agentmux_common::LayoutClientSlices {
+                            leaforder: old_row
+                                .leaforder
+                                .as_ref()
+                                .and_then(|v| serde_json::to_value(v).ok()),
+                            focused_node_id: old_row.focusednodeid.clone(),
+                            magnified_node_id: old_row.magnifiednodeid.clone(),
+                            pending_backend_actions: old_row
+                                .pendingbackendactions
+                                .as_ref()
+                                .and_then(|v| serde_json::to_value(v).ok()),
+                        }),
+                    };
+                    let rb_events = crate::reducer::update(&mut s, rollback_cmd, &ctx);
+                    for ev in &rb_events {
+                        if let Err(e) =
+                            crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                "UpdateObject: layout rollback SQLite mirror failed"
+                            );
+                        }
                     }
                 }
             }
+            events
         }
-        events
     };
 
+    if let Some(err) = early_err {
+        return WebReturnType::error(err);
+    }
     if let Some(err_msg) = events.iter().find_map(|e| match e {
         agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
         _ => None,
