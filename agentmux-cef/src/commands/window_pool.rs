@@ -673,20 +673,25 @@ pub fn demote_srv_cleanup(state: &Arc<AppState>, label: &str) {
 /// window dies. Demote embraces the recycle: the renderer is REUSED as the
 /// next warm pool entry.
 ///
-/// Sequence (UI thread — called from `CloseWindowTask`):
-///   1. Reducer `DemotePoolWindow`: flip `is_pool: true` + insert into
-///      `unpromoted`. Rejected (already pool-side / unknown) → return false
-///      and let the caller take the destroy fallback.
-///   2. Capacity cap: if the pool already holds ≥ `POOL_TARGET_SIZE`
-///      members, return false (destroy fallback — same leak as today, but
-///      srv state is still cleaned by `demote_srv_cleanup`).
-///   3. Launcher pool ledger: `report_pool_window_added` + count mirror
-///      (promote reported `report_pool_window_removed` on the way out).
-///   4. Park the HWND offscreen + hide (`set_taskbar_hidden(true)`), evict
+/// Sequence (UI thread — called from `CloseWindowTask`; all fallible steps
+/// run BEFORE any state mutation so the destroy fallback is mutation-free):
+///   0. Capacity cap: demotes may overfill to `POOL_TARGET_SIZE + 2`
+///      (the pool self-refills to target, so gating at target would defeat
+///      demote entirely); beyond the cap, return false (destroy fallback —
+///      same leak as today, srv state still cleaned by `demote_srv_cleanup`).
+///   1. Strict HWND resolution (never EnumWindows). Failure → return false
+///      with nothing mutated (reagent P1: a post-flip failure would strand
+///      the label in `unpromoted` forever, since the stale-label scrubber
+///      only runs from the never-firing `on_before_close`).
+///   2. Reducer `DemotePoolWindow`: flip `is_pool: true` + insert into
+///      `unpromoted`. Rejected (already pool-side) → destroy fallback.
+///   3. Park the HWND offscreen + hide (`set_taskbar_hidden(true)`), evict
 ///      the chrome `window_hwnds` cache entry (parked pool windows resolve
 ///      via `pool_hwnd_cache`, mirroring fresh-spawn state) and re-cache
 ///      the CEF Views `Window` for the next promote's
 ///      `take_pool_window_view`.
+///   4. Launcher pool ledger: `report_pool_window_added` + count mirror
+///      (promote reported `report_pool_window_removed` on the way out).
 ///   5. Reload the browser to the `pool=1` boot URL. The frontend boots
 ///      into pool-wait mode and re-sends `pool_window_ready` — queue
 ///      re-entry then rides the NORMAL `PoolWindowReady` handshake, so a
@@ -704,7 +709,7 @@ pub fn demote_promoted_pool_window(
 ) -> bool {
     use cef::{ImplBrowser, ImplFrame};
 
-    // 2. Capacity: the pool self-refills to POOL_TARGET_SIZE after every
+    // 0. Capacity: the pool self-refills to POOL_TARGET_SIZE after every
     // promote, so in steady state the pool is ALWAYS at target when a close
     // arrives — gating demote at the target would defeat it entirely
     // (verified live: every demote hit "at capacity" on first test).
@@ -727,7 +732,25 @@ pub fn demote_promoted_pool_window(
         return false;
     }
 
-    // 1. Reducer flip + unpromoted insert.
+    // 1. Resolve the HWND FIRST (strict resolution only — never
+    // EnumWindows), BEFORE any state mutation. Ordering matters (reagent
+    // P1 #1969): if the reducer flip ran first and HWND resolution then
+    // failed, the label would be stuck in `pool.unpromoted` with
+    // `is_pool: true` forever — the cleanup that scrubs stale pool labels
+    // (`handle_pool_destroyed_before_promote`) only runs from
+    // `on_before_close`, the exact callback this build never fires.
+    // Resolving first makes the failure path mutation-free: fall back to
+    // the destroy path with all state untouched.
+    let hwnd = unsafe { super::window::resolve_window_hwnd_strict(state, label) };
+    let Some(hwnd) = hwnd else {
+        crate::client::dlog(&format!(
+            "demote({}): no strict HWND — destroy fallback (no state mutated)",
+            label
+        ));
+        return false;
+    };
+
+    // 2. Reducer flip + unpromoted insert.
     let dispatch = state.host_dispatch(crate::reducer::HostCommand::DemotePoolWindow {
         label: label.to_string(),
     });
@@ -739,19 +762,7 @@ pub fn demote_promoted_pool_window(
         return false;
     }
 
-    // 4. Park the HWND. Strict resolution only — never EnumWindows.
-    let hwnd = unsafe { super::window::resolve_window_hwnd_strict(state, label) };
-    let Some(hwnd) = hwnd else {
-        // Reducer already flipped — undo is not worth a new command; the
-        // label sits in `unpromoted` and never becomes ready (no reload
-        // happened), which `handle_pool_destroyed_before_promote` cleans up
-        // when the destroy fallback kills the window.
-        crate::client::dlog(&format!(
-            "demote({}): no strict HWND — destroy fallback",
-            label
-        ));
-        return false;
-    };
+    // 3. Park the HWND offscreen + hide, mirroring fresh-spawn state.
     unsafe {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             SetWindowPos, HWND_TOP, SWP_NOACTIVATE,
