@@ -32,7 +32,18 @@ pub fn create_block(
     Ok(block)
 }
 
-/// Delete a block from its parent tab and prune it from the layout tree.
+/// Delete a block's rows: remove it from its parent tab's `blockids` and
+/// delete the Block row.
+///
+/// SPEC_864 site #6 — the layout-tree prune that used to live here
+/// (wcore-direct `LayoutState` write, the last Path-B writer on the
+/// block-delete path) moved to the reducer: the `delete_block` saga
+/// dispatches `LayoutDeleteNodeByBlock` as its Step 2, and the persist
+/// subscriber writes the reducer's resulting tree from the
+/// `LayoutNodeDeleted{new_tree, tree_cleared}` event. This fn is row-ops
+/// only, keeping `db_layout` single-writer. (`prune_block_from_layout`
+/// below stays — `heal_layout`'s orphan sweep still uses it until Phase 5
+/// deletes the backstops.)
 pub fn delete_block(
     store: &Store,
     tab_id: &str,
@@ -42,22 +53,6 @@ pub fn delete_block(
     tab.blockids.retain(|id| id != block_id);
     store.update(&mut tab)?;
     store.delete::<Block>(block_id)?;
-
-    // Prune the deleted block's node from the layout tree so it doesn't
-    // leave a blank pane. The frontend also removes the node, but if the
-    // frontend update races with the delete or is lost, the orphaned node
-    // persists in the database.
-    if !tab.layoutstate.is_empty() {
-        if let Ok(Some(mut layout)) = store.get::<LayoutState>(&tab.layoutstate) {
-            tracing::info!(
-                block_id = %block_id,
-                layout_id = %tab.layoutstate,
-                "pruning deleted block from layout tree"
-            );
-            prune_block_from_layout(&mut layout, block_id);
-            let _ = store.update(&mut layout);
-        }
-    }
     Ok(())
 }
 

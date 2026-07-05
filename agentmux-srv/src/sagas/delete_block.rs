@@ -143,7 +143,8 @@ async fn run_inner(
 ) -> Result<Value, String> {
     // Step 1: dispatch DeleteBlock through the reducer. The persist
     // subscriber sees the BlockDeleted event and runs
-    // `wcore::delete_block` (SQLite delete + layout prune).
+    // `wcore::delete_block` (SQLite row deletes; the layout prune moved
+    // to Step 2 — SPEC_864 site #6).
     if let Err(reason) = ctx
         .dispatch(Command::DeleteBlock {
             tab_id: tab_id.clone(),
@@ -162,6 +163,36 @@ async fn run_inner(
             reason
         );
         return Err(format!("DeleteBlock: {}", reason));
+    }
+
+    // Step 2 (SPEC_864 site #6): prune the deleted block's layout node
+    // through the reducer — the single writer of db_layout — instead of
+    // the retired wcore-direct prune the persist subscriber used to run.
+    // The reducer resolves block→node itself (it owns the tree) and
+    // silently no-ops when the block has no node (frontend already
+    // pushed a pruned tree, block never laid out, empty tab). The
+    // resulting `LayoutNodeDeleted{new_tree, tree_cleared}` event is
+    // what the subscriber persists.
+    //
+    // Best-effort, mirroring the old wcore prune's `let _ =
+    // store.update(&mut layout)`: a prune failure must not fail the
+    // block deletion itself (the block + controller are already gone);
+    // an orphaned node is exactly what the frontend's own delete-push
+    // and (until Phase 5) `heal_layout` converge away.
+    if let Err(reason) = ctx
+        .dispatch(Command::LayoutDeleteNodeByBlock {
+            tab_id: tab_id.clone(),
+            block_id: block_id.clone(),
+            correlation_id: String::new(),
+        })
+        .await
+    {
+        tracing::warn!(
+            tab_id = %tab_id,
+            block_id = %block_id,
+            "[saga] LayoutDeleteNodeByBlock dispatch failed (best-effort; layout node may orphan until frontend push / heal): {}",
+            reason
+        );
     }
 
     Ok(json!({
@@ -265,6 +296,78 @@ mod tests {
 
         // SQLite: block gone.
         assert!(state.wstore.get::<Block>(&block_id).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn saga_prunes_layout_through_reducer_coherently() {
+        // SPEC_864 site #6 — the layout prune is Step 2 of this saga
+        // (Command::LayoutDeleteNodeByBlock), not the retired
+        // wcore-direct write in the persist subscriber. Invariant:
+        // after the saga, the reducer's TabRecord tree and
+        // db_layout's rootnode agree (single-writer coherence), and a
+        // single-block tree ends genuinely empty on both sides.
+        let (state, _ws_id, tab_id, block_id) = seed().await;
+
+        // Seed a layout tree holding the block, reducer-routed +
+        // persisted (same LayoutSetTree path the frontend push uses).
+        let tree = agentmux_common::LayoutNode {
+            id: "n-solo".into(),
+            data: Some(agentmux_common::LayoutNodeData {
+                block_id: block_id.clone(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        dispatch_apply(
+            &state,
+            agentmux_common::ipc::Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(tree),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+        // Sanity: reducer + SQLite both hold the seeded tree.
+        {
+            let s = state.srv_state.lock().await;
+            assert!(s.tabs[&tab_id].rootnode.is_some());
+        }
+        let layout_id = state
+            .wstore
+            .get::<crate::backend::obj::Tab>(&tab_id)
+            .unwrap()
+            .unwrap()
+            .layoutstate;
+        assert!(state
+            .wstore
+            .get::<crate::backend::obj::LayoutState>(&layout_id)
+            .unwrap()
+            .unwrap()
+            .rootnode
+            .is_some());
+
+        run(&state, tab_id.clone(), block_id.clone()).await.unwrap();
+
+        // Reducer tree: pruned to empty (block was the sole leaf).
+        {
+            let s = state.srv_state.lock().await;
+            assert!(
+                s.tabs[&tab_id].rootnode.is_none(),
+                "reducer tree must be pruned by the saga's Step-2 dispatch"
+            );
+        }
+        // db_layout: matches the reducer (tree_cleared persisted the wipe).
+        assert!(
+            state
+                .wstore
+                .get::<crate::backend::obj::LayoutState>(&layout_id)
+                .unwrap()
+                .unwrap()
+                .rootnode
+                .is_none(),
+            "db_layout must agree with the reducer post-saga (single-writer coherence)"
+        );
     }
 
     #[tokio::test]
