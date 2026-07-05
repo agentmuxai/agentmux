@@ -60,6 +60,15 @@ mod recovery_pages;
 mod wndproc;
 #[cfg(target_os = "windows")]
 pub(crate) use wndproc::install_main_window_floater_cascade_hook;
+// Round 6 (pool demote) — the imperative srv-cleanup path in
+// `commands/window_pool.rs::demote_srv_cleanup` replicates
+// `on_before_close`'s backend cleanup (which never fires for parked
+// pool-window browsers).
+pub(crate) use helpers::backend_close_window;
+pub(crate) use lifecycle::{
+    retry_backend_window_id_lookup, BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
+    BACKEND_WINDOW_ID_RETRY_DELAY,
+};
 
 pub use handlers::AgentMuxClient;
 

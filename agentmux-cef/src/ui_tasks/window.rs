@@ -60,11 +60,217 @@ wrap_task! {
             // already being destroyed (e.g. macOS windowShouldClose racing this
             // queued IPC task) — is handled by the is_closed() guard below.
             if let Some(window) = get_window_on_ui(&self.state, &self.label) {
+                // CEF 148 Views: closing the WINDOW FIRST tears down the
+                // Window but leaves the hosted browser HIDDEN/RECYCLED —
+                // `on_before_close` never fires (the same property the quit
+                // path works around in lib.rs with a hard TerminateProcess;
+                // Discussion #1680). For MID-SESSION secondary-window closes
+                // there was no compensation at all, so every open+close of an
+                // extra window permanently leaked a live renderer process
+                // (~100MB commit), the reducer `browsers` entry, and — because
+                // the `on_before_close` → `backend_close_window` chain never
+                // ran — the entire srv-side window/workspace/tab/block state.
+                // Confirmed empirically with AGENTMUX_DEBUG_CLOSE=1 tracing:
+                // renderer count grew +1 per open/close cycle, no
+                // `on_before_close` was ever written, and a round-2 attempt
+                // that forced `close_browser(1)` AFTER `window.close()` was
+                // ALSO a no-op — once the Views window teardown has detached
+                // the browser, no CEF close API reaches it anymore. See
+                // docs/retro/retro-window-lifecycle-leak-2026-07-04.md and
+                // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
+                //
+                // Round 5: ARM browser destruction, then FORCE the window
+                // death CEF withholds — `close_browser(1)` followed by
+                // native `DestroyWindow` on the top-level HWND, for
+                // non-main labels (Windows). Empirical trail:
+                //   Round 2 (`close_browser` AFTER `window.close()`): no-op —
+                //     Views teardown detaches the browser first.
+                //   Round 3 (`close_browser` BEFORE `window.close()`):
+                //     destruction INITIATES (`do_close` fires) but CEF 148
+                //     Views parks the browser instead of completing it.
+                //   Round 4 (`DestroyWindow` alone, this session): the
+                //     top-level HWND dies (ret=1, verified same-thread
+                //     ownership, visible window gone) but NO browser
+                //     callbacks fire — unlike #1957's `set_as_child`
+                //     browser panes, a Views-hosted browser does NOT tear
+                //     down when its HWND is destroyed out from under it;
+                //     the renderer still leaks.
+                // Round 5 combines the halves that each stalled alone:
+                // `close_browser(1)` puts the browser into pending-
+                // destruction (round 3's `do_close`), and the immediate
+                // native `DestroyWindow` delivers the actual window death
+                // Views was deferring, letting the armed destruction
+                // complete → `on_before_close` → the §2 cleanup chain.
+                // NOT `window.close()` (Views parks the browser), NOT
+                // `PostMessage(WM_CLOSE)` (routes back through Views'
+                // wndproc — the old #1680 hide-the-frame failure).
+                //
+                // Safety: uses resolve_window_hwnd_strict (validated cache /
+                // registry only — NEVER the EnumWindows fallback, which for
+                // an unknown label can return MAIN), plus an explicit
+                // main-HWND guard. If strict resolution fails, fall through
+                // to the round-3 browser-first sequence below (better a
+                // known-leaky close than destroying the wrong window).
+                //
+                // Scope: NOT for "main" — main's close feeds the tuned wrr
+                // last-window quit sequence and process exit reaps everything
+                // there.
+                //
+                // Round 6 — for ALL secondary top-level windows (`window-*`:
+                // pool-promoted `window-pool-*`, cold-path and drag-tear-off
+                // `window-{uuid}`), the on_before_close cleanup chain never
+                // fires on this build (rounds 2–5 evidence), so the srv-side
+                // cleanup (backend_close_window → CloseWindow →
+                // delete_workspace cascade) runs IMPERATIVELY here for every
+                // such close. Scoped to `window-*`: floaters
+                // (`floating-*`) DO get a working on_before_close via their
+                // owned-popup DestroyWindow path (#1957 mechanism), and
+                // browser panes never route through this task.
+                //
+                // Then, for PROMOTED POOL windows, don't destroy at all:
+                // demote back into the warm pool — hidden, reloaded to the
+                // pool boot URL, re-enqueued via the normal renderer-ready
+                // handshake — so the renderer is REUSED, not leaked. If the
+                // pool is at the demote cap (or demote is rejected), fall
+                // through to the round-5 destroy: same parked-browser cost
+                // as today, srv state still clean.
+                //
+                // Known residual (tracked in the retro): cold-path and
+                // tear-off `window-{uuid}` windows can't re-enter the pool
+                // (the pool handshake keys on the `window-pool-` label
+                // prefix), so their close still parks the renderer via
+                // round 5 — srv state IS cleaned, the ~100MB renderer is
+                // not reclaimed. Pool "adoption" for foreign labels is the
+                // follow-up. In the default flow this is rare: open_new_window
+                // serves from the pool whenever it's non-empty.
+                #[cfg(target_os = "windows")]
+                if self.label.starts_with("window-") {
+                    crate::commands::window_pool::demote_srv_cleanup(&self.state, &self.label);
+                    if self.label.starts_with("window-pool-")
+                        && crate::commands::window_pool::demote_promoted_pool_window(
+                            &self.state,
+                            &self.label,
+                            &window,
+                        )
+                    {
+                        return;
+                    }
+                    // fall through to round-5 destroy below
+                }
+                #[cfg(target_os = "windows")]
+                if self.label != "main" {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
+                    let strict = unsafe {
+                        crate::commands::window::resolve_window_hwnd_strict(
+                            &self.state,
+                            &self.label,
+                        )
+                    };
+                    if let Some(hwnd) = strict {
+                        let main_hwnd = self.state.window_hwnds.lock().get("main").copied();
+                        if main_hwnd == Some(hwnd as isize) {
+                            crate::client::dlog(&format!(
+                                "CloseWindowTask({}): strict HWND resolved to MAIN — refusing DestroyWindow, falling back",
+                                self.label
+                            ));
+                        } else {
+                            // Step 1 — arm the browser destruction while the
+                            // browser is still attached and healthy (round 3;
+                            // force=1 skips unload handlers — our own frontend,
+                            // no user content).
+                            if let Some(mut browser) = self.state.get_browser(&self.label) {
+                                if let Some(host) = browser.host() {
+                                    crate::client::dlog(&format!(
+                                        "CloseWindowTask({}): round 5 — close_browser(1) to arm destruction",
+                                        self.label
+                                    ));
+                                    host.close_browser(1);
+                                }
+                            }
+                            tracing::info!(
+                                target: "wrr",
+                                label = %self.label,
+                                hwnd = ?hwnd,
+                                "[close-window] round 5: close_browser(1) + native DestroyWindow"
+                            );
+                            // Step 2 — deliver the window death Views defers.
+                            // Forensics kept from round 4: same-thread
+                            // ownership + ret/lasterr/liveness per close.
+                            unsafe {
+                                use windows_sys::Win32::Foundation::GetLastError;
+                                use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+                                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                                    GetWindowThreadProcessId, IsWindow,
+                                };
+                                let mut owner_pid: u32 = 0;
+                                let owner_tid = GetWindowThreadProcessId(hwnd, &mut owner_pid);
+                                let my_tid = GetCurrentThreadId();
+                                crate::client::dlog(&format!(
+                                    "CloseWindowTask({}): round 5 — DestroyWindow({:?}) owner_tid={} my_tid={} owner_pid={}",
+                                    self.label, hwnd, owner_tid, my_tid, owner_pid
+                                ));
+                                let ret = DestroyWindow(hwnd);
+                                let err = if ret == 0 { GetLastError() } else { 0 };
+                                let alive = IsWindow(hwnd);
+                                crate::client::dlog(&format!(
+                                    "CloseWindowTask({}): round 5 — DestroyWindow ret={} lasterr={} IsWindow_after={}",
+                                    self.label, ret, err, alive
+                                ));
+                            }
+                            return;
+                        }
+                    } else {
+                        crate::client::dlog(&format!(
+                            "CloseWindowTask({}): strict HWND resolution failed — falling back to round-3 close",
+                            self.label
+                        ));
+                    }
+                }
+                // Round 3 (fallback / non-Windows): BROWSER-FIRST teardown for
+                // non-main labels — force `close_browser(1)` while the browser
+                // is still attached and healthy, then close the window. This
+                // matches the standard CEF Views pattern (can_close →
+                // try_close_browser → browser destruction drives window
+                // close), just force-initiated from our side so the
+                // destruction is guaranteed to start. force=1 skips unload
+                // handlers — correct here: the content is our own frontend,
+                // not user web content with unsaved state. On Windows this
+                // path is KNOWN INSUFFICIENT (destruction initiates but parks
+                // — see retro); it remains only as the no-strict-HWND fallback.
+                if self.label != "main" {
+                    if let Some(mut browser) = self.state.get_browser(&self.label) {
+                        if let Some(host) = browser.host() {
+                            tracing::info!(
+                                target: "wrr",
+                                label = %self.label,
+                                "[close-window] browser-first teardown: close_browser(1) before window.close()"
+                            );
+                            crate::client::dlog(&format!(
+                                "CloseWindowTask({}): close_browser(1) BEFORE window.close()",
+                                self.label
+                            ));
+                            host.close_browser(1);
+                        }
+                    }
+                }
                 if window.is_closed() == 0 {
+                    crate::client::dlog(&format!(
+                        "CloseWindowTask({}): window.close()",
+                        self.label
+                    ));
                     window.close();
+                } else {
+                    crate::client::dlog(&format!(
+                        "CloseWindowTask({}): window already closed — skipping window.close()",
+                        self.label
+                    ));
                 }
                 return;
             }
+            crate::client::dlog(&format!(
+                "CloseWindowTask({}): no CefWindow resolved — fallback try_close_browser",
+                self.label
+            ));
             // Fallback: no CefWindow for this label (non-Views path / pre-init
             // teardown) — close the browser handle directly.
             if let Some(mut browser) = self.state.get_browser(&self.label) {

@@ -152,6 +152,48 @@ pub(super) fn handle_promote_pool_window(state: &mut HostState, label: String) -
     }
 }
 
+/// Round 6 (pool demote — SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY follow-up,
+/// retro-window-lifecycle-leak-2026-07-04): a PROMOTED pool window is being
+/// closed. CEF 148 Views parks the browser on every close/destroy sequence
+/// (rounds 2–5 all failed to complete destruction), so instead of leaking
+/// the renderer we return the window to the pool: flip the browser handle
+/// back to `is_pool: true` (so `count_live_user_windows` stops counting it)
+/// and re-insert the label into `unpromoted`. The caller then reloads the
+/// window to its `pool=1` boot URL — the frontend re-sends
+/// `pool_window_ready` exactly like a fresh spawn, and the NORMAL
+/// `PoolWindowReady` handshake moves it `unpromoted` → `queue`.
+///
+/// Does NOT touch `respawn_in_flight` (this is not a spawn; note the ready
+/// handshake will clear it, which at worst lets one extra spawn start —
+/// bounded by `spawn_pool_window`'s own capacity guard). Idempotent: a
+/// label already pool-side (double demote, race with destroy) is a no-op
+/// with `pool_demote_accepted: false`.
+pub(super) fn handle_demote_pool_window(state: &mut HostState, label: String) -> DispatchOutput {
+    let already_pool_side = state.pool.unpromoted.contains(&label)
+        || state.pool.queue.iter().any(|l| l == &label);
+    if already_pool_side {
+        return DispatchOutput {
+            pool_size_after: Some(state.pool.queue.len()),
+            ..Default::default()
+        };
+    }
+    // Tolerant of a missing browser handle (matching the other pool
+    // handlers' style): the only production caller is `CloseWindowTask`,
+    // which resolved the live window through the browser registry before
+    // dispatching.
+    if let Some(handle) = state.browsers.get_mut(&label) {
+        if let BrowserKind::TopLevel { is_pool } = &mut handle.kind {
+            *is_pool = true;
+        }
+    }
+    state.pool.unpromoted.insert(label);
+    DispatchOutput {
+        pool_demote_accepted: true,
+        pool_size_after: Some(state.pool.queue.len()),
+        ..Default::default()
+    }
+}
+
 pub(super) fn handle_pool_drain_all(state: &mut HostState) -> DispatchOutput {
     let drained: Vec<String> = state
         .pool

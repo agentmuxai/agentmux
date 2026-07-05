@@ -61,6 +61,19 @@ Today it is explicitly fire-and-forget (`helpers.rs:53`, own doc comment: *"we w
 - Manual/live: repeat the original repro — open several windows via pool-promote in quick succession, close them immediately, and verify via `Layout(query=windows)` that the reducer's window count returns to baseline (not just visually, at the OS window level, which already worked before this fix).
 - Same repro, cross-check renderer process count (`Get-CimInstance Win32_Process ... --type=renderer`) before/after to get the first real empirical data point on whether this also explains the renderer-count growth observed today.
 
+## 4b. Round 2 (2026-07-05) — the deeper cause this spec's fix didn't reach
+
+Post-merge empirical verification invalidated §1's implicit assumption that `on_before_close` fires at all for these closes. It does not: CEF Views `window.close()` on this build destroys the Window but leaves the browser hidden/recycled (`lib.rs` ~1050 documents this for the quit path; Discussion #1680), so the entire close-cascade — including this spec's retry — never executes for mid-session secondary-window closes, and each close leaks a live renderer on top of the srv-side state.
+
+Round-2 fix (same PR series): `CloseWindowTask` now follows `window.close()` with `close_browser(1)` on the closed label's browser (non-`main` only), forcing real browser destruction so `on_before_close` fires and the §2 cleanup chain — which is correct, and was simply dead code for this path — runs. §2's retry remains valuable for its original race; §2.2's observability made the "srv never heard about any close" diagnosis possible.
+
+Verification protocol for round 2 (per §4, executed against a fresh isolated build with `AGENTMUX_DEBUG_CLOSE=1`):
+- `on_before_close fired` entries present in the close-debug trace for each closed window
+- "Unregistered browser" in the host log per close
+- `backend_close_window` connect + HTTP 200 response lines per close
+- srv `GET /api/v1/windows` returns to baseline count
+- instance-scoped renderer process count returns to baseline
+
 ## 5. Follow-ups tracked separately (not this PR)
 
 - Task #7 (this fix)

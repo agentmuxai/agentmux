@@ -78,3 +78,144 @@ Not attempted in this session — closing/pruning the 8 orphaned window entries 
 ## Code fix
 
 Action items 1–2 (make `backend_close_window` observable, fix the silent-skip gate via a bounded retry) are implemented in **PR #1965** (`fix(window): retry backend_window_id lookup on close so CloseWindow reliably reaches srv`), design in `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`. Action items 3–6 remain open, tracked as tasks #8–#10 in this session (main-window reload/version bug, window-level test coverage, pagefile-spec cross-reference) plus the still-undecided `SystemProcessInfo`/reconciliation proposal (task #4).
+
+## Code fix, round 2 — PR #1965 was necessary but NOT sufficient (2026-07-05)
+
+Post-merge verification on a fresh isolated build (`g183aecc4`, channel `verify-window-fix-*`) showed the leak **still occurring**: 7 open/close cycles (both rapid and 600ms-delayed) → window records leaked every time, renderer count grew exactly +1 per cycle (5 → 12), and — decisively — **zero `on_before_close` invocations across the entire run** (0 "Unregistered browser" log lines; confirmed at trace level with `AGENTMUX_DEBUG_CLOSE=1`, which showed `register_backend_window` succeeding for the closed window but no close-cascade entries whatsoever afterward).
+
+**Actual root cause, one layer deeper:** on this CEF build, closing a Views window (`window.close()`) destroys the Window/HWND but leaves the hosted browser **hidden/recycled — `on_before_close` never fires**. This was already a *known, documented* property of the codebase: the quit path in `lib.rs` (~line 1050) explicitly works around it ("After a CEF Views last-window close the browsers are HIDDEN/recycled (the close never fires on_before_close)") with a hard `TerminateProcess` (Discussion #1680). What nobody accounted for: **mid-session secondary-window closes hit the same recycle behavior with no compensation at all.** Every open+close of an extra window permanently leaked:
+
+1. a live renderer process (~100MB commit — the pagefile-growth driver for multi-window usage, and a **second, independent renderer-leak mechanism** beyond the browser-pane one PR #1957 fixed);
+2. the reducer `browsers` map entry (never unregistered);
+3. the entire srv-side window/workspace/tab/block state (because `backend_close_window` lives inside the never-firing `on_before_close` — which is why PR #1965's retry, while correct, never got the chance to run).
+
+Also disproven by the trace: the PR #1965 hypothesis that the `backend_window_id` registration race was the trigger for THIS incident — the mapping was registered and available at close time; the callback that would have consumed it simply never executed. (#1965's fix remains correct and load-bearing for the race it targets, and its cleanup chain is exactly what round 2 re-activates.)
+
+**Round-2 fix:** in `CloseWindowTask` (`ui_tasks/window.rs`), after `window.close()` on the Views path, force the browser itself closed with `close_browser(1)` for non-`main` labels. This makes `on_before_close` actually fire, which re-activates the entire existing cleanup chain (UnregisterBrowser → HWND-cache eviction → launcher mirror → `backend_close_window` with the #1965 retry → srv `CloseWindow` → `delete_workspace` cascade). Safe for secondary windows because they are independent top-level Views widgets — the April pane-cascade failure mode (`WS_CHILD` entanglement, teardown-spike spec §2) structurally cannot occur. `main` is excluded: its close feeds the tuned wrr last-window quit sequence, and process exit reaps everything there anyway.
+
+## Round 2 verification: FAILED. Round 3: break point isolated to inside CEF, between `do_close` and `on_before_close` (2026-07-05)
+
+**Round 2 (close_browser(1) AFTER window.close()) did not work.** Fresh-build verification (channel `verify-round2`): the forcing log line fired 4/4 times, but counts still leaked (srv windows 1→9, renderers 5→9, zero `on_before_close`). Once the Views window teardown has detached the browser, no CEF close API reaches it.
+
+**Round 3 instrumented every link of the cascade** (`can_close`, `do_close`, `on_window_destroyed`, `CloseWindowTask` branches — all dlog-traced) **and swapped the order** to browser-first teardown (`close_browser(1)` *before* `window.close()`). Verification (channel `verify-round3`) still leaks (1→9 windows, 5→9 renderers), but the trace now pins the exact break point. Per closed window:
+
+```
+CloseWindowTask(label): close_browser(1) BEFORE window.close()   <- fires
+CloseWindowTask(label): window.close()                            <- fires
+can_close(label): try_close_browser -> 1                          <- fires, returns "safe to close"
+do_close fired; browser_list.len()=N                               <- FIRES — CEF initiated browser destruction
+on_before_close                                                    <- NEVER — destruction never completes
+```
+
+`browser_list.len()` grows monotonically across closes (4→5→6→7): browsers are appended in `on_after_created` and only removed in `on_before_close`, which never runs. The closed windows' top-level HWNDs *are* destroyed (verified via EnumWindows both rounds — only main + current pool + pane-pool floater remain), so the state after close is: **no Window, no HWND, `do_close` completed, browser parked/detached with its renderer alive, unreachable by any further CEF close call** (a second `close_browser(1)` on it — round 2 — was a no-op).
+
+**Conclusion: the break is inside CEF 148's Views/Alloy teardown, after `do_close` returns false (proceed) — CEF parks/"recycles" the browser instead of completing destruction.** No host-side ordering of `window.close()` / `close_browser()` fixes this; both sanctioned close paths funnel into the same parked state. This matches, and finally explains mechanically, the pre-existing `lib.rs` quit-path comment ("browsers are HIDDEN/recycled (the close never fires on_before_close)").
+
+**Recommended round 4 (not yet attempted — handed off):** bypass the Views close entirely for secondary windows and destroy the top-level HWND natively (`DestroyWindow`, NOT `PostMessage(WM_CLOSE)` — WM_CLOSE routes back through Views' wndproc, which is the old #1680 hide-the-frame failure). The native WM_DESTROY parent→child cascade destroying CEF's browser child HWND is the **exact mechanism PR #1957 proved reliably fires `OnBeforeClose`** for browser panes, and the floating-pane teardown has shipped on it for months. The top-level HWND is resolvable via `state.window_hwnds` / `resolve_window_hwnd` (`commands/window/lifecycle.rs`). Open question for round 4: whether to call `close_browser(1)` first (unload/JS teardown niceties) and then `DestroyWindow`, or `DestroyWindow` alone (what panes/floaters do). Second candidate if that fails: stop leaking at the source — re-enqueue closed promoted windows into the pool (embrace the recycle) — much bigger surgery, pool expects windows with live `cef::Window` handles.
+
+## Rounds 4 + 5: native DestroyWindow — window dies, browser STILL parked (2026-07-05, Agent2)
+
+**Round 4 (`DestroyWindow` alone, strict HWND resolution) executed and verified — INSUFFICIENT.**
+Implementation: `resolve_window_hwnd_strict` (validated cache / registry+GA_ROOT only — the
+EnumWindows fallback is banned on this path because it can return MAIN) + explicit main-HWND
+guard, then native `DestroyWindow` for non-main labels. Forensics per close (channel
+`dev/agenta-window-close-force-browser-teardown`):
+
+```
+round 4 — DestroyWindow(0x2e0722) owner_tid=90612 my_tid=90612   <- same thread, ownership valid
+round 4 — DestroyWindow ret=1 lasterr=0 IsWindow_after=0          <- succeeded, HWND genuinely gone
+(no can_close / do_close / on_window_destroyed / on_before_close) <- ZERO CEF callbacks
+```
+
+Visible window gone (EnumWindows-verified: only main + pool + floater remain), renderer count
+5→6 per cycle — **the leak persists**. Key negative result: **a Views-hosted browser does NOT
+tear down when its top-level HWND is destroyed out from under it.** The #1957 WM_DESTROY-cascade
+mechanism applies to `set_as_child` browser panes (raw child HWNDs we own), not to
+BrowserView/Views plumbing — the browser object survives its own window's native death, parked,
+renderer alive.
+
+**Round 5 (`close_browser(1)` to ARM destruction, then `DestroyWindow`) — closer, still
+insufficient.** Trace per close:
+
+```
+round 5 — close_browser(1) to arm destruction                     <- fires
+round 5 — DestroyWindow ret=1 lasterr=0 IsWindow_after=0          <- window death delivered
+do_close fired; browser_list.len()=N                              <- browser destruction initiated
+can_close(label): try_close_browser -> 1                          <- Views agrees: safe to close
+on_before_close                                                   <- STILL NEVER
+```
+
+Renderers 5→8 across 3 cycles. The break point is now pinned **one step deeper than round 3
+left it: between `can_close → true` and `OnBeforeClose`, i.e. inside CEF 148's
+BrowserView→Browser destruction, which parks regardless of whether the window death is
+delivered by Views (`window.close()`) or natively (`DestroyWindow`).**
+
+**Solution-space conclusion after five rounds:** every combination of the sanctioned close
+APIs and native window destruction funnels into the same parked-browser state. The remaining
+viable designs, in recommended order:
+
+1. **Embrace the recycle (pool-demote)** — the handoff's fallback, now the primary candidate:
+   `close_window` on a promoted window becomes "demote back into the pool": hide/move
+   offscreen, run the srv-side cleanup imperatively at demote time (unregister
+   `backend_window_id`, call `backend_close_window` → `CloseWindow` → `delete_workspace`
+   cascade — we know the label; no `on_before_close` needed), then re-enqueue as a warm pool
+   entry. The renderer is REUSED, not leaked; state is cleaned; and it aligns with what CEF
+   148 Views is determined to do anyway. Surgery lives in `window_pool.rs` (promote's inverse).
+   Round-5's native-DestroyWindow path must then be REMOVED for pool-eligible labels (the
+   window must stay alive to be reused).
+2. **Imperative cleanup + accept the parked browser** (fallback if pool-demote stalls):
+   keep round 5's close (window dies for real), and do the `on_before_close` work ourselves
+   at close time (UnregisterBrowser + backend_close_window with the known label). Fixes
+   leaks 2+3 (browsers map + srv state, the count-chip drift) but NOT leak 1 — the ~100MB
+   renderer stays until process exit, unless a per-browser renderer-PID reap can be added
+   (CEF exposes no cheap browser→renderer-PID attribution; see retro §impact).
+
+Round-5 code + instrumentation stays on the branch: the native close is behavior-improving
+(the window actually disappears via one deterministic mechanism), the forensics are
+load-bearing for round 6, and the negative results above are the map.
+
+## Round 6: POOL DEMOTE — VERIFIED WORKING (2026-07-05, Agent2)
+
+**Design:** stop fighting CEF's recycle; use it. Closing a promoted pool window now
+**demotes** it back into the warm pool instead of destroying it:
+
+1. `demote_srv_cleanup` — the on_before_close cleanup chain, run IMPERATIVELY at close
+   time (label known; no callback needed): `backend_close_window` → srv `CloseWindow` →
+   `delete_workspace` cascade, with the #1965 registration-race retry, then
+   `report_backend_window_id_unregistered` + `report_panes_reaped`.
+2. `HostCommand::DemotePoolWindow` — reducer flips `is_pool: true` + re-inserts into
+   `unpromoted` (idempotent; leaves the respawn semaphore alone).
+3. Park: `SetWindowPos` offscreen + `set_taskbar_hidden(true)`; `window_hwnds` chrome-cache
+   evicted; HWND re-cached in `pool_hwnd_cache`; CEF Views `Window` re-cached for the next
+   promote's `take_pool_window_view`.
+4. Reload to the `pool=1` boot URL — the frontend re-sends `pool_window_ready`, and queue
+   re-entry rides the NORMAL `PoolWindowReady` handshake (no mid-reload promote possible).
+5. Demote cap `POOL_TARGET_SIZE + 2`: each parked recycle costs the renderer that would
+   otherwise LEAK, so keeping it is strictly better up to the cap; beyond it, the round-5
+   destroy fallback runs (same cost as the old leak, srv state still cleaned).
+
+**Latent bug found and fixed en route:** `backend_close_window` authenticated via the
+`?authkey=` query param — **disabled for HTTP routes in the 2026-05-11 security audit
+(C3)** — so it has 401'd on every call since May, unnoticed because `on_before_close`
+never fires for these browsers and pre-#1965 the response was never read. Now sends the
+`X-AuthKey` header. This bug would have silently broken the cleanup chain even if CEF's
+destruction parking were ever fixed.
+
+**Verification (channel `dev/agenta-window-close-force-browser-teardown`, 3 open/close
+cycles + reopen):**
+- Closes #1/#2: `demoted back into pool`; close #3 hit the demote cap → destroy fallback ✓
+- `backend_close_window`: **HTTP 200** on all 4 closes; srv workspace cascade runs
+  (closed windows' workspace names are gone from the records) ✓
+- **Reopen: the next `open_new_window` promoted a RECYCLED window from the pool, and its
+  close re-demoted it — the loop is in equilibrium** ✓
+- Renderers 5→8 across the burst: +2 are REUSABLE pool members (pool grew 2→4 by design),
+  +1 is the cap-overflow destroy fallback. Steady-state closes leak nothing.
+
+**Remaining follow-ups (out of scope here):**
+- srv `CloseWindow` prunes the workspace/tabs/blocks but the WINDOW row itself still
+  lingers (visible in `/api/v1/windows` with an empty workspace name) — a pre-existing
+  srv-side gap common to every close path; small state, tracked separately (same
+  dual-write class as the #864 authority work).
+- Non-Windows platforms keep the Views `window.close()` path (no parked-browser evidence
+  collected there yet).
+- Subwindow children of a demoted window take their own close path (rare).

@@ -234,6 +234,51 @@ pub unsafe fn find_main_window() -> *mut std::ffi::c_void {
     result
 }
 
+/// Round 4 (SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY §4b follow-up) — the
+/// STRICT subset of `resolve_window_hwnd`: validated per-label cache hit,
+/// or reducer registry + GA_ROOT. Returns `None` instead of ever falling
+/// back to EnumWindows. Callers that DESTROY the resolved window (native
+/// `DestroyWindow` in `CloseWindowTask`) must use this — the EnumWindows
+/// fallback returns "some top-level of ours", which for an unknown label
+/// can be MAIN, and destroying main mid-session is catastrophic.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn resolve_window_hwnd_strict(
+    state: &Arc<AppState>,
+    label: &str,
+) -> Option<*mut std::ffi::c_void> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, IsWindow, GA_ROOT};
+
+    if label.is_empty() {
+        return None;
+    }
+    // Validated cache hit (same semantics as resolve_window_hwnd step 1:
+    // no GA_ROOT walk — the cache already stores the outer top-level).
+    let cached = state.window_hwnds.lock().get(label).copied();
+    if let Some(raw_isize) = cached {
+        let raw = raw_isize as *mut std::ffi::c_void;
+        if !raw.is_null() {
+            if IsWindow(raw) != 0 {
+                return Some(raw);
+            }
+            state.window_hwnds.lock().remove(label);
+        }
+    }
+    // Reducer registry + GA_ROOT (same as step 2).
+    if let Some(browser) = state.get_browser(label) {
+        if let Some(host) = browser.host() {
+            let raw = host.window_handle().0 as *mut std::ffi::c_void;
+            if !raw.is_null() {
+                let root = GetAncestor(raw, GA_ROOT);
+                let resolved = if root.is_null() { raw } else { root };
+                if IsWindow(resolved) != 0 {
+                    return Some(resolved);
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(target_os = "windows")]
 pub(crate) unsafe fn resolve_window_hwnd(state: &Arc<AppState>, label: &str) -> *mut std::ffi::c_void {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, IsWindow, GA_ROOT};

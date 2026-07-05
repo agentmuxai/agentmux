@@ -812,6 +812,66 @@ fn pool_promote_with_known_label_emits_event() {
     )));
 }
 
+// ── Round 6 — pool demote ────────────────────────────────────────────
+
+/// The demote round-trip: promoted label re-enters `unpromoted`, and the
+/// normal `PoolWindowReady` handshake (fired after the demote path reloads
+/// the window to its pool boot URL) moves it into the queue — a full
+/// promote → demote → ready → re-promote cycle on one label.
+#[test]
+fn pool_demote_reenters_unpromoted_then_ready_requeues() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
+    update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
+    let out = update(&mut state, HostCommand::PopAndPromoteFrontPoolWindow);
+    assert_eq!(out.promoted_pool_label.as_deref(), Some("p1"));
+    assert!(state.pool.queue.is_empty());
+
+    // Demote: back into unpromoted, accepted.
+    let out = update(&mut state, HostCommand::DemotePoolWindow { label: "p1".into() });
+    assert!(out.pool_demote_accepted, "demote of a promoted label must be accepted");
+    assert!(state.pool.unpromoted.contains("p1"));
+    assert!(state.pool.queue.is_empty(), "queue entry waits for renderer-ready");
+
+    // The reloaded frontend re-sends pool_window_ready → queue re-entry.
+    update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
+    assert!(!state.pool.unpromoted.contains("p1"));
+    assert_eq!(state.pool.queue.len(), 1);
+
+    // And it can be promoted again.
+    let out = update(&mut state, HostCommand::PopAndPromoteFrontPoolWindow);
+    assert_eq!(out.promoted_pool_label.as_deref(), Some("p1"));
+}
+
+/// Idempotency: demoting a label already pool-side (double demote, or a
+/// race with a fresh spawn) is rejected — the caller takes the destroy
+/// fallback rather than double-inserting.
+#[test]
+fn pool_demote_already_pool_side_is_rejected() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "p1".into() });
+    // Still unpromoted → demote must be a rejected no-op.
+    let out = update(&mut state, HostCommand::DemotePoolWindow { label: "p1".into() });
+    assert!(!out.pool_demote_accepted);
+    // Queued → also rejected.
+    update(&mut state, HostCommand::PoolWindowReady { label: "p1".into() });
+    let out = update(&mut state, HostCommand::DemotePoolWindow { label: "p1".into() });
+    assert!(!out.pool_demote_accepted);
+    assert_eq!(state.pool.queue.len(), 1, "no duplicate insertion");
+}
+
+/// Demote does NOT touch the respawn semaphore — a demote mid-spawn must
+/// not let a second spawn start.
+#[test]
+fn pool_demote_leaves_respawn_semaphore_alone() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::PoolWindowSpawnStart { label: "fresh".into() });
+    assert!(state.pool.respawn_in_flight);
+    let out = update(&mut state, HostCommand::DemotePoolWindow { label: "promoted-1".into() });
+    assert!(out.pool_demote_accepted);
+    assert!(state.pool.respawn_in_flight, "demote must not clear the spawn semaphore");
+}
+
 /// Sister test: destroy with the label in NEITHER set is still a no-op.
 #[test]
 fn pool_destroy_with_unknown_label_is_noop() {
