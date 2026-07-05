@@ -23,15 +23,15 @@ use super::wndproc::{install_top_level_focus_restore_hook, set_window_icon, skip
 /// pagefile-test session (windows promoted ~2s apart, no visible lag),
 /// while staying well clear of user-perceived latency for a window that's
 /// already closing.
-const BACKEND_WINDOW_ID_RETRY_ATTEMPTS: u32 = 5;
-const BACKEND_WINDOW_ID_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+pub(crate) const BACKEND_WINDOW_ID_RETRY_ATTEMPTS: u32 = 5;
+pub(crate) const BACKEND_WINDOW_ID_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Poll `lookup` up to `max_attempts` times, sleeping `delay` between each
 /// attempt (via the injected `sleep` so tests don't have to wait in real
 /// time), returning the first `Some` result or `None` if every attempt
 /// misses. Extracted from `on_before_close`'s backend_window_id retry so
 /// the race-closing behavior is unit-testable without a real CEF `Browser`.
-fn retry_backend_window_id_lookup(
+pub(crate) fn retry_backend_window_id_lookup(
     max_attempts: u32,
     delay: std::time::Duration,
     mut lookup: impl FnMut() -> Option<String>,

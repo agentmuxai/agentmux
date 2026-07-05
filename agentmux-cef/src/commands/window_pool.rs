@@ -354,27 +354,7 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
         crate::launcher_ipc::report_host_pool_count(pool_count);
     }
 
-    let ipc_port = *state.ipc_port.lock();
-    let ipc_token = &state.ipc_token;
-    // The `pool=1` flag tells the frontend to skip its standard
-    // workspace init and wait for a `pool:promote` event.
-    let url = match super::window::resolve_frontend_base_url(ipc_port) {
-        Ok(base_url) => {
-            let separator = if base_url.contains('?') { "&" } else { "?" };
-            format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pool=1",
-                base_url, separator, ipc_port, ipc_token, label
-            )
-        }
-        Err(e) => {
-            tracing::error!(
-                error = %e,
-                label = %label,
-                "[pool] frontend assets unavailable — pool warmup will load static error page (tear-off targets will surface the install-broken notice instead of crash-looping)",
-            );
-            super::window::assets_missing_data_url(&e)
-        }
-    };
+    let url = pool_frontend_url(state, &label);
 
     // Phase B.5 (window_meta step d) — combined pre-create handoff.
     // Pool windows graduate to tear-off destinations, which are
@@ -610,6 +590,218 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
 /// frontend's awaitPoolPromote AFTER its `pool:promote` listener
 /// is installed. NOW it's safe to enqueue this window for
 /// promotion.
+/// Build the frontend URL a pool window boots with. The `pool=1` flag tells
+/// the frontend to skip its standard workspace init and wait for a
+/// `pool:promote` event (and to send `pool_window_ready` once booted).
+/// Shared by `spawn_pool_window` (fresh spawn) and the round-6 demote path
+/// (reloading a previously-promoted window back to its pool boot state).
+fn pool_frontend_url(state: &Arc<AppState>, label: &str) -> String {
+    let ipc_port = *state.ipc_port.lock();
+    let ipc_token = &state.ipc_token;
+    match super::window::resolve_frontend_base_url(ipc_port) {
+        Ok(base_url) => {
+            let separator = if base_url.contains('?') { "&" } else { "?" };
+            format!(
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pool=1",
+                base_url, separator, ipc_port, ipc_token, label
+            )
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                label = %label,
+                "[pool] frontend assets unavailable — pool warmup will load static error page (tear-off targets will surface the install-broken notice instead of crash-looping)",
+            );
+            super::window::assets_missing_data_url(&e)
+        }
+    }
+}
+
+/// Round 6 (pool demote) — the srv/launcher cleanup a closing promoted pool
+/// window needs, done IMPERATIVELY at close time. `on_before_close` — where
+/// this cleanup normally lives — never fires for these windows (CEF 148
+/// parks the browser on every close/destroy sequence; rounds 2–5,
+/// retro-window-lifecycle-leak-2026-07-04), so without this the srv-side
+/// window/workspace/tab/block state leaks on every close. Runs the
+/// `backend_close_window` → srv `CloseWindow` → `delete_workspace` cascade
+/// on a background thread with the same bounded registration-race retry as
+/// `on_before_close` (#1965), then unregisters the `backend_window_id`
+/// mapping. Also reaps the window's launcher-side pane bookkeeping.
+///
+/// Called for BOTH demote outcomes (re-enqueued or destroy-fallback):
+/// either way the workspace is gone from the user's point of view.
+pub fn demote_srv_cleanup(state: &Arc<AppState>, label: &str) {
+    crate::launcher_ipc::report_panes_reaped(label.to_string());
+
+    let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+    let auth_key = state.auth_key.lock().clone();
+    let lbl = label.to_string();
+    let state_for_thread = state.clone();
+    std::thread::spawn(move || {
+        let sleep_fn = |d: std::time::Duration| std::thread::sleep(d);
+        match crate::client::retry_backend_window_id_lookup(
+            crate::client::BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
+            crate::client::BACKEND_WINDOW_ID_RETRY_DELAY,
+            || state_for_thread.backend_window_id(&lbl),
+            sleep_fn,
+        ) {
+            Some(window_id) => {
+                crate::client::dlog(&format!(
+                    "demote_srv_cleanup({}): backend_close_window window_id={}",
+                    lbl, window_id
+                ));
+                crate::client::backend_close_window(&web_endpoint, &auth_key, &window_id);
+                crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
+            }
+            None => {
+                let warn = format!(
+                    "demote_srv_cleanup({}): no backend window ID after retries — srv state may orphan",
+                    lbl
+                );
+                crate::client::dlog(&warn);
+                tracing::warn!("{}", warn);
+                crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
+            }
+        }
+    });
+}
+
+/// Round 6 (pool demote) — return a closing PROMOTED pool window to the
+/// warm pool instead of destroying it. Five rounds of evidence
+/// (retro-window-lifecycle-leak-2026-07-04) show CEF 148 Views parks the
+/// browser on every destroy sequence — the renderer leaks no matter how the
+/// window dies. Demote embraces the recycle: the renderer is REUSED as the
+/// next warm pool entry.
+///
+/// Sequence (UI thread — called from `CloseWindowTask`):
+///   1. Reducer `DemotePoolWindow`: flip `is_pool: true` + insert into
+///      `unpromoted`. Rejected (already pool-side / unknown) → return false
+///      and let the caller take the destroy fallback.
+///   2. Capacity cap: if the pool already holds ≥ `POOL_TARGET_SIZE`
+///      members, return false (destroy fallback — same leak as today, but
+///      srv state is still cleaned by `demote_srv_cleanup`).
+///   3. Launcher pool ledger: `report_pool_window_added` + count mirror
+///      (promote reported `report_pool_window_removed` on the way out).
+///   4. Park the HWND offscreen + hide (`set_taskbar_hidden(true)`), evict
+///      the chrome `window_hwnds` cache entry (parked pool windows resolve
+///      via `pool_hwnd_cache`, mirroring fresh-spawn state) and re-cache
+///      the CEF Views `Window` for the next promote's
+///      `take_pool_window_view`.
+///   5. Reload the browser to the `pool=1` boot URL. The frontend boots
+///      into pool-wait mode and re-sends `pool_window_ready` — queue
+///      re-entry then rides the NORMAL `PoolWindowReady` handshake, so a
+///      mid-reload promote is impossible (the label isn't in the queue
+///      until the renderer is genuinely ready).
+///
+/// Not handled (v1): subwindow children (rare; they take the destroy path
+/// via their own close), non-Windows platforms (no parked-browser evidence
+/// there yet — they keep the Views `window.close()` path).
+#[cfg(target_os = "windows")]
+pub fn demote_promoted_pool_window(
+    state: &Arc<AppState>,
+    label: &str,
+    window: &cef::Window,
+) -> bool {
+    use cef::{ImplBrowser, ImplFrame};
+
+    // 2. Capacity: the pool self-refills to POOL_TARGET_SIZE after every
+    // promote, so in steady state the pool is ALWAYS at target when a close
+    // arrives — gating demote at the target would defeat it entirely
+    // (verified live: every demote hit "at capacity" on first test).
+    // Demotes are allowed to OVERFILL up to a bounded burst margin: each
+    // parked recycled window costs the same renderer that would otherwise
+    // LEAK on destroy, so up to the cap, keeping it is strictly better —
+    // reusable instead of unreachable. Beyond the cap (pathological burst
+    // closes), fall back to destroy: same cost as the pre-round-6 leak,
+    // with srv state still cleaned.
+    const POOL_DEMOTE_CAP: usize = POOL_TARGET_SIZE + 2;
+    let pool_population = {
+        let st = state.host_state.lock();
+        st.pool.unpromoted.len() + st.pool.queue.len()
+    };
+    if pool_population >= POOL_DEMOTE_CAP {
+        crate::client::dlog(&format!(
+            "demote({}): pool at demote cap ({} >= {}) — destroy fallback",
+            label, pool_population, POOL_DEMOTE_CAP
+        ));
+        return false;
+    }
+
+    // 1. Reducer flip + unpromoted insert.
+    let dispatch = state.host_dispatch(crate::reducer::HostCommand::DemotePoolWindow {
+        label: label.to_string(),
+    });
+    if !dispatch.pool_demote_accepted {
+        crate::client::dlog(&format!(
+            "demote({}): reducer rejected (already pool-side / unknown browser) — destroy fallback",
+            label
+        ));
+        return false;
+    }
+
+    // 4. Park the HWND. Strict resolution only — never EnumWindows.
+    let hwnd = unsafe { super::window::resolve_window_hwnd_strict(state, label) };
+    let Some(hwnd) = hwnd else {
+        // Reducer already flipped — undo is not worth a new command; the
+        // label sits in `unpromoted` and never becomes ready (no reload
+        // happened), which `handle_pool_destroyed_before_promote` cleans up
+        // when the destroy fallback kills the window.
+        crate::client::dlog(&format!(
+            "demote({}): no strict HWND — destroy fallback",
+            label
+        ));
+        return false;
+    };
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, HWND_TOP, SWP_NOACTIVATE,
+        };
+        SetWindowPos(
+            hwnd,
+            HWND_TOP,
+            POOL_OFFSCREEN_X,
+            POOL_OFFSCREEN_Y,
+            POOL_WIDTH,
+            POOL_HEIGHT,
+            SWP_NOACTIVATE,
+        );
+        set_taskbar_hidden(hwnd, true);
+    }
+    state.window_hwnds.lock().remove(label);
+    if let Ok(mut cache) = pool_hwnd_cache().lock() {
+        cache.insert(label.to_string(), hwnd as usize);
+    }
+    cache_pool_window_view(label, window);
+
+    // 3. Launcher pool ledger — the window re-joins the pool.
+    crate::launcher_ipc::report_pool_window_added(label.to_string());
+    {
+        let pool_count = {
+            let st = state.host_state.lock();
+            (st.pool.unpromoted.len() + st.pool.queue.len()) as u32
+        };
+        crate::launcher_ipc::report_host_pool_count(pool_count);
+    }
+
+    // 5. Reload to pool boot state. The renderer process is reused (same
+    // origin); page state resets fully; `pool_window_ready` re-arrives on
+    // boot and completes the queue re-entry.
+    let url = pool_frontend_url(state, label);
+    if let Some(mut browser) = state.get_browser(label) {
+        if let Some(frame) = browser.main_frame() {
+            frame.load_url(Some(&cef::CefString::from(url.as_str())));
+        }
+    }
+
+    tracing::info!(
+        target: "dnd:tearoff:pool",
+        label = %label,
+        "[pool] round 6: promoted window demoted back into pool"
+    );
+    crate::client::dlog(&format!("demote({}): demoted back into pool", label));
+    true
+}
+
 pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;

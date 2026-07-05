@@ -115,6 +115,31 @@ wrap_task! {
                 // Scope: NOT for "main" — main's close feeds the tuned wrr
                 // last-window quit sequence and process exit reaps everything
                 // there.
+                //
+                // Round 6 (pool demote) — for PROMOTED POOL windows
+                // (window-pool-*), don't destroy at all: rounds 2–5 proved
+                // CEF parks the browser and leaks the renderer no matter how
+                // the window dies. Instead (a) run the srv cleanup
+                // imperatively (the on_before_close chain that never fires
+                // for these browsers), then (b) demote the window back into
+                // the warm pool — hidden, reloaded to its pool boot URL, and
+                // re-enqueued via the normal renderer-ready handshake — so
+                // the renderer is REUSED, not leaked. If the pool is at
+                // capacity (or demote is otherwise rejected), fall through
+                // to the round-5 destroy: same parked-browser cost as
+                // today, but srv state is still clean.
+                #[cfg(target_os = "windows")]
+                if self.label.starts_with("window-pool-") {
+                    crate::commands::window_pool::demote_srv_cleanup(&self.state, &self.label);
+                    if crate::commands::window_pool::demote_promoted_pool_window(
+                        &self.state,
+                        &self.label,
+                        &window,
+                    ) {
+                        return;
+                    }
+                    // fall through to round-5 destroy below
+                }
                 #[cfg(target_os = "windows")]
                 if self.label != "main" {
                     use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;

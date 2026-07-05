@@ -173,3 +173,49 @@ viable designs, in recommended order:
 Round-5 code + instrumentation stays on the branch: the native close is behavior-improving
 (the window actually disappears via one deterministic mechanism), the forensics are
 load-bearing for round 6, and the negative results above are the map.
+
+## Round 6: POOL DEMOTE — VERIFIED WORKING (2026-07-05, Agent2)
+
+**Design:** stop fighting CEF's recycle; use it. Closing a promoted pool window now
+**demotes** it back into the warm pool instead of destroying it:
+
+1. `demote_srv_cleanup` — the on_before_close cleanup chain, run IMPERATIVELY at close
+   time (label known; no callback needed): `backend_close_window` → srv `CloseWindow` →
+   `delete_workspace` cascade, with the #1965 registration-race retry, then
+   `report_backend_window_id_unregistered` + `report_panes_reaped`.
+2. `HostCommand::DemotePoolWindow` — reducer flips `is_pool: true` + re-inserts into
+   `unpromoted` (idempotent; leaves the respawn semaphore alone).
+3. Park: `SetWindowPos` offscreen + `set_taskbar_hidden(true)`; `window_hwnds` chrome-cache
+   evicted; HWND re-cached in `pool_hwnd_cache`; CEF Views `Window` re-cached for the next
+   promote's `take_pool_window_view`.
+4. Reload to the `pool=1` boot URL — the frontend re-sends `pool_window_ready`, and queue
+   re-entry rides the NORMAL `PoolWindowReady` handshake (no mid-reload promote possible).
+5. Demote cap `POOL_TARGET_SIZE + 2`: each parked recycle costs the renderer that would
+   otherwise LEAK, so keeping it is strictly better up to the cap; beyond it, the round-5
+   destroy fallback runs (same cost as the old leak, srv state still cleaned).
+
+**Latent bug found and fixed en route:** `backend_close_window` authenticated via the
+`?authkey=` query param — **disabled for HTTP routes in the 2026-05-11 security audit
+(C3)** — so it has 401'd on every call since May, unnoticed because `on_before_close`
+never fires for these browsers and pre-#1965 the response was never read. Now sends the
+`X-AuthKey` header. This bug would have silently broken the cleanup chain even if CEF's
+destruction parking were ever fixed.
+
+**Verification (channel `dev/agenta-window-close-force-browser-teardown`, 3 open/close
+cycles + reopen):**
+- Closes #1/#2: `demoted back into pool`; close #3 hit the demote cap → destroy fallback ✓
+- `backend_close_window`: **HTTP 200** on all 4 closes; srv workspace cascade runs
+  (closed windows' workspace names are gone from the records) ✓
+- **Reopen: the next `open_new_window` promoted a RECYCLED window from the pool, and its
+  close re-demoted it — the loop is in equilibrium** ✓
+- Renderers 5→8 across the burst: +2 are REUSABLE pool members (pool grew 2→4 by design),
+  +1 is the cap-overflow destroy fallback. Steady-state closes leak nothing.
+
+**Remaining follow-ups (out of scope here):**
+- srv `CloseWindow` prunes the workspace/tabs/blocks but the WINDOW row itself still
+  lingers (visible in `/api/v1/windows` with an empty workspace name) — a pre-existing
+  srv-side gap common to every close path; small state, tracked separately (same
+  dual-write class as the #864 authority work).
+- Non-Windows platforms keep the Views `window.close()` path (no parked-browser evidence
+  collected there yet).
+- Subwindow children of a demoted window take their own close path (rare).

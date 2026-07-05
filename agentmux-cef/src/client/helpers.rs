@@ -55,7 +55,7 @@ pub(crate) fn html_escape(s: &str) -> String {
 /// failure is logged via `tracing::error!` — still asynchronous from the
 /// caller's perspective (this whole function runs off the UI thread), but
 /// failures are no longer silently swallowed.
-pub(super) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
+pub(crate) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id: &str) {
     use std::io::Write;
 
     // Parse host:port from "http://127.0.0.1:PORT"
@@ -76,9 +76,18 @@ pub(super) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id
         "args": [window_id],
         "uicontext": null,
     }).to_string();
+    // Auth via the X-AuthKey HEADER. The legacy `?authkey=` query param was
+    // deliberately disabled for HTTP routes in the 2026-05-11 security audit
+    // (C3 — see srv test `auth_rejects_query_param_on_http_routes`; only /ws
+    // still honors it), which silently broke this request with a 401 ever
+    // since — unnoticed because `on_before_close` (the only caller) never
+    // fires for parked pool-window browsers, and pre-#1965 the response was
+    // never read. First observed live via the round-6 demote path
+    // (retro-window-lifecycle-leak-2026-07-04).
     let request = format!(
-        "POST /agentmux/service?service=window&method=CloseWindow&authkey={} HTTP/1.1\r\n\
+        "POST /agentmux/service HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\
