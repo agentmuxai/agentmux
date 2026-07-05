@@ -108,7 +108,7 @@ pub(super) async fn open_pane_floating(
 
     // Make the moved block the new tab's single root node so it renders.
     if let Err(e) =
-        crate::server::service::setup_torn_off_block_layout(wstore, &new_tab_id, &block_id)
+        crate::server::service::setup_torn_off_block_layout(state, &new_tab_id, &block_id).await
     {
         tracing::warn!(
             new_tab = %new_tab_id,

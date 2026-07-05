@@ -187,7 +187,28 @@ pub(crate) fn write_default_three_pane_layout(
     swarm_block_id: &str,
 ) -> Result<(), StoreError> {
     let tab = store.must_get::<Tab>(tab_id)?;
+    let (rootnode, focused_node_id, leaforder) =
+        default_three_pane_tree(agent_block_id, sysinfo_block_id, swarm_block_id);
+    let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
+    layout.rootnode = Some(rootnode);
+    layout.focusednodeid = focused_node_id;
+    layout.leaforder = Some(leaforder);
+    layout.pendingbackendactions = None;
+    store.update(&mut layout)?;
+    Ok(())
+}
 
+/// Pure builder for the default 3-pane tree (`agent | [sysinfo / swarm]`).
+/// Returns `(rootnode, focused_node_id, leaforder)`. Shared by the
+/// pre-bootstrap store-direct writer above (first launch — reducer not
+/// hydrated yet) and the post-bootstrap reducer-routed CreateWindow seed
+/// (SPEC_864 Phase 3, `seed_layout_via_reducer`), so the layout shape can
+/// never drift between the two paths.
+pub(crate) fn default_three_pane_tree(
+    agent_block_id: &str,
+    sysinfo_block_id: &str,
+    swarm_block_id: &str,
+) -> (LayoutNode, String, Vec<LeafOrderEntry>) {
     // Node IDs for each tree position. Leaves get their own node IDs distinct
     // from the block IDs they wrap.
     let agent_node_id = Uuid::new_v4().to_string();
@@ -249,17 +270,12 @@ pub(crate) fn write_default_three_pane_layout(
         ..Default::default()
     };
 
-    let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
-    layout.rootnode = Some(rootnode);
-    layout.focusednodeid = agent_node_id.clone();
-    layout.leaforder = Some(vec![
-        LeafOrderEntry { nodeid: agent_node_id, blockid: agent_block_id.to_string() },
+    let leaforder = vec![
+        LeafOrderEntry { nodeid: agent_node_id.clone(), blockid: agent_block_id.to_string() },
         LeafOrderEntry { nodeid: sysinfo_node_id, blockid: sysinfo_block_id.to_string() },
         LeafOrderEntry { nodeid: swarm_node_id, blockid: swarm_block_id.to_string() },
-    ]);
-    layout.pendingbackendactions = None;
-    store.update(&mut layout)?;
-    Ok(())
+    ];
+    (rootnode, agent_node_id, leaforder)
 }
 
 /// Get the singleton client record.

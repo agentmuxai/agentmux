@@ -61,6 +61,100 @@ pub(crate) async fn compensate_via_reducer(
     }
 }
 
+/// SPEC_864 Phase 3 — single-writer layout seeding. Dispatch a
+/// `LayoutSetTree` (tree + focus + leaforder as client slices) and persist
+/// it inside ONE hold of the reducer mutex, so persist order equals
+/// dispatch order — the same contract as `UpdateObject`'s Phase-2 route in
+/// `object.rs`. Replaces the wcore-direct seeders
+/// (`write_default_three_pane_layout` post-bootstrap caller,
+/// `setup_torn_off_block_layout`): the reducer's `TabRecord.rootnode` is
+/// authoritative, and the persist subscriber is the sole `db_layout`
+/// writer on this path.
+///
+/// On SQLite apply failure the reducer is rolled back to an empty tree
+/// (the seed target is a fresh tab whose row was empty) inside the same
+/// lock hold. Publishes events on success. Requires the tab to be known
+/// to the reducer — true for every caller (all run after reducer-routed
+/// CreateTab / sagas); the pre-bootstrap first-launch seed
+/// (`ensure_initial_data` → `seed_default_layout`) deliberately stays
+/// store-direct because the reducer isn't hydrated yet (spec site #3).
+pub(crate) async fn seed_layout_via_reducer(
+    state: &AppState,
+    tab_id: &str,
+    new_tree: agentmux_common::LayoutNode,
+    focused_node_id: String,
+    leaforder: Vec<crate::backend::obj::LeafOrderEntry>,
+) -> Result<(), String> {
+    let store = &state.wstore;
+    let slices = agentmux_common::LayoutClientSlices {
+        leaforder: serde_json::to_value(&leaforder).ok(),
+        focused_node_id,
+        magnified_node_id: String::new(),
+        // Fresh-tab seed: REPLACE semantics clear any stale queue.
+        pending_backend_actions: None,
+    };
+    let cmd = agentmux_common::ipc::Command::LayoutSetTree {
+        tab_id: tab_id.to_string(),
+        new_tree: Some(new_tree),
+        correlation_id: String::new(),
+        slices: Some(slices),
+    };
+
+    let mut apply_err: Option<String> = None;
+    let events = {
+        let mut s = state.srv_state.lock().await;
+        let ctx = crate::reducer::Ctx {
+            now_rfc3339: chrono::Utc::now().to_rfc3339(),
+            conn_id: 0,
+            registered_pid: None,
+        };
+        let events = crate::reducer::update(&mut s, cmd, &ctx);
+        let has_error = events
+            .iter()
+            .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
+        if !has_error {
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
+                }
+            }
+            if apply_err.is_some() {
+                // Roll the reducer back to the empty pre-seed tree inside
+                // the same lock hold; best-effort SQLite mirror.
+                let rollback = agentmux_common::ipc::Command::LayoutSetTree {
+                    tab_id: tab_id.to_string(),
+                    new_tree: None,
+                    correlation_id: String::new(),
+                    slices: Some(agentmux_common::LayoutClientSlices::default()),
+                };
+                let rb_events = crate::reducer::update(&mut s, rollback, &ctx);
+                for ev in &rb_events {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                        tracing::warn!(
+                            error = %e,
+                            "seed_layout_via_reducer: rollback SQLite mirror failed"
+                        );
+                    }
+                }
+            }
+        }
+        events
+    };
+
+    if let Some(err_msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(err_msg);
+    }
+    if let Some(err) = apply_err {
+        return Err(format!("layout seed SQLite write failed: {}", err));
+    }
+    publish_events(state, &events);
+    Ok(())
+}
+
 /// Existence check used by `DeleteWorkspace` to decide whether to
 /// run the wcore delete path. Propagates `StoreError` so the caller
 /// can surface real I/O / corruption failures instead of

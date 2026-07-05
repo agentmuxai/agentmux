@@ -726,7 +726,7 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             // Layout setup: rootnode + leaforder for the new tab so
             // the frontend renders the moved block correctly. Same
             // helper TearOffBlock uses.
-            if let Err(e) = setup_torn_off_block_layout(store, &new_tab_oid, &block_id) {
+            if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
                 tracing::warn!(new_tab = %new_tab_oid, "PromoteBlockToTab: layout setup failed: {}", e);
             }
             // Source tab: queue layout-delete action.
@@ -1104,7 +1104,7 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             // single root node so the frontend renders it. Mirrors
             // wcore::tear_off_block. Best-effort; layout migration is
             // E.4 territory and not yet reducer-routed.
-            if let Err(e) = setup_torn_off_block_layout(store, &new_tab_oid, &block_id) {
+            if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
                 tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
             }
             // Source tab: queue a layout-delete action so the source
