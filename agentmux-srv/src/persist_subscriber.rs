@@ -302,11 +302,12 @@ pub(crate) fn apply_event_to_wstore(
         // LayoutSetTree (the Layout* arms are still dormant per
         // reducer.rs §"4 of 11"); they land the persistence path that
         // the UpdateObject→LayoutSetTree reroute (next phase) needs.
-        // Insert/Delete are deliberately NOT here yet — their events
-        // carry op params, not the resulting tree, so persisting them
-        // would require re-running the algebra in the subscriber (a new
-        // divergence surface). That is resolved in a later phase by
-        // having those events carry the reducer's resulting tree.
+        // Insert is deliberately NOT here yet — its event carries op
+        // params, not the resulting tree, so persisting it would require
+        // re-running the algebra in the subscriber (a new divergence
+        // surface). Delete WAS in the same boat until SPEC_864 site #6
+        // gave `LayoutNodeDeleted` a `new_tree` (+ `tree_cleared`) and its
+        // own arm below; Insert follows when a production caller needs it.
         Event::LayoutCleared { tab_id, .. } => apply_layout_cleared(wstore, tab_id),
         Event::LayoutTreeReplaced {
             tab_id,
@@ -314,6 +315,26 @@ pub(crate) fn apply_event_to_wstore(
             slices,
             ..
         } => apply_layout_tree_replaced(wstore, tab_id, new_tree, slices.as_ref()),
+        // SPEC_864 site #6 — LayoutNodeDeleted gets its own arm (not the
+        // group below) because a delete is the one structural op that can
+        // legitimately EMPTY the tree (root-orphan case). `tree_cleared`
+        // disambiguates a real root-delete clear from a version-skewed
+        // sender's absent `new_tree`, which must be ignored rather than
+        // applied as an erase (same skew concern as the group below).
+        // Leaforder handling follows the granular-arm convention: untouched
+        // for a non-empty tree (frontend-recomputed geometry cache, not
+        // read on reproject), cleared with everything else on a real
+        // empty-tree clear (apply_layout_tree_replaced's clears path).
+        Event::LayoutNodeDeleted {
+            tab_id,
+            new_tree,
+            tree_cleared,
+            ..
+        } => match (new_tree.is_some(), tree_cleared) {
+            (true, _) => apply_layout_tree_replaced(wstore, tab_id, new_tree, None),
+            (false, true) => apply_layout_tree_replaced(wstore, tab_id, &None, None),
+            (false, false) => Ok(()),
+        },
         // The 7 granular structural arms each carry the reducer's resulting
         // tree in `new_tree` (post-op, post-balance), so persistence is the
         // same rootnode write as LayoutTreeReplaced — no algebra re-run in the
@@ -1514,6 +1535,107 @@ mod tests {
             .rootnode
             .expect("tree preserved, not cleared by a None granular event");
         assert_eq!(root.id, "keep");
+    }
+
+    // ── SPEC_864 site #6 — LayoutNodeDeleted persistence ────────────────────
+
+    #[test]
+    fn layout_node_deleted_persists_new_tree() {
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutNodeDeleted {
+                tab_id: tab.clone(),
+                node_id: "gone".into(),
+                new_tree: Some(leaf("survivor", "bs")),
+                tree_cleared: false,
+                was_focused: false,
+                was_magnified: false,
+                correlation_id: "c".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        let root = layout_of(&s, &tab)
+            .rootnode
+            .expect("delete event persisted the resulting tree");
+        assert_eq!(root.id, "survivor");
+    }
+
+    #[test]
+    fn layout_node_deleted_none_without_cleared_is_ignored() {
+        // A version-skewed LayoutNodeDeleted (pre-site-#6 JSON: no
+        // new_tree, tree_cleared defaults false) must NOT erase the
+        // persisted layout — same skew rule as the granular group.
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("keep", "bk")),
+                correlation_id: "seed".into(),
+                slices: None,
+                version: 2,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::LayoutNodeDeleted {
+                tab_id: tab.clone(),
+                node_id: "x".into(),
+                new_tree: None,
+                tree_cleared: false, // skewed sender — not a real clear
+                was_focused: false,
+                was_magnified: false,
+                correlation_id: "c".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        let root = layout_of(&s, &tab)
+            .rootnode
+            .expect("tree preserved — skewed delete event must not clear");
+        assert_eq!(root.id, "keep");
+    }
+
+    #[test]
+    fn layout_node_deleted_tree_cleared_erases_tree() {
+        // Root-orphan delete: new_tree=None + tree_cleared=true is a REAL
+        // clear (the deleted node was the root) and must wipe rootnode.
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("doomed-root", "bd")),
+                correlation_id: "seed".into(),
+                slices: None,
+                version: 2,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::LayoutNodeDeleted {
+                tab_id: tab.clone(),
+                node_id: "doomed-root".into(),
+                new_tree: None,
+                tree_cleared: true,
+                was_focused: true,
+                was_magnified: false,
+                correlation_id: "c".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        assert!(
+            layout_of(&s, &tab).rootnode.is_none(),
+            "tree_cleared delete must wipe the persisted tree"
+        );
     }
 
     #[test]

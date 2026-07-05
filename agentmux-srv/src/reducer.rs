@@ -120,6 +120,13 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             node_id,
             correlation_id,
         } => layout::handle_layout_delete_node(state, tab_id, node_id, correlation_id),
+        // SPEC_864 site #6 — block→node resolution in the arm; silent
+        // no-op when the block has no layout node (see the handler doc).
+        Command::LayoutDeleteNodeByBlock {
+            tab_id,
+            block_id,
+            correlation_id,
+        } => layout::handle_layout_delete_node_by_block(state, tab_id, block_id, correlation_id),
         // Phase 3 — the remaining 7 layout-tree arms. Each resolves the
         // tab, calls the existing pure fn in `backend::layout`, runs
         // `balance_node` (matching the frontend's post-action normalize),
@@ -3300,6 +3307,109 @@ mod tests {
             state.tabs[&tab_id].rootnode.is_none(),
             "root deletion must wipe the tree"
         );
+    }
+
+    // ── SPEC_864 site #6 — LayoutDeleteNodeByBlock + new_tree carriage ──────
+
+    #[test]
+    fn layout_delete_node_by_block_resolves_and_carries_new_tree() {
+        let (mut state, tab_id) = fresh_tab();
+        let mut root = leaf_node("group", "");
+        root.data = None;
+        root.children = vec![
+            leaf_node("a", "b1"),
+            leaf_node("b", "b2"),
+            leaf_node("c", "b3"),
+        ];
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(root);
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNodeByBlock {
+                tab_id: tab_id.clone(),
+                block_id: "b2".into(),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted {
+                node_id,
+                new_tree,
+                tree_cleared,
+                ..
+            } => {
+                assert_eq!(node_id, "b", "must resolve block b2 to node b");
+                assert!(!*tree_cleared, "non-root delete must not claim a clear");
+                let tree = new_tree.as_ref().expect("non-root delete keeps a tree");
+                assert!(
+                    crate::backend::layout::find_node_id_by_block(tree, "b2").is_none(),
+                    "deleted block must be gone from the event's tree"
+                );
+                assert!(
+                    crate::backend::layout::find_node_id_by_block(tree, "b1").is_some(),
+                    "sibling blocks must survive"
+                );
+                // The event's tree IS the reducer's post-delete tree — the
+                // single-writer contract the persist subscriber relies on.
+                assert_eq!(Some(tree), state.tabs[&tab_id].rootnode.as_ref());
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn layout_delete_node_by_block_unknown_block_is_silent_noop() {
+        // Every delete_block saga run dispatches this command; a block
+        // with no layout node (frontend already pruned, never laid out,
+        // empty tab) must be a silent no-op — no Event::Error, no
+        // version churn, tree untouched.
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("only", "b1"));
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNodeByBlock {
+                tab_id: tab_id.clone(),
+                block_id: "not-in-tree".into(),
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        );
+        assert!(events.is_empty(), "unresolved block must be a silent no-op");
+        assert_eq!(state.tabs[&tab_id].rootnode.as_ref().unwrap().id, "only");
+    }
+
+    #[test]
+    fn layout_delete_node_by_block_root_orphan_sets_tree_cleared() {
+        // Deleting the last block empties the tree — the one structural
+        // op where new_tree=None is legitimate. tree_cleared=true is what
+        // lets the persist subscriber distinguish this from a
+        // version-skewed sender's absent field.
+        let (mut state, tab_id) = fresh_tab();
+        state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("solo", "b1"));
+
+        let events = update(
+            &mut state,
+            Command::LayoutDeleteNodeByBlock {
+                tab_id: tab_id.clone(),
+                block_id: "b1".into(),
+                correlation_id: String::new(),
+            },
+            &ctx(1),
+        );
+        match &events[0] {
+            Event::LayoutNodeDeleted {
+                new_tree,
+                tree_cleared,
+                ..
+            } => {
+                assert!(new_tree.is_none());
+                assert!(*tree_cleared, "root-orphan delete must mark the clear as real");
+            }
+            other => panic!("expected LayoutNodeDeleted, got {:?}", other),
+        }
+        assert!(state.tabs[&tab_id].rootnode.is_none());
     }
 
     #[test]
