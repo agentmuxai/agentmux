@@ -277,6 +277,14 @@ pub struct LayoutActionData {
     pub blockid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nodesize: Option<u32>,
+    /// Split-only: the new node's desired size as a fraction (0.0-1.0) of the
+    /// TARGET node's current size, e.g. 0.5 for a 50/50 inner-direction drop,
+    /// 0.2 for an outer-direction drop (matches the ghost's `leaf/5` band).
+    /// The frontend applies this against the target's live `size` at split
+    /// time (`layoutTree.ts:splitHorizontal/splitVertical`), which the
+    /// backend cannot see. Takes precedence over `nodesize` when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nodesizefraction: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub indexarr: Option<Vec<i32>>,
     #[serde(default)]

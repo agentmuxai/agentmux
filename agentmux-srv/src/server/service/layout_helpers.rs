@@ -79,6 +79,7 @@ pub(super) fn queue_target_layout_insert(
         actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
         nodesize: None,
+        nodesizefraction: None,
         indexarr: None,
         focused: true,
         magnified: false,
@@ -91,7 +92,7 @@ pub(super) fn queue_target_layout_insert(
     Ok(())
 }
 
-/// Phase 4b — enqueue a directional split action on the TARGET tab's
+/// Phase 4b/4c — enqueue a directional split action on the TARGET tab's
 /// `LayoutState.pendingbackendactions` so the redocked block lands in
 /// the exact slot the ghost overlay previewed.
 ///
@@ -102,10 +103,13 @@ pub(super) fn queue_target_layout_insert(
 /// * 1/5 (Right/OuterRight)→ `SplitHorizontal`, position `after`
 /// * 8   (Center)          → falls through to `InsertNode` (handled by caller)
 ///
-/// Outer directions use `nodesize = Some(3)` so the new node occupies ≈23%
-/// (3 / 13) — the nearest representable integer to the ghost's `height/5`
-/// (20%) when the target node is at DefaultNodeSize (10).
-/// Inner directions use `nodesize = None` (DefaultNodeSize = 10 → 50/50).
+/// Phase 4c: rather than an absolute `nodesize` guess (which was only correct
+/// when the target happened to be at `DefaultNodeSize`), this sends
+/// `nodesizefraction` — the new node's share of the target's CURRENT size —
+/// which the frontend applies against the target's live size at split time
+/// (`layoutTree.ts`). Inner directions use 0.5 (50/50, matching the ghost's
+/// half-leaf); outer directions use 0.2 (matching the ghost's exact `leaf/5`
+/// band — see `ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md`).
 pub(super) fn queue_target_layout_split(
     store: &Store,
     target_tab_id: &str,
@@ -113,17 +117,17 @@ pub(super) fn queue_target_layout_split(
     target_block_id: &str,
     dir: u8,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Inner directions (Top=0,Right=1,Bottom=2,Left=3): new node at
-    // DefaultNodeSize (10) → 50/50 split, matching the ghost's half-leaf.
-    // Outer directions (4-7): nodesize=3 → ≈23% (3/13), close to the
-    // ghost's 20% (1/5). The exact ratio depends on the target node's
-    // current flex size which isn't available server-side; 3 is a
-    // reasonable integer approximation when the target is at DefaultNodeSize.
-    let (actiontype, position, nodesize): (&str, &str, Option<u32>) = match dir {
-        0 | 4 => ("splitvertical",   "before", if dir >= 4 { Some(3) } else { None }),
-        2 | 6 => ("splitvertical",   "after",  if dir >= 4 { Some(3) } else { None }),
-        3 | 7 => ("splithorizontal", "before", if dir >= 4 { Some(3) } else { None }),
-        1 | 5 => ("splithorizontal", "after",  if dir >= 4 { Some(3) } else { None }),
+    const INNER_FRACTION: f64 = 0.5;
+    const OUTER_FRACTION: f64 = 0.2;
+    let (actiontype, position, nodesizefraction): (&str, &str, f64) = match dir {
+        0 => ("splitvertical",   "before", INNER_FRACTION),
+        4 => ("splitvertical",   "before", OUTER_FRACTION),
+        2 => ("splitvertical",   "after",  INNER_FRACTION),
+        6 => ("splitvertical",   "after",  OUTER_FRACTION),
+        3 => ("splithorizontal", "before", INNER_FRACTION),
+        7 => ("splithorizontal", "before", OUTER_FRACTION),
+        1 => ("splithorizontal", "after",  INNER_FRACTION),
+        5 => ("splithorizontal", "after",  OUTER_FRACTION),
         // Center (8) or unknown — caller should use queue_target_layout_insert.
         _ => return queue_target_layout_insert(store, target_tab_id, block_id),
     };
@@ -134,7 +138,8 @@ pub(super) fn queue_target_layout_split(
         actiontype: actiontype.to_string(),
         actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
-        nodesize,
+        nodesize: None,
+        nodesizefraction: Some(nodesizefraction),
         indexarr: None,
         focused: true,
         magnified: false,
@@ -165,6 +170,7 @@ pub(super) fn queue_source_layout_delete(
         actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
         nodesize: None,
+        nodesizefraction: None,
         indexarr: None,
         focused: false,
         magnified: false,
@@ -175,4 +181,76 @@ pub(super) fn queue_source_layout_delete(
     source_layout.pendingbackendactions = Some(actions);
     store.update(&mut source_layout)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn seeded_tab_id(state: &crate::server::AppState) -> String {
+        state
+            .wstore
+            .get_all::<Tab>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("seeded tab")
+            .oid
+    }
+
+    fn last_action(state: &crate::server::AppState, tab_id: &str) -> LayoutActionData {
+        let tab = state.wstore.must_get::<Tab>(tab_id).unwrap();
+        let layout = state.wstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        layout
+            .pendingbackendactions
+            .unwrap_or_default()
+            .last()
+            .expect("an action was queued")
+            .clone()
+    }
+
+    #[test]
+    fn queue_target_layout_split_maps_every_direction_to_an_exact_fraction() {
+        // Phase 4c: every non-Center direction must carry `nodesizefraction`
+        // (not the old hardcoded-integer `nodesize` guess) so the frontend
+        // can derive an exact size from the target's live size. See
+        // ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md.
+        let state = test_state();
+        let tab_id = seeded_tab_id(&state);
+
+        let cases: &[(u8, &str, &str, f64)] = &[
+            (0, "splitvertical", "before", 0.5),
+            (4, "splitvertical", "before", 0.2),
+            (2, "splitvertical", "after", 0.5),
+            (6, "splitvertical", "after", 0.2),
+            (3, "splithorizontal", "before", 0.5),
+            (7, "splithorizontal", "before", 0.2),
+            (1, "splithorizontal", "after", 0.5),
+            (5, "splithorizontal", "after", 0.2),
+        ];
+
+        for &(dir, expected_type, expected_pos, expected_fraction) in cases {
+            queue_target_layout_split(&state.wstore, &tab_id, "new-block", "target-block", dir).unwrap();
+            let action = last_action(&state, &tab_id);
+            assert_eq!(action.actiontype, expected_type, "dir={dir}");
+            assert_eq!(action.position, expected_pos, "dir={dir}");
+            assert_eq!(action.nodesizefraction, Some(expected_fraction), "dir={dir}");
+            assert_eq!(action.nodesize, None, "dir={dir}: absolute nodesize is no longer used for splits");
+            assert_eq!(action.targetblockid, "target-block");
+        }
+    }
+
+    #[test]
+    fn queue_target_layout_split_falls_back_to_insert_for_center_and_unknown_dirs() {
+        let state = test_state();
+        let tab_id = seeded_tab_id(&state);
+
+        for dir in [8u8, 200u8] {
+            queue_target_layout_split(&state.wstore, &tab_id, "new-block", "target-block", dir).unwrap();
+            let action = last_action(&state, &tab_id);
+            assert_eq!(action.actiontype, "insert", "dir={dir}");
+            assert_eq!(action.nodesizefraction, None, "dir={dir}");
+        }
+    }
 }

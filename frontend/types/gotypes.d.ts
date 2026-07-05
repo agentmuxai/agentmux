@@ -1132,6 +1132,7 @@ declare global {
         actionid: string;
         blockid: string;
         nodesize?: number;
+        nodesizefraction?: number;
         indexarr?: number[];
         focused: boolean;
         magnified: boolean;

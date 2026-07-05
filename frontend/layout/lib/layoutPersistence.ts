@@ -236,6 +236,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 targetNodeId: targetNode.id,
                 newNode: newNode,
                 position: action.position,
+                sizeFraction: action.nodesizefraction,
             };
             model.treeReducer(splitAction, false);
             break;
@@ -264,6 +265,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 targetNodeId: targetNode.id,
                 newNode: newNode,
                 position: action.position,
+                sizeFraction: action.nodesizefraction,
             };
             model.treeReducer(splitAction, false);
             break;

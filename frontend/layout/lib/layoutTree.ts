@@ -27,6 +27,7 @@ import {
     LayoutTreeResizeNodeAction,
     LayoutTreeState,
     LayoutTreeSwapNodeAction,
+    LayoutNode,
     MoveOperation,
 } from "./types";
 
@@ -457,15 +458,40 @@ export function replaceNode(layoutState: LayoutTreeState, action: LayoutTreeRepl
     
 }
 
+// Carve newNode's size out of targetNode's CURRENT size, split proportionally
+// by `sizeFraction` (e.g. 0.5 for a 50/50 inner-direction drop, 0.2 for an
+// outer-direction drop's leaf/5 band). Returns the target's size as it was
+// BEFORE this mutation, which the wrap branch needs (it re-parents the
+// target's original footprint into a new group).
+//
+// The point of mutating targetNode.size (rather than just sizing newNode,
+// as an earlier version of this fix did) is the splice branch: newNode joins
+// the SAME children array as any other siblings there, and every sibling's
+// rendered pixel size depends on the parent's total pool
+// (`layoutGeometry.ts:updateTreeHelper`'s pixelToSizeRatio). Carving from the
+// target keeps that pool constant, so unrelated siblings are pixel-for-pixel
+// unaffected by the split — only the target's own slot divides into the
+// ghost's two sub-rects. See ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md.
+function applySizeFraction(targetNode: LayoutNode, newNode: LayoutNode, sizeFraction: number | undefined): number {
+    const originalSize = targetNode.size;
+    if (sizeFraction != null) {
+        const fraction = Math.min(Math.max(sizeFraction, 0.05), 0.95);
+        newNode.size = fraction * originalSize;
+        targetNode.size = (1 - fraction) * originalSize;
+    }
+    return originalSize;
+}
+
 // ─── SPLIT HORIZONTAL ─────────────────────────────────────────────────────────────
 
 export function splitHorizontal(layoutState: LayoutTreeState, action: LayoutTreeSplitHorizontalAction) {
-    const { targetNodeId, newNode, position } = action;
+    const { targetNodeId, newNode, position, sizeFraction } = action;
     const targetNode = findNode(layoutState.rootNode, targetNodeId);
     if (!targetNode) {
         console.error("splitHorizontal: Target node not found", targetNodeId);
         return;
     }
+    const originalTargetSize = applySizeFraction(targetNode, newNode, sizeFraction);
 
     const parent = findParent(layoutState.rootNode, targetNodeId);
     if (parent && parent.flexDirection === FlexDirection.Row) {
@@ -481,7 +507,9 @@ export function splitHorizontal(layoutState: LayoutTreeState, action: LayoutTree
         // Otherwise, if no parent or parent's flexDirection is not Row, we need to wrap
         // Create a new group node with horizontal layout.
         // IMPORTANT: pass an initial children array so the new node is valid.
-        const groupNode = newLayoutNode(FlexDirection.Row, targetNode.size, [targetNode], undefined);
+        // Use the target's PRE-split size so the group inherits the exact
+        // footprint the target used to occupy in the outer parent.
+        const groupNode = newLayoutNode(FlexDirection.Row, originalTargetSize, [targetNode], undefined);
         // Now decide the ordering based on the "position"
         groupNode.children = position === "before" ? [newNode, targetNode] : [targetNode, newNode];
         if (parent) {
@@ -498,18 +526,19 @@ export function splitHorizontal(layoutState: LayoutTreeState, action: LayoutTree
     if (action.focused) {
         layoutState.focusedNodeId = newNode.id;
     }
-    
+
 }
 
 // ─── SPLIT VERTICAL ─────────────────────────────────────────────────────────────
 
 export function splitVertical(layoutState: LayoutTreeState, action: LayoutTreeSplitVerticalAction) {
-    const { targetNodeId, newNode, position } = action;
+    const { targetNodeId, newNode, position, sizeFraction } = action;
     const targetNode = findNode(layoutState.rootNode, targetNodeId);
     if (!targetNode) {
         console.error("splitVertical: Target node not found", targetNodeId);
         return;
     }
+    const originalTargetSize = applySizeFraction(targetNode, newNode, sizeFraction);
 
     const parent = findParent(layoutState.rootNode, targetNodeId);
     if (parent && parent.flexDirection === FlexDirection.Column) {
@@ -524,7 +553,9 @@ export function splitVertical(layoutState: LayoutTreeState, action: LayoutTreeSp
     } else {
         // Wrap target node in a new vertical group.
         // Create group node with an initial children array so that validation passes.
-        const groupNode = newLayoutNode(FlexDirection.Column, targetNode.size, [targetNode], undefined);
+        // Use the target's PRE-split size so the group inherits the exact
+        // footprint the target used to occupy in the outer parent.
+        const groupNode = newLayoutNode(FlexDirection.Column, originalTargetSize, [targetNode], undefined);
         groupNode.children = position === "before" ? [newNode, targetNode] : [targetNode, newNode];
         if (parent) {
             const index = parent.children.findIndex((child) => child.id === targetNodeId);
@@ -540,5 +571,5 @@ export function splitVertical(layoutState: LayoutTreeState, action: LayoutTreeSp
     if (action.focused) {
         layoutState.focusedNodeId = newNode.id;
     }
-    
+
 }
