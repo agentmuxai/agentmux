@@ -193,6 +193,12 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             // Fallback: an unowned layout row (no tab references it) or a
             // rootnode that fails typed deserialization takes the legacy
             // wcore-direct path below, loudly — never silently drop a push.
+            // For an OWNED row whose rootnode failed the typed parse, the
+            // legacy path must still dispatch the focus/magnify slice to
+            // the reducer (the pre-Phase-2 Option-A behavior) so
+            // `TabRecord` focus state can't silently diverge on that
+            // branch (reagent P1 #1970, review 3).
+            let mut fallback_slice: Option<(String, String, String)> = None;
             if wave_obj_value.get("otype").and_then(|v| v.as_str()) == Some(OTYPE_LAYOUT) {
                 let layout_route: Option<(String, Option<agentmux_common::LayoutNode>)> =
                     match wave_obj_value
@@ -210,6 +216,18 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                                         "UpdateObject: layout rootnode failed typed parse; \
                                          falling back to legacy wcore-direct write"
                                     );
+                                    let get_str = |key: &str| -> String {
+                                        wave_obj_value
+                                            .get(key)
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string()
+                                    };
+                                    fallback_slice = Some((
+                                        tab_id,
+                                        get_str("focusednodeid"),
+                                        get_str("magnifiednodeid"),
+                                    ));
                                     None
                                 }
                             },
@@ -227,13 +245,33 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                         .await;
                 }
             }
-            // Non-layout otypes and the layout fallback: legacy wholesale
-            // row replace. (Pre-Phase-2, layout pushes also dispatched the
-            // focus/magnify slice here — that now lives inside
-            // `update_layout_via_reducer`; the degenerate fallback cases
-            // have no reducer-known tab, so there is nothing to dispatch.)
+            // Non-layout otypes and the layout fallbacks: legacy wholesale
+            // row replace. The unowned-row fallback has no reducer-known
+            // tab, so there is nothing to dispatch; the owned-but-unparsable
+            // fallback dispatches the focus/magnify slice AFTER the write
+            // succeeds (failure-atomicity ordering per codex P2 PR #632).
             match update_object(store, wave_obj_value) {
                 Ok((otype, oid, obj_val)) => {
+                    if let Some((tab_id, new_focused, new_magnified)) = fallback_slice {
+                        let focus_events = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::SetFocusedNode {
+                                tab_id: tab_id.clone(),
+                                node_id: new_focused,
+                            },
+                        )
+                        .await;
+                        publish_events(state, &focus_events);
+                        let mag_events = dispatch_to_reducer(
+                            state,
+                            agentmux_common::ipc::Command::SetMagnifiedNode {
+                                tab_id,
+                                node_id: new_magnified,
+                            },
+                        )
+                        .await;
+                        publish_events(state, &mag_events);
+                    }
                     let update = WaveObjUpdate {
                         updatetype: "update".into(),
                         otype,
