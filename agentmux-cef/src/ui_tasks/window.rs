@@ -116,26 +116,43 @@ wrap_task! {
                 // last-window quit sequence and process exit reaps everything
                 // there.
                 //
-                // Round 6 (pool demote) — for PROMOTED POOL windows
-                // (window-pool-*), don't destroy at all: rounds 2–5 proved
-                // CEF parks the browser and leaks the renderer no matter how
-                // the window dies. Instead (a) run the srv cleanup
-                // imperatively (the on_before_close chain that never fires
-                // for these browsers), then (b) demote the window back into
-                // the warm pool — hidden, reloaded to its pool boot URL, and
-                // re-enqueued via the normal renderer-ready handshake — so
-                // the renderer is REUSED, not leaked. If the pool is at
-                // capacity (or demote is otherwise rejected), fall through
-                // to the round-5 destroy: same parked-browser cost as
-                // today, but srv state is still clean.
+                // Round 6 — for ALL secondary top-level windows (`window-*`:
+                // pool-promoted `window-pool-*`, cold-path and drag-tear-off
+                // `window-{uuid}`), the on_before_close cleanup chain never
+                // fires on this build (rounds 2–5 evidence), so the srv-side
+                // cleanup (backend_close_window → CloseWindow →
+                // delete_workspace cascade) runs IMPERATIVELY here for every
+                // such close. Scoped to `window-*`: floaters
+                // (`floating-*`) DO get a working on_before_close via their
+                // owned-popup DestroyWindow path (#1957 mechanism), and
+                // browser panes never route through this task.
+                //
+                // Then, for PROMOTED POOL windows, don't destroy at all:
+                // demote back into the warm pool — hidden, reloaded to the
+                // pool boot URL, re-enqueued via the normal renderer-ready
+                // handshake — so the renderer is REUSED, not leaked. If the
+                // pool is at the demote cap (or demote is rejected), fall
+                // through to the round-5 destroy: same parked-browser cost
+                // as today, srv state still clean.
+                //
+                // Known residual (tracked in the retro): cold-path and
+                // tear-off `window-{uuid}` windows can't re-enter the pool
+                // (the pool handshake keys on the `window-pool-` label
+                // prefix), so their close still parks the renderer via
+                // round 5 — srv state IS cleaned, the ~100MB renderer is
+                // not reclaimed. Pool "adoption" for foreign labels is the
+                // follow-up. In the default flow this is rare: open_new_window
+                // serves from the pool whenever it's non-empty.
                 #[cfg(target_os = "windows")]
-                if self.label.starts_with("window-pool-") {
+                if self.label.starts_with("window-") {
                     crate::commands::window_pool::demote_srv_cleanup(&self.state, &self.label);
-                    if crate::commands::window_pool::demote_promoted_pool_window(
-                        &self.state,
-                        &self.label,
-                        &window,
-                    ) {
+                    if self.label.starts_with("window-pool-")
+                        && crate::commands::window_pool::demote_promoted_pool_window(
+                            &self.state,
+                            &self.label,
+                            &window,
+                        )
+                    {
                         return;
                     }
                     // fall through to round-5 destroy below
