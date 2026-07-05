@@ -401,6 +401,13 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // frame collapses to one callback; even rapid typing costs ~1 callback
     // per 16ms. Flag is per-component-instance (captured in closure).
     let typingScrollPending = false;
+    // Tracks the box's emptiness immediately BEFORE the current edit, for
+    // the ghost-text clear check below. Updated at the end of every
+    // handleInput call to hold for the next one. Seeded `true` (safe
+    // default: even if wrong for a mount with restored draft text, ghost
+    // text is only ever shown for an empty composer, so there's nothing to
+    // dismiss in that case anyway).
+    let boxWasEmpty = true;
     const handleInput = () => {
         // A manual edit exits history navigation — the next ArrowUp starts
         // again from the newest sent message. (Programmatic recall writes the
@@ -410,12 +417,17 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // body P95 < 5 ms. The mark span ends BEFORE the RAF enqueue so
         // we measure only the synchronous handler cost.
         markStart("agent-keystroke");
-        // First character typed into a previously-empty box dismisses any
-        // pending ghost-text suggestion — it must not silently reappear if
-        // the user later deletes back to empty. Length===1 check keeps this
-        // O(1) on every other keystroke (no-op past the first character).
-        // See docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md §4.3.
-        if (textareaRef?.value.length === 1) {
+        // The first edit into a previously-empty box dismisses any pending
+        // ghost-text suggestion — it must not silently reappear if the user
+        // later deletes back to empty. Checks the box's PRE-edit emptiness
+        // (boxWasEmpty) rather than the post-edit length: a `value.length
+        // === 1` check only catches a single typed keystroke and misses
+        // paste or voice-transcript inserts, which dispatch the same
+        // `input` event but can write multiple characters into an empty
+        // box at once (reagentx review on #1961). See
+        // docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md §4.3.
+        const newValue = textareaRef?.value ?? "";
+        if (boxWasEmpty && newValue.length > 0) {
             const vm = props.viewModel;
             if (vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"]) {
                 fireAndForget(() =>
@@ -425,6 +437,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                 );
             }
         }
+        boxWasEmpty = newValue.length === 0;
         updateAutocomplete();
         setIsBangCmd(textareaRef?.value.startsWith("!") ?? false);
         const cb = props.onTyping;
