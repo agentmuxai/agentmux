@@ -706,6 +706,124 @@ async fn update_object_layout_parse_failure_falls_back_with_focus_dispatch() {
     );
 }
 
+/// SPEC_864 Phase 3 — the seeders route through the reducer: after
+/// `seed_layout_via_reducer` / `setup_torn_off_block_layout`, the reducer's
+/// `TabRecord.rootnode` and `db_layout.rootnode` are the same tree (single
+/// writer), and the persisted row carries focus + leaforder.
+#[tokio::test]
+async fn layout_seeders_route_through_reducer_coherently() {
+    use agentmux_common::ipc::{Command, Event};
+    use crate::backend::obj::{LayoutState, Tab};
+
+    let state = test_state();
+    let wstore = state.wstore.clone();
+    let srv_state = state.srv_state.clone();
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        for ev in &events {
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+        }
+        events
+    }
+    let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "ws".into() }).await;
+    let ws_id = ws_evs
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+
+    // ── three-pane seed (the CreateWindow post-bootstrap path) ──
+    let tab_evs = dispatch_apply(
+        &state,
+        Command::CreateTab {
+            workspace_id: ws_id.clone(),
+            name: "t1".into(),
+        },
+    )
+    .await;
+    let tab1 = tab_evs
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let (tree, focused, leaforder) =
+        crate::backend::wcore::default_three_pane_tree("b-agent", "b-sysinfo", "b-swarm");
+    crate::server::service::seed_layout_via_reducer(
+        &state, &tab1, tree, focused, leaforder,
+    )
+    .await
+    .expect("three-pane seed via reducer");
+
+    let layout_oid = wstore.get::<Tab>(&tab1).unwrap().unwrap().layoutstate;
+    let row = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+    assert_eq!(row.leaforder.as_ref().unwrap().len(), 3);
+    assert!(!row.focusednodeid.is_empty(), "focus persisted");
+    {
+        let s = srv_state.lock().await;
+        let rec = s.tabs.get(&tab1).expect("reducer knows tab1");
+        assert_eq!(
+            rec.rootnode, row.rootnode,
+            "TabRecord == db_layout after three-pane seed"
+        );
+        assert_eq!(rec.focused_node_id, row.focusednodeid);
+    }
+
+    // ── single-leaf tear-off seed ──
+    let tab_evs = dispatch_apply(
+        &state,
+        Command::CreateTab {
+            workspace_id: ws_id,
+            name: "t2".into(),
+        },
+    )
+    .await;
+    let tab2 = tab_evs
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    crate::server::service::setup_torn_off_block_layout(&state, &tab2, "b-moved")
+        .await
+        .expect("tear-off seed via reducer");
+
+    let layout_oid = wstore.get::<Tab>(&tab2).unwrap().unwrap().layoutstate;
+    let row = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+    let root = row.rootnode.as_ref().expect("single-leaf tree persisted");
+    assert_eq!(root.data.as_ref().unwrap().block_id, "b-moved");
+    assert_eq!(row.leaforder.as_ref().unwrap()[0].blockid, "b-moved");
+    {
+        let s = srv_state.lock().await;
+        let rec = s.tabs.get(&tab2).expect("reducer knows tab2");
+        assert_eq!(
+            rec.rootnode, row.rootnode,
+            "TabRecord == db_layout after tear-off seed"
+        );
+    }
+}
+
+/// Seeding a tab the reducer doesn't know must fail loudly (Error event),
+/// not silently write db_layout — the pre-bootstrap first-launch seed is
+/// the only sanctioned store-direct path.
+#[tokio::test]
+async fn layout_seed_unknown_tab_errors() {
+    let state = test_state();
+    let (tree, focused, leaforder) =
+        crate::backend::wcore::default_three_pane_tree("a", "b", "c");
+    let err = crate::server::service::seed_layout_via_reducer(
+        &state, "ghost-tab", tree, focused, leaforder,
+    )
+    .await
+    .expect_err("unknown tab must error");
+    assert!(err.contains("unknown tab"), "got: {err}");
+}
+
 #[test]
 fn clean_name_trims_clamps_and_rejects_empty() {
     use super::clean_name;

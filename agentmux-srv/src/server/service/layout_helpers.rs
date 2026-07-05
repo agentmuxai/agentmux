@@ -11,25 +11,25 @@ use crate::backend::storage::store::Store;
 
 /// Phase E.5.5 — set up the layout tree for a tab that just received
 /// its first block via the TearOffBlock saga. Called from the
-/// TearOffBlock RPC handler after the saga's reducer-state portion
-/// (CreateTab + MoveBlock) completes. Mirrors the layout-rootnode
-/// + leaforder construction that `wcore::tear_off_block` previously
-/// embedded in its single function.
+/// TearOffBlock / RedockFloatingPane / PromoteBlockToTab handlers and the
+/// floating `pane.open` path after the saga's reducer-state portion
+/// (CreateTab + MoveBlock) completes.
 ///
-/// Layout state migration is E.4 — until then layout writes are
-/// wcore-direct and not reducer-routed. Best-effort: a failure here
-/// leaves the new tab with the moved block but a malformed layout;
+/// SPEC_864 Phase 3 — reducer-routed: dispatches `LayoutSetTree` via
+/// `seed_layout_via_reducer` (single writer of `db_layout`; the reducer's
+/// `TabRecord.rootnode` stays authoritative) instead of the retired
+/// wcore-direct `rootnode`/`leaforder` write. Every caller runs post-saga,
+/// so the tab is always reducer-known. Best-effort at the call sites: a
+/// failure leaves the new tab with the moved block but a malformed layout;
 /// the user-visible symptom is an empty render in the new window.
-pub(crate) fn setup_torn_off_block_layout(
-    store: &Store,
+pub(crate) async fn setup_torn_off_block_layout(
+    state: &super::super::AppState,
     new_tab_id: &str,
     block_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let new_tab = store.must_get::<Tab>(new_tab_id)?;
-    let mut layout = store.must_get::<LayoutState>(&new_tab.layoutstate)?;
+) -> Result<(), String> {
     let node_id = uuid::Uuid::new_v4().to_string();
     // Phase E.4.B Phase 2 — construct typed LayoutNode (was inline JSON).
-    layout.rootnode = Some(LayoutNode {
+    let rootnode = LayoutNode {
         id: node_id.clone(),
         flex_direction: FlexDirection::Row,
         size: 1.0,
@@ -39,13 +39,21 @@ pub(crate) fn setup_torn_off_block_layout(
             ..Default::default()
         }),
         ..Default::default()
-    });
-    layout.leaforder = Some(vec![LeafOrderEntry {
+    };
+    let leaforder = vec![LeafOrderEntry {
         nodeid: node_id,
         blockid: block_id.to_string(),
-    }]);
-    store.update(&mut layout)?;
-    Ok(())
+    }];
+    // Focused id stays empty — the legacy writer never set it for a
+    // torn-off tab; the frontend focuses on load.
+    super::reducer_helpers::seed_layout_via_reducer(
+        state,
+        new_tab_id,
+        rootnode,
+        String::new(),
+        leaforder,
+    )
+    .await
 }
 
 /// Floating-pane re-dock — enqueue an "insert" action on the TARGET
