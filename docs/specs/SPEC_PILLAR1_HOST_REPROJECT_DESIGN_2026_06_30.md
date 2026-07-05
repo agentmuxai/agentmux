@@ -13,6 +13,12 @@
 
 ---
 
+> **Scope note (2026-07-02):** the layout prerequisite (#864 / Q3 below) is satisfied by the **weak
+> single-writer** — retire wcore-direct and route the frontend's full-tree push through the reducer
+> (`LayoutSetTree`) so the reducer's in-memory state is the coherent source reproject reads. The full
+> **strong reducer-authority / intent-flip is NOT required for Pillar 1** (it moves layout *logic* into srv —
+> architectural purity, a separate goal). See `DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE` §7b.
+
 ## 0. TL;DR
 
 Pillar 1 is, in the literature's terms, making the host a **crash-only, microrebootable,

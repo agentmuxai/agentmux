@@ -10,10 +10,16 @@ projections. See `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` and
 ---
 
 > **Update 2026-07-02:** the srv-side single-writer machinery is complete (persist arms, `balance_node`,
-> 7 reducer arms, granular-event persistence all merged) and PR-time CI is in place. The remaining work is
-> all behavior-changing + app-running/E2E-gated: the **frontend `UpdateObject`→intents flip** (finishes #864
-> → unblocks Pillar 1), **Pillar 2 Stage 2**, then **Pillar 1** proper. Sections §3–§7 below are historical
-> (they predate this arc); the table above and this note are current.
+> 7 reducer arms, granular-event persistence all merged) and PR-time CI is in place.
+>
+> **Scope clarification (see DISCUSSION §7b):** the **frontend intent-flip is NOT strictly required for the
+> disposable host.** Pillar 1 needs only a **coherent single writer** for `db_layout` — the **weak cutover**
+> (retire wcore-direct; route the frontend's full-tree push through the reducer via `LayoutSetTree`; delete
+> `heal_layout`) suffices and is smaller/lower-risk. The full **intent-flip** (strong reducer-authority —
+> frontend sends intents, algebra in srv) is a *separate* architectural-purity goal, above-and-beyond
+> disposability. Choose per priority: **disposability → weak cutover; purity → intent-flip.** Then:
+> **Pillar 2 Stage 2**, then **Pillar 1** proper — all behavior-changing + app-running/E2E-gated.
+> Sections §3–§7 below are historical (predate this arc); the table above and this note are current.
 
 ## 1. Where we are (one-glance)
 
@@ -24,7 +30,7 @@ projections. See `SPEC_ARCHITECTURE_HEALTH_AND_REFACTOR_2026_06_29.md` and
 | **Pillar 2 — single lifecycle authority** | 🟡 Stage 1 merged (#1850); Stage 2 designed, blocked on runtime verification; Stage 3 pending |
 | Pillar 3 — commit-aware admission control | ✅ Merged (#1853); follow-ons (queue-and-drain, per-agent cap, badge) pending |
 | Pillar 1 — host reproject | 🟡 Q1–Q4 resolved (`SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30`); blocked on #864 |
-| #864 — layout single writer (Pillar 1 prereq) | 🟡 **srv-side single-writer machinery COMPLETE** (below); remaining = frontend intent-flip + wcore-direct retirement (the behavior-changing collapse) |
+| #864 — layout single writer (Pillar 1 prereq) | 🟡 srv-side machinery COMPLETE (below); remaining for Pillar 1 = **weak cutover** (route `UpdateObject`→`LayoutSetTree`, retire wcore-direct + `heal_layout`). Full intent-flip (strong) is separate/optional (DISCUSSION §7b). |
 | **Strong reducer-authority (layout)** | 🟡 srv side merged: persist arms (#1862), `balance_node` (#1866), 7 reducer arms (#1868), granular-event persistence (#1883). Reducer now **authors + normalizes + persists every layout op** — still **behavior-neutral** (no prod dispatcher; wcore-direct still the writer). Remaining: **Phase-4 frontend `UpdateObject`→intents flip** (E2E-gated) → delete backstops (`heal_layout`). |
 | PR-time CI + test-build unbreak | ✅ Merged (#1885) — `ci-pr.yml` runs `check --tests` + `test` + vitest on PRs (root-caused #1823/#1876 breaks: no PR CI). **TODO(owner):** add as *required* status checks in branch protection to actually gate. |
 | Saga collapse + persistence paydown | ⬜ After Pillars 1–3 |

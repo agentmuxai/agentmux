@@ -17,6 +17,14 @@ becomes Phase 1 here; this spec is the committed end-goal)
 
 ---
 
+> **Scope note (2026-07-02):** this strong-authority work (frontend sends *intents*; layout algebra in srv)
+> is **NOT strictly required for the disposable host (Pillar 1)**. Pillar 1 needs only a *coherent single
+> writer* for `db_layout`, which the **weak cutover** achieves — route the frontend's full-tree push through
+> `LayoutSetTree` + retire wcore-direct (see `SPEC_864_LAYOUT_SINGLE_WRITER` and
+> `DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE` §7b). This spec is the architectural-purity target (moving
+> layout *logic* out of the disposable renderer); pursue it above-and-beyond disposability, not as a Pillar-1
+> blocker.
+
 ## 0. TL;DR — the decision and the surprise
 
 **Decision (asaf, 2026-06-30):** reducer-as-authority is **critical, not optional**. Weak authority
