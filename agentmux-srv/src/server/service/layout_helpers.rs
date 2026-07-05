@@ -11,9 +11,11 @@ use crate::backend::storage::store::Store;
 
 /// Phase E.5.5 — set up the layout tree for a tab that just received
 /// its first block via the TearOffBlock saga. Called from the
-/// TearOffBlock / RedockFloatingPane / PromoteBlockToTab handlers and the
-/// floating `pane.open` path after the saga's reducer-state portion
-/// (CreateTab + MoveBlock) completes.
+/// TearOffBlock / PromoteBlockToTab handlers and the floating
+/// `pane.open` path after the saga's reducer-state portion
+/// (CreateTab + MoveBlock) completes. (NOT RedockFloatingPane — that
+/// redocks into an EXISTING tab and goes through
+/// `queue_target_layout_insert`/`_split` instead; reagent P2 on #1971.)
 ///
 /// SPEC_864 Phase 3 — reducer-routed: dispatches `LayoutSetTree` via
 /// `seed_layout_via_reducer` (single writer of `db_layout`; the reducer's
