@@ -151,10 +151,13 @@ pub struct AppState {
     /// an install mid-flight.
     /// See `SPEC_AGENT_INSTALL_STAGE_2026_05_17.md` §9.
     pub install_sessions: std::sync::Arc<crate::server::install_handlers::InstallSessionRegistry>,
-    /// Docker container manager for container-type agent panes (Phase 2).
-    /// `None` when Docker is not available on this host — container agents
-    /// will refuse to start rather than crashing the server.
-    pub container_manager: Option<std::sync::Arc<crate::backend::container::ContainerManager>>,
+    /// Docker container runtime handle for container-type agent panes
+    /// (Phase 2). Self-healing — `.get()`/`.is_available()` retry the
+    /// Docker connection on demand rather than being fixed at process
+    /// boot, so a daemon that starts after AgentMux launched is picked up
+    /// without an app restart. See `ContainerRuntimeHandle` and
+    /// docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+    pub container_manager: std::sync::Arc<crate::backend::container::ContainerRuntimeHandle>,
     /// Phase 3 — per-shell stop handles so `ShellStop` (MCP tool) and the UI
     /// stop button can tree-kill a running persistent shell node. See
     /// `docs/specs/SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md`.

@@ -487,6 +487,96 @@ impl ContainerManager {
     }
 }
 
+/// State of the container-runtime slot held by [`ContainerRuntimeHandle`].
+enum RuntimeSlot {
+    /// Test/no-docker-expected fixtures — `get()` never attempts a real
+    /// connect, always reports unavailable.
+    Disabled,
+    /// No manager yet: never connected, or the last connect attempt
+    /// failed. `get()` retries `ContainerManager::connect()` on every
+    /// call while in this state.
+    Empty,
+    Connected(ContainerManager),
+}
+
+/// Self-healing holder for the container runtime connection.
+///
+/// A plain `Option<ContainerManager>` fixed at process boot means a Docker
+/// daemon that starts (or a socket/named-pipe that appears) AFTER AgentMux
+/// launched is never picked up without an app restart — every consumer
+/// (the availability probe AND the actual container-launch code paths)
+/// would see a permanent `None`. This type retries on demand instead, so
+/// "start Docker Desktop while AgentMux is already running" is picked up
+/// within one call, everywhere `container_manager` is read.
+///
+/// See docs/retros/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
+pub struct ContainerRuntimeHandle {
+    slot: tokio::sync::RwLock<RuntimeSlot>,
+}
+
+impl ContainerRuntimeHandle {
+    /// Boot-time constructor. Attempts one connect (same as the prior
+    /// behavior) but never permanently gives up on failure — a failed
+    /// attempt leaves the slot `Empty` so `get()`/`is_available()` retry
+    /// later instead of staying stuck for the process lifetime.
+    pub fn connect_at_startup() -> Self {
+        let slot = match ContainerManager::connect() {
+            Ok(mgr) => RuntimeSlot::Connected(mgr),
+            Err(_) => RuntimeSlot::Empty,
+        };
+        Self { slot: tokio::sync::RwLock::new(slot) }
+    }
+
+    /// Test-only constructor: permanently reports unavailable and never
+    /// attempts a real connect, keeping host-only unit tests hermetic and
+    /// deterministic regardless of whether the test box has Docker.
+    pub fn disabled() -> Self {
+        Self { slot: tokio::sync::RwLock::new(RuntimeSlot::Disabled) }
+    }
+
+    /// Returns a connected manager, retrying `ContainerManager::connect()`
+    /// if the slot is currently `Empty`. Cheap on the happy path (a
+    /// read-lock plus a cheap `Arc`-backed clone); only takes the write
+    /// lock and re-dials when we don't already have a manager.
+    pub async fn get(&self) -> Option<ContainerManager> {
+        {
+            let slot = self.slot.read().await;
+            match &*slot {
+                RuntimeSlot::Connected(mgr) => return Some(mgr.clone()),
+                RuntimeSlot::Disabled => return None,
+                RuntimeSlot::Empty => {}
+            }
+        }
+        let mut slot = self.slot.write().await;
+        // Re-check under the write lock — another caller may have already
+        // connected between our read-unlock and this write-lock.
+        if let RuntimeSlot::Connected(mgr) = &*slot {
+            return Some(mgr.clone());
+        }
+        if matches!(&*slot, RuntimeSlot::Disabled) {
+            return None;
+        }
+        match ContainerManager::connect() {
+            Ok(mgr) => {
+                *slot = RuntimeSlot::Connected(mgr.clone());
+                Some(mgr)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// True iff a manager is available AND its daemon answers a live ping
+    /// right now. Never trusts a cached `Connected` slot alone — the
+    /// daemon can go down again after a successful connect, and
+    /// `check_available` is a real `docker.ping()`, not a cached flag.
+    pub async fn is_available(&self) -> bool {
+        match self.get().await {
+            Some(mgr) => mgr.check_available().await.is_ok(),
+            None => false,
+        }
+    }
+}
+
 /// Derive the stable container name for an agent from its slug.
 /// Format: `agentmux-<slug>`. Deterministic so restarts reuse the same container.
 pub fn container_name_for_slug(slug: &str) -> String {
