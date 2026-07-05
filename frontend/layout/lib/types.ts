@@ -148,6 +148,13 @@ export interface LayoutTreeSplitHorizontalAction extends LayoutTreeAction {
     newNode: LayoutNode;
     position: "before" | "after";
     focused?: boolean;
+    // The new node's size as a fraction (0-1) of the target node's CURRENT
+    // size at split time. When present, both the new node's size and the
+    // target's remaining size are derived from this fraction (instead of
+    // `newNode.size` as an absolute value), so the split carves the new
+    // node out of the target rather than diluting the shared flex pool of
+    // any other siblings. See ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md.
+    sizeFraction?: number;
 }
 
 export interface LayoutTreeSplitVerticalAction extends LayoutTreeAction {
@@ -156,6 +163,7 @@ export interface LayoutTreeSplitVerticalAction extends LayoutTreeAction {
     newNode: LayoutNode;
     position: "before" | "after";
     focused?: boolean;
+    sizeFraction?: number;
 }
 
 export interface ResizeNodeOperation {

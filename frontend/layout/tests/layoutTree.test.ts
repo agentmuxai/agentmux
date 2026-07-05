@@ -463,3 +463,78 @@ test("splitHorizontal - missing target is a no-op (logs error)", () => {
     });
     assert(JSON.stringify(treeState) === before);
 });
+
+// ── splitHorizontal / splitVertical — sizeFraction (ghost-landing fix) ───────
+// See ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md.
+
+test("splitHorizontal - sizeFraction splice branch conserves unrelated siblings' size", () => {
+    // Row of 3 siblings, split the MIDDLE one horizontally (matches parent's
+    // own axis, so this exercises the splice branch, not the wrap branch).
+    const c1 = newLayoutNode(undefined, 10, undefined, { blockId: "c1" });
+    const c2 = newLayoutNode(undefined, 10, undefined, { blockId: "c2" });
+    const c3 = newLayoutNode(undefined, 10, undefined, { blockId: "c3" });
+    const root = newLayoutNode(FlexDirection.Row, undefined, [c1, c2, c3]);
+    const treeState = newLayoutTreeState(root);
+    const newNode = newLayoutNode(undefined, undefined, undefined, { blockId: "new" });
+
+    splitHorizontal(treeState, {
+        type: LayoutTreeActionType.SplitHorizontal,
+        targetNodeId: c2.id,
+        newNode,
+        position: "after",
+        sizeFraction: 0.5,
+    });
+
+    // Unrelated siblings keep their exact original size — no dilution.
+    assert(c1.size === 10, "c1 untouched");
+    assert(c3.size === 10, "c3 untouched");
+    // The target's original 10 is carved 50/50 with the new node.
+    assert(c2.size === 5, "target carved to half its original size");
+    assert(newNode.size === 5, "new node gets the other half");
+    assert(
+        treeState.rootNode.children!.map((c) => c.data?.blockId).join(",") === "c1,c2,new,c3",
+        "new node lands directly after target, siblings otherwise untouched"
+    );
+});
+
+test("splitHorizontal - sizeFraction splice branch honors an outer-direction (0.2) fraction", () => {
+    const c1 = newLayoutNode(undefined, 10, undefined, { blockId: "c1" });
+    const c2 = newLayoutNode(undefined, 10, undefined, { blockId: "c2" });
+    const root = newLayoutNode(FlexDirection.Row, undefined, [c1, c2]);
+    const treeState = newLayoutTreeState(root);
+    const newNode = newLayoutNode(undefined, undefined, undefined, { blockId: "new" });
+
+    splitHorizontal(treeState, {
+        type: LayoutTreeActionType.SplitHorizontal,
+        targetNodeId: c2.id,
+        newNode,
+        position: "before",
+        sizeFraction: 0.2,
+    });
+
+    assert(c1.size === 10, "c1 untouched");
+    assert(c2.size === 8, "target keeps 80% of its original size");
+    assert(newNode.size === 2, "new node gets 20% of the target's original size");
+});
+
+test("splitVertical - sizeFraction wrap branch preserves the target's footprint in the outer parent", () => {
+    // Target has a non-default size (as if the user had resized it) to prove
+    // the ratio is computed from the target's CURRENT size, not a hardcoded
+    // default — the group must inherit the target's PRE-split size exactly.
+    const leaf = newLayoutNode(undefined, 40, undefined, { blockId: "only" });
+    const treeState = newLayoutTreeState(leaf);
+    const newNode = newLayoutNode(undefined, undefined, undefined, { blockId: "new" });
+
+    splitVertical(treeState, {
+        type: LayoutTreeActionType.SplitVertical,
+        targetNodeId: leaf.id,
+        newNode,
+        position: "after",
+        sizeFraction: 0.2,
+    });
+
+    assert(treeState.rootNode.flexDirection === FlexDirection.Column, "root wrapped in Column");
+    assert(treeState.rootNode.size === 40, "wrapping group inherits target's pre-split footprint");
+    assert(leaf.size === 32, "target keeps 80% of its original 40");
+    assert(newNode.size === 8, "new node gets 20% of the target's original 40");
+});

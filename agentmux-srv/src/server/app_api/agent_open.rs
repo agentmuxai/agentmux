@@ -293,6 +293,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             actionid: uuid::Uuid::new_v4().to_string(),
                             blockid: block_id.clone(),
                             nodesize: None,
+                            nodesizefraction: None,
                             indexarr: None,
                             focused: true,
                             magnified: false,
