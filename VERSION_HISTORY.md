@@ -11,7 +11,6 @@
 - fix(agent): exclude dynamic system-prompt sections from Claude Code launch args to improve cross-instance prompt-cache reuse
 - fix(window): retry backend_window_id lookup on close so window.CloseWindow reliably reaches srv
 
-
 ## 0.50.0 — 2026-07-03
 
 - feat(cef): report CEF dlopen + cef_init sub-stages to splash telemetry
