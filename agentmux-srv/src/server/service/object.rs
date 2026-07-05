@@ -181,74 +181,59 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // Phase E.4 (Option A) — when a LayoutState update lands,
-            // route the focused/magnified slice through the srv reducer
-            // so its canonical state matches what the frontend just
-            // pushed and the persist subscriber emits the new
-            // FocusedNodeChanged / MagnifiedNodeChanged events for E.6
-            // dispatcher consumption. The remaining LayoutState fields
-            // (rootnode/leaforder/pendingbackendactions) keep the
-            // wcore-direct write below per the deferred Option B
-            // decision in `SPEC_PHASE_E4_LAYOUT_REDUCER_2026-05-01.md`.
+            // SPEC_864 Phase 2 — an OTYPE_LAYOUT push routes through the
+            // reducer as a single `LayoutSetTree` (tree + client slices),
+            // replacing the legacy `update_raw` whole-row write PLUS the
+            // separate SetFocusedNode/SetMagnifiedNode dispatches (the
+            // "double-write": two SQLite writes, two version bumps, per
+            // push, with `TabRecord.rootnode` left a stale shadow). One
+            // dispatch → one persist-subscriber write → one version bump,
+            // and the reducer's in-memory tree stays authoritative.
             //
-            // (codex P2 PR #632) Capture the slice now but DO NOT
-            // dispatch yet — reducer + subscriber updates must happen
-            // ONLY AFTER update_object succeeds. Otherwise an
-            // UpdateObject failure would leave reducer state and
-            // FocusedNodeChanged/MagnifiedNodeChanged events fired for
-            // a request that returned an error, breaking failure
-            // atomicity.
-            let layout_slice: Option<(String, String, String)> = if wave_obj_value
-                .get("otype")
-                .and_then(|v| v.as_str())
-                == Some(OTYPE_LAYOUT)
-            {
-                wave_obj_value
-                    .get("oid")
-                    .and_then(|v| v.as_str())
-                    .and_then(|layout_oid| find_tab_for_layout(store, layout_oid))
-                    .map(|tab_id| {
-                        let new_focused = wave_obj_value
-                            .get("focusednodeid")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let new_magnified = wave_obj_value
-                            .get("magnifiednodeid")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        (tab_id, new_focused, new_magnified)
-                    })
-            } else {
-                None
-            };
+            // Fallback: an unowned layout row (no tab references it) or a
+            // rootnode that fails typed deserialization takes the legacy
+            // wcore-direct path below, loudly — never silently drop a push.
+            if wave_obj_value.get("otype").and_then(|v| v.as_str()) == Some(OTYPE_LAYOUT) {
+                let layout_route: Option<(String, Option<agentmux_common::LayoutNode>)> =
+                    match wave_obj_value
+                        .get("oid")
+                        .and_then(|v| v.as_str())
+                        .and_then(|layout_oid| find_tab_for_layout(store, layout_oid))
+                    {
+                        Some(tab_id) => match wave_obj_value.get("rootnode") {
+                            None | Some(serde_json::Value::Null) => Some((tab_id, None)),
+                            Some(v) => match serde_json::from_value(v.clone()) {
+                                Ok(tree) => Some((tab_id, Some(tree))),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "UpdateObject: layout rootnode failed typed parse; \
+                                         falling back to legacy wcore-direct write"
+                                    );
+                                    None
+                                }
+                            },
+                        },
+                        None => {
+                            tracing::warn!(
+                                "UpdateObject: layout row not owned by any tab; \
+                                 falling back to legacy wcore-direct write"
+                            );
+                            None
+                        }
+                    };
+                if let Some((tab_id, new_tree)) = layout_route {
+                    return update_layout_via_reducer(state, wave_obj_value, tab_id, new_tree)
+                        .await;
+                }
+            }
+            // Non-layout otypes and the layout fallback: legacy wholesale
+            // row replace. (Pre-Phase-2, layout pushes also dispatched the
+            // focus/magnify slice here — that now lives inside
+            // `update_layout_via_reducer`; the degenerate fallback cases
+            // have no reducer-known tab, so there is nothing to dispatch.)
             match update_object(store, wave_obj_value) {
                 Ok((otype, oid, obj_val)) => {
-                    // DB write succeeded — now dispatch the layout
-                    // reducer updates so reducer state and persist-
-                    // subscriber events stay aligned with the
-                    // committed wstore state. (codex P2 PR #632)
-                    if let Some((tab_id, new_focused, new_magnified)) = layout_slice {
-                        let focus_events = dispatch_to_reducer(
-                            state,
-                            agentmux_common::ipc::Command::SetFocusedNode {
-                                tab_id: tab_id.clone(),
-                                node_id: new_focused,
-                            },
-                        )
-                        .await;
-                        publish_events(state, &focus_events);
-                        let mag_events = dispatch_to_reducer(
-                            state,
-                            agentmux_common::ipc::Command::SetMagnifiedNode {
-                                tab_id,
-                                node_id: new_magnified,
-                            },
-                        )
-                        .await;
-                        publish_events(state, &mag_events);
-                    }
                     let update = WaveObjUpdate {
                         updatetype: "update".into(),
                         otype,
@@ -420,5 +405,124 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             WebReturnType::success_empty()
         }
         _ => WebReturnType::error(format!("unknown object method: {}", call.method)),
+    }
+}
+
+/// SPEC_864 Phase 2 — route a frontend `UpdateObject` layout push through
+/// the reducer as a single `LayoutSetTree` dispatch.
+///
+/// Ordering follows the CreateBlock pattern: dispatch (reducer state
+/// mutates) → apply events to wstore (the persist subscriber is the sole
+/// `db_layout` writer) → on SQLite failure, compensate by re-dispatching
+/// the pre-push row so reducer state rolls back → publish events (the
+/// wave-obj bridge re-reads the row, so publish must follow the write).
+///
+/// Not carried: `LayoutState.meta`. The legacy whole-row write persisted
+/// it incidentally, but nothing mutates layout meta (`UpdateObjectMeta`
+/// rejects OTYPE_LAYOUT and the frontend's `persistToBackend` writes only
+/// tree/focus/magnify/leaforder/pendingbackendactions), so the reducer
+/// route leaves the stored meta untouched.
+async fn update_layout_via_reducer(
+    state: &AppState,
+    wave_obj_value: serde_json::Value,
+    tab_id: String,
+    new_tree: Option<agentmux_common::LayoutNode>,
+) -> WebReturnType {
+    let store = &state.wstore;
+    let oid = wave_obj_value
+        .get("oid")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    // Snapshot the current row for compensation before anything mutates.
+    let old_row = match store.get::<LayoutState>(&oid) {
+        Ok(Some(row)) => row,
+        Ok(None) => return WebReturnType::error(format!("UpdateObject: layout not found: {}", oid)),
+        Err(e) => return WebReturnType::error(format!("UpdateObject: {}", e)),
+    };
+
+    let get_str = |key: &str| -> String {
+        wave_obj_value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let get_json = |key: &str| -> Option<serde_json::Value> {
+        wave_obj_value.get(key).filter(|v| !v.is_null()).cloned()
+    };
+    let slices = agentmux_common::LayoutClientSlices {
+        leaforder: get_json("leaforder"),
+        focused_node_id: get_str("focusednodeid"),
+        magnified_node_id: get_str("magnifiednodeid"),
+        pending_backend_actions: get_json("pendingbackendactions"),
+    };
+
+    let events = dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::LayoutSetTree {
+            tab_id: tab_id.clone(),
+            new_tree,
+            correlation_id: String::new(),
+            slices: Some(slices),
+        },
+    )
+    .await;
+    if let Some(err_msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return WebReturnType::error(err_msg);
+    }
+    // Convert the (non-Send) boxed error to a String before awaiting the
+    // compensation — same shape as CreateBlock's apply/compensate flow.
+    let mut apply_err: Option<String> = None;
+    for ev in &events {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+            apply_err = Some(e.to_string());
+            break;
+        }
+    }
+    if let Some(err) = apply_err {
+        // Roll the reducer back to the pre-push row so its in-memory
+        // tree doesn't diverge from the (unwritten) DB row.
+        let old_slices = agentmux_common::LayoutClientSlices {
+            leaforder: old_row
+                .leaforder
+                .as_ref()
+                .and_then(|v| serde_json::to_value(v).ok()),
+            focused_node_id: old_row.focusednodeid.clone(),
+            magnified_node_id: old_row.magnifiednodeid.clone(),
+            pending_backend_actions: old_row
+                .pendingbackendactions
+                .as_ref()
+                .and_then(|v| serde_json::to_value(v).ok()),
+        };
+        compensate_via_reducer(
+            state,
+            agentmux_common::ipc::Command::LayoutSetTree {
+                tab_id,
+                new_tree: old_row.rootnode.clone(),
+                correlation_id: String::new(),
+                slices: Some(old_slices),
+            },
+            store,
+        )
+        .await;
+        return WebReturnType::error(format!("UpdateObject: SQLite write failed: {}", err));
+    }
+    publish_events(state, &events);
+
+    // Return the committed row (fresh version) so the pusher's WOS cache
+    // stays in sync — same response shape as the legacy path.
+    match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
+        Ok(obj_val) => WebReturnType::success_with_updates(vec![WaveObjUpdate {
+            updatetype: "update".into(),
+            otype: OTYPE_LAYOUT.to_string(),
+            oid,
+            obj: Some(obj_val),
+        }]),
+        Err(e) => WebReturnType::error(format!("UpdateObject: re-read failed: {}", e)),
     }
 }

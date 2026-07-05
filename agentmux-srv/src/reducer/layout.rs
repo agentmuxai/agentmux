@@ -88,6 +88,7 @@ pub(super) fn handle_layout_set_tree(
     tab_id: String,
     new_tree: Option<agentmux_common::LayoutNode>,
     correlation_id: String,
+    slices: Option<agentmux_common::LayoutClientSlices>,
 ) -> Vec<Event> {
     let Some(tab) = state.tabs.get_mut(&tab_id) else {
         let v = state.bump_version();
@@ -99,6 +100,14 @@ pub(super) fn handle_layout_set_tree(
         }];
     };
     tab.rootnode = new_tree.clone();
+    // SPEC_864 Phase 2 — a full-row push carries focus/magnify in `slices`
+    // (REPLACE semantics; empty string = clear). leaforder /
+    // pending_backend_actions are not modeled in TabRecord — they ride the
+    // event through to the persist subscriber untouched.
+    if let Some(s) = &slices {
+        tab.focused_node_id = s.focused_node_id.clone();
+        tab.magnified_node_id = s.magnified_node_id.clone();
+    }
     // when the tree is wiped, focused/
     // magnified ids would point at non-existent nodes. Match
     // `handle_layout_clear`'s contract for the empty-tree case.
@@ -111,6 +120,7 @@ pub(super) fn handle_layout_set_tree(
         tab_id,
         new_tree,
         correlation_id,
+        slices,
         version: v,
     }]
 }

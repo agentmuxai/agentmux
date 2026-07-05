@@ -94,6 +94,38 @@ where
 
 // ── Command helper types ────────────────────────────────────────────────────
 
+/// SPEC_864 Phase 2 — the frontend-owned `LayoutState` slices carried by a
+/// full-row-replace push (the `UpdateObject`→`LayoutSetTree` route). The
+/// reducer applies `focused_node_id`/`magnified_node_id` to its `TabRecord`;
+/// `leaforder` and `pending_backend_actions` are opaque pass-through JSON the
+/// persist subscriber writes verbatim (no algebra re-run in the subscriber —
+/// that would be a new divergence surface).
+///
+/// Semantics are REPLACE, mirroring the legacy `update_raw` whole-row write
+/// this route retires: an absent/`null` `leaforder` or
+/// `pending_backend_actions` CLEARS the persisted column (pushing the row
+/// without processed actions is how the frontend acks its backend-action
+/// queue); an empty `focused_node_id`/`magnified_node_id` clears focus/
+/// magnify. A `LayoutSetTree` with `slices: None` (granular/tree-only
+/// callers) leaves all four columns untouched.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct LayoutClientSlices {
+    /// Frontend-recomputed geometry cache (`getLeafOrder`). Not read on
+    /// reproject; persisted only for legacy readers. `None` = clear.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leaforder: Option<serde_json::Value>,
+    /// Focused layout-node id; empty = clear.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub focused_node_id: String,
+    /// Magnified layout-node id; empty = clear.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub magnified_node_id: String,
+    /// The backend→frontend action queue as the client sees it after
+    /// processing. `None` = clear (the ack path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_backend_actions: Option<serde_json::Value>,
+}
+
 /// A single resize operation: target node + new flex size (0–100 relative units).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResizeOp {

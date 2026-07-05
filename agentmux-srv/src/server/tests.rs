@@ -468,6 +468,149 @@ async fn self_endpoint_missing_block_id_is_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+// ── SPEC_864 Phase 2 — UpdateObject routes layout pushes through the reducer ──
+
+/// End-to-end over the HTTP service: a frontend-style full-row layout push
+/// must (a) succeed, (b) bump `db_layout.version` exactly once (the legacy
+/// path double-wrote: update_raw + the focus/magnify subscriber write),
+/// (c) leave the reducer's `TabRecord.rootnode` equal to the persisted
+/// rootnode (the Pillar-1 coherence invariant — TabRecord was previously a
+/// passive shadow that diverged on every push), and (d) clear
+/// `pendingbackendactions` when the push omits it (the frontend's ack path).
+#[tokio::test]
+async fn update_object_layout_push_single_write_and_coherent_reducer() {
+    use agentmux_common::ipc::{Command, Event};
+    use crate::backend::obj::{LayoutActionData, LayoutState, Tab};
+
+    let state = test_state();
+    let wstore = state.wstore.clone();
+    let srv_state = state.srv_state.clone();
+
+    // Seed workspace + tab through the reducer so BOTH reducer state and
+    // wstore know the tab (mirrors production bootstrap).
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        for ev in &events {
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+        }
+        events
+    }
+    let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "ws".into() }).await;
+    let ws_id = ws_evs
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_evs = dispatch_apply(
+        &state,
+        Command::CreateTab {
+            workspace_id: ws_id,
+            name: "t".into(),
+        },
+    )
+    .await;
+    let tab_id = tab_evs
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+
+    let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
+    let layout_oid = tab.layoutstate.clone();
+
+    // Seed a pending backend action (as a redock would); the push below
+    // omits pendingbackendactions — the ack must clear it.
+    {
+        let mut layout = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+        layout.pendingbackendactions = Some(vec![LayoutActionData {
+            actiontype: "insert".into(),
+            actionid: "a1".into(),
+            blockid: "b-x".into(),
+            nodesize: None,
+            indexarr: None,
+            focused: false,
+            magnified: false,
+            ephemeral: false,
+            targetblockid: String::new(),
+            position: String::new(),
+        }]);
+        wstore.update(&mut layout).unwrap();
+    }
+    let version_before = wstore
+        .get::<LayoutState>(&layout_oid)
+        .unwrap()
+        .unwrap()
+        .version;
+
+    // Frontend-style full-row push (persistToBackend shape).
+    let push = serde_json::json!({
+        "service": "object",
+        "method": "UpdateObject",
+        "args": [{
+            "otype": "layout",
+            "oid": layout_oid,
+            "version": version_before,
+            "rootnode": {
+                "id": "n-root",
+                "flexDirection": "row",
+                "size": 1,
+                "data": { "blockId": "b-1" }
+            },
+            "focusednodeid": "n-root",
+            "leaforder": [{ "nodeid": "n-root", "blockid": "b-1" }]
+        }]
+    });
+    let app = build_router(state);
+    let req = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(push.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["success"].as_bool().unwrap_or(false),
+        "UpdateObject failed: {}",
+        json["error"]
+    );
+
+    // (b) exactly ONE version bump — the double-write is collapsed.
+    let layout = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+    assert_eq!(
+        layout.version,
+        version_before + 1,
+        "layout push must produce exactly one db_layout write"
+    );
+    // Row content matches the push.
+    assert_eq!(layout.rootnode.as_ref().unwrap().id, "n-root");
+    assert_eq!(layout.focusednodeid, "n-root");
+    assert_eq!(layout.leaforder.as_ref().unwrap()[0].blockid, "b-1");
+    // (d) omitted pendingbackendactions = ack → cleared.
+    assert!(
+        layout.pendingbackendactions.is_none(),
+        "push without pendingbackendactions must clear the queue (ack)"
+    );
+
+    // (c) the coherence invariant: TabRecord.rootnode == db_layout.rootnode.
+    let s = srv_state.lock().await;
+    let rec = s.tabs.get(&tab_id).expect("reducer knows the tab");
+    assert_eq!(
+        rec.rootnode, layout.rootnode,
+        "TabRecord.rootnode must match db_layout mid-session (no stale shadow)"
+    );
+    assert_eq!(rec.focused_node_id, "n-root");
+}
+
 #[test]
 fn clean_name_trims_clamps_and_rejects_empty() {
     use super::clean_name;

@@ -41,7 +41,10 @@ use std::sync::Arc;
 use agentmux_common::ipc::Event;
 use tokio::sync::{broadcast, Mutex};
 
-use crate::backend::obj::{Block, Client, LayoutState as PersistedLayoutState, Tab, Window, Workspace};
+use crate::backend::obj::{
+    Block, Client, LayoutActionData, LayoutState as PersistedLayoutState, LeafOrderEntry, Tab,
+    Window, Workspace,
+};
 use crate::backend::storage::store::Store;
 use crate::backend::wcore;
 use crate::state::State;
@@ -306,8 +309,11 @@ pub(crate) fn apply_event_to_wstore(
         // having those events carry the reducer's resulting tree.
         Event::LayoutCleared { tab_id, .. } => apply_layout_cleared(wstore, tab_id),
         Event::LayoutTreeReplaced {
-            tab_id, new_tree, ..
-        } => apply_layout_tree_replaced(wstore, tab_id, new_tree),
+            tab_id,
+            new_tree,
+            slices,
+            ..
+        } => apply_layout_tree_replaced(wstore, tab_id, new_tree, slices.as_ref()),
         // The 7 granular structural arms each carry the reducer's resulting
         // tree in `new_tree` (post-op, post-balance), so persistence is the
         // same rootnode write as LayoutTreeReplaced — no algebra re-run in the
@@ -328,7 +334,8 @@ pub(crate) fn apply_event_to_wstore(
             // `None` as an intentional empty-tree clear and ERASE the
             // persisted layout (codex P2 on #1883). Persist only a real tree.
             match new_tree {
-                Some(_) => apply_layout_tree_replaced(wstore, tab_id, new_tree),
+                // Granular events carry no client slices — tree-only write.
+                Some(_) => apply_layout_tree_replaced(wstore, tab_id, new_tree, None),
                 None => Ok(()),
             }
         }
@@ -796,17 +803,23 @@ fn apply_layout_cleared(
 /// empty, also clear the focus/magnify ids (and leaforder) so they don't
 /// dangle at nodes that no longer exist.
 ///
-/// When a tree IS present, `leaforder` is intentionally left untouched:
-/// it is a frontend-recomputed geometry cache (`getLeafOrder` in
-/// `layoutGeometry.ts`, sorted by render `treeKey`) and is NOT read on
-/// reproject — `persist::bootstrap_state_from_wstore` reads
-/// rootnode/focus/magnify only. The next phase extends LayoutSetTree to
-/// carry the frontend's leaforder when the UpdateObject push routes
-/// through it. Idempotent: no-op (no version bump) when nothing changes.
+/// SPEC_864 Phase 2 — when the event carries `slices` (the
+/// `UpdateObject`→`LayoutSetTree` full-row push), the frontend-owned
+/// columns are REPLACED to mirror the legacy `update_raw` whole-row write
+/// this route retires: leaforder / pendingbackendactions are written
+/// verbatim (absent = clear — pushing without processed actions is how
+/// the frontend acks its queue); focus/magnify strings overwrite (empty =
+/// clear). `slices: None` (granular events, tree-only callers) leaves
+/// those columns untouched — leaforder is a frontend-recomputed geometry
+/// cache (`getLeafOrder` in `layoutGeometry.ts`) and is NOT read on
+/// reproject (`persist::bootstrap_state_from_wstore` reads
+/// rootnode/focus/magnify only). Idempotent: no-op (no version bump)
+/// when nothing changes.
 fn apply_layout_tree_replaced(
     wstore: &Store,
     tab_id: &str,
     new_tree: &Option<agentmux_common::LayoutNode>,
+    slices: Option<&agentmux_common::LayoutClientSlices>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some(tab) = wstore.get::<Tab>(tab_id)? else {
         return Ok(());
@@ -818,23 +831,53 @@ fn apply_layout_tree_replaced(
         return Ok(());
     };
     let clears = new_tree.is_none();
-    // Idempotent short-circuit: skip the write (and version bump) when the
-    // tree already matches and, for the empty-tree case, focus/magnify/
-    // leaforder are already cleared.
+
+    // Compute the candidate values for every column this event owns, then
+    // write once only if something actually changed (idempotency contract:
+    // a double-apply — sync from the RPC handler, again from broadcast —
+    // must not churn the version).
+    let new_focused = match (slices, clears) {
+        (_, true) => String::new(),
+        (Some(s), false) => s.focused_node_id.clone(),
+        (None, false) => layout.focusednodeid.clone(),
+    };
+    let new_magnified = match (slices, clears) {
+        (_, true) => String::new(),
+        (Some(s), false) => s.magnified_node_id.clone(),
+        (None, false) => layout.magnifiednodeid.clone(),
+    };
+    let new_leaforder: Option<Vec<LeafOrderEntry>> = match (slices, clears) {
+        (_, true) => None,
+        (Some(s), false) => match &s.leaforder {
+            Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
+            _ => None,
+        },
+        (None, false) => layout.leaforder.clone(),
+    };
+    let new_pending: Option<Vec<LayoutActionData>> = match slices {
+        // The pending queue is frontend-acked state, not tree geometry —
+        // an empty-tree push still replaces it (unlike focus/leaforder,
+        // which dangle without a tree).
+        Some(s) => match &s.pending_backend_actions {
+            Some(v) if !v.is_null() => Some(serde_json::from_value(v.clone())?),
+            _ => None,
+        },
+        None => layout.pendingbackendactions.clone(),
+    };
+
     let already = layout.rootnode == *new_tree
-        && (!clears
-            || (layout.focusednodeid.is_empty()
-                && layout.magnifiednodeid.is_empty()
-                && layout.leaforder.is_none()));
+        && layout.focusednodeid == new_focused
+        && layout.magnifiednodeid == new_magnified
+        && layout.leaforder == new_leaforder
+        && layout.pendingbackendactions == new_pending;
     if already {
         return Ok(());
     }
     layout.rootnode = new_tree.clone();
-    if clears {
-        layout.focusednodeid = String::new();
-        layout.magnifiednodeid = String::new();
-        layout.leaforder = None;
-    }
+    layout.focusednodeid = new_focused;
+    layout.magnifiednodeid = new_magnified;
+    layout.leaforder = new_leaforder;
+    layout.pendingbackendactions = new_pending;
     wstore.update(&mut layout)?;
     Ok(())
 }
@@ -1398,6 +1441,7 @@ mod tests {
                 tab_id: tab.clone(),
                 new_tree: Some(leaf("n1", "b1")),
                 correlation_id: "c1".into(),
+                slices: None,
                 version: 3,
             },
             &s,
@@ -1447,6 +1491,7 @@ mod tests {
                 tab_id: tab.clone(),
                 new_tree: Some(leaf("keep", "bk")),
                 correlation_id: "seed".into(),
+                slices: None,
                 version: 2,
             },
             &s,
@@ -1480,6 +1525,7 @@ mod tests {
                 tab_id: tab.clone(),
                 new_tree: Some(leaf("n1", "b1")),
                 correlation_id: "c".into(),
+                slices: None,
                 version: 3,
             },
             &s,
@@ -1528,6 +1574,7 @@ mod tests {
                 tab_id: tab.clone(),
                 new_tree: Some(leaf("n1", "b1")),
                 correlation_id: "c".into(),
+                slices: None,
                 version: 3,
             },
             &s,
@@ -1547,6 +1594,7 @@ mod tests {
                 tab_id: tab.clone(),
                 new_tree: None,
                 correlation_id: "c".into(),
+                slices: None,
                 version: 5,
             },
             &s,
@@ -1566,6 +1614,7 @@ mod tests {
             tab_id: tab.clone(),
             new_tree: Some(leaf("n1", "b1")),
             correlation_id: "c".into(),
+            slices: None,
             version: 3,
         };
         apply_event_to_wstore(&ev, &s).unwrap();
@@ -1573,6 +1622,150 @@ mod tests {
         apply_event_to_wstore(&ev, &s).unwrap();
         let v2 = layout_of(&s, &tab).version;
         assert_eq!(v1, v2, "idempotent re-apply must not bump version");
+    }
+
+    // ── SPEC_864 Phase 2 — client slices on LayoutTreeReplaced ─────────
+
+    fn slices(
+        leaforder: Option<serde_json::Value>,
+        focused: &str,
+        magnified: &str,
+        pending: Option<serde_json::Value>,
+    ) -> agentmux_common::LayoutClientSlices {
+        agentmux_common::LayoutClientSlices {
+            leaforder,
+            focused_node_id: focused.into(),
+            magnified_node_id: magnified.into(),
+            pending_backend_actions: pending,
+        }
+    }
+
+    #[test]
+    fn layout_tree_replaced_with_slices_writes_full_row() {
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("n1", "b1")),
+                correlation_id: "c".into(),
+                slices: Some(slices(
+                    Some(serde_json::json!([{ "nodeid": "n1", "blockid": "b1" }])),
+                    "n1",
+                    "n1",
+                    None,
+                )),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        let layout = layout_of(&s, &tab);
+        assert_eq!(layout.rootnode.unwrap().id, "n1");
+        assert_eq!(layout.focusednodeid, "n1");
+        assert_eq!(layout.magnifiednodeid, "n1");
+        let lo = layout.leaforder.expect("leaforder written");
+        assert_eq!(lo.len(), 1);
+        assert_eq!(lo[0].nodeid, "n1");
+        assert_eq!(lo[0].blockid, "b1");
+    }
+
+    #[test]
+    fn layout_tree_replaced_slices_ack_clears_pending_actions() {
+        // Pushing the row without pendingbackendactions is how the frontend
+        // acks its processed backend-action queue — the slice-carrying write
+        // must CLEAR the column, not leave it (else actions re-apply on the
+        // next reload).
+        let s = store();
+        let tab = ws_tab(&s);
+        // Seed a pending action directly (as queue_target_layout_* would).
+        {
+            let t = s.get::<Tab>(&tab).unwrap().unwrap();
+            let mut layout = s
+                .get::<PersistedLayoutState>(&t.layoutstate)
+                .unwrap()
+                .unwrap();
+            layout.pendingbackendactions = Some(vec![LayoutActionData {
+                actiontype: "insert".into(),
+                actionid: "a1".into(),
+                blockid: "b-new".into(),
+                nodesize: None,
+                indexarr: None,
+                focused: true,
+                magnified: false,
+                ephemeral: false,
+                targetblockid: String::new(),
+                position: String::new(),
+            }]);
+            s.update(&mut layout).unwrap();
+        }
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("n1", "b1")),
+                correlation_id: "c".into(),
+                slices: Some(slices(None, "n1", "", None)),
+                version: 4,
+            },
+            &s,
+        )
+        .unwrap();
+        assert!(
+            layout_of(&s, &tab).pendingbackendactions.is_none(),
+            "slice write with absent pending queue must clear the column (ack path)"
+        );
+    }
+
+    #[test]
+    fn layout_tree_replaced_without_slices_leaves_client_columns_untouched() {
+        // Tree-only events (granular arms, dormant callers) must not clobber
+        // focus/magnify/leaforder/pending — only a slice-carrying full-row
+        // push owns those columns.
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("n1", "b1")),
+                correlation_id: "seed".into(),
+                slices: Some(slices(
+                    Some(serde_json::json!([{ "nodeid": "n1", "blockid": "b1" }])),
+                    "n1",
+                    "",
+                    Some(serde_json::json!([{
+                        "actiontype": "insert",
+                        "actionid": "a1",
+                        "blockid": "b2",
+                        "focused": false,
+                        "magnified": false,
+                        "ephemeral": false,
+                    }])),
+                )),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        // Now a tree-only replace (slices: None) with a different tree.
+        apply_event_to_wstore(
+            &Event::LayoutTreeReplaced {
+                tab_id: tab.clone(),
+                new_tree: Some(leaf("n2", "b2")),
+                correlation_id: "c".into(),
+                slices: None,
+                version: 4,
+            },
+            &s,
+        )
+        .unwrap();
+        let layout = layout_of(&s, &tab);
+        assert_eq!(layout.rootnode.unwrap().id, "n2", "tree replaced");
+        assert_eq!(layout.focusednodeid, "n1", "focus untouched");
+        assert!(layout.leaforder.is_some(), "leaforder untouched");
+        assert!(
+            layout.pendingbackendactions.is_some(),
+            "pending queue untouched by tree-only write"
+        );
     }
 
     #[test]
@@ -1592,6 +1785,7 @@ mod tests {
                 tab_id: "ghost".into(),
                 new_tree: Some(leaf("n", "b")),
                 correlation_id: "c".into(),
+                slices: None,
                 version: 1,
             },
             &s,
