@@ -137,6 +137,7 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
                 actionid: uuid::Uuid::new_v4().to_string(),
                 blockid: block_id.clone(),
                 nodesize: None,
+                nodesizefraction: None,
                 indexarr: None,
                 focused,
                 magnified: false,

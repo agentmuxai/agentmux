@@ -236,6 +236,36 @@ describe("processPendingBackendActions — Phase 4b Split routes", () => {
         expect(root.children![0].size).toBe(3);
     });
 
+    it("SplitHorizontal with nodesizefraction — sizes derive from the target's CURRENT size, not a default", async () => {
+        // ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md Root Cause 1:
+        // a target that isn't at DefaultNodeSize (e.g. user-resized) must still land
+        // at the ghost's exact ratio. Simulate a resized target (size 20, not 10).
+        const model = createLayoutModel();
+        const target = insertBlock(model, "existing");
+        target.size = 20;
+
+        setPendingActions(model, [{
+            actiontype: LayoutTreeActionType.SplitHorizontal,
+            actionid: "action-h-fraction",
+            blockid: "new-block",
+            targetblockid: "existing",
+            position: "before",
+            nodesize: undefined,
+            nodesizefraction: 0.2,
+            focused: true,
+            magnified: false,
+            ephemeral: false,
+        }]);
+
+        await processPendingBackendActions(model);
+
+        const root = model.treeState.rootNode!;
+        expect(root.children).toHaveLength(2);
+        expect(root.children![0].data?.blockId).toBe("new-block");
+        expect(root.children![0].size).toBe(4); // 0.2 * 20
+        expect(root.children![1].size).toBe(16); // 20 - 4
+    });
+
     it("SplitHorizontal logs error and no-ops when targetblockid not found", async () => {
         const model = createLayoutModel();
         insertBlock(model, "existing");

@@ -222,6 +222,7 @@ pub fn tear_off_block(
         actionid: Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
         nodesize: None,
+        nodesizefraction: None,
         indexarr: None,
         focused: false,
         magnified: false,
