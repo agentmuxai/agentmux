@@ -178,7 +178,9 @@ async fn run_inner(
     // store.update(&mut layout)`: a prune failure must not fail the
     // block deletion itself (the block + controller are already gone);
     // an orphaned node is exactly what the frontend's own delete-push
-    // and (until Phase 5) `heal_layout` converge away.
+    // converges away (SPEC_864 Phase 5 deleted the `heal_layout`
+    // backstop this comment used to reference — no Path-B writer
+    // remains to produce the orphans it swept).
     if let Err(reason) = ctx
         .dispatch(Command::LayoutDeleteNodeByBlock {
             tab_id: tab_id.clone(),
@@ -190,7 +192,7 @@ async fn run_inner(
         tracing::warn!(
             tab_id = %tab_id,
             block_id = %block_id,
-            "[saga] LayoutDeleteNodeByBlock dispatch failed (best-effort; layout node may orphan until frontend push / heal): {}",
+            "[saga] LayoutDeleteNodeByBlock dispatch failed (best-effort; layout node may orphan until frontend push): {}",
             reason
         );
     }

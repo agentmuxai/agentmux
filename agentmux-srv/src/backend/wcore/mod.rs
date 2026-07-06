@@ -733,33 +733,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tear_off_block() {
-        let store = make_store();
-        let ws = create_workspace(&store, "WS").unwrap();
-        let tab = create_tab(&store, &ws.oid).unwrap();
-        let block = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
-        let block2 = create_block(&store, &tab.oid, MetaMapType::new()).unwrap();
-
-        // Tear off block (not auto_close because tab still has block2)
-        let new_ws = tear_off_block(&store, &block.oid, &tab.oid, &ws.oid, true).unwrap();
-
-        // Block removed from source tab
-        let tab_data = store.must_get::<Tab>(&tab.oid).unwrap();
-        assert!(!tab_data.blockids.contains(&block.oid));
-        assert!(tab_data.blockids.contains(&block2.oid));
-
-        // New workspace created with the block
-        assert!(!new_ws.oid.is_empty());
-        assert_eq!(new_ws.tabids.len(), 1);
-        let new_tab = store.must_get::<Tab>(&new_ws.tabids[0]).unwrap();
-        assert!(new_tab.blockids.contains(&block.oid));
-
-        // Block parent ref updated
-        let block_data = store.must_get::<Block>(&block.oid).unwrap();
-        assert_eq!(block_data.parentoref, format!("tab:{}", new_tab.oid));
-    }
-
-    #[test]
     fn test_tear_off_tab() {
         let store = make_store();
         let ws = create_workspace(&store, "WS").unwrap();

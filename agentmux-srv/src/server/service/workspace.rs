@@ -339,43 +339,6 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            // Self-heal the layout before activating — remove any
-            // orphaned block nodes that would render as blank panes.
-            // (codex P1 PR #632 round 2) heal_layout clears
-            // focusednodeid in SQLite when rootnode drops to empty,
-            // bypassing the reducer. Sync the post-heal state through
-            // the reducer so its tabs[tab_id].focused_node_id mirror
-            // matches SQLite.
-            let healed = wcore::heal_layout(store, &tab_id).unwrap_or(false);
-            if healed {
-                if let Ok(tab) = store.must_get::<Tab>(&tab_id) {
-                    if !tab.layoutstate.is_empty() {
-                        if let Ok(Some(layout)) = store.get::<LayoutState>(&tab.layoutstate) {
-                            // Best-effort dispatch — failures here
-                            // don't block SetActiveTab.
-                            let focus_events = dispatch_to_reducer(
-                                state,
-                                agentmux_common::ipc::Command::SetFocusedNode {
-                                    tab_id: tab_id.clone(),
-                                    node_id: layout.focusednodeid.clone(),
-                                },
-                            )
-                            .await;
-                            publish_events(state, &focus_events);
-                            let mag_events = dispatch_to_reducer(
-                                state,
-                                agentmux_common::ipc::Command::SetMagnifiedNode {
-                                    tab_id: tab_id.clone(),
-                                    node_id: layout.magnifiednodeid.clone(),
-                                },
-                            )
-                            .await;
-                            publish_events(state, &mag_events);
-                        }
-                    }
-                }
-            }
-
             // Phase E.2c.3b — pinning was removed from AgentMux
             // (Waveterm legacy). All tabs are regular; dispatch
             // straight through the reducer. Bootstrap merges any
@@ -912,12 +875,12 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             // the reducer's MoveTab doesn't enforce this (intentionally,
             // for sagas that legitimately drain a workspace to delete
             // it). Keep the guard at the RPC layer where the policy
-            // belongs. **Read SQLite, not reducer state** — during the
-            // migration window, wcore-direct tab paths
-            // (PromoteBlockToTab, etc.) leave reducer.tab_ids stale,
-            // so a reducer-state guard would falsely reject valid
-            // moves. SQLite is the source of truth (codex P1 round-2
-            // #621).
+            // belongs. Reads SQLite rather than reducer state — as of
+            // SPEC_864 Phase 5 every tab-set mutation (CreateTab, MoveTab,
+            // and the PromoteBlockToTab/TearOffBlock/TearOffTab sagas) is
+            // reducer-routed, so the two are expected to agree; SQLite is
+            // just the existing read path here, not a staleness workaround
+            // (codex P1 round-2 #621, which motivated it, predates that).
             match store.get::<Workspace>(&source_ws_id) {
                 Ok(Some(src_ws)) => {
                     let total_tabs = src_ws.tabids.len() + src_ws.pinnedtabids.len();
@@ -1101,9 +1064,8 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             };
 
             // Layout setup for the new tab — make the moved block its
-            // single root node so the frontend renders it. Mirrors
-            // wcore::tear_off_block. Best-effort; reducer-routed
-            // (SPEC_864 Phase 3 seed / Phase 4 queue).
+            // single root node so the frontend renders it. Best-effort;
+            // reducer-routed (SPEC_864 Phase 3 seed / Phase 4 queue).
             if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
                 tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
             }
