@@ -417,11 +417,10 @@ fn apply_tab_created(
     wstore.with_tx(|tx| {
         if tx.get::<Tab>(tab_id)?.is_none() {
             // Phase E.2c.2 — create a LayoutState row alongside the
-            // Tab so downstream flows that hard-require
-            // `Tab.layoutstate` (e.g., `wcore::tear_off_block`'s
-            // `must_get::<LayoutState>(&tab.layoutstate)`) work for
-            // reducer-originated tabs. Mirrors the wcore::create_tab
-            // pattern. (codex P2 #614.)
+            // Tab so reducer-originated tabs have a `Tab.layoutstate`
+            // to seed (e.g. `setup_torn_off_block_layout`'s
+            // `seed_layout_via_reducer` call) just like wcore-created
+            // tabs. Mirrors the wcore::create_tab pattern. (codex P2 #614.)
             let mut layout = PersistedLayoutState {
                 oid: uuid::Uuid::new_v4().to_string(),
                 rootnode: None,

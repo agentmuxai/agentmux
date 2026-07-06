@@ -808,8 +808,10 @@ mod tests {
     }
 
     /// Regression test (codex P1 PR #689): missing blockId in JSON must fail
-    /// deserialization rather than silently default to "". An empty block_id
-    /// would cause incorrect orphan handling in prune_block_from_layout.
+    /// deserialization rather than silently default to "". An empty
+    /// block_id would cause incorrect matching wherever code resolves a
+    /// layout node by block id (e.g. the reducer's
+    /// `find_node_id_by_block`/`LayoutDeleteNodeByBlock`).
     #[test]
     fn test_layout_node_data_missing_block_id_fails_deserialization() {
         let missing_id = serde_json::json!({ "renderHint": "compact" });

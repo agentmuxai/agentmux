@@ -38,8 +38,11 @@ pub async fn run(
     source_tab_id: String,
     workspace_id: String,
 ) -> Result<Value, String> {
-    // Pre-condition: read SQLite (source of truth during migration
-    // window — wcore-direct paths can leave reducer state stale).
+    // Pre-condition: read SQLite. Block/workspace existence checks read
+    // the store directly rather than reducer state — unlike tab_ids
+    // (SPEC_864 Phase 5 verified every mutator of that field is
+    // reducer-routed), block and workspace migration status wasn't part
+    // of this pass, so SQLite stays the read here.
     {
         let block = match state.wstore.get::<crate::backend::obj::Block>(&block_id) {
             Ok(Some(b)) => b,

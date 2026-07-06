@@ -161,8 +161,9 @@ pub(super) async fn queue_target_layout_split(
 /// Phase E.5.5 — append a layout-delete action to the source tab's
 /// `LayoutState.pendingbackendactions` so the source window's
 /// frontend tears the moved block out of its layout tree on next
-/// poll. Mirrors the action-queueing portion of
-/// `wcore::tear_off_block`. Layout migration is E.4.
+/// poll. Used by the TearOffBlock/PromoteBlockToTab/RedockFloatingPane
+/// RPC handlers (the wcore-direct `tear_off_block` this used to mirror
+/// was dead code, deleted in SPEC_864 Phase 5).
 pub(super) async fn queue_source_layout_delete(
     state: &super::super::AppState,
     source_tab_id: &str,

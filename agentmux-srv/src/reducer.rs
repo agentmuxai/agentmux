@@ -1034,29 +1034,56 @@ mod tests {
         assert!(matches!(&events[0], Event::Error { .. }));
     }
 
-    /// codex P1 #620 carryover: `ReorderTabsBulk` must accept a list
-    /// containing tab_ids the reducer hasn't seen yet (because they
-    /// arrived via wcore-direct paths like `MoveTabToWorkspace`).
-    /// Strict permutation validation against the reducer's stale view
-    /// would falsely reject the canonical SQLite ordering during the
-    /// migration window.
+    /// SPEC_864 Phase 5 — strict validation reinstated: `MoveTabToWorkspace`,
+    /// `PromoteBlockToTab`, `TearOffBlock`, and `TearOffTab` are all
+    /// reducer-routed now, so `workspace.tab_ids` can't legitimately
+    /// diverge from the caller's view. A `tab_ids` list containing an id
+    /// the reducer doesn't know about for this workspace must be rejected,
+    /// not silently accepted as the codex P1 #620 migration-window
+    /// relaxation used to do.
     #[test]
-    fn reorder_tabs_bulk_accepts_unknown_ids_during_migration() {
+    fn reorder_tabs_bulk_rejects_unknown_ids() {
         let mut state = State::default();
         let ws_id = create_workspace(&mut state, "w");
         let known = create_tab(&mut state, &ws_id, "known");
-        // Simulate a wcore-direct move that landed a new tab in this
-        // workspace's SQLite list without going through the reducer.
-        // The reducer's `workspace.tab_ids` is now stale: it knows
-        // about `known` only, but SQLite has both `known` and
-        // `imported` (and the latter belongs to an entirely different
-        // workspace from the reducer's perspective).
-        let imported = "imported-tab".to_string();
+        let unknown = "unknown-tab".to_string();
         let events = update(
             &mut state,
             Command::ReorderTabsBulk {
                 workspace_id: ws_id.clone(),
-                tab_ids: vec![imported.clone(), known.clone()],
+                tab_ids: vec![unknown.clone(), known.clone()],
+            },
+            &ctx(99),
+        );
+        match &events[0] {
+            Event::Error { code, message, .. } => {
+                assert_eq!(*code, ErrorCode::InvalidCommand);
+                assert!(
+                    message.contains("permutation"),
+                    "error should mention permutation, got: {}",
+                    message
+                );
+            }
+            other => panic!("expected Error event, got {:?}", other),
+        }
+        // Rejected — workspace's tab_ids must be untouched.
+        let ws = state.workspaces.get(&ws_id).expect("ws still present");
+        assert_eq!(ws.tab_ids, vec![known]);
+    }
+
+    /// The permutation itself (same set, new order) must still succeed —
+    /// that's the whole point of the command.
+    #[test]
+    fn reorder_tabs_bulk_accepts_permutation_of_known_ids() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let t1 = create_tab(&mut state, &ws_id, "t1");
+        let t2 = create_tab(&mut state, &ws_id, "t2");
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: ws_id.clone(),
+                tab_ids: vec![t2.clone(), t1.clone()],
             },
             &ctx(99),
         );
@@ -1066,7 +1093,26 @@ mod tests {
             events.first()
         );
         let ws = state.workspaces.get(&ws_id).expect("ws still present");
-        assert_eq!(ws.tab_ids, vec![imported, known]);
+        assert_eq!(ws.tab_ids, vec![t2, t1]);
+    }
+
+    /// A `tab_ids` list missing a tab the reducer knows about (short
+    /// permutation) must also be rejected, not silently drop the tab.
+    #[test]
+    fn reorder_tabs_bulk_rejects_missing_known_id() {
+        let mut state = State::default();
+        let ws_id = create_workspace(&mut state, "w");
+        let t1 = create_tab(&mut state, &ws_id, "t1");
+        let _t2 = create_tab(&mut state, &ws_id, "t2");
+        let events = update(
+            &mut state,
+            Command::ReorderTabsBulk {
+                workspace_id: ws_id,
+                tab_ids: vec![t1],
+            },
+            &ctx(99),
+        );
+        assert!(matches!(&events[0], Event::Error { .. }));
     }
 
     /// codex P1 #620 carryover: a duplicate tab_id in the new list

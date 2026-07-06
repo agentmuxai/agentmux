@@ -260,24 +260,18 @@ pub(super) fn handle_reorder_tabs_bulk(
     workspace_id: String,
     tab_ids: Vec<String>,
 ) -> Vec<Event> {
-    // codex P1 #620 carryover: relax membership validation until tab
-    // moves are migrated through the reducer. `MoveTabToWorkspace`
-    // and `PromoteBlockToTab` (planned for PR 4) still write through
-    // wcore without dispatching reducer commands, so the reducer's
-    // view of `workspace.tab_ids` can be stale relative to SQLite.
-    // A subsequent `UpdateTabIds` (now routed through this command)
-    // must not refuse the canonical order just because the reducer
-    // hasn't seen the upstream move yet — that would be a
-    // user-visible regression vs. the prior wcore-direct path.
-    //
-    // Treat the caller's `tab_ids` as authoritative. The remaining
-    // checks are basic sanity: the workspace must exist in the
-    // reducer, and `tab_ids` must not contain duplicates (which would
-    // produce a corrupt persisted ordering with no way for the
-    // subscriber to recover). Length / set comparison against the
-    // reducer's stale view is dropped here; PR 4 reinstates strict
-    // validation once tab moves go through the reducer.
-    if !state.workspaces.contains_key(&workspace_id) {
+    // SPEC_864 Phase 5 — strict validation reinstated. The codex P1 #620
+    // membership relaxation existed because `MoveTabToWorkspace` and
+    // `PromoteBlockToTab` used to write through wcore without dispatching
+    // reducer commands, leaving `workspace.tab_ids` stale here. Both are
+    // now reducer-routed (`MoveTabToWorkspace` dispatches `MoveTab`
+    // directly; `PromoteBlockToTab`, `TearOffBlock`, and `TearOffTab` run
+    // through sagas whose steps dispatch `CreateTab`/`MoveTab`/`MoveBlock`)
+    // — every path that changes a workspace's tab set now updates the
+    // reducer in the same step, so `tab_ids` can't legitimately drift
+    // from SQLite anymore. `tab_ids` must be a permutation of the
+    // reducer's own set, not a caller-asserted replacement.
+    let Some(current) = state.workspaces.get(&workspace_id).map(|w| w.tab_ids.clone()) else {
         let v = state.bump_version();
         return vec![Event::Error {
             code: ErrorCode::InvalidCommand,
@@ -285,7 +279,7 @@ pub(super) fn handle_reorder_tabs_bulk(
             fatal: false,
             version: v,
         }];
-    }
+    };
     {
         let mut seen: std::collections::HashSet<&String> =
             std::collections::HashSet::with_capacity(tab_ids.len());
@@ -304,10 +298,24 @@ pub(super) fn handle_reorder_tabs_bulk(
             }
         }
     }
-    if state.workspaces.get(&workspace_id).expect("checked").tab_ids == tab_ids {
+    if current.len() != tab_ids.len()
+        || !current.iter().all(|id| tab_ids.contains(id))
+    {
+        let v = state.bump_version();
+        return vec![Event::Error {
+            code: ErrorCode::InvalidCommand,
+            message: format!(
+                "ReorderTabsBulk: tab_ids must be a permutation of the workspace's current tabs (got {:?}, expected a permutation of {:?})",
+                tab_ids, current
+            ),
+            fatal: false,
+            version: v,
+        }];
+    }
+    if current == tab_ids {
         return Vec::new();
     }
-    state.workspaces.get_mut(&workspace_id).expect("checked").tab_ids = tab_ids.clone();
+    state.workspaces.get_mut(&workspace_id).expect("checked above").tab_ids = tab_ids.clone();
     let v = state.bump_version();
     vec![Event::TabsReorderedBulk {
         workspace_id,

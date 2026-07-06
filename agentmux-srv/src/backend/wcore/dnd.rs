@@ -10,7 +10,6 @@ use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
 use super::tab::{create_tab, delete_tab, set_active_tab};
-use super::workspace::create_workspace;
 
 /// Move a block from one tab to another.
 /// Removes the block from `source_tab_id.blockids` and adds it to `dest_tab_id.blockids`.
@@ -186,107 +185,6 @@ pub fn move_tab_to_workspace(
 
     tracing::info!(tab_id = %tab_id, dest_ws = %dest_ws_id, insert_at = %insert_at, "[dnd] move_tab_to_workspace complete");
     Ok(())
-}
-
-/// Tear off a block into a new workspace.
-/// Removes the block from `source_tab_id`, creates a new workspace with a
-/// single tab containing the block. Returns the new workspace.
-/// If `auto_close_source` is true, deletes the source tab when it becomes empty.
-pub fn tear_off_block(
-    store: &Store,
-    block_id: &str,
-    source_tab_id: &str,
-    source_ws_id: &str,
-    auto_close_source: bool,
-) -> Result<Workspace, StoreError> {
-    tracing::info!(
-        block_id = %block_id,
-        source_tab = %source_tab_id,
-        source_ws = %source_ws_id,
-        auto_close = %auto_close_source,
-        "[dnd] tear_off_block"
-    );
-    // Verify block exists
-    let mut block = store.must_get::<Block>(block_id)?;
-
-    // Remove block from source tab's blockids and queue a layout delete action
-    // so the source window's frontend removes the node from its layout tree.
-    let mut source_tab = store.must_get::<Tab>(source_tab_id)?;
-    source_tab.blockids.retain(|id| id != block_id);
-    store.update(&mut source_tab)?;
-
-    let mut source_layout = store.must_get::<LayoutState>(&source_tab.layoutstate)?;
-    let mut actions = source_layout.pendingbackendactions.take().unwrap_or_default();
-    actions.push(LayoutActionData {
-        actiontype: "delete".to_string(),
-        actionid: Uuid::new_v4().to_string(),
-        blockid: block_id.to_string(),
-        nodesize: None,
-        nodesizefraction: None,
-        indexarr: None,
-        focused: false,
-        magnified: false,
-        ephemeral: false,
-        targetblockid: String::new(),
-        position: String::new(),
-    });
-    source_layout.pendingbackendactions = Some(actions);
-    store.update(&mut source_layout)?;
-
-    // Create new workspace
-    let new_ws = create_workspace(store, "")?;
-    // create_tab adds a tab and sets it as active
-    let new_tab = create_tab(store, &new_ws.oid)?;
-
-    // Add block to the new tab
-    let mut new_tab = store.must_get::<Tab>(&new_tab.oid)?;
-    new_tab.blockids.push(block_id.to_string());
-    store.update(&mut new_tab)?;
-
-    // Set up the layout tree for the new tab with the block as the single root node.
-    // Without this, the frontend renders an empty layout (rootnode: null).
-    // Phase E.4.B Phase 2 — typed LayoutNode (was inline JSON).
-    let mut layout = store.must_get::<LayoutState>(&new_tab.layoutstate)?;
-    let node_id = Uuid::new_v4().to_string();
-    layout.rootnode = Some(LayoutNode {
-        id: node_id.clone(),
-        flex_direction: FlexDirection::Row,
-        size: 1.0,
-        children: Vec::new(),
-        data: Some(LayoutNodeData {
-            block_id: block_id.to_string(),
-            ..Default::default()
-        }),
-        ..Default::default()
-    });
-    layout.leaforder = Some(vec![LeafOrderEntry {
-        nodeid: node_id,
-        blockid: block_id.to_string(),
-    }]);
-    store.update(&mut layout)?;
-
-    // Update block's parent reference
-    block.parentoref = format!("tab:{}", new_tab.oid);
-    store.update(&mut block)?;
-
-    // Auto-close empty source tab if requested
-    if auto_close_source && source_tab.blockids.is_empty() {
-        let ws = store.must_get::<Workspace>(source_ws_id)?;
-        let total_tabs = ws.tabids.len() + ws.pinnedtabids.len();
-        if total_tabs > 1 {
-            tracing::info!(source_tab = %source_tab_id, "[dnd] auto-closing empty source tab after tear-off");
-            delete_tab(store, source_ws_id, source_tab_id)?;
-        }
-    }
-
-    tracing::info!(
-        block_id = %block_id,
-        new_ws = %new_ws.oid,
-        new_tab = %new_tab.oid,
-        "[dnd] tear_off_block complete"
-    );
-    // Re-fetch workspace to return updated state
-    store.must_get::<Workspace>(&new_ws.oid)
 }
 
 /// Move a tab back from a tear-off workspace into a destination workspace.
