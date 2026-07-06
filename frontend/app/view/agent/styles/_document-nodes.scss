@@ -22,12 +22,31 @@
     }
 
     // Reusable class (as opposed to the animation applied inline on
-    // `.agent-tool-result-pill` / `.agent-tool-live-tail` below) for
-    // elements outside this file, e.g. `.agent-tool-overlay-header` in
-    // `_tool-overlay-portal.scss` — it also toggles via `display: none` <->
-    // flex rather than mount/unmount, which re-triggers a CSS animation the
-    // same way a fresh mount does.
+    // `.agent-tool-live-tail` below) for elements whose *visibility*
+    // toggle is coupled 1:1 to a genuine tool-status change — e.g.
+    // `.agent-tool-overlay-header` in `_tool-overlay-portal.scss`, which
+    // toggles `display: none` <-> flex only via `props.node.status`
+    // (`ToolBlockOverlay.tsx`), so CSS's "display:none -> visible
+    // restarts animations" behavior only ever fires on that real event.
     .agent-tool-summary-fade-in {
+        animation: agent-tool-summary-fade-in 160ms ease-out;
+
+        @include mixins.respect-reduced-motion {
+            animation: none;
+        }
+    }
+
+    // One-shot variant, added/removed by a `ref` callback
+    // (`fadeInOnMount` in `ToolBlock.tsx`) rather than living permanently
+    // on a selector. Needed wherever an element's `display` ALSO toggles
+    // for a reason unrelated to status — `.agent-tool-result-pill` below
+    // is shown/hidden by a `@container` width breakpoint
+    // (`_responsive.scss`) independent of tool status, so a persistent
+    // `animation:` on that selector would replay on every resize across
+    // 600px, even for an already-completed, unrelated tool call (reagent
+    // P2 on PR #1975). The ref only adds this class at genuine Solid
+    // mount time, so resizing never retriggers it.
+    .agent-tool-fade-in-once {
         animation: agent-tool-summary-fade-in 160ms ease-out;
 
         @include mixins.respect-reduced-motion {
@@ -468,11 +487,13 @@
         flex-shrink: 0;
         white-space: nowrap;
         line-height: 1.4;
-        animation: agent-tool-summary-fade-in 160ms ease-out;
-
-        @include mixins.respect-reduced-motion {
-            animation: none;
-        }
+        // NOT an `animation:` here — this selector's `display` also
+        // toggles on pane resize (see the `@container` rule in
+        // `_responsive.scss`), independent of tool status. The fade-in is
+        // applied via the one-shot `.agent-tool-fade-in-once` class
+        // instead (added by a `ref` callback only at genuine mount time —
+        // see `fadeInOnMount` in `ToolBlock.tsx`), so resizing never
+        // replays it (reagent P2 on PR #1975).
 
         &.pill-exit-ok  { color: var(--success-color); background: color-mix(in srgb, var(--success-color) 14%, transparent); }
         &.pill-exit-err { color: var(--error-color);   background: color-mix(in srgb, var(--error-color)   14%, transparent); }

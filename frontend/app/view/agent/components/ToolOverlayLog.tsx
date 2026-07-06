@@ -216,27 +216,47 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     let lastMeasuredHeight = 0;
     let lastBranch: LogBranch | undefined;
     let cancelHeightFlip: (() => void) | undefined;
+    // Set while the panel is (or was) content-visibility:hidden and we
+    // couldn't safely measure. A failed/denied/canceled tool auto-collapses
+    // the instant it leaves "running" (`ToolBlock.tsx` autoExpanded()), so
+    // the running->result branch change commonly happens entirely while
+    // hidden — without this flag, the first re-measurement after the user
+    // later expands the panel would FLIP from the stale pre-collapse
+    // ("streaming") height to the current one instead of just showing the
+    // final state (reagent P1 on PR #1975).
+    let heightStale = false;
 
     createEffect(() => {
         const b = branch();
         chunks(); // also re-measure as chunks stream in, not just on branch changes
         const hidden = panelHidden();
         const el = scrollRef;
-        // Reading scrollHeight on a content-visibility:hidden subtree forces
-        // a synchronous layout (same hazard as the auto-scroll effect above)
-        // — skip measuring entirely while the panel is collapsed.
-        if (!el || hidden) return;
+        if (!el) return;
+
+        if (hidden) {
+            // Reading scrollHeight here would force a synchronous layout on
+            // a content-visibility:hidden subtree (same hazard as the
+            // auto-scroll effect above). Track the logical branch (cheap,
+            // no DOM read) so a genuine change is still recorded, but mark
+            // the height stale — resolved as a silent resync, not a FLIP,
+            // the next time this runs while visible.
+            lastBranch = b;
+            heightStale = true;
+            return;
+        }
 
         const prevBranch = lastBranch;
         const prevHeight = lastMeasuredHeight;
         const newHeight = el.scrollHeight;
 
         const shouldAnimate =
+            !heightStale &&
             prevBranch !== undefined &&
             prevBranch !== b &&
             prevHeight > 0 &&
             Math.abs(newHeight - prevHeight) > 1 &&
             !atoms.prefersReducedMotionAtom();
+        heightStale = false;
 
         if (shouldAnimate) {
             cancelHeightFlip?.();

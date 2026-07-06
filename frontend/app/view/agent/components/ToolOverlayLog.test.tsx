@@ -141,6 +141,36 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         vi.useRealTimers();
     });
 
+    it("resyncs without animating when a branch change happened entirely while the panel was hidden", async () => {
+        // A failed/denied/canceled tool auto-collapses the instant it
+        // leaves "running" (ToolBlock.tsx autoExpanded()), so the
+        // running->result branch change commonly happens while
+        // content-visibility:hidden. The first re-measurement after the
+        // panel becomes visible again (e.g. the user expands it to
+        // inspect the error) must show the final state directly, NOT
+        // FLIP from the stale pre-collapse height (reagent P1 on #1975).
+        stubScrollHeight(40);
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const { container } = render(() => (
+            <div class="agent-tool-panel agent-tool-panel--hidden">
+                <ToolOverlayLog node={node()} />
+            </div>
+        ));
+        const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+
+        setNode(terminalNode); // branch changes entirely while hidden
+        expect(el.style.height).toBe(""); // never measured/animated while hidden
+
+        stubScrollHeight(120); // the terminal branch's real (now-visible) height
+        panel.classList.remove("agent-tool-panel--hidden"); // panel becomes visible
+        // MutationObserver callbacks run as a microtask.
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(el.style.height).toBe(""); // resynced silently, no FLIP
+    });
+
     it("does not animate when the user prefers reduced motion", async () => {
         reducedMotion = true;
         vi.useFakeTimers();
