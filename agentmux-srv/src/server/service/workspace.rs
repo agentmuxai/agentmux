@@ -730,7 +730,7 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
                 tracing::warn!(new_tab = %new_tab_oid, "PromoteBlockToTab: layout setup failed: {}", e);
             }
             // Source tab: queue layout-delete action.
-            if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
+            if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
                 tracing::warn!(source_tab = %source_tab_id, "PromoteBlockToTab: source layout delete-action enqueue failed: {}", e);
             }
             // Set the new tab as active in the workspace via reducer.
@@ -1102,14 +1102,14 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
 
             // Layout setup for the new tab — make the moved block its
             // single root node so the frontend renders it. Mirrors
-            // wcore::tear_off_block. Best-effort; layout migration is
-            // E.4 territory and not yet reducer-routed.
+            // wcore::tear_off_block. Best-effort; reducer-routed
+            // (SPEC_864 Phase 3 seed / Phase 4 queue).
             if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
                 tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
             }
             // Source tab: queue a layout-delete action so the source
             // window's frontend removes the node from its tree.
-            if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
+            if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
                 tracing::warn!(source_tab = %source_tab_id, "TearOffBlock: source layout delete-action enqueue failed: {}", e);
             }
 
@@ -1247,9 +1247,9 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             // retry; no visible change has propagated to the renderers yet.
             let target_layout_result = match (target_block_id.as_deref(), direction) {
                 (Some(tbid), Some(dir)) => {
-                    queue_target_layout_split(store, &target_tab_id, &block_id, tbid, dir)
+                    queue_target_layout_split(state, &target_tab_id, &block_id, tbid, dir).await
                 }
-                _ => queue_target_layout_insert(store, &target_tab_id, &block_id),
+                _ => queue_target_layout_insert(state, &target_tab_id, &block_id).await,
             };
             if let Err(e) = target_layout_result {
                 tracing::error!(
@@ -1261,7 +1261,7 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
                     "redock layout action failed: {e}"
                 ));
             }
-            if let Err(e) = queue_source_layout_delete(store, &source_tab_id, &block_id) {
+            if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
                 tracing::error!(
                     source_tab = %source_tab_id,
                     "RedockFloatingPane: source layout delete failed — aborting broadcast: {}",
@@ -1273,14 +1273,15 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             }
 
             let mut updates = Vec::new();
-            // Layout updates MUST come first — `append_block_to_target_layout`
-            // and `queue_source_layout_delete` write straight to wstore via
-            // `store.update`, which is NOT auto-broadcast (only the SQLite
-            // row gets a new version). Without these entries in the response,
-            // the target window's frontend never sees the new leaf and
-            // renders nothing; the source's pending delete action never
-            // gets pulled either. Both layouts are read AFTER the helpers
-            // run so we capture the fresh state.
+            // Layout updates MUST come first — the queue helpers persist
+            // via the reducer route (SPEC_864 Phase 4), whose SQLite write
+            // is NOT auto-broadcast (only the row gets a new version).
+            // Without these entries in the response, the target window's
+            // frontend never sees the new leaf and renders nothing; the
+            // source's pending delete action never gets pulled either.
+            // Both layouts are read AFTER the helpers return — the
+            // helpers persist synchronously inside the reducer lock, so
+            // the re-read always sees the appended actions.
             if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
                 if let Ok(src_layout) = store.must_get::<LayoutState>(&src_tab.layoutstate) {
                     updates.push(WaveObjUpdate {
