@@ -1,12 +1,58 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 // Document-node rendering — markdown / code / diff / bash / message
 // blocks rendered inside the agent conversation. Largest section of
 // the original `agent-view.scss` (~700 lines). Wrapped in
 // `.agent-view` so the cascade chain matches the pre-split file
 // (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
+    // Running -> terminal tool-status transition
+    // (ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md): the
+    // result pill and the live-tail/elapsed-ticker span mount/unmount
+    // instantly on the same tick a tool's status leaves "running" (they're
+    // gated by `resultPill() != null` / `log.open`, which flip together).
+    // A brief fade-in on the incoming element softens the pop; skipped
+    // entirely for reduced-motion users below.
+    @keyframes agent-tool-summary-fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    // Reusable class (as opposed to the animation applied inline on
+    // `.agent-tool-live-tail` below) for elements whose *visibility*
+    // toggle is coupled 1:1 to a genuine tool-status change — e.g.
+    // `.agent-tool-overlay-header` in `_tool-overlay-portal.scss`, which
+    // toggles `display: none` <-> flex only via `props.node.status`
+    // (`ToolBlockOverlay.tsx`), so CSS's "display:none -> visible
+    // restarts animations" behavior only ever fires on that real event.
+    .agent-tool-summary-fade-in {
+        animation: agent-tool-summary-fade-in 160ms ease-out;
+
+        @include mixins.respect-reduced-motion {
+            animation: none;
+        }
+    }
+
+    // One-shot variant, added/removed by a `ref` callback
+    // (`fadeInOnMount` in `ToolBlock.tsx`) rather than living permanently
+    // on a selector. Needed wherever an element's `display` ALSO toggles
+    // for a reason unrelated to status — `.agent-tool-result-pill` below
+    // is shown/hidden by a `@container` width breakpoint
+    // (`_responsive.scss`) independent of tool status, so a persistent
+    // `animation:` on that selector would replay on every resize across
+    // 600px, even for an already-completed, unrelated tool call (reagent
+    // P2 on PR #1975). The ref only adds this class at genuine Solid
+    // mount time, so resizing never retriggers it.
+    .agent-tool-fade-in-once {
+        animation: agent-tool-summary-fade-in 160ms ease-out;
+
+        @include mixins.respect-reduced-motion {
+            animation: none;
+        }
+    }
     // Shown wherever a tool-output body is render-capped
     // (SPEC_TOOL_OUTPUT_CAP_2026_05_30.md). One muted line, never silent.
     .agent-output-hidden-marker {
@@ -192,6 +238,11 @@
                 text-align: center;
                 color: var(--secondary-text-color);
                 font-size: 11px;
+                // Eases the running -> terminal color swap (warning ->
+                // success/error/etc, see the `&.success .agent-tool-status-icon`
+                // rules below) instead of an instant snap. The glyph itself
+                // still changes instantly — only its color eases.
+                transition: color 150ms ease;
             }
 
             .agent-tool-name {
@@ -229,6 +280,11 @@
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                animation: agent-tool-summary-fade-in 160ms ease-out;
+
+                @include mixins.respect-reduced-motion {
+                    animation: none;
+                }
 
                 // Waiting state (no stdout yet — showing elapsed timer).
                 // Dimmer than real output so it reads as "pending" rather
@@ -431,6 +487,13 @@
         flex-shrink: 0;
         white-space: nowrap;
         line-height: 1.4;
+        // NOT an `animation:` here — this selector's `display` also
+        // toggles on pane resize (see the `@container` rule in
+        // `_responsive.scss`), independent of tool status. The fade-in is
+        // applied via the one-shot `.agent-tool-fade-in-once` class
+        // instead (added by a `ref` callback only at genuine mount time —
+        // see `fadeInOnMount` in `ToolBlock.tsx`), so resizing never
+        // replays it (reagent P2 on PR #1975).
 
         &.pill-exit-ok  { color: var(--success-color); background: color-mix(in srgb, var(--success-color) 14%, transparent); }
         &.pill-exit-err { color: var(--error-color);   background: color-mix(in srgb, var(--error-color)   14%, transparent); }

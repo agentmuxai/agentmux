@@ -151,4 +151,58 @@ describe("ToolBlock — panel mode", () => {
         const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
         expect(panel.style.maxHeight).toBe("");
     });
+
+    // ── Result-pill one-shot fade-in (reagent P2 on PR #1975) ────────────
+    // The fade-in must be a one-shot class added by a `ref` callback at
+    // genuine mount time, NOT a persistent CSS `animation:` on the
+    // selector — the pill's `display` also toggles via an unrelated
+    // `@container` width breakpoint (_responsive.scss), and a persistent
+    // animation would replay on every resize across that breakpoint even
+    // for an already-completed, unrelated tool call.
+    describe("result-pill one-shot fade-in", () => {
+        const withResult: ToolNode = {
+            ...baseTool,
+            result: { exitCode: 0 } as any,
+        };
+
+        it("adds the one-shot class on mount and removes it after animationend", async () => {
+            const { container } = render(() => (
+                <ToolBlock node={withResult} pinned={false} onTogglePin={() => {}} />
+            ));
+            const pill = container.querySelector(".agent-tool-result-pill") as HTMLElement;
+            expect(pill).not.toBeNull();
+
+            // The class is added a microtask after mount — deferred past
+            // Solid's own dynamic `class={...}` effect, which sets
+            // `className` wholesale and would otherwise clobber a
+            // classList mutation made synchronously in the ref (see
+            // `fadeInOnMount`'s doc comment in ToolBlock.tsx).
+            await Promise.resolve();
+            expect(pill.classList.contains("agent-tool-fade-in-once")).toBe(true);
+
+            pill.dispatchEvent(new Event("animationend"));
+            expect(pill.classList.contains("agent-tool-fade-in-once")).toBe(false);
+        });
+
+        it("does not re-add the class on an unrelated re-render (only a genuine remount)", async () => {
+            // Regression guard for the actual bug: re-rendering with the
+            // SAME resultPill (simulating a resize-driven display toggle,
+            // not a real remount) must not re-add the one-shot class,
+            // since the ref callback only fires on genuine DOM insertion.
+            const [node, setNode] = createSignal<ToolNode>(withResult);
+            const { container } = render(() => <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />);
+            const pill = container.querySelector(".agent-tool-result-pill") as HTMLElement;
+            await Promise.resolve();
+            pill.dispatchEvent(new Event("animationend"));
+            expect(pill.classList.contains("agent-tool-fade-in-once")).toBe(false);
+
+            // Same status/result, just a new object reference (mirrors an
+            // unrelated parent re-render) — the pill is NOT unmounted by
+            // Solid (same <Show> branch stays true), so the ref never
+            // re-fires and the class must stay off.
+            setNode({ ...withResult });
+            await Promise.resolve();
+            expect(pill.classList.contains("agent-tool-fade-in-once")).toBe(false);
+        });
+    });
 });

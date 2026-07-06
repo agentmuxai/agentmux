@@ -49,7 +49,7 @@ const STATUS_LABEL: Record<ToolNode["status"], string> = {
 export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
     <div class="agent-tool-overlay" data-node-id={props.node.id}>
         <div
-            class="agent-tool-overlay-header"
+            class="agent-tool-overlay-header agent-tool-summary-fade-in"
             style={{
                 display:
                     props.node.status === "running" || props.node.status === "success"
