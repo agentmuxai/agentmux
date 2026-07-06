@@ -706,30 +706,19 @@ function TabBar(props: TabBarProps): JSX.Element {
         setLineLeft(left);
         setLineBottom(window.innerHeight - tabBarRef.getBoundingClientRect().bottom);
 
-        // Right edge extends past .tab-bar itself, through the header
-        // widgets (.system-status / ActionWidgets), stopping at the window
-        // control buttons — win32/linux render those as
-        // .window-action-buttons (window-controls.win32.tsx, reused by
-        // linux); macOS has none there (WindowControlsRight is null — its
-        // traffic lights are on the LEFT), so .system-status's own right
-        // edge is the natural stop.
-        const winActionButtons = document.querySelector<HTMLElement>(".window-action-buttons");
-        const systemStatus = document.querySelector<HTMLElement>(".system-status");
-        const right = winActionButtons
-            ? winActionButtons.getBoundingClientRect().left
-            : systemStatus
-                ? systemStatus.getBoundingClientRect().right
-                : scrollRect.right;
-        setLineWidth(right - left);
+        // Right edge runs all the way to the viewport's right edge — past
+        // the header widgets (.system-status/ActionWidgets) AND the window
+        // control buttons (win32/linux: .window-action-buttons; macOS's
+        // traffic lights are on the left, so nothing there either way).
+        // Live preview against stopping before the window controls; this
+        // was the version picked.
+        setLineWidth(window.innerWidth - left);
     };
     onMount(() => {
         measureLine();
         const ro = new ResizeObserver(measureLine);
         ro.observe(tabBarRef);
         ro.observe(tabBarScrollRef);
-        const boundaryEl = document.querySelector<HTMLElement>(".window-action-buttons")
-            ?? document.querySelector<HTMLElement>(".system-status");
-        if (boundaryEl) ro.observe(boundaryEl);
         window.addEventListener("resize", measureLine);
         onCleanup(() => {
             ro.disconnect();
