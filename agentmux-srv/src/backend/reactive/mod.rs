@@ -8,6 +8,7 @@
 //! rate limiting, message sanitization, audit logging, and cross-host
 //! polling via AgentMux cloud service.
 
+pub mod activity_watcher;
 pub mod handler;
 pub mod poller;
 pub mod registry;

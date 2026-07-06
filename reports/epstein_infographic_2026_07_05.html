@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jeffrey Epstein — Verified First-Person Accounts</title>
+<style>
+  :root {
+    --surface-1:      #fcfcfb;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+
+    --cat-journalist: #2a78d6; /* blue   — slot 1 */
+    --cat-scientific: #1baf7a; /* aqua   — slot 2 */
+    --cat-social:     #4a3aa7; /* violet — slot 5 */
+    --cat-testimony:  #e34948; /* red    — slot 6 */
+
+    --status-good:    #0ca30c;
+    --status-warning: #fab219;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1:      #1a1a19;
+      --page-plane:     #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+
+      --cat-journalist: #3987e5;
+      --cat-scientific: #199e70;
+      --cat-social:     #9085e9;
+      --cat-testimony:  #e66767;
+
+      --status-good:    #0ca30c;
+      --status-warning: #fab219;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page-plane);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px 80px; }
+
+  /* ── Header ───────────────────────────────────────────── */
+  header { margin-bottom: 40px; }
+  header h1 { font-size: 32px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; }
+  header p.dek { font-size: 16px; color: var(--text-secondary); max-width: 640px; margin: 0; }
+  header p.meta { font-size: 13px; color: var(--text-muted); margin: 12px 0 0; }
+
+  /* ── KPI row ──────────────────────────────────────────── */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--gridline); border: 1px solid var(--gridline); border-radius: 6px; overflow: hidden; margin-bottom: 44px; }
+  .kpi-tile { background: var(--surface-1); padding: 20px 16px; }
+  .kpi-tile .value { font-size: 30px; font-weight: 600; line-height: 1.1; }
+  .kpi-tile .label { font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
+
+  /* ── Category pill ───────────────────────────────────── */
+  .pill { display: inline-flex; align-items: center; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 100px; letter-spacing: 0.02em; text-transform: uppercase; }
+  .pill.journalist { background: var(--cat-journalist); color: #fff; }
+  .pill.scientific { background: var(--cat-scientific); color: #0b0b0b; }
+  .pill.social     { background: var(--cat-social);     color: #fff; }
+  .pill.testimony  { background: var(--cat-testimony);  color: #fff; }
+
+  /* ── Confidence badge ─────────────────────────────────── */
+  .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .badge svg { width: 14px; height: 14px; flex: none; }
+  .badge.high .dot   { color: var(--status-good); }
+  .badge.medium .dot { color: var(--status-warning); }
+
+  /* ── Cards ────────────────────────────────────────────── */
+  section.accounts { display: flex; flex-direction: column; gap: 20px; }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 24px 28px; }
+  .card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-bottom: 4px; }
+  .card-head h2 { font-size: 19px; font-weight: 700; margin: 0; }
+  .card-head .role { font-size: 13.5px; color: var(--text-secondary); }
+  .card-head .spacer { flex: 1 1 auto; }
+  .card .claims-note { font-size: 12px; color: var(--text-muted); margin: 2px 0 14px; }
+
+  .quote-group { margin-bottom: 14px; }
+  .quote-group:last-of-type { margin-bottom: 0; }
+  .quote-group .sub-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0 0 6px; }
+  blockquote {
+    margin: 0 0 8px; padding: 4px 0 4px 16px;
+    border-left: 3px solid; font-size: 15px; color: var(--text-primary);
+  }
+  .card.journalist blockquote, .quote-group.journalist blockquote { border-color: var(--cat-journalist); }
+  .card.scientific blockquote, .quote-group.scientific blockquote { border-color: var(--cat-scientific); }
+  .card.social blockquote     { border-color: var(--cat-social); }
+  .card.testimony blockquote  { border-color: var(--cat-testimony); }
+
+  .evidence { font-size: 13.5px; color: var(--text-secondary); margin: 10px 0 10px; }
+  .evidence strong { color: var(--text-primary); font-weight: 600; }
+
+  .citations { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--gridline); }
+  .citations a { font-size: 12.5px; color: var(--text-secondary); text-decoration: underline; text-decoration-color: var(--gridline); text-underline-offset: 2px; }
+  .citations a:hover { color: var(--text-primary); }
+
+  /* ── Footer / caveats ─────────────────────────────────── */
+  .footnote { margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--gridline); }
+  .footnote h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); margin: 0 0 10px; }
+  .footnote ul { margin: 0 0 24px; padding-left: 18px; font-size: 13.5px; color: var(--text-secondary); }
+  .footnote li { margin-bottom: 6px; }
+  .footnote .methodology { font-size: 12.5px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>People Who Met Jeffrey Epstein</h1>
+    <p class="dek">Paragraph-length, directly quoted first-person accounts — journalists, sworn victim/witness testimony, scientists, and social contacts — each independently adversarial-verified against primary sources.</p>
+    <p class="meta">Compiled 2026-07-05 · Multi-agent deep research, 3-vote adversarial verification per claim</p>
+  </header>
+
+  <div class="kpi-row">
+    <div class="kpi-tile"><div class="value">25</div><div class="label">Verified claims</div></div>
+    <div class="kpi-tile"><div class="value">9</div><div class="label">Distinct accounts</div></div>
+    <div class="kpi-tile"><div class="value">22</div><div class="label">Sources fetched</div></div>
+    <div class="kpi-tile"><div class="value">0</div><div class="label">Refuted / unverified</div></div>
+  </div>
+
+  <section class="accounts">
+
+    <!-- 1. James B. Stewart -->
+    <article class="card journalist">
+      <div class="card-head">
+        <span class="pill journalist">Journalist</span>
+        <h2>James B. Stewart</h2>
+        <span class="role">Columnist, The New York Times</span>
+        <span class="spacer"></span>
+        <span class="badge high"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M5 8.2l2 2 4-4.4" stroke="#fff" stroke-width="1.4" fill="none"/></svg>High confidence</span>
+      </div>
+      <p class="claims-note">90-minute in-person interview at Epstein's Manhattan mansion, Aug 16, 2018 · 4 claims merged</p>
+      <blockquote>&ldquo;Almost exactly a year ago, on August 16th, 2018, I visited Jeffrey Epstein at his cavernous Manhattan mansion&hellip; Epstein claimed to know potentially damaging or embarrassing information about many rich, famous and powerful people, including their supposed sexual proclivities and recreational drug use&hellip; [and] told me that criminalizing sex with teenage girls was a cultural aberration and that at times in history it was perfectly acceptable.&rdquo;</blockquote>
+      <p class="evidence"><strong>Evidence:</strong> Single-witness recollection of an unrecorded conversation, recounted by a Pulitzer-winning reporter in the paper of record. No source disputes date, location, duration, or content.</p>
+      <div class="citations">
+        <a href="https://www.nytimes.com/2019/08/12/business/jeffrey-epstein-interview.html" target="_blank" rel="noopener">NYT, "The Day Jeffrey Epstein Told Me He Had Dirt on Powerful People," Aug 12, 2019</a>
+        <a href="https://www.cjr.org/podcast/jeffrey-epstein-james-stewart-background-suicide-new-york-times.php" target="_blank" rel="noopener">CJR (corroboration)</a>
+      </div>
+    </article>
+
+    <!-- 2. Vicky Ward -->
+    <article class="card journalist">
+      <div class="card-head">
+        <span class="pill journalist">Journalist</span>
+        <h2>Vicky Ward</h2>
+        <span class="role">Contributor, Vanity Fair</span>
+      </div>
+
+      <div class="quote-group journalist">
+        <p class="sub-label">2002–03 reporting <span class="badge high" style="margin-left:8px"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M5 8.2l2 2 4-4.4" stroke="#fff" stroke-width="1.4" fill="none"/></svg>High confidence</span> · 3 claims merged</p>
+        <blockquote>&ldquo;Jeffrey wanted me to tell you that you looked so pretty&rdquo; — relayed by a female assistant after an off-the-record tea at Epstein's Upper East Side townhouse.</blockquote>
+        <blockquote>In repeated phone calls, Epstein asked &ldquo;What do you have on the girls?&rdquo; — &ldquo;over and over again,&rdquo; per Ward's contemporaneous notes.</blockquote>
+        <blockquote>Ward alleges editor Graydon Carter cut on-the-record allegations from a Phoenix mother and two daughters (one aged 16), telling her Epstein was &ldquo;sensitive about the young women.&rdquo;</blockquote>
+      </div>
+
+      <div class="quote-group journalist">
+        <p class="sub-label">2025 retrospective (NPR) <span class="badge medium" style="margin-left:8px"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><rect x="5" y="7.2" width="6" height="1.6" fill="#0b0b0b"/></svg>Medium confidence</span> · 2 claims merged</p>
+        <blockquote>&ldquo;[Epstein] claimed that he was a financial adviser for billionaires, and yet there was no footprint of him trading in the markets&hellip; The math has never added up.&rdquo;</blockquote>
+        <blockquote>Epstein hosted politicians and rich men while &ldquo;surrounded by beautiful women, many of whom were underage minors, almost in plain sight.&rdquo;</blockquote>
+      </div>
+
+      <p class="evidence"><strong>Evidence:</strong> Quotes verified verbatim against Ward's own essay and the NPR transcript; NPR independently confirmed the Farmer family spoke on record in 2002. Graydon Carter disputes Ward's account of <em>why</em> material was cut (he cites a "legal threshold"); a 2022 New Yorker piece challenged aspects of her broader reporting — her account should be read as her account.</p>
+      <div class="citations">
+        <a href="https://vickyward.com/article/i-tried-to-warn-you-about-sleazy-billionaire-jeffrey-epstein-in-2003/" target="_blank" rel="noopener">vickyward.com, 2015 essay</a>
+        <a href="https://www.thedailybeast.com/i-tried-to-warn-you-about-sleazy-billionaire-jeffrey-epstein-in-2003/" target="_blank" rel="noopener">The Daily Beast</a>
+        <a href="https://www.npr.org/2019/08/22/753337520/why-the-media-didnt-pay-much-attention-to-jeffrey-epstein" target="_blank" rel="noopener">NPR, 2019 (Farmer family corroboration)</a>
+        <a href="https://www.npr.org/2025/07/28/nx-s1-5479843/investigative-journalist-vicky-ward-reviews-just-who-jeffrey-epstein-was" target="_blank" rel="noopener">NPR Morning Edition, Jul 28, 2025</a>
+      </div>
+    </article>
+
+    <!-- 3. Johanna Sjoberg -->
+    <article class="card testimony">
+      <div class="card-head">
+        <span class="pill testimony">Sworn testimony</span>
+        <h2>Johanna Sjoberg</h2>
+        <span class="role">Recruited by Ghislaine Maxwell, 2001</span>
+        <span class="spacer"></span>
+        <span class="badge high"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M5 8.2l2 2 4-4.4" stroke="#fff" stroke-width="1.4" fill="none"/></svg>High confidence</span>
+      </div>
+      <p class="claims-note">Deposition, Giuffre v. Maxwell, unsealed Jan 2024 · 3 claims merged</p>
+      <blockquote>&ldquo;I remember him being in a bathrobe&hellip; I remember thinking this guy is very smart&rdquo; — describing her first meeting with Epstein.</blockquote>
+      <blockquote>Maxwell phoned to reprimand her after a massage: &ldquo;You came here and didn't finish your job and I had to finish it for you.&rdquo;</blockquote>
+      <blockquote>A photo was taken of Sjoberg with a puppet caricature of Prince Andrew while Andrew put his hand on her breast, with Virginia Giuffre, Epstein, and Maxwell present.</blockquote>
+      <p class="evidence"><strong>Evidence:</strong> Verified directly against the primary court record (1:15-cv-07433-LAP, Doc. 1320-12 and exhibits). Sworn testimony under oath. Maxwell and Prince Andrew dispute the underlying conduct, not that Sjoberg gave this testimony. <em>Minor correction: the puppet was ITV's Spitting Image, not the BBC as Sjoberg described it.</em></p>
+      <div class="citations">
+        <a href="https://uploads.guim.co.uk/2024/01/04/Final_Epstein_documents.pdf" target="_blank" rel="noopener">Unsealed court filing (PDF)</a>
+        <a href="https://storage.courtlistener.com/recap/gov.uscourts.nysd.447706/gov.uscourts.nysd.447706.1320.12.pdf" target="_blank" rel="noopener">CourtListener, Doc. 1320-12</a>
+        <a href="https://www.cbc.ca/news/world/jeffrey-epstein-court-documents-unsealed-1.7072375" target="_blank" rel="noopener">CBC (corroboration)</a>
+      </div>
+    </article>
+
+    <!-- 4. Rinaldo Rizzo -->
+    <article class="card testimony">
+      <div class="card-head">
+        <span class="pill testimony">Sworn testimony</span>
+        <h2>Rinaldo Rizzo</h2>
+        <span class="role">Estate manager for the Dubin family</span>
+        <span class="spacer"></span>
+        <span class="badge high"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M5 8.2l2 2 4-4.4" stroke="#fff" stroke-width="1.4" fill="none"/></svg>High confidence</span>
+      </div>
+      <p class="claims-note">Deposition, Giuffre v. Maxwell 1320-series</p>
+      <blockquote>Rizzo testified that a terrified 15-year-old girl told him and his wife that on Epstein's island she was asked for sex and refused; that Sarah Kellen took her passport and phone and gave them to Ghislaine Maxwell; and that she was threatened by Epstein and Maxwell not to talk about it.</blockquote>
+      <p class="evidence"><strong>Evidence:</strong> Sworn deposition; firsthand as to the conversation, secondhand as to the island events (relaying what the girl told him). The Dubin family disputes the underlying events, not that Rizzo gave this testimony.</p>
+      <div class="citations">
+        <a href="https://uploads.guim.co.uk/2024/01/04/Final_Epstein_documents.pdf" target="_blank" rel="noopener">Unsealed court filing (PDF)</a>
+        <a href="https://rollcall.com/factbase/epstein/file?id=giuffre-v-maxwell-115-cv-07433-sdny-2015-1320-26" target="_blank" rel="noopener">Roll Call Factbase</a>
+      </div>
+    </article>
+
+    <!-- 5. Peggy Siegal -->
+    <article class="card social">
+      <div class="card-head">
+        <span class="pill social">Social circle</span>
+        <h2>Peggy Siegal</h2>
+        <span class="role">Hollywood publicist, ~12-year acquaintance</span>
+        <span class="spacer"></span>
+        <span class="badge medium"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><rect x="5" y="7.2" width="6" height="1.6" fill="#0b0b0b"/></svg>Medium confidence</span>
+      </div>
+      <p class="claims-note">New York magazine interview, reported by THR, Mar 2026 · 3 claims merged</p>
+      <blockquote>Epstein introduced himself by name-dropping mutual friends and made clear he had &ldquo;numerous houses and a jet&rdquo; to get onto her screening-invitation list.</blockquote>
+      <blockquote>&ldquo;I instantly knew that he collected information to use against you&hellip; There was a sense of danger. It was like a warning bell.&rdquo;</blockquote>
+      <blockquote>&ldquo;I totally jeopardized my relationship with all these important people — they did not know who he was,&rdquo; referring to guests she brought to his post-conviction dinners.</blockquote>
+      <p class="evidence"><strong>Evidence:</strong> Secondary coverage of a primary interview. Siegal is a self-interested narrator with prior inconsistent statements — she previously denied taking Epstein's money, though DOJ emails show contact continuing until April 2019.</p>
+      <div class="citations">
+        <a href="https://www.hollywoodreporter.com/news/general-news/hollywood-publicist-peggy-siegal-jeffrey-epstein-new-york-interview-1236522678/" target="_blank" rel="noopener">The Hollywood Reporter, Mar 2026</a>
+      </div>
+    </article>
+
+    <!-- 6. John Brockman -->
+    <article class="card scientific">
+      <div class="card-head">
+        <span class="pill scientific">Academic &amp; scientific circle</span>
+        <h2>John Brockman</h2>
+        <span class="role">Founder, Edge Foundation</span>
+        <span class="spacer"></span>
+        <span class="badge high"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M5 8.2l2 2 4-4.4" stroke="#0b0b0b" stroke-width="1.4" fill="none"/></svg>High confidence</span>
+      </div>
+      <p class="claims-note">2013 emails to Evgeny Morozov, published 2019 · 3 claims merged</p>
+      <blockquote>Describing Epstein as a &ldquo;billionaire who owns Victoria's Secret plus a modelling agency&rdquo; with &ldquo;a beautiful young assistant from Belarus,&rdquo; adding &ldquo;He also got into trouble and spent a year in jail in Florida.&rdquo;</blockquote>
+      <blockquote>Recounting a visit to Epstein's townhouse where he found Epstein and a British man receiving foot massages from young Russian women — a man Brockman later realized was Prince Andrew.</blockquote>
+      <p class="evidence"><strong>Evidence:</strong> Epstein-linked foundations gave $638,000 of Edge's ~$857,000 in total donations (2001–2017), verified against IRS 990 filings. Emails published verbatim; jet photo and dinner attendance corroborated by 2002 NYT reporting and confirmed by Pinker and Dennett. Brockman declined comment rather than disputing. <em>Note: Epstein did not actually own Victoria's Secret (that was Leslie Wexner) — this reports Brockman's belief, not fact.</em></p>
+      <div class="citations">
+        <a href="https://www.buzzfeednews.com/article/peteraldhous/jeffrey-epstein-john-brockman-edge-foundation" target="_blank" rel="noopener">BuzzFeed News</a>
+        <a href="https://newrepublic.com/article/154826/jeffrey-epsteins-intellectual-enabler" target="_blank" rel="noopener">The New Republic (Morozov)</a>
+      </div>
+    </article>
+
+    <!-- 7. Sarah Kellen -->
+    <article class="card testimony">
+      <div class="card-head">
+        <span class="pill testimony">Statement via spokesperson</span>
+        <h2>Sarah Kellen</h2>
+        <span class="role">Former Epstein/Maxwell assistant</span>
+        <span class="spacer"></span>
+        <span class="badge medium"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><rect x="5" y="7.2" width="6" height="1.6" fill="#0b0b0b"/></svg>Medium confidence</span>
+      </div>
+      <p class="claims-note">Statement issued via representative Tracy Schmaler, 2019</p>
+      <blockquote>Kellen &ldquo;had just turned 22 when she was recruited by Jeffrey Epstein and Ghislaine Maxwell,&rdquo; after which Epstein &ldquo;began to sexually abuse her, and this abuse went on for years&rdquo;; she &ldquo;continues to struggle with the trauma.&rdquo;</blockquote>
+      <p class="evidence"><strong>Evidence:</strong> Third-person statement issued via a spokesperson, not a direct first-person quote. Kellen's victim/facilitator status is contested by other litigants who describe her as a facilitator; the existence and content of the published statement itself is not in dispute.</p>
+      <div class="citations">
+        <a href="https://www.buzzfeednews.com/article/peteraldhous/jeffrey-epstein-john-brockman-edge-foundation" target="_blank" rel="noopener">BuzzFeed News, Sep 26, 2019</a>
+      </div>
+    </article>
+
+    <!-- 8. Academics -->
+    <article class="card scientific">
+      <div class="card-head">
+        <span class="pill scientific">Academic &amp; scientific circle</span>
+        <h2>Steven Pinker, Lisa Randall &amp; Leon Botstein</h2>
+        <span class="role">Harvard psychologist · Harvard physicist · President, Bard College</span>
+        <span class="spacer"></span>
+        <span class="badge high"><svg class="dot" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="7"/><path d="M5 8.2l2 2 4-4.4" stroke="#0b0b0b" stroke-width="1.4" fill="none"/></svg>High confidence</span>
+      </div>
+      <p class="claims-note">4 claims merged</p>
+
+      <div class="quote-group scientific">
+        <p class="sub-label">Steven Pinker — flew on Epstein's jet, 2002</p>
+        <blockquote>&ldquo;I immediately disliked Epstein and thought he was a dilettante and a smartass.&rdquo;</blockquote>
+        <blockquote>On providing linguistic help later used in Epstein's legal defense: &ldquo;I was doing a professional courtesy to a colleague—it's routine. If I knew at the time what we know now, I would not have agreed.&rdquo;</blockquote>
+      </div>
+      <div class="quote-group scientific">
+        <p class="sub-label">Lisa Randall — visited Epstein's island, 2014</p>
+        <blockquote>&ldquo;I am appalled by the full extent of allegations against him and deeply regret maintaining contact.&rdquo;</blockquote>
+      </div>
+      <div class="quote-group scientific">
+        <p class="sub-label">Leon Botstein — email correspondent</p>
+        <blockquote>His contact with Epstein was &ldquo;always and only for the sole purpose of soliciting donations for the college.&rdquo;</blockquote>
+      </div>
+
+      <p class="evidence"><strong>Evidence:</strong> Verified verbatim across Scientific American, Times Higher Education, and the Harvard Crimson; Randall's 2014 trip is documented in a DOJ-released flight manifest. <em>Caveat on Botstein: a subsequent WilmerHale investigation for Bard's board concluded he "minimized and was not fully accurate" about the relationship ($150,000 in consulting fees, a $56,000 watch), and he later announced retirement — his quote is genuine but was shown incomplete by further investigation.</em></p>
+      <div class="citations">
+        <a href="https://www.scientificamerican.com/article/why-did-jeffrey-epstein-cultivate-famous-scientists/" target="_blank" rel="noopener">Scientific American, Jan 2026</a>
+        <a href="https://www.timeshighereducation.com/news/he-was-surrounded-smart-people-academics-epstein-files" target="_blank" rel="noopener">Times Higher Education</a>
+        <a href="https://www.thecrimson.com/article/2026/2/1/lisa-randall-epstein-ties/" target="_blank" rel="noopener">Harvard Crimson, Feb 1, 2026</a>
+      </div>
+    </article>
+
+  </section>
+
+  <div class="footnote">
+    <h3>Caveats</h3>
+    <ul>
+      <li>Several accounts are single-witness recollections of unrecorded private conversations (Stewart, Ward, Siegal) — accurately attributed, but the exact words are inherently unverifiable beyond the speaker's own account.</li>
+      <li>Ward's broader narrative is contested: Graydon Carter disputes her account of the 2003 edit, and a 2022 New Yorker piece challenged aspects of her reporting.</li>
+      <li>Siegal and Botstein are self-interested narrators whose statements were later shown incomplete by further reporting or investigation.</li>
+      <li>The Kellen statement came via a spokesperson, not directly from her, and her victim/facilitator status is contested elsewhere in the litigation.</li>
+      <li>Sworn testimony (Sjoberg, Rizzo) is denied as to underlying conduct by Maxwell, Prince Andrew, and the Dubin family — not the fact that the testimony was given.</li>
+      <li>Two minor factual wrinkles inside otherwise-accurate quotes: the Sjoberg puppet was ITV's Spitting Image, not the BBC; Brockman's description of Epstein owning Victoria's Secret was factually wrong (that was Wexner).</li>
+    </ul>
+    <p class="methodology">Methodology: 5 search angles → 22 sources fetched → 103 candidate claims extracted → 25 independently verified via 3-vote adversarial panel (need 2/3 to confirm) → merged into the 9 accounts above. 0 claims refuted, 0 left unverified. Full source report: <code>reports/epstein_firsthand_accounts_2026_07_05.md</code></p>
+  </div>
+
+</div>
+</body>
+</html>

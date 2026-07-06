@@ -30,7 +30,7 @@ mod agent_io;
 mod agent_define;
 mod pane;
 mod blockfile;
-mod session;
+pub(crate) mod session;
 mod identity;
 mod bundle;
 mod memory;
