@@ -875,12 +875,12 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             // the reducer's MoveTab doesn't enforce this (intentionally,
             // for sagas that legitimately drain a workspace to delete
             // it). Keep the guard at the RPC layer where the policy
-            // belongs. **Read SQLite, not reducer state** — during the
-            // migration window, wcore-direct tab paths
-            // (PromoteBlockToTab, etc.) leave reducer.tab_ids stale,
-            // so a reducer-state guard would falsely reject valid
-            // moves. SQLite is the source of truth (codex P1 round-2
-            // #621).
+            // belongs. Reads SQLite rather than reducer state — as of
+            // SPEC_864 Phase 5 every tab-set mutation (CreateTab, MoveTab,
+            // and the PromoteBlockToTab/TearOffBlock/TearOffTab sagas) is
+            // reducer-routed, so the two are expected to agree; SQLite is
+            // just the existing read path here, not a staleness workaround
+            // (codex P1 round-2 #621, which motivated it, predates that).
             match store.get::<Workspace>(&source_ws_id) {
                 Ok(Some(src_ws)) => {
                     let total_tabs = src_ws.tabids.len() + src_ws.pinnedtabids.len();
