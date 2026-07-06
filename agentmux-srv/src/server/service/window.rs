@@ -464,13 +464,21 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
         // SetWindowPosAndSize just above — window opacity isn't
         // reducer-tracked state (see `state::WindowRecord`), so there's
         // no split-brain risk to route around the way #864's layout
-        // tree had. `opacity: None` clears back to fully-opaque/unset.
+        // tree had. `opacity: None` clears back to fully-opaque/unset —
+        // that's a real, destructive state change (unlike pos/size's
+        // `None` in SetWindowPosAndSize, which just means "skip this
+        // field"), so unlike that handler a malformed (non-null,
+        // non-f32) argument must surface as an error, not get silently
+        // treated as an explicit clear. (reagent P1.)
         "SetWindowOpacity" => {
             let window_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            let opacity: Option<f32> = service::get_optional_arg(args, 1).unwrap_or(None);
+            let opacity: Option<f32> = match service::get_optional_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
             if let Some(o) = opacity {
                 if !(0.0..=1.0).contains(&o) {
                     return WebReturnType::error(format!(
@@ -663,6 +671,38 @@ mod set_window_opacity_tests {
         let state = test_state();
         let ret = handle_window_service(&state, &call("ghost-window", Some(0.5))).await;
         assert!(!ret.success, "unknown window must error");
+    }
+
+    /// reagent P1: a malformed (non-null, non-f32) opacity argument must
+    /// surface as an error, not be silently swallowed into an explicit
+    /// clear — `None` here means "wipe the persisted opacity," a real
+    /// state change, so a parse failure must not be conflated with it.
+    #[tokio::test]
+    async fn malformed_opacity_errors_and_does_not_clear() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        let set_ret = handle_window_service(&state, &call(&window_id, Some(0.6))).await;
+        assert!(set_ret.success);
+
+        let bad_call = WebCallType {
+            service: "window".to_string(),
+            method: "SetWindowOpacity".to_string(),
+            uicontext: None,
+            args: vec![
+                serde_json::Value::String(window_id.clone()),
+                serde_json::Value::String("not-a-number".to_string()),
+            ],
+        };
+        let ret = handle_window_service(&state, &bad_call).await;
+        assert!(!ret.success, "malformed opacity must error, not be treated as clear");
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(
+            win.opacity,
+            Some(0.6),
+            "a rejected malformed argument must not wipe the previously-set opacity"
+        );
     }
 
     #[tokio::test]
