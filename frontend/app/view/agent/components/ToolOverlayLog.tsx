@@ -18,6 +18,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
+import { atoms } from "@/app/store/global";
 import { Markdown } from "@/app/element/markdown";
 import { BashOutputViewer } from "./BashOutputViewer";
 import { CompactResult } from "./CompactResult";
@@ -91,6 +92,20 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     const hasChunks = () => (props.node.log?.chunks?.length ?? 0) > 0;
     const hasResult = () => props.node.result != null;
     const chunks = () => props.node.log?.chunks ?? [];
+
+    // Mirrors the `<Switch>` branches below exactly — used only to detect
+    // when the RENDERED branch changes (for the height-FLIP effect further
+    // down), so it must stay a plain function, not a `createMemo`: see the
+    // "INLINE prop access pattern" note above `isStreaming` — memoizing
+    // anything derived from `props.node.log?.chunks` has previously broken
+    // reactivity for in-place chunk-array mutations (PR #884/#885/#886).
+    type LogBranch = "streaming" | "result" | "chunks-final" | "empty";
+    const branch = (): LogBranch => {
+        if (isStreaming() && hasChunks()) return "streaming";
+        if (!isStreaming() && hasResult()) return "result";
+        if (!isStreaming() && !hasResult() && hasChunks()) return "chunks-final";
+        return "empty";
+    };
 
     // Auto-stick to bottom while the user hasn't scrolled away. The
     // threshold is forgiving — within 40px of the bottom counts as
@@ -184,6 +199,96 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         }
     });
 
+    // FLIP-style height transition when the rendered `<Switch>` branch below
+    // changes (running -> terminal, most commonly): `ChunkList` and
+    // `ToolOverlayResult` are different component trees with different
+    // natural heights, and today they swap with zero transition — the
+    // "jerk" in ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md.
+    //
+    // `lastMeasuredHeight`/`lastBranch` hold the values captured on the
+    // PREVIOUS run of this effect — i.e. the DOM height as it stood just
+    // before whatever change triggered the CURRENT run. That's exactly the
+    // FLIP "before" state, and it's the only way to get it: Solid effects
+    // always run after the DOM has already been patched for the change
+    // that triggered them, so there is no "before" to read within the same
+    // invocation. This only works because nothing else in this component
+    // mutates `scrollRef`'s height between effect runs.
+    let lastMeasuredHeight = 0;
+    let lastBranch: LogBranch | undefined;
+    let cancelHeightFlip: (() => void) | undefined;
+    // Set while the panel is (or was) content-visibility:hidden and we
+    // couldn't safely measure. A failed/denied/canceled tool auto-collapses
+    // the instant it leaves "running" (`ToolBlock.tsx` autoExpanded()), so
+    // the running->result branch change commonly happens entirely while
+    // hidden — without this flag, the first re-measurement after the user
+    // later expands the panel would FLIP from the stale pre-collapse
+    // ("streaming") height to the current one instead of just showing the
+    // final state (reagent P1 on PR #1975).
+    let heightStale = false;
+    // Guards the same `<Index>` slot-position hazard `ToolBlock.tsx` guards
+    // via `prevNodeId` (PR #1317, `AgentDocumentVirtualList.tsx:193-194`): a
+    // streaming-buffer cap-advance can swap a different tool node into this
+    // component instance without it ever unmounting. Without this guard the
+    // outgoing node's `lastBranch`/`lastMeasuredHeight` would leak into the
+    // incoming node's first render and could spuriously satisfy
+    // `prevBranch !== b`, FLIPping from the old tool's height to the new
+    // tool's height (reagent P1 round 2 on PR #1975).
+    let lastNodeId: string = props.node.id;
+
+    createEffect(() => {
+        const b = branch();
+        chunks(); // also re-measure as chunks stream in, not just on branch changes
+        const hidden = panelHidden();
+        const el = scrollRef;
+        if (!el) return;
+
+        const nodeId = props.node.id;
+        if (nodeId !== lastNodeId) {
+            // Reset the baseline to the incoming node's own branch/height —
+            // never animate across the swap itself — so a genuine later
+            // branch change on THIS node can still FLIP correctly.
+            lastNodeId = nodeId;
+            lastBranch = b;
+            heightStale = hidden;
+            lastMeasuredHeight = hidden ? lastMeasuredHeight : el.scrollHeight;
+            return;
+        }
+
+        if (hidden) {
+            // Reading scrollHeight here would force a synchronous layout on
+            // a content-visibility:hidden subtree (same hazard as the
+            // auto-scroll effect above). Track the logical branch (cheap,
+            // no DOM read) so a genuine change is still recorded, but mark
+            // the height stale — resolved as a silent resync, not a FLIP,
+            // the next time this runs while visible.
+            lastBranch = b;
+            heightStale = true;
+            return;
+        }
+
+        const prevBranch = lastBranch;
+        const prevHeight = lastMeasuredHeight;
+        const newHeight = el.scrollHeight;
+
+        const shouldAnimate =
+            !heightStale &&
+            prevBranch !== undefined &&
+            prevBranch !== b &&
+            prevHeight > 0 &&
+            Math.abs(newHeight - prevHeight) > 1 &&
+            !atoms.prefersReducedMotionAtom();
+        heightStale = false;
+
+        if (shouldAnimate) {
+            cancelHeightFlip?.();
+            cancelHeightFlip = flipHeight(el, prevHeight, newHeight);
+        }
+
+        lastBranch = b;
+        lastMeasuredHeight = newHeight;
+    });
+    onCleanup(() => cancelHeightFlip?.());
+
     /**
      * Render decision — exhaustive, mutually exclusive branches via
      * `<Switch>` rather than the prior 4-way `<Show>` cascade that
@@ -219,6 +324,43 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         </div>
     );
 };
+
+const HEIGHT_FLIP_MS = 150;
+
+/**
+ * Classic FLIP height transition: freeze `el` at `fromPx` (forcing a reflow
+ * so the browser commits it before animating), then ease to `toPx`,
+ * clearing the inline style once the transition ends so the box goes back
+ * to tracking its content naturally. `overflow-y` is forced to `hidden`
+ * for the transition's duration only, so the internal scrollbar doesn't
+ * flash on/off as the height passes through intermediate values.
+ *
+ * Returns a cancel function — call it if another transition needs to start
+ * before this one finishes (the caller always cancels the previous one
+ * before starting a new one, so at most one is ever in flight per element).
+ */
+function flipHeight(el: HTMLElement, fromPx: number, toPx: number): () => void {
+    el.style.transition = "none";
+    el.style.height = `${fromPx}px`;
+    el.style.overflowY = "hidden";
+    void el.offsetHeight; // force reflow so the "from" height commits before animating
+    el.style.transition = `height ${HEIGHT_FLIP_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+    const raf = requestAnimationFrame(() => {
+        el.style.height = `${toPx}px`;
+    });
+    const onEnd = (e: TransitionEvent) => {
+        if (e.target === el && e.propertyName === "height") cleanup();
+    };
+    const cleanup = () => {
+        cancelAnimationFrame(raf);
+        el.style.transition = "";
+        el.style.height = "";
+        el.style.overflowY = "";
+        el.removeEventListener("transitionend", onEnd);
+    };
+    el.addEventListener("transitionend", onEnd);
+    return cleanup;
+}
 
 type LogChunk = { kind: string; content: string; timestamp: number };
 

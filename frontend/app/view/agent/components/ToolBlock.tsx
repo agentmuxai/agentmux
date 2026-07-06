@@ -41,6 +41,34 @@ import { createBlock } from "@/store/global";
 import type { ToolNode } from "../types";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 
+/**
+ * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
+ * Solid-level mount of the element (i.e. when the enclosing `<Show>`
+ * flips true because the tool's status actually changed). A persistent
+ * CSS `animation:` on the selector itself would ALSO retrigger on any
+ * unrelated `display:none` <-> visible toggle — e.g. `.agent-tool-result-
+ * pill`'s `@container` breakpoint at 600px (`_responsive.scss`) applies
+ * regardless of tool status, so resizing the pane across that width would
+ * replay the fade-in on every already-completed, unrelated tool call
+ * (reagent P2 on PR #1975). A ref only fires once, at real DOM insertion.
+ *
+ * The `classList.add` is deferred a microtask: `ref` callbacks fire at
+ * element CREATION, before Solid's own effect for this element's dynamic
+ * `class={...}` expression has run (that effect sets `el.className`
+ * wholesale, not via `classList`) — mutating classList synchronously in
+ * the ref gets immediately clobbered by that later assignment. Deferring
+ * past the current synchronous render lets Solid's class effect finish
+ * first, so this addition survives.
+ */
+function fadeInOnMount(el: HTMLElement): void {
+    queueMicrotask(() => {
+        el.classList.add("agent-tool-fade-in-once");
+        el.addEventListener("animationend", () => el.classList.remove("agent-tool-fade-in-once"), {
+            once: true,
+        });
+    });
+}
+
 function ToolElapsedTicker(props: { startMs: number }): JSX.Element {
     const tick = useTick(1000);
     const elapsed = createMemo(() => (tick(), Math.floor((Date.now() - props.startMs) / 1000)));
@@ -260,7 +288,10 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
                 </Show>
                 <Show when={resultPill() != null}>
-                    <span class={`agent-tool-result-pill pill-${resultPill()?.variant}`}>
+                    <span
+                        ref={fadeInOnMount}
+                        class={`agent-tool-result-pill pill-${resultPill()?.variant}`}
+                    >
                         {resultPill()?.label}
                     </span>
                 </Show>
