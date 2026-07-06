@@ -1064,9 +1064,8 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
             };
 
             // Layout setup for the new tab — make the moved block its
-            // single root node so the frontend renders it. Mirrors
-            // wcore::tear_off_block. Best-effort; reducer-routed
-            // (SPEC_864 Phase 3 seed / Phase 4 queue).
+            // single root node so the frontend renders it. Best-effort;
+            // reducer-routed (SPEC_864 Phase 3 seed / Phase 4 queue).
             if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
                 tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
             }
