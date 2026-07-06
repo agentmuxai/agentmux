@@ -1,5 +1,12 @@
 # AgentMux Version History
 
+## 0.50.3 — 2026-07-06
+
+- feat(tabs): active tab's custom color traces the tab strip's boundary line
+- fix(layout): SPEC_864 Phase 5 — delete the heal_layout/reorder-relaxation backstops now that no Path-B writer remains
+- feat(srv): SPEC_PILLAR1_STEP2 — SetWindowOpacity RPC, durable per-window opacity mirror
+
+
 ## 0.50.2 — 2026-07-06
 
 - feat(agent): ghost-text next-prompt suggestion via the Ambient Model Call gateway
