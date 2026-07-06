@@ -9,12 +9,12 @@ import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
-import { makeORef, getObjectValue } from "../store/wos";
+import { makeORef, getObjectValue, getWaveObjectAtom } from "../store/wos";
 import { ConfirmModal } from "@/element/modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { deleteLayoutModelForTab } from "@/layout/index";
@@ -653,6 +653,21 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
+    // Active tab's color, reactive to both which tab is active AND that
+    // tab's own color changing while it stays active — same two-level-memo
+    // pattern tabcontent.tsx uses (a plain `getObjectValue` read wouldn't
+    // re-subscribe when only the color, not the active id, changes).
+    // Rendered as a line under .tab-bar-scroll specifically (not .tab-bar,
+    // which also contains the hamburger) so it spans exactly the tab
+    // strip's own width — right of the hamburger, left of the header
+    // widgets — rather than the full window-header width.
+    const activeTabAtom = createMemo(() => getWaveObjectAtom<Tab>(makeORef("tab", activeTabId())));
+    const activeTabData = createMemo(() => activeTabAtom()());
+    const activeTabColor = createMemo((): string | undefined | null => activeTabData()?.meta?.["tab:color"] as string | undefined | null);
+    const scrollStyle = (): JSX.CSSProperties => (
+        activeTabColor() ? { "box-shadow": `inset 0 -2px 0 0 ${activeTabColor()}` } : {}
+    );
+
     return (
         <div class="tab-bar" {...dragProps}>
             {/* Windows/Linux: hamburger sits at the LEFT of the tab strip.
@@ -662,7 +677,7 @@ function TabBar(props: TabBarProps): JSX.Element {
             <Show when={!isMacOS()}>
                 <HamburgerMenu />
             </Show>
-            <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
+            <div ref={tabBarScrollRef!} class="tab-bar-scroll" style={scrollStyle()} data-drag-region="false">
                 {/* When the hamburger sits to the left of the tabs (Windows/
                     Linux), give the hamburger→first-tab boundary the SAME 1px
                     separator every tab-to-tab boundary has — otherwise the
