@@ -225,6 +225,15 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // ("streaming") height to the current one instead of just showing the
     // final state (reagent P1 on PR #1975).
     let heightStale = false;
+    // Guards the same `<Index>` slot-position hazard `ToolBlock.tsx` guards
+    // via `prevNodeId` (PR #1317, `AgentDocumentVirtualList.tsx:193-194`): a
+    // streaming-buffer cap-advance can swap a different tool node into this
+    // component instance without it ever unmounting. Without this guard the
+    // outgoing node's `lastBranch`/`lastMeasuredHeight` would leak into the
+    // incoming node's first render and could spuriously satisfy
+    // `prevBranch !== b`, FLIPping from the old tool's height to the new
+    // tool's height (reagent P1 round 2 on PR #1975).
+    let lastNodeId: string = props.node.id;
 
     createEffect(() => {
         const b = branch();
@@ -232,6 +241,18 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         const hidden = panelHidden();
         const el = scrollRef;
         if (!el) return;
+
+        const nodeId = props.node.id;
+        if (nodeId !== lastNodeId) {
+            // Reset the baseline to the incoming node's own branch/height —
+            // never animate across the swap itself — so a genuine later
+            // branch change on THIS node can still FLIP correctly.
+            lastNodeId = nodeId;
+            lastBranch = b;
+            heightStale = hidden;
+            lastMeasuredHeight = hidden ? lastMeasuredHeight : el.scrollHeight;
+            return;
+        }
 
         if (hidden) {
             // Reading scrollHeight here would force a synchronous layout on

@@ -171,6 +171,46 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         expect(el.style.height).toBe(""); // resynced silently, no FLIP
     });
 
+    it("does not animate when a different tool node swaps into the same slot", async () => {
+        // Simulates a streaming-buffer cap-advance swapping a different tool
+        // node into the same <Index> slot without ever unmounting this
+        // component (reagent P1 round 2 on #1975) — mirrors the
+        // `prevNodeId` guard `ToolBlock.tsx` already applies for the
+        // analogous slot-reuse hazard on `onHoldOpen` (PR #1317).
+        vi.useFakeTimers();
+        stubScrollHeight(40); // tc-1's "streaming" height
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+        await vi.runOnlyPendingTimersAsync();
+        expect(el.style.height).toBe("");
+
+        // A different node (new id) reuses this slot, already in its
+        // terminal branch, with a very different natural height.
+        const otherNode: ToolNode = {
+            ...terminalNode,
+            id: "tc-2",
+        };
+        stubScrollHeight(500);
+        setNode(otherNode);
+        await vi.runOnlyPendingTimersAsync();
+        // Must resync silently — NOT FLIP from tc-1's stale 40px baseline.
+        expect(el.style.height).toBe("");
+
+        // A genuine branch change on the NEW node (tc-2) afterwards must
+        // still be able to FLIP correctly — the reset must not poison the
+        // baseline for the node going forward. Its baseline height is now
+        // 500px (tc-2's own terminal-branch height, recorded at the swap),
+        // so this eases from 500px down to the new 120px.
+        stubScrollHeight(120);
+        setNode({ ...otherNode, log: { open: true, chunks: [{ kind: "stdout", content: "x", timestamp: 1 }] } });
+        expect(el.style.height).toBe("500px"); // frozen "from" synchronously
+        await vi.runOnlyPendingTimersAsync();
+        expect(el.style.height).toBe("120px"); // eased to the "to" height
+
+        vi.useRealTimers();
+    });
+
     it("does not animate when the user prefers reduced motion", async () => {
         reducedMotion = true;
         vi.useFakeTimers();
