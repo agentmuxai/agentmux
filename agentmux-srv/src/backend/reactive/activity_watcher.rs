@@ -7,6 +7,12 @@
 //! result as an `agent:summary` WaveEvent — so panes (the swarm feed, in
 //! particular) can show a live one-liner without polling.
 //!
+//! Each call goes through `app_api::session::generate_pushed_activity_summary`,
+//! which routes it through the Ambient Model Call gateway (`crate::ambient`)
+//! under its own purpose tag — distinct from the pull RPC's, so a periodic
+//! background summary never contends with a live, user-facing pane-header
+//! request for the same block.
+//!
 //! Cost controls:
 //!   - skipped entirely for agents whose controller isn't `STATUS_RUNNING`
 //!     (an idle/stopped pane costs nothing)
@@ -42,9 +48,11 @@ const SWEEP_INTERVAL_SECS: u64 = 20;
 /// Max simultaneous Haiku CLI spawns across all agents.
 const MAX_CONCURRENT_SUMMARIES: usize = 2;
 
-/// Word budget for the pushed summary (a bit tighter than the pull RPC's
-/// default, since this renders in a narrow swarm-tree row rather than a
-/// pane title).
+/// Word budget for the pushed summary. Matches the frontend's dynamic cap
+/// for `session:activity_summary` (`useAgentActivitySummary.ts`), not that
+/// RPC's own bare default of 7 (`app_api/session.rs`'s `unwrap_or(7)`) — the
+/// pull path's effective width varies with pane size, so 12 is the closest
+/// fixed stand-in for a swarm-tree row rather than a claim of being tighter.
 const WORD_TARGET: u32 = 12;
 
 pub const EVENT_AGENT_SUMMARY: &str = "agent:summary";
