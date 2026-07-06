@@ -664,9 +664,14 @@ function TabBar(props: TabBarProps): JSX.Element {
     const activeTabAtom = createMemo(() => getWaveObjectAtom<Tab>(makeORef("tab", activeTabId())));
     const activeTabData = createMemo(() => activeTabAtom()());
     const activeTabColor = createMemo((): string | undefined | null => activeTabData()?.meta?.["tab:color"] as string | undefined | null);
-    const scrollStyle = (): JSX.CSSProperties => (
-        activeTabColor() ? { "box-shadow": `inset 0 -2px 0 0 ${activeTabColor()}` } : {}
-    );
+    // Starts at the first TAB's own left edge, not .tab-bar-scroll's — on
+    // Windows/Linux that container also includes the leading separator
+    // (the hamburger→first-tab hairline below), which a plain box-shadow on
+    // the container would paint over too. A dedicated absolutely-positioned
+    // line (rather than a box-shadow on the container) lets `left` skip past
+    // it explicitly. macOS has no leading separator (hamburger renders
+    // elsewhere), so the line starts flush at 0 there.
+    const activeLineLeft = () => (isMacOS() ? "0" : "var(--tab-separator-width, 1px)");
 
     return (
         <div class="tab-bar" {...dragProps}>
@@ -677,7 +682,22 @@ function TabBar(props: TabBarProps): JSX.Element {
             <Show when={!isMacOS()}>
                 <HamburgerMenu />
             </Show>
-            <div ref={tabBarScrollRef!} class="tab-bar-scroll" style={scrollStyle()} data-drag-region="false">
+            <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
+                <Show when={activeTabColor()}>
+                    <div
+                        class="active-tab-color-line"
+                        aria-hidden="true"
+                        style={{
+                            position: "absolute",
+                            left: activeLineLeft(),
+                            right: "0",
+                            bottom: "0",
+                            height: "2px",
+                            background: activeTabColor()!,
+                            "pointer-events": "none",
+                        }}
+                    />
+                </Show>
                 {/* When the hamburger sits to the left of the tabs (Windows/
                     Linux), give the hamburger→first-tab boundary the SAME 1px
                     separator every tab-to-tab boundary has — otherwise the
