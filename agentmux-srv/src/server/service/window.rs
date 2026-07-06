@@ -457,6 +457,38 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        // SPEC_PILLAR1_STEP2 (Slice A, Phase 1) — durable mirror of the
+        // host's per-window opacity so a crashed/restarted host can
+        // restore it (Phase 2, not yet wired: nothing calls this arm
+        // today). Direct store read-modify-write, same shape as
+        // SetWindowPosAndSize just above — window opacity isn't
+        // reducer-tracked state (see `state::WindowRecord`), so there's
+        // no split-brain risk to route around the way #864's layout
+        // tree had. `opacity: None` clears back to fully-opaque/unset.
+        "SetWindowOpacity" => {
+            let window_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let opacity: Option<f32> = service::get_optional_arg(args, 1).unwrap_or(None);
+            if let Some(o) = opacity {
+                if !(0.0..=1.0).contains(&o) {
+                    return WebReturnType::error(format!(
+                        "SetWindowOpacity: opacity must be in 0.0..=1.0, got {o}"
+                    ));
+                }
+            }
+            match store.must_get::<Window>(&window_id) {
+                Ok(mut win) => {
+                    win.opacity = opacity;
+                    match store.update(&mut win) {
+                        Ok(_) => WebReturnType::success_empty(),
+                        Err(e) => WebReturnType::error(e.to_string()),
+                    }
+                }
+                Err(e) => WebReturnType::error(e.to_string()),
+            }
+        }
         _ => WebReturnType::error(format!("unknown window method: {}", call.method)),
     }
 }
@@ -538,5 +570,111 @@ mod create_window_seed_tests {
             "tear-off from a freshly-created window must succeed, got: {:?}",
             result.err()
         );
+    }
+}
+
+/// SPEC_PILLAR1_STEP2 Slice A Phase 1 — `SetWindowOpacity` unit tests.
+#[cfg(test)]
+mod set_window_opacity_tests {
+    use super::handle_window_service;
+    use crate::backend::obj::Window;
+    use crate::backend::service::WebCallType;
+    use crate::server::tests::test_state;
+
+    fn call(window_id: &str, opacity: Option<f32>) -> WebCallType {
+        WebCallType {
+            service: "window".to_string(),
+            method: "SetWindowOpacity".to_string(),
+            uicontext: None,
+            args: vec![
+                serde_json::Value::String(window_id.to_string()),
+                opacity
+                    .map(|o| serde_json::json!(o))
+                    .unwrap_or(serde_json::Value::Null),
+            ],
+        }
+    }
+
+    async fn seeded_window_id(state: &crate::server::AppState) -> String {
+        let ret = handle_window_service(
+            state,
+            &WebCallType {
+                service: "window".to_string(),
+                method: "CreateWindow".to_string(),
+                uicontext: None,
+                args: vec![
+                    serde_json::Value::Null,
+                    serde_json::Value::String(String::new()),
+                ],
+            },
+        )
+        .await;
+        assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+        ret.data
+            .expect("CreateWindow returns the Window")
+            .get("oid")
+            .and_then(|v| v.as_str())
+            .expect("window has an oid")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn sets_and_persists_opacity() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        let ret = handle_window_service(&state, &call(&window_id, Some(0.85))).await;
+        assert!(ret.success, "SetWindowOpacity failed: {:?}", ret.error);
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.opacity, Some(0.85));
+    }
+
+    #[tokio::test]
+    async fn null_opacity_clears_it() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        handle_window_service(&state, &call(&window_id, Some(0.5)))
+            .await;
+        let ret = handle_window_service(&state, &call(&window_id, None)).await;
+        assert!(ret.success, "SetWindowOpacity (clear) failed: {:?}", ret.error);
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.opacity, None, "None must clear back to unset/opaque");
+    }
+
+    #[tokio::test]
+    async fn rejects_out_of_range_opacity() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        for bad in [-0.1_f32, 1.1_f32] {
+            let ret = handle_window_service(&state, &call(&window_id, Some(bad))).await;
+            assert!(!ret.success, "opacity {bad} must be rejected");
+        }
+        // Rejected — window's opacity must stay unset.
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.opacity, None);
+    }
+
+    #[tokio::test]
+    async fn errors_on_unknown_window() {
+        let state = test_state();
+        let ret = handle_window_service(&state, &call("ghost-window", Some(0.5))).await;
+        assert!(!ret.success, "unknown window must error");
+    }
+
+    #[tokio::test]
+    async fn boundary_values_are_accepted() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        for boundary in [0.0_f32, 1.0_f32] {
+            let ret = handle_window_service(&state, &call(&window_id, Some(boundary))).await;
+            assert!(ret.success, "boundary opacity {boundary} must be accepted");
+            let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+            assert_eq!(win.opacity, Some(boundary));
+        }
     }
 }
