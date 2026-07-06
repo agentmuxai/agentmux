@@ -346,8 +346,11 @@ pub struct Window {
     /// SPEC_PILLAR1_STEP2 — the host's last-set opacity for this window
     /// (`0.0..=1.0`), so a crashed/restarted host can restore it instead
     /// of defaulting to fully opaque. `None` = never set / fully opaque.
-    /// Written only via `Command::SetWindowOpacity`; the host is the
-    /// sole source of truth for the live value, this is a durable mirror.
+    /// Written only via the `SetWindowOpacity` RPC (a direct store
+    /// read-modify-write, not a reducer-dispatched Command — see
+    /// `server::service::window::handle_window_service`); the host is
+    /// the sole source of truth for the live value, this is a durable
+    /// mirror.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f32>,
     #[serde(default, serialize_with = "serialize_meta_as_null_if_empty", deserialize_with = "deserialize_meta_or_null")]
