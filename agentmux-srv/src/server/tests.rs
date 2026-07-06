@@ -824,6 +824,260 @@ async fn layout_seed_unknown_tab_errors() {
     assert!(err.contains("unknown tab"), "got: {err}");
 }
 
+/// SPEC_864 Phase 5, DoD #3 — `TabRecord.rootnode` (reducer) must equal
+/// `db_layout.rootnode` (persisted) after EVERY layout-mutating op, not
+/// just immediately post-seed. This is the capstone coherence check for
+/// the single-writer collapse: chains split → resize → swap → replace →
+/// Phase-4 queue-append → frontend-ack (LayoutSetTree) → delete-by-block
+/// (twice, ending in a root-orphan clear), asserting coherence after
+/// every step. A regression that only manifests a few ops into a real
+/// session (e.g. a granular arm's `new_tree` going stale, or the queue's
+/// append/replace semantics interacting badly) wouldn't be caught by a
+/// single seed-then-check test.
+#[tokio::test]
+async fn layout_stays_coherent_across_full_mutation_lifecycle() {
+    use agentmux_common::ipc::{Command, Event};
+    use agentmux_common::{LayoutNode, LayoutNodeData, LayoutClientSlices, ResizeOp, SplitPosition};
+    use crate::backend::obj::{LayoutState, Tab};
+
+    let state = test_state();
+    let wstore = state.wstore.clone();
+    let srv_state = state.srv_state.clone();
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        assert!(
+            !events.iter().any(|e| matches!(e, Event::Error { .. })),
+            "unexpected reducer error: {:?}",
+            events
+        );
+        for ev in &events {
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+        }
+        events
+    }
+
+    async fn assert_coherent(state: &AppState, tab_id: &str, step: &str) {
+        let tab = state.wstore.get::<Tab>(tab_id).unwrap().unwrap();
+        let db_layout = state
+            .wstore
+            .get::<LayoutState>(&tab.layoutstate)
+            .unwrap()
+            .unwrap();
+        let s = state.srv_state.lock().await;
+        let rec = s.tabs.get(tab_id).expect("reducer knows tab");
+        assert_eq!(
+            rec.rootnode, db_layout.rootnode,
+            "TabRecord.rootnode != db_layout.rootnode after {step}"
+        );
+    }
+
+    fn leaf(id: &str, block_id: &str) -> LayoutNode {
+        LayoutNode {
+            id: id.into(),
+            data: Some(LayoutNodeData {
+                block_id: block_id.into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "ws".into() }).await;
+    let ws_id = ws_evs
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_evs = dispatch_apply(
+        &state,
+        Command::CreateTab {
+            workspace_id: ws_id,
+            name: "t".into(),
+        },
+    )
+    .await;
+    let tab_id = tab_evs
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+
+    // Seed: single leaf via the reducer-routed tear-off-style seeder.
+    crate::server::service::setup_torn_off_block_layout(&state, &tab_id, "b1")
+        .await
+        .unwrap();
+    assert_coherent(&state, &tab_id, "seed").await;
+    let root_id = {
+        let s = srv_state.lock().await;
+        s.tabs[&tab_id].rootnode.as_ref().unwrap().id.clone()
+    };
+
+    // Split: wrap root in a new group, adding a second leaf.
+    dispatch_apply(
+        &state,
+        Command::LayoutSplitVertical {
+            tab_id: tab_id.clone(),
+            target_id: root_id.clone(),
+            new_node: leaf("n2", "b2"),
+            position: SplitPosition::After,
+            focus_after: true,
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "split").await;
+
+    // Resize both leaves.
+    dispatch_apply(
+        &state,
+        Command::LayoutResizeNodes {
+            tab_id: tab_id.clone(),
+            ops: vec![
+                ResizeOp { node_id: root_id.clone(), size: 3.0 },
+                ResizeOp { node_id: "n2".into(), size: 7.0 },
+            ],
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "resize").await;
+
+    // Swap the two leaves.
+    dispatch_apply(
+        &state,
+        Command::LayoutSwapNodes {
+            tab_id: tab_id.clone(),
+            node1_id: root_id.clone(),
+            node2_id: "n2".into(),
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "swap").await;
+
+    // Replace the second leaf with a brand-new one (b2 -> b3).
+    dispatch_apply(
+        &state,
+        Command::LayoutReplaceNode {
+            tab_id: tab_id.clone(),
+            target_id: "n2".into(),
+            new_node: leaf("n3", "b3"),
+            focus_after: false,
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "replace").await;
+
+    // Phase 4: queue-append a backend action (does not touch the tree).
+    let action = serde_json::json!([{
+        "actiontype": "insert",
+        "actionid": "a-fe",
+        "blockid": "b-fe",
+        "nodesize": null,
+        "nodesizefraction": null,
+        "indexarr": null,
+        "focused": true,
+        "magnified": false,
+        "ephemeral": false,
+        "targetblockid": "",
+        "position": "",
+    }]);
+    crate::server::service::queue_layout_actions_via_reducer(
+        &state,
+        &tab_id,
+        serde_json::from_value(action).unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_coherent(&state, &tab_id, "queue-append").await;
+    {
+        let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
+        let layout = wstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
+        assert_eq!(
+            layout.pendingbackendactions.as_ref().map(|a| a.len()),
+            Some(1),
+            "queued action must persist before the frontend acks it"
+        );
+    }
+
+    // Frontend ack: push the tree with the new block inserted + an empty
+    // pending-actions slice (REPLACE-clear, matching the real ack path).
+    let acked_tree = LayoutNode {
+        id: "root-acked".into(),
+        children: vec![leaf(&root_id, "b1"), leaf("n3", "b3"), leaf("n4", "b-fe")],
+        ..Default::default()
+    };
+    dispatch_apply(
+        &state,
+        Command::LayoutSetTree {
+            tab_id: tab_id.clone(),
+            new_tree: Some(acked_tree),
+            correlation_id: String::new(),
+            slices: Some(LayoutClientSlices {
+                leaforder: None,
+                focused_node_id: "n4".into(),
+                magnified_node_id: String::new(),
+                pending_backend_actions: None,
+            }),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "frontend-ack").await;
+    {
+        let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
+        let layout = wstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
+        assert!(
+            layout.pendingbackendactions.is_none(),
+            "ack slice must clear the queue"
+        );
+    }
+
+    // Delete the newly-acked block by id — tree survives (2 leaves left).
+    dispatch_apply(
+        &state,
+        Command::LayoutDeleteNodeByBlock {
+            tab_id: tab_id.clone(),
+            block_id: "b-fe".into(),
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "delete-by-block (b-fe)").await;
+
+    // Delete b1 — one leaf left.
+    dispatch_apply(
+        &state,
+        Command::LayoutDeleteNodeByBlock {
+            tab_id: tab_id.clone(),
+            block_id: "b1".into(),
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "delete-by-block (b1)").await;
+
+    // Delete the last block — root-orphan clear (rootnode -> None on both sides).
+    dispatch_apply(
+        &state,
+        Command::LayoutDeleteNodeByBlock {
+            tab_id: tab_id.clone(),
+            block_id: "b3".into(),
+            correlation_id: String::new(),
+        },
+    )
+    .await;
+    assert_coherent(&state, &tab_id, "delete-by-block (b3, root orphan)").await;
+    let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
+    let layout = wstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
+    assert!(layout.rootnode.is_none(), "tree must be fully empty at the end");
+}
+
 #[test]
 fn clean_name_trims_clamps_and_rejects_empty() {
     use super::clean_name;
