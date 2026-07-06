@@ -111,8 +111,64 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
 /// as the token-usage/cost-dashboard category for this call site.
 const AMBIENT_PURPOSE_ACTIVITY_SUMMARY: &str = "activity_summary";
 
+/// Purpose tag for the background/pushed activity summary (the swarm-feed
+/// sweep in `backend::reactive::activity_watcher`) — distinct from
+/// `AMBIENT_PURPOSE_ACTIVITY_SUMMARY` so the two never contend for the same
+/// Ambient Model Call gateway slot. A periodic background summary should not
+/// cancel, or be cancelled by, a live user-facing pane-header request for
+/// the same block.
+const AMBIENT_PURPOSE_ACTIVITY_SUMMARY_PUSHED: &str = "activity_summary_pushed";
+
 fn empty_summary_result() -> serde_json::Value {
     serde_json::to_value(&ActivitySummaryResult { summary: String::new(), tokens: None }).unwrap()
+}
+
+/// Pushed counterpart of `register_session_activity_summary`'s handler body —
+/// callable directly (no RPC envelope) by the background sweep in
+/// `backend::reactive::activity_watcher`. Goes through the same Ambient
+/// Model Call gateway (admission, cancellation-of-superseded, token
+/// accounting) under the distinct `_PUSHED` purpose above.
+///
+/// `generation` only needs to strictly increase across successive calls for
+/// the *same* `block_id` — the sweep loop's tick counter is sufficient; it
+/// doesn't need to correlate with the pull path's per-turn generation.
+///
+/// Returns `None` when there's nothing to summarize yet, the block/CLI path
+/// isn't resolvable, this call was superseded, or the CLI failed — the
+/// caller treats all of these as "no summary this tick."
+pub(crate) async fn generate_pushed_activity_summary(
+    wstore: &Store,
+    filestore: &crate::backend::storage::filestore::FileStore,
+    block_id: &str,
+    generation: u64,
+    word_target: u32,
+) -> Option<(String, Option<crate::agents::TokenCounts>)> {
+    let word_target = word_target.max(3).min(20);
+
+    let key = crate::ambient::AmbientCallKey::new(block_id, AMBIENT_PURPOSE_ACTIVITY_SUMMARY_PUSHED);
+    let guard = match crate::ambient::gateway().admit(key, generation) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return None,
+    };
+    let cancel = guard.cancellation();
+
+    let block: Block = wstore.get(block_id).ok().flatten()?;
+    let extracted = read_recent_activity_digest(filestore, block_id)?;
+
+    let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+    if cli_path.is_empty() {
+        return None;
+    }
+
+    let prompt = format!(
+        "Summarize in {word_target} words or fewer what is currently being worked on. \
+         Use a short terse phrase with no quotes or punctuation.\n\n\
+         Recent activity:\n\n{extracted}"
+    );
+
+    let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
+    drop(guard);
+    result.filter(|(summary, _)| !summary.is_empty())
 }
 
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {

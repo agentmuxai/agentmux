@@ -3,7 +3,7 @@
 
 pub(crate) mod cli_handlers;
 mod files;
-mod app_api;
+pub(crate) mod app_api;
 mod agent_handlers;
 mod editor_handlers;
 mod identity_handlers;
