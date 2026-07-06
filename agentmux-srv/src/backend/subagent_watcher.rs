@@ -40,6 +40,9 @@ pub struct SubagentInfo {
     pub status: SubagentStatus,
     pub event_count: usize,
     pub model: Option<String>,
+    /// Some("wf_<id>") when this subagent runs inside a Workflow tool run
+    /// (JSONL under `subagents/workflows/<id>/`); None for direct subagents.
+    pub workflow_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -65,6 +68,28 @@ pub enum SubagentEventType {
     Progress { output: String },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowInfo {
+    pub workflow_id: String,
+    pub parent_agent: String,
+    pub parent_block_id: String,
+    pub session_id: String,
+    /// Agents launched, per the run's journal `started` records (falls back
+    /// to the count of member JSONL files seen when the journal lags).
+    pub agents_total: usize,
+    /// Agents finished, per the journal's `result` records.
+    pub agents_done: usize,
+    pub status: WorkflowStatus,
+    pub last_event_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkflowStatus {
+    Running,
+    Completed,
+}
+
 // ── Internal state ────────────────────────────────────────────────────────
 
 struct SessionWatch {
@@ -85,6 +110,17 @@ struct SubagentState {
     events: Vec<SubagentEvent>,
 }
 
+struct WorkflowState {
+    info: WorkflowInfo,
+    journal_offset: u64,
+    /// Journal-sourced counters. `agents_total` in the public info is
+    /// max(journal_started, member files seen) since either side can lag.
+    journal_started: usize,
+    journal_results: usize,
+    member_files: usize,
+    members_completed: usize,
+}
+
 #[allow(dead_code)]
 struct WatchedAgent {
     agent_id: String,
@@ -98,6 +134,7 @@ pub struct SubagentWatcher {
     event_bus: Arc<EventBus>,
     sessions: Mutex<HashMap<String, SessionWatch>>,
     watched_agents: Mutex<Vec<WatchedAgent>>,
+    workflows: Mutex<HashMap<String, WorkflowState>>,
 }
 
 impl SubagentWatcher {
@@ -106,6 +143,7 @@ impl SubagentWatcher {
             event_bus,
             sessions: Mutex::new(HashMap::new()),
             watched_agents: Mutex::new(Vec::new()),
+            workflows: Mutex::new(HashMap::new()),
         }
     }
 
@@ -170,7 +208,13 @@ impl SubagentWatcher {
                     if dominated {
                         for path in event.paths {
                             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                if name.starts_with("agent-") && name.ends_with(".jsonl") {
+                                let is_subagent =
+                                    name.starts_with("agent-") && name.ends_with(".jsonl");
+                                // Workflow run journals live at
+                                // subagents/workflows/<wf>/journal.jsonl and drive
+                                // workflow-level progress counters.
+                                let is_journal = name == "journal.jsonl";
+                                if is_subagent || is_journal {
                                     let _ = tx_clone.send(path);
                                 }
                             }
@@ -249,7 +293,21 @@ impl SubagentWatcher {
                 }
 
                 for changed_path in paths {
-                    self_clone.process_jsonl_change(&parent_agent, &parent_block_id, &changed_path);
+                    let is_journal = changed_path.file_name().and_then(|n| n.to_str())
+                        == Some("journal.jsonl");
+                    if is_journal {
+                        self_clone.process_journal_change(
+                            &parent_agent,
+                            &parent_block_id,
+                            &changed_path,
+                        );
+                    } else {
+                        self_clone.process_jsonl_change(
+                            &parent_agent,
+                            &parent_block_id,
+                            &changed_path,
+                        );
+                    }
                 }
             }
         });
@@ -311,6 +369,20 @@ impl SubagentWatcher {
         result
     }
 
+    /// List all tracked workflow runs (sync — safe to call from RPC dispatch).
+    pub fn list_workflows(&self) -> Vec<WorkflowInfo> {
+        let mut workflows = self.workflows.lock().unwrap();
+        let mut result: Vec<WorkflowInfo> = workflows
+            .values_mut()
+            .map(|state| {
+                Self::refresh_workflow_status(state);
+                state.info.clone()
+            })
+            .collect();
+        result.sort_by(|a, b| b.last_event_at.cmp(&a.last_event_at));
+        result
+    }
+
     /// Get recent events for a specific subagent (sync — safe to call from RPC dispatch).
     pub fn get_history(&self, agent_id: &str, limit: usize) -> Vec<SubagentEvent> {
         let sessions = self.sessions.lock().unwrap();
@@ -338,15 +410,51 @@ impl SubagentWatcher {
         };
 
         for entry in walker.flatten() {
-            let subagents_dir = entry.path().join("subagents");
-            if subagents_dir.is_dir() {
-                if let Ok(files) = std::fs::read_dir(&subagents_dir) {
+            // subagents/ sits directly under the project dir, or one level
+            // deeper under a session dir (projects/<ws>/<session>/subagents).
+            let mut candidates = vec![entry.path().join("subagents")];
+            if let Ok(children) = std::fs::read_dir(entry.path()) {
+                for child in children.flatten() {
+                    candidates.push(child.path().join("subagents"));
+                }
+            }
+            for subagents_dir in candidates {
+                if subagents_dir.is_dir() {
+                    self.scan_subagents_dir(parent_agent, parent_block_id, &subagents_dir);
+                }
+            }
+        }
+    }
+
+    /// Process agent-*.jsonl directly in `dir`, plus workflow runs under
+    /// `dir/workflows/<wf>/` (member agent files + journal).
+    fn scan_subagents_dir(&self, parent_agent: &str, parent_block_id: &str, dir: &Path) {
+        if let Ok(files) = std::fs::read_dir(dir) {
+            for file in files.flatten() {
+                let path = file.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("agent-") && name.ends_with(".jsonl") {
+                        self.process_jsonl_change(parent_agent, parent_block_id, &path);
+                    }
+                }
+            }
+        }
+        let workflows_dir = dir.join("workflows");
+        if let Ok(runs) = std::fs::read_dir(&workflows_dir) {
+            for run in runs.flatten() {
+                if let Ok(files) = std::fs::read_dir(run.path()) {
                     for file in files.flatten() {
                         let path = file.path();
-                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                            if name.starts_with("agent-") && name.ends_with(".jsonl") {
+                        match path.file_name().and_then(|n| n.to_str()) {
+                            Some(name)
+                                if name.starts_with("agent-") && name.ends_with(".jsonl") =>
+                            {
                                 self.process_jsonl_change(parent_agent, parent_block_id, &path);
                             }
+                            Some("journal.jsonl") => {
+                                self.process_journal_change(parent_agent, parent_block_id, &path);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -367,14 +475,11 @@ impl SubagentWatcher {
             None => return,
         };
 
-        // Derive session_id from the parent directory structure
-        let session_id = jsonl_path
-            .parent() // subagents/
-            .and_then(|p| p.parent()) // project-encoded-dir/
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        // Session id = the directory containing subagents/. Workflow member
+        // files are nested deeper (subagents/workflows/<wf>/agent-*.jsonl),
+        // so walk ancestors instead of assuming a fixed depth.
+        let session_id = derive_session_id(jsonl_path);
+        let workflow_id = parse_workflow_id(jsonl_path);
 
         // Read the current offset before locking (so file I/O is outside the lock)
         let current_offset = {
@@ -422,6 +527,7 @@ impl SubagentWatcher {
                         status: SubagentStatus::Active,
                         event_count: 0,
                         model: None,
+                        workflow_id: None,
                     },
                     file_offset: 0,
                     events: Vec::new(),
@@ -429,6 +535,7 @@ impl SubagentWatcher {
             });
 
             state.file_offset = new_offset;
+            state.info.workflow_id = workflow_id.clone();
 
             // Update metadata from first line if we got it
             if let Some(m) = meta {
@@ -486,6 +593,7 @@ impl SubagentWatcher {
                             "parentBlockId": parent_block_id,
                             "sessionId": session_id,
                             "model": info_snapshot.model,
+                            "workflowId": info_snapshot.workflow_id,
                         }
                     }
                 })),
@@ -514,6 +622,7 @@ impl SubagentWatcher {
                             "newEvents": new_events.len(),
                             "totalEvents": info_snapshot.event_count,
                             "events": new_events,
+                            "workflowId": info_snapshot.workflow_id,
                         }
                     }
                 })),
@@ -534,6 +643,7 @@ impl SubagentWatcher {
                             "parentAgent": parent_agent,
                             "parentBlockId": parent_block_id,
                             "totalEvents": info_snapshot.event_count,
+                            "workflowId": info_snapshot.workflow_id,
                         }
                     }
                 })),
@@ -545,6 +655,181 @@ impl SubagentWatcher {
                 "subagent completed"
             );
         }
+
+        if let Some(wf_id) = workflow_id {
+            self.update_workflow_membership(
+                &wf_id,
+                parent_agent,
+                parent_block_id,
+                &session_id,
+                is_new,
+                completed,
+            );
+        }
+    }
+
+    /// Fold a member subagent's lifecycle into its workflow aggregate and
+    /// broadcast `workflow:updated`.
+    fn update_workflow_membership(
+        &self,
+        workflow_id: &str,
+        parent_agent: &str,
+        parent_block_id: &str,
+        session_id: &str,
+        member_spawned: bool,
+        member_completed: bool,
+    ) {
+        let info = {
+            let mut workflows = self.workflows.lock().unwrap();
+            let state = Self::workflow_entry(
+                &mut workflows,
+                workflow_id,
+                parent_agent,
+                parent_block_id,
+                session_id,
+            );
+            if member_spawned {
+                state.member_files += 1;
+            }
+            if member_completed {
+                state.members_completed += 1;
+            }
+            Self::refresh_workflow_info(state);
+            state.info.clone()
+        };
+        self.broadcast_workflow_updated(&info);
+    }
+
+    /// Process a changed workflow journal (subagents/workflows/<wf>/journal.jsonl):
+    /// tally new `started`/`result` records and broadcast `workflow:updated`.
+    fn process_journal_change(
+        &self,
+        parent_agent: &str,
+        parent_block_id: &str,
+        journal_path: &Path,
+    ) {
+        let workflow_id = match parse_workflow_id(journal_path) {
+            Some(id) => id,
+            None => return,
+        };
+        let session_id = derive_session_id(journal_path);
+
+        // Read the current offset before locking (file I/O outside the lock).
+        let offset = {
+            let workflows = self.workflows.lock().unwrap();
+            workflows
+                .get(&workflow_id)
+                .map(|w| w.journal_offset)
+                .unwrap_or(0)
+        };
+
+        let (started, results, new_offset) = match read_journal_counts(journal_path, offset) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(
+                    workflow_id = %workflow_id,
+                    error = %e,
+                    "failed to read workflow journal"
+                );
+                return;
+            }
+        };
+        if started == 0 && results == 0 && offset != 0 {
+            return;
+        }
+
+        let info = {
+            let mut workflows = self.workflows.lock().unwrap();
+            let state = Self::workflow_entry(
+                &mut workflows,
+                &workflow_id,
+                parent_agent,
+                parent_block_id,
+                &session_id,
+            );
+            state.journal_offset = new_offset;
+            state.journal_started += started;
+            state.journal_results += results;
+            Self::refresh_workflow_info(state);
+            state.info.clone()
+        };
+        self.broadcast_workflow_updated(&info);
+    }
+
+    fn workflow_entry<'a>(
+        workflows: &'a mut HashMap<String, WorkflowState>,
+        workflow_id: &str,
+        parent_agent: &str,
+        parent_block_id: &str,
+        session_id: &str,
+    ) -> &'a mut WorkflowState {
+        workflows
+            .entry(workflow_id.to_string())
+            .or_insert_with(|| WorkflowState {
+                info: WorkflowInfo {
+                    workflow_id: workflow_id.to_string(),
+                    parent_agent: parent_agent.to_string(),
+                    parent_block_id: parent_block_id.to_string(),
+                    session_id: session_id.to_string(),
+                    agents_total: 0,
+                    agents_done: 0,
+                    status: WorkflowStatus::Running,
+                    last_event_at: now_millis(),
+                },
+                journal_offset: 0,
+                journal_started: 0,
+                journal_results: 0,
+                member_files: 0,
+                members_completed: 0,
+            })
+    }
+
+    /// Recompute public counters from raw journal/member counters. Either
+    /// source can lag the other (journal writes vs member file creation), so
+    /// take the max of each pair.
+    fn refresh_workflow_info(state: &mut WorkflowState) {
+        state.info.agents_total = state.journal_started.max(state.member_files);
+        state.info.agents_done = state.journal_results.max(state.members_completed);
+        state.info.last_event_at = now_millis();
+        Self::refresh_workflow_status(state);
+    }
+
+    /// Counts-complete + 60s quiet ⇒ Completed. There is no timer: the flip
+    /// happens lazily at the next event or ListWorkflows read. `started ==
+    /// results` alone is not terminal — it also holds between phases of a
+    /// still-running workflow, hence the quiet window.
+    fn refresh_workflow_status(state: &mut WorkflowState) {
+        let counts_complete = state.info.agents_total > 0
+            && state.info.agents_done >= state.info.agents_total;
+        let quiet = now_millis().saturating_sub(state.info.last_event_at) > 60_000;
+        state.info.status = if counts_complete && quiet {
+            WorkflowStatus::Completed
+        } else {
+            WorkflowStatus::Running
+        };
+    }
+
+    fn broadcast_workflow_updated(&self, info: &WorkflowInfo) {
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "command": "eventrecv",
+                "data": {
+                    "event": "workflow:updated",
+                    "data": {
+                        "workflowId": info.workflow_id,
+                        "parentAgent": info.parent_agent,
+                        "parentBlockId": info.parent_block_id,
+                        "sessionId": info.session_id,
+                        "agentsTotal": info.agents_total,
+                        "agentsDone": info.agents_done,
+                        "status": info.status,
+                    }
+                }
+            })),
+        };
+        self.event_bus.broadcast_event(&event);
     }
 }
 
@@ -754,6 +1039,70 @@ fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
     }
 }
 
+/// Extract the workflow id from a path under `.../subagents/workflows/<id>/...`.
+/// Returns None for direct (non-workflow) subagent files.
+fn parse_workflow_id(path: &Path) -> Option<String> {
+    let comps: Vec<&str> = path.iter().filter_map(|c| c.to_str()).collect();
+    comps.windows(3).find_map(|w| {
+        (w[0] == "subagents" && w[1] == "workflows" && !w[2].ends_with(".jsonl"))
+            .then(|| w[2].to_string())
+    })
+}
+
+/// Session id = the name of the directory containing `subagents/`. Workflow
+/// member files are nested (`subagents/workflows/<wf>/agent-*.jsonl`), so walk
+/// ancestors instead of assuming a fixed depth.
+fn derive_session_id(path: &Path) -> String {
+    let mut dir = path.parent();
+    while let Some(d) = dir {
+        if d.file_name().and_then(|n| n.to_str()) == Some("subagents") {
+            return d
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+        }
+        dir = d.parent();
+    }
+    "unknown".to_string()
+}
+
+/// Count new `started` / `result` records in a workflow journal from `offset`.
+/// Returns (started, results, new_offset).
+fn read_journal_counts(path: &Path, offset: u64) -> Result<(usize, usize, u64), String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("open: {e}"))?;
+    let file_len = file.metadata().map_err(|e| format!("metadata: {e}"))?.len();
+    if file_len <= offset {
+        return Ok((0, 0, offset));
+    }
+
+    let mut reader = BufReader::new(file);
+    reader
+        .seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("seek: {e}"))?;
+
+    let (mut started, mut results) = (0usize, 0usize);
+    let mut current_offset = offset;
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        current_offset += line.len() as u64 + 1;
+        let value: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        match value.get("type").and_then(|v| v.as_str()) {
+            Some("started") => started += 1,
+            Some("result") => results += 1,
+            _ => {}
+        }
+    }
+    Ok((started, results, current_offset))
+}
+
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -802,6 +1151,7 @@ mod tests {
                 status: SubagentStatus::Active,
                 event_count: 0,
                 model: None,
+                workflow_id: None,
             },
             file_offset: 0,
             events: Vec::new(),
@@ -879,5 +1229,71 @@ mod tests {
             panic!("expected Text event");
         };
         assert_eq!(content, "100"); // first 100 (0..100) were trimmed away
+    }
+
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s.replace('/', std::path::MAIN_SEPARATOR_STR))
+    }
+
+    #[test]
+    fn workflow_id_from_nested_member_path() {
+        let path = p("projects/ws/sess-1/subagents/workflows/wf_abc123/agent-a1.jsonl");
+        assert_eq!(parse_workflow_id(&path), Some("wf_abc123".to_string()));
+    }
+
+    #[test]
+    fn workflow_id_from_journal_path() {
+        let path = p("projects/ws/sess-1/subagents/workflows/wf_abc123/journal.jsonl");
+        assert_eq!(parse_workflow_id(&path), Some("wf_abc123".to_string()));
+    }
+
+    #[test]
+    fn workflow_id_none_for_direct_subagent() {
+        let path = p("projects/ws/subagents/agent-a1.jsonl");
+        assert_eq!(parse_workflow_id(&path), None);
+    }
+
+    #[test]
+    fn workflow_id_none_for_stray_file_in_workflows_dir() {
+        let path = p("projects/ws/subagents/workflows/agent-a1.jsonl");
+        assert_eq!(parse_workflow_id(&path), None);
+    }
+
+    #[test]
+    fn session_id_flat_layout() {
+        let path = p("projects/proj-enc/subagents/agent-a1.jsonl");
+        assert_eq!(derive_session_id(&path), "proj-enc");
+    }
+
+    #[test]
+    fn session_id_nested_workflow_layout() {
+        let path = p("projects/ws/sess-uuid/subagents/workflows/wf_x/agent-a1.jsonl");
+        assert_eq!(derive_session_id(&path), "sess-uuid");
+    }
+
+    #[test]
+    fn journal_counts_incremental() {
+        let dir = std::env::temp_dir().join(format!("amx-journal-test-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let journal = dir.join("journal.jsonl");
+
+        std::fs::write(
+            &journal,
+            "{\"type\":\"started\",\"agentId\":\"a1\"}\n{\"type\":\"result\",\"agentId\":\"a1\",\"result\":{}}\n",
+        )
+        .unwrap();
+        let (started, results, offset) = read_journal_counts(&journal, 0).unwrap();
+        assert_eq!((started, results), (1, 1));
+
+        // Append two more records; re-read from the saved offset.
+        let mut existing = std::fs::read(&journal).unwrap();
+        existing.extend_from_slice(
+            b"{\"type\":\"started\",\"agentId\":\"a2\"}\n{\"type\":\"started\",\"agentId\":\"a3\"}\n",
+        );
+        std::fs::write(&journal, existing).unwrap();
+        let (started2, results2, _) = read_journal_counts(&journal, offset).unwrap();
+        assert_eq!((started2, results2), (2, 0));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
