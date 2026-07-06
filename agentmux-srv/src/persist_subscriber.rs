@@ -360,6 +360,16 @@ pub(crate) fn apply_event_to_wstore(
                 None => Ok(()),
             }
         }
+        // SPEC_864 Phase 4 — APPEND to the pending queue (unlike the
+        // slices path above, which REPLACEs it: pushing a slice without
+        // processed actions is how the frontend ACKS the queue; the
+        // backend enqueues by appending). Idempotent under the
+        // double-apply contract (sync from the dispatch helper, again
+        // from broadcast) by deduping on `actionid` — every writer
+        // stamps a fresh UUID per action.
+        Event::LayoutBackendActionsQueued { tab_id, actions, .. } => {
+            apply_layout_backend_actions_queued(wstore, tab_id, actions)
+        }
         // All other event variants are not domain-state mutations
         // (lifecycle, errors, snapshots). The subscriber ignores them.
         _ => Ok(()),
@@ -899,6 +909,51 @@ fn apply_layout_tree_replaced(
     layout.magnifiednodeid = new_magnified;
     layout.leaforder = new_leaforder;
     layout.pendingbackendactions = new_pending;
+    wstore.update(&mut layout)?;
+    Ok(())
+}
+
+/// SPEC_864 Phase 4 — apply a `LayoutBackendActionsQueued` event:
+/// APPEND the reducer-validated actions to
+/// `LayoutState.pendingbackendactions`. The queue is a backend→frontend
+/// mailbox: the backend appends here; the frontend drains it by pushing
+/// a full slice without the processed actions (the REPLACE path in
+/// `apply_layout_tree_replaced`).
+///
+/// Idempotency: the event is applied twice on the happy path (sync in
+/// `queue_layout_actions_via_reducer`, again by the subscriber task
+/// consuming the broadcast), so actions whose `actionid` is already in
+/// the queue are skipped. Every writer stamps a fresh UUID per action;
+/// an (out-of-contract) empty `actionid` dedupes against other empties,
+/// which is the safe direction — skip rather than duplicate.
+fn apply_layout_backend_actions_queued(
+    wstore: &Store,
+    tab_id: &str,
+    actions: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+        return Ok(());
+    };
+    if tab.layoutstate.is_empty() {
+        return Ok(());
+    }
+    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+        return Ok(());
+    };
+    let incoming: Vec<LayoutActionData> = serde_json::from_value(actions.clone())?;
+    let mut pending = layout.pendingbackendactions.take().unwrap_or_default();
+    let before = pending.len();
+    for action in incoming {
+        if !pending.iter().any(|p| p.actionid == action.actionid) {
+            pending.push(action);
+        }
+    }
+    if pending.len() == before {
+        // Every action already queued (double-apply) — no version churn.
+        layout.pendingbackendactions = Some(pending);
+        return Ok(());
+    }
+    layout.pendingbackendactions = Some(pending);
     wstore.update(&mut layout)?;
     Ok(())
 }
@@ -2279,5 +2334,86 @@ mod tests {
         .unwrap();
         let tab_after = s.get::<Tab>(&tab.oid).unwrap().unwrap();
         assert_eq!(tab_after.blockids, vec!["b2".to_string(), "b3".to_string(), "b1".to_string()]);
+    }
+
+    // ── SPEC_864 Phase 4 — pendingbackendactions APPEND semantics ──────────
+
+    fn action(id: &str, block: &str) -> LayoutActionData {
+        LayoutActionData {
+            actiontype: "insert".into(),
+            actionid: id.into(),
+            blockid: block.into(),
+            nodesize: None,
+            nodesizefraction: None,
+            indexarr: None,
+            focused: true,
+            magnified: false,
+            ephemeral: false,
+            targetblockid: String::new(),
+            position: String::new(),
+        }
+    }
+
+    #[test]
+    fn layout_backend_actions_queued_appends_not_replaces() {
+        let s = store();
+        let tab = ws_tab(&s);
+        apply_event_to_wstore(
+            &Event::LayoutBackendActionsQueued {
+                tab_id: tab.clone(),
+                actions: serde_json::to_value(vec![action("a1", "b1")]).unwrap(),
+                correlation_id: "c1".into(),
+                version: 3,
+            },
+            &s,
+        )
+        .unwrap();
+        apply_event_to_wstore(
+            &Event::LayoutBackendActionsQueued {
+                tab_id: tab.clone(),
+                actions: serde_json::to_value(vec![action("a2", "b2")]).unwrap(),
+                correlation_id: "c2".into(),
+                version: 4,
+            },
+            &s,
+        )
+        .unwrap();
+        let pending = layout_of(&s, &tab).pendingbackendactions.unwrap();
+        assert_eq!(pending.len(), 2, "second event must APPEND, not replace");
+        assert_eq!(pending[0].actionid, "a1");
+        assert_eq!(pending[1].actionid, "a2");
+    }
+
+    #[test]
+    fn layout_backend_actions_queued_dedupes_on_double_apply() {
+        // Same event applied twice (sync dispatch + broadcast redelivery)
+        // must not duplicate the queued action.
+        let s = store();
+        let tab = ws_tab(&s);
+        let ev = Event::LayoutBackendActionsQueued {
+            tab_id: tab.clone(),
+            actions: serde_json::to_value(vec![action("a1", "b1")]).unwrap(),
+            correlation_id: "c1".into(),
+            version: 3,
+        };
+        apply_event_to_wstore(&ev, &s).unwrap();
+        apply_event_to_wstore(&ev, &s).unwrap();
+        let pending = layout_of(&s, &tab).pendingbackendactions.unwrap();
+        assert_eq!(pending.len(), 1, "double-apply must not duplicate by actionid");
+    }
+
+    #[test]
+    fn layout_backend_actions_queued_silent_when_tab_missing() {
+        let s = store();
+        apply_event_to_wstore(
+            &Event::LayoutBackendActionsQueued {
+                tab_id: "ghost".into(),
+                actions: serde_json::to_value(vec![action("a1", "b1")]).unwrap(),
+                correlation_id: "c1".into(),
+                version: 1,
+            },
+            &s,
+        )
+        .unwrap();
     }
 }

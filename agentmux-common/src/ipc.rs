@@ -611,6 +611,16 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         slices: Option<crate::LayoutClientSlices>,
     },
+    /// SPEC_864 Phase 4 — append actions to a tab's
+    /// `pendingbackendactions` queue through the reducer. `actions` is a
+    /// JSON array of `LayoutActionData` objects (raw-value pass-through;
+    /// the reducer does not model the queue — see
+    /// `Event::LayoutBackendActionsQueued`).
+    LayoutQueueBackendActions {
+        tab_id: String,
+        actions: serde_json::Value,
+        correlation_id: String,
+    },
 
     /// Phase D.3 — request an `Event::EventList` reply containing the
     /// events the launcher has emitted with version > `since`. Used
@@ -1591,6 +1601,23 @@ pub enum Event {
         correlation_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         slices: Option<crate::LayoutClientSlices>,
+        version: u64,
+    },
+
+    /// SPEC_864 Phase 4 — actions appended to a tab's
+    /// `pendingbackendactions` queue through the reducer (the
+    /// backend→frontend "please mutate your layout tree" channel).
+    /// `actions` is a JSON array of `LayoutActionData` objects, carried
+    /// as a raw value the same way `LayoutClientSlices` carries the
+    /// queue: the reducer does NOT model the queue in `TabRecord`
+    /// (pass-through), and the persist subscriber APPENDS these to the
+    /// existing `LayoutState.pendingbackendactions` (append semantics —
+    /// unlike the slices REPLACE semantics of a frontend push, which is
+    /// how the frontend acks/clears the queue).
+    LayoutBackendActionsQueued {
+        tab_id: String,
+        actions: serde_json::Value,
+        correlation_id: String,
         version: u64,
     },
 

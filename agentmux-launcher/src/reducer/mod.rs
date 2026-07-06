@@ -529,6 +529,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
         | Command::LayoutInsertNodeAtIndex { .. }
         | Command::LayoutDeleteNode { .. }
         | Command::LayoutDeleteNodeByBlock { .. }
+        | Command::LayoutQueueBackendActions { .. }
         | Command::LayoutMoveNode { .. }
         | Command::LayoutSwapNodes { .. }
         | Command::LayoutResizeNodes { .. }

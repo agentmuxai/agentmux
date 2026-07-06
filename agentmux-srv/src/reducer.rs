@@ -127,6 +127,14 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             block_id,
             correlation_id,
         } => layout::handle_layout_delete_node_by_block(state, tab_id, block_id, correlation_id),
+        // SPEC_864 Phase 4 — queue-append pass-through (the reducer does
+        // not model pendingbackendactions in TabRecord; the persist
+        // subscriber appends to db_layout from the event).
+        Command::LayoutQueueBackendActions {
+            tab_id,
+            actions,
+            correlation_id,
+        } => layout::handle_layout_queue_backend_actions(state, tab_id, actions, correlation_id),
         // Phase 3 — the remaining 7 layout-tree arms. Each resolves the
         // tab, calls the existing pure fn in `backend::layout`, runs
         // `balance_node` (matching the frontend's post-action normalize),
@@ -364,6 +372,7 @@ mod tests {
             | Event::LayoutSplitHorizontalApplied { version, .. }
             | Event::LayoutSplitVerticalApplied { version, .. }
             | Event::LayoutCleared { version, .. }
+            | Event::LayoutBackendActionsQueued { version, .. }
             | Event::LayoutTreeReplaced { version, .. } => *version,
         }
     }
@@ -2513,6 +2522,79 @@ mod tests {
         assert!(tab.rootnode.is_none(), "rootnode wiped");
         assert_eq!(tab.focused_node_id, "");
         assert_eq!(tab.magnified_node_id, "");
+    }
+
+    #[test]
+    fn layout_queue_backend_actions_passes_through_and_emits_event() {
+        let (mut state, tab_id) = fresh_tab();
+        let actions = serde_json::json!([{
+            "actiontype": "insert",
+            "actionid": "a1",
+            "blockid": "b1",
+            "nodesize": null,
+            "nodesizefraction": null,
+            "indexarr": null,
+            "focused": true,
+            "magnified": false,
+            "ephemeral": false,
+            "targetblockid": "",
+            "position": "",
+        }]);
+        let events = update(
+            &mut state,
+            Command::LayoutQueueBackendActions {
+                tab_id: tab_id.clone(),
+                actions: actions.clone(),
+                correlation_id: "corr-q1".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            Event::LayoutBackendActionsQueued {
+                tab_id: ev_tab_id,
+                actions: ev_actions,
+                correlation_id,
+                ..
+            } => {
+                assert_eq!(ev_tab_id, &tab_id);
+                assert_eq!(ev_actions, &actions);
+                assert_eq!(correlation_id, "corr-q1");
+            }
+            other => panic!("expected LayoutBackendActionsQueued, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn layout_queue_backend_actions_unknown_tab_emits_error() {
+        let mut state = State::default();
+        let events = update(
+            &mut state,
+            Command::LayoutQueueBackendActions {
+                tab_id: "nope".into(),
+                actions: serde_json::json!([{}]),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], Event::Error { .. }));
+    }
+
+    #[test]
+    fn layout_queue_backend_actions_empty_array_emits_error() {
+        let (mut state, tab_id) = fresh_tab();
+        let events = update(
+            &mut state,
+            Command::LayoutQueueBackendActions {
+                tab_id,
+                actions: serde_json::json!([]),
+                correlation_id: "corr".into(),
+            },
+            &ctx(1),
+        );
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], Event::Error { .. }));
     }
 
     #[test]
