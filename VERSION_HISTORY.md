@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.50.2 — 2026-07-06
+
+- feat(agent): ghost-text next-prompt suggestion via the Ambient Model Call gateway
+- fix(agent): clear stale next-prompt ghost text on session end
+- fix(toolchain): unify Docker/toolchain capability detection across the app
+- fix(layout): floating-pane redock lands at the ghost's exact rect — size fraction carved from target, siblings untouched
+- fix(window): instrument the window-close cascade and isolate the CEF 148 browser-parking break point (rounds 2-5 evidence trail behind the pool-demote fix)
+- fix(layout): UpdateObject routes layout pushes through the reducer as a single LayoutSetTree (SPEC_864 Phase 2)
+- fix(window): pool-demote on close — recycle promoted pool windows instead of leaking renderers; fix backend_close_window 401 (query-param auth removed 2026-05-11)
+- fix(layout): SPEC_864 Phase 3 — layout seeders route through the reducer (CreateWindow three-pane, tear-off/promote/redock/floating single-leaf)
+- fix(layout): SPEC_864 site 6 — delete_block layout prune routes through the reducer
+- fix(tabs): tighten tab-inner right padding so the close button sits closer to the edge
+- fix(agent): smooth the running -> completed tool-preview transition (fade-in summary elements, FLIP height transition on panel body)
+- feat(swarm): track workflow tool runs in subagent_watcher
+- fix(layout): SPEC_864 Phase 4 — route pendingbackendactions queue writers through the reducer
+- feat(swarm): push periodic Haiku activity summaries per agent
+
+
 ## 0.50.1 — 2026-07-05
 
 - fix(ci): winget-create no longer ships a Linux binary, use windows-latest
