@@ -676,7 +676,14 @@ impl SubagentWatcher {
     }
 
     /// Fold a member subagent's lifecycle into its workflow aggregate and
-    /// broadcast `workflow:updated`.
+    /// broadcast `workflow:updated` — but only when membership actually
+    /// changed (a spawn or a completion). `process_jsonl_change` calls this
+    /// unconditionally for every workflow member, including plain
+    /// text/tool_use/tool_result activity ticks that carry neither flag; a
+    /// workflow with several active members would otherwise broadcast a WS
+    /// event on every one of those ticks even though `agentsTotal`/
+    /// `agentsDone` never moved. Mirrors the `has_new_records` gate in
+    /// `process_journal_change`.
     fn update_workflow_membership(
         &self,
         workflow_id: &str,
@@ -686,6 +693,10 @@ impl SubagentWatcher {
         member_spawned: bool,
         member_completed: bool,
     ) {
+        if !member_spawned && !member_completed {
+            return;
+        }
+
         let info = {
             let mut workflows = self.workflows.lock().unwrap();
             let state = Self::workflow_entry(
