@@ -48,6 +48,10 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             let subagents = state.subagent_watcher.list_active();
             WebReturnType::success(serde_json::to_value(&subagents).unwrap_or_default())
         }
+        ("subagent", "ListWorkflows") => {
+            let workflows = state.subagent_watcher.list_workflows();
+            WebReturnType::success(serde_json::to_value(&workflows).unwrap_or_default())
+        }
         ("subagent", "GetHistory") => {
             let agent_id: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
