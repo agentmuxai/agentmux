@@ -204,7 +204,6 @@ Phase 2/4 landing — the srv-side plumbing is valid and testable on its own.
   `floating_pane.rs`/`window_pool.rs` for the label→block_id mapping used by drag/redock).
   This spec explicitly does NOT verify that mapping — flagged as the one open question for whoever
   implements Slice B.
-  the reducer.
 - **This spec does not implement `ReportNormalRect`/`ReportOSPlacementChange`** (continuous drag/resize
   tracking). Only the existing maximize-button trigger gets write-through. A floating pane resized by
   dragging its edge (not via the maximize button) will NOT have its new size persisted until/unless
@@ -232,7 +231,7 @@ Phase 2/4 landing — the srv-side plumbing is valid and testable on its own.
 
 ## 6. Definition of done
 
-1. `Window.opacity` persists through a real `Command::SetWindowOpacity` dispatch, unit-tested.
+1. `Window.opacity` persists through a real `SetWindowOpacity` RPC call, unit-tested.
 2. Setting a window's opacity in a running app persists it to srv (verified live, not just unit-tested).
 3. Killing and relaunching the host restores the last-set opacity for windows that had one (verified live).
 4. `block.meta["pane:floating_normal_rect"]`/`["pane:floating_placement"]` persist through the existing
