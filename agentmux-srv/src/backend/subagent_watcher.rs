@@ -8,10 +8,17 @@
 //! conversation to a JSONL file under:
 //!   `<claude-config>/projects/<encoded-workspace>/subagents/agent-<id>.jsonl`
 //!
+//! A Workflow tool run nests its member agents one level deeper, under a
+//! per-run directory, and adds a run-level journal:
+//!   `<claude-config>/projects/<encoded-workspace>/subagents/workflows/<run-id>/agent-<id>.jsonl`
+//!   `<claude-config>/projects/<encoded-workspace>/subagents/workflows/<run-id>/journal.jsonl`
+//!
 //! This module watches those directories and emits:
 //!   - `subagent:spawned`   — new subagent JSONL file detected
 //!   - `subagent:activity`  — new events appended to a subagent file
 //!   - `subagent:completed` — subagent finished (result event seen)
+//!   - `workflow:updated`   — a workflow run's member count or journal
+//!     `started`/`result` tally changed (see `WorkflowInfo`)
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
@@ -734,10 +741,13 @@ impl SubagentWatcher {
                 return;
             }
         };
-        if started == 0 && results == 0 && offset != 0 {
+        // Nothing new landed (no complete lines since `offset`) — nothing to
+        // persist or broadcast.
+        if new_offset == offset {
             return;
         }
 
+        let has_new_records = started > 0 || results > 0;
         let info = {
             let mut workflows = self.workflows.lock().unwrap();
             let state = Self::workflow_entry(
@@ -747,13 +757,24 @@ impl SubagentWatcher {
                 parent_block_id,
                 &session_id,
             );
+            // Always persist the advanced offset, even when the newly-read
+            // lines didn't contain a started/result record — otherwise those
+            // bytes get rescanned on every subsequent journal change until a
+            // matching record eventually appears elsewhere in the file.
             state.journal_offset = new_offset;
-            state.journal_started += started;
-            state.journal_results += results;
-            Self::refresh_workflow_info(state);
+            if has_new_records {
+                state.journal_started += started;
+                state.journal_results += results;
+                Self::refresh_workflow_info(state);
+            }
             state.info.clone()
         };
-        self.broadcast_workflow_updated(&info);
+        // Only broadcast when the counters actually moved — an offset-only
+        // advance (non-started/result lines) has no observable effect on
+        // WorkflowInfo, so a broadcast would just be noise.
+        if has_new_records {
+            self.broadcast_workflow_updated(&info);
+        }
     }
 
     fn workflow_entry<'a>(
@@ -1070,6 +1091,14 @@ fn derive_session_id(path: &Path) -> String {
 
 /// Count new `started` / `result` records in a workflow journal from `offset`.
 /// Returns (started, results, new_offset).
+///
+/// Reads line-by-line via `read_until(b'\n', ..)` rather than `BufRead::lines()`
+/// so a trailing line with no `\n` yet (the writer racing a partial append) is
+/// never counted or consumed: `new_offset` only ever advances past complete,
+/// newline-terminated lines, so the next call re-reads that partial line whole
+/// once the rest of it lands, instead of seeking mid-line and silently losing
+/// the record's leading bytes (and the record itself, since the resulting
+/// truncated JSON fails to parse).
 fn read_journal_counts(path: &Path, offset: u64) -> Result<(usize, usize, u64), String> {
     let file = std::fs::File::open(path).map_err(|e| format!("open: {e}"))?;
     let file_len = file.metadata().map_err(|e| format!("metadata: {e}"))?.len();
@@ -1084,13 +1113,22 @@ fn read_journal_counts(path: &Path, offset: u64) -> Result<(usize, usize, u64), 
 
     let (mut started, mut results) = (0usize, 0usize);
     let mut current_offset = offset;
-    for line_result in reader.lines() {
-        let line = match line_result {
-            Ok(l) => l,
-            Err(_) => break,
-        };
-        current_offset += line.len() as u64 + 1;
-        let value: serde_json::Value = match serde_json::from_str(&line) {
+    loop {
+        let mut buf = Vec::new();
+        let bytes_read = reader
+            .read_until(b'\n', &mut buf)
+            .map_err(|e| format!("read_until: {e}"))?;
+        if bytes_read == 0 {
+            break; // EOF
+        }
+        if !buf.ends_with(b"\n") {
+            break; // trailing partial line — leave it unconsumed for next time
+        }
+        current_offset += bytes_read as u64;
+
+        let line = String::from_utf8_lossy(&buf);
+        let trimmed = line.trim_end_matches(['\n', '\r']);
+        let value: serde_json::Value = match serde_json::from_str(trimmed) {
             Ok(v) => v,
             Err(_) => continue,
         };
@@ -1293,6 +1331,41 @@ mod tests {
         std::fs::write(&journal, existing).unwrap();
         let (started2, results2, _) = read_journal_counts(&journal, offset).unwrap();
         assert_eq!((started2, results2), (2, 0));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Regression test for a race where the journal writer has flushed a
+    /// record's bytes but not yet its trailing `\n` (mid-`write!` on a
+    /// concurrently-appended file). The unterminated line must be neither
+    /// counted nor consumed — `new_offset` should sit exactly at its start —
+    /// so the next read picks it up whole once the newline lands, instead of
+    /// silently losing the record.
+    #[test]
+    fn journal_counts_skips_unterminated_trailing_line() {
+        let dir = std::env::temp_dir().join(format!("amx-journal-test-partial-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let journal = dir.join("journal.jsonl");
+
+        // One complete record, then a partial record with no trailing newline.
+        let first_line = "{\"type\":\"started\",\"agentId\":\"a1\"}\n";
+        let partial_line = "{\"type\":\"started\",\"agentId\":\"a2";
+        std::fs::write(&journal, format!("{first_line}{partial_line}")).unwrap();
+
+        let (started, results, offset) = read_journal_counts(&journal, 0).unwrap();
+        assert_eq!((started, results), (1, 0), "partial trailing line must not be counted");
+        assert_eq!(
+            offset, first_line.len() as u64,
+            "offset must stop at the start of the partial line, not past it"
+        );
+
+        // The writer finishes the line; a re-read from the same offset must
+        // now see the complete record rather than a truncated/corrupted one.
+        let mut existing = std::fs::read(&journal).unwrap();
+        existing.extend_from_slice(b"\"}\n");
+        std::fs::write(&journal, existing).unwrap();
+        let (started2, results2, _) = read_journal_counts(&journal, offset).unwrap();
+        assert_eq!((started2, results2), (1, 0), "completed line must be picked up whole, not dropped");
 
         std::fs::remove_dir_all(&dir).ok();
     }
