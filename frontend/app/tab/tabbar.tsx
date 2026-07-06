@@ -9,12 +9,13 @@ import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
-import { makeORef, getObjectValue } from "../store/wos";
+import { makeORef, getObjectValue, getWaveObjectAtom } from "../store/wos";
 import { ConfirmModal } from "@/element/modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { deleteLayoutModelForTab } from "@/layout/index";
@@ -84,6 +85,7 @@ function TabCloseConfirmModal(props: {
 
 function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
+    let tabBarRef!: HTMLDivElement;
     let tabBarScrollRef!: HTMLDivElement;
     // Latches once per drag — the tear-off handshake should only run a
     // single time even if the user keeps moving past the threshold.
@@ -653,8 +655,79 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
+    // Active tab's color, reactive to both which tab is active AND that
+    // tab's own color changing while it stays active — same two-level-memo
+    // pattern tabcontent.tsx uses (a plain `getObjectValue` read wouldn't
+    // re-subscribe when only the color, not the active id, changes).
+    const activeTabAtom = createMemo(() => getWaveObjectAtom<Tab>(makeORef("tab", activeTabId())));
+    const activeTabData = createMemo(() => activeTabAtom()());
+    const activeTabColor = createMemo((): string | undefined | null => activeTabData()?.meta?.["tab:color"] as string | undefined | null);
+
+    // The line is rendered as a sibling of .tab-bar-scroll (both children of
+    // .tab-bar), NOT as a child inside it — .tab-bar-scroll is the horizontal
+    // SCROLL container (overflow-x: auto), and an absolutely-positioned
+    // descendant of a scroll container moves with its scrollLeft (verified
+    // live: scrolling by 500px shifted the line's rect.x by exactly -500px —
+    // reagentx review on #1979 caught this before it shipped). .tab-bar
+    // itself never scrolls, so a line positioned relative to *it* stays put
+    // regardless of how far the tab strip is scrolled.
+    //
+    // left/width are measured (not CSS calc) because there's no fixed
+    // constant for "the hamburger's rendered width" to subtract — .tab-bar-
+    // scroll's own offsetLeft/clientWidth relative to .tab-bar already
+    // encode exactly that, and neither changes when .tab-bar-scroll is
+    // scrolled internally (scrolling content never moves the container's
+    // own box in its parent). offsetLeft lands at .tab-bar-scroll's own edge
+    // though, which on Windows/Linux is one leading separator short of the
+    // first tab's actual left edge (the separator is .tab-bar-scroll's own
+    // first child, per the leading-separator Show below) — add its width
+    // (the same --tab-separator-width token it's styled with) to close that
+    // last 1px gap, and take it back out of the width so the right edge is
+    // unaffected.
+    // Viewport-absolute px (not relative to any container) — the line's
+    // right edge extends past .tab-bar's own box (into .system-status's
+    // territory), and .tab-bar has `overflow: hidden`, so it's rendered via
+    // a <Portal> to document.body (position: fixed) rather than as a normal
+    // .tab-bar child, to escape that clipping. getBoundingClientRect() is
+    // already viewport-relative and already post-zoom (`.window-header`
+    // applies `zoom` uniformly to everything inside it), so these values
+    // are usable directly by a fixed-position element outside that
+    // zoomed/clipped subtree with no extra conversion.
+    const [lineLeft, setLineLeft] = createSignal(0);
+    const [lineWidth, setLineWidth] = createSignal(0);
+    const [lineBottom, setLineBottom] = createSignal(0);
+    const measureLine = () => {
+        if (!tabBarScrollRef || !tabBarRef) return;
+        const leadingSeparatorPx = isMacOS()
+            ? 0
+            : parseFloat(getComputedStyle(tabBarScrollRef).getPropertyValue("--tab-separator-width")) || 1;
+        const scrollRect = tabBarScrollRef.getBoundingClientRect();
+        const left = scrollRect.left + leadingSeparatorPx;
+        setLineLeft(left);
+        setLineBottom(window.innerHeight - tabBarRef.getBoundingClientRect().bottom);
+
+        // Right edge runs all the way to the viewport's right edge — past
+        // the header widgets (.system-status/ActionWidgets) AND the window
+        // control buttons (win32/linux: .window-action-buttons; macOS's
+        // traffic lights are on the left, so nothing there either way).
+        // Live preview against stopping before the window controls; this
+        // was the version picked.
+        setLineWidth(window.innerWidth - left);
+    };
+    onMount(() => {
+        measureLine();
+        const ro = new ResizeObserver(measureLine);
+        ro.observe(tabBarRef);
+        ro.observe(tabBarScrollRef);
+        window.addEventListener("resize", measureLine);
+        onCleanup(() => {
+            ro.disconnect();
+            window.removeEventListener("resize", measureLine);
+        });
+    });
+
     return (
-        <div class="tab-bar" {...dragProps}>
+        <div ref={tabBarRef!} class="tab-bar" {...dragProps}>
             {/* Windows/Linux: hamburger sits at the LEFT of the tab strip.
                 On macOS it's rendered at the far right of the window header
                 instead (see window-header.tsx) so it clears the native
@@ -709,6 +782,26 @@ function TabBar(props: TabBarProps): JSX.Element {
                     of the scroll container looked draggable but wasn't. */}
                 <div class="tab-bar-fill" data-drag-region="true" />
             </div>
+            <Show when={activeTabColor()}>
+                {/* Portal to escape .tab-bar's `overflow: hidden` — the line's
+                    right edge extends past .tab-bar's own box, through the
+                    header widgets, to the window control buttons. */}
+                <Portal mount={document.body}>
+                <div
+                    class="active-tab-color-line"
+                    aria-hidden="true"
+                    style={{
+                        position: "fixed",
+                        left: `${lineLeft()}px`,
+                        width: `${lineWidth()}px`,
+                        bottom: `${lineBottom()}px`,
+                        height: "3px",
+                        background: activeTabColor()!,
+                        "pointer-events": "none",
+                    }}
+                />
+                </Portal>
+            </Show>
             <Show when={pendingCloseTabId() !== null}>
                 <TabCloseConfirmModal
                     tabId={pendingCloseTabId()!}
