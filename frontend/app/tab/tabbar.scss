@@ -24,11 +24,6 @@
     min-width: 0;
     height: 100%;
     overflow: hidden;
-    // Needed for .active-tab-color-line, an absolutely-positioned sibling of
-    // .tab-bar-scroll — deliberately NOT a child of .tab-bar-scroll itself,
-    // since that's the horizontal scroll container and an absolute
-    // descendant of it moves with its scrollLeft.
-    position: relative;
     // Drag cascades from window-header; individual tabs/buttons opt out
 
     .tab-bar-scroll {
