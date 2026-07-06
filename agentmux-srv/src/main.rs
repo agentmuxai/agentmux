@@ -685,6 +685,18 @@ async fn main() {
         backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config).await;
     });
 
+    // Push a live Haiku activity summary per registered agent (swarm feed) —
+    // reads reactive::get_global_handler() as its registry, so it needs no
+    // AppState and can start before AppState is built (matches sysinfo/watchdog above).
+    let activity_wstore = Arc::clone(&wstore);
+    let activity_filestore = Arc::clone(&filestore);
+    let activity_broker = broker.clone();
+    tokio::spawn(async move {
+        backend::reactive::activity_watcher::run_agent_summary_loop(
+            activity_wstore, activity_filestore, activity_broker,
+        ).await;
+    });
+
     // Reactive handler (global singleton) + poller
     let reactive_handler = reactive::get_global_handler();
     reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {
