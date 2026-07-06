@@ -260,6 +260,11 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec!["ctx".into(), "windowId".into(), "pos".into(), "size".into()],
             return_desc: None,
         }),
+        ("window", "SetWindowOpacity") => Some(MethodMeta {
+            desc: Some("set (or clear, via null) a window's persisted opacity".into()),
+            arg_names: vec!["ctx".into(), "windowId".into(), "opacity".into()],
+            return_desc: None,
+        }),
         ("window", "MoveBlockToNewWindow") => Some(MethodMeta {
             desc: Some("move block to new window".into()),
             arg_names: vec!["ctx".into(), "currentTabId".into(), "blockId".into()],
