@@ -11,10 +11,18 @@
 //!   - skipped entirely for agents whose controller isn't `STATUS_RUNNING`
 //!     (an idle/stopped pane costs nothing)
 //!   - skipped when the block's `output` FileStore size hasn't changed since
-//!     the last summary (nothing new happened; no point re-summarizing)
+//!     the last *successful* summary (nothing new happened; no point
+//!     re-summarizing) — a failed/empty attempt does not mark the size as
+//!     seen, so the next tick retries rather than being permanently
+//!     suppressed until the output happens to grow again
+//!   - skipped when a summarization for that block is already in flight
+//!     (guards against a slow call still running when the next tick fires)
 //!   - capped at `MAX_CONCURRENT_SUMMARIES` simultaneous Haiku CLI spawns
+//!   - per-block bookkeeping is pruned each tick against the current
+//!     registration list, so a disconnected/unregistered agent's entry
+//!     doesn't linger for the rest of the process's lifetime
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -45,9 +53,20 @@ pub const EVENT_AGENT_SUMMARY: &str = "agent:summary";
 pub async fn run_agent_summary_loop(wstore: Arc<Store>, filestore: Arc<FileStore>, broker: Arc<Broker>) {
     let mut ticker = interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SUMMARIES));
-    // block_id -> last output size we summarized at, so idle agents (no new
-    // output since last sweep) are skipped instead of re-billed every tick.
+    // block_id -> last output size we *successfully* summarized at, so idle
+    // agents (no new output since the last summary) are skipped instead of
+    // re-billed every tick. An entry is only written after a non-empty
+    // summary comes back (see the spawned task below) — a transient failure
+    // (CLI error, missing `cmd` in meta, missing block) leaves no entry, so
+    // the next tick retries instead of being permanently suppressed until
+    // the output size happens to change again.
     let last_seen_size: Arc<Mutex<HashMap<String, i64>>> = Arc::new(Mutex::new(HashMap::new()));
+    // block_ids with a summarization currently in flight, so a slow call
+    // (up to the 15s CLI timeout) doesn't get double-dispatched by the next
+    // 20s tick before last_seen_size has a chance to reflect its result.
+    // Self-cleaning: every insert below has a matching remove once that same
+    // spawned task's call resolves, on every exit path.
+    let in_flight: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
     // Shared generation counter for the Ambient Model Call gateway — only
     // needs to strictly increase per (block_id, purpose) key over time, so
@@ -60,7 +79,16 @@ pub async fn run_agent_summary_loop(wstore: Arc<Store>, filestore: Arc<FileStore
         ticker.tick().await;
         tick += 1;
 
-        for agent in get_global_handler().list_agents() {
+        let agents = get_global_handler().list_agents();
+
+        // Drop last_seen_size entries for agents that unregistered/disconnected
+        // since the last sweep, so this map stays bounded by the current agent
+        // count instead of growing for every block_id ever seen in the
+        // process's lifetime.
+        let registered: HashSet<String> = agents.iter().map(|a| a.block_id.clone()).collect();
+        last_seen_size.lock().unwrap().retain(|block_id, _| registered.contains(block_id));
+
+        for agent in agents {
             let block_id = agent.block_id.clone();
 
             let status = match get_block_controller_status(&block_id) {
@@ -75,28 +103,41 @@ pub async fn run_agent_summary_loop(wstore: Arc<Store>, filestore: Arc<FileStore
                 Ok(Some(wf)) => wf.size,
                 _ => continue,
             };
-            {
-                let mut seen = last_seen_size.lock().unwrap();
-                if seen.get(&block_id) == Some(&current_size) {
-                    continue; // no new output since the last summary — skip
-                }
-                seen.insert(block_id.clone(), current_size);
+            if last_seen_size.lock().unwrap().get(&block_id) == Some(&current_size) {
+                continue; // already summarized this exact output size — skip
+            }
+            if !in_flight.lock().unwrap().insert(block_id.clone()) {
+                continue; // a summarization for this block is already running
             }
 
             let wstore = wstore.clone();
             let filestore = filestore.clone();
             let broker = broker.clone();
             let semaphore = semaphore.clone();
+            let last_seen_size = last_seen_size.clone();
+            let in_flight = in_flight.clone();
             let agent_id = agent.agent_id.clone();
 
             tokio::spawn(async move {
-                let Ok(_permit) = semaphore.acquire().await else { return };
-
-                let Some((summary, _tokens)) = crate::server::app_api::session::generate_pushed_activity_summary(
-                    &wstore, &filestore, &block_id, tick, WORD_TARGET,
-                ).await else {
+                let Ok(_permit) = semaphore.acquire().await else {
+                    in_flight.lock().unwrap().remove(&block_id);
                     return;
                 };
+
+                let result = crate::server::app_api::session::generate_pushed_activity_summary(
+                    &wstore, &filestore, &block_id, tick, WORD_TARGET,
+                ).await;
+
+                in_flight.lock().unwrap().remove(&block_id);
+
+                let Some((summary, _tokens)) = result else {
+                    // Leave last_seen_size untouched so a future tick retries
+                    // this block — whether the failure was transient (CLI
+                    // hiccup, stale-on-arrival via the Ambient Model Call
+                    // gateway) or persistent (no CLI path in meta yet).
+                    return;
+                };
+                last_seen_size.lock().unwrap().insert(block_id.clone(), current_size);
 
                 let ts = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
