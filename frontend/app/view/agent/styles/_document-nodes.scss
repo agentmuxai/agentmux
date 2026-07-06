@@ -1,12 +1,39 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../../mixins.scss";
+
 // Document-node rendering — markdown / code / diff / bash / message
 // blocks rendered inside the agent conversation. Largest section of
 // the original `agent-view.scss` (~700 lines). Wrapped in
 // `.agent-view` so the cascade chain matches the pre-split file
 // (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
+    // Running -> terminal tool-status transition
+    // (ANALYSIS_TOOL_PREVIEW_RUNNING_TO_COMPLETED_JERK_2026_07_05.md): the
+    // result pill and the live-tail/elapsed-ticker span mount/unmount
+    // instantly on the same tick a tool's status leaves "running" (they're
+    // gated by `resultPill() != null` / `log.open`, which flip together).
+    // A brief fade-in on the incoming element softens the pop; skipped
+    // entirely for reduced-motion users below.
+    @keyframes agent-tool-summary-fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    // Reusable class (as opposed to the animation applied inline on
+    // `.agent-tool-result-pill` / `.agent-tool-live-tail` below) for
+    // elements outside this file, e.g. `.agent-tool-overlay-header` in
+    // `_tool-overlay-portal.scss` — it also toggles via `display: none` <->
+    // flex rather than mount/unmount, which re-triggers a CSS animation the
+    // same way a fresh mount does.
+    .agent-tool-summary-fade-in {
+        animation: agent-tool-summary-fade-in 160ms ease-out;
+
+        @include mixins.respect-reduced-motion {
+            animation: none;
+        }
+    }
     // Shown wherever a tool-output body is render-capped
     // (SPEC_TOOL_OUTPUT_CAP_2026_05_30.md). One muted line, never silent.
     .agent-output-hidden-marker {
@@ -192,6 +219,11 @@
                 text-align: center;
                 color: var(--secondary-text-color);
                 font-size: 11px;
+                // Eases the running -> terminal color swap (warning ->
+                // success/error/etc, see the `&.success .agent-tool-status-icon`
+                // rules below) instead of an instant snap. The glyph itself
+                // still changes instantly — only its color eases.
+                transition: color 150ms ease;
             }
 
             .agent-tool-name {
@@ -229,6 +261,11 @@
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                animation: agent-tool-summary-fade-in 160ms ease-out;
+
+                @include mixins.respect-reduced-motion {
+                    animation: none;
+                }
 
                 // Waiting state (no stdout yet — showing elapsed timer).
                 // Dimmer than real output so it reads as "pending" rather
@@ -431,6 +468,11 @@
         flex-shrink: 0;
         white-space: nowrap;
         line-height: 1.4;
+        animation: agent-tool-summary-fade-in 160ms ease-out;
+
+        @include mixins.respect-reduced-motion {
+            animation: none;
+        }
 
         &.pill-exit-ok  { color: var(--success-color); background: color-mix(in srgb, var(--success-color) 14%, transparent); }
         &.pill-exit-err { color: var(--error-color);   background: color-mix(in srgb, var(--error-color)   14%, transparent); }
