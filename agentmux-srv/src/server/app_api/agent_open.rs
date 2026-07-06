@@ -283,26 +283,31 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // The frontend's LayoutModel watches pendingbackendactions on the
                 // LayoutState and applies them via treeReducer — same mechanism
                 // used by cross-window drag-and-drop (dnd.rs).
+                // SPEC_864 Phase 4 — append through the reducer (single
+                // writer of db_layout). Best-effort like the store-direct
+                // write it replaces.
                 {
-                    let tab: Tab = wstore.must_get(&tab_id)
-                        .map_err(|e| format!("agent.open: reload tab: {e}"))?;
-                    if let Ok(mut layout) = wstore.must_get::<obj::LayoutState>(&tab.layoutstate) {
-                        let mut actions = layout.pendingbackendactions.take().unwrap_or_default();
-                        actions.push(obj::LayoutActionData {
-                            actiontype: "insert".to_string(),
-                            actionid: uuid::Uuid::new_v4().to_string(),
-                            blockid: block_id.clone(),
-                            nodesize: None,
-                            nodesizefraction: None,
-                            indexarr: None,
-                            focused: true,
-                            magnified: false,
-                            ephemeral: false,
-                            targetblockid: String::new(),
-                            position: String::new(),
-                        });
-                        layout.pendingbackendactions = Some(actions);
-                        let _ = wstore.update(&mut layout);
+                    let action = obj::LayoutActionData {
+                        actiontype: "insert".to_string(),
+                        actionid: uuid::Uuid::new_v4().to_string(),
+                        blockid: block_id.clone(),
+                        nodesize: None,
+                        nodesizefraction: None,
+                        indexarr: None,
+                        focused: true,
+                        magnified: false,
+                        ephemeral: false,
+                        targetblockid: String::new(),
+                        position: String::new(),
+                    };
+                    if let Err(e) = crate::server::service::queue_layout_actions_via_reducer(
+                        &app_state,
+                        &tab_id,
+                        vec![action],
+                    )
+                    .await
+                    {
+                        tracing::warn!("agent.open: layout action enqueue failed: {e}");
                     }
                 }
 

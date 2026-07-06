@@ -155,6 +155,71 @@ pub(crate) async fn seed_layout_via_reducer(
     Ok(())
 }
 
+/// SPEC_864 Phase 4 — single-writer queue append. Dispatch a
+/// `LayoutQueueBackendActions` and persist the resulting
+/// `LayoutBackendActionsQueued` inside ONE hold of the reducer mutex
+/// (same critical-section contract as `seed_layout_via_reducer`), so a
+/// concurrent frontend ACK slice (`LayoutSetTree` REPLACE) can't
+/// interleave between dispatch and persist. Replaces the five
+/// store-direct `pendingbackendactions` writers (`layout_helpers`'
+/// insert/split/delete queuers + the two inline app_api sites).
+///
+/// No rollback arm: the reducer does not model the queue in
+/// `TabRecord` (pass-through validation only), so a SQLite apply
+/// failure leaves no reducer↔SQLite divergence to repair — just
+/// return the error.
+///
+/// `actions` must be non-empty; the reducer rejects an empty array.
+pub(crate) async fn queue_layout_actions_via_reducer(
+    state: &AppState,
+    tab_id: &str,
+    actions: Vec<crate::backend::obj::LayoutActionData>,
+) -> Result<(), String> {
+    let store = &state.wstore;
+    let actions_json = serde_json::to_value(&actions)
+        .map_err(|e| format!("queue actions serialize failed: {}", e))?;
+    let cmd = agentmux_common::ipc::Command::LayoutQueueBackendActions {
+        tab_id: tab_id.to_string(),
+        actions: actions_json,
+        correlation_id: String::new(),
+    };
+
+    let mut apply_err: Option<String> = None;
+    let events = {
+        let mut s = state.srv_state.lock().await;
+        let ctx = crate::reducer::Ctx {
+            now_rfc3339: chrono::Utc::now().to_rfc3339(),
+            conn_id: 0,
+            registered_pid: None,
+        };
+        let events = crate::reducer::update(&mut s, cmd, &ctx);
+        let has_error = events
+            .iter()
+            .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
+        if !has_error {
+            for ev in &events {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    apply_err = Some(e.to_string());
+                    break;
+                }
+            }
+        }
+        events
+    };
+
+    if let Some(err_msg) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(err_msg);
+    }
+    if let Some(err) = apply_err {
+        return Err(format!("queue append SQLite write failed: {}", err));
+    }
+    publish_events(state, &events);
+    Ok(())
+}
+
 /// Existence check used by `DeleteWorkspace` to decide whether to
 /// run the wcore delete path. Propagates `StoreError` so the caller
 /// can surface real I/O / corruption failures instead of

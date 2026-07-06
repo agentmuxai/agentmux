@@ -305,7 +305,8 @@ fn event_version(e: &Event) -> u64 {
         | Event::LayoutSplitHorizontalApplied { version, .. }
         | Event::LayoutSplitVerticalApplied { version, .. }
         | Event::LayoutCleared { version, .. }
-        | Event::LayoutTreeReplaced { version, .. } => *version,
+        | Event::LayoutBackendActionsQueued { version, .. }
+            | Event::LayoutTreeReplaced { version, .. } => *version,
     }
 }
 

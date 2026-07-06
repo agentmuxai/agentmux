@@ -370,6 +370,46 @@ pub(super) fn handle_layout_delete_node_by_block(
     handle_layout_delete_node(state, tab_id, node_id, correlation_id)
 }
 
+/// SPEC_864 Phase 4 — append backend actions to a tab's
+/// `pendingbackendactions` queue. The reducer does NOT model the queue
+/// in `TabRecord` (it is a transient backend→frontend mailbox the
+/// frontend drains via REPLACE-clear slices, not layout-tree state), so
+/// this arm only validates and passes the payload through; the persist
+/// subscriber APPENDs it to `LayoutState.pendingbackendactions`.
+///
+/// `actions` must be a non-empty JSON array of `LayoutActionData`
+/// objects (the type lives in `agentmux-srv::backend::obj`, not the
+/// common crate — hence the raw-value carriage).
+pub(super) fn handle_layout_queue_backend_actions(
+    state: &mut State,
+    tab_id: String,
+    actions: serde_json::Value,
+    correlation_id: String,
+) -> Vec<Event> {
+    if !state.tabs.contains_key(&tab_id) {
+        return unknown_tab(state, "LayoutQueueBackendActions", &tab_id);
+    }
+    match actions.as_array() {
+        Some(arr) if !arr.is_empty() => {}
+        _ => {
+            return op_error(
+                state,
+                format!(
+                    "LayoutQueueBackendActions: actions must be a non-empty JSON array (tab {})",
+                    tab_id
+                ),
+            )
+        }
+    }
+    let v = state.bump_version();
+    vec![Event::LayoutBackendActionsQueued {
+        tab_id,
+        actions,
+        correlation_id,
+        version: v,
+    }]
+}
+
 // ── Phase 3 — remaining structural arms ─────────────────────────────────────
 //
 // Each arm resolves the tab, calls the existing pure fn in `backend::layout`,

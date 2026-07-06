@@ -40,7 +40,9 @@ pub(crate) use introspect::{
 };
 pub(crate) use layout_helpers::setup_torn_off_block_layout;
 pub(crate) use object_helpers::{schedule_agent_zoom_mirror, update_object_meta};
-pub(crate) use reducer_helpers::{dispatch_to_reducer, publish_events, seed_layout_via_reducer};
+pub(crate) use reducer_helpers::{
+    dispatch_to_reducer, publish_events, queue_layout_actions_via_reducer, seed_layout_via_reducer,
+};
 
 pub(super) async fn handle_service(
     State(state): State<AppState>,

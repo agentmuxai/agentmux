@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Layout-tree + pending-action writers used by the tear-off / promote /
-//! redock handlers. Layout state migration is E.4 territory; until then these
-//! write straight to wstore. `setup_torn_off_block_layout` is re-exported
-//! crate-wide (the pane app-API uses it).
+//! redock handlers. SPEC_864 Phase 3/4 — all of them route through the
+//! reducer (`seed_layout_via_reducer` / `queue_layout_actions_via_reducer`);
+//! nothing here writes wstore directly anymore.
+//! `setup_torn_off_block_layout` is re-exported crate-wide (the pane
+//! app-API uses it).
 
 use crate::backend::obj::*;
-use crate::backend::storage::store::Store;
 
 /// Phase E.5.5 — set up the layout tree for a tab that just received
 /// its first block via the TearOffBlock saga. Called from the
@@ -74,15 +75,15 @@ pub(crate) async fn setup_torn_off_block_layout(
 /// channel for "backend wants the frontend to mutate its layout
 /// tree". Source-delete on tear-off uses the same channel via
 /// `queue_source_layout_delete`.
-pub(super) fn queue_target_layout_insert(
-    store: &Store,
+///
+/// SPEC_864 Phase 4 — appends through the reducer
+/// (`queue_layout_actions_via_reducer`), not `store.update`.
+pub(super) async fn queue_target_layout_insert(
+    state: &super::super::AppState,
     target_tab_id: &str,
     block_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let target_tab = store.must_get::<Tab>(target_tab_id)?;
-    let mut target_layout = store.must_get::<LayoutState>(&target_tab.layoutstate)?;
-    let mut actions = target_layout.pendingbackendactions.take().unwrap_or_default();
-    actions.push(LayoutActionData {
+) -> Result<(), String> {
+    let action = LayoutActionData {
         // Matches `LayoutTreeActionType.InsertNode = "insert"` in
         // `frontend/layout/lib/types.ts:73`.
         actiontype: "insert".to_string(),
@@ -96,10 +97,9 @@ pub(super) fn queue_target_layout_insert(
         ephemeral: false,
         targetblockid: String::new(),
         position: String::new(),
-    });
-    target_layout.pendingbackendactions = Some(actions);
-    store.update(&mut target_layout)?;
-    Ok(())
+    };
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, target_tab_id, vec![action])
+        .await
 }
 
 /// Phase 4b/4c — enqueue a directional split action on the TARGET tab's
@@ -120,13 +120,13 @@ pub(super) fn queue_target_layout_insert(
 /// (`layoutTree.ts`). Inner directions use 0.5 (50/50, matching the ghost's
 /// half-leaf); outer directions use 0.2 (matching the ghost's exact `leaf/5`
 /// band — see `ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md`).
-pub(super) fn queue_target_layout_split(
-    store: &Store,
+pub(super) async fn queue_target_layout_split(
+    state: &super::super::AppState,
     target_tab_id: &str,
     block_id: &str,
     target_block_id: &str,
     dir: u8,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), String> {
     const INNER_FRACTION: f64 = 0.5;
     const OUTER_FRACTION: f64 = 0.2;
     let (actiontype, position, nodesizefraction): (&str, &str, f64) = match dir {
@@ -139,12 +139,9 @@ pub(super) fn queue_target_layout_split(
         1 => ("splithorizontal", "after",  INNER_FRACTION),
         5 => ("splithorizontal", "after",  OUTER_FRACTION),
         // Center (8) or unknown — caller should use queue_target_layout_insert.
-        _ => return queue_target_layout_insert(store, target_tab_id, block_id),
+        _ => return queue_target_layout_insert(state, target_tab_id, block_id).await,
     };
-    let target_tab = store.must_get::<Tab>(target_tab_id)?;
-    let mut target_layout = store.must_get::<LayoutState>(&target_tab.layoutstate)?;
-    let mut actions = target_layout.pendingbackendactions.take().unwrap_or_default();
-    actions.push(LayoutActionData {
+    let action = LayoutActionData {
         actiontype: actiontype.to_string(),
         actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
@@ -156,10 +153,9 @@ pub(super) fn queue_target_layout_split(
         ephemeral: false,
         targetblockid: target_block_id.to_string(),
         position: position.to_string(),
-    });
-    target_layout.pendingbackendactions = Some(actions);
-    store.update(&mut target_layout)?;
-    Ok(())
+    };
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, target_tab_id, vec![action])
+        .await
 }
 
 /// Phase E.5.5 — append a layout-delete action to the source tab's
@@ -167,15 +163,12 @@ pub(super) fn queue_target_layout_split(
 /// frontend tears the moved block out of its layout tree on next
 /// poll. Mirrors the action-queueing portion of
 /// `wcore::tear_off_block`. Layout migration is E.4.
-pub(super) fn queue_source_layout_delete(
-    store: &Store,
+pub(super) async fn queue_source_layout_delete(
+    state: &super::super::AppState,
     source_tab_id: &str,
     block_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let source_tab = store.must_get::<Tab>(source_tab_id)?;
-    let mut source_layout = store.must_get::<LayoutState>(&source_tab.layoutstate)?;
-    let mut actions = source_layout.pendingbackendactions.take().unwrap_or_default();
-    actions.push(LayoutActionData {
+) -> Result<(), String> {
+    let action = LayoutActionData {
         actiontype: "delete".to_string(),
         actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),
@@ -187,47 +180,76 @@ pub(super) fn queue_source_layout_delete(
         ephemeral: false,
         targetblockid: String::new(),
         position: String::new(),
-    });
-    source_layout.pendingbackendactions = Some(actions);
-    store.update(&mut source_layout)?;
-    Ok(())
+    };
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, source_tab_id, vec![action])
+        .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::tests::test_state;
+    use agentmux_common::ipc::{Command, Event};
 
-    fn seeded_tab_id(state: &crate::server::AppState) -> String {
-        state
-            .wstore
-            .get_all::<Tab>()
+    /// SPEC_864 Phase 4 — the queue helpers dispatch through the reducer,
+    /// which rejects unknown tabs, so tests must create the tab via
+    /// reducer commands (same pattern as
+    /// `layout_seeders_route_through_reducer_coherently` in server tests)
+    /// rather than reading the wcore-seeded tab.
+    async fn reducer_known_tab(state: &crate::server::AppState) -> String {
+        async fn dispatch_apply(state: &crate::server::AppState, cmd: Command) -> Vec<Event> {
+            let events = super::super::reducer_helpers::dispatch_to_reducer(state, cmd).await;
+            for ev in &events {
+                crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            }
+            events
+        }
+        let ws_evs = dispatch_apply(state, Command::CreateWorkspace { name: "ws".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            state,
+            Command::CreateTab {
+                workspace_id: ws_id,
+                name: "t1".into(),
+            },
+        )
+        .await;
+        tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
             .unwrap()
-            .into_iter()
-            .next()
-            .expect("seeded tab")
-            .oid
+    }
+
+    fn pending_actions(state: &crate::server::AppState, tab_id: &str) -> Vec<LayoutActionData> {
+        let tab = state.wstore.must_get::<Tab>(tab_id).unwrap();
+        let layout = state.wstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        layout.pendingbackendactions.unwrap_or_default()
     }
 
     fn last_action(state: &crate::server::AppState, tab_id: &str) -> LayoutActionData {
-        let tab = state.wstore.must_get::<Tab>(tab_id).unwrap();
-        let layout = state.wstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
-        layout
-            .pendingbackendactions
-            .unwrap_or_default()
+        pending_actions(state, tab_id)
             .last()
             .expect("an action was queued")
             .clone()
     }
 
-    #[test]
-    fn queue_target_layout_split_maps_every_direction_to_an_exact_fraction() {
+    #[tokio::test]
+    async fn queue_target_layout_split_maps_every_direction_to_an_exact_fraction() {
         // Phase 4c: every non-Center direction must carry `nodesizefraction`
         // (not the old hardcoded-integer `nodesize` guess) so the frontend
         // can derive an exact size from the target's live size. See
         // ANALYSIS_FLOATING_PANE_GHOST_LANDING_DISCONNECT_2026_07_04.md.
         let state = test_state();
-        let tab_id = seeded_tab_id(&state);
+        let tab_id = reducer_known_tab(&state).await;
 
         let cases: &[(u8, &str, &str, f64)] = &[
             (0, "splitvertical", "before", 0.5),
@@ -241,7 +263,9 @@ mod tests {
         ];
 
         for &(dir, expected_type, expected_pos, expected_fraction) in cases {
-            queue_target_layout_split(&state.wstore, &tab_id, "new-block", "target-block", dir).unwrap();
+            queue_target_layout_split(&state, &tab_id, "new-block", "target-block", dir)
+                .await
+                .unwrap();
             let action = last_action(&state, &tab_id);
             assert_eq!(action.actiontype, expected_type, "dir={dir}");
             assert_eq!(action.position, expected_pos, "dir={dir}");
@@ -249,18 +273,33 @@ mod tests {
             assert_eq!(action.nodesize, None, "dir={dir}: absolute nodesize is no longer used for splits");
             assert_eq!(action.targetblockid, "target-block");
         }
+        // 8 splits queued → 8 actions APPENDED (not replaced).
+        assert_eq!(pending_actions(&state, &tab_id).len(), cases.len());
     }
 
-    #[test]
-    fn queue_target_layout_split_falls_back_to_insert_for_center_and_unknown_dirs() {
+    #[tokio::test]
+    async fn queue_target_layout_split_falls_back_to_insert_for_center_and_unknown_dirs() {
         let state = test_state();
-        let tab_id = seeded_tab_id(&state);
+        let tab_id = reducer_known_tab(&state).await;
 
         for dir in [8u8, 200u8] {
-            queue_target_layout_split(&state.wstore, &tab_id, "new-block", "target-block", dir).unwrap();
+            queue_target_layout_split(&state, &tab_id, "new-block", "target-block", dir)
+                .await
+                .unwrap();
             let action = last_action(&state, &tab_id);
             assert_eq!(action.actiontype, "insert", "dir={dir}");
             assert_eq!(action.nodesizefraction, None, "dir={dir}");
         }
+    }
+
+    /// SPEC_864 Phase 4 — queue writers hit the reducer's unknown-tab
+    /// validation instead of silently writing wstore.
+    #[tokio::test]
+    async fn queue_helpers_error_on_reducer_unknown_tab() {
+        let state = test_state();
+        let err = queue_source_layout_delete(&state, "ghost-tab", "b1")
+            .await
+            .expect_err("unknown tab must error");
+        assert!(err.contains("unknown tab"), "got: {err}");
     }
 }

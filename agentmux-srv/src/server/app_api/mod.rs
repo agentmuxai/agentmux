@@ -127,26 +127,31 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     );
     let focused = cmd.focus.unwrap_or(true);
 
+    // SPEC_864 Phase 4 — append through the reducer (single writer of
+    // db_layout). Best-effort like the store-direct write it replaces:
+    // a failure leaves the block created but not laid out.
     {
-        let tab: Tab = wstore.must_get(&tab_id)
-            .map_err(|e| format!("pane.open: reload tab: {e}"))?;
-        if let Ok(mut layout) = wstore.must_get::<obj::LayoutState>(&tab.layoutstate) {
-            let mut actions = layout.pendingbackendactions.take().unwrap_or_default();
-            actions.push(obj::LayoutActionData {
-                actiontype,
-                actionid: uuid::Uuid::new_v4().to_string(),
-                blockid: block_id.clone(),
-                nodesize: None,
-                nodesizefraction: None,
-                indexarr: None,
-                focused,
-                magnified: false,
-                ephemeral: false,
-                targetblockid,
-                position,
-            });
-            layout.pendingbackendactions = Some(actions);
-            let _ = wstore.update(&mut layout);
+        let action = obj::LayoutActionData {
+            actiontype,
+            actionid: uuid::Uuid::new_v4().to_string(),
+            blockid: block_id.clone(),
+            nodesize: None,
+            nodesizefraction: None,
+            indexarr: None,
+            focused,
+            magnified: false,
+            ephemeral: false,
+            targetblockid,
+            position,
+        };
+        if let Err(e) = crate::server::service::queue_layout_actions_via_reducer(
+            state,
+            &tab_id,
+            vec![action],
+        )
+        .await
+        {
+            tracing::warn!("pane.open: layout action enqueue failed: {e}");
         }
     }
 
