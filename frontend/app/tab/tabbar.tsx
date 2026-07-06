@@ -657,21 +657,47 @@ function TabBar(props: TabBarProps): JSX.Element {
     // tab's own color changing while it stays active — same two-level-memo
     // pattern tabcontent.tsx uses (a plain `getObjectValue` read wouldn't
     // re-subscribe when only the color, not the active id, changes).
-    // Rendered as a line under .tab-bar-scroll specifically (not .tab-bar,
-    // which also contains the hamburger) so it spans exactly the tab
-    // strip's own width — right of the hamburger, left of the header
-    // widgets — rather than the full window-header width.
     const activeTabAtom = createMemo(() => getWaveObjectAtom<Tab>(makeORef("tab", activeTabId())));
     const activeTabData = createMemo(() => activeTabAtom()());
     const activeTabColor = createMemo((): string | undefined | null => activeTabData()?.meta?.["tab:color"] as string | undefined | null);
-    // Starts at the first TAB's own left edge, not .tab-bar-scroll's — on
-    // Windows/Linux that container also includes the leading separator
-    // (the hamburger→first-tab hairline below), which a plain box-shadow on
-    // the container would paint over too. A dedicated absolutely-positioned
-    // line (rather than a box-shadow on the container) lets `left` skip past
-    // it explicitly. macOS has no leading separator (hamburger renders
-    // elsewhere), so the line starts flush at 0 there.
-    const activeLineLeft = () => (isMacOS() ? "0" : "var(--tab-separator-width, 1px)");
+
+    // The line is rendered as a sibling of .tab-bar-scroll (both children of
+    // .tab-bar), NOT as a child inside it — .tab-bar-scroll is the horizontal
+    // SCROLL container (overflow-x: auto), and an absolutely-positioned
+    // descendant of a scroll container moves with its scrollLeft (verified
+    // live: scrolling by 500px shifted the line's rect.x by exactly -500px —
+    // reagentx review on #1979 caught this before it shipped). .tab-bar
+    // itself never scrolls, so a line positioned relative to *it* stays put
+    // regardless of how far the tab strip is scrolled.
+    //
+    // left/width are measured (not CSS calc) because there's no fixed
+    // constant for "the hamburger's rendered width" to subtract — .tab-bar-
+    // scroll's own offsetLeft/clientWidth relative to .tab-bar already
+    // encode exactly that, and neither changes when .tab-bar-scroll is
+    // scrolled internally (scrolling content never moves the container's
+    // own box in its parent). offsetLeft lands at .tab-bar-scroll's own edge
+    // though, which on Windows/Linux is one leading separator short of the
+    // first tab's actual left edge (the separator is .tab-bar-scroll's own
+    // first child, per the leading-separator Show below) — add its width
+    // (the same --tab-separator-width token it's styled with) to close that
+    // last 1px gap, and take it back out of the width so the right edge is
+    // unaffected.
+    const [lineLeft, setLineLeft] = createSignal(0);
+    const [lineWidth, setLineWidth] = createSignal(0);
+    const measureLine = () => {
+        if (!tabBarScrollRef) return;
+        const leadingSeparatorPx = isMacOS()
+            ? 0
+            : parseFloat(getComputedStyle(tabBarScrollRef).getPropertyValue("--tab-separator-width")) || 1;
+        setLineLeft(tabBarScrollRef.offsetLeft + leadingSeparatorPx);
+        setLineWidth(tabBarScrollRef.clientWidth - leadingSeparatorPx);
+    };
+    onMount(() => {
+        measureLine();
+        const ro = new ResizeObserver(measureLine);
+        ro.observe(tabBarScrollRef);
+        onCleanup(() => ro.disconnect());
+    });
 
     return (
         <div class="tab-bar" {...dragProps}>
@@ -683,21 +709,6 @@ function TabBar(props: TabBarProps): JSX.Element {
                 <HamburgerMenu />
             </Show>
             <div ref={tabBarScrollRef!} class="tab-bar-scroll" data-drag-region="false">
-                <Show when={activeTabColor()}>
-                    <div
-                        class="active-tab-color-line"
-                        aria-hidden="true"
-                        style={{
-                            position: "absolute",
-                            left: activeLineLeft(),
-                            right: "0",
-                            bottom: "0",
-                            height: "2px",
-                            background: activeTabColor()!,
-                            "pointer-events": "none",
-                        }}
-                    />
-                </Show>
                 {/* When the hamburger sits to the left of the tabs (Windows/
                     Linux), give the hamburger→first-tab boundary the SAME 1px
                     separator every tab-to-tab boundary has — otherwise the
@@ -744,6 +755,21 @@ function TabBar(props: TabBarProps): JSX.Element {
                     of the scroll container looked draggable but wasn't. */}
                 <div class="tab-bar-fill" data-drag-region="true" />
             </div>
+            <Show when={activeTabColor()}>
+                <div
+                    class="active-tab-color-line"
+                    aria-hidden="true"
+                    style={{
+                        position: "absolute",
+                        left: `${lineLeft()}px`,
+                        width: `${lineWidth()}px`,
+                        bottom: "0",
+                        height: "2px",
+                        background: activeTabColor()!,
+                        "pointer-events": "none",
+                    }}
+                />
+            </Show>
             <Show when={pendingCloseTabId() !== null}>
                 <TabCloseConfirmModal
                     tabId={pendingCloseTabId()!}
