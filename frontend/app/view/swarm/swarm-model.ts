@@ -36,6 +36,31 @@ export interface AgentTreeNode {
     subagents: ActiveSubagent[];
 }
 
+// ── Status derivation ────────────────────────────────────────────────────
+
+/**
+ * `turn_active` is turn-precise (backed by the health monitor wired to the
+ * NDJSON stream) but only meaningful for persistent/ACP agent controllers —
+ * `is_agent_pane` is the discriminator, since `turn_active: false` and "this
+ * controller never populates turn_active" are indistinguishable on the wire
+ * (the Rust struct omits `false` fields — `skip_serializing_if = "is_false"`).
+ * For `is_agent_pane` panes, trust `turn_active` alone: `shellprocstatus`
+ * stays `"running"` for a persistent agent's entire process lifetime,
+ * idle-between-turns included, so OR-ing it back in would misrepresent an
+ * idle agent as "working" again — the exact bug this field exists to fix.
+ * For everything else (shell/PTY panes with no turn concept), fall back to
+ * `shellprocstatus` as before. See
+ * docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md Finding 1.
+ */
+function derivedRunningStatus(
+    isAgentPane: boolean | undefined,
+    turnActive: boolean | undefined,
+    shellprocstatus: string | undefined,
+): "running" | "idle" {
+    if (isAgentPane) return turnActive ? "running" : "idle";
+    return shellprocstatus === "running" ? "running" : "idle";
+}
+
 // ── ViewModel ────────────────────────────────────────────────────────────
 
 export class SwarmViewModel implements ViewModel {
@@ -174,7 +199,7 @@ export class SwarmViewModel implements ViewModel {
             // Fetch current status — don't assume idle for already-running agents.
             void BlockService.GetControllerStatus(blockId)
                 .then((rts) => {
-                    const status = rts?.shellprocstatus === "running" ? "running" : "idle";
+                    const status = derivedRunningStatus(rts?.is_agent_pane, rts?.turn_active, rts?.shellprocstatus);
                     this.setAgentStatuses((prev) => {
                         const m = new Map(prev);
                         m.set(blockId, status);
@@ -188,8 +213,8 @@ export class SwarmViewModel implements ViewModel {
                 eventType: WpsEvent.ControllerStatus,
                 scope,
                 handler: (ev) => {
-                    const proc = (ev as any)?.data?.shellprocstatus as string | undefined;
-                    const next: "running" | "idle" = proc === "running" ? "running" : "idle";
+                    const data = (ev as any)?.data;
+                    const next = derivedRunningStatus(data?.is_agent_pane, data?.turn_active, data?.shellprocstatus);
                     this.setAgentStatuses((prev) => {
                         const m = new Map(prev);
                         m.set(blockId, next);

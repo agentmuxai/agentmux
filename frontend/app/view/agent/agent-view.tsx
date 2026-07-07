@@ -456,6 +456,18 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         },
         onReady: () => onReadyFn?.(),
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
+        // Mount-time TurnPhase reconciliation — see
+        // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
+        // Finding 1. dispatchPaneIfRegistered (not dispatchPane) because
+        // this can resolve before registerPane() has run for a pane still
+        // mid-mount.
+        onControllerStatus: (rts) => {
+            dispatchPaneIfRegistered(
+                model.blockId,
+                { type: "ReconcileTurnActive", at: Date.now(), active: !!rts.turn_active },
+                "system",
+            );
+        },
     });
 
     onMount(() => {

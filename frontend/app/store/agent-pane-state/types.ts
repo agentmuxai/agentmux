@@ -378,6 +378,22 @@ export type AgentPaneCommand =
     | { type: "StreamWatchdogTick"; nowMs: number }
 
     /**
+     * Mount-time reconciliation: `BlockControllerRuntimeStatus.turn_active`
+     * (backend-verified, from the health monitor wired to the NDJSON
+     * stream — see `agentmux-srv/src/backend/blockcontroller/health.rs`)
+     * fetched once via `GetControllerStatus` during the launch flow's
+     * Phase 3. `registerPane()` always seeds `turnPhase: Idle` regardless
+     * of whether the agent is actually mid-turn; this command corrects
+     * that ONLY IF still `Idle` when it arrives — it never overrides a
+     * phase a real stream/user event already produced (TurnStart,
+     * StreamFlushObserved, etc. always win if they got there first). A
+     * `false` active flag is a no-op: `Idle` is already the right state
+     * and there is nothing to correct. See
+     * docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
+     * Finding 1.
+     */
+    | { type: "ReconcileTurnActive"; at: number; active: boolean }
+    /**
      * User pressed send — turn becomes active. Also clears stale
      * sessionStats from the previous turn.
      */
@@ -535,6 +551,13 @@ export type AgentPaneEvent =
           thresholdMs: number;
       }
     | { type: "turn-started"; at: number }
+    /**
+     * `ReconcileTurnActive` promoted the mount-default `Idle` to
+     * `Streaming` because the backend reported a turn already in flight.
+     * Surfaced for diagnostics — distinguishes this from a normal
+     * user-initiated `turn-started`.
+     */
+    | { type: "turn-active-reconciled-at-mount" }
     | {
           /**
            * A turn finished and the phase transitioned to `Done`. Since

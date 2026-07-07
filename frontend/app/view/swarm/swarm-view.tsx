@@ -160,7 +160,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
 type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected" | "unknown";
 
-function phaseToDisplayStatus(blockId: string, _fallback: "running" | "idle"): AgentDisplayStatus {
+function phaseToDisplayStatus(blockId: string, fallback: "running" | "idle"): AgentDisplayStatus {
     const phaseAccessor = getBlockTurnPhase(blockId);
     // A block only has a registered TurnPhase while its pane is mounted in
     // THIS renderer (registerActivity() in agentActivity.ts runs from the
@@ -170,7 +170,16 @@ function phaseToDisplayStatus(blockId: string, _fallback: "running" | "idle"): A
     // here. Conflating the two used to render active agents as flatly
     // "idle" ("nothing in progress" when something clearly was) — see
     // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md §1.4/§3.5.
-    if (!phaseAccessor) return "unknown";
+    //
+    // `fallback` is `node.agentStatus` — backend-verified via
+    // `GetControllerStatus`/`ControllerStatus` (swarm-model.ts's
+    // `derivedRunningStatus`), independent of whether this renderer has a
+    // mounted pane for the block. For agent panes it's turn-precise (keyed
+    // off `turn_active`, not raw process-alive `shellprocstatus` — see
+    // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
+    // Finding 1), so it's safe to trust here instead of falling through to
+    // "unknown" for an unmounted/background agent.
+    if (!phaseAccessor) return fallback === "running" ? "working" : "idle";
     const phase = phaseAccessor();
     switch (phase.kind) {
         case "Submitting":    return "working";

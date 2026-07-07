@@ -248,6 +248,7 @@ impl PersistentSubprocessController {
             shellprocexitcode: inner.proc_exit_code,
             spawn_ts_ms: None,
             is_agent_pane: true,
+            turn_active: self.health_monitor.is_active_turn(),
         }
     }
 
@@ -294,6 +295,24 @@ impl PersistentSubprocessController {
         if !self.is_running() {
             self.spawn_process(config.clone())?;
         }
+        // spawn_process already marks a fresh process's first turn active
+        // (and starts its watchdog); for an already-running process (the
+        // common case — every turn after the first) this is the only place
+        // that re-marks the turn active, since the persistent process never
+        // exits between turns. Without this, `turn_active` would go stale
+        // after turn 1 and never distinguish "generating" from "idle between
+        // turns" again. The watchdog spawned per-turn (`spawn_health_watchdog`
+        // exits as soon as `is_active_turn()` goes false — see
+        // `core::spawn_health_watchdog`'s doc comment) also needs
+        // re-arming here, but only when actually resuming from idle: a
+        // mid-turn steering send (`send_user_message`) already has one
+        // running, so re-spawning on every call would leak duplicate
+        // watchdog tasks.
+        let was_active = self.health_monitor.is_active_turn();
+        self.health_monitor.set_active_turn(true);
+        if !was_active {
+            core::spawn_health_watchdog(&self.health_monitor);
+        }
 
         // Format as stream-json user message
         let json_msg = serde_json::json!({
@@ -337,6 +356,15 @@ impl PersistentSubprocessController {
     /// the message land mid-turn (steering) instead of waiting for idle.
     /// Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
     pub fn send_user_message(&self, message: String) -> Result<(), String> {
+        // Whether the process was busy or idle, delivering this message
+        // (re)starts an active turn — see the comment in `send_message`,
+        // including the watchdog re-arm-only-if-was-idle rationale.
+        let was_active = self.health_monitor.is_active_turn();
+        self.health_monitor.set_active_turn(true);
+        if !was_active {
+            core::spawn_health_watchdog(&self.health_monitor);
+        }
+
         let json_msg = serde_json::json!({
             "type": "user",
             "message": {
@@ -777,6 +805,13 @@ impl PersistentSubprocessController {
                     }
                     let (meaningful, _error) = classify_output_line(&parsed);
                     health_read.record_output(meaningful);
+                    // Claude's turn-ending marker. Persistent mode never exits
+                    // between turns, so this is the only place `turn_active`
+                    // can go back to false without waiting for process exit —
+                    // see `send_message`'s matching `set_active_turn(true)`.
+                    if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
+                        health_read.set_active_turn(false);
+                    }
                     if let Some(sid) = parsed.get(&session_id_field).and_then(|v| v.as_str()) {
                         let sid_string = sid.to_string();
                         let already_captured = inner_read.lock().unwrap().session_id.is_some();
@@ -881,6 +916,7 @@ impl PersistentSubprocessController {
                             shellprocexitcode: exit_code,
                             spawn_ts_ms: None,
                             is_agent_pane: true,
+                            turn_active: false,
                         };
                         super::publish_controller_status(broker, &status);
                     }
@@ -1101,6 +1137,34 @@ mod send_input_tests {
         assert!(
             err.contains("does not accept raw input"),
             "raw input should be rejected, got {err:?}"
+        );
+    }
+
+    // `turn_active` on the runtime status snapshot must track the health
+    // monitor's active-turn flag directly — this is the signal the frontend
+    // seeds TurnPhase from at mount instead of always defaulting to Idle
+    // (see docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
+    // Finding 1). Exercised here via the health monitor directly rather than
+    // send_message()/the stdout reader, which both require a real spawned
+    // process.
+    #[test]
+    fn status_snapshot_turn_active_tracks_health_monitor() {
+        let c = controller();
+        assert!(
+            !c.get_status_snapshot().turn_active,
+            "freshly constructed controller has no turn in flight"
+        );
+
+        c.health_monitor.set_active_turn(true);
+        assert!(
+            c.get_status_snapshot().turn_active,
+            "turn_active must flip true once the health monitor marks a turn active"
+        );
+
+        c.health_monitor.set_active_turn(false);
+        assert!(
+            !c.get_status_snapshot().turn_active,
+            "turn_active must flip back false once the turn ends"
         );
     }
 }
