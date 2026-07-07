@@ -625,6 +625,26 @@ wrap_task! {
                                         }
                                     }
                                 }
+                                // Register the pane's OWN overlay window (not
+                                // task_main_win above) → block_id, so the
+                                // sendEvent: swizzle's `is_overlay` branch can
+                                // resolve which pane a direct click on its body
+                                // belongs to and emit `browser-pane-clicked`
+                                // (click-to-select — see PANE_OVERLAY_WIN_TO_BLOCK
+                                // doc comment in platform_macos.rs).
+                                if !task_overlay_win.is_null() {
+                                    if let Some(block_id) = self.label
+                                        .strip_prefix("browser-pane-")
+                                        .and_then(|rest| rest.rfind('-').map(|dash| rest[..dash].to_string()))
+                                    {
+                                        if let Ok(mut om) = crate::ui_tasks::PANE_OVERLAY_WIN_TO_BLOCK.try_lock() {
+                                            om.insert(
+                                                task_overlay_win as usize,
+                                                (self.label.clone(), block_id, Arc::downgrade(&self.state)),
+                                            );
+                                        }
+                                    }
+                                }
                                 crate::ui_tasks::PANE_LOCAL_W.store(
                                     task_dip_w, std::sync::atomic::Ordering::SeqCst);
                                 tracing::info!(
