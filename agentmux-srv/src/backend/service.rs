@@ -265,6 +265,11 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec!["ctx".into(), "windowId".into(), "opacity".into()],
             return_desc: None,
         }),
+        ("window", "SetWindowTopology") => Some(MethodMeta {
+            desc: Some("set a window's persisted kind + parent_window_id".into()),
+            arg_names: vec!["ctx".into(), "windowId".into(), "kind".into(), "parentWindowId".into()],
+            return_desc: None,
+        }),
         ("window", "MoveBlockToNewWindow") => Some(MethodMeta {
             desc: Some("move block to new window".into()),
             arg_names: vec!["ctx".into(), "currentTabId".into(), "blockId".into()],
