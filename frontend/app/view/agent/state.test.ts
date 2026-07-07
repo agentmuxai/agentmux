@@ -6,7 +6,7 @@ import {
     createAgentAtoms,
     type AgentAtoms,
 } from "./state";
-import { isInterruptibleTurn, workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 
 let atoms: AgentAtoms;
 
@@ -86,57 +86,6 @@ describe("createAgentAtoms", () => {
             reason: "stream-unsubscribed",
         });
         expect(workingFromPhase(getPhase())).toBe(false);
-    });
-
-    // ── isInterruptibleTurn — "Send now" affordance gating ──────────────
-    // The pending-queue "Send now" button is meaningful only when a CLI
-    // process is in flight that SIGINT can interrupt — i.e. Streaming or
-    // Interrupting. `Submitting` is excluded because the message itself
-    // is the would-be turn, still waiting for `agent-message-accepted`.
-    // Gating on `workingFromPhase` caused a brief flash on every send.
-    // Spec: docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md.
-    test("isInterruptibleTurn = false for Idle / Submitting / Done / Disconnected", () => {
-        const [getPhase, setPhase] = atoms.turnPhaseAtom;
-
-        expect(getPhase().kind).toBe("Idle");
-        expect(isInterruptibleTurn(getPhase())).toBe(false);
-
-        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "" });
-        expect(isInterruptibleTurn(getPhase())).toBe(false);
-
-        setPhase({ kind: "Done", outcome: "completed", finishedAt: 1 });
-        expect(isInterruptibleTurn(getPhase())).toBe(false);
-
-        setPhase({
-            kind: "Disconnected",
-            lastKind: "Streaming",
-            lastConnectedAt: 1,
-            reason: "stream-unsubscribed",
-        });
-        expect(isInterruptibleTurn(getPhase())).toBe(false);
-    });
-
-    test("isInterruptibleTurn = true for Streaming / Interrupting", () => {
-        const [getPhase, setPhase] = atoms.turnPhaseAtom;
-
-        setPhase({
-            kind: "Streaming",
-            bufferSize: 0,
-            toolsActive: 0,
-            lastEventMs: 1,
-        });
-        expect(isInterruptibleTurn(getPhase())).toBe(true);
-
-        setPhase({ kind: "Interrupting", reason: "user", sigintSentAt: 1 });
-        expect(isInterruptibleTurn(getPhase())).toBe(true);
-    });
-
-    test("isInterruptibleTurn excludes the Submitting case that workingFromPhase includes", () => {
-        const submitting = { kind: "Submitting", submittedAt: 1, pendingContent: "" } as const;
-        // The exact divergence point: this is why the Send-now flash
-        // existed and why a separate predicate was needed.
-        expect(workingFromPhase(submitting)).toBe(true);
-        expect(isInterruptibleTurn(submitting)).toBe(false);
     });
 
     test("Interrupting phase drives the 'Stopping…' label", () => {

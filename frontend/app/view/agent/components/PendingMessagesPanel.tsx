@@ -20,6 +20,11 @@
  * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
  *
  * See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
+ *
+ * No "Send now" button — Esc on an empty composer delivers the queue to the
+ * live agent immediately instead (mirrors Claude Code CLI's "stop and
+ * consider this now" gesture). See
+ * docs/specs/SPEC_AGENT_ESCAPE_STEER_QUEUED_MESSAGE_2026_07_06.md.
  */
 
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js";
@@ -27,12 +32,6 @@ import type { PendingMessage } from "../state";
 
 interface PendingMessagesPanelProps {
     pendingMessages: Accessor<PendingMessage[]>;
-    /** True when the user should be offered a "Send now" shortcut —
-     *  typically: a turn is running AND the queue is non-empty. */
-    showSendNow?: Accessor<boolean>;
-    /** Fires when the user clicks "Send now". Caller is expected to
-     *  SIGINT the running turn so the queued messages drain. */
-    onSendImmediately?: () => void;
 }
 
 export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Element => {
@@ -48,21 +47,10 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
                 <div class="agent-pending-header">
                     <span class="agent-spinner-dot" />
                     <span class="agent-pending-header-text">
-                        Queued — sends at the agent's next step; ↑ to edit (
+                        Queued — sends at the agent's next step; ↑ to edit, Esc to send now (
                         {queuedMessages().length}
                         {queuedMessages().length === 1 ? " message" : " messages"})
                     </span>
-                    <Show when={props.showSendNow?.()}>
-                        <button
-                            type="button"
-                            class="agent-send-immediately-btn"
-                            onClick={() => props.onSendImmediately?.()}
-                            title="Stop the current turn and process the queue now"
-                        >
-                            <span class="agent-send-immediately-icon">⏭</span>
-                            <span>Send now</span>
-                        </button>
-                    </Show>
                 </div>
                 <For each={queuedMessages()}>
                     {(msg) => (

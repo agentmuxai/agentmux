@@ -188,10 +188,16 @@ interface AgentFooterProps {
      */
     onTyping?: () => void;
     /**
-     * Called on Esc when the textarea is empty (or whitespace only). The
-     * parent sends SIGINT to the agent CLI process — equivalent to Ctrl+C
-     * in a terminal. With text in the textarea, Esc clears instead.
-     * See SPEC_AGENT_PANE_FOLLOWUPS item #9.
+     * Called on Esc when the textarea is empty (or whitespace only). With
+     * text in the textarea, Esc clears instead. See SPEC_AGENT_PANE_FOLLOWUPS
+     * item #9.
+     *
+     * The parent decides what Esc actually does, mirroring Claude Code CLI:
+     * if a message is already queued (sitting behind a running turn), Esc
+     * delivers it to the live agent right now instead of waiting for the
+     * next natural breakpoint — "stop and consider this now." Only when
+     * nothing is queued does it fall back to sending SIGINT (equivalent to
+     * Ctrl+C in a terminal). See SPEC_AGENT_ESCAPE_STEER_QUEUED_MESSAGE_2026_07_06.md.
      */
     onStopAgent?: () => void;
     /**
@@ -706,9 +712,6 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
 
     return (
         <div class="agent-footer">
-            {/* "Send now" now renders inside PendingMessagesPanel (right
-                of the queue header) so it sits next to the messages it
-                accelerates, not above the composer. */}
             <div class="agent-input-container">
                 <Show when={autocompletePrefix() !== null && completions().length > 0}>
                     <SlashAutocomplete

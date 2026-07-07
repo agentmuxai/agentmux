@@ -335,28 +335,6 @@ export function workingFromPhase(phase: TurnPhase): boolean {
 }
 
 /**
- * Selector — `true` iff there is an in-flight turn that SIGINT can
- * interrupt. Same shape as {@link workingFromPhase}, but **excludes
- * `Submitting`** — during Submitting the would-be turn is itself
- * sitting in the pending queue waiting for `agent-message-accepted`,
- * so there is no CLI process to interrupt yet.
- *
- * Used by the "Send now" affordance (`PendingMessagesPanel`), which
- * is meaningful only when the queue genuinely sits behind a running
- * turn. Gating that button on the broader `workingFromPhase` caused
- * a brief flash on every send: the freshly-typed message was in
- * `pendingMessages` for ~50–200 ms while the phase sat in `Submitting`,
- * lighting the button before `agent-message-accepted` cleared the
- * queue. Spec: docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md.
- *
- * Returns true ⇔ `phase.kind ∈ {Streaming, Interrupting}`.
- */
-export function isInterruptibleTurn(phase: TurnPhase): boolean {
-    const k = phase.kind;
-    return k === "Streaming" || k === "Interrupting";
-}
-
-/**
  * Selector — `true` iff the pane is in the `Disconnected` phase. PR F:
  * drives the {@link AgentDisconnectedBanner} visibility, replacing any
  * ad-hoc "streaming.active === false but turn was active" checks. Pure
