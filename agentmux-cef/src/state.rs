@@ -878,6 +878,21 @@ pub struct AppState {
     /// and to pass the value to the frontend via the URL query string.
     pub window_transparent: std::sync::atomic::AtomicBool,
 
+    /// SPEC_PILLAR1_STEP4 Phase 2 — set once `"main"` has registered in
+    /// `on_after_created`, i.e. once we have direct proof CEF's UI-thread
+    /// message loop is actually pumping posted tasks. `post_task(ThreadId::UI,
+    /// ...)` silently drops tasks posted before this point (verified live:
+    /// `CreateWindowTask::execute` never ran and the browsers it should have
+    /// created were never made — see retro-pillar1-step4-reproject-race).
+    /// The launcher-ipc reader task can deliver `Event::Snapshot` (and thus
+    /// call `reproject_from_snapshot`) before this flag flips, since it runs
+    /// on its own tokio runtime independent of CEF's message loop.
+    pub ui_thread_ready: std::sync::atomic::AtomicBool,
+
+    /// Stash for a snapshot that arrived before `ui_thread_ready`. Drained
+    /// and replayed once `"main"` registers (see `ui_thread_ready`).
+    pub pending_reproject_snapshot: Mutex<Option<Vec<agentmux_common::ipc::WindowSnapshot>>>,
+
 }
 
 impl Default for AppState {
@@ -949,6 +964,8 @@ impl Default for AppState {
             window_hwnds: Mutex::new(HashMap::new()),
             floating_redock_ghost: Mutex::new(HashMap::new()),
             window_transparent: std::sync::atomic::AtomicBool::new(false),
+            ui_thread_ready: std::sync::atomic::AtomicBool::new(false),
+            pending_reproject_snapshot: Mutex::new(None),
         }
     }
 }

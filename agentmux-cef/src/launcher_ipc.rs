@@ -673,14 +673,14 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             );
             crate::commands::orphan_reconcile::reconcile_and_drain(state);
         }
-        // SPEC_PILLAR1_STEP4 Phase 1 — observe-only. Logs what a reproject
-        // pass would drive (window count/kind/parent) but doesn't create
-        // anything yet; that's Phase 2. Deliberately returns before the
+        // SPEC_PILLAR1_STEP4 Phase 2 — logs what this snapshot shows, then
+        // drives the fast-path reproject (recreate any window beyond
+        // "main" the launcher still remembers — e.g. after a host-only
+        // crash the launcher survived). Deliberately returns before the
         // generic broadcast below: this is a large, host-internal
         // request/response payload, not a typed delta the frontend's
         // launcher-event reducer expects — forwarding it would be either
-        // dead weight or a mis-parse, and Phase 1's whole point is zero
-        // externally-visible behavior change.
+        // dead weight or a mis-parse.
         Event::Snapshot { version, windows, .. } => {
             tracing::info!(
                 target: "reproject",
@@ -692,6 +692,24 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                     .collect::<Vec<_>>(),
                 "[reproject] launcher snapshot received"
             );
+            // This event can arrive (and this arm can run) before CEF's
+            // UI-thread message loop has started pumping — the launcher-ipc
+            // reader task runs on its own tokio runtime, independent of
+            // `run_message_loop()`. Posting `CreateWindowTask` via
+            // `post_task(ThreadId::UI, ...)` before that point is a silent
+            // no-op — verified live: the task's `execute()` never runs and
+            // the window is never created, even though every reducer-side
+            // bookkeeping call still succeeds. Stash and let `"main"`'s own
+            // registration (proof the UI thread is alive) drain and replay.
+            if state.ui_thread_ready.load(std::sync::atomic::Ordering::Acquire) {
+                crate::commands::window::reproject_from_snapshot(state, windows);
+            } else {
+                tracing::info!(
+                    target: "reproject",
+                    "[reproject] UI thread not ready yet — stashing snapshot for replay after \"main\" registers"
+                );
+                *state.pending_reproject_snapshot.lock() = Some(windows.clone());
+            }
             return;
         }
         _ => {}

@@ -1154,7 +1154,13 @@ pub fn post_create_window(
         state.clone(), url.to_string(), label.to_string(),
         x, y, w, h, frameless,
     );
+    tracing::info!(
+        label = %label,
+        on_ui_thread = currently_on(ThreadId::UI) != 0,
+        "[create-window] post_create_window: calling post_task"
+    );
     post_task(ThreadId::UI, Some(&mut task));
+    tracing::info!(label = %label, "[create-window] post_create_window: post_task returned");
 }
 
 // ── DevTools (toggle) ─────────────────────────────────────────────────────

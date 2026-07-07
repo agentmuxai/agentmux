@@ -230,13 +230,34 @@ tests unaffected (no test regressions); no new unit tests added for the request/
 itself since Phase 1's own log line was the live-verification signal — revisit if Phase 2 needs a
 more structured (non-string-log) handoff.
 
-**Phase 2 — per-window recreation from the fast-path snapshot.** Make `open_window_with_kind`
-`pub(crate)`, add the explicit-rect parameter, implement the enumeration + parent-before-child
-ordering + old-label→new-label remapping from §2.2. **App-running verification required** (this
-session's established bar for every host↔launcher/srv write-through): open 2-3 windows including at
-least one subwindow, kill the *inner host process only* (the established technique for triggering a
-launcher-supervised respawn without killing the launcher), confirm all windows reappear with correct
-kind/parent linkage and roughly-correct placement.
+**Phase 2 — per-window recreation from the fast-path snapshot.** ✅ Done. `open_window_with_kind`
+made `pub(crate)` with the explicit-rect parameter; `reproject_from_snapshot` implements the
+enumeration + parent-before-child ordering + old-label→new-label remapping from §2.2.
+
+**Addendum 2026-07-07 (post-implementation) — UI-thread-readiness race found and fixed.** First
+live-verification pass (kill inner host, 2 extra top-level windows including a subwindow open)
+looked like total success at every reducer/log level — `BrowserRegistered`, `WindowOpened`,
+`WindowInstanceAssigned` all fired for both recreated labels — but neither window ever appeared in
+CDP's target list and the renderer process count never grew. Root cause, confirmed by
+cross-referencing timestamps across two independent test runs: `reproject_from_snapshot` runs from
+the launcher-ipc reader task, which lives on its own tokio runtime and can complete **before CEF's
+UI-thread message loop starts pumping** (`run_message_loop()` in `lib.rs`, called well after
+`connect_to_launcher`'s synchronous handshake returns). `post_task(ThreadId::UI, ...)` posted before
+that point is a silent no-op — the `CreateWindowTask` it wraps never runs (`execute()`'s own first
+log line never appears), even though `post_task` itself returns without error. The orphaned
+`PendingWindowCreation` queue entries were then silently claimed by unrelated, concurrently-starting
+pool-warmup window creations once the message loop did start, producing exactly the misleading
+"reducer says success, CDP says nothing exists" signature.
+
+Fix: `AppState` gained `ui_thread_ready: AtomicBool` and `pending_reproject_snapshot: Mutex<Option<Vec<WindowSnapshot>>>`.
+`apply_event_to_shadow`'s `Event::Snapshot` arm stashes the snapshot instead of calling
+`reproject_from_snapshot` directly when `ui_thread_ready` is false. `"main"`'s own registration in
+`on_after_created` (the first point with direct proof the UI thread is alive — pool-window creations
+posted immediately afterward were verified to execute correctly) flips the flag and drains/replays
+any stashed snapshot. Re-verified live after the fix: both recreated windows now show
+`"[create-window] task entered UI thread"`, appear as real CDP targets, get non-null `windowId`s via
+`listWindowInstances()`, and the renderer process count grew by exactly 2 (9 → 11) as expected. See
+retro (to be written) for the full timestamp cross-reference.
 
 **Phase 3 — slow-path fallback from srv.** Read `Client.windowids` + `Window.kind`/
 `parent_window_id` (Step 3) when the launcher's snapshot is empty/unavailable. **App-running
@@ -304,9 +325,10 @@ session established.
 
 1. ✅ `Command::GetSnapshot` is sent by the host on every launcher connection; the response is parsed
    and logged (Phase 1).
-2. ⬜ Killing the inner host process only (launcher survives) and confirming a multi-window session
-   (including a subwindow) fully reprojects with correct kind/parent/content and approximately
-   correct placement (Phase 2, live-verified).
+2. ✅ Killing the inner host process only (launcher survives) and confirming a multi-window session
+   fully reprojects with correct kind/parent/content and approximately correct placement (Phase 2,
+   live-verified — see the UI-thread-readiness addendum above for the race that had to be fixed
+   first).
 3. ⬜ Killing the entire process tree and relaunching confirms a multi-window session reprojects
    with correct kind/parent/content, position/size at default placement (Phase 3, live-verified).
 4. ⬜ No regression in existing single-window cold-start behavior (the common case — most users

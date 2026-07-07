@@ -390,6 +390,23 @@ impl AgentMuxHandler {
         if label == "main" {
             crate::commands::window_pool::init_pool(&self.state);
             crate::commands::window_pool::init_pane_pool(&self.state);
+
+            // SPEC_PILLAR1_STEP4 Phase 2 fix — "main" registering here is
+            // our proof CEF's UI-thread message loop is actually pumping
+            // posted tasks (see `ui_thread_ready`'s doc comment for why this
+            // matters: `post_task(ThreadId::UI, ...)` silently drops tasks
+            // posted before this point). Flip the flag, then replay any
+            // snapshot that arrived too early to reproject safely.
+            self.state.ui_thread_ready.store(true, std::sync::atomic::Ordering::Release);
+            let stashed = self.state.pending_reproject_snapshot.lock().take();
+            if let Some(windows) = stashed {
+                tracing::info!(
+                    target: "reproject",
+                    window_count = windows.len(),
+                    "[reproject] replaying stashed snapshot now that \"main\" has registered"
+                );
+                crate::commands::window::reproject_from_snapshot(&self.state, &windows);
+            }
         } else if label.starts_with("window-pool-") {
             crate::commands::window_pool::register_pool_window(&self.state, &label);
         } else if label.starts_with("floating-pool-") {
