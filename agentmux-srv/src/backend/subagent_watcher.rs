@@ -403,6 +403,21 @@ impl SubagentWatcher {
         Vec::new()
     }
 
+    /// Get info for a single subagent (sync — safe to call from RPC dispatch).
+    /// Targeted counterpart of `list_active()` — a subagent pane reopened
+    /// after its `subagent:spawned` event already fired needs its info once,
+    /// at mount; scanning + cloning every active subagent across every
+    /// session for that is wasteful when the caller already knows the id.
+    pub fn get_info(&self, agent_id: &str) -> Option<SubagentInfo> {
+        let sessions = self.sessions.lock().unwrap();
+        for session in sessions.values() {
+            if let Some(state) = session.subagents.get(agent_id) {
+                return Some(state.info.clone());
+            }
+        }
+        None
+    }
+
     // ── Internal methods ──────────────────────────────────────────────────
 
     /// Scan for existing subagent JSONL files in a projects directory.
@@ -1234,6 +1249,24 @@ mod tests {
         // s2: its only subagent belonged to parent-1, so the whole session
         // entry is pruned (not left behind as an empty HashMap).
         assert!(!sessions.contains_key("s2"), "session left with zero subagents must be removed, not left empty");
+    }
+
+    #[test]
+    fn get_info_finds_a_subagent_by_id_without_scanning_the_full_list() {
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+            s1.subagents.insert("sub-b".to_string(), fixture_state("parent-1", "sub-b", "s1"));
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        let found = watcher.get_info("sub-b").expect("sub-b should be found");
+        assert_eq!(found.agent_id, "sub-b");
+        assert_eq!(found.parent_agent, "parent-1");
+
+        assert!(watcher.get_info("never-spawned").is_none());
     }
 
     #[test]
