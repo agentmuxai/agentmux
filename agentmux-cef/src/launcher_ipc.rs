@@ -170,6 +170,12 @@ pub async fn connect_to_launcher(
     if COMMAND_TX.set(tx).is_err() {
         tracing::warn!("[launcher-ipc] COMMAND_TX already set — connect_to_launcher called twice");
     }
+    // SPEC_PILLAR1_STEP4 Phase 1 — request the launcher's live window
+    // snapshot on every connect (cold start AND a post-crash respawn look
+    // identical here; see the spec for why no separate "is this a restart"
+    // signal is needed). Phase 1 is observe-only: the reader task logs what
+    // this would drive but doesn't recreate anything yet.
+    request_snapshot();
     let writer_for_drain = Arc::clone(&writer);
     tokio::spawn(async move {
         while let Some(cmd) = rx.recv().await {
@@ -390,6 +396,9 @@ pub async fn connect_to_launcher(
     if COMMAND_TX.set(tx).is_err() {
         tracing::warn!("[launcher-ipc] COMMAND_TX already set — connect_to_launcher called twice");
     }
+    // SPEC_PILLAR1_STEP4 Phase 1 — see the Windows variant's identical call
+    // for the rationale.
+    request_snapshot();
     let writer_for_drain = Arc::clone(&writer);
     tokio::spawn(async move {
         while let Some(cmd) = rx.recv().await {
@@ -664,6 +673,27 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             );
             crate::commands::orphan_reconcile::reconcile_and_drain(state);
         }
+        // SPEC_PILLAR1_STEP4 Phase 1 — observe-only. Logs what a reproject
+        // pass would drive (window count/kind/parent) but doesn't create
+        // anything yet; that's Phase 2. Deliberately returns before the
+        // generic broadcast below: this is a large, host-internal
+        // request/response payload, not a typed delta the frontend's
+        // launcher-event reducer expects — forwarding it would be either
+        // dead weight or a mis-parse, and Phase 1's whole point is zero
+        // externally-visible behavior change.
+        Event::Snapshot { version, windows, .. } => {
+            tracing::info!(
+                target: "reproject",
+                version,
+                window_count = windows.len(),
+                windows = ?windows
+                    .iter()
+                    .map(|w| (w.label.as_str(), w.kind, w.parent_label.as_deref(), w.last_rect))
+                    .collect::<Vec<_>>(),
+                "[reproject] launcher snapshot received"
+            );
+            return;
+        }
         _ => {}
     }
 
@@ -695,6 +725,21 @@ pub fn report_window_opened(
     };
     if let Err(e) = tx.send(cmd) {
         tracing::warn!("[launcher-ipc] report_window_opened: channel closed ({})", e);
+    }
+}
+
+/// SPEC_PILLAR1_STEP4 Phase 1 — request the launcher's live window
+/// snapshot (`Event::Snapshot`, handled in `apply_event_to_shadow` below).
+/// Called once, right after `COMMAND_TX` is published, from both platform
+/// variants of `connect_to_launcher`. No-op if the launcher pipe isn't
+/// connected (`task dev` mode), same semantics as every other `report_*`
+/// helper here.
+fn request_snapshot() {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    if let Err(e) = tx.send(Command::GetSnapshot) {
+        tracing::warn!("[launcher-ipc] request_snapshot: channel closed ({})", e);
     }
 }
 
