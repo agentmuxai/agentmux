@@ -9,14 +9,17 @@ your task dev, neither the swarm summaries or subagents are showing in
 swarm" → clarified to "nm, the summary comes through, not the subagent" →
 after the initial fix landed, live-tested again and reported: "when I opened
 an agent that had spawned subagents before, the swarm pane floods with old
-subagents... we need an architecture rethink, this looks sloppy."
+subagents... we need an architecture rethink, this looks sloppy." → after
+Findings 1-2 landed, reported a live agent ("Mazs") that had genuinely just
+spawned subagents still showed nothing, which led to Finding 3.
 
 ## tl;dr
 
-Two distinct, independently-confirmed bugs in `agentmux-srv/src/backend/subagent_watcher.rs`, both stemming from the same root pattern this session's other findings share: state gets (re)constructed at "reopen" time from raw filesystem/process truth, with no scoping to what's actually *current*.
+Three distinct, independently-confirmed bugs in `agentmux-srv/src/backend/subagent_watcher.rs` / `agentmux-srv/src/server/reactive.rs`, all stemming from the same root pattern this session's other findings share: state gets (re)constructed at "reopen"/"register" time from raw filesystem/process truth, with no scoping to — or even correct identification of — what's actually *current*.
 
 1. **Subagents never appeared at all** — `watch_agent()` (called from the reactive-register handshake) failed outright and silently gave up when the Claude CLI's config directory didn't exist yet on disk, which is the common case (register fires ~47s before the directory is created).
 2. **Subagents flooded in from every past session** — once (1) was fixed, reopening any agent pane whose identity had prior conversations flooded the Swarm view with every subagent that identity had *ever* spawned, in *every* project, across the process's whole history — not just the current session.
+3. **The watched directory itself was often just wrong** — `derive_claude_config_dir()` hardcodes `~/.config/claude-<agent_id>`, which only matches reality for an agent with an explicit per-identity bundle override. Any agent without one (the common case — confirmed live for two different test agents) launches under the shared default auth path, `~/.agentmux/shared/providers/claude/`, a completely different subtree. Fix (1) above then watched forever for a directory that was never going to be created at that path, no matter how long it waited.
 
 ## Finding 1 — `watch_agent()` fails silently when the config dir doesn't exist yet
 
@@ -70,14 +73,45 @@ Removed the blind scan from `watch_agent()` entirely. Reasoning about what's act
 
 If the on-disk layout is ever flat (no per-session directory — `subagents/` sitting directly under the project dir), `scan_session_subagents` intentionally finds nothing rather than falling back to a broader scan — showing nothing is a smaller failure than reintroducing the flood.
 
+## Finding 3 — `derive_claude_config_dir()`'s path convention doesn't match reality for most agents
+
+### The gap
+
+After Findings 1-2 shipped, a live agent ("Mazs") that had genuinely just spawned subagents via a Task-tool workflow still showed nothing in Swarm. The log told the real story — `~/.config/claude-mazs` had never existed, across *multiple* registration attempts spanning 38+ minutes:
+
+```
+14:58:45  WARN failed to watch directory for subagents  dir=...\claude-mazs
+15:04:12  WARN failed to watch directory for subagents  dir=...\claude-mazs
+15:04:36  WARN failed to watch directory for subagents  dir=...\claude-mazs
+15:05:38  WARN failed to watch directory for subagents  dir=...\claude-mazs
+15:05:57  WARN failed to watch directory for subagents  dir=...\claude-mazs
+15:07:26  WARN failed to watch directory for subagents  dir=...\claude-mazs
+```
+
+This isn't a timing race (Finding 1's fix even engaged correctly — "watching nearest existing ancestor instead" — but the ancestor it fell back to, `~/.config`, still never had a `claude-mazs` child appear under it). `derive_claude_config_dir(agent_id)` hardcodes `home/.config/claude-<agent_id>` — a convention that turned out not to be universal. Reading `agentmux-cef`'s `ensure_auth_dir` (the function that actually resolves the CLI's `CLAUDE_CONFIG_DIR` at launch) revealed why: the DEFAULT provider auth dir lives under the account-wide shared root, `~/.agentmux/shared/providers/claude/` — *not* a per-agent `~/.config` path — with a per-identity bundle override taking priority only when one is explicitly configured. `derive_claude_config_dir()`'s guess only ever matches the override case; any agent without one (apparently the common case) was watching a directory tree that was never going to receive the files, no matter how long Finding 1's ancestor-fallback waited.
+
+### Fix
+
+Added `resolve_claude_config_dir(meta, agent_id)`, which reads the block's own `cmd:env.CLAUDE_CONFIG_DIR` — the literal value the CLI process was launched with, written by the launch flow before spawn, from the exact same resolution `ensure_auth_dir` performs — falling back to the legacy `derive_claude_config_dir` guess only when `cmd:env` isn't set yet. `handle_reactive_register` now calls this instead of the raw guess.
+
+### Verification
+
+Live-confirmed post-fix: both test agents ("AgentY", with an identity override, and "Mazs", without one) now resolve to `~/.agentmux/shared/providers/claude/projects` — the real shared path — and the watch succeeds immediately (no ancestor-fallback needed, since the real path already exists). Mazs's pending workflow batch of 13 subagents (all sharing one slug, confirming they're one legitimate concurrent spawn from the *current* session, not a resurfaced flood) appeared correctly as `subagent:spawned` events immediately after.
+
 ## Why this wasn't caught by the earlier report
 
-`REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md`'s Finding 2 (subagent completion detection) and this report's bugs live in the same file and the same general area (`subagent_watcher.rs`'s registration/scan path) but are functionally unrelated — Finding 2 was about a broken *completion* signal for subagents already correctly discovered; this report is about *discovery* itself being unscoped. Finding 2's fix (PR #2002) didn't touch `watch_agent()` or the scan functions at all. Both bugs were pre-existing and unrelated to any of the four PRs from the earlier report — they only surfaced because this was the first time an agent identity with real multi-session history was tested against a live `task dev` build with subagent tracking actually working end-to-end (Finding 1 above had been silently swallowing the whole subagent feature for any freshly-registering agent up to this point).
+`REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md`'s Finding 2 (subagent completion detection) and this report's bugs live in the same file and the same general area (`subagent_watcher.rs`'s registration/scan path) but are functionally unrelated — Finding 2 was about a broken *completion* signal for subagents already correctly discovered; this report is about *discovery* itself being broken (Findings 1 and 3) and unscoped (Finding 2 of this report). Finding 2's fix in the earlier report (PR #2002) didn't touch `watch_agent()`, `reactive.rs`, or the scan functions at all. All three bugs here were pre-existing and unrelated to any of the four PRs from the earlier report — they only surfaced because this was the first time agent identities with real multi-session history, and a mix of identity-bound vs. shared-default auth configs, were tested against a live `task dev` build with subagent tracking actually exercised end-to-end.
 
 ## Verification
 
-- `cargo test -p agentmux-srv subagent_watcher` — 16 tests passing, including:
+- `cargo test -p agentmux-srv subagent_watcher` — 19 tests passing, including:
   - `watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_missing` (Finding 1 regression test)
   - `scan_session_subagents_only_backfills_the_named_session` (Finding 2 — confirms cross-session isolation)
   - `scan_session_subagents_is_a_noop_for_an_unknown_session_id` (Finding 2 — confirms no flood-prone fallback)
-- Live-verified in `task dev` against this agent identity's real 20-session history.
+  - `resolve_claude_config_dir_prefers_cmd_env_over_the_legacy_guess` (Finding 3)
+  - `resolve_claude_config_dir_falls_back_to_the_legacy_guess_when_cmd_env_is_absent` (Finding 3)
+  - `resolve_claude_config_dir_falls_back_when_cmd_env_lacks_the_key` (Finding 3)
+- `cargo test -p agentmux-srv reactive` — 52 passing
+- Live-verified in `task dev`:
+  - Finding 2 against this agent identity's real 20-session history
+  - Finding 3 against two live agents with different auth configurations (one identity-bound, one shared-default) — both resolved to their real config dirs and correctly picked up a live subagent spawn (13 subagents, one workflow batch) that had previously shown nothing

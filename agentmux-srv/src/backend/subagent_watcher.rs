@@ -1270,13 +1270,43 @@ pub fn encode_workspace_path(workspace_path: &str) -> String {
         .replace(':', "")
 }
 
-/// Derive the Claude Code config directory for a host agent.
+/// Derive the Claude Code config directory for a host agent. Only matches
+/// reality for an agent with an explicit per-identity bundle override —
+/// prefer `resolve_claude_config_dir` when the block's meta is available.
 pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let config_dir = home
         .join(".config")
         .join(format!("claude-{}", agent_id.to_lowercase()));
     Some(config_dir)
+}
+
+/// The authoritative Claude Code config directory for a block: the
+/// `CLAUDE_CONFIG_DIR` the CLI process was actually launched with, read from
+/// the block's own `cmd:env` meta (written by the launch flow before spawn,
+/// from the exact same resolution the CLI process itself used — see
+/// `agentmux-cef`'s `ensure_auth_dir`). Falls back to
+/// `derive_claude_config_dir`'s legacy `~/.config/claude-<agent_id>` guess
+/// only when `cmd:env` isn't set yet.
+///
+/// This distinction matters: `derive_claude_config_dir`'s guess only holds
+/// for an agent with an explicit per-identity bundle override. Any agent
+/// without one launches under the shared default at
+/// `~/.agentmux/shared/providers/claude/`, a completely different path that
+/// the guess never matches — silently disabling subagent tracking for that
+/// agent forever (confirmed live: repeated "config dir does not exist yet"
+/// over 38+ minutes and multiple re-registrations, for an agent that had, in
+/// fact, already spawned subagents — just under the real shared path). See
+/// docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
+pub fn resolve_claude_config_dir(
+    meta: &crate::backend::obj::MetaMapType,
+    agent_id: &str,
+) -> Option<PathBuf> {
+    meta.get("cmd:env")
+        .and_then(|v| v.get("CLAUDE_CONFIG_DIR"))
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .or_else(|| derive_claude_config_dir(agent_id))
 }
 
 #[cfg(test)]
@@ -1528,6 +1558,42 @@ mod tests {
         // walk up to — real callers always pass an absolute config dir, but
         // the function must not panic on this input.
         assert_eq!(nearest_existing_ancestor(Path::new("bare-name")), None);
+    }
+
+    /// Regression test for the observed bug: an agent without an explicit
+    /// per-identity bundle override launches under the shared default auth
+    /// dir (`~/.agentmux/shared/providers/claude/`), not
+    /// `derive_claude_config_dir`'s `~/.config/claude-<agent_id>` guess.
+    /// `resolve_claude_config_dir` must prefer the block's real `cmd:env`
+    /// over that guess whenever it's actually set.
+    #[test]
+    fn resolve_claude_config_dir_prefers_cmd_env_over_the_legacy_guess() {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert(
+            "cmd:env".to_string(),
+            serde_json::json!({ "CLAUDE_CONFIG_DIR": "/agentmux/shared/providers/claude" }),
+        );
+
+        let resolved = resolve_claude_config_dir(&meta, "some-agent").unwrap();
+        assert_eq!(resolved, PathBuf::from("/agentmux/shared/providers/claude"));
+    }
+
+    #[test]
+    fn resolve_claude_config_dir_falls_back_to_the_legacy_guess_when_cmd_env_is_absent() {
+        let meta = crate::backend::obj::MetaMapType::new();
+        let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+        assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
+    }
+
+    #[test]
+    fn resolve_claude_config_dir_falls_back_when_cmd_env_lacks_the_key() {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        // cmd:env is present but doesn't carry CLAUDE_CONFIG_DIR (e.g. a
+        // non-Claude provider, or a race before the key is written).
+        meta.insert("cmd:env".to_string(), serde_json::json!({ "OTHER_VAR": "x" }));
+
+        let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+        assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
     }
 
     #[tokio::test]
