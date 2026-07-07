@@ -309,3 +309,80 @@ pub(crate) fn backend_get_window_opacity(web_endpoint: &str, auth_key: &str, win
     }
     parsed.get("data")?.get("opacity")?.as_f64().map(|o| o as f32)
 }
+
+/// SPEC_PILLAR1_STEP2 Slice B Phase 4 — write-through a floating pane's
+/// OS-window placement to its block's `meta` map, via the existing generic
+/// `object.UpdateObjectMeta` RPC (Phase E.5.3 — `Command::UpdateBlockMeta`
+/// already does a shallow merge against `block.meta`, so no new srv-side RPC
+/// was needed for this phase, unlike opacity's Phase 1). `meta_patch` is
+/// merged as-is — pass only the keys that changed (e.g. omit
+/// `pane:floating_normal_rect` on a restore that only changes placement).
+///
+/// Fire-and-forget, same shape as `backend_set_window_opacity`: raw TCP, no
+/// async runtime needed, called from `toggle_floating_maximize`
+/// (`commands/window/chrome.rs`) off the calling thread so a slow/failed srv
+/// round-trip never stalls the maximize/restore the user is actively
+/// triggering. No debounce (unlike opacity): this fires once per button
+/// click, not once per drag tick, so there's no burst to collapse.
+pub(crate) fn backend_update_block_meta(web_endpoint: &str, auth_key: &str, block_id: &str, meta_patch: serde_json::Value) {
+    use std::io::Write;
+
+    let Some(addr) = parse_web_endpoint(web_endpoint, "backend_update_block_meta") else {
+        return;
+    };
+
+    let oref = format!("block:{block_id}");
+    let body = serde_json::json!({
+        "service": "object",
+        "method": "UpdateObjectMeta",
+        "args": [oref, meta_patch],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(timeout)).ok();
+            stream.set_read_timeout(Some(timeout)).ok();
+            if let Err(e) = stream.write_all(request.as_bytes()) {
+                tracing::warn!(
+                    block_id = %block_id,
+                    error = %e,
+                    "[backend_update_block_meta] write failed — floating-pane placement not persisted"
+                );
+                return;
+            }
+            use std::io::Read;
+            let mut resp = String::new();
+            let _ = stream.read_to_string(&mut resp);
+            let first_line = resp.lines().next().unwrap_or("(empty)");
+            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
+                tracing::warn!(
+                    block_id = %block_id,
+                    response = %first_line,
+                    "[backend_update_block_meta] UpdateObjectMeta did not succeed — floating-pane placement not persisted"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                block_id = %block_id,
+                addr = %addr,
+                error = %e,
+                "[backend_update_block_meta] connect failed — floating-pane placement not persisted"
+            );
+        }
+    }
+}
