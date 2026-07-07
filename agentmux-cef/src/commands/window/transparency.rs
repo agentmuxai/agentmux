@@ -22,12 +22,58 @@
 //             via ui_tasks::post_set_window_alpha (CEF Views handle → must run
 //             on the UI thread). Native-Wayland ozone: no protocol, no-op.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::state::AppState;
 
 #[cfg(target_os = "windows")]
 use super::lifecycle::find_all_own_windows;
+
+/// SPEC_PILLAR1_STEP2 Slice A Phase 2 (reagent P1 on #1985) — trailing-edge
+/// debounce for the srv opacity write-through, keyed by window label.
+///
+/// The frontend's opacity slider calls `set_window_opacity` on every
+/// `onInput` tick with no debounce of its own — a drag can fire dozens of
+/// calls/sec. The naive approach (spawn a thread + TCP connection per call)
+/// lets those writes race each other: srv's `SetWindowOpacity` RPC does an
+/// unconditional `store.update` with no sequencing, so out-of-order network
+/// delivery could persist a stale mid-drag value instead of the final one
+/// — silently defeating the crash-restart correctness this phase exists
+/// for. A generation counter per label fixes this without touching the
+/// frontend or adding a CAS/version check to the Phase 1 RPC (out of
+/// scope for this phase): each call bumps its label's generation, then
+/// its spawned writer sleeps `OPACITY_WRITE_DEBOUNCE_MS` and only actually
+/// writes if no newer call has superseded it in the meantime. A burst
+/// collapses to exactly one outbound write — the final settled value —
+/// while deliberate, slowly-spaced changes (deliberate clicks, not a drag)
+/// each still get their own write once they clear the window.
+const OPACITY_WRITE_DEBOUNCE_MS: u64 = 400;
+
+fn opacity_write_generations() -> &'static Mutex<HashMap<String, u64>> {
+    static MAP: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Bump and return the new generation for `label`.
+fn next_opacity_write_generation(label: &str) -> u64 {
+    let mut m = opacity_write_generations()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let gen = m.entry(label.to_string()).or_insert(0);
+    *gen += 1;
+    *gen
+}
+
+/// True if `generation` is still the latest recorded generation for
+/// `label` — i.e. no newer `set_window_opacity` call for this label has
+/// happened since this one was scheduled.
+fn is_current_opacity_write_generation(label: &str, generation: u64) -> bool {
+    let m = opacity_write_generations()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    m.get(label).copied() == Some(generation)
+}
 
 /// Set window transparency/blur effects for a single window.
 ///
@@ -216,6 +262,56 @@ pub fn set_window_opacity(
         }
     }
 
+    // SPEC_PILLAR1_STEP2 Slice A Phase 2 — write-through to srv's durable
+    // `Window.opacity` mirror (added in Phase 1, #1982) so a crashed/
+    // restarted host can restore it instead of defaulting to fully opaque
+    // (`get_window_opacity` below reads it back). Platform-agnostic:
+    // `out.events` is the same regardless of which cfg-gated block above
+    // ran, so this fires once per call, not once per platform.
+    //
+    // Debounced per label (see `next_opacity_write_generation` above,
+    // reagent P1 on #1985) so a rapid burst — e.g. a slider drag, which
+    // the frontend fires on every `onInput` tick with no debounce of its
+    // own — collapses to exactly one outbound write of the final settled
+    // value, instead of one thread + TCP connection per tick racing to
+    // persist whichever happens to land last over the network. Silently
+    // skipped when the label has no registered `backend_window_id` (e.g.
+    // a pre-promote pool window, or a floating pane — see
+    // SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md §1.B,
+    // floating panes have no srv `Window` row to write to at all).
+    for ev in &out.events {
+        let resolved = match ev {
+            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
+                Some((ev_label.clone(), Some(*ev_opacity)))
+            }
+            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
+                Some((ev_label.clone(), None))
+            }
+            _ => None,
+        };
+        let Some((ev_label, ev_opacity)) = resolved else { continue };
+        let Some(window_id) = state.backend_window_id(&ev_label) else {
+            tracing::debug!(
+                label = %ev_label,
+                "[opacity] set_window_opacity: no backend_window_id — skipping srv write-through"
+            );
+            continue;
+        };
+        let generation = next_opacity_write_generation(&ev_label);
+        let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+        let auth_key = state.auth_key.lock().clone();
+        let debounce_label = ev_label.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(OPACITY_WRITE_DEBOUNCE_MS));
+            if !is_current_opacity_write_generation(&debounce_label, generation) {
+                // A newer call for this label superseded us during the
+                // sleep — this value is stale, don't persist it.
+                return;
+            }
+            crate::client::backend_set_window_opacity(&web_endpoint, &auth_key, &window_id, ev_opacity);
+        });
+    }
+
     let _ = out;
     Ok(serde_json::Value::Null)
 }
@@ -225,20 +321,102 @@ pub fn set_window_opacity(
 /// Reads from `HostState.window_opacities` — reflects the last value applied
 /// via `set_window_opacity`, not the Win32 layer. Used by the frontend to
 /// restore opacity on window init without an extra IPC round-trip.
-pub fn get_window_opacity(
+///
+/// SPEC_PILLAR1_STEP2 Slice A Phase 2 — a miss here means either "never set"
+/// OR "fresh process after a crash/restart" (`window_opacities` starts
+/// empty every launch). Falls back to srv's durable `Window.opacity` mirror
+/// via `backend_get_window_opacity` in the latter case — the actual
+/// reproject payoff of Phase 1's write-through. `async` (unlike the sibling
+/// handlers in this file) so the blocking network read runs on tokio's
+/// blocking-thread pool (`spawn_blocking`) rather than the async worker
+/// thread handling this IPC request.
+pub async fn get_window_opacity(
     state: &Arc<AppState>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let label = args
         .get("label")
         .and_then(|v| v.as_str())
-        .unwrap_or("main");
-    let opacity = state
-        .host_state
-        .lock()
-        .window_opacities
-        .get(label)
-        .copied()
-        .unwrap_or(1.0);
+        .unwrap_or("main")
+        .to_string();
+    let host_memory = state.host_state.lock().window_opacities.get(&label).copied();
+    if let Some(opacity) = host_memory {
+        return Ok(serde_json::json!(opacity));
+    }
+
+    let opacity = match state.backend_window_id(&label) {
+        Some(window_id) => {
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            tokio::task::spawn_blocking(move || {
+                crate::client::backend_get_window_opacity(&web_endpoint, &auth_key, &window_id)
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(1.0)
+        }
+        None => 1.0,
+    };
     Ok(serde_json::json!(opacity))
+}
+
+#[cfg(test)]
+mod opacity_debounce_tests {
+    use super::{is_current_opacity_write_generation, next_opacity_write_generation};
+
+    /// Simulates a rapid burst (slider drag): only the LAST call's
+    /// generation should still be "current" once all bumps have happened
+    /// — the reagent P1 scenario this debounce exists to prevent (an
+    /// earlier, superseded call's stale value winning a network race).
+    #[test]
+    fn burst_only_the_last_generation_is_current() {
+        let label = "test-burst-only-last-wins";
+        let gens: Vec<u64> = (0..5).map(|_| next_opacity_write_generation(label)).collect();
+        for &g in &gens[..gens.len() - 1] {
+            assert!(
+                !is_current_opacity_write_generation(label, g),
+                "earlier generation {g} must be superseded after a burst"
+            );
+        }
+        assert!(
+            is_current_opacity_write_generation(label, *gens.last().unwrap()),
+            "the last generation in the burst must still be current"
+        );
+    }
+
+    /// A single, deliberate (non-burst) call must still be current —
+    /// debouncing a burst down to one write must not also drop the only
+    /// write when there's no burst to coalesce.
+    #[test]
+    fn single_call_is_current() {
+        let label = "test-single-call-is-current";
+        let g = next_opacity_write_generation(label);
+        assert!(is_current_opacity_write_generation(label, g));
+    }
+
+    /// Generations are tracked independently per label — a burst on one
+    /// window must not supersede a pending write for a different window.
+    #[test]
+    fn generations_are_independent_per_label() {
+        let a = "test-independent-label-a";
+        let b = "test-independent-label-b";
+        let ga = next_opacity_write_generation(a);
+        let gb = next_opacity_write_generation(b);
+        // A second call on `a` only supersedes `a`'s generation, not `b`'s.
+        next_opacity_write_generation(a);
+        assert!(!is_current_opacity_write_generation(a, ga));
+        assert!(is_current_opacity_write_generation(b, gb));
+    }
+
+    /// A generation that was never issued for a label (or an unknown
+    /// label entirely) must never read as current — the debounce map
+    /// only knows about labels it has actually seen.
+    #[test]
+    fn unknown_label_or_generation_is_never_current() {
+        assert!(!is_current_opacity_write_generation("test-never-seen-this-label", 1));
+        let label = "test-known-label-wrong-generation";
+        let g = next_opacity_write_generation(label);
+        assert!(!is_current_opacity_write_generation(label, g + 1));
+    }
 }

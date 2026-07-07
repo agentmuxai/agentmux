@@ -231,14 +231,19 @@ Phase 2/4 landing — the srv-side plumbing is valid and testable on its own.
 
 ## 6. Definition of done
 
-1. `Window.opacity` persists through a real `SetWindowOpacity` RPC call, unit-tested.
-2. Setting a window's opacity in a running app persists it to srv (verified live, not just unit-tested).
-3. Killing and relaunching the host restores the last-set opacity for windows that had one (verified live).
-4. `block.meta["pane:floating_normal_rect"]`/`["pane:floating_placement"]` persist through the existing
-   generic block-meta-patch mechanism, unit-tested.
-5. Maximizing then restoring a floating pane, killing the host, and relaunching restores the pane at
-   its last-known normal rect (verified live).
-6. Neither write-through path introduces a detectable UI stall on the action that triggers it.
+1. ✅ `Window.opacity` persists through a real `SetWindowOpacity` RPC call, unit-tested (Phase 1, #1982).
+2. ✅ Setting a window's opacity in a running app persists it to srv (Phase 2 — verified live via an
+   isolated instance: `window.api.setWindowOpacity('main', 0.7)` → `GetWindow` showed
+   `opacity: 0.699999988079071` in srv).
+3. ✅ Killing and relaunching the host restores the last-set opacity for windows that had one (Phase 2 —
+   verified live: killed the host process, relaunched against the same channel,
+   `window.api.getWindowOpacity('main')` on the fresh process returned `0.7`, not the 1.0 default).
+   Also verified the clear path: `setWindowOpacity('main', 1.0)` → srv's `Window.opacity` field became
+   fully absent (`None`, matching `WindowOpacityCleared`, not `Some(1.0)`).
+4. ⬜ Slice B — not started.
+5. ⬜ Slice B — not started.
+6. ✅ Both write-through paths (Phase 2) are `std::thread::spawn`/`spawn_blocking`, off the calling
+   thread — no stall observed live.
 
 ---
 
