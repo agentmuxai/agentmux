@@ -30,7 +30,7 @@ import {
     StreamingState,
     TurnTokens,
 } from "./types";
-import type { InitPhase, TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { InitPhase, PaneFailure, TurnPhase } from "@/app/store/agent-pane-state/types";
 
 /**
  * A signal pair: [getter, setter]
@@ -110,6 +110,13 @@ export interface AgentAtoms {
      * Drives the enriched `AgentWorkingRow` display.
      */
     currentToolArgAtom: SignalPair<string | null>;
+    /**
+     * Active classified failure for this pane, or null. Reducer-owned
+     * (see `AgentPaneState.failure`) — replaces the local `failure` signal
+     * `useAgentFailure.ts` used to hold on its own, with no path back into
+     * `turnPhase`. See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
+     */
+    failureAtom: SignalPair<PaneFailure | null>;
 }
 
 /**
@@ -175,5 +182,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         // SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md §5.4.
         detailsOpenAtom: createSignal<boolean>(false),
         currentToolArgAtom: createSignal<string | null>(null),
+        failureAtom: createSignal<PaneFailure | null>(null),
     };
 }
