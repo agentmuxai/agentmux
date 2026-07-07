@@ -259,6 +259,21 @@ any stashed snapshot. Re-verified live after the fix: both recreated windows now
 `listWindowInstances()`, and the renderer process count grew by exactly 2 (9 → 11) as expected. See
 retro (to be written) for the full timestamp cross-reference.
 
+**Addendum 2026-07-07 (reagent review, PR #2015) — TOCTOU between the two fields above.** reagent
+caught a real race in the fix just described: the reader thread's `ui_thread_ready` load and
+`"main"`'s registration `store` + stash-drain were two independent operations. If the reader thread
+read `ready == false`, then `"main"` registered (flipping `ready` and draining the still-empty
+stash) before the reader thread reached its stash write, the snapshot would be written *after* the
+one-time drain point had already passed and would never replay — a silent do-nothing regression to
+the exact class of bug this addendum's parent fix was written to close, just moved one layer up.
+Fixed by collapsing `ui_thread_ready` + `pending_reproject_snapshot` into one field,
+`ui_thread_gate: Mutex<UiThreadGate { ready: bool, stashed: Option<Vec<WindowSnapshot>> }>`, so the
+reader's check-then-stash and `"main"`'s flip-then-drain are both performed under the same lock
+acquisition — whichever runs first is guaranteed complete (and visible) before the other starts, by
+construction rather than by timing luck. Re-verified live after this second fix (fresh build, fresh
+isolated instance, same kill/respawn methodology): both recreated windows again registered under
+their own correct labels with zero mislabeling, and appeared as real CDP targets.
+
 **Phase 3 — slow-path fallback from srv.** Read `Client.windowids` + `Window.kind`/
 `parent_window_id` (Step 3) when the launcher's snapshot is empty/unavailable. **App-running
 verification required**: kill the *entire* process tree (launcher + host together) and relaunch from

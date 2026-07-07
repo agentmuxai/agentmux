@@ -393,12 +393,17 @@ impl AgentMuxHandler {
 
             // SPEC_PILLAR1_STEP4 Phase 2 fix — "main" registering here is
             // our proof CEF's UI-thread message loop is actually pumping
-            // posted tasks (see `ui_thread_ready`'s doc comment for why this
+            // posted tasks (see `ui_thread_gate`'s doc comment for why this
             // matters: `post_task(ThreadId::UI, ...)` silently drops tasks
-            // posted before this point). Flip the flag, then replay any
-            // snapshot that arrived too early to reproject safely.
-            self.state.ui_thread_ready.store(true, std::sync::atomic::Ordering::Release);
-            let stashed = self.state.pending_reproject_snapshot.lock().take();
+            // posted before this point). Flip `ready` and take `stashed`
+            // under the SAME lock acquisition the launcher-ipc reader task
+            // uses to check-then-stash — this is what closes the TOCTOU
+            // reagent's review caught in the first version of this fix.
+            let stashed = {
+                let mut gate = self.state.ui_thread_gate.lock();
+                gate.ready = true;
+                gate.stashed.take()
+            };
             if let Some(windows) = stashed {
                 tracing::info!(
                     target: "reproject",

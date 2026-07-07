@@ -701,14 +701,20 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // the window is never created, even though every reducer-side
             // bookkeeping call still succeeds. Stash and let `"main"`'s own
             // registration (proof the UI thread is alive) drain and replay.
-            if state.ui_thread_ready.load(std::sync::atomic::Ordering::Acquire) {
+            //
+            // The check and the stash happen under ONE lock acquisition
+            // (`ui_thread_gate`), not a load-then-separate-lock pair — see
+            // that field's doc comment for the TOCTOU this closes.
+            let mut gate = state.ui_thread_gate.lock();
+            if gate.ready {
+                drop(gate);
                 crate::commands::window::reproject_from_snapshot(state, windows);
             } else {
                 tracing::info!(
                     target: "reproject",
                     "[reproject] UI thread not ready yet — stashing snapshot for replay after \"main\" registers"
                 );
-                *state.pending_reproject_snapshot.lock() = Some(windows.clone());
+                gate.stashed = Some(windows.clone());
             }
             return;
         }
