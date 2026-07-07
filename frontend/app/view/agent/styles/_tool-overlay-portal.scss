@@ -67,39 +67,3 @@
     }
 }
 
-.agent-tool-overlay-actions {
-    flex: 0 0 auto;
-    display: flex;
-    gap: var(--space-0-5);
-    padding: var(--space-1) var(--space-1-5);
-    border-top: 1px solid var(--border-color);
-    background: var(--main-bg-color);
-
-    .agent-tool-overlay-action {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-0-5);
-        padding: var(--space-0-5) var(--space-1);
-        border: none;
-        border-radius: 0;
-        background: transparent;
-        color: var(--main-text-color);
-        font-size: 11px;
-        cursor: default;
-
-        &:hover:not(.agent-tool-overlay-action--disabled) {
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
-        }
-        &--active {
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.12));
-        }
-        &--disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-        }
-        .agent-tool-overlay-action-icon {
-            font-size: 12px;
-        }
-    }
-}
-

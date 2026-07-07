@@ -90,8 +90,6 @@ interface ToolBlockProps {
     onTogglePin: () => void;
     /** Mark this tool held-open — called once on its active→inactive transition. */
     onHoldOpen?: () => void;
-    /** Opens the tool's overlay content in a dedicated pane. */
-    onOpenInPane?: () => void;
 }
 
 const STATUS_ICON: Record<ToolNode["status"], string> = {
@@ -383,7 +381,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             >
                 <ToolBlockOverlay
                     node={props.node}
-                    onOpenInPane={props.onOpenInPane}
                     previewFontScale={previewFontScale}
                 />
             </div>

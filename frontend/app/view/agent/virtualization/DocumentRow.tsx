@@ -87,18 +87,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
         else props.onToggleCollapse(n.id);
     };
 
-    // Open-in-pane for tool nodes — surfaces in the overlay action bar
-    // (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §4). Stubbed in Phase 3 as
-    // a console.warn; Phase 4 wires it to createBlock({view:"tool-detail"}).
-    // The other two branching actions (open-in-window, new-agent-here)
-    // are surfaced disabled by `ToolOverlayActions` itself with their
-    // own coming-soon tooltips.
-    const onOpenInPane = (): void => {
-        if (props.node().type === "tool") {
-            console.warn("[tool-overlay] open in pane — not yet implemented");
-        }
-    };
-
     const handleRowKey = (e: KeyboardEvent): void => {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         const n = props.node();
@@ -128,7 +116,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
             <DocumentNodeBody
                 node={props.node}
                 documentState={props.documentState}
-                onOpenInPane={onOpenInPane}
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
                 onHoldToolOpen={props.onHoldToolOpen}
@@ -142,8 +129,6 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
 interface DocumentNodeBodyProps {
     node: Accessor<DocumentNode>;
     documentState: Accessor<DocumentState>;
-    /** Open-in-pane handler for tool nodes (overlay action bar). */
-    onOpenInPane?: () => void;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
     onHoldToolOpen?: (id: string) => void;
@@ -193,7 +178,6 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     heldOpen={props.documentState().expandedTools.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                     onHoldOpen={() => props.onHoldToolOpen?.(props.node().id)}
-                    onOpenInPane={props.onOpenInPane}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "agent_message"}>
