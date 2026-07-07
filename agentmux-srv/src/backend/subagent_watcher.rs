@@ -201,14 +201,52 @@ impl SubagentWatcher {
 
         let (tx, mut rx) = mpsc::unbounded_channel::<PathBuf>();
 
-        // Set up filesystem watcher
-        let tx_clone = tx.clone();
+        // Set up filesystem watcher. `watch_agent` is called from the
+        // reactive-register handshake, which fires as soon as the CLI's hook
+        // reaches AgentMux — well before the CLI itself has necessarily
+        // created its `CLAUDE_CONFIG_DIR` on disk (a live trace showed a 47s
+        // gap between register and the persistent process actually
+        // spawning). Watching a path that doesn't exist yet fails outright
+        // with no retry, permanently disabling subagent tracking for that
+        // agent's whole session — the observed cause of subagents silently
+        // never appearing in Swarm. Fall back to the nearest EXISTING
+        // ancestor (typically `~/.config`, effectively always present) so
+        // the watch succeeds immediately and the recursive mode picks up
+        // `config_dir`/`projects_dir` once the CLI creates them.
         let watched_dir = if projects_dir.exists() {
             projects_dir.clone()
-        } else {
-            // Watch parent (config_dir) until projects/ appears
+        } else if config_dir.exists() {
             config_dir.clone()
+        } else {
+            match nearest_existing_ancestor(&config_dir) {
+                Some(dir) => {
+                    tracing::info!(
+                        agent = %agent_id,
+                        config_dir = %config_dir.display(),
+                        watching = %dir.display(),
+                        "config dir does not exist yet — watching nearest existing ancestor instead"
+                    );
+                    dir
+                }
+                None => {
+                    tracing::warn!(
+                        agent = %agent_id,
+                        config_dir = %config_dir.display(),
+                        "no existing ancestor found for config dir — cannot watch for subagents"
+                    );
+                    return;
+                }
+            }
         };
+
+        // Filters events to this agent's config dir regardless of which
+        // directory ended up watched — a no-op when watching config_dir or
+        // projects_dir directly (both are already under config_dir), but
+        // essential when watching a shared ancestor above: without it,
+        // every other agent's subagent files under that same ancestor would
+        // be misattributed to this agent_id.
+        let config_dir_filter = config_dir.clone();
+        let tx_clone = tx.clone();
 
         let mut watcher = match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             match res {
@@ -219,6 +257,9 @@ impl SubagentWatcher {
                     );
                     if dominated {
                         for path in event.paths {
+                            if !path.starts_with(&config_dir_filter) {
+                                continue;
+                            }
                             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                                 let is_subagent =
                                     name.starts_with("agent-") && name.ends_with(".jsonl");
@@ -275,8 +316,22 @@ impl SubagentWatcher {
             });
         }
 
-        // Scan for any existing subagent files
-        self.scan_existing_subagents(agent_id, parent_block_id, &projects_dir);
+        // Deliberately NOT scanning history here. `watch_agent` runs at
+        // reactive-register time — before this agent identity's session for
+        // *this pane* is known — and `projects_dir` covers every project
+        // this agent identity has EVER worked in, across every past
+        // session. A blind scan here used to flood the Swarm view with
+        // every subagent this identity had ever spawned, in every project,
+        // the moment any pane for it was reopened (observed: 20 old
+        // sessions, 4-18 subagent files each, all appearing at once). A
+        // brand-new session has nothing to backfill — subagents will be
+        // picked up live, correctly, as the Task tool spawns them. A
+        // RESUMED session's own prior subagents (still legitimately
+        // relevant) are scoped in via `scan_session_subagents`, called from
+        // `handle_reactive_register` when the block's persisted
+        // `agent:sessionid` meta says which exact session this pane is
+        // resuming. See
+        // docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
 
         // Spawn async task to process file change notifications
         let self_clone = Arc::clone(self);
@@ -425,30 +480,38 @@ impl SubagentWatcher {
 
     // ── Internal methods ──────────────────────────────────────────────────
 
-    /// Scan for existing subagent JSONL files in a projects directory.
-    fn scan_existing_subagents(&self, parent_agent: &str, parent_block_id: &str, projects_dir: &Path) {
-        if !projects_dir.exists() {
-            return;
-        }
-
-        let walker = match std::fs::read_dir(projects_dir) {
-            Ok(w) => w,
-            Err(_) => return,
-        };
+    /// Backfill subagents that already existed before this pane (re)opened,
+    /// scoped to exactly the ONE session being resumed — not this agent
+    /// identity's entire history. Called from `handle_reactive_register`
+    /// when the block being registered already has a persisted
+    /// `agent:sessionid` (i.e. it's resuming a prior conversation, not
+    /// starting fresh); a brand-new session has nothing to backfill.
+    ///
+    /// Searches only the top level of `config_dir/projects/*` for a child
+    /// directory literally named `session_id` (the nested-per-session
+    /// layout observed in practice: `projects/<ws>/<session-uuid>/subagents/`)
+    /// — cheap, since an agent identity typically has few distinct project
+    /// dirs. Older/flat-layout installs where `subagents/` sits directly
+    /// under the project dir with no session-level folder have no way to
+    /// isolate one session's subagents from another's at the filesystem
+    /// level; in that case this intentionally finds nothing rather than
+    /// falling back to scanning everything.
+    pub fn scan_session_subagents(
+        &self,
+        parent_agent: &str,
+        parent_block_id: &str,
+        config_dir: &Path,
+        session_id: &str,
+    ) {
+        let projects_dir = config_dir.join("projects");
+        let Ok(walker) = std::fs::read_dir(&projects_dir) else { return };
 
         for entry in walker.flatten() {
-            // subagents/ sits directly under the project dir, or one level
-            // deeper under a session dir (projects/<ws>/<session>/subagents).
-            let mut candidates = vec![entry.path().join("subagents")];
-            if let Ok(children) = std::fs::read_dir(entry.path()) {
-                for child in children.flatten() {
-                    candidates.push(child.path().join("subagents"));
-                }
-            }
-            for subagents_dir in candidates {
-                if subagents_dir.is_dir() {
-                    self.scan_subagents_dir(parent_agent, parent_block_id, &subagents_dir);
-                }
+            let session_dir = entry.path().join(session_id);
+            let subagents_dir = session_dir.join("subagents");
+            if subagents_dir.is_dir() {
+                self.scan_subagents_dir(parent_agent, parent_block_id, &subagents_dir);
+                return; // session ids are unique — no need to keep scanning
             }
         }
     }
@@ -1096,6 +1159,34 @@ fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
     }
 }
 
+/// Walk up `path`'s ancestors (parent, grandparent, ...) and return the
+/// first one that already exists on disk. Used by `watch_agent` when the
+/// target directory doesn't exist yet — `notify::Watcher::watch` fails
+/// outright on a nonexistent path, so this finds the closest directory that
+/// can actually be watched right now (a later-created descendant is still
+/// picked up, since the watch is recursive).
+///
+/// Never walks above the user's home directory. Without a floor, a fresh
+/// environment where even `~/.config` doesn't exist yet (ephemeral
+/// dev/CI/container — this project's own docs describe several such setups)
+/// would walk all the way to `$HOME` or further, and
+/// `watcher.watch(&watched_dir, RecursiveMode::Recursive)` performs a
+/// synchronous, blocking directory walk of whatever it's handed — recursing
+/// the entire home directory (or beyond) from inside the async
+/// `handle_reactive_register` request handler risks a long stall and, on
+/// Linux, exhausting the OS-wide inotify watch-count limit. Returns `None`
+/// (giving up on watching rather than risking an unbounded walk) if `path`
+/// isn't under the home directory at all, or if no existing ancestor is
+/// found within that bound.
+fn nearest_existing_ancestor(path: &Path) -> Option<PathBuf> {
+    let floor = dirs::home_dir()?;
+    path.ancestors()
+        .skip(1)
+        .take_while(|p| p.starts_with(&floor))
+        .find(|p| p.exists())
+        .map(|p| p.to_path_buf())
+}
+
 /// Extract the workflow id from a path under `.../subagents/workflows/<id>/...`.
 /// Returns None for direct (non-workflow) subagent files.
 fn parse_workflow_id(path: &Path) -> Option<String> {
@@ -1195,13 +1286,43 @@ pub fn encode_workspace_path(workspace_path: &str) -> String {
         .replace(':', "")
 }
 
-/// Derive the Claude Code config directory for a host agent.
+/// Derive the Claude Code config directory for a host agent. Only matches
+/// reality for an agent with an explicit per-identity bundle override —
+/// prefer `resolve_claude_config_dir` when the block's meta is available.
 pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let config_dir = home
         .join(".config")
         .join(format!("claude-{}", agent_id.to_lowercase()));
     Some(config_dir)
+}
+
+/// The authoritative Claude Code config directory for a block: the
+/// `CLAUDE_CONFIG_DIR` the CLI process was actually launched with, read from
+/// the block's own `cmd:env` meta (written by the launch flow before spawn,
+/// from the exact same resolution the CLI process itself used — see
+/// `agentmux-cef`'s `ensure_auth_dir`). Falls back to
+/// `derive_claude_config_dir`'s legacy `~/.config/claude-<agent_id>` guess
+/// only when `cmd:env` isn't set yet.
+///
+/// This distinction matters: `derive_claude_config_dir`'s guess only holds
+/// for an agent with an explicit per-identity bundle override. Any agent
+/// without one launches under the shared default at
+/// `~/.agentmux/shared/providers/claude/`, a completely different path that
+/// the guess never matches — silently disabling subagent tracking for that
+/// agent forever (confirmed live: repeated "config dir does not exist yet"
+/// over 38+ minutes and multiple re-registrations, for an agent that had, in
+/// fact, already spawned subagents — just under the real shared path). See
+/// docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
+pub fn resolve_claude_config_dir(
+    meta: &crate::backend::obj::MetaMapType,
+    agent_id: &str,
+) -> Option<PathBuf> {
+    meta.get("cmd:env")
+        .and_then(|v| v.get("CLAUDE_CONFIG_DIR"))
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .or_else(|| derive_claude_config_dir(agent_id))
 }
 
 #[cfg(test)]
@@ -1433,6 +1554,188 @@ mod tests {
     fn session_id_flat_layout() {
         let path = p("projects/proj-enc/subagents/agent-a1.jsonl");
         assert_eq!(derive_session_id(&path), "proj-enc");
+    }
+
+    #[test]
+    fn nearest_existing_ancestor_finds_first_existing_parent() {
+        // Must live under the home dir — nearest_existing_ancestor's floor
+        // (see its doc comment) would otherwise reject the whole path before
+        // ever reaching `dir`. std::env::temp_dir() is NOT reliably under
+        // home (e.g. plain /tmp on Linux CI runners), so build the temp path
+        // from home_dir() directly.
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        let dir = home.join(format!("amx-ancestor-test-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // dir exists; dir/a/b/c does not.
+        let missing = dir.join("a").join("b").join("c");
+        assert_eq!(nearest_existing_ancestor(&missing), Some(dir.clone()));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn nearest_existing_ancestor_returns_none_for_a_root_that_does_not_exist() {
+        // A path with no ancestors at all (bare filename) has nothing to
+        // walk up to — real callers always pass an absolute config dir, but
+        // the function must not panic on this input.
+        assert_eq!(nearest_existing_ancestor(Path::new("bare-name")), None);
+    }
+
+    /// Regression test for reagent's finding on PR #2008: without a floor,
+    /// a path whose entire ancestor chain up to and including the home
+    /// directory is missing would walk PAST home — risking a
+    /// `notify::Watcher::watch` recursive walk of an enormous, unrelated
+    /// tree. Must return None instead once the walk would have to cross the
+    /// home directory boundary.
+    #[test]
+    fn nearest_existing_ancestor_never_walks_above_the_home_directory() {
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        // Every ancestor from `missing` up through (and including) `home`
+        // is guaranteed nonexistent (home itself always exists — it's the
+        // real user's home dir — so nest deep enough that none of the
+        // intermediate synthetic segments exist either).
+        let missing = home
+            .join("amx-never-created-1")
+            .join("amx-never-created-2")
+            .join("amx-never-created-3");
+        // `home` itself exists, so the walk finds it — proving the floor is
+        // inclusive of home, not exclusive.
+        assert_eq!(nearest_existing_ancestor(&missing), Some(home));
+    }
+
+    /// Regression test for the observed bug: an agent without an explicit
+    /// per-identity bundle override launches under the shared default auth
+    /// dir (`~/.agentmux/shared/providers/claude/`), not
+    /// `derive_claude_config_dir`'s `~/.config/claude-<agent_id>` guess.
+    /// `resolve_claude_config_dir` must prefer the block's real `cmd:env`
+    /// over that guess whenever it's actually set.
+    #[test]
+    fn resolve_claude_config_dir_prefers_cmd_env_over_the_legacy_guess() {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert(
+            "cmd:env".to_string(),
+            serde_json::json!({ "CLAUDE_CONFIG_DIR": "/agentmux/shared/providers/claude" }),
+        );
+
+        let resolved = resolve_claude_config_dir(&meta, "some-agent").unwrap();
+        assert_eq!(resolved, PathBuf::from("/agentmux/shared/providers/claude"));
+    }
+
+    #[test]
+    fn resolve_claude_config_dir_falls_back_to_the_legacy_guess_when_cmd_env_is_absent() {
+        let meta = crate::backend::obj::MetaMapType::new();
+        let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+        assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
+    }
+
+    #[test]
+    fn resolve_claude_config_dir_falls_back_when_cmd_env_lacks_the_key() {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        // cmd:env is present but doesn't carry CLAUDE_CONFIG_DIR (e.g. a
+        // non-Claude provider, or a race before the key is written).
+        meta.insert("cmd:env".to_string(), serde_json::json!({ "OTHER_VAR": "x" }));
+
+        let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+        assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
+    }
+
+    #[tokio::test]
+    async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_missing() {
+        // Regression test for the observed bug: watch_agent() is called from
+        // the reactive-register handshake, which fires well before the CLI
+        // process has created CLAUDE_CONFIG_DIR on disk. Watching a
+        // nonexistent path used to fail outright with no retry, permanently
+        // disabling subagent tracking for that agent's whole session.
+        // Must live under the home dir — nearest_existing_ancestor's floor
+        // would otherwise reject this path outright on platforms where
+        // std::env::temp_dir() isn't under home (e.g. plain /tmp on Linux
+        // CI runners).
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        let root = home.join(format!("amx-watch-fallback-test-{}", now_millis()));
+        std::fs::create_dir_all(&root).unwrap(); // ancestor exists...
+        let config_dir = root.join("claude-testagent"); // ...but this does not.
+        assert!(!config_dir.exists());
+
+        let watcher = Arc::new(fixture_watcher());
+        watcher.watch_agent("test-agent", "block-1", config_dir.clone());
+
+        // watch_agent must have succeeded (registered itself) instead of
+        // bailing out — the old behavior returned early on the failed
+        // notify::watch() call, before ever reaching this point.
+        assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Regression test for the observed flood: reopening a pane for an
+    /// agent identity that has spawned subagents across many past sessions
+    /// (in this project) must only backfill the ONE session being resumed,
+    /// not every session the identity has ever run.
+    #[test]
+    fn scan_session_subagents_only_backfills_the_named_session() {
+        let config_dir = std::env::temp_dir()
+            .join(format!("amx-scan-session-test-{}", now_millis()));
+        let target_session = "target-session-uuid";
+        let other_session = "other-session-uuid";
+
+        let target_dir = config_dir
+            .join("projects")
+            .join("ws-enc")
+            .join(target_session)
+            .join("subagents");
+        let other_dir = config_dir
+            .join("projects")
+            .join("ws-enc")
+            .join(other_session)
+            .join("subagents");
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::create_dir_all(&other_dir).unwrap();
+
+        std::fs::write(
+            target_dir.join("agent-wanted.jsonl"),
+            "{\"type\":\"result\",\"result\":\"done\"}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            other_dir.join("agent-unwanted.jsonl"),
+            "{\"type\":\"result\",\"result\":\"done\"}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.scan_session_subagents("parent-1", "block-1", &config_dir, target_session);
+
+        let active = watcher.list_active();
+        assert_eq!(active.len(), 1, "only the target session's subagent should be backfilled");
+        assert_eq!(active[0].agent_id, "wanted");
+        assert_eq!(active[0].session_id, target_session);
+
+        std::fs::remove_dir_all(&config_dir).ok();
+    }
+
+    #[test]
+    fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
+        let config_dir = std::env::temp_dir()
+            .join(format!("amx-scan-session-unknown-test-{}", now_millis()));
+        let existing_dir = config_dir
+            .join("projects")
+            .join("ws-enc")
+            .join("some-other-session")
+            .join("subagents");
+        std::fs::create_dir_all(&existing_dir).unwrap();
+        std::fs::write(
+            existing_dir.join("agent-a.jsonl"),
+            "{\"type\":\"result\",\"result\":\"done\"}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
+
+        assert!(watcher.list_active().is_empty(), "unknown session id must not fall back to scanning everything");
+
+        std::fs::remove_dir_all(&config_dir).ok();
     }
 
     #[test]
