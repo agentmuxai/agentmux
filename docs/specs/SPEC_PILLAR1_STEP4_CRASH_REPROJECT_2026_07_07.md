@@ -215,11 +215,20 @@ gating a larger piece of work.
 
 ## 3. Phased plan
 
-**Phase 1 — wire the launcher snapshot fetch (fast path), no window recreation yet.** On host
-startup, send `Command::GetSnapshot`, log what it would drive (window count, kinds, parents) but
-don't act yet. Pure plumbing + observability; zero behavior change. Unit-testable on the launcher
-side (`handle_get_snapshot` already has coverage per its doc comment); host-side needs new tests for
-the request/response round trip.
+**Phase 1 — wire the launcher snapshot fetch (fast path), no window recreation yet. ✅ Done,
+live-verified.** `request_snapshot()` sends `Command::GetSnapshot` right after `COMMAND_TX` is
+published in both platform variants of `connect_to_launcher`
+(`agentmux-cef/src/launcher_ipc.rs`); the resulting `Event::Snapshot` is logged (window count,
+label/kind/parent/last_rect per window) and deliberately **not** broadcast to renderers (it's a
+large host-internal payload, not a typed delta the frontend expects — broadcasting it would violate
+Phase 1's zero-behavior-change goal). Live-verified on an isolated instance: opened a subwindow,
+killed the inner host process only (launcher survives), and the respawned host's snapshot request
+came back with `window_count=2`, correctly showing `("main", FullInstance, None, None)` and
+`("window-...", Subwindow, Some("main"), Some(Rect{...}))` — kind, parent, AND `last_rect` all
+correctly reflected from the launcher's live memory, with zero srv query involved. 159 existing unit
+tests unaffected (no test regressions); no new unit tests added for the request/response round trip
+itself since Phase 1's own log line was the live-verification signal — revisit if Phase 2 needs a
+more structured (non-string-log) handoff.
 
 **Phase 2 — per-window recreation from the fast-path snapshot.** Make `open_window_with_kind`
 `pub(crate)`, add the explicit-rect parameter, implement the enumeration + parent-before-child
@@ -293,7 +302,7 @@ session established.
 
 ## 6. Definition of done
 
-1. ⬜ `Command::GetSnapshot` is sent by the host on every launcher connection; the response is parsed
+1. ✅ `Command::GetSnapshot` is sent by the host on every launcher connection; the response is parsed
    and logged (Phase 1).
 2. ⬜ Killing the inner host process only (launcher survives) and confirming a multi-window session
    (including a subwindow) fully reprojects with correct kind/parent/content and approximately
