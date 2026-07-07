@@ -216,6 +216,47 @@ pub fn set_window_opacity(
         }
     }
 
+    // SPEC_PILLAR1_STEP2 Slice A Phase 2 — write-through to srv's durable
+    // `Window.opacity` mirror (added in Phase 1, #1982) so a crashed/
+    // restarted host can restore it instead of defaulting to fully opaque
+    // (`get_window_opacity` below reads it back). Platform-agnostic:
+    // `out.events` is the same regardless of which cfg-gated block above
+    // ran, so this fires once per call, not once per platform.
+    //
+    // Best-effort and off this thread entirely (`std::thread::spawn`,
+    // matching `backend_close_window`'s established pattern for
+    // host→srv calls) — a slow or failed srv write must never delay the
+    // opacity change the user is actively making, which already applied
+    // via the local Win32/AppKit/X11 side-effect above. Silently skipped
+    // when the label has no registered `backend_window_id` (e.g. a
+    // pre-promote pool window, or a floating pane — see
+    // SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md §1.B,
+    // floating panes have no srv `Window` row to write to at all).
+    for ev in &out.events {
+        let resolved = match ev {
+            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
+                Some((ev_label.clone(), Some(*ev_opacity)))
+            }
+            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
+                Some((ev_label.clone(), None))
+            }
+            _ => None,
+        };
+        let Some((ev_label, ev_opacity)) = resolved else { continue };
+        let Some(window_id) = state.backend_window_id(&ev_label) else {
+            tracing::debug!(
+                label = %ev_label,
+                "[opacity] set_window_opacity: no backend_window_id — skipping srv write-through"
+            );
+            continue;
+        };
+        let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+        let auth_key = state.auth_key.lock().clone();
+        std::thread::spawn(move || {
+            crate::client::backend_set_window_opacity(&web_endpoint, &auth_key, &window_id, ev_opacity);
+        });
+    }
+
     let _ = out;
     Ok(serde_json::Value::Null)
 }
@@ -225,20 +266,42 @@ pub fn set_window_opacity(
 /// Reads from `HostState.window_opacities` — reflects the last value applied
 /// via `set_window_opacity`, not the Win32 layer. Used by the frontend to
 /// restore opacity on window init without an extra IPC round-trip.
-pub fn get_window_opacity(
+///
+/// SPEC_PILLAR1_STEP2 Slice A Phase 2 — a miss here means either "never set"
+/// OR "fresh process after a crash/restart" (`window_opacities` starts
+/// empty every launch). Falls back to srv's durable `Window.opacity` mirror
+/// via `backend_get_window_opacity` in the latter case — the actual
+/// reproject payoff of Phase 1's write-through. `async` (unlike the sibling
+/// handlers in this file) so the blocking network read runs on tokio's
+/// blocking-thread pool (`spawn_blocking`) rather than the async worker
+/// thread handling this IPC request.
+pub async fn get_window_opacity(
     state: &Arc<AppState>,
     args: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let label = args
         .get("label")
         .and_then(|v| v.as_str())
-        .unwrap_or("main");
-    let opacity = state
-        .host_state
-        .lock()
-        .window_opacities
-        .get(label)
-        .copied()
-        .unwrap_or(1.0);
+        .unwrap_or("main")
+        .to_string();
+    let host_memory = state.host_state.lock().window_opacities.get(&label).copied();
+    if let Some(opacity) = host_memory {
+        return Ok(serde_json::json!(opacity));
+    }
+
+    let opacity = match state.backend_window_id(&label) {
+        Some(window_id) => {
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            tokio::task::spawn_blocking(move || {
+                crate::client::backend_get_window_opacity(&web_endpoint, &auth_key, &window_id)
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(1.0)
+        }
+        None => 1.0,
+    };
     Ok(serde_json::json!(opacity))
 }
