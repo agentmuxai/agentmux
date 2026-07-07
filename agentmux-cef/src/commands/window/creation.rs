@@ -281,6 +281,7 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         None,
         initial_view.as_deref(),
         initial_meta.as_deref(),
+        None,
     )
 }
 
@@ -328,15 +329,29 @@ pub fn open_subwindow(
         Some(parent_instance_id),
         None,
         None,
+        None,
     )
 }
 
-fn open_window_with_kind(
+/// SPEC_PILLAR1_STEP4 Phase 2 — `pub(crate)` (was private) so the reproject
+/// driver (`launcher_ipc::reproject_from_snapshot`) can call it directly,
+/// bypassing the IPC-handler wrappers (`open_new_window`/`open_subwindow`)
+/// that assume a live, frontend-originated request.
+///
+/// `explicit_rect`: when `Some`, skips `get_offset_position`/
+/// `get_secondary_window_size`'s offset/70%-of-monitor placement heuristic
+/// and uses the given rect verbatim — the reproject driver's fast path
+/// passes the launcher snapshot's `last_rect` here so a recreated window
+/// lands roughly where it was, instead of at a new-window default position.
+/// `None` preserves today's behavior exactly (both existing callers pass
+/// `None`).
+pub(crate) fn open_window_with_kind(
     state: &Arc<AppState>,
     kind: crate::state::WindowKind,
     parent_instance_id: Option<String>,
     initial_view: Option<&str>,
     initial_meta: Option<&str>,
+    explicit_rect: Option<agentmux_common::ipc::Rect>,
 ) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
     // See `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` and the smoke retro
@@ -388,8 +403,14 @@ fn open_window_with_kind(
     // Phase B.5 (window_meta step d) — push the pre-create handoff
     // (label + kind + parent). Replaces the previous parallel
     // `window_meta.insert` + `pending_window_labels.push` pair.
-    let (pos_x, pos_y) = get_offset_position();
-    let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
+    let (pos_x, pos_y, win_w, win_h) = match explicit_rect {
+        Some(r) => (r.left, r.top, r.right - r.left, r.bottom - r.top),
+        None => {
+            let (pos_x, pos_y) = get_offset_position();
+            let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
+            (pos_x, pos_y, win_w, win_h)
+        }
+    };
 
     // Phase F.1 — routed through the host reducer.
     state.host_dispatch(
@@ -413,6 +434,121 @@ fn open_window_with_kind(
     // atoms via the CEF JS bridge; no sync emit here.
 
     Ok(serde_json::json!(label))
+}
+
+/// SPEC_PILLAR1_STEP4 Phase 2 — the fast-path reproject driver. Called once
+/// per process life from `launcher_ipc::apply_event_to_shadow`'s
+/// `Event::Snapshot` arm, with the launcher's live window list (survives a
+/// host-only crash — see the spec for why this is preferred over srv's
+/// durable-but-poorer-fidelity `Client.windowids`).
+///
+/// Idempotent by construction, not by an explicit "have we already
+/// reprojected" flag: `"main"` is always filtered out (it's created by the
+/// separate, unconditional cold-start path regardless of what the snapshot
+/// says — recreating it here would double-create). On a genuine first-ever
+/// launch the snapshot has zero entries beyond (at most) a stale `"main"`,
+/// so this call does nothing.
+///
+/// Ordering: `FullInstance` windows are recreated before `Subwindow`s, so a
+/// subwindow's parent always exists (under its NEW label) by the time the
+/// subwindow needs it. This is a stable sort by kind, not a dependency
+/// graph — sufficient because every real subwindow's parent is a
+/// `FullInstance` (per `WindowKind`'s own doc comment; there is no
+/// subwindow-of-subwindow nesting in this codebase).
+///
+/// Old-label→new-label remapping is mandatory, not optional: every
+/// recreated window gets a fresh `window-<uuid>` label
+/// (`open_window_with_kind`), so a subwindow's `parent_label` from the
+/// snapshot (an OLD label) must be translated to the parent's NEW label
+/// before being passed to `open_window_with_kind`. `"main"` is seeded into
+/// the remap table as `"main"` → `"main"` since its label is stable across
+/// restarts (never regenerated).
+pub(crate) fn reproject_from_snapshot(
+    state: &Arc<AppState>,
+    windows: &[agentmux_common::ipc::WindowSnapshot],
+) {
+    use std::collections::HashMap;
+
+    let mut to_create: Vec<&agentmux_common::ipc::WindowSnapshot> =
+        windows.iter().filter(|w| w.label != "main").collect();
+    if to_create.is_empty() {
+        tracing::debug!(target: "reproject", "[reproject] nothing to recreate beyond main");
+        return;
+    }
+    // FullInstance before Subwindow — stable sort preserves the snapshot's
+    // own relative ordering within each kind. `WindowSnapshot.kind` is the
+    // WIRE type (`agentmux_common::ipc::WindowKind`), distinct from the
+    // host's own `crate::state::WindowKind` — mapped one-to-one, same
+    // conversion `apply_shadow_projection`'s `Event::WindowOpened` arm
+    // already does.
+    let to_host_kind = |k: agentmux_common::ipc::WindowKind| match k {
+        agentmux_common::ipc::WindowKind::FullInstance => crate::state::WindowKind::FullInstance,
+        agentmux_common::ipc::WindowKind::Subwindow => crate::state::WindowKind::Subwindow,
+    };
+    to_create.sort_by_key(|w| match w.kind {
+        agentmux_common::ipc::WindowKind::FullInstance => 0,
+        agentmux_common::ipc::WindowKind::Subwindow => 1,
+    });
+
+    let mut label_remap: HashMap<String, String> = HashMap::new();
+    label_remap.insert("main".to_string(), "main".to_string());
+
+    let mut created = 0usize;
+    let mut skipped = 0usize;
+    for w in to_create {
+        let new_parent = match &w.parent_label {
+            Some(old_parent) => match label_remap.get(old_parent) {
+                Some(new_label) => Some(new_label.clone()),
+                None => {
+                    // Parent wasn't (re)created — e.g. it was itself
+                    // skipped, or the snapshot listed a Subwindow before
+                    // its FullInstance parent existed at all (a crash
+                    // mid-creation). Skip rather than create an orphan
+                    // with a dangling parent link.
+                    tracing::warn!(
+                        target: "reproject",
+                        label = %w.label,
+                        parent_label = %old_parent,
+                        "[reproject] parent not found in remap table — skipping this window"
+                    );
+                    skipped += 1;
+                    continue;
+                }
+            },
+            None => None,
+        };
+        match open_window_with_kind(state, to_host_kind(w.kind), new_parent, None, None, w.last_rect) {
+            Ok(new_label_val) => {
+                let new_label = new_label_val.as_str().unwrap_or_default().to_string();
+                tracing::info!(
+                    target: "reproject",
+                    old_label = %w.label,
+                    new_label = %new_label,
+                    kind = ?w.kind,
+                    parent_label = ?w.parent_label,
+                    had_rect = w.last_rect.is_some(),
+                    "[reproject] recreated window"
+                );
+                label_remap.insert(w.label.clone(), new_label);
+                created += 1;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "reproject",
+                    label = %w.label,
+                    error = %e,
+                    "[reproject] failed to recreate window"
+                );
+                skipped += 1;
+            }
+        }
+    }
+    tracing::info!(
+        target: "reproject",
+        created,
+        skipped,
+        "[reproject] fast-path reproject complete"
+    );
 }
 
 fn percent_encode(s: &str) -> String {
