@@ -940,7 +940,7 @@ impl AgentMuxHandler {
                         }
                     }
                 });
-            } else {
+            } else if !self.is_browser_pane {
                 let warn = format!(
                     "[on_before_close] no backend window ID registered for label={:?} — shells may orphan",
                     label
@@ -948,6 +948,14 @@ impl AgentMuxHandler {
                 dlog(&warn);
                 tracing::warn!("{}", warn);
             }
+            // Browser-pane handlers reaching here with label=None are the
+            // DESIGNED post-explicit-close state, not an orphan risk: the
+            // pane close path (browser_panes::close → take_browser_hwnd)
+            // already unregistered the label before CEF's on_before_close
+            // fires, and panes never have a backend_window_id to begin
+            // with. Warning here would fire once per pane close now that
+            // the wrapper teardown actually runs CEF's close pipeline
+            // (retro-browser-pane-renderer-leak-2026-07-07) — pure noise.
         }
 
         tracing::debug!(

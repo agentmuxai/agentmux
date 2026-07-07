@@ -16,10 +16,19 @@
 //! This module inserts one thin, app-owned HWND between main and CEF's
 //! browser — mirroring the pattern `floating_pane.rs` already uses
 //! successfully for torn-off panes (an app-owned window that embeds CEF as
-//! its own `WS_CHILD`). Destroying OUR wrapper via `DestroyWindow` never
-//! calls any CEF API; Win32's native `WM_DESTROY` parent→child cascade
-//! tears down CEF's child HWND as a side effect, which — per the floater's
-//! already-proven behavior — reliably fires CEF's `OnBeforeClose`.
+//! its own `WS_CHILD`). Destroying OUR wrapper never calls any CEF API.
+//!
+//! **Correction (retro-browser-pane-renderer-leak-2026-07-07):** the
+//! original claim here — that destroying the wrapper while still a
+//! `WS_CHILD` of main would cascade `WM_DESTROY` into CEF's child and
+//! "reliably fire `OnBeforeClose`" — was wrong. CEF does not treat a
+//! parent-hierarchy tear-down as a browser close, so the browser/renderer
+//! silently survived every pane close, headless (live-confirmed via CDP).
+//! The floater teardown works because its `DestroyWindow` runs on a
+//! genuine, un-owned TOP-LEVEL window. `destroy_wrapper_hwnd` therefore
+//! reparents the wrapper out to top-level first (`SetParent(NULL)` +
+//! `WS_CHILD`→`WS_POPUP`), matching the floater's structure at destroy
+//! time — see its doc comment for the full mechanism.
 //!
 //! Unlike the floater (an unowned top-level `WS_POPUP`), this wrapper is a
 //! genuine `WS_CHILD` of whatever window currently hosts the pane (usually
@@ -248,12 +257,37 @@ pub(crate) fn resize_wrapper(wrapper_hwnd: *mut std::ffi::c_void, rect: &Rect) {
     }
 }
 
-/// Destroy the wrapper. Never calls any CEF API — this is a plain Win32
-/// `DestroyWindow` on a window we created and own, which is exactly the
-/// pattern `floating_pane.rs` already uses successfully: Win32's own
-/// `WM_DESTROY` cascade tears down CEF's child HWND as a side effect,
-/// which reliably fires CEF's `OnBeforeClose` (per the floater's proven
-/// behavior — see this module's doc comment).
+/// Destroy the wrapper — by first promoting it OUT of the `WS_CHILD`-of-main
+/// relationship, then `DestroyWindow`-ing it as a genuine top-level window.
+/// Never calls any CEF API.
+///
+/// **Why the reparent step is load-bearing (retro-browser-pane-renderer-leak-
+/// 2026-07-07):** destroying the wrapper while it was still a `WS_CHILD` of a
+/// live top-level delivered `WM_DESTROY` to CEF's child HWND via *parent
+/// hierarchy tear-down* — which CEF/Alloy explicitly does NOT treat as a
+/// browser close (`SPEC_BROWSER_PANE_LIFECYCLE.md` §8: "`DoClose` is NOT
+/// called when the host window is destroyed via parent hierarchy tear-down").
+/// The result, live-confirmed via CDP: the pane's `Browser`/renderer survived
+/// every close, fully alive and headless, one leaked renderer per cycle. The
+/// floater precedent this module's design mirrors works precisely because the
+/// floater's `DestroyWindow` runs on a genuine, un-owned TOP-LEVEL window —
+/// the teardown-spike spec's Candidate A said so explicitly
+/// (SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md §3: "first promote
+/// its outer HWND out of the WS_CHILD-of-main relationship — e.g.
+/// `SetParent(pane_hwnd, NULL)` — then destroy it the same way the floater
+/// does"), but the original wrapper implementation shipped without that step.
+///
+/// So: hide → `SetParent(NULL)` → clear `WS_CHILD`/set `WS_POPUP` (the
+/// MSDN-documented protocol when reparenting to the desktop — `SetParent`
+/// itself doesn't touch styles) → `DestroyWindow`. At destroy time the
+/// wrapper is now structurally identical to the floater (hidden, un-owned,
+/// top-level, CEF browser as its sole `WS_CHILD`), and CEF runs its real
+/// teardown → `OnBeforeClose` fires → the renderer actually exits. The
+/// window is hidden before it ever becomes top-level and is destroyed within
+/// the same call, so it never appears on screen, in the taskbar, or in
+/// Alt-Tab. The April `close_browser`-cascades-into-main coupling (spike §2)
+/// stays impossible: no CEF API is called, and after the reparent the pane
+/// shares no HWND lineage with main at all.
 ///
 /// Pure Win32 side effects only — does NOT touch `PANE_WRAPPER_HWNDS`.
 /// Callers that need the map cleaned up should call `take_wrapper_hwnd`
@@ -263,22 +297,61 @@ pub(crate) fn resize_wrapper(wrapper_hwnd: *mut std::ffi::c_void, rect: &Rect) {
 pub(crate) fn destroy_wrapper_hwnd(wrapper_hwnd: *mut std::ffi::c_void) {
     use windows_sys::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        DestroyWindow, GetParent, ShowWindow, SW_HIDE,
+        DestroyWindow, GetParent, GetWindowLongPtrW, SetParent, SetWindowLongPtrW, ShowWindow,
+        GWL_STYLE, SW_HIDE, WS_CHILD, WS_POPUP,
     };
 
+    // Owner-thread contract: Win32's DestroyWindow (and SetParent) only work
+    // from the thread that created the window — the CEF UI thread, via
+    // CreateBrowserPaneTask. Callers off that thread must post
+    // DestroyPaneWrapperTask instead of calling this directly. Calling
+    // DestroyWindow cross-thread fails with ERROR_ACCESS_DENIED, and doing
+    // exactly that (unchecked) from the IPC thread is how every pane close
+    // silently leaked its renderer (retro-browser-pane-renderer-leak-
+    // 2026-07-07).
+    debug_assert_ne!(cef::currently_on(cef::ThreadId::UI), 0);
+
     unsafe {
-        // Capture the parent BEFORE destroy — GetParent on a destroyed HWND
-        // returns null. Same DWM-compositor-caching defense as the old
-        // direct-CEF-HWND destroy path (browser_panes.rs::destroy_hwnd):
-        // hide first so DWM stops compositing this surface before the
-        // window (and its CEF child) actually goes away.
+        // Capture the parent BEFORE the reparent — it's the window whose
+        // client area needs repainting once the pane is gone (same
+        // DWM-compositor-caching defense as the old direct-CEF-HWND destroy
+        // path: hide first so DWM stops compositing this surface before the
+        // window and its CEF child actually go away).
         let parent = GetParent(wrapper_hwnd);
         ShowWindow(wrapper_hwnd, SW_HIDE);
-        DestroyWindow(wrapper_hwnd);
+
+        // Promote to a genuine, un-owned top-level window (see doc comment —
+        // this makes the DestroyWindow below structurally identical to the
+        // floater's proven teardown, rather than a parent-hierarchy
+        // tear-down that SPEC_BROWSER_PANE_LIFECYCLE.md §8 documents CEF
+        // handling differently).
+        SetParent(wrapper_hwnd, std::ptr::null_mut());
+        let style = GetWindowLongPtrW(wrapper_hwnd, GWL_STYLE);
+        SetWindowLongPtrW(
+            wrapper_hwnd,
+            GWL_STYLE,
+            (style & !(WS_CHILD as isize)) | WS_POPUP as isize,
+        );
+
+        // Checked, never fire-and-forget: an unchecked DestroyWindow failure
+        // is precisely what hid this leak for its entire lifetime.
+        let destroyed = DestroyWindow(wrapper_hwnd);
+        if destroyed == 0 {
+            let err = windows_sys::Win32::Foundation::GetLastError();
+            tracing::error!(
+                hwnd = ?wrapper_hwnd,
+                gle = err,
+                "[pane-wrapper] DestroyWindow FAILED — CEF browser/renderer will leak"
+            );
+        } else {
+            tracing::info!(
+                hwnd = ?wrapper_hwnd,
+                "[pane-wrapper] destroyed (top-level, owner thread)"
+            );
+        }
         if !parent.is_null() {
             InvalidateRect(parent, std::ptr::null(), 1 /* TRUE erase */);
             UpdateWindow(parent);
         }
     }
-    tracing::info!(hwnd = ?wrapper_hwnd, "[pane-wrapper] destroyed");
 }
