@@ -29,7 +29,7 @@ import {
     unregisterPane as unregisterLayoutPane,
     type LayoutView,
 } from "@/app/store/agent-pane-layout-store";
-import { isInterruptibleTurn, workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { SubagentLinkNode } from "./types";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { getRecentDispatches } from "@/app/store/command-source";
@@ -554,15 +554,32 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // promotion and agent-message-accepted. See ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
         const wasAlreadyWorking = workingFromPhase(paneSnapshot(model.blockId)?.turnPhase ?? { kind: "Idle" });
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
-        // while a turn is already running regresses Streaming → Submitting, which
-        // hides the "Send now" affordance (isInterruptibleTurn is false during
-        // Submitting) until the next stream event — the "panel shows up a couple
-        // seconds late" bug. A queued-while-busy message rides the running turn;
-        // the queue-drain (agent-message-accepted) re-enters Submitting if needed.
+        // while a turn is already running regresses Streaming → Submitting,
+        // which would flicker the busy indicator back to its "Submitting"
+        // look for no reason. A queued-while-busy message rides the running
+        // turn; the queue-drain (agent-message-accepted) re-enters Submitting
+        // if needed.
         if (!wasAlreadyWorking) {
             dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
         }
         return commands.sendMessage(message, wasAlreadyWorking);
+    };
+
+    // Esc on an empty composer. Mirrors Claude Code CLI: if a message is
+    // already queued behind a running turn, deliver it to the live agent
+    // right now instead of waiting for the next tool-boundary/idle
+    // auto-flush — "stop and consider this now." Must NOT also call
+    // stopAgent(): killing the process here would destroy the very live
+    // session the delivery just wrote into (persistent controllers only
+    // steer while the process stays alive). Only fall back to stopAgent()
+    // (SIGINT) when there's nothing queued to steer with.
+    // See SPEC_AGENT_ESCAPE_STEER_QUEUED_MESSAGE_2026_07_06.md.
+    const handleEscapeOnEmptyComposer = (): void => {
+        if (commands.hasHeldMessages()) {
+            void commands.flushHeldMessages();
+            return;
+        }
+        commands.stopAgent();
     };
 
     // Failure-recovery accessory row (per-error-class actions + 5s auto-retry
@@ -926,26 +943,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 typed message lands next to the live conversation it's
                 queued against. Previously lived below the activity log;
                 repositioning per SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.
-                "Send now" lives inside the queue header (right side)
-                so it sits adjacent to the messages it accelerates. */}
-            <PendingMessagesPanel
-                pendingMessages={pendingMessagesAtom[0]}
-                showSendNow={() =>
-                    // "Send now" appears only when there is an in-flight
-                    // turn that SIGINT can actually interrupt — i.e.
-                    // Streaming / Interrupting. `Submitting` is excluded
-                    // because the message in the queue during Submitting
-                    // IS the would-be turn; there is no CLI process to
-                    // stop yet. Gating on the broader `workingFromPhase`
-                    // caused a brief flash on every send.
-                    // Spec: docs/analysis/ANALYSIS_SEND_NOW_FLASH_2026_05_28.md.
-                    isInterruptibleTurn(agentAtoms().turnPhaseAtom[0]()) &&
-                    pendingMessagesAtom[0]().some((m) => m.enqueuedWhileBusy)
-                }
-                onSendImmediately={() => {
-                    commands.stopAgent();
-                }}
-            />
+                No "Send now" affordance — Esc on an empty composer delivers
+                a queued message immediately instead (mirrors Claude Code
+                CLI). See SPEC_AGENT_ESCAPE_STEER_QUEUED_MESSAGE_2026_07_06.md. */}
+            <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
 
             {/* PR F — Disconnected banner. Visible when the stream
                 tore down while a turn was in flight (kind=Disconnected).
@@ -1110,7 +1111,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                     onTyping={() => {
                         scrollToBottomFn?.();
                     }}
-                    onStopAgent={commands.stopAgent}
+                    onStopAgent={handleEscapeOnEmptyComposer}
                     onRecallLatestQueued={commands.recallLatestHeld}
                     getCompletions={commands.completions}
                     viewModel={model}
