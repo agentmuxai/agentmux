@@ -1,9 +1,11 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, onCleanup, For, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import type { SubagentViewModel, SubagentEvent, SubagentEventType } from "./subagent-model";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { scheduleOnSettle } from "@/app/util/settle-detector";
 import "./subagent-view.scss";
 
 export function SubagentView(props: ViewComponentProps<SubagentViewModel>): JSX.Element {
@@ -11,6 +13,40 @@ export function SubagentView(props: ViewComponentProps<SubagentViewModel>): JSX.
     const events = props.model.eventsAtom;
     const status = props.model.statusAtom;
     const autoScroll = props.model.autoScrollAtom;
+
+    // Loading overlay — mirrors agent-view.tsx's brain-spinner treatment
+    // (docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md):
+    // shown from mount, cross-fades out once loadHistory's two RPCs
+    // (GetHistory + GetInfo) have resolved AND the resulting DOM has
+    // actually painted. #1992 wired the brain-spinner treatment into
+    // block.tsx's generic stage-one fallback (before the block/viewModel
+    // resolve) and into agent-view.tsx's stage-two window, but SubagentView
+    // resolves its viewModel near-instantly — its own stage-two window
+    // (loadHistory's RPC round trip) was left showing only a static
+    // "Loading subagent activity..." text. See
+    // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
+    // Finding 4.
+    const [historyLoaded, setHistoryLoaded] = createSignal(false);
+    const [showLoadingOverlay, setShowLoadingOverlay] = createSignal(true);
+    let cancelSettleWait: (() => void) | undefined;
+    let loadingOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => {
+        cancelSettleWait?.();
+        clearTimeout(loadingOverlayFadeTimeout);
+    });
+    // status() starts "loading" and flips to "active"/"completed" once
+    // loadHistory resolves (subagent-model.ts) — that transition is this
+    // view's equivalent of agent-view.tsx's onHistoryReady.
+    createEffect((wasLoading: boolean) => {
+        const isLoading = status() === "loading";
+        if (wasLoading && !isLoading) {
+            cancelSettleWait = scheduleOnSettle(() => {
+                setHistoryLoaded(true);
+                loadingOverlayFadeTimeout = setTimeout(() => setShowLoadingOverlay(false), 220);
+            });
+        }
+        return isLoading;
+    }, true);
 
     let scrollRef: HTMLDivElement | null = null;
 
@@ -44,6 +80,11 @@ export function SubagentView(props: ViewComponentProps<SubagentViewModel>): JSX.
 
     return (
         <div class="subagent-pane">
+            <Show when={showLoadingOverlay()}>
+                <div class="subagent-pane-loading-overlay">
+                    <BrainSpinner fading={historyLoaded()} />
+                </div>
+            </Show>
             <div class="subagent-header">
                 <div class="subagent-header-left">
                     <span class="subagent-header-icon">
