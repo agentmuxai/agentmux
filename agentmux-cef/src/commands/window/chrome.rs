@@ -102,6 +102,13 @@ pub fn toggle_floating_maximize(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "toggle_floating_maximize: label is required".to_string())?
         .to_string();
+    // SPEC_PILLAR1_STEP2 Slice B Phase 4 — the frontend caller
+    // (`FloatingMaximizeButton` in `blockframe.tsx`) already has
+    // `nodeModel.blockId` in scope and passes it alongside `label`. Optional
+    // for back-compat (older/mismatched builds): the srv write-through below
+    // is silently skipped when absent, same as opacity's missing-
+    // `backend_window_id` skip.
+    let block_id = args.get("block_id").and_then(|v| v.as_str()).map(|s| s.to_string());
 
     // Read the floater's CURRENT (pre-toggle) screen rect so the reducer can
     // stash it as the restore target. Win32 physical pixels — the same space
@@ -213,5 +220,39 @@ pub fn toggle_floating_maximize(
         crate::state::WindowPlacement::Maximized => "maximized",
         _ => "normal",
     };
+
+    // SPEC_PILLAR1_STEP2 Slice B Phase 4 — write-through to the block's
+    // durable `meta` mirror (added in Phase 3 via the existing generic
+    // `UpdateObjectMeta` RPC — no new srv code needed). Fire-and-forget on a
+    // background thread, mirroring `set_window_opacity`'s write-through: a
+    // slow/failed srv round-trip must never stall the maximize/restore the
+    // user is actively triggering.
+    //
+    // Rect to persist: on Maximize (`current_rect`, the pre-toggle rect the
+    // reducer just stashed as `last_known_normal_rect`) or on Restore
+    // (`restore_rect`, the rect the reducer just handed back and the Win32
+    // side-effect above just applied) — both describe "where the floater
+    // sits/should sit when Normal", matching `pane:floating_normal_rect`'s
+    // meaning. Omitted from the patch (not written as null) when unavailable
+    // (e.g. `GetWindowRect` failed) — a partial merge leaves any
+    // previously-persisted rect untouched rather than clearing it.
+    if let Some(block_id) = block_id {
+        let rect_to_persist = match placement {
+            crate::state::WindowPlacement::Maximized => current_rect,
+            _ => restore_rect,
+        };
+        let mut meta_patch = serde_json::json!({ "pane:floating_placement": placement_str });
+        if let Some(r) = rect_to_persist {
+            meta_patch["pane:floating_normal_rect"] = serde_json::json!({
+                "left": r.left, "top": r.top, "right": r.right, "bottom": r.bottom,
+            });
+        }
+        let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+        let auth_key = state.auth_key.lock().clone();
+        std::thread::spawn(move || {
+            crate::client::backend_update_block_meta(&web_endpoint, &auth_key, &block_id, meta_patch);
+        });
+    }
+
     Ok(serde_json::json!({ "placement": placement_str }))
 }
