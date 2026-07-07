@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * ToolBlockOverlay — three-slot tool overlay
+ * ToolBlockOverlay — two-slot tool overlay
  * (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.4):
  *
  *   ┌────────────────────────────────────┐
@@ -10,9 +10,12 @@
  *   ├────────────────────────────────────┤
  *   │ log body (scrollable, virtualized) │
  *   │   ...                              │
- *   ├────────────────────────────────────┤
- *   │ action bar (fixed)                 │
  *   └────────────────────────────────────┘
+ *
+ * The action bar (open-in-pane / open-in-window / new-agent-here) was
+ * removed — all three were non-functional stubs (open-in-pane just
+ * console.warn'd, the other two were permanently disabled pending
+ * host APIs / backend RPCs that never shipped).
  *
  * Per SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md the header was
  * simplified: the status icon, tool name, summary, and duration are on
@@ -25,14 +28,10 @@
 
 import { type JSX } from "solid-js";
 import type { ToolNode } from "../types";
-import { ToolOverlayActions } from "./ToolOverlayActions";
 import { ToolOverlayLog } from "./ToolOverlayLog";
 
 export interface ToolBlockOverlayProps {
     node: ToolNode;
-    onOpenInPane?: () => void;
-    onOpenInWindow?: () => void;
-    onNewAgentHere?: () => void;
     previewFontScale?: () => number;
 }
 
@@ -62,12 +61,6 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
             </span>
         </div>
         <ToolOverlayLog node={props.node} fontScale={props.previewFontScale} />
-        <ToolOverlayActions
-            node={props.node}
-            onOpenInPane={props.onOpenInPane}
-            onOpenInWindow={props.onOpenInWindow}
-            onNewAgentHere={props.onNewAgentHere}
-        />
     </div>
 );
 
