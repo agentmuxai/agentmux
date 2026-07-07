@@ -9,7 +9,7 @@ import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { getTabGrabOffset } from "./tab-grab-offset";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ObjectService, WorkspaceService } from "../store/services";
@@ -28,6 +28,7 @@ import {
     setBouncingTabId,
     computeInsertionPoint,
     InsertionPoint,
+    tabWrapperRefs,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
@@ -666,24 +667,22 @@ function TabBar(props: TabBarProps): JSX.Element {
     // The line is rendered as a sibling of .tab-bar-scroll (both children of
     // .tab-bar), NOT as a child inside it — .tab-bar-scroll is the horizontal
     // SCROLL container (overflow-x: auto), and an absolutely-positioned
-    // descendant of a scroll container moves with its scrollLeft (verified
-    // live: scrolling by 500px shifted the line's rect.x by exactly -500px —
-    // reagentx review on #1979 caught this before it shipped). .tab-bar
-    // itself never scrolls, so a line positioned relative to *it* stays put
-    // regardless of how far the tab strip is scrolled.
+    // descendant of a scroll container moves with its scrollLeft. That was a
+    // bug the first time around (the line was meant to trace the whole tab
+    // strip's boundary, which shouldn't move when scrolled — reagentx review
+    // on #1979 caught it). It's the opposite requirement now: the line's
+    // left edge is the SELECTED TAB's own left edge, which legitimately does
+    // move as the strip scrolls (the tab's rendered position in the viewport
+    // changes), so re-measuring on scroll (below) is intentional this time,
+    // not a regression of that old bug.
     //
-    // left/width are measured (not CSS calc) because there's no fixed
-    // constant for "the hamburger's rendered width" to subtract — .tab-bar-
-    // scroll's own offsetLeft/clientWidth relative to .tab-bar already
-    // encode exactly that, and neither changes when .tab-bar-scroll is
-    // scrolled internally (scrolling content never moves the container's
-    // own box in its parent). offsetLeft lands at .tab-bar-scroll's own edge
-    // though, which on Windows/Linux is one leading separator short of the
-    // first tab's actual left edge (the separator is .tab-bar-scroll's own
-    // first child, per the leading-separator Show below) — add its width
-    // (the same --tab-separator-width token it's styled with) to close that
-    // last 1px gap, and take it back out of the width so the right edge is
-    // unaffected.
+    // left is measured from the active tab's own wrapper element
+    // (tabWrapperRefs, populated by DroppableTab — see tabbar-dnd.ts), not
+    // any container edge, so the line starts exactly where the selected tab
+    // starts regardless of which tab that is or how far the strip is
+    // scrolled. Falls back to leaving the previous values in place if the
+    // ref isn't available yet (e.g. a render race right after a tab is
+    // created) rather than flashing to some other position.
     // Viewport-absolute px (not relative to any container) — the line's
     // right edge extends past .tab-bar's own box (into .system-status's
     // territory), and .tab-bar has `overflow: hidden`, so it's rendered via
@@ -696,13 +695,16 @@ function TabBar(props: TabBarProps): JSX.Element {
     const [lineLeft, setLineLeft] = createSignal(0);
     const [lineWidth, setLineWidth] = createSignal(0);
     const [lineBottom, setLineBottom] = createSignal(0);
-    const measureLine = () => {
-        if (!tabBarScrollRef || !tabBarRef) return;
-        const leadingSeparatorPx = isMacOS()
-            ? 0
-            : parseFloat(getComputedStyle(tabBarScrollRef).getPropertyValue("--tab-separator-width")) || 1;
-        const scrollRect = tabBarScrollRef.getBoundingClientRect();
-        const left = scrollRect.left + leadingSeparatorPx;
+    // Gates rendering the line to "we've actually measured the CURRENTLY
+    // active tab's real position" — see the retry effect below for why this
+    // can briefly be false (new-tab creation) and why showing the line with
+    // a stale position in that window is worse than not showing it at all.
+    const [lineReady, setLineReady] = createSignal(false);
+    const measureLine = (): boolean => {
+        if (!tabBarRef) return false;
+        const activeTabEl = tabWrapperRefs.get(activeTabId());
+        if (!activeTabEl) return false;
+        const left = activeTabEl.getBoundingClientRect().left;
         setLineLeft(left);
         setLineBottom(window.innerHeight - tabBarRef.getBoundingClientRect().bottom);
 
@@ -713,15 +715,62 @@ function TabBar(props: TabBarProps): JSX.Element {
         // Live preview against stopping before the window controls; this
         // was the version picked.
         setLineWidth(window.innerWidth - left);
+        return true;
     };
+    // Re-measure whenever the selected tab (or the tab order — a reorder
+    // drag can shift the active tab's position without changing which tab
+    // is active) changes.
+    //
+    // Creating a new tab auto-selects it, but its DroppableTab hasn't
+    // necessarily mounted (and registered itself in tabWrapperRefs — see
+    // tabbar-dnd.ts) by the time this effect's dependencies update: without
+    // retrying, `measureLine` bailed and left the PREVIOUS tab's left/width
+    // in place, so the line rendered at the old tab's position — appearing
+    // to run from the wrong (usually further left/right, depending on
+    // where the new tab landed) starting point instead of stopping at the
+    // new tab's actual left edge. Retry across a few animation frames until
+    // the new tab's ref shows up, hiding the line meanwhile (lineReady)
+    // rather than showing it at that stale, wrong position.
+    //
+    // Precise tracking mid-drag-reorder (the 100ms gap-padding transition
+    // in tabbar.scss) is intentionally out of scope here — this settles
+    // correctly once the drag/transition ends.
+    createEffect(() => {
+        // Reads establish this effect's reactive deps — re-runs (and, via
+        // the onCleanup below, cancels any still-in-flight retry loop from
+        // a superseded selection) whenever either changes.
+        activeTabId();
+        tabIds();
+        let cancelled = false;
+        let attempts = 0;
+        const tryMeasure = () => {
+            if (cancelled) return;
+            if (measureLine()) {
+                setLineReady(true);
+                return;
+            }
+            if (attempts >= 10) return; // give up quietly after ~10 frames
+            attempts++;
+            requestAnimationFrame(tryMeasure);
+        };
+        setLineReady(false);
+        tryMeasure();
+        onCleanup(() => {
+            cancelled = true;
+        });
+    });
     onMount(() => {
-        measureLine();
-        const ro = new ResizeObserver(measureLine);
+        if (measureLine()) setLineReady(true);
+        const ro = new ResizeObserver(() => measureLine());
         ro.observe(tabBarRef);
-        ro.observe(tabBarScrollRef);
+        if (tabBarScrollRef) {
+            ro.observe(tabBarScrollRef);
+            tabBarScrollRef.addEventListener("scroll", measureLine);
+        }
         window.addEventListener("resize", measureLine);
         onCleanup(() => {
             ro.disconnect();
+            tabBarScrollRef?.removeEventListener("scroll", measureLine);
             window.removeEventListener("resize", measureLine);
         });
     });
@@ -782,7 +831,7 @@ function TabBar(props: TabBarProps): JSX.Element {
                     of the scroll container looked draggable but wasn't. */}
                 <div class="tab-bar-fill" data-drag-region="true" />
             </div>
-            <Show when={activeTabColor()}>
+            <Show when={activeTabColor() && lineReady()}>
                 {/* Portal to escape .tab-bar's `overflow: hidden` — the line's
                     right edge extends past .tab-bar's own box, through the
                     header widgets, to the window control buttons. */}
