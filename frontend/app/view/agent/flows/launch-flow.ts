@@ -62,6 +62,15 @@ export interface LaunchFlowOptions {
      * docs/analysis/AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
      */
     getInitialTermSize?: () => { rows: number; cols: number } | undefined;
+    /**
+     * Called once Phase 3's `GetControllerStatus` resolves, with the raw
+     * runtime status — previously this result was only ever logged. Used
+     * to seed `TurnPhase` from `rts.turn_active` at mount instead of the
+     * hardcoded `Idle` default. See
+     * docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
+     * Finding 1.
+     */
+    onControllerStatus?: (rts: BlockControllerRuntimeStatus) => void;
 }
 
 export type LaunchFlowResult = "success" | "auth_failed" | "fatal";
@@ -307,6 +316,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         const rts = await BlockService.GetControllerStatus(blockId);
         const status = rts?.shellprocstatus ?? "init";
         log("controller", `status: ${status}`);
+        if (rts) opts.onControllerStatus?.(rts);
         if (status === "init") {
             log("agent", "ready — type a message below to start");
         } else if (status === "done") {

@@ -157,6 +157,18 @@ pub struct BlockControllerRuntimeStatus {
     /// True if this pane is running an agent CLI (e.g. claude, codex, gemini, kimi, openclaw, pi).
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_agent_pane: bool,
+    /// True if a turn is currently in flight (message sent, no terminating
+    /// `"result"` event observed yet). For `PersistentSubprocessController`
+    /// this is the only signal that distinguishes "actively generating a
+    /// turn" from "process alive, idle between turns" — `shellprocstatus`
+    /// stays `"running"` for the whole process lifetime either way. Backed
+    /// by `HealthMonitor.active_turn` (see `blockcontroller/health.rs`).
+    /// Frontend seeds `TurnPhase` from this at mount instead of always
+    /// defaulting to `Idle` — see
+    /// docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
+    /// Finding 1.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub turn_active: bool,
 }
 
 // ---- Controller trait ----

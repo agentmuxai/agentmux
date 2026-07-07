@@ -55,6 +55,8 @@ export interface UseAgentControllerStatusOptions {
      * yet). Forwarded to the launch flow to seed the PTY size at spawn.
      */
     getInitialTermSize?: () => { rows: number; cols: number } | undefined;
+    /** Forwarded to the launch flow — see `LaunchFlowOptions.onControllerStatus`. */
+    onControllerStatus?: (rts: BlockControllerRuntimeStatus) => void;
 }
 
 export interface UseAgentControllerStatus {
@@ -148,6 +150,7 @@ export function useAgentControllerStatus(
                 authEnv,
                 onLoginSuccess: opts.onLoginSuccess,
                 getInitialTermSize: opts.getInitialTermSize,
+                onControllerStatus: opts.onControllerStatus,
             });
             if (result === "success") {
                 setAgentReady(true);
