@@ -68,6 +68,9 @@ pub(crate) use helpers::backend_close_window;
 // SPEC_PILLAR1_STEP2 Slice A Phase 2 — durable opacity mirror write-through
 // / read-back, used by `commands/window/transparency.rs`.
 pub(crate) use helpers::{backend_get_window_opacity, backend_set_window_opacity};
+// SPEC_PILLAR1_STEP2 Slice B Phase 4 — floating-pane placement write-through,
+// used by `commands/window/chrome.rs`.
+pub(crate) use helpers::backend_update_block_meta;
 pub(crate) use lifecycle::{
     retry_backend_window_id_lookup, BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
     BACKEND_WINDOW_ID_RETRY_DELAY,

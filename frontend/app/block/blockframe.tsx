@@ -198,13 +198,15 @@ function OptMagnifyButton(props: { magnified: boolean; toggleMagnify: () => void
  *  expect a maximize button to toggle), which keeps the button stateless —
  *  the reducer is the single source of truth for placement, not a mirrored
  *  frontend signal that can drift. */
-function FloatingMaximizeButton(props: { label: string }): JSX.Element {
+function FloatingMaximizeButton(props: { label: string; blockId: string }): JSX.Element {
     const decl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "window-maximize",
         title: "Maximize",
         click: () => {
-            invokeCommand("toggle_floating_maximize", { label: props.label }).catch(console.error);
+            invokeCommand("toggle_floating_maximize", { label: props.label, block_id: props.blockId }).catch(
+                console.error
+            );
         },
     };
     return <IconButton decl={decl} className="block-frame-magnify" />;
@@ -279,7 +281,7 @@ function EndIcons(props: {
                         disabled={magnifyDisabled()}
                     />
                 }>
-                    <FloatingMaximizeButton label={floatingLabel()!} />
+                    <FloatingMaximizeButton label={floatingLabel()!} blockId={props.nodeModel.blockId} />
                 </Show>
             }>
                 <IconButton decl={{
