@@ -141,10 +141,12 @@ wrap_task! {
                 // App-owned wrapper HWND, WS_CHILD of the target window at the
                 // pane's rect — CEF's browser embeds INTO this instead of
                 // directly into the target window. See browser_pane::wrapper's
-                // module doc for why: destroying our own wrapper later (not
-                // CEF's own HWND, not close_browser()) is what gets a reliable
-                // renderer teardown without risking the close_browser cascade
-                // into main. SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md.
+                // module doc for why: reparenting our own wrapper out to
+                // top-level and then destroying it (not CEF's own HWND, not
+                // close_browser()) is what gets a reliable renderer teardown
+                // without risking the close_browser cascade into main.
+                // SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md +
+                // retro-browser-pane-renderer-leak-2026-07-07.md.
                 let wrapper_hwnd = match crate::browser_pane::wrapper::create_wrapper(
                     &self.label,
                     parent_hwnd_raw,

@@ -1,5 +1,10 @@
 # RETRO — browser-pane close reports success but the CEF renderer survives (task #1 investigation)
 
+> **STATUS: FIXED (same day).** See the "Root cause — CONFIRMED" addendum at the bottom: the primary
+> cause turned out to be a **cross-thread Win32 `DestroyWindow` silently failing** (owner-thread-only
+> API, return value never checked), not the parent-hierarchy-teardown theory §"Root cause" below
+> hypothesized. That section is kept as-written for the record of how the diagnosis evolved.
+
 **Date:** 2026-07-07
 **Author:** AgentA
 **Severity:** High — a currently-reproducible renderer-process leak, distinct from (not fixed by) PR #1957 and its Round 2 follow-up. Every browser-pane open→close cycle appears to leak one renderer process indefinitely.
@@ -121,3 +126,55 @@ GET http://<cdp_debug_port>/json/list
 ```
 No special timing or concurrency needed — reproduced on the very first attempt, and on all 4
 sequential (non-overlapping) cycles in this session's test.
+
+---
+
+## Root cause — CONFIRMED (2026-07-07, later the same day)
+
+The §"Root cause (code-level, not yet fixed)" hypothesis above — that the `WM_DESTROY` cascade
+doesn't count as a browser close when delivered via parent-hierarchy tear-down — was **tested and
+falsified as the primary cause**: an intermediate build that reparented the wrapper to top-level
+(`SetParent(NULL)` + `WS_CHILD`→`WS_POPUP`) before `DestroyWindow`, per the teardown-spike's own
+Candidate A prescription, still leaked all 4 renderers, with the new log line proving the new code
+ran every time.
+
+**The actual primary cause is one Win32 sentence:** *"A thread cannot use `DestroyWindow` to destroy
+a window created by a different thread."* The wrapper is created on the **CEF UI thread** (inside
+`CreateBrowserPaneTask::execute` — the "browser pane created on UI thread" log line), but
+`BrowserPaneManager::close()` runs on a **tokio IPC handler thread** (`ipc.rs`'s
+`browser_pane_close` arm calls it directly). The cross-thread `DestroyWindow` fails with
+`ERROR_ACCESS_DENIED`, its return value was never checked, and the pane's pixels vanished anyway
+because the preceding `ShowWindow(SW_HIDE)` *does* work cross-thread. So **no HWND was ever
+destroyed, CEF never received `WM_DESTROY`, and the browser survived headless** — for the entire
+lifetime of this close path, including the pre-#1957 direct-CEF-HWND variant (whose "only *may
+eventually* fire `OnBeforeClose`" reputation is retroactively explained: it never fired because the
+destroy never happened).
+
+This also resolves the "floater precedent" mystery: floaters tear down correctly **not** because
+their window is top-level, but because their `DestroyWindow` runs inside their own wndproc
+(`WM_CLOSE` → `DefWindowProcW` → `DestroyWindow`) — **on the UI thread, the owner**. The codebase
+even already knew the constraint for the Views path: the Linux/macOS close has always posted
+`DetachBrowserPaneViewTask` to the UI thread, with a comment explicitly noting `close()` runs on
+tokio threads. The Windows arm simply never got the same marshalling.
+
+**The fix (verified live, all spike-§4 scenarios green):**
+1. `AppStateCloseOps::destroy_hwnd` now posts `DestroyPaneWrapperTask` to the CEF UI thread instead
+   of calling `destroy_wrapper_hwnd` inline.
+2. `destroy_wrapper_hwnd` reparents the wrapper to a genuine un-owned top-level before
+   `DestroyWindow` (kept as spec-prescribed belt-and-suspenders against the §8 parent-hierarchy
+   caveat; its necessity *given* the thread fix is unproven — the thread fix is the proven-necessary
+   half), asserts UI-thread-ness, and **checks `DestroyWindow`'s return value**, logging an `error!`
+   with `GetLastError` on failure — the unchecked failure is what hid this bug for its whole life.
+3. The now-actually-firing `on_before_close` for panes surfaced a misleading per-close
+   "shells may orphan" warning (label=None is the *designed* post-explicit-close state for panes) —
+   gated to non-pane handlers.
+
+Validation on an isolated instance (`0.50.3+g42434642.dirty.20260707T082529`): baseline 5 renderers →
+4 open/navigate/close cycles → **5 renderers** (previously 9); **zero** zombie CDP targets (previously
+4 live pages); `[pane-wrapper] destroyed (top-level, owner thread)` + pane `on_before_close` firing
+per close (never seen in any prior run); two-panes-close-one released exactly one renderer with main
+and the sibling pane untouched; mid-navigation close clean; app alive throughout.
+
+Direct relevance: this was very plausibly a major contributor to
+`SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md`'s commit-charge growth — every browser-pane close
+since the feature existed leaked a full renderer process.

@@ -47,8 +47,12 @@ pub trait BrowserPaneCloseOps {
     /// refcount isn't held by our scope.
     fn take_browser_hwnd(&self, label: &str) -> Option<usize>;
 
-    /// Destroy the given HWND. Production calls Win32 `DestroyWindow`.
-    /// Called only with values returned from `take_browser_hwnd`.
+    /// Destroy the given HWND. Production posts a CEF UI-thread task
+    /// (`DestroyPaneWrapperTask`) that runs Win32 `DestroyWindow` on the
+    /// wrapper's OWNING thread — DestroyWindow is owner-thread-only, and
+    /// calling it directly from the IPC thread silently no-ops
+    /// (retro-browser-pane-renderer-leak-2026-07-07). Called only with
+    /// values returned from `take_browser_hwnd`.
     fn destroy_hwnd(&self, hwnd: usize);
 }
 
@@ -57,10 +61,12 @@ pub trait BrowserPaneCloseOps {
 ///
 /// SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md: `take_browser_hwnd`
 /// now returns the app-owned WRAPPER's HWND (`browser_pane::wrapper`), not
-/// CEF's own HWND — `destroy_hwnd` destroys the wrapper, never CEF's own
-/// window directly and never via `close_browser()`. See that module's doc
-/// comment for why this reliably releases the renderer without risking the
-/// close_browser-cascades-into-main bug three earlier attempts hit.
+/// CEF's own HWND — `destroy_hwnd` destroys the wrapper (after reparenting it
+/// out to top-level; see `destroy_wrapper_hwnd`'s doc for why that step is
+/// what actually releases the renderer — retro-browser-pane-renderer-leak-
+/// 2026-07-07), never CEF's own window directly and never via
+/// `close_browser()`, avoiding the close_browser-cascades-into-main bug three
+/// earlier attempts hit.
 struct AppStateCloseOps<'a>(&'a Arc<AppState>);
 
 impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
@@ -86,8 +92,9 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
             // our wrapper, which never itself receives focus). Belt-and-
             // suspenders: `on_before_close_browser_pane` also runs a more
             // thorough sweep via `uninstall_focus_redirect_for_block` once
-            // CEF's OnBeforeClose fires (which the wrapper teardown below
-            // is what makes reliable) — this covers the gap before that.
+            // CEF's OnBeforeClose fires (which the wrapper's reparent-then-
+            // destroy teardown is what makes reliable — see
+            // destroy_wrapper_hwnd) — this covers the gap before that.
             if let Some(host) = browser.host() {
                 let wh = host.window_handle();
                 if !wh.0.is_null() {
@@ -113,7 +120,27 @@ impl<'a> BrowserPaneCloseOps for AppStateCloseOps<'a> {
     fn destroy_hwnd(&self, hwnd: usize) {
         #[cfg(target_os = "windows")]
         {
-            crate::browser_pane::wrapper::destroy_wrapper_hwnd(hwnd as *mut std::ffi::c_void);
+            // Marshal the destroy onto the CEF UI thread — the thread that
+            // CREATED the wrapper (CreateBrowserPaneTask::execute). `close()`
+            // runs on a tokio IPC thread, and Win32's DestroyWindow hard-fails
+            // (ERROR_ACCESS_DENIED) from any thread other than the window's
+            // owner — which is exactly how every pane close silently leaked
+            // its renderer while the logs looked clean
+            // (retro-browser-pane-renderer-leak-2026-07-07: the pixels
+            // vanished because ShowWindow(SW_HIDE) works cross-thread; the
+            // DestroyWindow after it never did anything, so CEF never saw
+            // WM_DESTROY and the browser survived headless). Mirrors the
+            // Linux/macOS path, which has always posted
+            // DetachBrowserPaneViewTask for the same stated reason (see the
+            // marshalling-tasks comment near the bottom of this file).
+            let mut task = DestroyPaneWrapperTask::new(hwnd as isize);
+            let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+            if posted == 0 {
+                tracing::error!(
+                    hwnd,
+                    "[pane-wrapper] post_task(destroy) failed — wrapper + CEF browser will leak"
+                );
+            }
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -389,19 +416,21 @@ impl BrowserPaneManager {
     /// quit the whole app or orphaned the pane's pixels while blocking the
     /// pane's own teardown.
     ///
-    /// As of `SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md`, instead:
+    /// As of `SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md` (and
+    /// corrected per retro-browser-pane-renderer-leak-2026-07-07), instead:
     /// 1. Remove the Browser from `state.browsers` so subsequent lookups miss.
-    /// 2. Win32 `DestroyWindow` on our own app-owned wrapper HWND
-    ///    (`browser_pane::wrapper`) — never on CEF's own HWND directly, and
-    ///    never `close_browser()`. Win32's native `WM_DESTROY` cascade tears
-    ///    down CEF's child HWND as a side effect, which is the same pattern
-    ///    `floating_pane.rs` already uses successfully for torn-off panes:
-    ///    destroying a window we own reliably fires CEF's `OnBeforeClose`,
-    ///    unlike destroying CEF's own HWND directly (the pre-2026-07-03
-    ///    approach, which only "may eventually" fire it) or calling
-    ///    `close_browser()` (the cascade above).
-    /// 3. Drop our `Browser` Arc. `on_before_close` should now fire reliably
-    ///    via the wrapper's WM_DESTROY cascade; `drain_closed_label` stays
+    /// 2. Reparent our app-owned wrapper HWND (`browser_pane::wrapper`) out to
+    ///    a genuine top-level window, THEN Win32 `DestroyWindow` it — never
+    ///    CEF's own HWND directly, and never `close_browser()`. The reparent
+    ///    is load-bearing: destroying the wrapper while it was still a
+    ///    `WS_CHILD` of main delivered `WM_DESTROY` via parent-hierarchy
+    ///    tear-down, which CEF does NOT treat as a browser close — the
+    ///    browser/renderer silently survived every close (live-confirmed via
+    ///    CDP). Made top-level first, the destroy is structurally identical
+    ///    to the floater's proven teardown and CEF runs its real close
+    ///    pipeline. See `destroy_wrapper_hwnd`'s doc for the full mechanism.
+    /// 3. Drop our `Browser` Arc. `on_before_close` fires via the
+    ///    reparent-then-destroy teardown; `drain_closed_label` stays
     ///    idempotent as a backstop for any remaining async-timing edge case.
     ///
     /// Trade-off: because we bypass `close_browser`, Chromium's `beforeunload`
@@ -491,7 +520,7 @@ impl BrowserPaneManager {
     fn close_with(label: &str, ops: &dyn BrowserPaneCloseOps) {
         if let Some(hwnd) = ops.take_browser_hwnd(label) {
             ops.destroy_hwnd(hwnd);
-            tracing::info!(label, "pane HWND destroyed");
+            tracing::info!(label, "pane wrapper destroy dispatched");
         }
     }
 
@@ -987,13 +1016,39 @@ pub fn compute_pane_visible(
     !overlays.iter().any(|or| rects_intersect(*or, pane_rect))
 }
 
-// ── Linux/macOS UI-thread marshalling tasks ────────────────────────────────
+// ── UI-thread marshalling tasks ─────────────────────────────────────────────
 //
 // `View::set_bounds` and `Window::remove_child_view` must run on the CEF UI
 // thread. Both `BrowserPaneManager::resize` and `::close` are called from IPC
 // handler tasks on tokio threads, so we wrap the UI-thread bodies in
 // `wrap_task!` structs and post them via `post_task(ThreadId::UI, ...)` —
 // same pattern as `ui_tasks::CloseWindowTask` / `MaximizeWindowTask` / etc.
+//
+// The same constraint applies to the Windows path's Win32 calls:
+// `DestroyWindow` only works from the thread that created the window (the CEF
+// UI thread, via CreateBrowserPaneTask) — see `DestroyPaneWrapperTask` below
+// and retro-browser-pane-renderer-leak-2026-07-07 for the leak that calling
+// it from the IPC thread silently caused.
+
+/// Windows pane-wrapper destroy, marshalled to the CEF UI thread (the
+/// wrapper's owning thread — Win32 DestroyWindow is owner-thread-only).
+/// Posted by `AppStateCloseOps::destroy_hwnd`; the actual
+/// hide → reparent-to-top-level → DestroyWindow sequence lives in
+/// `browser_pane::wrapper::destroy_wrapper_hwnd`.
+#[cfg(target_os = "windows")]
+wrap_task! {
+    pub struct DestroyPaneWrapperTask {
+        hwnd: isize,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            crate::browser_pane::wrapper::destroy_wrapper_hwnd(
+                self.hwnd as *mut std::ffi::c_void,
+            );
+        }
+    }
+}
 
 #[cfg(not(target_os = "windows"))]
 wrap_task! {
