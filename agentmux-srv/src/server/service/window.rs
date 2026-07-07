@@ -497,6 +497,51 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        // SPEC_PILLAR1_STEP3 — durable mirror of a window's kind + parent
+        // linkage, so a future reproject can tell which native-window
+        // creation path to drive for each window in `Client.windowids`.
+        // Direct store read-modify-write, same shape as SetWindowOpacity
+        // just above — kind/parent aren't reducer-tracked state (see
+        // `state::WindowRecord`), so there's no split-brain risk to route
+        // around.
+        "SetWindowTopology" => {
+            let window_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let kind: Option<String> = match service::get_optional_arg(args, 1) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let parent_window_id: Option<String> = match service::get_optional_arg(args, 2) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            if let Some(k) = &kind {
+                if k != "full_instance" && k != "subwindow" {
+                    return WebReturnType::error(format!(
+                        "SetWindowTopology: kind must be 'full_instance' or 'subwindow', got '{k}'"
+                    ));
+                }
+                if k == "subwindow" && parent_window_id.is_none() {
+                    return WebReturnType::error(
+                        "SetWindowTopology: kind='subwindow' requires a non-null parent_window_id"
+                            .to_string(),
+                    );
+                }
+            }
+            match store.must_get::<Window>(&window_id) {
+                Ok(mut win) => {
+                    win.kind = kind;
+                    win.parent_window_id = parent_window_id;
+                    match store.update(&mut win) {
+                        Ok(_) => WebReturnType::success_empty(),
+                        Err(e) => WebReturnType::error(e.to_string()),
+                    }
+                }
+                Err(e) => WebReturnType::error(e.to_string()),
+            }
+        }
         _ => WebReturnType::error(format!("unknown window method: {}", call.method)),
     }
 }
@@ -716,5 +761,122 @@ mod set_window_opacity_tests {
             let win = state.wstore.must_get::<Window>(&window_id).unwrap();
             assert_eq!(win.opacity, Some(boundary));
         }
+    }
+}
+
+/// SPEC_PILLAR1_STEP3 — `SetWindowTopology` unit tests.
+#[cfg(test)]
+mod set_window_topology_tests {
+    use super::handle_window_service;
+    use crate::backend::obj::Window;
+    use crate::backend::service::WebCallType;
+    use crate::server::tests::test_state;
+
+    fn call(window_id: &str, kind: Option<&str>, parent_window_id: Option<&str>) -> WebCallType {
+        WebCallType {
+            service: "window".to_string(),
+            method: "SetWindowTopology".to_string(),
+            uicontext: None,
+            args: vec![
+                serde_json::Value::String(window_id.to_string()),
+                kind.map(|k| serde_json::json!(k)).unwrap_or(serde_json::Value::Null),
+                parent_window_id
+                    .map(|p| serde_json::json!(p))
+                    .unwrap_or(serde_json::Value::Null),
+            ],
+        }
+    }
+
+    async fn seeded_window_id(state: &crate::server::AppState) -> String {
+        let ret = handle_window_service(
+            state,
+            &WebCallType {
+                service: "window".to_string(),
+                method: "CreateWindow".to_string(),
+                uicontext: None,
+                args: vec![
+                    serde_json::Value::Null,
+                    serde_json::Value::String(String::new()),
+                ],
+            },
+        )
+        .await;
+        assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+        ret.data
+            .expect("CreateWindow returns the Window")
+            .get("oid")
+            .and_then(|v| v.as_str())
+            .expect("window has an oid")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn sets_and_persists_full_instance() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        let ret = handle_window_service(&state, &call(&window_id, Some("full_instance"), None)).await;
+        assert!(ret.success, "SetWindowTopology failed: {:?}", ret.error);
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.kind, Some("full_instance".to_string()));
+        assert_eq!(win.parent_window_id, None);
+    }
+
+    #[tokio::test]
+    async fn sets_and_persists_subwindow_with_parent() {
+        let state = test_state();
+        let parent_id = seeded_window_id(&state).await;
+        let window_id = seeded_window_id(&state).await;
+
+        let ret =
+            handle_window_service(&state, &call(&window_id, Some("subwindow"), Some(&parent_id))).await;
+        assert!(ret.success, "SetWindowTopology failed: {:?}", ret.error);
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.kind, Some("subwindow".to_string()));
+        assert_eq!(win.parent_window_id, Some(parent_id));
+    }
+
+    #[tokio::test]
+    async fn rejects_subwindow_without_parent() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        let ret = handle_window_service(&state, &call(&window_id, Some("subwindow"), None)).await;
+        assert!(!ret.success, "subwindow with no parent_window_id must be rejected");
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.kind, None, "rejected write must not persist");
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_kind() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        let ret = handle_window_service(&state, &call(&window_id, Some("floating"), None)).await;
+        assert!(!ret.success, "unknown kind must be rejected");
+    }
+
+    #[tokio::test]
+    async fn null_kind_clears_it() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        handle_window_service(&state, &call(&window_id, Some("full_instance"), None)).await;
+        let ret = handle_window_service(&state, &call(&window_id, None, None)).await;
+        assert!(ret.success, "SetWindowTopology (clear) failed: {:?}", ret.error);
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.kind, None);
+        assert_eq!(win.parent_window_id, None);
+    }
+
+    #[tokio::test]
+    async fn errors_on_unknown_window() {
+        let state = test_state();
+        let ret = handle_window_service(&state, &call("ghost-window", Some("full_instance"), None)).await;
+        assert!(!ret.success, "unknown window must error");
     }
 }

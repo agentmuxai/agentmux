@@ -353,6 +353,22 @@ pub struct Window {
     /// mirror.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity: Option<f32>,
+    /// SPEC_PILLAR1_STEP3 — the window's kind (`"full_instance"` |
+    /// `"subwindow"`), durable so a reproject can tell which native-window
+    /// creation path to drive. `None` = unknown/legacy row; treat as
+    /// `full_instance` on read (matches today's implicit default — every
+    /// window was a full instance before this field existed). Written only
+    /// via the `SetWindowTopology` RPC (a direct store read-modify-write,
+    /// not reducer-dispatched — window kind/parent were never reducer
+    /// state, same rationale as `opacity` above).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// SPEC_PILLAR1_STEP3 — the parent `Window.oid` for a `subwindow`;
+    /// `None` for a `full_instance` (or an unset/legacy row). A `subwindow`
+    /// with `parent_window_id: None` is a nonsensical state the
+    /// `SetWindowTopology` RPC rejects at write time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_window_id: Option<String>,
     #[serde(default, serialize_with = "serialize_meta_as_null_if_empty", deserialize_with = "deserialize_meta_or_null")]
     pub meta: MetaMapType,
 }

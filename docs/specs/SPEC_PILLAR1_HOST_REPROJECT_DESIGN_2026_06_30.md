@@ -81,11 +81,19 @@ Full field inventory from `agentmux-cef/src/state.rs` + `reducer/`, grouped by d
 ### 2.A — LOGICAL TOPOLOGY → **must be authoritative in srv** (the actual Pillar 1 work)
 | Host field | What it is | In srv today? | Action |
 |---|---|---|---|
-| window set (via `shadow_window_meta` / `window_meta`) | which top-level windows exist, kind, parent linkage | **Yes** — launcher owns `instance_registry`, `backend_window_ids`, `windows`; host already projects them | Confirm completeness; close any host-only window facts |
-| layout tree (pane topology) | the split/tab structure per window | **Partially** — `db_layout` exists but is written via **two paths** (reducer + wcore-direct) | **#864**: collapse to one write path; this is the core gap |
-| `window_opacities: HashMap<String,f32>` | per-window opacity | **No** | Persist to window metadata |
-| `pane_window_states: HashMap<String,PaneWindowState>` | floating-pane Normal/Max/Min + `last_known_normal_rect` | **No** | Persist restore-rects + placement |
+| window set (via `shadow_window_meta` / `window_meta`) | which top-level windows exist, kind, parent linkage | **Corrected 2026-07-07 — was wrong.** See §2.A.1 below: the window-**id** list is durable (`Client.windowids`, SQLite), but `kind`/parent linkage is **not in srv at all**, only in the launcher's in-memory registry (itself non-durable across a full process-tree kill). | New work, not just an audit: persist `kind` + `parent_window_id` to srv (Step 3, sized separately) |
+| layout tree (pane topology) | the split/tab structure per window | **Yes, verified** — SPEC_864's single-writer collapse (all 5 phases) is fully merged; `TabRecord.rootnode`/`LayoutState` is coherent, no Path-B writer remains. Confirmed live, not just claimed. | Done |
+| `window_opacities: HashMap<String,f32>` | per-window opacity | **Yes** (SPEC_PILLAR1_STEP2 Slice A, merged + live-verified) | Done |
+| `pane_window_states: HashMap<String,PaneWindowState>` | floating-pane Normal/Max/Min + `last_known_normal_rect` | **Yes** (SPEC_PILLAR1_STEP2 Slice B, merged + live-verified). Read-back-on-reopen deliberately deferred to Step 4 — no live trigger exists until reproject recreates floaters. | Done (write-through); read-back is Step 4 scope |
 | pool **target size** | how many warm windows/panes to keep | config | Keep in config (already durable) |
+
+#### 2.A.1 — Correction (2026-07-07): the window-set row above was wrong
+
+Verified against source, not assumed (see `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md` for the full citations). Two separate facts were conflated in the original table:
+
+- **What IS durable:** `Client.windowids: Vec<String>` (SQLite) — the *list of window ids that should exist* survives a full kill of launcher + host + srv (same data dir). A crash never calls `CloseWindow`, so a crash-killed window's id is never pruned.
+- **What is NOT durable, anywhere:** `Window`'s persisted row (`agentmux-srv/src/backend/obj.rs`) has no `kind` or `parent` field at all. `WindowKind` (`FullInstance`/`Subwindow`) and parent linkage live only in the **launcher's** in-memory `WindowMirror` map (`agentmux-launcher/src/state.rs`) — a third process, separate from both host and srv, with **zero disk persistence** (grepped the whole launcher state/reducer for save/load/serde/sqlite — nothing). Killing the launcher loses this instantly.
+- **Bigger consequence, also corrected:** cold launch does not "read srv topology and rebuild the window set." `agentmux-cef/src/app.rs::on_context_initialized` unconditionally creates exactly **one** native window (implicitly "main"); the frontend inside it then reads only `Client.windowids[0]`. A second FullInstance window or a Subwindow is *never* automatically recreated by the existing cold-start path — today, after ANY relaunch (crash or not), those come back only if the user manually reopens them. "Reproject fires the existing cold-start path" (§4 below) is therefore not sufficient for Step 4 on its own; multi-window recreation is new code, not an existing capability being triggered on a new event.
 
 ### 2.B — NATIVE / EPHEMERAL HANDLES → **rebuilt on reproject, never serialized**
 `browsers: HashMap<String,BrowserHandle>` (CEF `Browser` FFI objects), GPU/renderer processes,
@@ -157,8 +165,14 @@ What we do instead:
   is **#864: retire the wcore-direct second write path** so the reducer is the *only* writer.
   Pillar 1's durability correctness is impossible while two writers race one record (audit §2.3
   "layout split-brain"); fixing #864 is therefore a **hard prerequisite**, not a nice-to-have.
-- **Reproject read path = the existing cold-start restore.** No new deserialization code; the host
-  already reads srv topology on launch. Pillar 1 makes that read fire on crash and cover 2.A fully.
+- **Reproject read path = the existing cold-start restore — corrected 2026-07-07, partially true.**
+  The read/render machinery for **one window's** workspace/tab/layout is real and reusable (no new
+  deserialization code needed there). But the existing cold-start path only ever *invokes* that
+  machinery for window #1 ("main") — see §2.A.1. "Making that read fire on crash and cover 2.A
+  fully" undersells the work: covering *all* windows requires new code to enumerate the durable
+  window-id list beyond the first, resolve each one's `kind`/parent (once Step 3 gives that
+  somewhere to live), and drive per-window native creation — the single-window path doesn't
+  generalize by itself.
 
 **Consequence for sequencing:** #864 is pulled *into* Pillar 1's critical path (it was previously
 "pay-down"). Single-write-path first, then opacity/placement persistence, then fire-restore-on-crash.
@@ -179,17 +193,26 @@ independent of Pillar 1 and can land anytime.
 
 ## 6. Resulting Pillar 1 implementation sequence (for the sized spec next)
 
-1. **#864 — collapse layout to one write path** (reducer is sole writer; delete wcore-direct).
-   *Hard prerequisite — durability is incoherent with two writers.*
-2. **Persist the two host-only topology facts** to srv: per-window opacity, floating-pane
-   placement + `last_known_normal_rect`.
-3. **Audit window-set completeness** — confirm no host-only window truth beyond what
-   `shadow_*` already projects; close gaps.
-4. **Fire the cold-start restore path on crash** (mid-session reproject) + the "Restoring session…"
-   overlay; ensure in-flight (2.C) work is **re-derived from topology, not resumed**.
-5. **E2E test:** "host OOM ⇒ session reprojects" (topology equivalence within budget, overlay
+1. ✅ **#864 — collapse layout to one write path** (reducer is sole writer; delete wcore-direct).
+   *Hard prerequisite — durability is incoherent with two writers.* **Done, merged (all 5 phases).**
+2. ✅ **Persist the two host-only topology facts** to srv: per-window opacity, floating-pane
+   placement + `last_known_normal_rect`. **Done, merged, live-verified (SPEC_PILLAR1_STEP2 Slices
+   A + B).**
+3. ⬜ **Persist window `kind` + parent linkage to srv** — corrected scope (2026-07-07): this is
+   **not** an "audit + close small gaps" step as originally written. `kind`/parent have no srv
+   representation at all today (§2.A.1). Sized as its own spec:
+   `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`.
+4. ⬜ **Fire the cold-start restore path on crash** (mid-session reproject) + the "Restoring session…"
+   overlay; ensure in-flight (2.C) work is **re-derived from topology, not resumed**. **Corrected
+   scope (2026-07-07):** this needs genuinely new multi-window recreation code (§2.A.1) — the
+   existing cold-start path only ever handles one window. The in-flight re-derivation rule (§7) has
+   **zero existing scaffolding** to build on (verified by search — the closest analog,
+   `commands/orphan_reconcile.rs`'s live/dead/hostless planner, is structurally similar but solves a
+   different trigger). Needs its own dedicated design pass before implementation, not a subtask of
+   this sequence step.
+5. ⬜ **E2E test:** "host OOM ⇒ session reprojects" (topology equivalence within budget, overlay
    shown, no orphan tree).
-6. **Then the collapses land:** graceful-flush-vs-crash incoherence deleted (one recover path);
+6. ⬜ **Then the collapses land:** graceful-flush-vs-crash incoherence deleted (one recover path);
    saga layer collapses to an in-memory registry (nothing durable left to compensate).
 
 ---
