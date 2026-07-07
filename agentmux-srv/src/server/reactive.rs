@@ -225,7 +225,32 @@ pub(super) async fn handle_reactive_register(
             // Pass block_id so subagent events are stamped with the owning pane,
             // letting the frontend route ⚡ panels to that pane only.
             if let Some(config_dir) = subagent_watcher::derive_claude_config_dir(&req.agent_id) {
-                state.subagent_watcher.watch_agent(&req.agent_id, &req.block_id, config_dir);
+                state.subagent_watcher.watch_agent(&req.agent_id, &req.block_id, config_dir.clone());
+
+                // If this block already has a persisted session id, it's
+                // resuming a prior conversation (not starting fresh) —
+                // backfill just THAT session's own subagents, so a
+                // reopened pane shows what it already had without
+                // flooding in every OTHER session this agent identity has
+                // ever run. A brand-new session has nothing to backfill;
+                // watch_agent's live watcher picks up subagents as the
+                // Task tool spawns them. See
+                // docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
+                if let Ok(Some(block)) = state.wstore.get::<crate::backend::obj::Block>(&req.block_id) {
+                    let session_id = crate::backend::obj::meta_get_string(
+                        &block.meta,
+                        crate::backend::blockcontroller::core::META_SESSION_ID,
+                        "",
+                    );
+                    if !session_id.is_empty() {
+                        state.subagent_watcher.scan_session_subagents(
+                            &req.agent_id,
+                            &req.block_id,
+                            &config_dir,
+                            &session_id,
+                        );
+                    }
+                }
             }
 
             // Notify cloud subscriber so it can subscribe for cloud-push delivery
