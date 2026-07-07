@@ -2,4 +2,4 @@
 type: patch
 ---
 
-fix(browser-pane): macOS/Linux click on pane body now selects the pane
+fix(browser-pane): macOS click on pane body now selects the pane (Linux still open)

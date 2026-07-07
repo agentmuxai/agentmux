@@ -1,9 +1,17 @@
-# SPEC — Browser pane: clicking the body selects the pane (macOS/Linux)
+# SPEC — Browser pane: clicking the body selects the pane (macOS)
 
 **Date:** 2026-07-07
 **Type:** Bug fix
-**Status:** Implemented, pending manual click smoke test
-**Scope:** `agentmux-cef` (`ui_tasks/platform_macos.rs`, `ui_tasks/pane_geometry.rs`)
+**Status:** Implemented for macOS and manually confirmed; Linux still open (see Scope)
+**Scope:** `agentmux-cef` (`ui_tasks/platform_macos.rs`, `ui_tasks/pane_geometry.rs`) —
+macOS only. The new `PANE_OVERLAY_WIN_TO_BLOCK` map, the registration in
+`SetPaneBoundsViewsTask`, and the `sendEvent:` swizzle tap are all
+`#[cfg(target_os = "macos")]`; Linux's branch of `SetPaneBoundsViewsTask`
+(`pane_geometry.rs`, the `#[cfg(not(target_os = "macos"))]` early-return path)
+never reaches this registration code, so **Linux gets no fix from this
+change** — it needs its own native click-detection mechanism (GTK/X11 or
+Wayland have neither an HWND-style subclass nor an AppKit-style `sendEvent:`
+swizzle to reuse), tracked as follow-up work, not implemented here.
 
 ## Problem
 
@@ -25,7 +33,8 @@ Windows already has a fix: `agentmux-cef/src/browser_pane/hwnd.rs` subclasses
 the pane's HWND and emits `browser-pane-clicked` (with `block_id`) directly
 from `WM_LBUTTONDOWN`. `agentmux-cef/src/browser_pane/callbacks.rs`'s
 `#[cfg(not(target_os = "windows"))]` branch explicitly notes this subclass
-"doesn't exist" on macOS/Linux — that gap is what this fix closes for macOS.
+"doesn't exist" on macOS/Linux — that gap is what this fix closes for macOS
+only (Linux remains open, see Scope above).
 
 ## Root cause confirmation
 
