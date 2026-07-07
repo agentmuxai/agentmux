@@ -4,17 +4,18 @@
 export const DefaultTermTheme = "default-dark";
 import { colord } from "colord";
 
-// Built-in high-contrast palette used when the backend `wconfig` doesn't
-// supply a `termthemes` table (which it currently doesn't — see
-// agentmux-srv/src/backend/wconfig/mod.rs). Without this fallback every
+// Last-resort palette for when `document`/CSS custom properties aren't
+// available at all (e.g. a non-browser test environment) — see
+// `tryDeriveTermThemeFromCss` below, which is what actually fires in the
+// steady state today (no `termthemes` table configured — see
+// agentmux-srv/src/backend/wconfig/mod.rs). Without either fallback, every
 // xterm in the app would render with xterm.js's library defaults, which
-// include dim greys for the ANSI palette and a near-white foreground
-// that looks washed out on dark panel backgrounds.
+// include dim greys for the ANSI palette and a near-white foreground that
+// looks washed out on dark panel backgrounds.
 //
-// This is *not* a competing source of truth — `computeTheme` still
-// prefers `fullConfig.termthemes[themeName]` when present. The fallback
-// only fires when neither the requested theme nor the configured
-// default exists, which is the steady state today.
+// This is *not* a competing source of truth — `computeTheme` still prefers
+// `fullConfig.termthemes[themeName]` when present, then the CSS-derived
+// theme. This literal only fires when all of those miss.
 const FALLBACK_TERM_THEME: TermThemeType = {
     "display:name": "Built-in dark",
     "display:order": 0,
@@ -47,6 +48,60 @@ function applyTransparencyToColor(hexColor: string, transparency: number): strin
     return colord(hexColor).alpha(alpha).toHex();
 }
 
+// Builds a TermThemeType from the currently-active app theme's --term-*
+// custom properties (theme.scss + frontend/app/themes/*.scss), so a
+// terminal with no explicit term:theme picks up whatever window:theme is
+// active instead of a fixed, theme-independent palette. See
+// SPEC_TERMINAL_THEME_PENETRATION_2026_07_07.md.
+//
+// No dedicated --term-cursor token exists (only --term-cursor-accent) —
+// cursor reuses --term-foreground, the common "cursor matches text color"
+// convention, rather than adding a new token across every theme file for a
+// value that would almost always equal foreground anyway.
+//
+// cursorAccent isn't part of TermThemeType's wire shape (frontend/types/
+// gotypes.d.ts) but IS a real xterm.js ITheme option — same tolerant `as
+// unknown as TermThemeType` cast FALLBACK_TERM_THEME below already uses for
+// the same reason, not a typo.
+function tryDeriveTermThemeFromCss(): TermThemeType | null {
+    if (typeof document === "undefined") return null;
+    // Only runs from computeTheme, invoked on mount and on theme/settings
+    // changes (an infrequent, deliberate user action), never per-keystroke.
+    const style = getComputedStyle(document.documentElement); // perf:allow-layout-read — theme switch, not input-handler hot path
+    const v = (name: string) => style.getPropertyValue(name).trim();
+    const background = v("--term-background");
+    const foreground = v("--term-foreground");
+    if (!background || !foreground) return null; // theme.scss not loaded / not a real DOM
+    const themeName = document.documentElement.getAttribute("data-theme") || "default";
+    return {
+        "display:name": `App theme (${themeName})`,
+        "display:order": -1,
+        black: v("--term-black"),
+        red: v("--term-red"),
+        green: v("--term-green"),
+        yellow: v("--term-yellow"),
+        blue: v("--term-blue"),
+        magenta: v("--term-magenta"),
+        cyan: v("--term-cyan"),
+        white: v("--term-white"),
+        brightBlack: v("--term-bright-black"),
+        brightRed: v("--term-bright-red"),
+        brightGreen: v("--term-bright-green"),
+        brightYellow: v("--term-bright-yellow"),
+        brightBlue: v("--term-bright-blue"),
+        brightMagenta: v("--term-bright-magenta"),
+        brightCyan: v("--term-bright-cyan"),
+        brightWhite: v("--term-bright-white"),
+        gray: v("--term-gray"),
+        cmdtext: v("--term-cmdtext"),
+        foreground,
+        background,
+        selectionBackground: v("--term-selection-background"),
+        cursor: foreground,
+        cursorAccent: v("--term-cursor-accent"),
+    } as unknown as TermThemeType;
+}
+
 // returns (theme, bgcolor, transparency (0 - 1.0))
 function computeTheme(
     fullConfig: FullConfigType,
@@ -55,7 +110,7 @@ function computeTheme(
 ): [TermThemeType, string] {
     let theme: TermThemeType = fullConfig?.termthemes?.[themeName];
     if (theme == null) {
-        theme = fullConfig?.termthemes?.[DefaultTermTheme] || FALLBACK_TERM_THEME;
+        theme = fullConfig?.termthemes?.[DefaultTermTheme] || tryDeriveTermThemeFromCss() || FALLBACK_TERM_THEME;
     }
     const themeCopy = { ...theme };
     if (termTransparency != null && termTransparency > 0) {
@@ -96,4 +151,4 @@ function computeTermThemeFromSettings(fullConfig: FullConfigType): [TermThemeTyp
     return [theme, bgcolor];
 }
 
-export { computeTheme, computeTermThemeFromSettings };
+export { computeTheme, computeTermThemeFromSettings, tryDeriveTermThemeFromCss };
