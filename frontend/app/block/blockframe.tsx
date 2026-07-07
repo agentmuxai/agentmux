@@ -739,6 +739,11 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const nodeModel = props.nodeModel;
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
     const isFocused = () => nodeModel.isFocused();
+    // With only one pane in the tab, there's nothing to distinguish
+    // "focused" from "unfocused" against, so the focus ring carries no
+    // signal — same reasoning as the floating-pane-workspace's always-on
+    // suppression (frontend/app/workspace/floating-pane-workspace.scss).
+    const isAlone = () => nodeModel.numLeafs() <= 1;
     const customBg = util.useAtomValueSafe(props.viewModel?.blockBg);
     const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
     const changeConnModalAtom = useBlockAtom(nodeModel.blockId, "changeConn", () => {
@@ -853,6 +858,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                 "block-focused": isFocused() || props.preview,
                 "block-preview": props.preview,
                 "has-agent-color": !!blockAgentColor(),
+                "pane-alone": isAlone(),
                 ephemeral: isEphemeral(),
                 magnified: isMagnified(),
             })}

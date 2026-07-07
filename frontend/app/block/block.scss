@@ -557,6 +557,20 @@
             &.has-agent-color .block-mask {
                 border-color: var(--block-agent-color);
             }
+
+            // Alone in this tab — nothing to distinguish "focused" from
+            // "unfocused" against, so the ring carries no signal. Same
+            // reasoning as the floating-pane-workspace's always-on
+            // suppression (frontend/app/workspace/floating-pane-workspace.scss),
+            // which exists because a floater always wraps a single pane;
+            // `.pane-alone` here is the dynamic (numLeafs-driven) equivalent
+            // for a lone pane in the regular tiled layout. `!important` for
+            // the same specificity reason documented there: this must beat
+            // the `.has-agent-color` variant above regardless of source
+            // order.
+            &.pane-alone .block-mask {
+                border-color: transparent !important;
+            }
         }
 
     }
