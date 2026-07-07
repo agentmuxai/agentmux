@@ -68,8 +68,53 @@ Separately, and probably the more user-visible contributor here: the main window
 ## Open questions / not yet resolved
 
 - Whether `backend_close_window`'s TCP POST is actually attempted and failing silently for the 4 "clean" closes at 19:43–19:44, or never attempted at all — needs `dlog()`-level output, which isn't in the log surface this investigation had access to.
-- Whether the main-window version=4 re-registration at 19:14:41 is actually caused by the DevTools-toggle/close-reopen suggestion from earlier this session, or something else — not confirmed with the user.
 - Exact current live window count reconciliation (9 in `Layout`, vs. whatever the user's original "5" reflected at the time they reported it) — these are different snapshots at different times in an ongoing, cumulative leak, not a discrepancy to resolve, but worth noting neither number should be treated as "the" bug count.
+
+## 2026-07-07 update — action item 3 root-caused and live-confirmed (task #8)
+
+**The DevTools-toggle/close-reopen theory above (line 22, 50) does not hold up.** Checked
+`agentmux-cef/src/client/crash_recovery.rs::on_render_process_terminated` and the recovery page's
+Reload button: both navigate the *existing* `Browser` object via `frame.load_url`/`location.href`,
+never recreating it. `report_window_opened` fires from exactly two places
+(`client/lifecycle.rs::on_after_created`, `commands/window_pool.rs`'s pool-promote path) — both
+gated on a genuinely NEW `Browser` object being created. A content reload cannot trigger either.
+
+**Confirmed mechanism, live-reproduced 2026-07-07:** `on_after_created` (`lifecycle.rs:71-83`)
+labels a browser `"main"` purely based on `self.state.browsers_is_empty()` — "is this the first
+browser *this host process* has registered," not "is this the first-ever main window of the app
+session." Separately, the launcher's `handle_goodbye` (`agentmux-launcher/src/reducer/connection.rs:200-221`,
+fired on both graceful `Goodbye` and the synthetic one dispatched on an ungraceful host EOF,
+`ipc/server.rs:703-728`) only flips `state.processes[pid].state = Exited` — it never touches
+`state.windows`, and `WindowMirror` (`state.rs:94+`) has **no field at all** recording which host
+connection/session a window entry belongs to, so there is no way for `handle_goodbye` to even find
+the right entries to clean up today.
+
+Reproduced directly: launched an isolated instance, then `taskkill`'d the **inner** host process
+(not the outer launcher wrapper) — the launcher log showed `CEF host exited abnormally (code 1) —
+relaunching (restart 1/3)`, confirming the exact "host dies, launcher survives, host respawns"
+precondition this mechanism needs. The respawned host process (fresh `AppState`, `browsers_is_empty()`
+true again) created a brand-new `Browser` for its own "Starter workspace" window, confirmed via CDP —
+i.e. a **second, genuinely distinct native window gets labeled `"main"` again**, and (since a hard
+process kill runs zero in-process CEF shutdown callbacks) `on_before_close`/`report_window_closed`
+structurally cannot have fired for the killed host's original `"main"` — there is no code path that
+could have paired it off. `window.api.getInstanceNumber('main')` after the respawn returned `1`,
+consistent with the launcher's documented duplicate-open-overwrites-not-appends contract
+(`reducer/window.rs:57-67`) — the ledger doesn't crash or double-count, it silently drops the prior
+entry's history.
+
+**Severity re-assessment: lower than the original "High" above.** This is semantic/ledger corruption
+(the launcher's diagnostic view of "main" silently loses continuity across a host restart), not a
+resource leak or a count-inflation bug — `state.windows`/`shadow_window_meta`/frontend `knownEntries`
+are all label-keyed maps, so a duplicate open overwrites rather than accumulates, and
+`instance_registry`'s number is preserved. It's real drift/inaccuracy in observability, not the
+unbounded-growth class the rest of this retro is about.
+
+**Fix scope, now understood:** needs `WindowMirror` (or a parallel map) to record an owning
+connection/session id, so `handle_goodbye` can find and synthetically close (or otherwise mark)
+windows orphaned by a host disconnect before a respawned host's fresh `WindowOpened` silently
+overwrites them. This is a real schema addition to `agentmux-launcher`, not a small patch — scoped as
+a follow-up, not implemented in this pass. See `docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md`
+§2.3 for where this was previously deferred.
 
 ## Remediation of the current live session
 
