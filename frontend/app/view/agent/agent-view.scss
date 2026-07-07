@@ -31,6 +31,7 @@
 @use "styles/responsive";
 @use "styles/decision-panel";
 @use "styles/shell-node";
+@use "styles/loading-overlay";
 
 .agent-view {
     container-type: inline-size;
