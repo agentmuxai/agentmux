@@ -142,3 +142,41 @@ Each phase ships independently; Phase 1 alone would have fully covered tonight's
 2. **`SystemReloadView` scope when torn off** — same open question §8.2 of the first-class-surface spec raises for `SetWindowName`: does self-context resolve the right *window* (not just block) when the calling agent's pane was torn off into a floating window?
 3. **Does reload actually fix a stale empty layout cell**, or would that require `SystemRestartInstance`? Untested as of this writing — the incident that motivated this spec was redirected to a hard-refresh-by-hand request rather than confirmed via either new verb (neither exists yet).
 4. **Capability storage** — same unresolved question as the first-class-surface spec §8.1; should be answered once, shared across both specs' Tier-1 verbs.
+
+## 8. 2026-07-07 update — root-cause investigation (tasks #2/#3), closed with a reasoned (not proven) conclusion
+
+Investigated §4.3's deferred root-cause ("why a pane gets pruned from a layout tree") and open question 3
+above. No new evidence about the original 2026-07-04 incident survives anywhere in the repo — no
+timeline, no trace of which user action preceded the prune, and this doc remains the only place it's
+even mentioned. A live-reproduction attempt (open sysinfo/swarm, exercise plausible triggers — tab
+switch, adjacent-block delete, rapid window churn — on the current build) was abandoned after several
+tooling-friction dead ends (the widget bar's icon-only rendering + a mismatch between
+`agentmux-srv/src/config/widgets.json`'s pinned/icon fields and the frontend's own widget catalog made
+driving the exact widget-bar click path via CDP not worth the further time investment) rather than
+because it disproved anything — this is a scoping decision, not a negative result.
+
+**What does settle this, circumstantially:** every phase of `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md`
+(the fix for `db_layout`'s split-brain — multiple uncoordinated writers that could race and silently drop
+a layout node) landed **2026-07-05 through 2026-07-06** — confirmed via `git log`, all five phase commits
+post-date this incident's 2026-07-04 timestamp. The incident happened while the exact defect class
+SPEC_864 exists to eliminate was still active in production. A layout node silently vanishing while its
+block survives (leaving a stale-rendered empty cell) is precisely the failure mode a split-brain writer
+race produces — one writer's snapshot clobbering another's concurrent edit.
+
+**Conclusion (reasoned, not proven — no direct evidence ties the specific incident to the specific
+race):** this is very likely already fixed as a side effect of SPEC_864's now-fully-merged single-writer
+cutover, not by any dedicated fix for sysinfo/swarm specifically. There is nothing sysinfo/swarm-specific
+in the code that would make these two panes more prone to a layout-tree bug than any other pane type
+(confirmed: the widget-bar creation path is fully generic, no per-widget branching) — their appearance in
+the original report is most plausibly incidental (whichever panes happened to be present when a
+concurrent-write race landed), not causal.
+
+**Given this, tasks #2 and #3 are closed here rather than left open indefinitely:** further investigation
+would need either the original incident's exact repro steps (which don't exist anywhere) or a
+dedicated stress-test harness for concurrent layout writes against the pre-864 code — not a productive
+use of time against code that's already been superseded. If this class of symptom (a pane's content
+gone, empty cell persists) recurs on the current (post-864) build, that would be strong evidence against
+this conclusion and should be treated as a fresh, still-open bug, not a re-opening of this one — the
+capstone invariant test added in SPEC_864 Phase 5
+(`layout_stays_coherent_across_full_mutation_lifecycle`, `agentmux-srv/src/server/tests.rs`) is the
+regression guard for exactly this class going forward.
