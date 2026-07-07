@@ -107,6 +107,23 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
     );
 }
 
+/// Max simultaneous Haiku CLI spawns across the two user-turn-triggered pull
+/// RPCs (`session:activity_summary`, `session:next_prompt_suggestion`). The
+/// Ambient Model Call gateway's `admit()` only dedupes/cancels *per key*
+/// (per block+purpose) — with no cap across different blocks, many panes
+/// finishing a turn around the same moment could each spawn their own Haiku
+/// subprocess unbounded. Mirrors `activity_watcher.rs`'s
+/// `MAX_CONCURRENT_SUMMARIES` cap on the separate pushed-summary sweep, but
+/// kept as its own semaphore rather than shared with that one: a burst of
+/// background sweep summaries should not queue behind, or block, a live
+/// user-facing pane-header/ghost-text request, and vice versa.
+const MAX_CONCURRENT_PULL_CALLS: usize = 2;
+
+fn pull_call_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_PULL_CALLS))
+}
+
 /// Ambient-call purpose tag for the per-turn activity summary. Also usable
 /// as the token-usage/cost-dashboard category for this call site.
 const AMBIENT_PURPOSE_ACTIVITY_SUMMARY: &str = "activity_summary";
@@ -200,6 +217,20 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 };
                 let cancel = guard.cancellation();
 
+                // Cap concurrent Haiku spawns across all blocks — see
+                // MAX_CONCURRENT_PULL_CALLS. Raced against cancellation so a
+                // request superseded while queued for a permit never spawns
+                // the CLI at all.
+                let permit = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => None,
+                    permit = pull_call_semaphore().acquire() => permit.ok(),
+                };
+                let Some(_permit) = permit else {
+                    drop(guard);
+                    return Ok(Some(empty_summary_result()));
+                };
+
                 let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
 
                 let block: Block = wstore
@@ -282,6 +313,19 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     }
                 };
                 let cancel = guard.cancellation();
+
+                // Same cross-block concurrency cap as activity_summary — the
+                // two pull RPCs share MAX_CONCURRENT_PULL_CALLS so neither
+                // alone can flood the machine with Haiku subprocesses.
+                let permit = tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => None,
+                    permit = pull_call_semaphore().acquire() => permit.ok(),
+                };
+                let Some(_permit) = permit else {
+                    drop(guard);
+                    return Ok(Some(empty_suggestion_result()));
+                };
 
                 let block: Block = wstore
                     .get(&cmd.block_id)
@@ -562,4 +606,29 @@ pub(super) fn extract_digest_text(lines: &[&str]) -> String {
     }
 
     parts.join("\n")
+}
+
+#[cfg(test)]
+mod pull_call_semaphore_tests {
+    use super::*;
+
+    /// The two pull RPCs share one process-wide cap: once
+    /// MAX_CONCURRENT_PULL_CALLS permits are held, a further non-blocking
+    /// acquire must fail rather than let a third Haiku CLI spawn through.
+    #[tokio::test]
+    async fn caps_at_max_concurrent_pull_calls() {
+        let sem = pull_call_semaphore();
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONCURRENT_PULL_CALLS {
+            held.push(sem.try_acquire().expect("permit within the cap should be available"));
+        }
+        assert!(
+            sem.try_acquire().is_err(),
+            "a permit beyond MAX_CONCURRENT_PULL_CALLS must not be granted"
+        );
+
+        // Releasing one frees a slot for the next caller.
+        held.pop();
+        assert!(sem.try_acquire().is_ok(), "releasing a permit must free a slot");
+    }
 }
