@@ -542,10 +542,19 @@ impl AgentMuxHandler {
             })
             .map(|(k, _)| k.clone());
         dlog(&format!("label found: {:?}", label));
+        // Pillar 2 Stage 2 (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md §3.2/§4#3)
+        // — `UnregisterBrowser` is quit-relevant, so `reducer::update` already
+        // computed `reconcile_quit` under the same lock and surfaced its
+        // verdict here. Capture it now (state.browsers doesn't change again
+        // before the gate below reads it) instead of re-deriving
+        // `count_live_user_windows() == 0` locally — `reconcile_quit` is the
+        // single decision authority; this handler is now just an executor.
+        let mut request_drain: Option<crate::state::QuitReason> = None;
         if let Some(ref lbl) = label {
-            self.state.host_dispatch(
+            let unregister_dispatch = self.state.host_dispatch(
                 crate::reducer::HostCommand::UnregisterBrowser { label: lbl.clone() },
             );
+            request_drain = unregister_dispatch.request_drain;
             let remaining = self.state.host_state.lock().browsers.len();
             tracing::info!(
                 "Unregistered browser: label={} (remaining: {})",
@@ -795,7 +804,14 @@ impl AgentMuxHandler {
             // browser-pane-* only. window-pool-* labels (promoted)
             // are tracked windows and need their cleanup events.
             if !lbl.starts_with("browser-pane-") {
-                let was_last = user_browser_count == 0 && !self.is_browser_pane;
+                // Pillar 2 Stage 2 — mirrors the actual cascade gate below
+                // (`request_drain.is_some()`), not the raw `user_browser_count`
+                // reading, so this report and the real decision can't drift
+                // apart. `request_drain` is strictly more conservative than
+                // `user_browser_count == 0` alone (it's also `None` while a
+                // user window-creation is in flight, or once already
+                // draining) — see reconcile_quit's should_begin_drain.
+                let was_last = request_drain.is_some() && !self.is_browser_pane;
                 crate::launcher_ipc::report_pool_drain_decision(lbl.clone(), was_last);
             }
         }
@@ -824,108 +840,17 @@ impl AgentMuxHandler {
         // Windows path. macOS uses NSWindow.performClose:; Linux
         // uses X11 WM_DELETE_WINDOW. Same async-close-cascade
         // semantics on all platforms; only the OS API differs.
-        if user_browser_count == 0 && !self.is_browser_pane {
-            // PR #5 H.5 — flip QuitState Running → Draining via reducer.
-            // Mirrors the pre-PR Phase B.9.3 drain flag: spawn_pool_window
-            // checks `quit_state != Running` (in the reducer's spawn arm)
-            // and skips refill on every subsequent on_pool_window_destroyed
-            // → no new pool browsers added → browsers map can actually
-            // drain. BeginDrain is idempotent — safe if a duplicate
-            // last-close fires.
-            self.state.host_dispatch(
-                crate::reducer::HostCommand::BeginDrain {
-                    reason: crate::state::QuitReason::LastWindowClosed,
-                },
-            );
-            tracing::warn!(target: "wrr", "[wrr] quit_state=Draining (drain mode)");
-
-            // Phase H.2.b — reducer-aware iteration with fallback + drift logging.
-            // Collect ALL background-only browsers: tab pool (window-pool-*)
-            // AND pane pool (floating-pool-*). Both live in browser_list
-            // (created via CreateWindowTask which clones the main top-level
-            // client). Omitting pane pool windows here means browser_list
-            // never empties on macOS/Linux (init_pane_pool spawns one at
-            // startup), so Stage 2's is_empty() gate never fires and the
-            // host hangs on every quit.
-            let pool_browsers: Vec<cef::Browser> = self
-                .state
-                .list_browsers()
-                .into_iter()
-                .filter(|(label, _)| {
-                    label.starts_with("window-pool-") || label.starts_with("floating-pool-")
-                })
-                .map(|(_, b)| b)
-                .collect();
-            tracing::warn!(
-                target: "wrr",
-                "[wrr] stage 1: user_count==0; closing {} pool browser(s) (tab+pane)",
-                pool_browsers.len()
-            );
-
-            // Windows path: prefer Win32 PostMessage(WM_CLOSE) —
-            // bypasses CEF's task queue (proven reliable; smoke
-            // v0.33.500+). When window_handle() returns null
-            // (early/late lifecycle), fall through to the
-            // post_task path so the close still happens — without
-            // the fallback, self.browser_list never empties and
-            // Stage 2 never fires. (codex #601 P1.)
-            #[cfg(target_os = "windows")]
-            {
-                use windows_sys::Win32::Foundation::HWND;
-                use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
-                for (i, mut b) in pool_browsers.into_iter().enumerate() {
-                    let hwnd_opt = b.host().and_then(|h| {
-                        let wh = h.window_handle();
-                        if wh.0.is_null() {
-                            None
-                        } else {
-                            Some(wh.0 as HWND)
-                        }
-                    });
-                    if let Some(hwnd) = hwnd_opt {
-                        let ok = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
-                        tracing::debug!(
-                            target: "wrr-trace",
-                            "[trace] stage1[{}] PostMessage(hwnd={:p}, WM_CLOSE) ok={}",
-                            i, hwnd, ok != 0
-                        );
-                    } else {
-                        // Fallback: defer close_browser via UI task.
-                        // Same path as non-Windows so the cascade
-                        // still drains.
-                        let mut task = ClosePoolBrowserTask::new(b);
-                        let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
-                        tracing::warn!(
-                            target: "wrr",
-                            "[wrr] stage1[{}] hwnd=null; fell back to post_task(close_browser) posted={}",
-                            i, posted != 0
-                        );
-                    }
-                }
-            }
-
-            // Non-Windows path: defer `close_browser` to the UI
-            // thread via `cef::post_task`. Calling close_browser
-            // inline from inside another browser's on_before_close
-            // hangs the UI thread (CEF re-entrance, smoke
-            // v0.33.497 confirmed on Windows; same constraint on
-            // macOS / Linux per CEF docs). Windows prefers
-            // PostMessage(WM_CLOSE) as the primary path (bypasses
-            // CEF's task queue, which proved unreliable in
-            // late-teardown windows — see
-            // `docs/retro/b9-3-quit-thread-analysis.md`).
-            // (reagent #601 P1.)
-            #[cfg(not(target_os = "windows"))]
-            {
-                for (i, b) in pool_browsers.into_iter().enumerate() {
-                    let mut task = ClosePoolBrowserTask::new(b);
-                    let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
-                    tracing::debug!(
-                        target: "wrr-trace",
-                        "[trace] stage1[{}] post_task(close_browser) posted={}",
-                        i, posted != 0
-                    );
-                }
+        // Pillar 2 Stage 2 — the decision ("should we drain?") now comes
+        // solely from `reconcile_quit` (via the `request_drain` captured
+        // above from the `UnregisterBrowser` dispatch); this handler only
+        // executes it. `!self.is_browser_pane` stays as a belt-and-suspenders
+        // guard (a browser-pane close should never drive top-level app-quit
+        // logic), though in practice `request_drain` is already `None` for a
+        // pane close — `count_live_user_windows` only counts
+        // `BrowserKind::TopLevel{is_pool:false}`, never panes.
+        if !self.is_browser_pane {
+            if let Some(reason) = request_drain {
+                self.begin_drain_and_cascade(reason);
             }
         }
 
@@ -1030,6 +955,123 @@ impl AgentMuxHandler {
             "[trace] on_before_close EXIT label={:?} self.browser_list.len()={}",
             label, self.browser_list.len()
         );
+    }
+
+    /// Pillar 2 Stage 2 (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md §3.2) —
+    /// the Stage-1 drain-and-cascade executor, extracted verbatim from what
+    /// used to be `on_before_close`'s inline `user_browser_count == 0` block
+    /// so it's callable from any UI-thread CEF callback that observes
+    /// `reconcile_quit`'s decision via `DispatchOutput.request_drain` — not
+    /// just the close-edge that happened to trigger it this time. This is
+    /// the "action" half of the decision/action split (`reducer/quit.rs:49-54`):
+    /// callers must have already confirmed `request_drain.is_some()` (the
+    /// DECISION) before calling this (the ACTION) — this function does not
+    /// re-check anything, it just executes.
+    ///
+    /// Only flips `QuitState` and closes the (already-hidden) pool browsers.
+    /// Never calls `quit_message_loop()` — that stays Stage 2, gated
+    /// separately on `self.browser_list.is_empty()` in `on_before_close`,
+    /// since calling it from inside another browser's `on_before_close`
+    /// deadlocks the UI thread (confirmed v0.33.498).
+    pub(crate) fn begin_drain_and_cascade(&self, reason: crate::state::QuitReason) {
+        // PR #5 H.5 — flip QuitState Running → Draining via reducer.
+        // Mirrors the pre-PR Phase B.9.3 drain flag: spawn_pool_window
+        // checks `quit_state != Running` (in the reducer's spawn arm)
+        // and skips refill on every subsequent on_pool_window_destroyed
+        // → no new pool browsers added → browsers map can actually
+        // drain. BeginDrain is idempotent — safe if a duplicate
+        // last-close (or a later reconcile) fires.
+        self.state.host_dispatch(crate::reducer::HostCommand::BeginDrain { reason });
+        tracing::warn!(target: "wrr", "[wrr] quit_state=Draining (drain mode)");
+
+        // Phase H.2.b — reducer-aware iteration with fallback + drift logging.
+        // Collect ALL background-only browsers: tab pool (window-pool-*)
+        // AND pane pool (floating-pool-*). Both live in browser_list
+        // (created via CreateWindowTask which clones the main top-level
+        // client). Omitting pane pool windows here means browser_list
+        // never empties on macOS/Linux (init_pane_pool spawns one at
+        // startup), so Stage 2's is_empty() gate never fires and the
+        // host hangs on every quit.
+        let pool_browsers: Vec<cef::Browser> = self
+            .state
+            .list_browsers()
+            .into_iter()
+            .filter(|(label, _)| {
+                label.starts_with("window-pool-") || label.starts_with("floating-pool-")
+            })
+            .map(|(_, b)| b)
+            .collect();
+        tracing::warn!(
+            target: "wrr",
+            "[wrr] stage 1: draining; closing {} pool browser(s) (tab+pane)",
+            pool_browsers.len()
+        );
+
+        // Windows path: prefer Win32 PostMessage(WM_CLOSE) —
+        // bypasses CEF's task queue (proven reliable; smoke
+        // v0.33.500+). When window_handle() returns null
+        // (early/late lifecycle), fall through to the
+        // post_task path so the close still happens — without
+        // the fallback, self.browser_list never empties and
+        // Stage 2 never fires. (codex #601 P1.)
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Foundation::HWND;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+            for (i, mut b) in pool_browsers.into_iter().enumerate() {
+                let hwnd_opt = b.host().and_then(|h| {
+                    let wh = h.window_handle();
+                    if wh.0.is_null() {
+                        None
+                    } else {
+                        Some(wh.0 as HWND)
+                    }
+                });
+                if let Some(hwnd) = hwnd_opt {
+                    let ok = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
+                    tracing::debug!(
+                        target: "wrr-trace",
+                        "[trace] stage1[{}] PostMessage(hwnd={:p}, WM_CLOSE) ok={}",
+                        i, hwnd, ok != 0
+                    );
+                } else {
+                    // Fallback: defer close_browser via UI task.
+                    // Same path as non-Windows so the cascade
+                    // still drains.
+                    let mut task = ClosePoolBrowserTask::new(b);
+                    let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                    tracing::warn!(
+                        target: "wrr",
+                        "[wrr] stage1[{}] hwnd=null; fell back to post_task(close_browser) posted={}",
+                        i, posted != 0
+                    );
+                }
+            }
+        }
+
+        // Non-Windows path: defer `close_browser` to the UI
+        // thread via `cef::post_task`. Calling close_browser
+        // inline from inside another browser's on_before_close
+        // hangs the UI thread (CEF re-entrance, smoke
+        // v0.33.497 confirmed on Windows; same constraint on
+        // macOS / Linux per CEF docs). Windows prefers
+        // PostMessage(WM_CLOSE) as the primary path (bypasses
+        // CEF's task queue, which proved unreliable in
+        // late-teardown windows — see
+        // `docs/retro/b9-3-quit-thread-analysis.md`).
+        // (reagent #601 P1.)
+        #[cfg(not(target_os = "windows"))]
+        {
+            for (i, b) in pool_browsers.into_iter().enumerate() {
+                let mut task = ClosePoolBrowserTask::new(b);
+                let posted = cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                tracing::debug!(
+                    target: "wrr-trace",
+                    "[trace] stage1[{}] post_task(close_browser) posted={}",
+                    i, posted != 0
+                );
+            }
+        }
     }
 }
 
