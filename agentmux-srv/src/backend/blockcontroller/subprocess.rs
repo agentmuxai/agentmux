@@ -207,6 +207,7 @@ impl SubprocessController {
             shellprocexitcode: inner.proc_exit_code,
             spawn_ts_ms: None,
             is_agent_pane: false,
+            turn_active: self.health_monitor.is_active_turn(),
         }
     }
 
@@ -834,6 +835,7 @@ impl SubprocessController {
                         shellprocexitcode: inner.proc_exit_code,
                         spawn_ts_ms: None,
                         is_agent_pane: false,
+                        turn_active: false,
                     }
                 };
                 super::publish_controller_status(broker, &status);
@@ -1038,6 +1040,7 @@ impl SubprocessController {
                                 shellprocexitcode: inner.proc_exit_code,
                                 spawn_ts_ms: None,
                                 is_agent_pane: false,
+                                turn_active: false,
                             }
                         };
                         super::publish_controller_status(b, &status);
@@ -1088,6 +1091,9 @@ impl SubprocessController {
                         shellprocexitcode: inner.proc_exit_code,
                         spawn_ts_ms: None,
                         is_agent_pane: false,
+                        // Published just before set_active_turn(true) below —
+                        // accurate at the moment this snapshot is built.
+                        turn_active: false,
                     }
                 };
                 super::publish_controller_status(b, &status);
@@ -1260,6 +1266,7 @@ impl SubprocessController {
                         shellprocexitcode: inner.proc_exit_code,
                         spawn_ts_ms: None,
                         is_agent_pane: false,
+                        turn_active: false,
                     }
                 };
                 super::publish_controller_status(b, &status);

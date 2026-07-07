@@ -73,6 +73,11 @@ declare global {
         shellprocexitcode: number;
         spawn_ts_ms?: number;
         is_agent_pane?: boolean;
+        // True if a turn is in flight (message sent, no terminating "result"
+        // event observed yet). Only meaningful for persistent/ACP agent
+        // controllers with a health monitor wired to the NDJSON stream —
+        // absent/false for shell/PTY-backed panes, which have no such signal.
+        turn_active?: boolean;
     };
 
     // agents.failure.AgentFailure — payload of the `agentfailure` wave event

@@ -751,6 +751,7 @@ impl Controller for ShellController {
                         shellprocexitcode: inner.proc_exit_code,
                         spawn_ts_ms: inner.spawn_ts_ms,
                         is_agent_pane: inner.is_agent_pane,
+                        turn_active: false,
                     }
                 };
                 super::super::publish_controller_status(broker, &status);

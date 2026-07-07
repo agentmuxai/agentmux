@@ -127,6 +127,7 @@ impl AcpController {
             shellprocexitcode: inner.proc_exit_code,
             spawn_ts_ms: None,
             is_agent_pane: true,
+            turn_active: self.health_monitor.is_active_turn(),
         }
     }
 
@@ -426,6 +427,7 @@ impl AcpController {
                             shellprocexitcode: -1,
                             spawn_ts_ms: None,
                             is_agent_pane: true,
+                            turn_active: false,
                         };
                         super::publish_controller_status(broker, &status);
                     }
@@ -454,6 +456,7 @@ impl AcpController {
                             shellprocexitcode: exit_code,
                             spawn_ts_ms: None,
                             is_agent_pane: true,
+                            turn_active: false,
                         };
                         super::publish_controller_status(broker, &status);
                     }

@@ -70,6 +70,39 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    describe("ReconcileTurnActive (mount-time reconciliation)", () => {
+        it("promotes a fresh Idle pane to Streaming when the backend reports a turn in flight", () => {
+            const start = mk();
+            expect(start.turnPhase.kind).toBe("Idle");
+            const r = update(start, { type: "ReconcileTurnActive", at: 100, active: true });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect(r.events[0]).toMatchObject({ type: "turn-active-reconciled-at-mount" });
+        });
+
+        it("active: false is a no-op — Idle is already correct", () => {
+            const start = mk();
+            const r = update(start, { type: "ReconcileTurnActive", at: 100, active: false });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
+        });
+
+        it("does not override a phase a real event already produced", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, { type: "TurnStart", at: 110 }).state;
+            expect(s1.turnPhase.kind).toBe("Submitting");
+            const r = update(s1, { type: "ReconcileTurnActive", at: 120, active: true });
+            expect(r.state).toBe(s1);
+            expect(r.events).toEqual([]);
+        });
+
+        it("does not require the stream to be subscribed yet (unlike TurnStart)", () => {
+            const start = mk();
+            expect(start.lastEventMs).toBe(null);
+            const r = update(start, { type: "ReconcileTurnActive", at: 100, active: true });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+        });
+    });
+
     describe("Turn lifecycle invariants", () => {
         it("TurnStart while stream unsubscribed is suppressed", () => {
             const start = mk();

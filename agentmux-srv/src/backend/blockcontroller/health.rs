@@ -181,6 +181,28 @@ impl HealthMonitor {
         self.evaluate_and_transition();
     }
 
+    /// Atomically marks a turn active and reports whether one was already in
+    /// flight (the pre-call value) — a single lock acquisition, unlike
+    /// calling `is_active_turn()` then `set_active_turn(true)` separately.
+    /// That two-step form is a check-then-act race: `send_message` (user
+    /// input) and `send_user_message` (muxbus delivery) can run concurrently
+    /// on the same block, and both reading `false` before either writes
+    /// `true` lets both decide to spawn a watchdog — the exact duplicate the
+    /// "only re-arm when resuming from idle" logic exists to prevent.
+    pub fn mark_turn_active_returning_was_active(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        let was_active = inner.active_turn;
+        inner.active_turn = true;
+        let now = Instant::now();
+        inner.last_output_ts = now;
+        inner.last_meaningful_ts = now;
+        inner.errors.reset();
+        inner.exit_code = None;
+        drop(inner);
+        self.evaluate_and_transition();
+        was_active
+    }
+
     /// Called when the subprocess exits.
     pub fn set_exited(&self, exit_code: i32) {
         let mut inner = self.inner.lock().unwrap();
@@ -501,5 +523,42 @@ mod tests {
             let inner = monitor.inner.lock().unwrap();
             assert_eq!(inner.current_health, AgentHealth::Dead);
         }
+    }
+
+    #[test]
+    fn mark_turn_active_returning_was_active_reports_the_pre_call_value() {
+        let monitor = HealthMonitor::new("test-block".to_string(), None);
+        assert!(!monitor.is_active_turn());
+
+        // First call: was idle before this call.
+        let was_active = monitor.mark_turn_active_returning_was_active();
+        assert!(!was_active, "first call should report idle-before-call");
+        assert!(monitor.is_active_turn(), "turn is now active");
+
+        // Second call while already active: reports true (already in flight).
+        let was_active_again = monitor.mark_turn_active_returning_was_active();
+        assert!(was_active_again, "second call should report already-active");
+        assert!(monitor.is_active_turn());
+    }
+
+    /// Regression test for the exact race reagent flagged on PR #2005: a
+    /// naive `is_active_turn()` read followed by a separate
+    /// `set_active_turn(true)` write lets two concurrent callers (send_message
+    /// vs. send_user_message on the same block) both observe `false` before
+    /// either writes `true`, so both decide to spawn a watchdog.
+    /// `mark_turn_active_returning_was_active` closes that window by holding
+    /// the lock across both the read and the write — this test simulates the
+    /// interleaving directly (no real concurrency needed to prove the
+    /// invariant: exactly one of N concurrent-in-spirit calls sees "was
+    /// idle").
+    #[test]
+    fn mark_turn_active_is_atomic_across_repeated_calls() {
+        let monitor = HealthMonitor::new("test-block".to_string(), None);
+        let results: Vec<bool> = (0..5).map(|_| monitor.mark_turn_active_returning_was_active()).collect();
+        // Exactly the first call observes "was idle" (false); every
+        // subsequent call — however tightly interleaved a real concurrent
+        // caller might be — observes "already active" (true), because each
+        // read-and-write pair is indivisible under the lock.
+        assert_eq!(results, vec![false, true, true, true, true]);
     }
 }

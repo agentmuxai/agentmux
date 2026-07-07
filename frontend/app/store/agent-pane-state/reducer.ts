@@ -342,6 +342,32 @@ export function update(
             };
         }
 
+        case "ReconcileTurnActive": {
+            // Only ever promotes the mount-default Idle — never overrides a
+            // phase a real stream/user event already produced. A `false`
+            // active flag is a no-op: Idle is already correct. Deliberately
+            // does NOT gate on `state.lastEventMs` the way TurnStart /
+            // StreamFlushObserved do — this seed is meant to cover exactly
+            // the window before the live stream has necessarily subscribed
+            // yet, which is the gap this command exists to close. See the
+            // type's doc comment in types.ts.
+            if (!command.active || state.turnPhase.kind !== "Idle") {
+                return { state, events: [] };
+            }
+            return {
+                state: {
+                    ...state,
+                    turnPhase: {
+                        kind: "Streaming",
+                        bufferSize: 0,
+                        toolsActive: 0,
+                        lastEventMs: command.at,
+                    },
+                },
+                events: [{ type: "turn-active-reconciled-at-mount" }],
+            };
+        }
+
         case "TurnStart": {
             // Invariant 1: can't start a turn without a subscribed
             // stream. PR G: `state.lastEventMs !== null` replaces the
