@@ -57,6 +57,25 @@ pub(crate) static ORIG_RWHVC_SHOULD_IGNORE: std::sync::atomic::AtomicUsize =
 #[cfg(target_os = "macos")]
 pub(crate) static PANE_LOCAL_W: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 
+// Overlay NSWindow* (the pane's OWN window — not the main window key used by
+// PANE_WIN_TO_HOST/PANE_LABEL_TO_WIN above) → (pane label, block_id, weak
+// AppState). Populated alongside those two maps by SetPaneBoundsViewsTask.
+// Read by swizzled_nsapp_send_event's `is_overlay` branch to detect a click
+// landing directly on a pane's rendered body and emit `browser-pane-clicked`
+// — the click-to-select signal every in-DOM pane gets for free via ordinary
+// click bubbling to blockframe.tsx (see block/block.tsx::handleBlockClick),
+// but a browser pane's content is a separate native BrowserView layered on
+// top, so no DOM click ever fires for it. Mirrors the Windows
+// WM_LBUTTONDOWN → browser-pane-clicked path in browser_pane/hwnd.rs; this
+// is the macOS/Linux equivalent (see
+// docs/specs/SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md).
+#[cfg(target_os = "macos")]
+pub(crate) static PANE_OVERLAY_WIN_TO_BLOCK: std::sync::LazyLock<
+    std::sync::Mutex<
+        std::collections::HashMap<usize, (String, String, std::sync::Weak<crate::state::AppState>)>,
+    >,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
 /// Swizzled NSWindow::isMainWindow — returns YES only for the tagged pane overlay.
 /// All other NativeWidgetMacNSWindow instances (pool windows, etc.) call through
 /// to the original implementation and return their real value.
@@ -167,6 +186,12 @@ pub(crate) fn clear_pane_swizzle_statics(pane_label: &str) {
                 MAIN_RWHVC_PTR.store(0, Relaxed);
             }
         }
+    }
+    // PANE_OVERLAY_WIN_TO_BLOCK is keyed by the pane's OWN overlay window
+    // pointer (unrelated to win_ptr/PANE_WIN_TO_HOST above, which key by the
+    // main window) — always independently evict this pane's entry by label.
+    if let Ok(mut m) = PANE_OVERLAY_WIN_TO_BLOCK.try_lock() {
+        m.retain(|_, (label, _, _)| label != pane_label);
     }
 }
 #[cfg(not(target_os = "macos"))]
@@ -346,6 +371,31 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                         }
                         dispatch_fn(rwhvc, sel_m, event);
                         return;
+                    }
+                } else if ev_type == 1 {
+                    // A click landed directly on a pane's own overlay window —
+                    // the pane-body click that (unlike every in-DOM pane) never
+                    // produces a DOM click for blockframe.tsx's selection
+                    // handler to bubble-catch. Tap it here and emit
+                    // `browser-pane-clicked` so the frontend selects/borders
+                    // the pane exactly as the header-click path already does
+                    // (browser-model.ts → refocusNode). This does NOT return —
+                    // dispatch continues via the original sendEvent: call
+                    // below/at function end, unchanged from before this tap
+                    // existed.
+                    let win_usize = win as usize;
+                    let hit = PANE_OVERLAY_WIN_TO_BLOCK
+                        .try_lock()
+                        .ok()
+                        .and_then(|m| m.get(&win_usize).cloned());
+                    if let Some((_, block_id, weak_state)) = hit {
+                        if let Some(state) = weak_state.upgrade() {
+                            crate::events::emit_event_from_state(
+                                &state,
+                                "browser-pane-clicked",
+                                &serde_json::json!({ "block_id": block_id }),
+                            );
+                        }
                     }
                 }
             }
