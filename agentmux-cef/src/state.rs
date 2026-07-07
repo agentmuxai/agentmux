@@ -878,6 +878,35 @@ pub struct AppState {
     /// and to pass the value to the frontend via the URL query string.
     pub window_transparent: std::sync::atomic::AtomicBool,
 
+    /// SPEC_PILLAR1_STEP4 Phase 2 — gates `reproject_from_snapshot` on proof
+    /// that CEF's UI-thread message loop is actually pumping posted tasks.
+    /// `post_task(ThreadId::UI, ...)` silently drops tasks posted before that
+    /// point (verified live: `CreateWindowTask::execute` never ran and the
+    /// browsers it should have created were never made — see
+    /// retro-pillar1-step4-reproject-race). The launcher-ipc reader task can
+    /// deliver `Event::Snapshot` before `"main"` registers (the proof point),
+    /// since it runs on its own tokio runtime independent of CEF's message
+    /// loop — so the event handler and `"main"`'s registration race to
+    /// access this state from different threads.
+    ///
+    /// `ready` and `stashed` are ONE field, not two, deliberately: reagent's
+    /// review of the first version (separate `AtomicBool` + `Mutex<Option<_>>`)
+    /// caught a TOCTOU hole between them — the reader thread could read
+    /// `ready == false`, then `"main"`'s registration could flip it and drain
+    /// the (still-empty) stash, then the reader thread would write its
+    /// snapshot into the stash *after* the one-time drain had already
+    /// happened, so it would never replay. Both the check-then-stash and the
+    /// flip-then-drain must happen under the same lock so one always
+    /// completes before the other starts.
+    pub ui_thread_gate: Mutex<UiThreadGate>,
+
+}
+
+/// See `AppState::ui_thread_gate`.
+#[derive(Default)]
+pub struct UiThreadGate {
+    pub ready: bool,
+    pub stashed: Option<Vec<agentmux_common::ipc::WindowSnapshot>>,
 }
 
 impl Default for AppState {
@@ -949,6 +978,7 @@ impl Default for AppState {
             window_hwnds: Mutex::new(HashMap::new()),
             floating_redock_ghost: Mutex::new(HashMap::new()),
             window_transparent: std::sync::atomic::AtomicBool::new(false),
+            ui_thread_gate: Mutex::new(UiThreadGate::default()),
         }
     }
 }
