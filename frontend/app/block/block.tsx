@@ -11,6 +11,7 @@ import {
 } from "@/app/block/blocktypes";
 import { getBlockViewClass } from "@/app/block/block-registry";
 import { invokeCommand } from "@/app/platform/ipc";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
@@ -125,7 +126,7 @@ function BlockSubBlock({ nodeModel, viewModel }: FullSubBlockProps): JSX.Element
         <Show when={blockData()}>
             <div class={clsx("block-content", { "block-no-padding": noPadding })} ref={(el) => { contentRef.current = el; }}>
                 <ErrorBoundary>
-                    <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem()}</Suspense>
+                    <Suspense fallback={<BrainSpinner />}>{viewElem()}</Suspense>
                 </ErrorBoundary>
             </div>
         </Show>
@@ -260,7 +261,7 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
                 style={blockContentStyle()}
             >
                 <ErrorBoundary>
-                    <Suspense fallback={<CenteredDiv>Loading...</CenteredDiv>}>{viewElem()}</Suspense>
+                    <Suspense fallback={<BrainSpinner />}>{viewElem()}</Suspense>
                 </ErrorBoundary>
             </div>
         </BlockFrame>
@@ -306,7 +307,7 @@ function Block(props: BlockProps): JSX.Element {
     // graph, which may be half-flushed.
     const viewTypeStr = createMemo(() => blockData()?.meta?.view);
     return (
-        <Show when={ready()}>
+        <Show when={ready()} fallback={<BrainSpinner />}>
             <BlockErrorBoundary
                 blockId={props.nodeModel.blockId}
                 viewType={viewTypeStr()}
@@ -348,7 +349,10 @@ function SubBlock(props: SubBlockProps): JSX.Element {
 
     const viewTypeStr = createMemo(() => blockData()?.meta?.view);
     return (
-        <Show when={!loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel()}>
+        <Show
+            when={!loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel()}
+            fallback={<BrainSpinner />}
+        >
             <BlockErrorBoundary
                 blockId={props.nodeModel.blockId}
                 viewType={viewTypeStr()}
