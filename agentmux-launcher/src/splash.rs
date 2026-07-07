@@ -31,7 +31,7 @@
 //! passed to `spawn_splash`.  Each animation frame (~60 fps) drains the
 //! receiver and updates the stage list.  When the CEF host signals the
 //! dismiss Win32 event (from `on_load_end`), the splash freezes, holds for
-//! `AGENTMUX_SPLASH_HOLD_MS` ms (default 3000), then fades out.
+//! `AGENTMUX_SPLASH_HOLD_MS` ms (default 2000), then fades out.
 
 #![cfg(target_os = "windows")]
 
@@ -302,11 +302,11 @@ unsafe fn run_splash(
             composite(dib_pixels, 200u8, &stages, Some(total_ms), &footer);
             push_layered(hwnd, mem_dc, 255);
 
-            // Summary hold — 3 s default, shortened for very fast starts.
+            // Summary hold — 2 s default, shortened for very fast starts.
             let hold_ms = std::env::var("AGENTMUX_SPLASH_HOLD_MS")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(3000);
+                .unwrap_or(2000);
             let hold_ms = if total_ms < 500 { hold_ms.min(1000) } else { hold_ms };
             if hold_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(hold_ms));

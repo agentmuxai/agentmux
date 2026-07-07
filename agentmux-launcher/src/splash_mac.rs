@@ -701,7 +701,7 @@ impl Splash {
                 let hold_ms = std::env::var("AGENTMUX_SPLASH_HOLD_MS")
                     .ok()
                     .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(3000);
+                    .unwrap_or(2000);
                 let hold_ms = if total_ms < 500 { hold_ms.min(1000) } else { hold_ms };
                 hold_duration = Duration::from_millis(hold_ms);
                 changed = true; // force one final refresh showing the "total:" row

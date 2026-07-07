@@ -257,7 +257,7 @@ async fn route_command(
         "reveal_in_file_explorer" => commands::platform::reveal_in_file_explorer(args),
         "set_window_transparency" => commands::window::set_window_transparency(state, args),
         "set_window_opacity" => commands::window::set_window_opacity(state, args),
-        "get_window_opacity" => commands::window::get_window_opacity(state, args),
+        "get_window_opacity" => commands::window::get_window_opacity(state, args).await,
         "start_window_drag" => commands::window::start_window_drag(state, args),
         "get_window_rect" => commands::window::get_window_rect(state, args),
         "set_window_rect" => commands::window::set_window_rect(state, args),

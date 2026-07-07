@@ -149,3 +149,163 @@ pub(crate) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id
         }
     }
 }
+
+/// Parse "http://host:port" / "https://host:port" into a `SocketAddr`, or
+/// `None` (logged) if it doesn't parse. Shared by the two SPEC_PILLAR1_STEP2
+/// helpers below — factored out rather than duplicating
+/// `backend_close_window`'s inline parse.
+fn parse_web_endpoint(web_endpoint: &str, caller: &str) -> Option<std::net::SocketAddr> {
+    let addr_str = web_endpoint
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    match addr_str.parse() {
+        Ok(a) => Some(a),
+        Err(e) => {
+            tracing::warn!("[{caller}] cannot parse endpoint '{}': {}", web_endpoint, e);
+            None
+        }
+    }
+}
+
+/// SPEC_PILLAR1_STEP2 Slice A Phase 2 — write-through the host's per-window
+/// opacity to srv's `Window.opacity` so a crashed/restarted host can restore
+/// it (via `backend_get_window_opacity` below). Fire-and-forget, same shape
+/// as `backend_close_window`: raw TCP, no async runtime needed, always
+/// called from its own background thread (see `set_window_opacity` in
+/// `commands/window/transparency.rs`) so a slow/failed srv round-trip never
+/// stalls the opacity change the user is actively making. Failures are
+/// logged, not surfaced — a missed write-through only affects crash
+/// recovery, not the live opacity the user just set (which already applied
+/// via the local Win32/AppKit/X11 side-effect before this is even called).
+///
+/// `opacity: None` sends a real JSON `null` — srv's `SetWindowOpacity` RPC
+/// treats that as an explicit clear (`Window.opacity = None`), distinct
+/// from `Some(1.0)` ("set to fully opaque"). Mirrors the reducer's own
+/// `WindowOpacityApplied`/`WindowOpacityCleared` distinction (the caller in
+/// `transparency.rs` maps `Cleared` to `None`, not `Some(1.0)`).
+pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, window_id: &str, opacity: Option<f32>) {
+    use std::io::Write;
+
+    let Some(addr) = parse_web_endpoint(web_endpoint, "backend_set_window_opacity") else {
+        return;
+    };
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "SetWindowOpacity",
+        "args": [window_id, opacity],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(timeout)).ok();
+            stream.set_read_timeout(Some(timeout)).ok();
+            if let Err(e) = stream.write_all(request.as_bytes()) {
+                tracing::warn!(
+                    window_id = %window_id,
+                    error = %e,
+                    "[backend_set_window_opacity] write failed — opacity mirror not persisted"
+                );
+                return;
+            }
+            // Drain the response so the connection closes cleanly; only the
+            // status line matters here (best-effort, unlike
+            // backend_close_window this isn't gating a user-visible retry).
+            use std::io::Read;
+            let mut resp = String::new();
+            let _ = stream.read_to_string(&mut resp);
+            let first_line = resp.lines().next().unwrap_or("(empty)");
+            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
+                tracing::warn!(
+                    window_id = %window_id,
+                    response = %first_line,
+                    "[backend_set_window_opacity] SetWindowOpacity did not succeed — opacity mirror not persisted"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                window_id = %window_id,
+                addr = %addr,
+                error = %e,
+                "[backend_set_window_opacity] connect failed — opacity mirror not persisted"
+            );
+        }
+    }
+}
+
+/// SPEC_PILLAR1_STEP2 Slice A Phase 2 — read back the last-persisted opacity
+/// for `window_id` from srv (the crash-recovery path: the host's in-memory
+/// `window_opacities` map is empty on a fresh process, so a restart falls
+/// back to this instead of defaulting to fully opaque). Blocking — callers
+/// run it via `tokio::task::spawn_blocking` (see `get_window_opacity` in
+/// `commands/window/transparency.rs`), not inline on an async task, since
+/// this does a real network round-trip.
+///
+/// Returns `None` on any failure (parse/connect/non-200/missing field) —
+/// the caller's existing `unwrap_or(1.0)` fallback covers all of those
+/// identically, so there's no need to distinguish "srv has no value" from
+/// "couldn't reach srv" here.
+pub(crate) fn backend_get_window_opacity(web_endpoint: &str, auth_key: &str, window_id: &str) -> Option<f32> {
+    use std::io::Write;
+
+    let addr = parse_web_endpoint(web_endpoint, "backend_get_window_opacity")?;
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "GetWindow",
+        "args": [window_id],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
+        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_opacity] connect failed"))
+        .ok()?;
+    stream.set_write_timeout(Some(timeout)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_opacity] write failed"))
+        .ok()?;
+
+    use std::io::Read;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).ok()?;
+
+    // Split the raw HTTP/1.1 response into headers and body on the blank
+    // line (matches the request format written above — no chunked
+    // encoding involved, srv's axum response is a single JSON payload).
+    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
+    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    parsed.get("data")?.get("opacity")?.as_f64().map(|o| o as f32)
+}
