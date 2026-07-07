@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use crate::backend::model_catalog::{fetch_model_catalog, read_oauth_access_token, CatalogModel};
+use crate::backend::model_catalog::{fetch_model_catalog, resolve_access_token, CatalogModel};
 use crate::backend::providers::get_provider;
 use crate::backend::rpc::engine::WshRpcEngine;
 
@@ -64,10 +64,13 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                     None => return empty_result(),
                 };
                 let dir = paths.provider_auth_dir(provider.auth_dir_name);
-                let token = match read_oauth_access_token(&dir) {
+                let token = match resolve_access_token(&dir).await {
                     Some(t) => t,
-                    // No token here (logged out, or macOS Keychain) → empty →
-                    // frontend keeps its static fallback.
+                    // No token from the `.credentials.json` file, the
+                    // CLAUDE_CODE_OAUTH_TOKEN env var, or a previously
+                    // persisted copy of it (e.g. logged out, or macOS
+                    // Keychain with no `claude setup-token` token exported)
+                    // → empty → frontend keeps its static fallback.
                     None => return empty_result(),
                 };
 
