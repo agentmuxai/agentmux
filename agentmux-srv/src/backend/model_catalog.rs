@@ -32,6 +32,18 @@
 use std::path::Path;
 
 use crate::identity::key_validator::client;
+use crate::identity::secret_store;
+
+/// Fixed, sentinel account id for the user-supplied long-lived
+/// `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), persisted via
+/// `identity::secret_store::put`/`get`. Those wrap it in `account_key()`
+/// (`"acct:{account_id}"`), so the actual keychain entry is
+/// `"acct:system:claude-code-oauth-token"` — this constant only needs to be
+/// distinct as an *account id* from the per-identity Armory account ids used
+/// elsewhere (see `identity::resolver`, `identity::oauth_client`), which are
+/// account UUIDs and would never collide with this sentinel string. This is a
+/// single, system-wide fallback token, not tied to any AgentMux identity.
+const CLAUDE_OAUTH_TOKEN_ACCOUNT: &str = "system:claude-code-oauth-token";
 
 /// One entry in the model dropdown. `id` is the concrete `--model` value the
 /// CLI accepts (e.g. `claude-sonnet-5`); `display_name` is the label to show
@@ -60,6 +72,73 @@ pub fn read_oauth_access_token(config_dir: &Path) -> Option<String> {
     } else {
         Some(token.to_string())
     }
+}
+
+/// Resolve the Claude OAuth access token to use for the model-catalog fetch,
+/// trying multiple sources in order before giving up (→ caller falls back to
+/// the bundled curated catalog, unchanged from before this existed). Order:
+///
+///   1. [`read_oauth_access_token`] — the `.credentials.json` file written by
+///      the Claude Code CLI. Covers Linux/Windows with zero behavior change.
+///   2. The `CLAUDE_CODE_OAUTH_TOKEN` env var — the long-lived token a user
+///      gets by running `claude setup-token` themselves in a real terminal
+///      (Anthropic's documented recipe for headless/CI use of Claude Code)
+///      and exporting before launching AgentMux. This is how macOS — where
+///      Claude Code keeps its token in the Keychain, not a plain file — gets
+///      a token at all. When found, it is persisted into AgentMux's own
+///      OS-keychain-backed secret store (`identity::secret_store`) under
+///      [`CLAUDE_OAUTH_TOKEN_ACCOUNT`] so a later run still has it even
+///      without the env var set (e.g. the app relaunched from the Dock
+///      rather than from the terminal that had it exported).
+///   3. AgentMux's own secret store — a token persisted by a previous run of
+///      step 2.
+///
+/// Callers should use this instead of calling [`read_oauth_access_token`]
+/// directly. Never logs the token.
+///
+/// Steps 2/3 hit the OS keychain (via `identity::secret_store`), which wraps
+/// blocking `keyring` syscalls (can even trigger a macOS permission prompt on
+/// first access) — run on a `spawn_blocking` thread, matching the established
+/// pattern for the same calls in `app_api/mod.rs`'s
+/// `identity_account_validate_stored_impl`, so this never blocks an async
+/// runtime worker thread.
+pub async fn resolve_access_token(config_dir: &Path) -> Option<String> {
+    if let Some(token) = read_oauth_access_token(config_dir) {
+        return Some(token);
+    }
+    tokio::task::spawn_blocking(|| {
+        resolve_fallback_access_token(
+            || std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok(),
+            |token| {
+                if let Err(e) = secret_store::put(CLAUDE_OAUTH_TOKEN_ACCOUNT, token) {
+                    tracing::warn!("model catalog: failed to persist CLAUDE_CODE_OAUTH_TOKEN: {e}");
+                }
+            },
+            || {
+                secret_store::get(CLAUDE_OAUTH_TOKEN_ACCOUNT)
+                    .ok()
+                    .map(|z| z.to_string())
+            },
+        )
+    })
+    .await
+    .unwrap_or(None)
+}
+
+/// Pure resolution-order logic backing steps 2/3 of [`resolve_access_token`],
+/// factored out so it is unit-testable without touching a real OS keychain
+/// (`identity::secret_store` wraps the `keyring` crate directly with no
+/// mockable seam, so tests inject plain closures here instead).
+fn resolve_fallback_access_token(
+    env_var: impl FnOnce() -> Option<String>,
+    persist: impl FnOnce(&str),
+    stored: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if let Some(token) = env_var().filter(|t| !t.is_empty()) {
+        persist(&token);
+        return Some(token);
+    }
+    stored().filter(|t| !t.is_empty())
 }
 
 /// Map a `GET /v1/models` response body (`{ "data": [ { id, display_name }, … ] }`)
@@ -152,5 +231,45 @@ mod tests {
         let got = parse_models(&body);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].id, "claude-haiku-4-5");
+    }
+
+    #[test]
+    fn fallback_prefers_env_var_and_persists_it() {
+        let mut persisted = None;
+        let got = resolve_fallback_access_token(
+            || Some("sk-ant-oat-from-env".to_string()),
+            |token| persisted = Some(token.to_string()),
+            || Some("sk-ant-oat-from-store".to_string()),
+        );
+        assert_eq!(got.as_deref(), Some("sk-ant-oat-from-env"));
+        assert_eq!(persisted.as_deref(), Some("sk-ant-oat-from-env"));
+    }
+
+    #[test]
+    fn fallback_uses_secret_store_when_env_var_absent() {
+        let mut persist_calls = 0;
+        let got = resolve_fallback_access_token(
+            || None,
+            |_| persist_calls += 1,
+            || Some("sk-ant-oat-from-store".to_string()),
+        );
+        assert_eq!(got.as_deref(), Some("sk-ant-oat-from-store"));
+        assert_eq!(persist_calls, 0);
+    }
+
+    #[test]
+    fn fallback_treats_empty_env_var_as_absent() {
+        let got = resolve_fallback_access_token(
+            || Some(String::new()),
+            |_| panic!("must not persist an empty token"),
+            || Some("sk-ant-oat-from-store".to_string()),
+        );
+        assert_eq!(got.as_deref(), Some("sk-ant-oat-from-store"));
+    }
+
+    #[test]
+    fn fallback_none_when_no_source_has_a_token() {
+        let got = resolve_fallback_access_token(|| None, |_| panic!("must not persist"), || None);
+        assert!(got.is_none());
     }
 }
