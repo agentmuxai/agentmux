@@ -73,6 +73,7 @@ import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -347,16 +348,29 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     let historyReadyFn: (() => void) | undefined;
     // Brain-spinner loading overlay (see
     // docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md):
-    // shown from mount, cross-fades out once the initial history load
-    // resolves (success or failure — same fail-open behavior as
-    // onHistoryReady itself) so a content-heavy pane never sits blank while
-    // it replays. `showLoadingOverlay` unmounts the overlay entirely once the
-    // fade transition has had time to finish, instead of leaving an
-    // invisible-but-present pointer-events:none div forever.
+    // shown from mount, cross-fades out once real content has actually
+    // painted, so a content-heavy pane never sits blank while it replays.
+    //
+    // `onHistoryReady` fires right after the NDJSON parse/dispatch — BEFORE
+    // the resulting DOM's layout/paint, which is the dominant cost for heavy
+    // sessions (500-600ms, see SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md).
+    // Starting the fade there (or after any flat delay) would make the
+    // overlay disappear before painting finishes for exactly the
+    // content-heavy case this exists to cover — reproducing the blank
+    // window instead of fixing it. `scheduleOnSettle` (same Long-Task-quiet
+    // detector `tab-reveal.ts` uses for the analogous tab-switch case) waits
+    // for the main thread to actually go quiet post-dispatch before the
+    // fade starts. `showLoadingOverlay` then unmounts the overlay entirely
+    // once the fade transition has had time to finish, instead of leaving
+    // an invisible-but-present pointer-events:none div forever.
     const [historyLoaded, setHistoryLoaded] = createSignal(false);
     const [showLoadingOverlay, setShowLoadingOverlay] = createSignal(true);
-    let loadingOverlayTimeout: ReturnType<typeof setTimeout> | undefined;
-    onCleanup(() => clearTimeout(loadingOverlayTimeout));
+    let cancelSettleWait: (() => void) | undefined;
+    let loadingOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => {
+        cancelSettleWait?.();
+        clearTimeout(loadingOverlayFadeTimeout);
+    });
     const history = useHistoryPagination({
         blockId: model.blockId,
         model: paneModel,
@@ -364,8 +378,10 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         definitionId: agentId,
         onHistoryReady: () => {
             historyReadyFn?.();
-            setHistoryLoaded(true);
-            loadingOverlayTimeout = setTimeout(() => setShowLoadingOverlay(false), 260);
+            cancelSettleWait = scheduleOnSettle(() => {
+                setHistoryLoaded(true);
+                loadingOverlayFadeTimeout = setTimeout(() => setShowLoadingOverlay(false), 220);
+            });
         },
         // Schema v2: apply DocumentState + pane overlay after NDJSON replay.
         onSnapshotOverlay: ({ documentState, detailsOpen }) => {
