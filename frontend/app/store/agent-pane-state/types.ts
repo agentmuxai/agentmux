@@ -96,6 +96,26 @@ export type KindBeforeDisconnect =
 export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 
 /**
+ * A classified backend failure (the `agentfailure` wave event's payload,
+ * `AgentFailure` in `frontend/types/gotypes.d.ts`) currently surfaced for
+ * this pane. Single source of truth for "is there an active failure" —
+ * previously duplicated as a hook-local signal in `useAgentFailure.ts`,
+ * with no path back into `turnPhase`. See
+ * docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
+ *
+ * Deliberately does NOT carry the auto-retry countdown/budget or the
+ * expanded/retrying view flags — those are pure presentation timing with
+ * no correctness coupling to anything else in the reducer, and stay
+ * hook-local in `useAgentFailure.ts` exactly as before.
+ */
+export interface PaneFailure {
+    /** The classified failure, verbatim from the backend event. */
+    data: AgentFailure;
+    /** Wall-clock ms the failure landed. */
+    at: number;
+}
+
+/**
  * Single source of truth for the turn lifecycle. Since PR G this is the
  * only place where "is the agent working", "is a stop in flight", and
  * "did the stream drop" are encoded — the legacy `turnActive` /
@@ -241,6 +261,14 @@ export interface AgentPaneState {
     /** Resolved model id that produced `lastContextWindow` — used to re-seed the
      *  window when the user switches models mid-session (`/model`). */
     lastContextModel: string | null;
+    /**
+     * Active classified failure for this pane, or `null`. Set by
+     * `FailureObserved` (which also force-ends a working turn — see the
+     * command's reducer case), cleared by `FailureCleared` or implicitly
+     * by the next `TurnStart` (a fresh turn always ends the failure
+     * episode). See {@link PaneFailure}.
+     */
+    failure: PaneFailure | null;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -258,6 +286,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     lastEventMs: null,
     turnPhase: { kind: "Idle" },
     detailsOpen: false,
+    failure: null,
 });
 
 /**
@@ -462,6 +491,20 @@ export type AgentPaneCommand =
      */
     | { type: "ProviderWaiting"; reason: "rate_limited"; retryAfterMs: number | null; at: number }
 
+    // ── Failure recovery ──────────────────────────────────────────
+    /**
+     * Backend classified a failure for this pane (the `agentfailure` wave
+     * event). Unconditionally force-ends a working turn (Submitting /
+     * Streaming / Interrupting → Done.errored) — this is what closes the
+     * "stuck Waiting after a rate-limit interruption" bug: an authoritative
+     * failure classification no longer depends on the CLI process actually
+     * exiting (persistent-mode agents never do between turns) to clear the
+     * turn phase. See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
+     */
+    | { type: "FailureObserved"; failure: AgentFailure; at: number }
+    /** User dismissed the failure row (Dismiss / ×). Episode over. */
+    | { type: "FailureCleared" }
+
     // ── Composer details / Log panel ─────────────────────────────
     /** Toggle the log panel open/closed. */
     | { type: "DetailsToggle" }
@@ -544,6 +587,16 @@ export type AgentPaneEvent =
     | { type: "tokens-updated"; input: number | null; output: number | null }
     | { type: "context-compacted"; tokensBefore: number; tokensAfter: number }
     | { type: "provider-waiting"; reason: "rate_limited" }
+    /**
+     * A failure was observed and recorded on `state.failure`. `turnWasEnded`
+     * is true iff the pane's turn was actually working (Submitting /
+     * Streaming / Interrupting) at the time — surfaced for diagnostics
+     * (e.g. distinguishing a genuine mid-turn failure from a stray late
+     * event arriving after the pane was already idle).
+     */
+    | { type: "failure-observed"; code: AgentFailure["code"]; turnWasEnded: boolean }
+    /** `state.failure` was cleared (explicit dismiss, or implicitly by TurnStart). */
+    | { type: "failure-cleared" }
     | { type: "stop-requested"; at: number }
     | { type: "stop-failed" }
     /**

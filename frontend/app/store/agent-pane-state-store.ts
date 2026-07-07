@@ -23,6 +23,7 @@ import {
     AgentPaneState,
     type InitPhase,
     initialState,
+    type PaneFailure,
     type TurnPhase,
 } from "./agent-pane-state/types";
 import { type CommandSource, recordDispatch } from "./command-source";
@@ -80,6 +81,12 @@ export interface AgentPaneProjections {
     /** Learned context-window size for the current model (null → view uses the
      *  provider's static fallback). Driven by TokensIn alongside contextTokens. */
     contextWindow?: (next: number | null) => void;
+    /**
+     * Active classified failure for this pane, or null. Reducer-owned
+     * (see `AgentPaneState.failure` / `FailureObserved` / `FailureCleared`).
+     * See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
+     */
+    failure?: (next: PaneFailure | null) => void;
 }
 
 interface Slot {
@@ -206,6 +213,7 @@ export function dispatch(
     proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
     proj("detailsOpen", prev.detailsOpen, slot.state.detailsOpen, slot.proj.detailsOpen);
     proj("currentToolArg", prev.currentToolArg, slot.state.currentToolArg, slot.proj.currentToolArg);
+    proj("failure", prev.failure, slot.state.failure, slot.proj.failure);
 
     if (cascadeSetter != null) {
         console.warn(

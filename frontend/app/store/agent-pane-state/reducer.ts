@@ -44,6 +44,7 @@ import {
     SUBMIT_TIMEOUT_MS,
     TurnOutcome,
     TurnPhase,
+    workingFromPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
 import { learnContextWindow } from "./context-window";
@@ -225,6 +226,19 @@ export function update(
                           ...state.turnPhase,
                           bufferSize: newBuf,
                           lastEventMs: command.at,
+                          // Clear a stale rate-limit wait on ANY observable
+                          // stream activity, not just tool/token events —
+                          // `bumpEvent` already does this; this branch
+                          // previously spread the whole phase forward
+                          // unchanged, so a rate-limited turn whose very
+                          // next activity was plain streamed text (no
+                          // intervening tool call) kept showing "Rate
+                          // limited — retrying…" long after the agent had
+                          // resumed normal streaming (reported false
+                          // positive, see
+                          // ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md).
+                          waitingReason: undefined,
+                          retryAfterMs: undefined,
                       }
                     : state.turnPhase.kind === "Submitting"
                         || state.turnPhase.kind === "Idle"
@@ -376,11 +390,23 @@ export function update(
                     deadlineMs: command.at + SUBMIT_TIMEOUT_MS,
                 });
             }
+            // A fresh turn starting always ends any prior failure episode —
+            // this is what the failure-recovery hook used to reconstruct by
+            // watching raw ControllerStatus transitions (`awaitingVerdict`);
+            // TurnStart already knows "a new turn is beginning" directly, so
+            // there's no need to re-derive it from the outside. Emit
+            // failure-cleared only when there was actually something to
+            // clear, matching the other no-op-vs-event conventions in this
+            // reducer (e.g. DetailsExpand/DetailsCollapse below).
+            if (state.failure) {
+                events.push({ type: "failure-cleared" });
+            }
             return {
                 state: {
                     ...state,
                     sessionStats: null, // clear stale stats from prior turn
                     lastEventMs: command.at,
+                    failure: null,
                     // Submitting until the first stream event /
                     // subscribe transitions us to Streaming. The
                     // TurnStart payload doesn't carry pendingContent;
@@ -823,6 +849,43 @@ export function update(
             return {
                 state: next,
                 events: [{ type: "provider-waiting", reason: command.reason }],
+            };
+        }
+
+        case "FailureObserved": {
+            // Unconditionally end a working turn: a backend failure
+            // classification is authoritative regardless of whether the
+            // underlying CLI process ever exits (persistent-mode agents
+            // don't, between turns — see useAgentStream.ts's process-exit
+            // grace timer, which only covers the crash-exit case). Without
+            // this, a rate-limited (or otherwise failed) persistent-mode
+            // turn left `turnPhase` stuck in `Streaming` until the ~3-minute
+            // liveness-recovery watchdog eventually cleared it — the
+            // "stuck Waiting after a rate-limit interruption" bug.
+            const turnWasEnded = workingFromPhase(state.turnPhase);
+            const nextPhase: TurnPhase = turnWasEnded
+                ? { kind: "Done", outcome: "errored", finishedAt: command.at }
+                : state.turnPhase; // already idle — a stray/late event; leave phase alone
+            return {
+                state: {
+                    ...state,
+                    turnPhase: nextPhase,
+                    currentTool: turnWasEnded ? null : state.currentTool,
+                    currentToolArg: turnWasEnded ? null : state.currentToolArg,
+                    turnTokens: turnWasEnded ? null : state.turnTokens,
+                    failure: { data: command.failure, at: command.at },
+                },
+                events: [
+                    { type: "failure-observed", code: command.failure.code, turnWasEnded },
+                ],
+            };
+        }
+
+        case "FailureCleared": {
+            if (!state.failure) return { state, events: [] };
+            return {
+                state: { ...state, failure: null },
+                events: [{ type: "failure-cleared" }],
             };
         }
 

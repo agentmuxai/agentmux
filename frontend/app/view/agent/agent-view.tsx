@@ -236,6 +236,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 turnPhase: a.turnPhaseAtom[1],
                 detailsOpen: a.detailsOpenAtom[1],
                 currentToolArg: a.currentToolArgAtom[1],
+                failure: a.failureAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -581,6 +582,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     };
     const failureUI = useAgentFailure({
         blockId: model.blockId,
+        // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
+        model: paneModel,
+        failure: agentAtoms().failureAtom[0],
         onRetry: retryLastTurn,
         onTrustCenter: () => void openOrFocusPaneByView("armory"),
         canSeed: () => provider()?.id === "claude",
