@@ -1164,11 +1164,27 @@ fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
 /// target directory doesn't exist yet — `notify::Watcher::watch` fails
 /// outright on a nonexistent path, so this finds the closest directory that
 /// can actually be watched right now (a later-created descendant is still
-/// picked up, since the watch is recursive). Returns `None` only if no
-/// ancestor exists at all (would require the filesystem root itself to be
-/// missing).
+/// picked up, since the watch is recursive).
+///
+/// Never walks above the user's home directory. Without a floor, a fresh
+/// environment where even `~/.config` doesn't exist yet (ephemeral
+/// dev/CI/container — this project's own docs describe several such setups)
+/// would walk all the way to `$HOME` or further, and
+/// `watcher.watch(&watched_dir, RecursiveMode::Recursive)` performs a
+/// synchronous, blocking directory walk of whatever it's handed — recursing
+/// the entire home directory (or beyond) from inside the async
+/// `handle_reactive_register` request handler risks a long stall and, on
+/// Linux, exhausting the OS-wide inotify watch-count limit. Returns `None`
+/// (giving up on watching rather than risking an unbounded walk) if `path`
+/// isn't under the home directory at all, or if no existing ancestor is
+/// found within that bound.
 fn nearest_existing_ancestor(path: &Path) -> Option<PathBuf> {
-    path.ancestors().skip(1).find(|p| p.exists()).map(|p| p.to_path_buf())
+    let floor = dirs::home_dir()?;
+    path.ancestors()
+        .skip(1)
+        .take_while(|p| p.starts_with(&floor))
+        .find(|p| p.exists())
+        .map(|p| p.to_path_buf())
 }
 
 /// Extract the workflow id from a path under `.../subagents/workflows/<id>/...`.
@@ -1542,7 +1558,13 @@ mod tests {
 
     #[test]
     fn nearest_existing_ancestor_finds_first_existing_parent() {
-        let dir = std::env::temp_dir().join(format!("amx-ancestor-test-{}", now_millis()));
+        // Must live under the home dir — nearest_existing_ancestor's floor
+        // (see its doc comment) would otherwise reject the whole path before
+        // ever reaching `dir`. std::env::temp_dir() is NOT reliably under
+        // home (e.g. plain /tmp on Linux CI runners), so build the temp path
+        // from home_dir() directly.
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        let dir = home.join(format!("amx-ancestor-test-{}", now_millis()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // dir exists; dir/a/b/c does not.
@@ -1558,6 +1580,28 @@ mod tests {
         // walk up to — real callers always pass an absolute config dir, but
         // the function must not panic on this input.
         assert_eq!(nearest_existing_ancestor(Path::new("bare-name")), None);
+    }
+
+    /// Regression test for reagent's finding on PR #2008: without a floor,
+    /// a path whose entire ancestor chain up to and including the home
+    /// directory is missing would walk PAST home — risking a
+    /// `notify::Watcher::watch` recursive walk of an enormous, unrelated
+    /// tree. Must return None instead once the walk would have to cross the
+    /// home directory boundary.
+    #[test]
+    fn nearest_existing_ancestor_never_walks_above_the_home_directory() {
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        // Every ancestor from `missing` up through (and including) `home`
+        // is guaranteed nonexistent (home itself always exists — it's the
+        // real user's home dir — so nest deep enough that none of the
+        // intermediate synthetic segments exist either).
+        let missing = home
+            .join("amx-never-created-1")
+            .join("amx-never-created-2")
+            .join("amx-never-created-3");
+        // `home` itself exists, so the walk finds it — proving the floor is
+        // inclusive of home, not exclusive.
+        assert_eq!(nearest_existing_ancestor(&missing), Some(home));
     }
 
     /// Regression test for the observed bug: an agent without an explicit
@@ -1603,7 +1647,12 @@ mod tests {
         // process has created CLAUDE_CONFIG_DIR on disk. Watching a
         // nonexistent path used to fail outright with no retry, permanently
         // disabling subagent tracking for that agent's whole session.
-        let root = std::env::temp_dir().join(format!("amx-watch-fallback-test-{}", now_millis()));
+        // Must live under the home dir — nearest_existing_ancestor's floor
+        // would otherwise reject this path outright on platforms where
+        // std::env::temp_dir() isn't under home (e.g. plain /tmp on Linux
+        // CI runners).
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        let root = home.join(format!("amx-watch-fallback-test-{}", now_millis()));
         std::fs::create_dir_all(&root).unwrap(); // ancestor exists...
         let config_dir = root.join("claude-testagent"); // ...but this does not.
         assert!(!config_dir.exists());
