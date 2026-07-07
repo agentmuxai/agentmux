@@ -203,13 +203,15 @@ independent of Pillar 1 and can land anytime.
    representation at all before this (§2.A.1). Sized as its own spec, both phases done, merged,
    live-verified: `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`.
 4. ⬜ **Fire the cold-start restore path on crash** (mid-session reproject) + the "Restoring session…"
-   overlay; ensure in-flight (2.C) work is **re-derived from topology, not resumed**. **Corrected
-   scope (2026-07-07):** this needs genuinely new multi-window recreation code (§2.A.1) — the
-   existing cold-start path only ever handles one window. The in-flight re-derivation rule (§7) has
-   **zero existing scaffolding** to build on (verified by search — the closest analog,
-   `commands/orphan_reconcile.rs`'s live/dead/hostless planner, is structurally similar but solves a
-   different trigger). Needs its own dedicated design pass before implementation, not a subtask of
-   this sequence step.
+   overlay; ensure in-flight (2.C) work is **re-derived from topology, not resumed**. **Sized design
+   spec written 2026-07-07, not yet implemented:**
+   `docs/specs/SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md`. Key design: a two-tier reproject —
+   prefer the launcher's live in-memory window snapshot (survives a host-only crash, richer/faster;
+   the wire protocol already exists as `Command::GetSnapshot`/`Event::Snapshot` but has never been
+   called from the host) and fall back to srv's durable `Client.windowids` + Step 3's `kind`/
+   `parent_window_id` when the launcher itself also died. In-flight (2.C) state turned out to already
+   be correctly empty on every fresh process by construction — the remaining discipline is
+   procedural (always create through the normal path), not new state-clearing logic.
 5. ⬜ **E2E test:** "host OOM ⇒ session reprojects" (topology equivalence within budget, overlay
    shown, no orphan tree).
 6. ⬜ **Then the collapses land:** graceful-flush-vs-crash incoherence deleted (one recover path);
