@@ -30,7 +30,8 @@ export type SubagentEventType =
     | { type: "text"; content: string }
     | { type: "tool_use"; name: string; input_summary: string }
     | { type: "tool_result"; is_error: boolean; preview: string }
-    | { type: "progress"; output: string };
+    | { type: "progress"; output: string }
+    | { type: "result"; content: string };
 
 // ── ViewModel ────────────────────────────────────────────────────────────
 

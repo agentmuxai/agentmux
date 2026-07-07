@@ -176,6 +176,12 @@ function EventContent(props: { eventType: SubagentEventType }): JSX.Element {
                     <span>{et.output}</span>
                 </div>
             );
+        case "result":
+            return (
+                <div class="subagent-event-body">
+                    <pre class="subagent-event-text">{et.content}</pre>
+                </div>
+            );
         default:
             return null;
     }
