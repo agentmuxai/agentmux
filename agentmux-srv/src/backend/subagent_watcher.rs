@@ -73,6 +73,11 @@ pub enum SubagentEventType {
     ToolUse { name: String, input_summary: String },
     ToolResult { is_error: bool, preview: String },
     Progress { output: String },
+    /// A JSONL `"result"`-typed line — the subagent's final output. Kept
+    /// distinct from `Text` so completion detection can key off the
+    /// discriminant directly instead of matching derived text content
+    /// (see `process_jsonl_change`'s completion check).
+    Result { content: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -572,9 +577,14 @@ impl SubagentWatcher {
                 state.events.drain(..excess);
             }
 
-            // Check last event for result type (completion)
+            // Check last event for result type (completion). Keyed off the
+            // `Result` discriminant itself (a real `"result"`-typed JSONL
+            // line), not derived text content — real Claude Code result
+            // events populate `result`/`content`, so matching against the
+            // "Subagent completed" placeholder (only ever produced when
+            // both are absent) almost never fired.
             if let Some(last) = new_events.last() {
-                if matches!(&last.event_type, SubagentEventType::Text { content } if content == "Subagent completed") {
+                if matches!(&last.event_type, SubagentEventType::Result { .. }) {
                     completed = true;
                     state.info.status = SubagentStatus::Completed;
                 }
@@ -1065,7 +1075,7 @@ fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
                     }
                 })
                 .unwrap_or_else(|| "Subagent completed".to_string());
-            Some(SubagentEventType::Text { content })
+            Some(SubagentEventType::Result { content })
         }
         _ => None,
     }
@@ -1278,6 +1288,84 @@ mod tests {
             panic!("expected Text event");
         };
         assert_eq!(content, "100"); // first 100 (0..100) were trimmed away
+    }
+
+    #[test]
+    fn parse_event_type_result_line_with_content() {
+        let value: serde_json::Value =
+            serde_json::from_str(r#"{"type":"result","result":"final answer"}"#).unwrap();
+        let parsed = parse_event_type(&value);
+        assert!(matches!(
+            parsed,
+            Some(SubagentEventType::Result { content }) if content == "final answer"
+        ));
+    }
+
+    #[test]
+    fn parse_event_type_result_line_without_content_falls_back() {
+        // Real Claude Code result events always populate `result`/`content`;
+        // this fallback only exists for malformed/unexpected lines.
+        let value: serde_json::Value = serde_json::from_str(r#"{"type":"result"}"#).unwrap();
+        let parsed = parse_event_type(&value);
+        assert!(matches!(
+            parsed,
+            Some(SubagentEventType::Result { content }) if content == "Subagent completed"
+        ));
+    }
+
+    #[test]
+    fn process_jsonl_change_marks_completed_on_result_event() {
+        let dir = std::env::temp_dir().join(format!("amx-subagent-test-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-sub-a.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            concat!(
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+                "{\"type\":\"result\",\"result\":\"final answer\"}\n",
+            ),
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+
+        {
+            let sessions = watcher.sessions.lock().unwrap();
+            let session = sessions.values().next().expect("session recorded");
+            let state = session.subagents.get("sub-a").expect("subagent recorded");
+            assert_eq!(state.info.status, SubagentStatus::Completed);
+            assert!(matches!(
+                state.events.last().unwrap().event_type,
+                SubagentEventType::Result { .. }
+            ));
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn process_jsonl_change_stays_active_without_result_event() {
+        let dir = std::env::temp_dir().join(format!("amx-subagent-test-active-{}", now_millis()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-sub-b.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"still working\"}]}}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
+
+        {
+            let sessions = watcher.sessions.lock().unwrap();
+            let session = sessions.values().next().expect("session recorded");
+            let state = session.subagents.get("sub-b").expect("subagent recorded");
+            assert_eq!(state.info.status, SubagentStatus::Active);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     fn p(s: &str) -> PathBuf {
