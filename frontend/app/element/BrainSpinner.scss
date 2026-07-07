@@ -28,8 +28,20 @@
         pointer-events: none;
     }
 
-    &.is-reduced-motion svg {
-        animation: none;
+    // Instant show/hide, no animation — matches this codebase's established
+    // reduced-motion pattern for the analogous tab-reveal fade
+    // (workspace.tsx sets transition:"none" when prefersReducedMotion() is
+    // true). Must override BOTH the pulse keyframe and the fade transition;
+    // an earlier version of this rule only disabled the pulse, leaving the
+    // opacity fade still animated under prefers-reduced-motion.
+    &.is-reduced-motion {
+        svg {
+            animation: none;
+        }
+
+        &.is-fading {
+            transition: none;
+        }
     }
 }
 
