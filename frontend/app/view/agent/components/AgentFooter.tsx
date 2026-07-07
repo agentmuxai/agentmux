@@ -581,10 +581,17 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // Ghost-text next-prompt suggestion: Tab accepts it into the real
         // input, matching Claude Code CLI's own terminal UX (see
         // docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md).
+        // Right Arrow is a deliberate AgentMux addition on top of that
+        // parity baseline — not something Claude Code's own CLI does — for
+        // the fish-shell/zsh-autosuggestions/Copilot-style convenience of
+        // accepting an inline suggestion with the "continue typing right"
+        // key, letting the user just press Enter after. Safe to claim here:
+        // with the textarea empty there's no cursor to move, so Right Arrow
+        // is otherwise a no-op in this state.
         // Only reachable when the textarea is empty, which is also the only
         // state the slash-autocomplete branch below can't be in (it requires
-        // a `/prefix`) — the two Tab handlers never compete.
-        if (e.key === "Tab" && textareaRef && textareaRef.value.length === 0) {
+        // a `/prefix`) — these handlers never compete with it.
+        if ((e.key === "Tab" || e.key === "ArrowRight") && textareaRef && textareaRef.value.length === 0) {
             const vm = props.viewModel;
             const suggestion = vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined;
             if (suggestion) {
