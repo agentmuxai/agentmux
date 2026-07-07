@@ -1959,6 +1959,116 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.turnPhase.kind).toBe("Submitting");
         });
     });
+
+    // SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md — folds
+    // useAgentFailure's local failure state into the reducer so a backend
+    // failure classification unconditionally ends a working turn, instead
+    // of depending on the CLI process actually exiting (which never
+    // happens between turns for persistent-mode agents). Fixes the
+    // "stuck Waiting after a rate-limit interruption" bug.
+    describe("Failure recovery (FailureObserved / FailureCleared)", () => {
+        const rateLimited: AgentFailure = {
+            code: "rate_limited",
+            title: "Rate limited",
+            detail: "429",
+            retryable: true,
+        };
+
+        it("FailureObserved while Streaming ends the turn (Done.errored) and records state.failure", () => {
+            const s0 = streaming(100);
+            const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 200 });
+            expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "errored", finishedAt: 200 });
+            expect(r.state.failure).toEqual({ data: rateLimited, at: 200 });
+            expect(r.events).toContainEqual({ type: "failure-observed", code: "rate_limited", turnWasEnded: true });
+        });
+
+        it("FailureObserved while Submitting ends the turn (Done.errored)", () => {
+            const s0 = update(ready(100), { type: "TurnStart", at: 100 }).state;
+            expect(s0.turnPhase.kind).toBe("Submitting");
+            const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 150 });
+            expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "errored", finishedAt: 150 });
+        });
+
+        it("FailureObserved while Interrupting ends the turn (Done.errored)", () => {
+            const s0 = update(streaming(100), { type: "RequestStop", at: 150 }).state;
+            expect(s0.turnPhase.kind).toBe("Interrupting");
+            const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 160 });
+            expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "errored", finishedAt: 160 });
+        });
+
+        it("FailureObserved while Idle leaves the phase untouched but still records state.failure (turnWasEnded: false)", () => {
+            const s0 = ready(100);
+            expect(s0.turnPhase.kind).toBe("Idle");
+            const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 150 });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+            expect(r.state.failure).toEqual({ data: rateLimited, at: 150 });
+            expect(r.events).toContainEqual({ type: "failure-observed", code: "rate_limited", turnWasEnded: false });
+        });
+
+        it("FailureObserved that ends a turn clears currentTool/currentToolArg/turnTokens", () => {
+            let s0 = streaming(100);
+            s0 = update(s0, { type: "ToolStart", name: "Bash", arg: "ls" }, 110).state;
+            s0 = update(s0, { type: "TokensIn", input: 500 }, 110).state;
+            expect(s0.currentTool).toBe("Bash");
+            const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 200 });
+            expect(r.state.currentTool).toBeNull();
+            expect(r.state.currentToolArg).toBeNull();
+            expect(r.state.turnTokens).toBeNull();
+        });
+
+        it("FailureCleared clears state.failure", () => {
+            const s0 = update(streaming(100), { type: "FailureObserved", failure: rateLimited, at: 150 }).state;
+            expect(s0.failure).not.toBeNull();
+            const r = update(s0, { type: "FailureCleared" });
+            expect(r.state.failure).toBeNull();
+            expect(r.events).toEqual([{ type: "failure-cleared" }]);
+        });
+
+        it("FailureCleared with no active failure is a same-ref no-op", () => {
+            const s0 = ready(100);
+            const r = update(s0, { type: "FailureCleared" });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("TurnStart implicitly clears a pre-existing state.failure (fresh turn ends the episode)", () => {
+            let s0 = ready(100);
+            s0 = update(s0, { type: "FailureObserved", failure: rateLimited, at: 150 }).state;
+            expect(s0.failure).not.toBeNull();
+            const r = update(s0, { type: "TurnStart", at: 200 });
+            expect(r.state.failure).toBeNull();
+            expect(r.state.turnPhase.kind).toBe("Submitting");
+            expect(r.events).toContainEqual({ type: "failure-cleared" });
+        });
+
+        it("TurnStart with no active failure does NOT emit failure-cleared", () => {
+            const s0 = ready(100);
+            const r = update(s0, { type: "TurnStart", at: 200 });
+            expect(r.events.some((e) => e.type === "failure-cleared")).toBe(false);
+        });
+    });
+
+    // Issue 2 of ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md:
+    // StreamFlushObserved's Streaming arm previously spread the whole prior
+    // phase forward unchanged, so a stale `waitingReason`/`retryAfterMs` from
+    // an earlier rate-limit rode along through any later plain-text flush —
+    // the reported false-positive "Rate limited — retrying…" label shown
+    // long after the agent resumed normal streaming.
+    describe("StreamFlushObserved clears stale rate-limit fields (false-positive fix)", () => {
+        it("clears waitingReason/retryAfterMs on the next flush after a rate-limit wait", () => {
+            let s0 = streaming(100);
+            s0 = update(
+                s0,
+                { type: "ProviderWaiting", reason: "rate_limited", retryAfterMs: 5000, at: 110 },
+            ).state;
+            expect(s0.turnPhase).toMatchObject({ waitingReason: "rate_limited", retryAfterMs: 5000 });
+
+            const r = update(s0, { type: "StreamFlushObserved", addedCount: 1, at: 120 });
+            expect(r.state.turnPhase.kind).toBe("Streaming");
+            expect((r.state.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>).waitingReason).toBeUndefined();
+            expect((r.state.turnPhase as Extract<TurnPhase, { kind: "Streaming" }>).retryAfterMs).toBeUndefined();
+        });
+    });
 });
 
 // `workingByLegacy` was the dual-write invariant helper (turnActive ||

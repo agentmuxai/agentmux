@@ -5,11 +5,24 @@
  * useAgentFailure — owns the agent-pane failure-recovery surface.
  *
  * Subscribes to the per-block `agentfailure` wave event (the classified
- * `AgentFailure` from a non-zero exit), holds the transient view state
- * (expanded body, retrying, the 5-second auto-retry countdown), and exposes a
- * `<PaneRow>` descriptor via `failureToRow`. The actual recovery *effects*
- * (re-run the turn, re-auth, open Armory) are passed in by the caller so
- * this hook stays presentation-only.
+ * `AgentFailure` from a non-zero exit) and forwards it into the pane
+ * reducer as `FailureObserved` — which is what makes an authoritative
+ * backend failure classification unconditionally end a working turn,
+ * closing the "stuck Waiting after a rate-limit interruption" bug (see
+ * docs/analysis/ANALYSIS_AGENT_INPUT_LIFECYCLE_RATELIMIT_SENDNOW_2026_07_06.md).
+ * The *active failure itself* (`state.failure`) now lives in
+ * `AgentPaneState` — this hook reads it back via the `failure` accessor
+ * passed in, instead of holding its own local copy that nothing else could
+ * agree with. See docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
+ *
+ * What stays hook-local: the expanded-body toggle, the `retrying` flag, and
+ * the 5s/10s auto-retry countdown/budget. None of these are facts anything
+ * else in the app needs to agree on — they're pure view-presentation timing,
+ * the same class as a `<Show>` toggle — so there's no drift risk in keeping
+ * them here (same rationale the spec used to leave `expanded` local).
+ *
+ * The actual recovery *effects* (re-run the turn, re-auth, open Armory) are
+ * passed in by the caller so this hook stays presentation-only otherwise.
  *
  * Auto-retry: for transient classes (rate-limit / overload / network) a 5 s
  * countdown arms; clicking Retry fires immediately, reaching 0 fires
@@ -23,12 +36,20 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
+import type { AgentPaneModel } from "@/app/store/agent-pane-model";
+import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 
 const AUTO_RETRY_BACKOFF_S = [5, 10] as const; // then manual-only
 
 export interface UseAgentFailureOptions {
     blockId: string;
+    /** Per-pane dispatch handle — default-safe against post-unmount races. */
+    model: AgentPaneModel;
+    /** Reactive read of the canonical `state.failure` (single source of
+     *  truth, set by `FailureObserved` / cleared by `FailureCleared` or the
+     *  next `TurnStart`). */
+    failure: Accessor<PaneFailure | null>;
     /** Re-run the failed turn (re-send the last user message). */
     onRetry: () => void;
     /** Re-authenticate this agent's provider account (P2). */
@@ -52,7 +73,6 @@ export interface UseAgentFailureResult {
 }
 
 export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureResult {
-    const [failure, setFailure] = createSignal<AgentFailure | null>(null);
     const [expanded, setExpanded] = createSignal(false);
     const [retrying, setRetrying] = createSignal(false);
     const [autoRetryIn, setAutoRetryIn] = createSignal<number | null>(null);
@@ -75,7 +95,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
     const clear = () => {
         cancelCountdown();
-        setFailure(null);
+        opts.model.dispatchPane({ type: "FailureCleared" });
         setExpanded(false);
         setRetrying(false);
     };
@@ -122,7 +142,11 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // (SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20 §4 P1.2)
         const persistedAtom = getBlockMetaKeyAtom(opts.blockId, "agent:last_failure");
         const pf = persistedAtom();
-        if (pf) setFailure(pf);
+        // Seed the reducer's canonical `state.failure` (not a local signal —
+        // see the module doc comment). The pane is freshly mounted here, so
+        // there's no working turn to force-end; FailureObserved's `turnWasEnded`
+        // check is false and it just records the failure.
+        if (pf) opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at: Date.now() });
 
         const unsubFailure = waveEventSubscribe({
             eventType: WpsEvent.AgentFailure,
@@ -136,7 +160,9 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 cancelCountdown();
                 setExpanded(false);
                 setRetrying(false);
-                setFailure(f);
+                // Reducer-side: records state.failure AND unconditionally ends
+                // a still-working turn — see FailureObserved's reducer case.
+                opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
                 if (isTransient(f.code)) armAutoRetry();
             },
         });
@@ -156,7 +182,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                     // NOT mean success. Defer the verdict to the next event.
                     awaitingVerdict = true;
                 } else if (procStatus === "running") {
-                    if (failure()) {
+                    if (opts.failure()) {
                         // A new turn starting while a failure row is still
                         // visible = the user composed a fresh message (the Retry
                         // button goes through doRetry, which already cleared the
@@ -184,8 +210,9 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     });
 
     const row = (): FailureRow | null => {
-        const f = failure();
-        if (!f) return null;
+        const pf = opts.failure();
+        if (!pf) return null;
+        const f = pf.data;
         return failureToRow(
             f,
             { expanded: expanded(), autoRetryIn: autoRetryIn(), retrying: retrying(), canSeed: opts.canSeed?.() },

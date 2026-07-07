@@ -12,8 +12,9 @@
  *      `agentfailure` after it), so a later unrelated transient still gets 2.
  */
 
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
@@ -55,8 +56,43 @@ const successfulTurn = () => {
 const hasRetryCountdown = (ui: UseAgentFailureResult) =>
     (ui.row()?.actions ?? []).some((a) => a.label === "Retry now (5s)");
 
-const mkUI = (onRetry: () => void): UseAgentFailureResult =>
-    useAgentFailure({ blockId: "b", onRetry, onLoginAgain() {}, onUseExistingLogin() {}, onLoginViaTerminal() {}, onTrustCenter() {}, onNewSession() {} });
+// Minimal fake AgentPaneModel: dispatchPane mirrors ONLY the two commands
+// this hook actually sends (FailureObserved / FailureCleared) against a
+// local signal — a faithful stand-in for the real reducer's `state.failure`
+// field for the purposes of this hook-level test (no TurnStart/turnPhase
+// involved here; that's covered by reducer.test.ts).
+const makeFakeModel = () => {
+    const [failure, setFailure] = createSignal<PaneFailure | null>(null);
+    const model = {
+        blockId: "b",
+        disposed: false,
+        dispatchPane: vi.fn((command: { type: string; failure?: AgentFailure; at?: number }) => {
+            if (command.type === "FailureObserved") {
+                setFailure({ data: command.failure!, at: command.at! });
+            } else if (command.type === "FailureCleared") {
+                setFailure(null);
+            }
+            return [];
+        }),
+        dispatchDoc: vi.fn(() => []),
+    };
+    return { model: model as any, failure };
+};
+
+const mkUI = (onRetry: () => void): UseAgentFailureResult => {
+    const { model, failure } = makeFakeModel();
+    return useAgentFailure({
+        blockId: "b",
+        model,
+        failure,
+        onRetry,
+        onLoginAgain() {},
+        onUseExistingLogin() {},
+        onLoginViaTerminal() {},
+        onTrustCenter() {},
+        onNewSession() {},
+    });
+};
 
 describe("useAgentFailure P1.2 — persisted meta seed on mount", () => {
     beforeEach(() => {
