@@ -1,5 +1,21 @@
 # AgentMux Version History
 
+## 0.51.0 — 2026-07-07
+
+- feat(host): SPEC_PILLAR1_STEP2 Phase 2 — wire per-window opacity write-through + crash-restart read-back
+- fix(ui): suppress the focus ring when a pane is alone in its tab
+- fix(agent): unify failure state into the pane reducer, fix stuck-Waiting and false-positive rate-limit label
+- fix(tabs): active-tab color line now starts at the selected tab's left edge
+- feat(host): SPEC_PILLAR1_STEP2 Slice B — floating-pane placement write-through to srv
+- feat(agent): Esc delivers a queued message immediately, mirroring Claude Code CLI
+- fix(agent): remove non-functional tool overlay action bar (open-in-pane/window, new-agent-here)
+- feat(agent): brain-spinner loading overlay covers blank pane-mount and history-replay window
+- refactor(host): SPEC_PILLAR2 Stage 2 (partial) — wire on_before_close through reconcile_quit
+- fix(model-catalog): fall back to CLAUDE_CODE_OAUTH_TOKEN on macOS
+- feat(agent): Right Arrow also accepts the ghost-text next-prompt suggestion
+- fix(browser-pane): marshal wrapper destroy to the CEF UI thread — closes the per-close renderer leak
+
+
 ## 0.50.3 — 2026-07-06
 
 - feat(tabs): active tab's custom color traces the tab strip's boundary line
