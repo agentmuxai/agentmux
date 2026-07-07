@@ -163,6 +163,28 @@ follow-up.
    version entries. **Recommend (c).**
 2. **macOS Keychain token.** No file token there → always fall back to bundled catalog on macOS, or add a
    `claude`-CLI-mediated fetch path. Accept the fallback for v1.
+   - **2026-07-07 follow-up investigation** (confirms this is a real, live gap, not just a theoretical
+     caveat — v0.50.3 on macOS still shows the stale curated label): both candidate escape hatches were
+     checked and ruled out.
+     - *CLI-mediated path.* `claude auth status --json` was run directly — it returns only
+       `{loggedIn, authMethod, apiProvider, email, orgId, orgName, subscriptionType}`. No access token in
+       the payload, so there is no CLI surface that hands us the bearer token; this path is dead.
+     - *Direct Keychain read.* Inspecting a real macOS login keychain (`security dump-keychain`) shows the
+       CLI does **not** use a single fixed item name. It stores credentials under
+       `"Claude Code-credentials-<8-hex-hash>"` (account = OS username), and a machine with several
+       isolated `CLAUDE_CONFIG_DIR`s (as AgentMux uses per agent) has **one such item per config dir** —
+       4 distinct hash suffixes were observed on one dev machine. The hash derivation is undocumented and
+       internal to the `claude` CLI; reverse-engineering it would be fragile to any upstream CLI change.
+       Separately, reading a Keychain item created by a different binary (`claude`, not `agentmux`) will
+       generally trigger a one-time native "AgentMux wants to access confidential information stored by
+       claude" ACL prompt per item — the same class of interruption `agentmux-cef/src/app.rs`'s
+       `--use-mock-keychain` / `--password-store=basic` switches were added specifically to avoid for
+       Chromium's own credential store.
+   - **Conclusion:** no clean fetch path currently exists for macOS. Revisit only if Anthropic ships a
+     stable, documented way to obtain the OAuth token (or an authenticated list-models capability) without
+     scraping another process's Keychain item. Until then, macOS keeps the curated static label
+     (Linux/Windows already get the live refresh today, since their token sits in the plain
+     `.credentials.json` file).
 3. **Where to cache.** Store row vs JSON-under-data-dir; per-`(provider, cli_version)` key either way.
 4. **Context windows too?** `/v1/models` also returns `max_input_tokens` — fold context-window refresh
    into the same task (aligns with `SPEC_CONTEXT_VISIBILITY_2026_06_17`), or keep this label-only for v1.
