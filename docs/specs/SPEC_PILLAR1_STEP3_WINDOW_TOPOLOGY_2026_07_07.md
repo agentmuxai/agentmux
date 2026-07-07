@@ -80,9 +80,16 @@ implementation, not guessed here:
    `commands/window/creation.rs`'s call sites) and call the new RPC directly after
    `WindowService.CreateWindow` resolves in `initHostNewWindow()` (`frontend/app-init.ts:421-493`).
 
-Candidate 1 is likely cleaner (the host already has the truth without inventing a new frontend
-signal), but requires confirming the `register_backend_window` timing actually gives the host a
-reliable "this window_id is now real in srv" hook — verify at implementation time.
+**Resolved (2026-07-07, Phase 2 implementation): Candidate 1.** `register_backend_window`
+(`agentmux-cef/src/commands/window/meta.rs`) is exactly the right hook — it fires once per window
+with that window's concrete srv `window_id`, and the host already has `WindowMeta{kind,
+parent_instance_id}` for the label at that point (populated at creation time). One nuance found
+during implementation: `WindowMeta.parent_instance_id` is a window **label**, not a srv id — it must
+be resolved to the parent's `window_id` via `AppState::backend_window_id(parent_label)` before
+writing srv's `parent_window_id` field (the same label→id lookup the opacity/floating-placement
+write-throughs already use). If the parent hasn't registered its own `window_id` yet (a narrow
+creation-order race — in practice a subwindow's parent is always already open, so this is
+theoretical), the write-through is skipped for that call rather than persisting a wrong value.
 
 **Reproject read-back (Step 4's dependency, not this spec's job):** once persisted, a future
 reproject pass can `GetWindow` each id from `Client.windowids[1..]`, read `kind`/`parent_window_id`,
@@ -91,17 +98,20 @@ somewhere; consuming it is Step 4.
 
 ## 3. Phased plan
 
-**Phase 1 — srv side.** Add `Window.kind`/`parent_window_id` fields + `SetWindowTopology` RPC arm
-(direct store read-modify-write, mirroring `service/window.rs`'s `SetWindowOpacity`). Validate
-`kind` against the known enum values (reject anything else, matching opacity's range validation
-pattern). Unit tests: round-trip persists, unknown window errors, `subwindow` requires a
-non-empty `parent_window_id` (reject `subwindow` + `None` parent — a nonsensical state). Behavior-
-neutral — nothing calls it yet.
+**Phase 1 — srv side. ✅ Done, merged (PR #2004).** Added `Window.kind`/`parent_window_id` fields +
+`SetWindowTopology` RPC arm (direct store read-modify-write, mirroring `service/window.rs`'s
+`SetWindowOpacity`). Validates `kind` against the known enum, rejects `subwindow` without a
+`parent_window_id`, and (added during reagent review) rejects a `parent_window_id` set alongside
+any kind other than `subwindow`, a dangling `parent_window_id` (doesn't reference a real window), or
+a self-referential one. 10 unit tests, behavior-neutral at merge (nothing called it yet).
 
-**Phase 2 — host/frontend wiring.** Resolve the write-through call site (§2's open question) and
-wire it. **App-running verification required**, same bar as SPEC_PILLAR1_STEP2: open a subwindow,
-confirm `GetWindow` on its id shows `kind: "subwindow"` and the correct `parent_window_id`; open a
-second FullInstance window, confirm `kind: "full_instance"`, `parent_window_id: null`.
+**Phase 2 — host/frontend wiring. ✅ Done.** Wired via `register_backend_window` (Candidate 1
+above). **Live-verified** on an isolated instance: `main` → `kind: "full_instance"`, no
+`parent_window_id`; a second full window opened via `openNewWindow()` → `kind: "full_instance"`, no
+`parent_window_id`; a subwindow opened via `open_subwindow {parent_instance_id: "main"}` →
+`kind: "subwindow"`, `parent_window_id` == main's own srv `oid` (correctly resolved from the label,
+not the literal string `"main"`) — confirmed via direct `GetWindow` RPC calls against srv, not just
+host-side logging.
 
 Each phase independently shippable, matching every other Pillar 1 spec's phasing discipline.
 
@@ -127,11 +137,11 @@ Each phase independently shippable, matching every other Pillar 1 spec's phasing
 
 ## 6. Definition of done
 
-1. ⬜ `Window.kind`/`parent_window_id` persist through `SetWindowTopology`, unit-tested.
-2. ⬜ Opening a subwindow live-verifiably persists `kind: "subwindow"` + the correct parent id to
+1. ✅ `Window.kind`/`parent_window_id` persist through `SetWindowTopology`, unit-tested (10 tests).
+2. ✅ Opening a subwindow live-verifiably persists `kind: "subwindow"` + the correct parent id to
    srv (checked via `GetWindow`, same isolated-instance methodology as every other Pillar 1 spec
    this session).
-3. ⬜ Opening a second full window live-verifiably persists `kind: "full_instance"`,
+3. ✅ Opening a second full window live-verifiably persists `kind: "full_instance"`,
    `parent_window_id: null`.
 
 ## 7. Sources
