@@ -1,0 +1,22 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Brain-spinner loading overlay — covers the pane from mount until initial
+// history load resolves. See
+// docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md.
+// Wrapped in .agent-view so the cascade chain matches the pre-split file
+// (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24), same convention as
+// _auth-overlay.scss.
+.agent-view {
+    .agent-pane-loading-overlay {
+        position: absolute;
+        inset: 0;
+        background: var(--main-bg-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        // Same tier as the auth overlay — needs to cover the whole pane
+        // (progress bar, search, document, composer) while loading.
+        z-index: var(--zindex-elem-modal);
+    }
+}

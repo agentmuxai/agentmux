@@ -1,0 +1,39 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Same pulse timing/easing as index.html's #startup-loading — keep them in
+// sync if either changes, they're meant to read as the same brand moment.
+
+.brain-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+
+    svg {
+        width: 64px;
+        height: 64px;
+        opacity: 0.9;
+        animation: brain-spinner-pulse 1.8s ease-in-out infinite;
+        // See index.html's #startup-loading svg comment: without a dedicated
+        // GPU layer, Chromium re-rasterizes this large multi-gradient vector
+        // every animation frame, which reads as a flicker instead of a pulse.
+        will-change: transform, opacity;
+    }
+
+    &.is-fading {
+        opacity: 0;
+        transition: opacity 200ms ease-out;
+        pointer-events: none;
+    }
+
+    &.is-reduced-motion svg {
+        animation: none;
+    }
+}
+
+@keyframes brain-spinner-pulse {
+    0%, 100% { opacity: 0.9; transform: scale(1) translateZ(0); }
+    50%       { opacity: 0.65; transform: scale(0.97) translateZ(0); }
+}

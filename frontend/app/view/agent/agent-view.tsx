@@ -72,6 +72,7 @@ import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { AgentPicker, useAgentDefinitions } from "./components/AgentPicker";
 import { AgentSearchBar } from "./components/AgentSearchBar";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -344,12 +345,28 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
     // that lives inside AgentDocumentView. This drives the enter-animation
     // gate on the streaming buffer.
     let historyReadyFn: (() => void) | undefined;
+    // Brain-spinner loading overlay (see
+    // docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md):
+    // shown from mount, cross-fades out once the initial history load
+    // resolves (success or failure — same fail-open behavior as
+    // onHistoryReady itself) so a content-heavy pane never sits blank while
+    // it replays. `showLoadingOverlay` unmounts the overlay entirely once the
+    // fade transition has had time to finish, instead of leaving an
+    // invisible-but-present pointer-events:none div forever.
+    const [historyLoaded, setHistoryLoaded] = createSignal(false);
+    const [showLoadingOverlay, setShowLoadingOverlay] = createSignal(true);
+    let loadingOverlayTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(loadingOverlayTimeout));
     const history = useHistoryPagination({
         blockId: model.blockId,
         model: paneModel,
         outputFormat,
         definitionId: agentId,
-        onHistoryReady: () => historyReadyFn?.(),
+        onHistoryReady: () => {
+            historyReadyFn?.();
+            setHistoryLoaded(true);
+            loadingOverlayTimeout = setTimeout(() => setShowLoadingOverlay(false), 260);
+        },
         // Schema v2: apply DocumentState + pane overlay after NDJSON replay.
         onSnapshotOverlay: ({ documentState, detailsOpen }) => {
             const [, setDocState] = agentAtoms().documentStateAtom;
@@ -799,6 +816,15 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
             onContextMenu={handleContextMenu}
             tabIndex={-1}
         >
+            {/* Loading overlay — covers the pane from mount until the initial
+                history load resolves, so a content-heavy pane never sits
+                blank while it replays. See
+                docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md. */}
+            <Show when={showLoadingOverlay()}>
+                <div class="agent-pane-loading-overlay">
+                    <BrainSpinner fading={historyLoaded()} />
+                </div>
+            </Show>
             {/* Gradient progress bar — 2px, pinned position:absolute top:0.
                 Animated shimmer while working, hidden at rest. Colors derived
                 from --accent-color via color-mix() so it adapts to all themes.
