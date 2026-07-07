@@ -250,3 +250,9 @@
         color: var(--secondary-text-color);
     }
 }
+
+.subagent-event-result {
+    .subagent-event-time {
+        color: var(--success-color, #2ea043);
+    }
+}
