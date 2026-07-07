@@ -112,15 +112,36 @@ returns once not `Running` (`quit.rs:15`), and `BeginDrain` is documented idempo
 (`client/mod.rs:1090`).
 
 ### 3.3 Result: the three decision sites become executors
-- **`client::on_before_close`** — keep the `UnregisterBrowser` dispatch; **delete the inline
-  `count_live_user_windows()==0` gate + inline `BeginDrain`** (lines ~1084-1097). The post-dispatch
-  hook now fires `reconcile_quit` after the `UnregisterBrowser` it just dispatched. The Stage-1 body
-  moves into `begin_drain_and_cascade`.
-- **`wrr::win_event::maybe_quit_on_last_user_window`** — remove as a *decision*; if it still needs to
-  exist for OS-event reasons, it calls the same reconcile path, never its own count.
-- **`commands::orphan_reconcile`** — its `plan.begin_drain` computation (`orphan_reconcile.rs:189,345`)
-  is now redundant with `reconcile_quit`; have it call the shared executor instead of duplicating the
-  drain-safety predicate. (Keep its *close-plan* execution; drop its independent drain *decision*.)
+- **`client::on_before_close`** — ✅ **DONE** (Stage 2, first slice). Keeps the `UnregisterBrowser`
+  dispatch, now captures its `DispatchOutput.request_drain` instead of re-deriving
+  `count_live_user_windows() == 0` locally; the Stage-1 body was extracted verbatim into
+  `AgentMuxHandler::begin_drain_and_cascade(reason)`, called only when `request_drain.is_some()`.
+  Live-verified (isolated instance, debug tracing): a promoted secondary window closing while main
+  stays open correctly fires `on_before_close` with `request_drain: None` (main still counts) and no
+  cascade; closing the last window in a normal two-window session exits the whole process tree
+  cleanly within 1 second, no deadlock, no orphan (`tasklist` confirmed clean afterward).
+- **`wrr::win_event::maybe_quit_on_last_user_window`** — ⚠️ **NOT DONE — bigger gap than this section
+  assumed.** Live-verified (2026-07-07) that on Windows, closing the **main window does not fire
+  `on_before_close` at all** (confirmed via `RUST_LOG="info,wrr-trace=debug"`: closing "main" produced
+  zero `on_before_close ENTER` trace lines for the "main" label itself — only WRR's
+  `[wrr] all user windows hidden/closed ... quitting message loop` fired, followed by CEF's own
+  shutdown cascade closing the *other* remaining browsers, whose `on_before_close` fired only as a
+  side effect of `quit_message_loop()` already having been called). This means, for the single most
+  common quit scenario — the user closes the main window — `HostState.browsers` never learns "main"
+  is gone (no `UnregisterBrowser` dispatch ever fires for it), so `reconcile_quit`'s
+  `count_live_user_windows()` would keep reporting `main` as live even after the OS says otherwise.
+  **"Have WRR call the same reconcile path instead of its own count" (as originally written above) is
+  not achievable as a simple swap** — `reconcile_quit` has no way to know main closed unless something
+  tells the reducer. Closing this gap needs WRR's OS-hook to itself report the main-window-gone
+  transition into the reducer (a new command/event, or reusing `UnregisterBrowser` off the OS
+  signal instead of the CEF signal) *before* trusting `reconcile_quit`'s count — a real design task,
+  not part of this rollout's original scope. Tracked as a separate follow-up; `quit_message_loop()`
+  called directly from WRR, bypassing `QuitState` entirely, is unchanged for now.
+- **`commands::orphan_reconcile`** — not started. Its `plan.begin_drain` computation
+  (`orphan_reconcile.rs:189,345`) is still independent of `reconcile_quit`; per the research done
+  2026-07-07 it also carries a "Race B" (`freshly_promoted`) guard with no `HostState` equivalent —
+  merging it away needs either a new `HostState` field or a two-phase "sanitize state.browsers, then
+  trust reconcile_quit" design, not a direct swap either.
 
 ## 4. Exact code changes
 
@@ -165,15 +186,33 @@ The retro (§7.4) notes **zero E2E coverage** for "close last window ⇒ tree ex
   skip it).
 
 ## 7. Rollout
-1. Land #1 (un-dead-code) + #2 (reducer hook + `request_drain`) + tests #5.1/#5.2 — pure, no behavior
+1. ✅ Land #1 (un-dead-code) + #2 (reducer hook + `request_drain`) + tests #5.1/#5.2 — pure, no behavior
    change yet (hook computed but executor still the old inline path).
-2. Land #3 (extract executor, delete inline gate, wire `request_drain`).
-3. Land #4/#5 (demote orphan_reconcile + WRR; E2E test).
-4. Verify against the retro's reproduction (#1647/#1650/#1676 scenarios) and the orphan-log signature
-   (drain marker now always present).
+2. ✅ **Partially landed 2026-07-07.** Land #3 (extract executor, delete inline gate, wire
+   `request_drain`) — done for `on_before_close`. Live-verified: single-window close and sequential
+   multi-window close both exit cleanly with no deadlock/orphan. **However**, live verification also
+   found `on_before_close` never fires for the main window's close on Windows at all (§3.3) — so this
+   step alone does not yet close the actual race the spec exists to fix; it only makes the
+   already-firing call sites (secondary/pool window closes) single-authority instead of duplicating
+   the decision.
+3. ⬜ Land #4/#5 (demote orphan_reconcile + WRR; E2E test) — **not started; scope now understood to be
+   larger than originally written.** Wiring WRR needs a new mechanism for the reducer to learn the main
+   window closed (§3.3), and demoting `orphan_reconcile` needs to either add a `HostState` field for its
+   "Race B" (`freshly_promoted`) guard or keep it as an upstream state-sanitize step — neither is a
+   simple call-the-shared-executor swap. Re-scope before starting.
+4. ⬜ Verify against the retro's reproduction (#1647/#1650/#1676 scenarios) and the orphan-log signature
+   (drain marker now always present) — blocked on #3 above, since those scenarios are exactly the
+   main-window/pool-refill race that step 2's landing doesn't reach.
 
 ## 8. Definition of done
 - `reconcile_quit` is the only place "should we drain?" is decided; the other sites are executors.
-- The race regression test fails on `main` (pre-wire) and passes after.
-- Closing the last window always exits the process tree (E2E green); no orphan host logs.
+  **Partial:** true for `on_before_close`'s two verified scenarios; not yet true for WRR or
+  `orphan_reconcile`.
+- The race regression test fails on `main` (pre-wire) and passes after. **Not written yet** — needs
+  step 3 above to be meaningful (the current landing doesn't touch the actual racing path).
+- Closing the last window always exits the process tree (E2E green); no orphan host logs. **Verified
+  manually** for the two-window and one-window cases (2026-07-07); no automated E2E test yet.
 - Net deletion of duplicated drain-decision code in `on_before_close` / `orphan_reconcile` / `wrr`.
+  **Done for `on_before_close`** (the inline `count_live_user_windows()==0` + `BeginDrain` block was
+  deleted, replaced by consuming `request_drain`); `orphan_reconcile` and `wrr` still duplicate the
+  decision.
