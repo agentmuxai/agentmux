@@ -67,8 +67,8 @@ pub(crate) static PANE_LOCAL_W: std::sync::atomic::AtomicI32 = std::sync::atomic
 // but a browser pane's content is a separate native BrowserView layered on
 // top, so no DOM click ever fires for it. Mirrors the Windows
 // WM_LBUTTONDOWN → browser-pane-clicked path in browser_pane/hwnd.rs; this
-// is the macOS/Linux equivalent (see
-// docs/specs/SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md).
+// is the macOS equivalent — Linux still has no click-to-select for browser
+// pane bodies, see docs/specs/SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md.
 #[cfg(target_os = "macos")]
 pub(crate) static PANE_OVERLAY_WIN_TO_BLOCK: std::sync::LazyLock<
     std::sync::Mutex<
