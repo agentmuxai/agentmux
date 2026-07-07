@@ -11,6 +11,21 @@
     position: relative;
 }
 
+// Brain-spinner loading overlay — covers the pane from mount until
+// loadHistory resolves and the resulting DOM has painted. Same tier/pattern
+// as agent-view's _loading-overlay.scss (docs/specs/
+// REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md); the pulse/
+// fade/reduced-motion behavior itself lives in BrainSpinner.scss.
+.subagent-pane-loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--main-bg-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: var(--zindex-elem-modal);
+}
+
 .subagent-header {
     display: flex;
     align-items: center;

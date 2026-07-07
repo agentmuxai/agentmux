@@ -162,12 +162,17 @@ export class SubagentViewModel implements ViewModel {
             this.setStatus("active");
         }
 
-        // Also load info
+        // Also load info — a targeted single-agent lookup, not ListActive's
+        // full scan of every active subagent across every session (wasteful
+        // fan-out that compounds when several subagent panes are open at
+        // once). Still needed even though subagent:spawned/subagent:completed
+        // event handlers populate info reactively: this pane may be
+        // reopening a subagent that already spawned before it mounted, so
+        // that event already fired and won't refire.
         try {
-            const allActive = await callBackendService("subagent", "ListActive", []);
-            const list = (allActive as SubagentInfo[]) ?? [];
-            const match = list.find((s) => s.agent_id === this.subagentId);
-            if (match) {
+            const info = await callBackendService("subagent", "GetInfo", [this.subagentId]);
+            if (info) {
+                const match = info as SubagentInfo;
                 this.setInfo(match);
                 this.setStatus(match.status);
             }
