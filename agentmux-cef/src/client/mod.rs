@@ -71,6 +71,9 @@ pub(crate) use helpers::{backend_get_window_opacity, backend_set_window_opacity}
 // SPEC_PILLAR1_STEP2 Slice B Phase 4 — floating-pane placement write-through,
 // used by `commands/window/chrome.rs`.
 pub(crate) use helpers::backend_update_block_meta;
+// SPEC_PILLAR1_STEP3 Phase 2 — window kind/parent-linkage write-through,
+// used by `commands/window/meta.rs::register_backend_window`.
+pub(crate) use helpers::backend_set_window_topology;
 pub(crate) use lifecycle::{
     retry_backend_window_id_lookup, BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
     BACKEND_WINDOW_ID_RETRY_DELAY,

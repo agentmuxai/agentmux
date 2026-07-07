@@ -198,10 +198,10 @@ independent of Pillar 1 and can land anytime.
 2. ✅ **Persist the two host-only topology facts** to srv: per-window opacity, floating-pane
    placement + `last_known_normal_rect`. **Done, merged, live-verified (SPEC_PILLAR1_STEP2 Slices
    A + B).**
-3. ⬜ **Persist window `kind` + parent linkage to srv** — corrected scope (2026-07-07): this is
-   **not** an "audit + close small gaps" step as originally written. `kind`/parent have no srv
-   representation at all today (§2.A.1). Sized as its own spec:
-   `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`.
+3. ✅ **Persist window `kind` + parent linkage to srv** — corrected scope (2026-07-07): this was
+   **not** an "audit + close small gaps" step as originally written. `kind`/parent had no srv
+   representation at all before this (§2.A.1). Sized as its own spec, both phases done, merged,
+   live-verified: `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md`.
 4. ⬜ **Fire the cold-start restore path on crash** (mid-session reproject) + the "Restoring session…"
    overlay; ensure in-flight (2.C) work is **re-derived from topology, not resumed**. **Corrected
    scope (2026-07-07):** this needs genuinely new multi-window recreation code (§2.A.1) — the

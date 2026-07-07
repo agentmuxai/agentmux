@@ -179,7 +179,7 @@ pub fn get_instance_number(state: &Arc<AppState>, args: &serde_json::Value) -> s
 /// Register the backend window ID for a window label.
 /// Called by the frontend after it has initialized its backend Window object.
 /// Used by `on_before_close` to notify the backend when a secondary window closes.
-pub fn register_backend_window(_state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
+pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     let window_id = args.get("window_id").and_then(|v| v.as_str()).unwrap_or("");
     tracing::info!(label = %label, window_id = %window_id, "[window] register_backend_window received");
@@ -210,10 +210,65 @@ pub fn register_backend_window(_state: &Arc<AppState>, args: &serde_json::Value)
         // without this it is always `None` on macOS/Linux and redock silently
         // fails. See docs/analysis/REPORT_MACOS_FLOATING_PANE_REDOCK_2026_05_30.md.
         #[cfg(not(target_os = "windows"))]
-        _state
+        state
             .shadow_backend_window_ids
             .lock()
             .insert(label.to_string(), window_id.to_string());
+
+        // SPEC_PILLAR1_STEP3 Phase 2 — write-through this window's kind +
+        // parent linkage to srv now that its concrete window_id is known.
+        // This is the first point in the window's life where the host has
+        // both facts at once: `WindowMeta` (kind/parent_instance_id) was
+        // populated at creation time (`on_after_created`, from the
+        // pre-create handoff — see the module doc above), and `window_id`
+        // just arrived as this call's argument. The frontend never learns
+        // its own window's kind, so this write-through is host-only.
+        if let Some(meta) = state.window_meta(label) {
+            let kind_str = match meta.kind {
+                crate::state::WindowKind::FullInstance => "full_instance",
+                crate::state::WindowKind::Subwindow => "subwindow",
+            };
+            // `parent_instance_id` is a window LABEL (see `WindowMeta`'s doc
+            // comment), not a srv window_id — resolve it through the same
+            // label→window_id lookup the opacity/floating-placement
+            // write-throughs already use. A `Subwindow` whose parent hasn't
+            // registered its own window_id yet (a narrow creation-order
+            // race) is skipped rather than written with a wrong/missing
+            // parent — the same class of bounded gap SPEC_PILLAR1_STEP2
+            // already accepted for its own write-throughs.
+            let parent_window_id: Option<String> = match &meta.parent_instance_id {
+                Some(parent_label) => match state.backend_window_id(parent_label) {
+                    Some(id) => Some(id),
+                    None => {
+                        tracing::debug!(
+                            label = %label,
+                            parent_label = %parent_label,
+                            "[window-topology] parent's backend_window_id not yet known — skipping topology write-through"
+                        );
+                        return serde_json::Value::Null;
+                    }
+                },
+                None => None,
+            };
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let window_id_owned = window_id.to_string();
+            let kind_owned = kind_str.to_string();
+            std::thread::spawn(move || {
+                crate::client::backend_set_window_topology(
+                    &web_endpoint,
+                    &auth_key,
+                    &window_id_owned,
+                    &kind_owned,
+                    parent_window_id.as_deref(),
+                );
+            });
+        } else {
+            tracing::debug!(
+                label = %label,
+                "[window-topology] no WindowMeta for label — skipping topology write-through (e.g. pool/browser-pane label)"
+            );
+        }
     } else {
         tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
     }

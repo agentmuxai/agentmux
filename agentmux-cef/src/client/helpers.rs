@@ -248,6 +248,86 @@ pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, win
     }
 }
 
+/// SPEC_PILLAR1_STEP3 Phase 2 — write-through a window's `kind` +
+/// `parent_window_id` to srv, so a future reproject can tell which
+/// native-window creation path to drive for each window. Fire-and-forget,
+/// same shape as `backend_set_window_opacity`: raw TCP, called from its own
+/// background thread (see `register_backend_window` in
+/// `commands/window/meta.rs`) so a slow/failed srv round-trip never stalls
+/// the registration the frontend is actively completing.
+///
+/// `parent_window_id` must already be resolved to a srv `Window.oid` by the
+/// caller — `WindowMeta.parent_instance_id` (the host-side source of this
+/// value) is a window LABEL, not a srv id; the caller resolves it via
+/// `AppState::backend_window_id` before calling this.
+pub(crate) fn backend_set_window_topology(
+    web_endpoint: &str,
+    auth_key: &str,
+    window_id: &str,
+    kind: &str,
+    parent_window_id: Option<&str>,
+) {
+    use std::io::Write;
+
+    let Some(addr) = parse_web_endpoint(web_endpoint, "backend_set_window_topology") else {
+        return;
+    };
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "SetWindowTopology",
+        "args": [window_id, kind, parent_window_id],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(timeout)).ok();
+            stream.set_read_timeout(Some(timeout)).ok();
+            if let Err(e) = stream.write_all(request.as_bytes()) {
+                tracing::warn!(
+                    window_id = %window_id,
+                    error = %e,
+                    "[backend_set_window_topology] write failed — topology mirror not persisted"
+                );
+                return;
+            }
+            use std::io::Read;
+            let mut resp = String::new();
+            let _ = stream.read_to_string(&mut resp);
+            let first_line = resp.lines().next().unwrap_or("(empty)");
+            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
+                tracing::warn!(
+                    window_id = %window_id,
+                    response = %first_line,
+                    "[backend_set_window_topology] SetWindowTopology did not succeed — topology mirror not persisted"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                window_id = %window_id,
+                addr = %addr,
+                error = %e,
+                "[backend_set_window_topology] connect failed — topology mirror not persisted"
+            );
+        }
+    }
+}
+
 /// SPEC_PILLAR1_STEP2 Slice A Phase 2 — read back the last-persisted opacity
 /// for `window_id` from srv (the crash-recovery path: the host's in-memory
 /// `window_opacities` map is empty on a fresh process, so a restart falls
