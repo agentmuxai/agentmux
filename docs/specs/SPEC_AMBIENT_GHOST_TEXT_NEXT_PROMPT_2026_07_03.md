@@ -186,8 +186,18 @@ suggestion is **interactive**:
   `Done`.
 - **Tab accepts** the suggestion into the real input (matching Claude Code's
   own terminal UX exactly, so users familiar with the CLI get a consistent
-  mental model). Any other keystroke dismisses it — normal typing takes over
-  immediately, no different from typing over a placeholder.
+  mental model). **Right Arrow also accepts it** — verified 2026-07-07 by
+  inspecting the Claude Code CLI binary directly (`strings` + grep for every
+  `name==="rightArrow"`/`name==="right"` key check): the real CLI has no
+  right-arrow path anywhere near the prompt-suggestion logic, only `tab`. So
+  this is a deliberate AgentMux-only addition layered on top of the CLI-parity
+  baseline — the fish-shell/zsh-autosuggestions/Copilot convention of
+  accepting an inline suggestion with the "keep going right" key, so the user
+  can Right-Arrow-then-Enter without reaching for Tab. Safe to add: with the
+  textarea empty (the only state the suggestion renders in) there's no cursor
+  to move, so Right Arrow is otherwise a no-op there. Any other keystroke
+  dismisses it — normal typing takes over immediately, no different from
+  typing over a placeholder.
 - Precedence over the existing static placeholder (§3): show
   `term:next_prompt_suggestion` if present and current-generation; else the
   existing static placeholder text. Same "prefer the richer ambient signal,
