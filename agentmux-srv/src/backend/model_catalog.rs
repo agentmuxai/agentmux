@@ -34,12 +34,15 @@ use std::path::Path;
 use crate::identity::key_validator::client;
 use crate::identity::secret_store;
 
-/// Fixed, sentinel keychain account string for the user-supplied long-lived
+/// Fixed, sentinel account id for the user-supplied long-lived
 /// `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), persisted via
-/// `identity::secret_store`. Deliberately distinct from the `acct:<account_id>`
-/// convention used for per-identity Armory keys (see `identity::resolver`,
-/// `identity::oauth_client`) — this is a single, system-wide fallback token,
-/// not tied to any AgentMux identity/account.
+/// `identity::secret_store::put`/`get`. Those wrap it in `account_key()`
+/// (`"acct:{account_id}"`), so the actual keychain entry is
+/// `"acct:system:claude-code-oauth-token"` — this constant only needs to be
+/// distinct as an *account id* from the per-identity Armory account ids used
+/// elsewhere (see `identity::resolver`, `identity::oauth_client`), which are
+/// account UUIDs and would never collide with this sentinel string. This is a
+/// single, system-wide fallback token, not tied to any AgentMux identity.
 const CLAUDE_OAUTH_TOKEN_ACCOUNT: &str = "system:claude-code-oauth-token";
 
 /// One entry in the model dropdown. `id` is the concrete `--model` value the
@@ -92,23 +95,34 @@ pub fn read_oauth_access_token(config_dir: &Path) -> Option<String> {
 ///
 /// Callers should use this instead of calling [`read_oauth_access_token`]
 /// directly. Never logs the token.
-pub fn resolve_access_token(config_dir: &Path) -> Option<String> {
+///
+/// Steps 2/3 hit the OS keychain (via `identity::secret_store`), which wraps
+/// blocking `keyring` syscalls (can even trigger a macOS permission prompt on
+/// first access) — run on a `spawn_blocking` thread, matching the established
+/// pattern for the same calls in `app_api/mod.rs`'s
+/// `identity_account_validate_stored_impl`, so this never blocks an async
+/// runtime worker thread.
+pub async fn resolve_access_token(config_dir: &Path) -> Option<String> {
     if let Some(token) = read_oauth_access_token(config_dir) {
         return Some(token);
     }
-    resolve_fallback_access_token(
-        || std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok(),
-        |token| {
-            if let Err(e) = secret_store::put(CLAUDE_OAUTH_TOKEN_ACCOUNT, token) {
-                tracing::warn!("model catalog: failed to persist CLAUDE_CODE_OAUTH_TOKEN: {e}");
-            }
-        },
-        || {
-            secret_store::get(CLAUDE_OAUTH_TOKEN_ACCOUNT)
-                .ok()
-                .map(|z| z.to_string())
-        },
-    )
+    tokio::task::spawn_blocking(|| {
+        resolve_fallback_access_token(
+            || std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok(),
+            |token| {
+                if let Err(e) = secret_store::put(CLAUDE_OAUTH_TOKEN_ACCOUNT, token) {
+                    tracing::warn!("model catalog: failed to persist CLAUDE_CODE_OAUTH_TOKEN: {e}");
+                }
+            },
+            || {
+                secret_store::get(CLAUDE_OAUTH_TOKEN_ACCOUNT)
+                    .ok()
+                    .map(|z| z.to_string())
+            },
+        )
+    })
+    .await
+    .unwrap_or(None)
 }
 
 /// Pure resolution-order logic backing steps 2/3 of [`resolve_access_token`],

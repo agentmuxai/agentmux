@@ -64,7 +64,7 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                     None => return empty_result(),
                 };
                 let dir = paths.provider_auth_dir(provider.auth_dir_name);
-                let token = match resolve_access_token(&dir) {
+                let token = match resolve_access_token(&dir).await {
                     Some(t) => t,
                     // No token from the `.credentials.json` file, the
                     // CLAUDE_CODE_OAUTH_TOKEN env var, or a previously
