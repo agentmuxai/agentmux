@@ -530,6 +530,32 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
                     );
                 }
             }
+            // reagent P1: parent_window_id must only ever be set alongside
+            // kind='subwindow' — the doc comment's invariant ("None for a
+            // full_instance ... or an unset/legacy row") was previously only
+            // enforced in one direction (subwindow requires a parent), not
+            // the reverse (full_instance/None must NOT carry a parent).
+            if parent_window_id.is_some() && kind.as_deref() != Some("subwindow") {
+                return WebReturnType::error(
+                    "SetWindowTopology: parent_window_id must only be set when kind='subwindow'"
+                        .to_string(),
+                );
+            }
+            // reagent P2: a subwindow's parent must reference a real,
+            // DIFFERENT window — otherwise a dangling or self-referential
+            // parent_window_id silently persists undetected.
+            if let Some(parent_id) = &parent_window_id {
+                if parent_id == &window_id {
+                    return WebReturnType::error(
+                        "SetWindowTopology: parent_window_id must not equal window_id".to_string(),
+                    );
+                }
+                if store.must_get::<Window>(parent_id).is_err() {
+                    return WebReturnType::error(format!(
+                        "SetWindowTopology: parent_window_id '{parent_id}' does not reference an existing window"
+                    ));
+                }
+            }
             match store.must_get::<Window>(&window_id) {
                 Ok(mut win) => {
                     win.kind = kind;
@@ -857,6 +883,63 @@ mod set_window_topology_tests {
 
         let ret = handle_window_service(&state, &call(&window_id, Some("floating"), None)).await;
         assert!(!ret.success, "unknown kind must be rejected");
+    }
+
+    /// reagent P1: a full_instance (or unset/None kind) must never carry a
+    /// parent_window_id — only the reverse (subwindow requires a parent)
+    /// was originally enforced.
+    #[tokio::test]
+    async fn rejects_full_instance_with_parent() {
+        let state = test_state();
+        let parent_id = seeded_window_id(&state).await;
+        let window_id = seeded_window_id(&state).await;
+
+        let ret =
+            handle_window_service(&state, &call(&window_id, Some("full_instance"), Some(&parent_id)))
+                .await;
+        assert!(!ret.success, "full_instance with a parent_window_id must be rejected");
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.kind, None, "rejected write must not persist");
+    }
+
+    /// reagent P1: same rule when kind is omitted entirely (None) but a
+    /// parent_window_id is supplied anyway.
+    #[tokio::test]
+    async fn rejects_none_kind_with_parent() {
+        let state = test_state();
+        let parent_id = seeded_window_id(&state).await;
+        let window_id = seeded_window_id(&state).await;
+
+        let ret = handle_window_service(&state, &call(&window_id, None, Some(&parent_id))).await;
+        assert!(!ret.success, "kind=None with a parent_window_id must be rejected");
+    }
+
+    /// reagent P2: parent_window_id must reference a real window row, not a
+    /// dangling id.
+    #[tokio::test]
+    async fn rejects_dangling_parent_window_id() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        let ret =
+            handle_window_service(&state, &call(&window_id, Some("subwindow"), Some("ghost-parent")))
+                .await;
+        assert!(!ret.success, "a parent_window_id that doesn't exist must be rejected");
+
+        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        assert_eq!(win.kind, None, "rejected write must not persist");
+    }
+
+    /// reagent P2: a window cannot be its own parent.
+    #[tokio::test]
+    async fn rejects_self_referential_parent() {
+        let state = test_state();
+        let window_id = seeded_window_id(&state).await;
+
+        let ret =
+            handle_window_service(&state, &call(&window_id, Some("subwindow"), Some(&window_id))).await;
+        assert!(!ret.success, "a window referencing itself as parent must be rejected");
     }
 
     #[tokio::test]
