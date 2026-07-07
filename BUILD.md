@@ -12,7 +12,7 @@ These instructions cover setting up dependencies and building AgentMux from sour
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| **Node.js** | v22 LTS | Frontend build (React/Vite) |
+| **Node.js** | v22 LTS | Frontend build (SolidJS/Vite) |
 | **Rust** | 1.77+ | Backend (agentmux-srv) + Host (agentmux-cef) |
 | **Task** | Latest | Build orchestration |
 
@@ -123,7 +123,7 @@ task dev
 ```
 
 Features:
-- Frontend hot reload (React HMR via Vite)
+- Frontend hot reload (Solid Refresh via Vite)
 - Auto-rebuild on Rust changes
 - DevTools available (Ctrl+Shift+I)
 
