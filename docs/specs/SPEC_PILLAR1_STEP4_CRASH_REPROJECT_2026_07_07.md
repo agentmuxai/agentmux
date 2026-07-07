@@ -1,0 +1,325 @@
+# Pillar 1 Step 4 — Crash Reproject: Automatic Multi-Window Reconstruction
+
+**Date:** 2026-07-07
+**Type:** Design spec (grounds Step 4 before any code — Steps 1-3 are done; this is genuinely new
+machinery, not "fire an existing path on a new trigger")
+**Status:** Ready for review — not yet implemented
+**Builds on:** SPEC_864 (merged), SPEC_PILLAR1_STEP2 (merged), SPEC_PILLAR1_STEP3 (merged) —
+persistence prerequisites are all in place.
+**Corrects/resolves:** `SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` §6 step 4 — the design
+doc's own 2026-07-07 addendum already flagged this needs "genuinely new multi-window recreation
+code" and "zero existing scaffolding" for in-flight re-derivation. This spec grounds both claims
+with a concrete design, and finds one of them is less true than believed (see §2.1).
+
+---
+
+## 0. TL;DR
+
+The host today rebuilds exactly **one** window on any (re)start — cold or post-crash, identically —
+by reading `Client.windowids[0]` from srv. Everything else the user had open is gone unless they
+manually reopen it. This spec makes reproject **unconditional and idempotent**: every host start
+enumerates the full persisted window set and recreates whatever's missing, whether that's zero
+extra windows (the common case — nothing to do) or several (the crash-recovery case). No new
+"is this a restart" signal is needed — see §2.2 for why.
+
+**The most important finding grounding this spec:** the launcher (which stays alive across a
+host-only crash — the far more common failure than a full process-tree kill) already holds a
+richer, faster, zero-query copy of the window set in memory (`label`, `kind`, `parent_label`, and
+even `last_rect`) than what a fresh host would get by querying srv. There is **already a complete,
+tested wire protocol for the host to fetch it** — `Command::GetSnapshot` → `Event::Snapshot`
+(`agentmux-launcher/src/reducer/connection.rs:71-113`) — that the host has simply never called.
+This spec's design is a **two-tier reproject**: prefer the launcher's live snapshot when available
+(fast, richer, no srv round-trip); fall back to srv's durable `Client.windowids` +
+`Window.kind`/`parent_window_id` (Step 3) when the launcher itself also died. Both tiers converge on
+the same per-window recreation code path.
+
+---
+
+## 1. Current state (verified against source, 2026-07-07 research pass)
+
+### 1.A — No distinguishing "this is a crash restart" signal exists, anywhere
+Grepped `agentmux-launcher/src/host_spawn.rs`, `supervisor/windows.rs`, `supervisor/unix.rs` for any
+restart counter, env var, or CLI flag — none exists. The crash-relaunch call sites
+(`supervisor/windows.rs:558-624`, `unix.rs:516-556`) pass the **identical** `args`/`env` as the
+original spawn; the only thing that ever differs is `host_degraded` (a `--disable-gpu` rendering
+fallback after repeated crashes, unrelated to topology). `agentmux-cef/src/app.rs::on_context_
+initialized` (the sole native-window-creation call at startup) has no branch on prior-session state.
+**Conclusion: cold launch and post-crash launch are byte-identical code paths today.** (Confirms and
+extends the SPEC_PILLAR1_STEP3 finding.)
+
+### 1.B — The launcher's in-memory window state survives a host-only crash, completely unexploited
+`agentmux-launcher/src/state.rs:172-259` (`struct State`) — `windows: HashMap<String, WindowMirror>`
+(with `kind`, `parent_label` at `state.rs:96-100`), `instance_registry`, `backend_window_ids` — is
+constructed **once**, for the launcher's entire process lifetime, inside `Arc<Mutex<State>>`. A
+host-only crash does not touch this `Arc` — only the host *process* dies. Tracing what happens on an
+ungraceful host disconnect: `dispatch_synthetic_goodbye` → `handle_goodbye`
+(`agentmux-launcher/src/reducer/connection.rs:200-221`) mutates only `state.processes[pid].state =
+Exited` — `state.windows` is never touched. The only thing that ever removes a `WindowMirror` entry
+is an explicit `ReportWindowClosed`, which a crash never sends.
+
+**The wire protocol to fetch this already exists, fully built, and is simply never called:**
+- `Command::GetSnapshot` (`agentmux-common/src/ipc.rs:240`) → `handle_get_snapshot`
+  (`agentmux-launcher/src/reducer/connection.rs:71-113`) → `Event::Snapshot { version, lifecycle,
+  windows: Vec<WindowSnapshot>, pool, instance_registry, backend_window_ids, monitors }`, where each
+  `WindowSnapshot` carries `label, kind, parent_label, hwnd, visible, iconic, last_rect,
+  foregrounded_since_open`.
+- Grepped all of `agentmux-cef/src` for `GetSnapshot` — **zero call sites.** The host's launcher-
+  connect flow (`agentmux-cef/src/launcher_ipc.rs::connect_to_launcher`) sends `Register` then just
+  starts a passive delta-apply read loop; it never requests a snapshot.
+- `handle_register`'s own comment (`agentmux-launcher/src/reducer/connection.rs:169`) already
+  anticipated this: *"Subsequent Host re-registers (after a host crash + restart in some future
+  world) won't double-fire [the lifecycle transition]"* — written in the future tense, never acted
+  on.
+
+**This is a green-field design opportunity, not a bug fix.** The launcher's snapshot is strictly
+richer than what Step 3 persisted to srv (it includes `last_rect`, which srv's `Window.pos`/
+`winsize` fields are — per the parent design doc — currently dead/unwritten) and requires no query
+latency (already in the launcher's memory). It is *not* a replacement for srv persistence, though —
+a full process-tree kill (launcher + host together, e.g. an OS-level OOM-killer sweep) loses it
+entirely, which is exactly the case Step 3's srv persistence exists to cover.
+
+### 1.C — In-flight/transient `HostState` fields (design doc's "2.C") already start correctly empty
+Every field in this category (`pending_window_creations`, `pending_browser_pane_creates`,
+`browser_panes`'s Live/Closing lifecycle, `pool.respawn_in_flight`/`pane_pool.respawn_in_flight`,
+`quit_state`, `top_level_creation`) is a plain Rust struct field with no cross-process persistence.
+`AppState::default()` (`agentmux-cef/src/state.rs:923`) constructs a byte-fresh `HostState::default()`
+on every process start — cold or post-crash, identically. **Verified: there is nothing to "clear" or
+"re-derive" in the sense of resetting stale data — every field is already empty/reset by construction
+on any fresh process.** The design doc's §7 "subtle part" warning is still correct in spirit but was
+mis-aimed at state-clearing; the actual discipline needed is **procedural**: the reproject driver
+must create windows/panes through the same code paths an interactive user action would use (which
+correctly populate these transient queues as a side effect of real creation), never by synthesizing
+entries directly into `pending_window_creations`/`browser_panes` to *simulate* a resumed operation.
+No existing code does the latter — there is no anti-pattern to fix, only a constraint to write down
+before someone invents one.
+
+### 1.D — No overlay/splash mechanism distinguishes cold-start from crash-restart, and none has a text slot
+Three existing loading-treatment mechanisms, none reusable as-is:
+- **Launcher native splash** (`agentmux-launcher/src/splash.rs`) — spawned exactly once per launcher
+  lifetime (`supervisor/windows.rs:199`, before the *first* host spawn only), destroyed permanently
+  after first dismiss (`splash.rs:315-338`: fade → `DestroyWindow` → thread returns). Never
+  re-invoked on the crash-restart branches (`windows.rs:558-624`). Its content is a stage-telemetry
+  list (`"Saga recovery"`, `"Host startup"`, …), not a swappable headline — there's no generic text
+  field to repurpose.
+- **`BrainSpinner`** (`frontend/app/element/BrainSpinner.tsx`) — confirmed frontend/DOM-only; every
+  call site is a `Suspense`/`Show` fallback *inside an already-mounted pane inside an already-loaded
+  window*. Not usable for the pre-window phase of a reproject, which is exactly the phase that
+  matters most (the user sees nothing at all until a window exists).
+- **`index.html`'s `#startup-loading`** (`frontend/app/init/startup-splash.ts`) — a CSS-only
+  full-cover overlay baked into the HTML template, shown before any JS runs, dismissed by
+  `fadeOutStartupSplash()`. Reappears automatically on every window's page load (including a
+  reprojected one) with zero host-side wiring — but has no text slot either, just an animated logo.
+
+### 1.E — `open_window_with_kind` is the right internal function to build on, with two gaps
+`agentmux-cef/src/commands/window/creation.rs:334-416` — the private function both `open_new_window`
+and `open_subwindow` (the IPC entry points) delegate to. It already does the right thing for
+`(kind, parent_instance_id)`: builds the label, the frontend URL (`windowLabel=`/`initialView=`/
+`initialMeta=`), dispatches `EnqueuePendingWindowCreation`, and calls
+`ui_tasks::post_create_window`. Two gaps for reproject's purposes:
+1. **Not `pub(crate)`** — trivial visibility fix.
+2. **No explicit-rect parameter** — it always computes its own offset/70%-of-monitor placement
+   (`get_offset_position`/`get_secondary_window_size`, `:391-392`); there's no way to pass a target
+   rect (needed to restore a window to `last_rect` from the launcher's snapshot, or a subwindow to
+   its last known position). Needs an `explicit_rect: Option<PaneRect>` parameter that skips the
+   placement heuristics when present.
+3. **No multi-window loop** — it creates exactly one window per call, as expected; the enumeration
+   over "all windows this session should have" is new code regardless of source (launcher snapshot
+   or srv query).
+
+---
+
+## 2. Target design
+
+### 2.1 — Two-tier reproject source (the central design decision)
+
+```
+On host startup (unconditional, every time — cold or post-crash):
+  1. Connect to the launcher (as today), send Register.
+  2. NEW: immediately send Command::GetSnapshot.
+  3. If a non-empty Event::Snapshot arrives within a short bound (e.g. 500ms — the launcher is
+     local IPC, this should be near-instant if it responds at all) AND it lists more than the
+     one window the host is about to create by default:
+       → FAST PATH: reproject from the launcher's snapshot (`WindowSnapshot.kind`, `.parent_label`,
+         `.last_rect`). No srv query needed for topology; srv is still the source for each window's
+         workspace/tab/layout content (unchanged from today's per-window bootstrap).
+  4. Otherwise (no snapshot, empty snapshot, or launcher itself is also fresh — e.g. after a full
+     process-tree kill, a fresh launcher has no in-memory history):
+       → SLOW PATH: reproject from srv. Read `Client.windowids`; for each id beyond the one the
+         default bootstrap already handles, `GetWindow` to read `kind`/`parent_window_id` (Step 3).
+         No `last_rect` available this way (Step 2/3 never persisted window pos/size — see §4 risk).
+  5. Either path: drive per-window recreation through `open_window_with_kind` (made `pub(crate)`,
+     with the new explicit-rect parameter), in parent-before-child order (a Subwindow's parent must
+     exist before the Subwindow is created — trivial to guarantee by sorting FullInstance windows
+     first, matching `WindowKind`'s natural precedence).
+```
+
+**Why two tiers, not just the srv path:** the srv-only path loses window position/size entirely
+(never persisted — a real, separate gap, see §4) and pays a query round-trip per window. The
+launcher-snapshot path is strictly better whenever available (the overwhelmingly common case — most
+crashes are host-only OOM/panic, not full-tree kills) and costs nothing to prefer. Skipping it would
+leave the existing, tested `GetSnapshot`/`Event::Snapshot` machinery permanently dead for no reason.
+
+**Why this doesn't need a new "is this a restart" signal:** the enumeration is written to be
+idempotent by construction — on a genuine first-ever launch, the launcher's snapshot has zero
+windows (nothing running yet) and srv's `Client.windowids` has zero or one entry, so the "recreate
+what's missing beyond the default" loop simply does nothing extra. The same code path handles cold
+start and crash-restart uniformly, exactly matching the crash-only-software principle the parent
+design doc cites (Candea & Fox: *one* way to start). This is a stronger, simpler resolution than
+inventing a restart flag.
+
+### 2.2 — Per-window recreation
+
+For each window beyond the default one:
+1. Resolve `kind` (`FullInstance`/`Subwindow`) and, for a `Subwindow`, its parent's **new** label
+   (not its old one — the parent is being recreated fresh too, with a new `window-<uuid>` label;
+   the reproject driver must track old-label→new-label for the current pass to wire
+   `parent_instance_id` correctly. `WindowMirror`'s `parent_label` / srv's `parent_window_id` both
+   reference identity, not the literal label string, so this remapping is required either way).
+2. Call `open_window_with_kind(state, kind, Some(new_parent_label), None, None, explicit_rect)`.
+3. The window's *content* (workspace/tab/layout) is **not** part of this call — exactly as today,
+   the frontend inside the newly-created window resolves its own workspace via the existing
+   per-window bootstrap (`frontend/app-init.ts`), reading srv directly. This is the part of the
+   design doc's claim that *is* still true: content-level reproject reuses existing machinery
+   without new deserialization code. Only the **window-set** enumeration is new.
+
+### 2.3 — In-flight state: procedural discipline, not new state management (see §1.C)
+
+State this: reproject must call `open_window_with_kind` (or its future variants) exactly as an
+interactive "New Window"/"New Subwindow" action would — never write directly into
+`pending_window_creations`, `browser_panes`, or any other transient map to simulate a resumed
+operation. This is already true of every existing caller; the spec's job is to make the constraint
+explicit so a future contributor doesn't "optimize" reproject into a shortcut that reintroduces the
+exact race classes #864/Pillar 2 spent this session eliminating.
+
+### 2.4 — Overlay UX (secondary priority — do not let this block the mechanism)
+
+Two independent, low-coupling pieces, matching the two phases:
+- **Pre-window phase** (nothing on screen yet): extend the launcher's native splash to be
+  re-spawnable on the crash-restart branches (`supervisor/windows.rs:558-624`/`unix.rs:516-556`),
+  with a new headline concept distinct from the stage-telemetry list — "Restoring session…" — and a
+  fresh dismiss-event/env-var pair per re-spawn (the original event's consumer thread is already
+  gone by the time a crash-restart happens). This is genuinely new launcher-side work, not a text
+  swap.
+- **In-window phase** (a reprojected window's page is loading): extend `index.html`'s
+  `#startup-loading` with an optional query-param-driven headline (e.g. `?restoring=1`) — cheap,
+  frontend-only, and the overlay already reappears automatically per the design doc's own
+  observation that flicker/rebuild-visibility is a crash-path-only, acceptable event.
+
+**Recommendation: land 2.1-2.3 (the actual mechanism) first, behind no overlay at all if necessary
+(a blank moment before the window appears is not worse than today's status quo of the window simply
+never reappearing) — then treat 2.4 as a fast follow, not a blocking dependency.** This mirrors how
+this session's own splash-hold fix (3s→2s) was folded into an unrelated PR as a "quick addon," not
+gating a larger piece of work.
+
+---
+
+## 3. Phased plan
+
+**Phase 1 — wire the launcher snapshot fetch (fast path), no window recreation yet.** On host
+startup, send `Command::GetSnapshot`, log what it would drive (window count, kinds, parents) but
+don't act yet. Pure plumbing + observability; zero behavior change. Unit-testable on the launcher
+side (`handle_get_snapshot` already has coverage per its doc comment); host-side needs new tests for
+the request/response round trip.
+
+**Phase 2 — per-window recreation from the fast-path snapshot.** Make `open_window_with_kind`
+`pub(crate)`, add the explicit-rect parameter, implement the enumeration + parent-before-child
+ordering + old-label→new-label remapping from §2.2. **App-running verification required** (this
+session's established bar for every host↔launcher/srv write-through): open 2-3 windows including at
+least one subwindow, kill the *inner host process only* (the established technique for triggering a
+launcher-supervised respawn without killing the launcher), confirm all windows reappear with correct
+kind/parent linkage and roughly-correct placement.
+
+**Phase 3 — slow-path fallback from srv.** Read `Client.windowids` + `Window.kind`/
+`parent_window_id` (Step 3) when the launcher's snapshot is empty/unavailable. **App-running
+verification required**: kill the *entire* process tree (launcher + host together) and relaunch from
+scratch, confirm windows still reproject (without exact position/size — see §4 risk — but with
+correct kind/parent/content).
+
+**Phase 4 — overlay UX** (§2.4), as a follow-on, not gating Phases 1-3.
+
+**Phase 5 — E2E test** ("host OOM ⇒ session reprojects", per the parent design doc's §3 acceptance
+criterion): automate the Phase 2 manual verification.
+
+Each phase independently shippable, matching every other Pillar 1 spec's phasing discipline this
+session established.
+
+---
+
+## 4. Risks / honest caveats
+
+- **Window position/size (`Window.pos`/`winsize`) is not persisted by any live path today** —
+  confirmed dead fields per the parent design doc's own §2.C ("genuinely useful for reproject but not
+  one of the two facts the design doc's Q1 table names; a natural Step 2.5"). The slow (srv-only)
+  path therefore cannot restore exact window placement, only kind/parent/content — windows reproject
+  at `open_window_with_kind`'s default offset/70% heuristic, not where the user left them. The fast
+  (launcher-snapshot) path *does* have `last_rect` and should use it. This asymmetry should be
+  called out to users/reviewers, not silently accepted — restoring approximate-but-wrong-position
+  windows is still much better than not restoring them at all, but it's not full parity between the
+  two tiers.
+- **Old-label→new-label remapping for parent linkage is a real bookkeeping requirement**, not
+  automatic — every recreated window gets a fresh `window-<uuid>` label; a naive implementation that
+  reuses the *old* parent label when creating a Subwindow will silently produce a dangling
+  `parent_instance_id` pointing at a label that no longer exists. Phase 2's implementation must build
+  this remap table before creating any Subwindow.
+- **The 500ms `GetSnapshot` response bound (§2.1 step 3) is a first guess, not measured.** Local IPC
+  should be fast, but this needs empirical tuning during Phase 1's implementation, not an assumed
+  constant.
+- **This spec does not implement the overlay (§2.4)** beyond scoping it — per the recommendation in
+  that section, it should not block Phases 1-3.
+- **Multi-monitor / DPI edge cases for restored `last_rect`** (the fast path) aren't addressed here —
+  a `last_rect` from a monitor configuration that no longer exists (laptop undocked, external
+  monitor removed) needs a bounds-check/clamp-to-nearest-available-monitor fallback, mirroring
+  patterns already used elsewhere in this codebase for monitor-aware placement
+  (`get_offset_position`/`get_secondary_window_size` presumably already have some of this logic —
+  verify and reuse at implementation time, don't invent new monitor-geometry code).
+
+---
+
+## 5. Explicitly out of scope
+
+- Persisting window `pos`/`winsize` to close the fast/slow-path placement-fidelity gap (§4) — a
+  natural "Step 2.5" the parent design doc already named, not blocking this spec.
+- The saga-layer collapse and graceful-flush-vs-crash incoherence deletion (parent design doc §6
+  step 6) — downstream of this spec, not a prerequisite.
+- Floating-pane read-back-on-reopen (deferred from SPEC_PILLAR1_STEP2 Slice B) — this spec's
+  window-level reproject is the trigger that finally makes that read-back path live/testable, but
+  wiring the read-back itself is that spec's follow-up, not this one's.
+- Cross-platform (macOS/Linux) parity — this research pass and the cited code (`splash_mac.rs`
+  aside) was Windows-focused, matching this session's live-verification methodology throughout.
+  macOS/Linux equivalents for the launcher-snapshot fast path and the native-splash re-spawn need
+  their own verification pass at implementation time.
+
+---
+
+## 6. Definition of done
+
+1. ⬜ `Command::GetSnapshot` is sent by the host on every launcher connection; the response is parsed
+   and logged (Phase 1).
+2. ⬜ Killing the inner host process only (launcher survives) and confirming a multi-window session
+   (including a subwindow) fully reprojects with correct kind/parent/content and approximately
+   correct placement (Phase 2, live-verified).
+3. ⬜ Killing the entire process tree and relaunching confirms a multi-window session reprojects
+   with correct kind/parent/content, position/size at default placement (Phase 3, live-verified).
+4. ⬜ No regression in existing single-window cold-start behavior (the common case — most users
+   never see more than one window) — this must remain exactly as fast and reliable as today.
+5. ⬜ E2E test automating #2 (Phase 5).
+
+---
+
+## 7. Sources
+
+- `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md` (parent design doc, corrected
+  2026-07-07 — the doc this spec resolves step 4 of).
+- `docs/specs/SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md` (the srv-side persistence this
+  spec's slow path reads from).
+- `docs/status/STATUS_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_07_07.md` (the status snapshot that
+  recommended this spec be written next).
+- Code read for this spec (two research passes, 2026-07-07): `agentmux-launcher/src/state.rs:172-
+  259`, `agentmux-launcher/src/reducer/connection.rs:60-221`, `agentmux-launcher/src/host_spawn.rs:
+  14-179`, `agentmux-launcher/src/supervisor/windows.rs:199,558-624`, `agentmux-launcher/src/
+  supervisor/unix.rs:516-556`, `agentmux-common/src/ipc.rs:240-243,1146`, `agentmux-cef/src/
+  launcher_ipc.rs:84-306`, `agentmux-cef/src/app.rs:1125-1233`, `agentmux-cef/src/reducer/mod.rs:65-
+  188`, `agentmux-cef/src/state.rs:923`, `agentmux-cef/src/commands/window/creation.rs:237-463`,
+  `agentmux-cef/src/ui_tasks/window.rs:1146-1158`, `agentmux-launcher/src/splash.rs:173-338`,
+  `frontend/app/element/BrainSpinner.tsx:1-40`, `frontend/app/init/startup-splash.ts:1-38`,
+  `index.html:20-82`.
