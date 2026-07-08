@@ -900,6 +900,22 @@ pub struct AppState {
     /// completes before the other starts.
     pub ui_thread_gate: Mutex<UiThreadGate>,
 
+    /// SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P1, PR #2032, 2026-07-08)
+    /// — `new_label → old_srv_window_id`. The slow path's `reproject_from_srv`
+    /// must NOT close the old window_id right after `open_window_with_kind`
+    /// returns `Ok`: that only means a `CreateWindowTask` was posted to the
+    /// UI thread (fire-and-forget), not that the window actually exists —
+    /// this session's own Phase 2 investigation found `post_task` can
+    /// silently drop a posted task. Closing on that unconfirmed signal would
+    /// delete the old session's window/workspace/tabs with no replacement
+    /// and no retry if creation then failed. Instead, the old id is stashed
+    /// here keyed by the NEW label, and only closed once that label's own
+    /// `register_backend_window` call fires — proof the new window's
+    /// frontend actually loaded and round-tripped IPC. If creation silently
+    /// fails, the entry just sits here unclosed forever, which is the same
+    /// (safe, if imperfect) fallback behavior as before this whole cleanup
+    /// existed: the old data lingers, but is never lost.
+    pub pending_reproject_closures: Mutex<std::collections::HashMap<String, String>>,
 }
 
 /// See `AppState::ui_thread_gate`.
@@ -1182,6 +1198,7 @@ impl Default for AppState {
             floating_redock_ghost: Mutex::new(HashMap::new()),
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
+            pending_reproject_closures: Mutex::new(HashMap::new()),
         }
     }
 }
