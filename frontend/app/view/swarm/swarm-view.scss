@@ -216,6 +216,15 @@
 
 // ── Subagent child row ───────────────────────────────────────────────────
 
+.swarm-subagent-group {
+    display: flex;
+    flex-direction: column;
+
+    &--completed {
+        opacity: 0.85;
+    }
+}
+
 .swarm-subagent-row {
     display: flex;
     align-items: center;
@@ -243,6 +252,113 @@
         white-space: nowrap;
         color: var(--main-text-color);
     }
+}
+
+.swarm-subagent-expand-icon {
+    width: 10px;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    flex-shrink: 0;
+}
+
+// ── Subagent inline detail (expanded event log) ──────────────────────────
+
+.swarm-subagent-detail {
+    display: flex;
+    flex-direction: column;
+    margin: 0 6px 4px 30px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--panel-bg-color, var(--main-bg-color));
+    max-height: 320px;
+    overflow: hidden;
+}
+
+.swarm-subagent-detail-header {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.swarm-subagent-detail-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--main-text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.swarm-subagent-detail-meta {
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
+.swarm-subagent-detail-log {
+    overflow-y: auto;
+    padding: 2px 8px 4px;
+}
+
+.swarm-subagent-detail-loading,
+.swarm-subagent-detail-empty {
+    padding: 8px 0;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+}
+
+.swarm-subagent-detail-text {
+    margin: 2px 0;
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--termfontfamily, monospace);
+
+    &--error {
+        color: var(--error-color);
+    }
+}
+
+.swarm-subagent-detail-tool {
+    margin: 1px 0;
+}
+
+.swarm-subagent-detail-tool-header {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: default;
+    padding: 1px 0;
+    font-size: 11px;
+    user-select: none;
+
+    &:hover {
+        color: var(--accent-color);
+    }
+
+    &--error {
+        color: var(--error-color);
+    }
+}
+
+.swarm-subagent-detail-tool-name {
+    font-family: var(--termfontfamily, monospace);
+    font-weight: 600;
+    color: var(--accent-color);
+}
+
+.swarm-subagent-detail-progress {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    padding: 1px 0;
 }
 
 // ── Haiku activity summary ───────────────────────────────────────────────

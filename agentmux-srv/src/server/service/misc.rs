@@ -69,6 +69,19 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             let info = state.subagent_watcher.get_info(&agent_id);
             WebReturnType::success(serde_json::to_value(&info).unwrap_or(serde_json::Value::Null))
         }
+        ("subagent", "GenerateName") => {
+            let agent_id: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            let display_name = super::super::app_api::session::generate_subagent_name(
+                &state.wstore,
+                &state.subagent_watcher,
+                &agent_id,
+            )
+            .await;
+            WebReturnType::success(serde_json::json!({ "displayName": display_name }))
+        }
         // ---- HistoryService ----
         ("history", "List") => {
             let provider: Option<String> = service::get_optional_arg(args, 0).unwrap_or(None);

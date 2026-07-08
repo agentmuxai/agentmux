@@ -119,7 +119,7 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
 /// user-facing pane-header/ghost-text request, and vice versa.
 const MAX_CONCURRENT_PULL_CALLS: usize = 2;
 
-fn pull_call_semaphore() -> &'static tokio::sync::Semaphore {
+pub(crate) fn pull_call_semaphore() -> &'static tokio::sync::Semaphore {
     static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
     SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_PULL_CALLS))
 }
@@ -186,6 +186,94 @@ pub(crate) async fn generate_pushed_activity_summary(
     let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
     drop(guard);
     result.filter(|(summary, _)| !summary.is_empty())
+}
+
+/// Ambient-call purpose tag for the on-demand subagent display name (see
+/// `generate_subagent_name`). One-shot per subagent — `generation` is always
+/// the constant `1` since a name, once generated, is cached on
+/// `SubagentInfo.display_name` and never regenerated; there is no "newer
+/// turn" to supersede an in-flight naming call the way there is for the
+/// per-turn pull RPCs above.
+const AMBIENT_PURPOSE_SUBAGENT_NAME: &str = "subagent_name";
+
+/// Generate (or return the already-cached) concise Haiku display name for a
+/// subagent. Called on-demand the first time a client expands that
+/// subagent's row in the Swarm view — see `("subagent", "GenerateName")` in
+/// `server::service::misc`. Subagents have no `Block`/meta of their own, so
+/// this borrows the parent block's CLI path + auth env, and reads the
+/// subagent's own initial task prompt directly off its JSONL (available
+/// immediately even for a still-running subagent, unlike a transcript
+/// summary which needs output to summarize).
+///
+/// Returns `None` when there's nothing to name (unknown subagent, no task
+/// prompt on the first JSONL line, parent block unresolvable, or the call
+/// was superseded/capped/failed) — callers should treat that as "leave the
+/// row showing its slug/id fallback," not an error.
+pub(crate) async fn generate_subagent_name(
+    wstore: &Store,
+    subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
+    agent_id: &str,
+) -> Option<String> {
+    let info = subagent_watcher.get_info(agent_id)?;
+    if let Some(existing) = info.display_name {
+        return Some(existing);
+    }
+
+    let key = crate::ambient::AmbientCallKey::new(agent_id.to_string(), AMBIENT_PURPOSE_SUBAGENT_NAME);
+    let guard = match crate::ambient::gateway().admit(key, 1) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return None,
+    };
+    let cancel = guard.cancellation();
+
+    // Same cross-block concurrency cap as the pull RPCs above — a user
+    // rapidly expanding several subagent rows shouldn't spawn unbounded
+    // concurrent Haiku CLIs either.
+    let permit = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        permit = pull_call_semaphore().acquire() => permit.ok(),
+    };
+    let Some(_permit) = permit else {
+        drop(guard);
+        return None;
+    };
+
+    let Some(task_prompt) = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path) else {
+        drop(guard);
+        return None;
+    };
+
+    let block: Block = match wstore.get(&info.parent_block_id) {
+        Ok(Some(b)) => b,
+        _ => {
+            drop(guard);
+            return None;
+        }
+    };
+    let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+    if cli_path.is_empty() {
+        drop(guard);
+        return None;
+    }
+
+    let prompt = format!(
+        "Give a concise ~5-word name for this task. \
+         No punctuation, no quotes, no preamble — respond with just the name.\n\n\
+         Task:\n\n{task_prompt}"
+    );
+
+    let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
+    drop(guard);
+
+    let (name, _tokens) = result?;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    subagent_watcher.set_display_name(agent_id, &name);
+    Some(name)
 }
 
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -429,7 +517,7 @@ fn read_recent_activity_digest(
 /// stream-json line (same `usage` shape the main turn pipeline parses —
 /// see `agents::translator::claude::parse_usage`), so ambient calls are
 /// never silently excluded from token accounting.
-pub(super) async fn invoke_ambient_haiku_call(
+pub(crate) async fn invoke_ambient_haiku_call(
     cli_path: &str,
     prompt: &str,
     meta: &obj::MetaMapType,
