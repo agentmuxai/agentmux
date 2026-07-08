@@ -59,6 +59,15 @@ export const McpApi = {
         return client.rpcCall("mcp.unbind", data, opts);
     },
 
+    /** Health/prerequisite probe — see McpProbeResult (gotypes.d.ts). */
+    McpProbeCommand(
+        client: RpcClient,
+        data: { agent_id: string; id: string },
+        opts?: RpcOpts,
+    ): Promise<McpProbeResult> {
+        return client.rpcCall("mcp.probe", data, opts);
+    },
+
     // ── Armory catalog (global servers only, no agent_id) ──────────────────
 
     McpCatalogListCommand(
@@ -83,5 +92,15 @@ export const McpApi = {
         opts?: RpcOpts,
     ): Promise<{ deleted: boolean }> {
         return client.rpcCall("mcp.catalog.delete", data, opts);
+    },
+
+    /** Health/prerequisite probe for a global catalog server — no agent_id
+     *  (mirrors mcp.catalog.*'s window-scoped shape). See McpProbeResult. */
+    McpCatalogProbeCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<McpProbeResult> {
+        return client.rpcCall("mcp.catalog.probe", data, opts);
     },
 };
