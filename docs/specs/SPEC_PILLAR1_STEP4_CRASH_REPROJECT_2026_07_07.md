@@ -305,6 +305,20 @@ opened plus 2 pre-existing pool-warm windows that had also registered backend wi
 gracefully defaulting 2 legacy rows with no persisted `kind` to `FullInstance` with a warning, rather
 than failing. All 4 appeared as real, correctly-labeled CDP targets.
 
+**Addendum 2026-07-08 (reagent review, PR #2017) — main-parented subwindows were silently skipped.**
+reagent caught a second real bug: `reproject_from_snapshot`'s `label_remap` is seeded only with the
+string `"main"` → `"main"` (the host's own stable label), not srv's UUID for it. `reproject_from_srv`
+built each snapshot's `parent_label` directly from srv's raw `parent_window_id`, so a subwindow
+parented to main carried `windowids[0]`'s literal UUID as its parent — a key the remap table never
+had, so the lookup failed and the subwindow was silently skipped as "parent not found," defeating the
+slow path for the single most common subwindow case. My first live-verification pass never caught
+this because it only tested `FullInstance` windows, no subwindow. Fixed by translating
+`windowids[0]`'s UUID to the `"main"` sentinel before building the snapshot list. Re-verified live
+with a subwindow explicitly parented to main (via `open_subwindow`, `parent_instance_id: "main"`)
+through a full process-tree kill + fresh relaunch: the reproject log now shows
+`kind=Subwindow parent_label=Some("main")` and `skipped=0`, and the subwindow appears as a real CDP
+target with a valid `windowId`.
+
 **Phase 4 — overlay UX** (§2.4), as a follow-on, not gating Phases 1-3.
 
 **Phase 5 — E2E test** ("host OOM ⇒ session reprojects", per the parent design doc's §3 acceptance

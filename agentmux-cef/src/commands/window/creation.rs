@@ -601,6 +601,14 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>) {
             return;
         }
 
+        // reagent P1 (PR #2017) — `reproject_from_snapshot`'s `label_remap` is
+        // seeded only with the string `"main"` → `"main"` (the host's own
+        // stable label for it), not srv's UUID for it. A subwindow whose
+        // persisted `parent_window_id` equals `windowids[0]` (main's srv
+        // window_id) must be translated to the `"main"` sentinel here —
+        // otherwise the remap lookup finds nothing and the subwindow is
+        // silently skipped as if its parent were missing.
+        let main_srv_id = &window_ids[0];
         let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
         for window_id in window_ids.iter().skip(1) {
             let Some((kind, parent_window_id)) = crate::client::backend_get_window_topology(&web_endpoint, &auth_key, window_id) else {
@@ -619,10 +627,17 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>) {
                     agentmux_common::ipc::WindowKind::FullInstance
                 }
             };
+            let parent_label = parent_window_id.map(|pid| {
+                if &pid == main_srv_id {
+                    "main".to_string()
+                } else {
+                    pid
+                }
+            });
             snapshots.push(agentmux_common::ipc::WindowSnapshot {
                 label: window_id.clone(),
                 kind,
-                parent_label: parent_window_id,
+                parent_label,
                 hwnd: None,
                 visible: true,
                 iconic: false,
