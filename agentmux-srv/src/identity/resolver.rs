@@ -414,62 +414,99 @@ pub async fn inject_identity_env_async(
     }
 }
 
-/// Resolve the identity bindings for an instance, preferring the
-/// **direct** agent↔account links over the bundle bindings.
+/// Resolve the identity bindings for an instance from the **direct**
+/// agent↔account links only.
 ///
-/// Phase 3 slice 2 PR-A dual-read: the resolver historically walked
-/// `instance.identity_id → db_identity_bindings (bundle)`. This helper
-/// first consults `db_agent_identity_links` keyed on the instance's
-/// DEFINITION id (`agent_id` in that table == `AgentDefinition.id`).
-/// When any direct link exists it is authoritative and the bundle path
-/// is skipped; otherwise we fall back to the bundle bindings, giving
-/// byte-identical behavior on DBs that have no direct links yet.
+/// Phase 3 slice 2 PR-B (the flip): the resolver previously dual-read —
+/// preferring `db_agent_identity_links` keyed on the instance's DEFINITION
+/// id, falling back to the bundle bindings (`db_identity_bindings`) when no
+/// direct links existed (PR-A, #1927). That fallback is removed here. Every
+/// live write path that creates a NEW binding through the launch flow or
+/// the per-agent Accounts tab already writes a direct link (PR-A/B1,
+/// #1950), and the m0013/m0014 migrations (#1927/#1952) backfilled direct
+/// links for every pre-existing bundle binding — so on any DB that has run
+/// those migrations, this is behavior-preserving.
+///
+/// Known transitional gap (tracked in #1624, owned by PR-C): the Identities
+/// tab's bind/unbind actions and the OAuth Connect/Reconnect-into-bundle
+/// flow still write ONLY a bundle binding, with no per-write direct-link
+/// fan-out. A binding created through either surface after this change
+/// lands — until PR-C deprecates those write paths — will show as bound in
+/// the Armory UI but will NOT inject at spawn. That's why the empty-result
+/// case below warns instead of silently returning nothing: it's a signal
+/// this specific gap was hit, not routine "no accounts configured."
 ///
 /// The direct links carry no `identity_id` of their own, so the mapped
 /// `IdentityBinding` reuses `instance.identity_id` for that field — the
 /// injection loop only reads `.provider` and `.account_id`, so the
 /// `identity_id` value there is cosmetic (used only in log lines).
+///
+/// `broker` publishes `identity:no-direct-links` when the direct set is
+/// empty — a standing diagnostic (not removed by PR-C, which only deletes
+/// the two write paths that can cause this), so there's something for a
+/// future frontend surface to subscribe to if the transitional window
+/// documented above runs longer than expected. `None` in tests / call
+/// sites that don't have a broker handle.
 fn resolve_bindings_for_instance(
     id_store: &Store,
     instance: &crate::backend::storage::store::AgentInstance,
+    broker: Option<&Arc<Broker>>,
 ) -> Vec<crate::backend::storage::store::IdentityBinding> {
     use crate::backend::storage::store::IdentityBinding;
 
-    // 1. Direct links on the DEFINITION (revived path).
     let direct = id_store
         .agent_identity_list_for_agent(&instance.definition_id)
         .unwrap_or_else(|e| {
             tracing::warn!(
                 target: "identity",
-                "direct-link lookup failed for definition {}: {} — falling back to bundle bindings",
+                "direct-link lookup failed for definition {}: {}",
                 instance.definition_id,
                 e,
             );
             Vec::new()
         });
-    if !direct.is_empty() {
-        return direct
-            .into_iter()
-            .map(|l| IdentityBinding {
-                identity_id: instance.identity_id.clone(),
-                provider: l.provider,
-                account_id: l.account_id,
-            })
-            .collect();
+
+    if direct.is_empty() {
+        // Non-fatal — the spawn proceeds with no identity env injected,
+        // same as "identity has no accounts bound" below. Distinct log
+        // line + event because this case specifically can mean a
+        // bundle-only binding exists but never got a direct link (see
+        // doc comment) — not routine "no accounts configured."
+        tracing::warn!(
+            target: "identity",
+            "no direct account links for definition {} (identity {}) — \
+             nothing to inject. If this identity has bundle-only bindings \
+             (Identities tab or OAuth reconnect), see #1624 PR-C.",
+            instance.definition_id,
+            instance.identity_id,
+        );
+        if let Some(b) = broker {
+            b.publish(WaveEvent {
+                event: "identity:no-direct-links".to_string(),
+                scopes: vec![],
+                sender: String::new(),
+                // Persisted (unlike the rest of this file's ephemeral
+                // events) — nothing subscribes live yet, so without
+                // persistence a future frontend surface polling via
+                // read_event_history would see nothing. Small window;
+                // this is a diagnostic, not an audit log.
+                persist: 20,
+                data: Some(serde_json::json!({
+                    "definition_id": instance.definition_id,
+                    "identity_id": instance.identity_id,
+                })),
+            });
+        }
     }
 
-    // 2. Fall back to bundle bindings (existing behavior).
-    id_store
-        .bundle_identity_bindings(&instance.identity_id)
-        .unwrap_or_else(|e| {
-            tracing::warn!(
-                target: "identity",
-                "bindings lookup failed for identity {}: {}",
-                instance.identity_id,
-                e,
-            );
-            Vec::new()
+    direct
+        .into_iter()
+        .map(|l| IdentityBinding {
+            identity_id: instance.identity_id.clone(),
+            provider: l.provider,
+            account_id: l.account_id,
         })
+        .collect()
 }
 
 pub fn inject_identity_env_with_broker(
@@ -509,16 +546,11 @@ pub fn inject_identity_env_with_broker(
         return;
     }
 
-    // Step 3: bindings — global, reads from id_store.
-    //
-    // Dual-read (Phase 3 slice 2 PR-A): prefer the DIRECT
-    // agent↔account links keyed on the instance's definition; fall back
-    // to the bundle bindings when no direct links exist. On existing DBs
-    // nothing has populated `db_agent_identity_links` at spawn time, so
-    // the direct set is empty and the bundle path is taken — identical
-    // behavior. The m0013 backfill copies the bundle bindings into direct
-    // links 1:1, so the direct path resolves to the SAME accounts.
-    let bindings = resolve_bindings_for_instance(&id_store, &instance);
+    // Step 3: bindings — global, reads from id_store. Direct-links-only
+    // as of Phase 3 slice 2 PR-B (the flip) — see resolve_bindings_for_instance's
+    // doc comment for the transitional gap this closes and the one it
+    // doesn't (#1624 PR-C).
+    let bindings = resolve_bindings_for_instance(&id_store, &instance, broker.as_ref());
 
     if bindings.is_empty() {
         // Identity exists but has no accounts bound. Nothing to inject.
@@ -889,6 +921,12 @@ mod tests {
         store
             .bundle_identity_bind("id-oauth", "claude", "acct-claude")
             .unwrap();
+        // Direct link — the only path the resolver reads post-flip
+        // (Phase 3 slice 2 PR-B). The bundle bind above is kept to prove
+        // its presence doesn't matter anymore.
+        store
+            .agent_identity_link("def-1", "acct-claude", "claude")
+            .unwrap();
 
         insert_block_for_agent(&store, "block-oauth", "def-1");
         let inst = make_instance("block-oauth", "id-oauth");
@@ -965,6 +1003,9 @@ mod tests {
         store.identity_upsert(&bad).unwrap();
         store
             .bundle_identity_bind("id-bad", "claude", "acct-bad")
+            .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-bad", "claude")
             .unwrap();
 
         insert_block_for_agent(&store, "block-bad", "def-1");
@@ -1103,6 +1144,9 @@ mod tests {
         store
             .bundle_identity_bind("id-work", "github", "acct-gh")
             .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-gh", "github")
+            .unwrap();
 
         // Anthropic account.
         let anthropic = make_account(
@@ -1115,6 +1159,9 @@ mod tests {
         store.identity_upsert(&anthropic).unwrap();
         store
             .bundle_identity_bind("id-work", "anthropic", "acct-anth")
+            .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-anth", "anthropic")
             .unwrap();
 
         // Instance for the block, pointing at id-work.
@@ -1214,10 +1261,10 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn inject_direct_link_wins_over_bundle_binding() {
-        // When BOTH a direct link and a bundle binding exist for the
-        // same provider, the DIRECT link is authoritative (dual-read
-        // preference). The bundle binding points at a different account
-        // whose secret must NOT be injected.
+        // When BOTH a direct link and a bundle binding exist for the same
+        // provider, only the direct link is injected — post-flip (Phase 3
+        // slice 2 PR-B) the bundle binding isn't consulted at all, so its
+        // account's secret must NOT be injected regardless of precedence.
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
@@ -1305,6 +1352,168 @@ mod tests {
 
     #[cfg(debug_assertions)]
     #[test]
+    fn inject_bundle_only_binding_no_longer_injects() {
+        // The core behavior change of Phase 3 slice 2 PR-B (the flip): an
+        // account bound ONLY through the bundle path (e.g. what the
+        // Identities tab bind action or an OAuth reconnect still produces
+        // today, per #1624) is no longer read by the resolver at all. This
+        // is the transitional gap PR-C (bundle-API write deprecation) is
+        // meant to close on the write side.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let identity = Identity {
+            id: "id-bundle-only".to_string(),
+            name: "BundleOnly".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        let github = make_account(
+            "acct-bundle-only",
+            "github",
+            SecretRef::PlaintextDev {
+                plaintext_dev: "ghp_bundle_only".to_string(),
+            },
+        );
+        store.identity_upsert(&github).unwrap();
+        // Bundle binding only — deliberately NO agent_identity_link call.
+        store
+            .bundle_identity_bind("id-bundle-only", "github", "acct-bundle-only")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-bundle-only", "def-1");
+        let inst = make_instance("block-bundle-only", "id-bundle-only");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store, "block-bundle-only", &mut env);
+
+        // Nothing injected — the bundle-only binding is invisible to the
+        // resolver now.
+        assert!(env.get("GITHUB_TOKEN").is_none());
+        assert!(env.is_empty());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_bundle_only_binding_publishes_no_direct_links_event() {
+        // Same setup as inject_bundle_only_binding_no_longer_injects, but
+        // asserts the diagnostic WaveEvent fires — the standing signal
+        // agent1 asked for in #1624 so a future frontend surface (or just
+        // log triage) can see the transitional gap being hit, not just
+        // silence.
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let identity = Identity {
+            id: "id-bundle-only-2".to_string(),
+            name: "BundleOnly2".to_string(),
+            description: String::new(),
+            is_blank: false,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_identity_upsert(&identity).unwrap();
+
+        let github = make_account(
+            "acct-bundle-only-2",
+            "github",
+            SecretRef::PlaintextDev {
+                plaintext_dev: "ghp_bundle_only_2".to_string(),
+            },
+        );
+        store.identity_upsert(&github).unwrap();
+        store
+            .bundle_identity_bind("id-bundle-only-2", "github", "acct-bundle-only-2")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-bundle-only-2", "def-1");
+        let inst = make_instance("block-bundle-only-2", "id-bundle-only-2");
+        store.instance_create(&inst).unwrap();
+
+        let broker = Arc::new(Broker::new());
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env_with_broker(
+            store.clone(),
+            store,
+            Some(broker.clone()),
+            "block-bundle-only-2",
+            &mut env,
+        );
+
+        // The event is persisted (see resolve_bindings_for_instance's
+        // publish) precisely so it's readable here without needing a live
+        // subscriber wired up at publish time.
+        let history = broker.read_event_history("identity:no-direct-links", "", 10);
+        let event = history.last().expect("expected identity:no-direct-links event");
+        assert_eq!(
+            event.data.as_ref().and_then(|d| d.get("definition_id")).and_then(|v| v.as_str()),
+            Some("def-1"),
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
     fn inject_partial_success_skips_failed_bindings() {
         let store = make_store();
 
@@ -1359,6 +1568,9 @@ mod tests {
         store
             .bundle_identity_bind("id-mixed", "github", "acct-good")
             .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-good", "github")
+            .unwrap();
 
         // Account whose Env-backed secret references a missing var.
         let bad = make_account(
@@ -1371,6 +1583,9 @@ mod tests {
         store.identity_upsert(&bad).unwrap();
         store
             .bundle_identity_bind("id-mixed", "anthropic", "acct-bad")
+            .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-bad", "anthropic")
             .unwrap();
 
         insert_block_for_agent(&store, "block-mixed", "def-1");
@@ -1441,6 +1656,9 @@ mod tests {
         store.identity_upsert(&custom).unwrap();
         store
             .bundle_identity_bind("id-future", "custom", "acct-custom")
+            .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-custom", "custom")
             .unwrap();
 
         insert_block_for_agent(&store, "block-future", "def-1");
@@ -1622,6 +1840,9 @@ mod tests {
         store
             .bundle_identity_bind("id-probe", "claude", "acct-claude")
             .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-claude", "claude")
+            .unwrap();
 
         insert_block_for_agent(&store, "block-probe", "def-1");
         let inst = make_instance("block-probe", "id-probe");
@@ -1712,6 +1933,9 @@ mod tests {
         store.identity_upsert(&claude).unwrap();
         store
             .bundle_identity_bind("id-ok", "claude", "acct-ok")
+            .unwrap();
+        store
+            .agent_identity_link("def-1", "acct-ok", "claude")
             .unwrap();
 
         insert_block_for_agent(&store, "block-ok", "def-1");
