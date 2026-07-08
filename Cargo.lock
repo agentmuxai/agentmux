@@ -138,6 +138,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "hmac",
  "json_comments",
  "keyring",
  "libc",
