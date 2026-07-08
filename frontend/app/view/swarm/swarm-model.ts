@@ -162,6 +162,61 @@ export function mergeSubagentsPreservingIdentity(
     });
 }
 
+function shallowEqualGroup(a: WorkflowGroup, b: WorkflowGroup): boolean {
+    return (
+        a.name === b.name &&
+        a.activeCount === b.activeCount &&
+        a.totalCount === b.totalCount &&
+        a.status === b.status &&
+        a.lastEventAt === b.lastEventAt &&
+        a.subagents.length === b.subagents.length &&
+        a.subagents.every((m, i) => m === b.subagents[i])
+    );
+}
+
+/**
+ * Stabilize `WorkflowGroup` wrapper identity across `buildTree()` calls,
+ * mirroring `mergeSubagentsPreservingIdentity` one level up.
+ * `groupSubagentsByWorkflow` is a pure function — it unconditionally builds
+ * a brand-new `WorkflowGroup` object per call, even when every member
+ * (already reference-stable thanks to `mergeSubagentsPreservingIdentity`)
+ * is unchanged. Left alone, that fresh wrapper still remounts
+ * `WorkflowGroupRow` — and everything nested inside an expanded one
+ * (`SubagentRow`, `SubagentDetailPane`, `SubagentDetailEvent`) — on every
+ * unrelated tree recompute, which for a workflow group (the highest-volume
+ * case: a single run can spawn dozens of subagents) defeats the very
+ * remount fix `expandedIdsAtom`/`getSubagentDetail` were meant to provide.
+ *
+ * `cache` is a `Map<workflowId, WorkflowGroup>` the caller keeps around
+ * (one per `SwarmViewModel`), shared and called once per BLOCK within one
+ * `buildTree()` pass — this function only reuses-or-replaces into `cache`,
+ * it never prunes it (pruning here, scoped to one block's children, would
+ * evict entries a DIFFERENT block's call just wrote). Callers doing a full
+ * multi-block tree rebuild should prune the cache once afterward against
+ * every workflowId seen across the whole tree — see `pruneGroupIdentityCache`.
+ */
+export function stabilizeGroupIdentity(
+    cache: Map<string, WorkflowGroup>,
+    children: SwarmChild[]
+): SwarmChild[] {
+    return children.map((child) => {
+        if (!isWorkflowGroup(child)) return child;
+        const old = cache.get(child.workflowId);
+        const stable = old && shallowEqualGroup(old, child) ? old : child;
+        cache.set(child.workflowId, stable);
+        return stable;
+    });
+}
+
+/** Drop cache entries for workflows no longer present anywhere in the tree
+ *  — call once after a full `buildTree()` pass, not per-block (see
+ *  `stabilizeGroupIdentity`), so it can't grow unbounded across sessions. */
+export function pruneGroupIdentityCache(cache: Map<string, WorkflowGroup>, liveWorkflowIds: Set<string>): void {
+    for (const key of [...cache.keys()]) {
+        if (!liveWorkflowIds.has(key)) cache.delete(key);
+    }
+}
+
 // ── Subagent detail (inline-expand event log) ───────────────────────────
 
 export interface SubagentDetail {
@@ -177,11 +232,11 @@ export interface SubagentDetail {
  * subagent:activity/subagent:completed. Deliberately NOT tied to a
  * component's render lifecycle (no `onCleanup`): `SwarmViewModel` caches
  * one of these per expanded subagent (`getSubagentDetail`) so it survives
- * the frequent `<For>` remounts `tree()` causes (see
- * `mergeSubagentsPreservingIdentity` and `groupSubagentsByWorkflow` above —
- * workflow-group wrapper objects are rebuilt on every recompute regardless
- * of whether their members changed) instead of refetching/resubscribing on
- * every incidental re-render while a row is open.
+ * `<For>` remounts `tree()` can still cause for unrelated reasons, instead
+ * of refetching/resubscribing on every incidental re-render while a row is
+ * open. See `mergeSubagentsPreservingIdentity` and `stabilizeGroupIdentity`
+ * above for how row/wrapper object identity itself is kept stable in the
+ * first place.
  */
 export function createSubagentDetail(subagentId: string): SubagentDetail {
     const [events, setEvents] = createSignal<SubagentEvent[]>([]);
@@ -327,6 +382,16 @@ export class SwarmViewModel implements ViewModel {
     // resubscribe from scratch — potentially several times a second while a
     // row is open during an active turn.
     private detailCache = new Map<string, SubagentDetail>();
+
+    // Persisted across buildTree() calls so stabilizeGroupIdentity can reuse
+    // the same WorkflowGroup wrapper object when a group's own content is
+    // unchanged — without this, expandedIds/detailCache above still don't
+    // help a subagent NESTED inside a workflow group, since <For> remounts
+    // the whole WorkflowGroupRow subtree (SubagentRow, SubagentDetailPane,
+    // SubagentDetailEvent — including the latter's own local `expanded`
+    // signal for a tool_use/tool_result toggle) whenever the group's own
+    // wrapper reference changes, which is every buildTree() call otherwise.
+    private groupIdentityCache = new Map<string, WorkflowGroup>();
 
     private unsubs: (() => void)[] = [];
     // Per-block controllerstatus unsubs — cleaned up when block list refreshes
@@ -525,7 +590,7 @@ export class SwarmViewModel implements ViewModel {
         const parentIds = subagents.map((s) => s.parent_block_id).filter(Boolean);
         const allBlockIds = [...new Set([...blockIds, ...parentIds])];
 
-        return allBlockIds.map((blockId) => {
+        const nodes = allBlockIds.map((blockId) => {
             const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
             const agentName =
@@ -537,11 +602,19 @@ export class SwarmViewModel implements ViewModel {
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
-            const children = groupSubagentsByWorkflow(
-                subagents.filter((s) => s.parent_block_id === blockId)
+            const children = stabilizeGroupIdentity(
+                this.groupIdentityCache,
+                groupSubagentsByWorkflow(subagents.filter((s) => s.parent_block_id === blockId))
             );
             return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, subagents: children };
         });
+
+        // Prune once per full pass (not per-block — see stabilizeGroupIdentity)
+        // against every workflow_id live anywhere in the flat subagent list.
+        const liveWorkflowIds = new Set(subagents.map((s) => s.workflow_id).filter((id): id is string => !!id));
+        pruneGroupIdentityCache(this.groupIdentityCache, liveWorkflowIds);
+
+        return nodes;
     }
 
     dispose(): void {
@@ -550,5 +623,6 @@ export class SwarmViewModel implements ViewModel {
         this.blockUnsubs = [];
         for (const detail of this.detailCache.values()) detail.dispose();
         this.detailCache.clear();
+        this.groupIdentityCache.clear();
     }
 }

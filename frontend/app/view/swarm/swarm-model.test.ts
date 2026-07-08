@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { groupSubagentsByWorkflow, isWorkflowGroup, mergeSubagentsPreservingIdentity, type ActiveSubagent } from "./swarm-model";
+import {
+    groupSubagentsByWorkflow,
+    isWorkflowGroup,
+    mergeSubagentsPreservingIdentity,
+    pruneGroupIdentityCache,
+    stabilizeGroupIdentity,
+    type ActiveSubagent,
+    type WorkflowGroup,
+} from "./swarm-model";
 
 function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id">): ActiveSubagent {
     return {
@@ -159,5 +167,57 @@ describe("mergeSubagentsPreservingIdentity", () => {
         const next = [mk({ agent_id: "a1" })];
         const merged = mergeSubagentsPreservingIdentity(prev, next);
         expect(merged[0]).toBe(next[0]);
+    });
+});
+
+describe("stabilizeGroupIdentity", () => {
+    it("reuses the cached WorkflowGroup reference when nothing about the group changed", () => {
+        const cache = new Map<string, WorkflowGroup>();
+        const members = [mk({ agent_id: "a1", workflow_id: "wf_1" })];
+        const first = groupSubagentsByWorkflow(members);
+        const stabilizedFirst = stabilizeGroupIdentity(cache, first);
+
+        // A second, independently-built (but content-identical) group for the
+        // same workflow — mirrors what a fresh groupSubagentsByWorkflow() call
+        // produces on an unrelated buildTree() recompute.
+        const second = groupSubagentsByWorkflow(members);
+        const stabilizedSecond = stabilizeGroupIdentity(cache, second);
+
+        expect(stabilizedSecond[0]).toBe(stabilizedFirst[0]);
+    });
+
+    it("returns a fresh reference when the group's member set actually changed", () => {
+        const cache = new Map<string, WorkflowGroup>();
+        const first = groupSubagentsByWorkflow([mk({ agent_id: "a1", workflow_id: "wf_1", status: "active" })]);
+        const stabilizedFirst = stabilizeGroupIdentity(cache, first);
+
+        const second = groupSubagentsByWorkflow([mk({ agent_id: "a1", workflow_id: "wf_1", status: "completed" })]);
+        const stabilizedSecond = stabilizeGroupIdentity(cache, second);
+
+        expect(stabilizedSecond[0]).not.toBe(stabilizedFirst[0]);
+    });
+
+    it("passes loose (non-group) subagents through unchanged", () => {
+        const cache = new Map<string, WorkflowGroup>();
+        const loose = groupSubagentsByWorkflow([mk({ agent_id: "a1", workflow_id: null })]);
+        const stabilized = stabilizeGroupIdentity(cache, loose);
+        expect(stabilized[0]).toBe(loose[0]);
+        expect(cache.size).toBe(0);
+    });
+});
+
+describe("pruneGroupIdentityCache", () => {
+    it("drops entries for workflows no longer live, keeps the rest", () => {
+        const cache = new Map<string, WorkflowGroup>();
+        const groupA = groupSubagentsByWorkflow([mk({ agent_id: "a1", workflow_id: "wf_a" })]);
+        const groupB = groupSubagentsByWorkflow([mk({ agent_id: "b1", workflow_id: "wf_b" })]);
+        stabilizeGroupIdentity(cache, groupA);
+        stabilizeGroupIdentity(cache, groupB);
+        expect(cache.size).toBe(2);
+
+        pruneGroupIdentityCache(cache, new Set(["wf_a"]));
+        expect(cache.size).toBe(1);
+        expect(cache.has("wf_a")).toBe(true);
+        expect(cache.has("wf_b")).toBe(false);
     });
 });
