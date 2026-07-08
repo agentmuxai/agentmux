@@ -59,6 +59,16 @@ impl TelegramApiError {
     }
 }
 
+/// Strips the bot token out of an error message before it's ever logged or
+/// returned. `reqwest::Error`'s `Display` embeds the request URL on
+/// send/connection failures, and the URL contains `bot{token}` — so `{e}`
+/// must never reach a log line or a `Result<_, String>` unredacted. This is
+/// the single choke point every error-construction site routes through, so
+/// callers can't accidentally skip it.
+fn redact(token: &str, s: String) -> String {
+    s.replace(token, "***")
+}
+
 /// Build a dedicated client for `getUpdates` with a timeout that safely
 /// exceeds Telegram's own 30s long-poll wait. Kept distinct from the client
 /// used for sends (spec §9).
@@ -94,7 +104,7 @@ pub async fn get_updates(
         ])
         .send()
         .await
-        .map_err(|e| format!("telegram rest: getUpdates http error: {e}"))?;
+        .map_err(|e| redact(token, format!("telegram rest: getUpdates http error: {e}")))?;
 
     let status = resp.status();
     if status == reqwest::StatusCode::CONFLICT {
@@ -107,7 +117,7 @@ pub async fn get_updates(
     let body: TelegramResponse<Vec<serde_json::Value>> = resp
         .json()
         .await
-        .map_err(|e| format!("telegram rest: getUpdates parse error: {e}"))?;
+        .map_err(|e| redact(token, format!("telegram rest: getUpdates parse error: {e}")))?;
 
     if !body.ok {
         return Err(format!(
@@ -132,7 +142,7 @@ pub async fn send_message(
         text: escape_html(text),
         parse_mode: "HTML",
     };
-    post_for_message(http, &url, &body, "sendMessage").await
+    post_for_message(http, token, &url, &body, "sendMessage").await
 }
 
 /// POST /bot{token}/editMessageText
@@ -150,7 +160,7 @@ pub async fn edit_message_text(
         text: escape_html(text),
         parse_mode: "HTML",
     };
-    post_for_message(http, &url, &body, "editMessageText").await
+    post_for_message(http, token, &url, &body, "editMessageText").await
 }
 
 /// Dispatches to `send_message` or `edit_message_text` depending on whether
@@ -170,6 +180,7 @@ pub async fn send_or_edit(
 
 async fn post_for_message<B: serde::Serialize>(
     http: &reqwest::Client,
+    token: &str,
     url: &str,
     body: &B,
     method_name: &str,
@@ -180,12 +191,14 @@ async fn post_for_message<B: serde::Serialize>(
         .json(body)
         .send()
         .await
-        .map_err(|e| TelegramApiError::simple(format!("telegram rest: {method_name} http error: {e}")))?;
+        .map_err(|e| {
+            TelegramApiError::simple(redact(token, format!("telegram rest: {method_name} http error: {e}")))
+        })?;
 
     let status = resp.status();
 
     let parsed: TelegramResponse<Message> = resp.json().await.map_err(|e| {
-        TelegramApiError::simple(format!("telegram rest: {method_name} parse error: {e}"))
+        TelegramApiError::simple(redact(token, format!("telegram rest: {method_name} parse error: {e}")))
     })?;
 
     if status == reqwest::StatusCode::TOO_MANY_REQUESTS || !parsed.ok {
@@ -238,5 +251,16 @@ mod tests {
     #[test]
     fn escape_html_handles_all_three_chars_together() {
         assert_eq!(escape_html("a<b>c&d"), "a&lt;b&gt;c&amp;d");
+    }
+
+    #[test]
+    fn redact_strips_token_from_url_bearing_error_text() {
+        let token = "123456:ABC-secret";
+        let msg = format!(
+            "telegram rest: getUpdates http error: error sending request for url (https://api.telegram.org/bot{token}/getUpdates?timeout=30)"
+        );
+        let redacted = redact(token, msg);
+        assert!(!redacted.contains(token), "token leaked into: {redacted}");
+        assert!(redacted.contains("bot***"));
     }
 }

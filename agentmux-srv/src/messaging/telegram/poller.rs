@@ -28,95 +28,121 @@ const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 /// "1 msg/second" limit, enforced with a bit of headroom).
 const CHAT_MIN_SPACING: Duration = Duration::from_millis(1100);
 
+/// Runs the inbound long-poll loop and the outbound send loop as two fully
+/// independent tasks (`tokio::join!`, not `tokio::select!` on a shared loop
+/// iteration).
+///
+/// The original design interleaved both in one `tokio::select!`: whichever
+/// branch was constructed fresh each iteration. That meant an outbound send
+/// arriving mid-poll would drop (cancel) the in-flight `getUpdates` future,
+/// and — worse — any rate-limit backoff sleep inside outbound handling (up to
+/// a Telegram-specified `retry_after`, potentially many seconds) blocked the
+/// *entire* loop, including inbound polling, since both branches shared one
+/// iteration. A burst of outbound sends (e.g. `edit_message_id` streaming
+/// updates) could starve inbound message delivery for as long as the burst +
+/// backoff lasted. Splitting into two independently-scheduled tasks removes
+/// this coupling entirely: the inbound poll always runs on its own cadence
+/// regardless of outbound activity.
 pub async fn run_poll_loop(
     config: TelegramConfig,
     http: reqwest::Client,
-    mut outbound_rx: mpsc::UnboundedReceiver<OutboundMsg>,
+    outbound_rx: mpsc::UnboundedReceiver<OutboundMsg>,
     health: Arc<Mutex<BridgeHealth>>,
 ) {
+    let inbound_config = config.clone();
+    tokio::join!(
+        run_inbound_loop(inbound_config, health),
+        run_outbound_loop(config, http, outbound_rx),
+    );
+}
+
+async fn run_inbound_loop(config: TelegramConfig, health: Arc<Mutex<BridgeHealth>>) {
     // Dedicated client for getUpdates: needs a longer per-request timeout than
     // the 30s `timeout` param Telegram itself waits on (spec §9). Sends use
-    // `http` (the client passed in from `init_global`) with a short per-request
-    // timeout override instead, so a stuck send can't wedge the poll loop.
+    // a client with a short per-request timeout override instead (rest.rs),
+    // so a stuck send can't wedge this loop — and now, since sends run on a
+    // fully separate task, they couldn't wedge it even without that timeout.
     let poll_http = rest::build_poll_client();
 
     let mut offset: i64 = 0;
     let mut delay_secs = RECONNECT_DELAY_SECS;
 
+    loop {
+        match rest::get_updates(&poll_http, &config.token, offset).await {
+            Ok(updates) => {
+                delay_secs = RECONNECT_DELAY_SECS;
+                {
+                    let mut h = health.lock().unwrap();
+                    h.status = BridgeStatus::Connected;
+                    h.error = None;
+                }
+
+                // Offset advances past every update in the batch — including
+                // ones that fail to parse — so a permanently-malformed update
+                // can never wedge the poll loop (spec §9).
+                let mut max_update_id = offset - 1;
+                for raw in &updates {
+                    let update_id = raw.get("update_id").and_then(|v| v.as_i64());
+                    let Some(update_id) = update_id else {
+                        tracing::warn!(
+                            "telegram_bridge: update missing update_id, skipping (offset cannot advance past it)"
+                        );
+                        continue;
+                    };
+                    if update_id > max_update_id {
+                        max_update_id = update_id;
+                    }
+
+                    match serde_json::from_value::<Update>(raw.clone()) {
+                        Ok(update) => handle_update(&update, &config, &health),
+                        Err(e) => {
+                            tracing::warn!(
+                                "telegram_bridge: malformed update {update_id}: {e} — skipping"
+                            );
+                        }
+                    }
+                }
+                if max_update_id >= offset {
+                    offset = max_update_id + 1;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("telegram_bridge: getUpdates failed: {e}");
+                {
+                    let mut h = health.lock().unwrap();
+                    h.status = BridgeStatus::Error;
+                    h.error = Some(e);
+                    h.reconnect_count += 1;
+                }
+                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
+                delay_secs = (delay_secs * 2).min(MAX_RECONNECT_DELAY_SECS);
+            }
+        }
+    }
+}
+
+async fn run_outbound_loop(
+    config: TelegramConfig,
+    http: reqwest::Client,
+    mut outbound_rx: mpsc::UnboundedReceiver<OutboundMsg>,
+) {
     // Per-chat outbound rate limiting (spec §2.5, v1 scope: spacing + reactive
-    // 429 backoff only, no full token-bucket accounting).
+    // 429 backoff only, no full token-bucket accounting). Owned entirely by
+    // this task now — never shared with the inbound loop.
     let mut chat_last_sent: HashMap<i64, Instant> = HashMap::new();
     let mut chat_backoff_until: HashMap<i64, Instant> = HashMap::new();
     let mut global_backoff_until: Option<Instant> = None;
 
-    loop {
-        tokio::select! {
-            // Outbound: agent → Telegram REST (checked opportunistically between polls)
-            Some(msg) = outbound_rx.recv() => {
-                handle_outbound(
-                    &http,
-                    &config,
-                    msg,
-                    &mut chat_last_sent,
-                    &mut chat_backoff_until,
-                    &mut global_backoff_until,
-                ).await;
-            }
-
-            // Inbound: long poll
-            result = rest::get_updates(&poll_http, &config.token, offset) => {
-                match result {
-                    Ok(updates) => {
-                        delay_secs = RECONNECT_DELAY_SECS;
-                        {
-                            let mut h = health.lock().unwrap();
-                            h.status = BridgeStatus::Connected;
-                            h.error = None;
-                        }
-
-                        // Offset advances past every update in the batch — including
-                        // ones that fail to parse — so a permanently-malformed update
-                        // can never wedge the poll loop (spec §9).
-                        let mut max_update_id = offset - 1;
-                        for raw in &updates {
-                            let update_id = raw.get("update_id").and_then(|v| v.as_i64());
-                            let Some(update_id) = update_id else {
-                                tracing::warn!(
-                                    "telegram_bridge: update missing update_id, skipping (offset cannot advance past it)"
-                                );
-                                continue;
-                            };
-                            if update_id > max_update_id {
-                                max_update_id = update_id;
-                            }
-
-                            match serde_json::from_value::<Update>(raw.clone()) {
-                                Ok(update) => handle_update(&update, &config, &health),
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "telegram_bridge: malformed update {update_id}: {e} — skipping"
-                                    );
-                                }
-                            }
-                        }
-                        if max_update_id >= offset {
-                            offset = max_update_id + 1;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("telegram_bridge: getUpdates failed: {e}");
-                        {
-                            let mut h = health.lock().unwrap();
-                            h.status = BridgeStatus::Error;
-                            h.error = Some(e);
-                            h.reconnect_count += 1;
-                        }
-                        tokio::time::sleep(Duration::from_secs(delay_secs)).await;
-                        delay_secs = (delay_secs * 2).min(MAX_RECONNECT_DELAY_SECS);
-                    }
-                }
-            }
-        }
+    while let Some(msg) = outbound_rx.recv().await {
+        handle_outbound(
+            &http,
+            &config,
+            msg,
+            &mut chat_last_sent,
+            &mut chat_backoff_until,
+            &mut global_backoff_until,
+        )
+        .await;
     }
 }
 
