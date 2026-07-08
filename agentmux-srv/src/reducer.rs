@@ -2542,6 +2542,27 @@ mod tests {
         (state, tab)
     }
 
+    /// Registers a minimal `BlockRecord` for `block_id` in `state.blocks`,
+    /// so a test-constructed leaf referencing it survives
+    /// `prune_dangling_block_refs` (added alongside `LayoutSetTree` and the
+    /// `apply_atomic`-routed arms — see
+    /// `docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`).
+    /// Real callers always have a live `BlockRecord` before a layout leaf
+    /// can reference it (`CreateBlock` populates `state.blocks` before any
+    /// layout insert for that block can be dispatched — verified via
+    /// `server::service::object`'s create-block handler); these
+    /// lower-level reducer tests construct trees directly and need this
+    /// explicit seed to match that real precondition.
+    fn seed_block(state: &mut State, tab_id: &str, block_id: &str) {
+        state.blocks.insert(
+            block_id.to_string(),
+            crate::state::BlockRecord {
+                block_id: block_id.to_string(),
+                tab_id: tab_id.to_string(),
+            },
+        );
+    }
+
     #[test]
     fn layout_clear_wipes_rootnode_focus_magnify_and_emits_event() {
         let (mut state, tab_id) = fresh_tab();
@@ -2660,6 +2681,8 @@ mod tests {
     #[test]
     fn layout_set_tree_replaces_rootnode_wholesale() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "b1");
+        seed_block(&mut state, &tab_id, "b2");
         state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("old", "b1"));
 
         let new_tree = Some(leaf_node("new", "b2"));
@@ -2696,12 +2719,57 @@ mod tests {
         assert!(state.tabs[&tab_id].rootnode.is_none());
     }
 
+    /// End-to-end regression for
+    /// docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md:
+    /// a wholesale tree push — the exact vector a stale frontend copy used
+    /// to resurrect a deleted block's leaf through — must self-heal
+    /// instead of persisting the dangling reference. Only "ba" is
+    /// registered as live; "gone" is not (simulating a block deleted
+    /// before this push landed, e.g. from a stale frontend LayoutModel).
+    #[test]
+    fn layout_set_tree_self_heals_a_dangling_block_ref_in_the_pushed_tree() {
+        let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+
+        let pushed_tree = agentmux_common::LayoutNode {
+            id: "root".into(),
+            children: vec![leaf_node("a", "ba"), leaf_node("b", "gone")],
+            ..Default::default()
+        };
+        let events = update(
+            &mut state,
+            Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(pushed_tree),
+                correlation_id: "corr".into(),
+                slices: None,
+            },
+            &ctx(1),
+        );
+
+        assert!(matches!(&events[0], Event::LayoutTreeReplaced { .. }));
+        assert!(tree_has(&state, &tab_id, "a"), "live block's leaf survives");
+        assert!(!tree_has(&state, &tab_id, "b"), "dangling leaf pruned, not persisted");
+        // Event::LayoutTreeReplaced's own new_tree must reflect the healed
+        // tree too, not the caller's original — this is what the persist
+        // subscriber writes to db_layout, so a pruned reducer state with a
+        // stale event would just move the divergence downstream.
+        if let Event::LayoutTreeReplaced { new_tree, .. } = &events[0] {
+            let root = new_tree.as_ref().unwrap();
+            assert!(
+                !root.children.iter().any(|c| c.id == "b"),
+                "emitted event's new_tree must already reflect the prune"
+            );
+        }
+    }
+
     /// SPEC_864 Phase 2 — a slice-carrying full-row push applies focus/
     /// magnify to the TabRecord (empty = clear) and echoes the slices on
     /// the emitted event for the persist subscriber.
     #[test]
     fn layout_set_tree_with_slices_applies_focus_magnify() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "b1");
         state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "stale".into();
 
         let events = update(
@@ -2864,6 +2932,7 @@ mod tests {
         // Symmetry guard: Some(new_tree) must NOT clear focused/
         // magnified — caller may have set them deliberately.
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "b");
         state.tabs.get_mut(&tab_id).unwrap().focused_node_id = "n".into();
         state.tabs.get_mut(&tab_id).unwrap().magnified_node_id = "n".into();
         let _ = update(
@@ -3010,6 +3079,9 @@ mod tests {
     #[test]
     fn layout_move_node_reparents_and_emits_event() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        seed_block(&mut state, &tab_id, "bb");
+        seed_block(&mut state, &tab_id, "bc");
         state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(group_node(
             "root",
             vec![
@@ -3040,6 +3112,8 @@ mod tests {
     #[test]
     fn layout_swap_nodes_swaps_positions() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        seed_block(&mut state, &tab_id, "bb");
         state.tabs.get_mut(&tab_id).unwrap().rootnode =
             Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
         let events = update(
@@ -3061,6 +3135,8 @@ mod tests {
     #[test]
     fn layout_resize_nodes_applies_sizes() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        seed_block(&mut state, &tab_id, "bb");
         state.tabs.get_mut(&tab_id).unwrap().rootnode =
             Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
         let events = update(
@@ -3084,6 +3160,9 @@ mod tests {
     #[test]
     fn layout_replace_node_swaps_in_new_and_honours_focus() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        seed_block(&mut state, &tab_id, "bb");
+        seed_block(&mut state, &tab_id, "bx");
         state.tabs.get_mut(&tab_id).unwrap().rootnode =
             Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
         let events = update(
@@ -3145,6 +3224,8 @@ mod tests {
     #[test]
     fn layout_split_horizontal_wraps_root_and_focuses_new() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        seed_block(&mut state, &tab_id, "bx");
         state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("a", "ba"));
         let events = update(
             &mut state,
@@ -3170,6 +3251,8 @@ mod tests {
     #[test]
     fn layout_split_vertical_wraps_root() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        seed_block(&mut state, &tab_id, "bx");
         state.tabs.get_mut(&tab_id).unwrap().rootnode = Some(leaf_node("a", "ba"));
         let events = update(
             &mut state,
@@ -3192,6 +3275,9 @@ mod tests {
     #[test]
     fn layout_insert_node_at_index_inserts_after_path() {
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "ba");
+        seed_block(&mut state, &tab_id, "bb");
+        seed_block(&mut state, &tab_id, "bx");
         state.tabs.get_mut(&tab_id).unwrap().rootnode =
             Some(group_node("root", vec![leaf_node("a", "ba"), leaf_node("b", "bb")]));
         let events = update(
@@ -3217,6 +3303,7 @@ mod tests {
         // Matches the frontend oracle (insertNodeAtIndex promotes to root on
         // an empty tree; layoutTree.ts:303-304) — not a reject.
         let (mut state, tab_id) = fresh_tab();
+        seed_block(&mut state, &tab_id, "b");
         let events = update(
             &mut state,
             Command::LayoutInsertNodeAtIndex {

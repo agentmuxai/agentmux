@@ -740,3 +740,99 @@ fn find_node_by_id_does_not_mutate() {
     let _ = find_node_by_id(&root, "n1");
     assert_eq!(root.children.len(), child_count_before);
 }
+
+// ── pruneDanglingBlockRefs ────────────────────────────────────────────────────
+// Reducer-write-path self-healing added after
+// docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md —
+// "no layout leaf ever references a nonexistent block" as an unconditional
+// invariant of the write path, not something individual callers must
+// remember to uphold correctly.
+
+fn live(ids: &[&str]) -> std::collections::HashSet<String> {
+    ids.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn prune_is_a_noop_on_a_clean_tree() {
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("a", "ba", 5.0), leaf("b", "bb", 5.0)],
+    ));
+    let before = root.clone();
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["ba", "bb"]));
+    assert_eq!(pruned, 0);
+    assert_eq!(root, before);
+}
+
+#[test]
+fn prune_is_a_noop_on_an_empty_tree() {
+    let mut root: Option<LayoutNode> = None;
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["ba"]));
+    assert_eq!(pruned, 0);
+    assert!(root.is_none());
+}
+
+#[test]
+fn prune_clears_the_tree_when_root_is_the_sole_dangling_leaf() {
+    // The exact shape of the bug this closes: a single-block tab whose
+    // block was deleted, leaving the root itself as the dangling leaf.
+    let mut root = Some(leaf("only", "deleted-block", 1.0));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&[]));
+    assert_eq!(pruned, 1);
+    assert!(root.is_none());
+}
+
+#[test]
+fn prune_removes_a_non_root_dangling_leaf_and_collapses_the_sole_survivor() {
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("a", "ba", 5.0), leaf("b", "deleted-block", 5.0)],
+    ));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["ba"]));
+    assert_eq!(pruned, 1);
+    // delete_node's single-child collapse promotes "a" into root's place —
+    // same behavior an explicit user delete would produce.
+    let r = root.unwrap();
+    assert_eq!(r.id, "a");
+    assert_eq!(r.data.as_ref().unwrap().block_id, "ba");
+    assert!(r.children.is_empty());
+}
+
+#[test]
+fn prune_removes_multiple_dangling_leaves_in_one_pass() {
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![
+            leaf("a", "ba", 3.0),
+            leaf("b", "gone-1", 3.0),
+            leaf("c", "gone-2", 3.0),
+        ],
+    ));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["ba"]));
+    assert_eq!(pruned, 2);
+    let r = root.unwrap();
+    // Down to the sole survivor — same single-child collapse as above.
+    assert_eq!(r.data.as_ref().unwrap().block_id, "ba");
+}
+
+#[test]
+fn prune_leaves_container_nodes_alone() {
+    // Container/group nodes have data: None — must never be mistaken for
+    // a dangling leaf just because their (nonexistent) block_id can't
+    // match anything live.
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![leaf("a", "ba", 5.0)],
+    ));
+    let pruned = prune_dangling_block_refs(&mut root, &live(&["ba"]));
+    assert_eq!(pruned, 0);
+    assert_eq!(root.unwrap().id, "root");
+}

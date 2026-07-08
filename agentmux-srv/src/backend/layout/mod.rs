@@ -153,6 +153,81 @@ pub fn find_node_id_by_block(tree: &LayoutNode, block_id: &str) -> Option<String
     None
 }
 
+/// Removes every leaf whose `data.block_id` is not in `live_block_ids`,
+/// using the same collapse semantics as an explicit user delete
+/// (`delete_node`'s single-child-parent promotion). Returns the number of
+/// leaves pruned (0 = tree was already clean — the common case, so this is
+/// cheap to call unconditionally on every write).
+///
+/// This is the reducer's referential-integrity enforcement for `db_layout`,
+/// added after
+/// `docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`
+/// found that a single point-fix (notifying the frontend on one specific
+/// delete path) only closes the one mechanism it targets — any other
+/// current or future caller that writes a stale/bad tree without going
+/// through that same notification channel can still leave a dangling
+/// `blockId` behind. Calling this at every layout-tree write site in the
+/// reducer (the single writer of `db_layout` since SPEC_864) makes "no
+/// layout leaf ever references a nonexistent block" an unconditional
+/// invariant of the write path itself, not a property individual callers
+/// have to remember to uphold — the same shape as WRR (Window Reality
+/// Reconciliation, `agentmux-cef/src/wrr/`) enforcing "no window/pool
+/// drift" at the point where reality is observed, rather than trusting
+/// every caller to keep the model in sync.
+///
+/// Re-scans the tree fresh after each removal rather than working off a
+/// pre-computed list of dangling node ids, since `delete_node`'s
+/// single-child collapse can rewrite a surviving parent's id out from
+/// under a stale id — see the comment on `delete_recursive`. Terminates
+/// because each iteration strictly shrinks the tree (bounded by leaf
+/// count).
+pub fn prune_dangling_block_refs(
+    root: &mut Option<LayoutNode>,
+    live_block_ids: &std::collections::HashSet<String>,
+) -> usize {
+    let mut pruned = 0;
+    loop {
+        let Some(tree) = root.as_ref() else { break };
+        let Some(dangling_id) = first_dangling_leaf_id(tree, live_block_ids) else { break };
+        pruned += 1;
+        if tree.id == dangling_id {
+            // Root is itself the dangling leaf (single-block tab) —
+            // delete_node leaves root deletion to the caller.
+            *root = None;
+            continue;
+        }
+        if let Some(t) = root.as_mut() {
+            // A `NodeNotFound` here would mean the id vanished via this
+            // same loop's prior collapse without our fresh re-scan
+            // catching it first — shouldn't happen given the re-scan, but
+            // isn't a correctness problem either way: the node is gone,
+            // which is the outcome we wanted.
+            let _ = delete_node(t, &dangling_id);
+        }
+    }
+    pruned
+}
+
+/// First leaf (depth-first) whose `data.block_id` is set but not present in
+/// `live_block_ids`. `data.block_id` is only ever non-empty on leaves —
+/// container/group nodes have `data: None` (see `ensure_group_node`).
+fn first_dangling_leaf_id(
+    node: &LayoutNode,
+    live_block_ids: &std::collections::HashSet<String>,
+) -> Option<String> {
+    if let Some(data) = &node.data {
+        if !data.block_id.is_empty() && !live_block_ids.contains(&data.block_id) {
+            return Some(node.id.clone());
+        }
+    }
+    for child in &node.children {
+        if let Some(found) = first_dangling_leaf_id(child, live_block_ids) {
+            return Some(found);
+        }
+    }
+    None
+}
+
 // ── Insert-location heuristic ──────────────────────────────────────────────
 
 /// Candidate for insertion location, collected during tree traversal.

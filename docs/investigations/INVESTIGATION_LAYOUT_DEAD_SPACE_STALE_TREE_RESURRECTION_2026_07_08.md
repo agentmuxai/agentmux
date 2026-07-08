@@ -1,11 +1,14 @@
 # Investigation: Dead-space layout leaf referencing a deleted block
 
 **Date:** 2026-07-08
-**Status:** Root cause confirmed by code (not live-reproduced through the CEF frontend);
-Mechanism A fixed — `agentmux-srv/src/sagas/delete_block.rs` Step 2b now queues a
-`pendingbackendactions` delete via `queue_source_layout_delete`, same channel tear-off
-already uses. Mechanism B (saga-step non-atomicity) and the missing CAS on `Store::update`
-remain open, tracked as follow-ons in §Recommended fix.
+**Status:** Root cause confirmed by code (not live-reproduced through the CEF frontend).
+Mechanism A fixed at the point of origin — `agentmux-srv/src/sagas/delete_block.rs` Step 2b
+now queues a `pendingbackendactions` delete via `queue_source_layout_delete`, same channel
+tear-off already uses. **Also fixed systemically** — every reducer layout-tree write path now
+self-heals any dangling block reference unconditionally (§WRR-style self-healing invariant
+below), so the invariant holds regardless of which caller or future bug produces a stale
+tree. Mechanism B (saga-step non-atomicity) and the missing CAS on `Store::update` remain
+open, tracked as follow-ons in §Recommended fix.
 **Component:** `agentmux-srv` reducer/layout persistence, `frontend/layout/lib/layoutPersistence.ts`
 **Reported by:** user, dev instance (`v0.51.0`, built 2026-07-07 11:13:02, HEAD `8bea4a52`)
 **Relation to Pillar 1 (host reproject, `SPEC_PILLAR1_*`):** not causal — Pillar 1's reproject
@@ -290,3 +293,75 @@ Both are things SPEC_864's own docs already flag as open/undecided (see
 `docs/handoff/HANDOFF_864_AUTHORITY_AND_WINDOW_LIFECYCLE_2026_07_05.md:58` on the CAS
 question specifically) rather than novel findings here — worth tracking as follow-ons, not
 blockers for the Mechanism A fix.
+
+## Follow-up: WRR-style self-healing invariant (implemented)
+
+The Mechanism A fix above closes the *one specific call site* (`delete_block`) that produced
+this incident. It does not, by itself, guarantee "no layout leaf ever references a
+nonexistent block" as a property of the system — any other current or future caller that
+writes a stale or bad tree without going through the same notification channel could still
+leave a dangling reference behind, and the fix does nothing for corruption that already
+exists in a persisted `db_layout` row.
+
+Requested explicitly: an invariant enforced the same way WRR (Window Reality Reconciliation,
+`agentmux-cef/src/wrr/`) enforces "no window/pool drift" — not a periodic scan/timer, but a
+check applied at the exact point reality is written, so drift structurally cannot accumulate
+regardless of which caller or bug would otherwise have produced it.
+
+**Implementation:** `agentmux-srv/src/backend/layout/mod.rs::prune_dangling_block_refs(root,
+live_block_ids)` — a pure function that walks a layout tree and removes every leaf whose
+`data.block_id` isn't in the live set, reusing `delete_node`'s existing tested collapse
+semantics (single-child-parent promotion) rather than new tree-surgery logic. Re-scans fresh
+after each removal (`delete_node`'s collapse can rewrite a surviving parent's id out from
+under a pre-computed target list).
+
+Wired into the reducer — the single writer of `db_layout` since SPEC_864 — at every
+tree-mutating command:
+- `handle_layout_set_tree` (`reducer/layout.rs`) — the exact vector that caused this
+  incident (a wholesale tree push). The emitted `Event::LayoutTreeReplaced`'s `new_tree` is
+  re-derived from the *post-prune* `tab.rootnode`, not the caller's original value — pruning
+  reducer state alone while persisting the caller's stale value would just move the
+  divergence downstream instead of closing it.
+- `apply_atomic` (`reducer/layout.rs`) — the shared choke point for
+  `LayoutMoveNode`/`LayoutSwapNodes`/`LayoutResizeNodes`/`LayoutReplaceNode`/
+  `LayoutSplitHorizontal`/`LayoutSplitVertical`. `LayoutReplaceNode` and the two split arms
+  accept a caller-supplied new node that could itself carry a stale `block_id`; move/swap/
+  resize can't introduce a *new* dangling reference but get the check for free, which also
+  opportunistically cleans up any pre-existing corruption a routine edit happens to touch.
+- `handle_layout_insert_node_at_index` — same reasoning as the split arms (caller-supplied
+  node).
+
+**Deliberately left uncovered**, with reasoning, not an oversight:
+- `handle_layout_insert_node` (`LayoutInsertNode`) — its emitted event carries no `new_tree`
+  field (only the inserted `node`/`parent_id`/`index`), so it's unclear without further
+  investigation whether the persist subscriber for this event type reads a full tree from
+  reducer state or reconstructs one independently from the event's fields; pruning
+  `tab.rootnode` alone might not correctly propagate to what gets persisted. Also, this
+  handler introduces exactly one brand-new node — if *that* node's own `block_id` is invalid,
+  silently insert-then-immediately-prune is arguably the wrong UX compared to rejecting the
+  insert outright, which is a different design question than resurrection-prevention.
+- The deletion-path handlers (`handle_layout_delete_node`, `handle_layout_delete_node_by_block`)
+  and `handle_layout_clear` — these remove nodes or wipe the tree; they cannot structurally
+  introduce a *new* dangling reference, so there's nothing for this check to catch there.
+
+**Test seeding note:** ~14 pre-existing reducer/server layout tests constructed trees with
+block ids that were never registered in `state.blocks` (a legitimate simplification before
+this invariant existed — they were testing pure tree mechanics, not block lifecycle). Real
+production callers always have a live `BlockRecord` before a layout leaf can reference it
+(verified: `server::service::object`'s create-block handler dispatches `CreateBlock` through
+the reducer, populating `state.blocks`, before any client can have a confirmed `block_id` to
+insert into a layout). Fixed by seeding matching `BlockRecord`s in each affected test rather
+than weakening the invariant. Added a `seed_block` test helper
+(`agentmux-srv/src/reducer.rs`) for this. All 1441 tests in the `agentmux-srv` suite pass
+after the fix, including 7 new tests covering `prune_dangling_block_refs` directly
+(`backend/layout/tests.rs`) and one reducer-level end-to-end regression test
+(`layout_set_tree_self_heals_a_dangling_block_ref_in_the_pushed_tree`) proving a wholesale
+`LayoutSetTree` push carrying a dangling leaf now self-heals instead of persisting it.
+
+**What this does and doesn't guarantee:** going forward, no *new* write through a covered
+command can leave `db_layout` holding a leaf whose block doesn't exist — this holds
+regardless of which caller or future bug would otherwise have produced the stale write, which
+is the actual "guaranteed no empty slots" property that was asked for. It does not
+retroactively repair rows already corrupted before this landed (a one-off data cleanup,
+separate from this fix), and it doesn't cover the two handlers noted above as deliberately
+out of scope.
