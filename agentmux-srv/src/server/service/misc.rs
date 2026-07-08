@@ -74,13 +74,17 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
-            let display_name = super::super::app_api::session::generate_subagent_name(
+            let result = super::super::app_api::session::generate_subagent_name(
                 &state.wstore,
                 &state.subagent_watcher,
                 &agent_id,
             )
             .await;
-            WebReturnType::success(serde_json::json!({ "displayName": display_name }))
+            let (display_name, tokens) = match result {
+                Some((name, tokens)) => (Some(name), tokens),
+                None => (None, None),
+            };
+            WebReturnType::success(serde_json::json!({ "displayName": display_name, "tokens": tokens }))
         }
         // ---- HistoryService ----
         ("history", "List") => {
