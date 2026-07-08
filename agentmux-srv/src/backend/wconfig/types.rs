@@ -349,6 +349,34 @@ pub struct SettingsType {
     #[serde(rename = "messaging:telegram:target", default, skip_serializing_if = "Option::is_none")]
     pub messaging_telegram_target: Option<String>,
 
+    // -- Slack messaging bridge --
+
+    /// Master enable for the Slack messaging bridge.
+    /// When true, the bridge opens a Socket Mode connection at startup.
+    #[serde(rename = "messaging:slack:enabled", default, skip_serializing_if = "is_false")]
+    pub messaging_slack_enabled: bool,
+
+    /// Slack bot token (`xoxb-...`). Used for Web API calls (chat.postMessage).
+    /// Treat as a secret — do not log. Obtain from api.slack.com/apps → OAuth & Permissions
+    /// → Bot User OAuth Token, after installing the app to the workspace.
+    #[serde(rename = "messaging:slack:bot_token", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_slack_bot_token: Option<String>,
+
+    /// Slack app-level token (`xapp-...`). Used only for apps.connections.open (Socket Mode).
+    /// Treat as a secret — do not log. Obtain from api.slack.com/apps → Basic Information
+    /// → App-Level Tokens, scope `connections:write`.
+    #[serde(rename = "messaging:slack:app_token", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_slack_app_token: Option<String>,
+
+    /// Channel ID to filter inbound messages and use as the default send target.
+    #[serde(rename = "messaging:slack:channel", default, skip_serializing_if = "String::is_empty")]
+    pub messaging_slack_channel: String,
+
+    /// Agent ID that receives inbound Slack messages via the reactive bus.
+    /// Absent → messages are logged but not forwarded to any agent.
+    #[serde(rename = "messaging:slack:target", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_slack_target: Option<String>,
+
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]

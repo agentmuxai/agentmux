@@ -139,7 +139,7 @@
         "icon": "brands@slack",
         "color": "#4a154b",
         "label": "Slack",
-        "description": "Slack — real interface, agent-connected (bridge Phase 2)",
+        "description": "Slack — real interface, agent-connected",
         "blockdef": {
             "meta": {
                 "view": "browser",
