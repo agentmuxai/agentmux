@@ -17,9 +17,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_delete(engine, state);
     register_mcp_bind(engine, state);
     register_mcp_unbind(engine, state);
+    register_mcp_probe(engine, state);
     register_mcp_catalog_list(engine, state);
     register_mcp_catalog_upsert(engine, state);
     register_mcp_catalog_delete(engine, state);
+    register_mcp_catalog_probe(engine, state);
 }
 
 fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -240,6 +242,38 @@ fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
+/// Health/prerequisite probe for one of this agent's own or bound-global
+/// servers (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.4).
+/// Opens a short-lived MCP connection and reports whether the server
+/// actually speaks the protocol — distinct from `mcp.upsert`'s "is this
+/// valid JSON" check, which tells you nothing about reachability.
+fn register_mcp_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_MCP_PROBE,
+        Box::new(move |data, ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { agent_id: String, id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.probe: {e}"))?;
+                check_s1(&ctx, &req.agent_id)?;
+                if !wstore.mcp_server_is_accessible_to(&req.agent_id, &req.id)
+                    .map_err(|e| format!("mcp.probe: {e}"))?
+                {
+                    return Err("FORBIDDEN: MCP server not accessible to this agent".to_string());
+                }
+                let server = wstore.mcp_server_get(&req.id)
+                    .map_err(|e| format!("mcp.probe: {e}"))?
+                    .ok_or_else(|| "mcp.probe: MCP server not found".to_string())?;
+                let result = crate::backend::mcp_probe::probe(&server.transport, &server.config).await;
+                Ok(Some(serde_json::to_value(&result).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
 fn register_mcp_catalog_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     engine.register_handler(
@@ -346,7 +380,7 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if let Some(existing) = wstore.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.catalog.delete: {e}"))?
                 {
-                    if !existing.is_global {
+    if !existing.is_global {
                         return Err("FORBIDDEN: cannot delete a private MCP server via the catalog".to_string());
                     }
                 }
@@ -359,6 +393,35 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     });
                 }
                 Ok(Some(json!({ "deleted": deleted })))
+            })
+        }),
+    );
+}
+
+/// Health/prerequisite probe for a global catalog server, callable without
+/// an agent context (mirrors mcp.catalog.*'s window-scoped, no-`check_s1`
+/// shape) — this is what lets the Armory's MCP Servers tab show a
+/// connected/error status per row before any agent has bound the server.
+/// See SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.4.
+fn register_mcp_catalog_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_PROBE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.probe: {e}"))?;
+                let server = wstore.mcp_server_get(&req.id)
+                    .map_err(|e| format!("mcp.catalog.probe: {e}"))?
+                    .ok_or_else(|| "mcp.catalog.probe: MCP server not found".to_string())?;
+                if !server.is_global {
+                    return Err("FORBIDDEN: mcp.catalog.probe only probes global servers".to_string());
+                }
+                let result = crate::backend::mcp_probe::probe(&server.transport, &server.config).await;
+                Ok(Some(serde_json::to_value(&result).map_err(|e| e.to_string())?))
             })
         }),
     );
