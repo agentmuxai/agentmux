@@ -224,7 +224,7 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         // `AppState::pending_reproject_closures`'s doc comment for why this
         // can't happen any earlier (right after `open_window_with_kind`
         // returns `Ok`) without risking silent data loss.
-        let old_reprojected_id = state.pending_reproject_closures.lock().remove(label);
+        let old_reprojected_id = state.pending_reproject_closures.lock().confirm(label);
         if let Some(old_id) = old_reprojected_id {
             let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
             let auth_key = state.auth_key.lock().clone();

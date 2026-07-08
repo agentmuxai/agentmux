@@ -657,18 +657,17 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
         // recreate at most this many windows per pass; anything beyond that
         // is left in place (not lost — just not recreated this launch) with
         // a loud warning, rather than silently opening dozens of windows.
-        const MAX_SLOW_PATH_RECREATE: usize = 20;
-        if extra_ids.len() > MAX_SLOW_PATH_RECREATE {
+        let dropped = cap_recreate_list(&mut extra_ids, MAX_SLOW_PATH_RECREATE);
+        if dropped > 0 {
             tracing::warn!(
                 target: "reproject",
-                total = extra_ids.len(),
-                recreating = MAX_SLOW_PATH_RECREATE,
-                dropped = extra_ids.len() - MAX_SLOW_PATH_RECREATE,
+                total = extra_ids.len() + dropped,
+                recreating = extra_ids.len(),
+                dropped,
                 "[reproject] slow path: Client.windowids has far more entries than a normal \
                  session should — capping recreation to avoid a runaway window-open storm; \
                  the rest are left in srv, uncreated, for now"
             );
-            extra_ids.truncate(MAX_SLOW_PATH_RECREATE);
         }
 
         let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
@@ -734,7 +733,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
         if !recreated_pairs.is_empty() {
             let mut pending = state.pending_reproject_closures.lock();
             for (old_id, new_label) in recreated_pairs {
-                pending.insert(new_label, old_id);
+                pending.stage(new_label, old_id);
             }
         }
     });
@@ -785,6 +784,61 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
         }
     }
     (1200, 800)
+}
+
+/// SPEC_PILLAR1_STEP4 Phase 3 safety cap — see `reproject_from_srv`'s own
+/// comment at the call site for why this exists (found live, 2026-07-08:
+/// 30+ accumulated `Client.windowids` entries recreated all at once).
+const MAX_SLOW_PATH_RECREATE: usize = 20;
+
+/// Truncates `items` to at most `max` entries in place; returns how many
+/// were dropped. Extracted as a pure function (reagent P2, PR #2032,
+/// 2026-07-08) so the cap itself has direct unit test coverage, not just
+/// the live-verified end-to-end behavior.
+fn cap_recreate_list<T>(items: &mut Vec<T>, max: usize) -> usize {
+    if items.len() <= max {
+        return 0;
+    }
+    let dropped = items.len() - max;
+    items.truncate(max);
+    dropped
+}
+
+#[cfg(test)]
+mod cap_recreate_list_tests {
+    use super::cap_recreate_list;
+
+    #[test]
+    fn under_the_cap_is_untouched() {
+        let mut items = vec![1, 2, 3];
+        assert_eq!(cap_recreate_list(&mut items, 20), 0);
+        assert_eq!(items, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn exactly_at_the_cap_is_untouched() {
+        let mut items: Vec<i32> = (0..20).collect();
+        assert_eq!(cap_recreate_list(&mut items, 20), 0);
+        assert_eq!(items.len(), 20);
+    }
+
+    #[test]
+    fn over_the_cap_truncates_and_reports_dropped_count() {
+        let mut items: Vec<i32> = (0..44).collect();
+        assert_eq!(cap_recreate_list(&mut items, 20), 24);
+        assert_eq!(items.len(), 20);
+        // Keeps the FIRST `max`, not an arbitrary subset — matters because
+        // callers may care about ordering (e.g. FullInstance-before-Subwindow
+        // sort already applied upstream).
+        assert_eq!(items, (0..20).collect::<Vec<i32>>());
+    }
+
+    #[test]
+    fn empty_list_is_a_noop() {
+        let mut items: Vec<i32> = Vec::new();
+        assert_eq!(cap_recreate_list(&mut items, 20), 0);
+        assert!(items.is_empty());
+    }
 }
 
 #[cfg(test)]
