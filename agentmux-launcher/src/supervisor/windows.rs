@@ -34,6 +34,14 @@ use crate::{
 /// then wait on one shared event and can render stacked/duplicate splash
 /// windows simultaneously. A per-restart unique name sidesteps the collision
 /// entirely; the caller passes a monotonic counter that only increases.
+///
+/// The unique name alone only stops two splashes from *sharing one event* —
+/// it does nothing to stop the PREVIOUS restart's splash from being
+/// orphaned if its host crashed again before calling `on_load_end` (reagent
+/// P1, PR #2032, 2026-07-08). Every call site MUST call
+/// `crate::splash::dismiss_splash` on the outgoing `splash_event_name`
+/// immediately before calling this function, so the old thread tears itself
+/// down via its own normal dismiss path instead of leaking forever.
 #[cfg(target_os = "windows")]
 fn respawn_splash_for_restart(dir_hash: &str, seq: u32) -> Option<String> {
     if crate::splash_config::splash_disabled() {
@@ -604,6 +612,17 @@ pub(crate) async fn run_windows(
                         // cold-start dismiss, so nothing was listening on that
                         // event name — the host would signal it and nothing would
                         // happen. See `respawn_splash_for_restart`.
+                        // Tear down the PREVIOUS restart's splash before spawning a
+                        // new one (reagent P1, PR #2032, 2026-07-08): the unique
+                        // per-restart event name (above) stops two splashes from
+                        // sharing one Win32 event, but does nothing to stop the old
+                        // one from being orphaned — if the host that was supposed to
+                        // dismiss it crashed again first, its thread would otherwise
+                        // block in `WaitForSingleObject` for the rest of the
+                        // launcher's life and its window could still be on screen.
+                        if let Some(prev_event) = splash_event_name.as_deref() {
+                            crate::splash::dismiss_splash(prev_event);
+                        }
                         restart_splash_seq += 1;
                         splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
                         match spawn_host_supervised(
@@ -658,6 +677,17 @@ pub(crate) async fn run_windows(
                         // SPEC_PILLAR1_STEP4 Phase 4 — see the OOM branch above for
                         // why this re-spawns the splash rather than reusing
                         // `splash_event_name` as-is.
+                        // Tear down the PREVIOUS restart's splash before spawning a
+                        // new one (reagent P1, PR #2032, 2026-07-08): the unique
+                        // per-restart event name (above) stops two splashes from
+                        // sharing one Win32 event, but does nothing to stop the old
+                        // one from being orphaned — if the host that was supposed to
+                        // dismiss it crashed again first, its thread would otherwise
+                        // block in `WaitForSingleObject` for the rest of the
+                        // launcher's life and its window could still be on screen.
+                        if let Some(prev_event) = splash_event_name.as_deref() {
+                            crate::splash::dismiss_splash(prev_event);
+                        }
                         restart_splash_seq += 1;
                         splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
                         match spawn_host_supervised(
