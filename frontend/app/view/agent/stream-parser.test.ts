@@ -459,6 +459,88 @@ describe("user_message startup-injection detection", () => {
     });
 });
 
+// ── [JEKT:...] marker detection (SPEC_JEKT_SECURITY_AND_VISIBILITY) ────────
+
+describe("jekt marker detection", () => {
+    const jektBlock = (overrides: Partial<{
+        from: string; to: string; tier: string; delivery: string; trust: string;
+        msgid: string; priority: string;
+    }> = {}) => {
+        const f = {
+            from: "agentx", to: "agent3", tier: "coord", delivery: "host",
+            trust: "host-verified", msgid: "abc123", priority: "normal",
+            ...overrides,
+        };
+        return `[JEKT:FROM=${f.from} TO=${f.to} TIER=${f.tier} DELIVERY=${f.delivery} TRUST=${f.trust} MSGID=${f.msgid} PRIORITY=${f.priority} TS=1783386012]\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `From: ${f.from} | To: ${f.to} | ts=1783386012\n` +
+            `Hey, can you review PR #25?\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `Reply: bus:inject to ${f.from}\n` +
+            `[/JEKT]`;
+    };
+
+    test("parses a well-formed block into a jekt_message node", () => {
+        const message = jektBlock();
+        const node = parser.parseStreamEvent({ type: "user_message", message });
+        expect(node).not.toBeNull();
+        expect(node!.type).toBe("jekt_message");
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.from).toBe("agentx");
+        expect(jekt.to).toBe("agent3");
+        expect(jekt.tier).toBe("coord");
+        expect(jekt.deliveryTier).toBe("host");
+        expect(jekt.trust).toBe("host-verified");
+        expect(jekt.msgId).toBe("abc123");
+        expect(jekt.priority).toBe("normal");
+        expect(jekt.raw).toBe(message);
+    });
+
+    test("strips divider/header/reply scaffolding from the displayed message", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock() });
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.message).toBe("Hey, can you review PR #25?");
+    });
+
+    test("direction is incoming when TO matches the current agent", () => {
+        parser.setAgentId("agent3");
+        const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ to: "agent3" }) });
+        expect((node as import("./types").JektMessageNode).direction).toBe("incoming");
+    });
+
+    test("direction is outgoing when FROM matches the current agent and TO doesn't", () => {
+        parser.setAgentId("agentx");
+        const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ from: "agentx", to: "agent3" }) });
+        expect((node as import("./types").JektMessageNode).direction).toBe("outgoing");
+    });
+
+    test("defaults unrecognized TIER/DELIVERY values to coord/host rather than dropping the node", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ tier: "bogus", delivery: "bogus" }) });
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.type).toBe("jekt_message");
+        expect(jekt.tier).toBe("coord");
+        expect(jekt.deliveryTier).toBe("host");
+    });
+
+    test("falls back to a plain user_message for an unterminated jekt block", () => {
+        const message = "[JEKT:FROM=agentx TO=agent3 TIER=coord]\nno closing tag here";
+        const node = parser.parseStreamEvent({ type: "user_message", message });
+        expect(node!.type).toBe("user_message");
+        expect((node as UserMessageNode).message).toBe(message);
+    });
+
+    test("falls back to a plain user_message when FROM/TO are missing", () => {
+        const message = "[JEKT:TIER=coord]\nsomething\n[/JEKT]";
+        const node = parser.parseStreamEvent({ type: "user_message", message });
+        expect(node!.type).toBe("user_message");
+    });
+
+    test("normal typed input starting with a bracket is not mistaken for a jekt block", () => {
+        const node = parser.parseStreamEvent({ type: "user_message", message: "[not a jekt] just talking about brackets" });
+        expect(node!.type).toBe("user_message");
+    });
+});
+
 // ── error_result → AgentErrorNode (P1.3) ────────────────────────────────────
 
 describe("error_result event", () => {

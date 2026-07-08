@@ -15,6 +15,10 @@ import {
     DIRECTION_ICONS,
     DocumentNode,
     ErrorResultEvent,
+    JektDeliveryTier,
+    JektMessageNode,
+    JektTier,
+    JektTrust,
     STATUS_ICONS,
     StreamEvent,
     TextEvent,
@@ -41,6 +45,54 @@ import {
  * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
  */
 export const STARTUP_HEADING_RE = /^# Session Context\b/;
+
+/**
+ * Matches a full `[JEKT:...]...[/JEKT]` marker block spanning the whole
+ * message. Produced by `wrap_jekt_message` (`agentmux-srv/src/backend/
+ * reactive/sanitize.rs`) and `wrapJektMessage` (`muxbus-cloud/muxbus/server/
+ * src/index.ts`) — the two current producers of this format. Group 1 is the
+ * structured tag's field string (`FROM=... TO=... TIER=...`); group 2 is
+ * everything between the tag line and the closing `[/JEKT]`.
+ *
+ * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.1.
+ */
+export const JEKT_BLOCK_RE = /^\[JEKT:([^\]\n]+)\]\r?\n([\s\S]*?)\r?\n\[\/JEKT\]\s*$/;
+
+const VALID_JEKT_TIERS: ReadonlySet<string> = new Set(["info", "coord", "sensitive"]);
+const VALID_JEKT_DELIVERY_TIERS: ReadonlySet<string> = new Set(["host", "lan", "wan"]);
+
+/** Parses the `KEY=value` tokens out of a jekt structured-tag string. */
+function parseJektTagFields(tag: string): Record<string, string> {
+    const fields: Record<string, string> = {};
+    const re = /(\w+)=(\S+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(tag))) {
+        fields[m[1]] = m[2];
+    }
+    return fields;
+}
+
+/**
+ * Strips the presentational scaffolding both jekt-wrapping implementations
+ * add around the actual message (divider lines, the "From: X | To: Y | ..."
+ * header line, the sensitive-tier warning, the reply hint), leaving just
+ * what the sender actually typed/sent. Best-effort: any line that doesn't
+ * match a known scaffolding shape is kept, so an unrecognized wrapper
+ * variant degrades to showing extra context rather than losing content.
+ */
+function stripJektEnvelope(body: string): string {
+    return body
+        .split("\n")
+        .filter((line) => {
+            if (/^─+$/.test(line)) return false;
+            if (/^From:.*\|.*\|/.test(line)) return false;
+            if (/^⚠/.test(line)) return false;
+            if (/^Reply:/.test(line)) return false;
+            return true;
+        })
+        .join("\n")
+        .trim();
+}
 
 /**
  * Shared default skip-callback — returns the same empty `Set`
@@ -460,6 +512,9 @@ export class ClaudeCodeStreamParser {
      * `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
      */
     private userMessageToNode(event: UserMessageEvent): DocumentNode {
+        const jekt = this.tryParseJekt(event);
+        if (jekt) return jekt;
+
         const isStartup = STARTUP_HEADING_RE.test(event.message);
         return {
             type: "user_message",
@@ -467,6 +522,57 @@ export class ClaudeCodeStreamParser {
             message: event.message,
             timestamp: event.timestamp || Date.now(),
             isStartup,
+        };
+    }
+
+    /**
+     * Detects a `[JEKT:...]...[/JEKT]` marker block occupying the whole
+     * user-message payload and, if found, parses it into a `JektMessageNode`
+     * instead of the plain-text `UserMessageNode` the marker would otherwise
+     * render as. Returns null for anything that isn't a well-formed jekt
+     * block — including malformed/partial markers — so those fall through to
+     * normal plain-text rendering rather than being silently dropped.
+     *
+     * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
+     */
+    private tryParseJekt(event: UserMessageEvent): JektMessageNode | null {
+        const match = JEKT_BLOCK_RE.exec(event.message.trim());
+        if (!match) return null;
+
+        const fields = parseJektTagFields(match[1]);
+        if (!fields.FROM || !fields.TO) return null;
+
+        const tier: JektTier = VALID_JEKT_TIERS.has(fields.TIER) ? (fields.TIER as JektTier) : "coord";
+        const deliveryTier: JektDeliveryTier = VALID_JEKT_DELIVERY_TIERS.has(fields.DELIVERY)
+            ? (fields.DELIVERY as JektDeliveryTier)
+            : "host";
+        const trust: JektTrust = fields.TRUST === "host-verified" ? "host-verified" : "network-claimed";
+
+        // Direction mirrors agentMessageToNode: incoming when this agent is
+        // the declared recipient, outgoing when it's the declared sender
+        // (spec §3.2's outgoing echo — not yet emitted by any producer today,
+        // but handled here so JektBubble is ready when it is). Falls back to
+        // incoming, the only case any current producer emits.
+        const lowerAgentId = this.currentAgentId?.toLowerCase();
+        const direction: "incoming" | "outgoing" =
+            lowerAgentId && fields.FROM.toLowerCase() === lowerAgentId && fields.TO.toLowerCase() !== lowerAgentId
+                ? "outgoing"
+                : "incoming";
+
+        return {
+            type: "jekt_message",
+            id: this.nextIdOf("jekt"),
+            from: fields.FROM,
+            to: fields.TO,
+            message: stripJektEnvelope(match[2]),
+            raw: event.message,
+            tier,
+            deliveryTier,
+            trust,
+            msgId: fields.MSGID || "",
+            priority: fields.PRIORITY === "urgent" ? "urgent" : "normal",
+            direction,
+            timestamp: event.timestamp || Date.now(),
         };
     }
 
