@@ -28,7 +28,26 @@ export interface ActiveSubagent {
     // typed away here. Some("wf_<id>") for a Task/Workflow-tool run that
     // spawned multiple subagents together; null for a standalone subagent.
     workflow_id: string | null;
+    // Concise Haiku-generated name (SubagentInfo.display_name, Rust). Null
+    // until a client expands this subagent's row for the first time — see
+    // `subagent.GenerateName` / the `subagent:named` event below.
+    display_name: string | null;
 }
+
+// ── Subagent event log (inline-expand detail) ───────────────────────────
+
+export interface SubagentEvent {
+    agent_id: string;
+    event_type: SubagentEventType;
+    timestamp: number;
+}
+
+export type SubagentEventType =
+    | { type: "text"; content: string }
+    | { type: "tool_use"; name: string; input_summary: string }
+    | { type: "tool_result"; is_error: boolean; preview: string }
+    | { type: "progress"; output: string }
+    | { type: "result"; content: string };
 
 /**
  * A group of subagents spawned together by one Task/Workflow-tool run
@@ -106,6 +125,129 @@ export function groupSubagentsByWorkflow(subagents: ActiveSubagent[]): SwarmChil
     return [...loose, ...groups].sort((a, b) => lastEventOf(b) - lastEventOf(a));
 }
 
+function shallowEqualSubagent(a: ActiveSubagent, b: ActiveSubagent): boolean {
+    return (
+        a.slug === b.slug &&
+        a.status === b.status &&
+        a.last_event_at === b.last_event_at &&
+        a.event_count === b.event_count &&
+        a.model === b.model &&
+        a.workflow_id === b.workflow_id &&
+        a.display_name === b.display_name &&
+        a.parent_agent === b.parent_agent &&
+        a.parent_block_id === b.parent_block_id &&
+        a.session_id === b.session_id
+    );
+}
+
+/**
+ * Merge a freshly-fetched subagent list into the previous one, reusing the
+ * OLD object reference for any entry whose fields are unchanged. `ListActive`
+ * returns a brand-new JSON-deserialized array on every call — without this,
+ * every subagent (not just the one that actually changed) gets a fresh
+ * object identity on every spawn/completed refresh, and SolidJS's `<For>`
+ * (which diffs list items by reference, not value) tears down and remounts
+ * every row in the tree on every refresh, silently collapsing any row a
+ * user has expanded. See
+ * docs/specs/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md.
+ */
+export function mergeSubagentsPreservingIdentity(
+    prev: ActiveSubagent[],
+    next: ActiveSubagent[]
+): ActiveSubagent[] {
+    const prevById = new Map(prev.map((s) => [s.agent_id, s]));
+    return next.map((incoming) => {
+        const old = prevById.get(incoming.agent_id);
+        return old && shallowEqualSubagent(old, incoming) ? old : incoming;
+    });
+}
+
+// ── Subagent detail (inline-expand event log) ───────────────────────────
+
+export interface SubagentDetail {
+    eventsAtom: Accessor<SubagentEvent[]>;
+    infoAtom: Accessor<ActiveSubagent | null>;
+    statusAtom: Accessor<"active" | "completed" | "loading">;
+    dispose: () => void;
+}
+
+/**
+ * Plain-function counterpart of the retired SubagentViewModel — fetches one
+ * subagent's event history + info once and keeps them live via
+ * subagent:activity/subagent:completed. Deliberately NOT tied to a
+ * component's render lifecycle (no `onCleanup`): `SwarmViewModel` caches
+ * one of these per expanded subagent (`getSubagentDetail`) so it survives
+ * the frequent `<For>` remounts `tree()` causes (see
+ * `mergeSubagentsPreservingIdentity` and `groupSubagentsByWorkflow` above —
+ * workflow-group wrapper objects are rebuilt on every recompute regardless
+ * of whether their members changed) instead of refetching/resubscribing on
+ * every incidental re-render while a row is open.
+ */
+export function createSubagentDetail(subagentId: string): SubagentDetail {
+    const [events, setEvents] = createSignal<SubagentEvent[]>([]);
+    const [info, setInfo] = createSignal<ActiveSubagent | null>(null);
+    const [status, setStatus] = createSignal<"active" | "completed" | "loading">("loading");
+
+    const unsubs: (() => void)[] = [];
+
+    const unsubActivity = waveEventSubscribe({
+        eventType: "subagent:activity",
+        handler: (event: WaveEvent) => {
+            const data = event?.data as any;
+            if (data?.agentId !== subagentId) return;
+            const newEvents = (data?.events as SubagentEvent[]) ?? [];
+            if (newEvents.length > 0) setEvents((prev) => [...prev, ...newEvents]);
+            if (data?.totalEvents != null) {
+                setInfo((prev) => (prev ? { ...prev, event_count: data.totalEvents } : prev));
+            }
+        },
+    });
+    if (unsubActivity) unsubs.push(unsubActivity);
+
+    const unsubCompleted = waveEventSubscribe({
+        eventType: "subagent:completed",
+        handler: (event: WaveEvent) => {
+            const data = event?.data as any;
+            if (data?.agentId !== subagentId) return;
+            setStatus("completed");
+            setInfo((prev) => (prev ? { ...prev, status: "completed" } : prev));
+        },
+    });
+    if (unsubCompleted) unsubs.push(unsubCompleted);
+
+    void (async () => {
+        try {
+            const result = await callBackendService("subagent", "GetHistory", [subagentId, 500]);
+            setEvents((result as SubagentEvent[]) ?? []);
+            setStatus("active");
+        } catch {
+            setStatus("active");
+        }
+        // Targeted single-agent lookup (not ListActive's full scan) — this
+        // subagent may have spawned before this pane opened, so its
+        // subagent:spawned event already fired and won't refire.
+        try {
+            const result = await callBackendService("subagent", "GetInfo", [subagentId]);
+            if (result) {
+                const match = result as ActiveSubagent;
+                setInfo(match);
+                setStatus(match.status);
+            }
+        } catch {
+            // ignore
+        }
+    })();
+
+    return {
+        eventsAtom: events,
+        infoAtom: info,
+        statusAtom: status,
+        dispose: () => {
+            for (const unsub of unsubs) unsub();
+        },
+    };
+}
+
 // ── Status derivation ────────────────────────────────────────────────────
 
 /**
@@ -164,20 +306,27 @@ export class SwarmViewModel implements ViewModel {
     loadingAtom: Accessor<boolean> = this._loading[0];
     private setLoading: Setter<boolean> = this._loading[1];
 
-    // Workflow groups the user has expanded, keyed by workflowId. Lives
-    // here, not as WorkflowGroupRow-local component state: `buildTree()`
-    // calls `groupSubagentsByWorkflow`, which builds brand-new WorkflowGroup
-    // wrapper objects on every recompute — including when an UNRELATED block
-    // changes (any subagent spawn/complete event, any `term:ctx-tokens` or
-    // activity-summary meta update touches `tree()`'s dependencies). Since
-    // `<For>` diffs list items by reference, a fresh wrapper object remounts
-    // WorkflowGroupRow and silently resets a local `expanded` signal on
-    // essentially every tree refresh — precisely while watching an active
-    // workflow's progress, the case this feature targets. Keying expand
-    // state by a stable string id here survives that churn.
+    // Rows the user has expanded — keyed by workflowId (WorkflowGroupRow) or
+    // agent_id (SubagentRow). Lives here, not as row-local component state:
+    // `tree()` recomputes on every trackedBlockIds/subagents/agentStatuses
+    // change (agentStatuses updates on every controllerstatus tick — very
+    // frequent during an active turn) and rebuilds fresh WorkflowGroup/
+    // AgentTreeNode wrapper objects every time regardless of whether that
+    // row's own data changed, so `<For>`'s reference-diffing remounts row
+    // components far more often than "the user actually changed something."
+    // Local expand state would silently collapse on the very next unrelated
+    // status tick; keying by a stable string id here survives that churn.
     private _expandedIds = createSignal<Set<string>>(new Set());
     expandedIdsAtom: Accessor<Set<string>> = this._expandedIds[0];
     private setExpandedIds: Setter<Set<string>> = this._expandedIds[1];
+
+    // One SubagentDetail per currently-expanded subagent, created lazily on
+    // first expand. Same rationale as expandedIds above: if this fetch+
+    // subscribe lifecycle lived inside the row component instead, every
+    // incidental remount (see above) would refetch GetHistory/GetInfo and
+    // resubscribe from scratch — potentially several times a second while a
+    // row is open during an active turn.
+    private detailCache = new Map<string, SubagentDetail>();
 
     private unsubs: (() => void)[] = [];
     // Per-block controllerstatus unsubs — cleaned up when block list refreshes
@@ -200,6 +349,23 @@ export class SwarmViewModel implements ViewModel {
             handler: () => void this.loadSubagents(),
         });
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
+
+        // Patch display_name in place (not a full loadSubagents() reload) so
+        // every client watching this session picks up a generated name —
+        // not just the one whose expand click triggered subagent.GenerateName.
+        const unsubNamed = waveEventSubscribe({
+            eventType: "subagent:named",
+            handler: (event: WaveEvent) => {
+                const data = event?.data as any;
+                const agentId = data?.agentId;
+                const displayName = data?.displayName;
+                if (!agentId || !displayName) return;
+                this.setSubagents((prev) =>
+                    prev.map((s) => (s.agent_id === agentId ? { ...s, display_name: displayName } : s))
+                );
+            },
+        });
+        if (unsubNamed) this.unsubs.push(unsubNamed);
 
         // When process trackers change, refresh the block list
         const unsubProcAdded = waveEventSubscribe({
@@ -260,16 +426,19 @@ export class SwarmViewModel implements ViewModel {
         try {
             const result = await callBackendService("subagent", "ListActive", []);
             const list = (result as ActiveSubagent[]) ?? [];
-            this.setSubagents(list);
+            this.setSubagents((prev) => mergeSubagentsPreservingIdentity(prev, list));
         } catch {
             // silently ignore
         }
     };
 
+    // ── Row expand/collapse (workflow groups + subagent detail) ──────────
+
     isExpanded(id: string): boolean {
         return this.expandedIdsAtom().has(id);
     }
 
+    /** Generic toggle — used by WorkflowGroupRow (no data-fetching side effects). */
     toggleExpanded(id: string): void {
         this.setExpandedIds((prev) => {
             const next = new Set(prev);
@@ -277,6 +446,27 @@ export class SwarmViewModel implements ViewModel {
             else next.add(id);
             return next;
         });
+    }
+
+    /** SubagentRow's toggle — also tears down the cached SubagentDetail
+     *  (and its WS subscriptions) on collapse, so a subagent a user opened
+     *  once and moved on from doesn't keep a live subscription forever. */
+    toggleSubagentExpanded(agentId: string): void {
+        const wasExpanded = this.isExpanded(agentId);
+        this.toggleExpanded(agentId);
+        if (wasExpanded) {
+            this.detailCache.get(agentId)?.dispose();
+            this.detailCache.delete(agentId);
+        }
+    }
+
+    getSubagentDetail(agentId: string): SubagentDetail {
+        let detail = this.detailCache.get(agentId);
+        if (!detail) {
+            detail = createSubagentDetail(agentId);
+            this.detailCache.set(agentId, detail);
+        }
+        return detail;
     }
 
     // Subscribe to controllerstatus events for each tracked block and
@@ -358,5 +548,7 @@ export class SwarmViewModel implements ViewModel {
         for (const unsub of [...this.unsubs, ...this.blockUnsubs]) unsub();
         this.unsubs = [];
         this.blockUnsubs = [];
+        for (const detail of this.detailCache.values()) detail.dispose();
+        this.detailCache.clear();
     }
 }

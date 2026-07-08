@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { groupSubagentsByWorkflow, isWorkflowGroup, type ActiveSubagent } from "./swarm-model";
+import { groupSubagentsByWorkflow, isWorkflowGroup, mergeSubagentsPreservingIdentity, type ActiveSubagent } from "./swarm-model";
 
 function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id">): ActiveSubagent {
     return {
@@ -15,6 +15,7 @@ function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id"
         event_count: 1,
         model: null,
         workflow_id: null,
+        display_name: null,
         ...overrides,
     };
 }
@@ -120,5 +121,43 @@ describe("groupSubagentsByWorkflow", () => {
         // newest-loose (900) > wf_1 group (500) > old-loose (100)
         expect(isWorkflowGroup(result[0]) ? result[0].workflowId : result[0].agent_id).toBe("newest-loose");
         expect(isWorkflowGroup(result[2]) ? result[2].workflowId : result[2].agent_id).toBe("old-loose");
+    });
+});
+
+describe("mergeSubagentsPreservingIdentity", () => {
+    it("reuses the old object reference for an entry whose fields are unchanged", () => {
+        const prev = [mk({ agent_id: "a1", slug: "foo" })];
+        const next = [mk({ agent_id: "a1", slug: "foo" })];
+        const merged = mergeSubagentsPreservingIdentity(prev, next);
+        expect(merged[0]).toBe(prev[0]);
+    });
+
+    it("uses the new object when a field actually changed", () => {
+        const prev = [mk({ agent_id: "a1", status: "active" })];
+        const next = [mk({ agent_id: "a1", status: "completed" })];
+        const merged = mergeSubagentsPreservingIdentity(prev, next);
+        expect(merged[0]).toBe(next[0]);
+        expect(merged[0].status).toBe("completed");
+    });
+
+    it("only replaces the changed entry, leaving unrelated entries' references untouched", () => {
+        const prev = [
+            mk({ agent_id: "a1", status: "active" }),
+            mk({ agent_id: "a2", status: "active" }),
+        ];
+        const next = [
+            mk({ agent_id: "a1", status: "completed" }), // changed
+            mk({ agent_id: "a2", status: "active" }), // unchanged
+        ];
+        const merged = mergeSubagentsPreservingIdentity(prev, next);
+        expect(merged[0]).toBe(next[0]);
+        expect(merged[1]).toBe(prev[1]);
+    });
+
+    it("uses the new object for a subagent with no prior entry", () => {
+        const prev: ActiveSubagent[] = [];
+        const next = [mk({ agent_id: "a1" })];
+        const merged = mergeSubagentsPreservingIdentity(prev, next);
+        expect(merged[0]).toBe(next[0]);
     });
 });
