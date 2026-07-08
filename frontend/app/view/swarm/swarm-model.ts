@@ -24,6 +24,38 @@ export interface ActiveSubagent {
     last_event_at: number;
     event_count: number;
     model: string | null;
+    // Already on the wire (SubagentInfo.workflow_id, Rust) — was previously
+    // typed away here. Some("wf_<id>") for a Task/Workflow-tool run that
+    // spawned multiple subagents together; null for a standalone subagent.
+    workflow_id: string | null;
+}
+
+/**
+ * A group of subagents spawned together by one Task/Workflow-tool run
+ * (shared `workflow_id`). Collapsed into one row in the tree instead of one
+ * row per member — a single workflow run can spawn dozens of subagents at
+ * once (observed live: 45), which read as a "flood" when listed flat. See
+ * docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md Finding 4.
+ */
+export interface WorkflowGroup {
+    kind: "workflowGroup";
+    workflowId: string;
+    /** Derived client-side from the first member with a non-empty slug —
+     *  the backend has no separate workflow-name concept (see report). */
+    name: string;
+    subagents: ActiveSubagent[];
+    activeCount: number;
+    totalCount: number;
+    /** "active" if any member is still active; "retired" once every member
+     *  has completed. */
+    status: "active" | "retired";
+    lastEventAt: number;
+}
+
+export type SwarmChild = ActiveSubagent | WorkflowGroup;
+
+export function isWorkflowGroup(child: SwarmChild): child is WorkflowGroup {
+    return "kind" in child && child.kind === "workflowGroup";
 }
 
 export interface AgentTreeNode {
@@ -33,7 +65,45 @@ export interface AgentTreeNode {
     activitySummary: string | null;
     contextTokens: number | null;
     agentStatus: "running" | "idle";
-    subagents: ActiveSubagent[];
+    subagents: SwarmChild[];
+}
+
+/**
+ * Group `subagents` (already filtered to one parent block) by `workflow_id`.
+ * Subagents with no `workflow_id` pass through unchanged; subagents sharing
+ * one collapse into a single `WorkflowGroup`. Result is sorted by most
+ * recent activity, mixing loose subagents and groups in one recency order.
+ */
+export function groupSubagentsByWorkflow(subagents: ActiveSubagent[]): SwarmChild[] {
+    const loose: ActiveSubagent[] = [];
+    const byWorkflow = new Map<string, ActiveSubagent[]>();
+    for (const s of subagents) {
+        if (s.workflow_id) {
+            const members = byWorkflow.get(s.workflow_id) ?? [];
+            members.push(s);
+            byWorkflow.set(s.workflow_id, members);
+        } else {
+            loose.push(s);
+        }
+    }
+
+    const groups: WorkflowGroup[] = [...byWorkflow.entries()].map(([workflowId, members]) => {
+        const sorted = [...members].sort((a, b) => b.last_event_at - a.last_event_at);
+        const activeCount = sorted.filter((m) => m.status === "active").length;
+        return {
+            kind: "workflowGroup" as const,
+            workflowId,
+            name: sorted.find((m) => m.slug)?.slug || workflowId,
+            subagents: sorted,
+            activeCount,
+            totalCount: sorted.length,
+            status: activeCount > 0 ? "active" as const : "retired" as const,
+            lastEventAt: sorted[0]?.last_event_at ?? 0,
+        };
+    });
+
+    const lastEventOf = (c: SwarmChild): number => (isWorkflowGroup(c) ? c.lastEventAt : c.last_event_at);
+    return [...loose, ...groups].sort((a, b) => lastEventOf(b) - lastEventOf(a));
 }
 
 // ── Status derivation ────────────────────────────────────────────────────
@@ -249,9 +319,9 @@ export class SwarmViewModel implements ViewModel {
             const rawCtx = block?.meta?.["term:ctx-tokens"];
             const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
             const agentStatus = statuses.get(blockId) ?? "idle";
-            const children = subagents
-                .filter((s) => s.parent_block_id === blockId)
-                .sort((a, b) => b.last_event_at - a.last_event_at);
+            const children = groupSubagentsByWorkflow(
+                subagents.filter((s) => s.parent_block_id === blockId)
+            );
             return { blockId, agentName, agentProvider, activitySummary, contextTokens, agentStatus, subagents: children };
         });
     }

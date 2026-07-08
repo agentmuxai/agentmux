@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowGroup } from "./swarm-model";
+import { isWorkflowGroup } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -251,9 +252,43 @@ function AgentRow({
             </div>
             <div class="swarm-children">
                 <For each={node.subagents}>
-                    {(sub) => <SubagentRow sub={sub} />}
+                    {(child) => isWorkflowGroup(child)
+                        ? <WorkflowGroupRow group={child} />
+                        : <SubagentRow sub={child} />}
                 </For>
             </div>
+        </div>
+    );
+}
+
+// ── Workflow group row (collapsed by default) ───────────────────────────
+
+function WorkflowGroupRow({ group }: { group: WorkflowGroup }): JSX.Element {
+    const [expanded, setExpanded] = createSignal(false);
+
+    return (
+        <div class={`swarm-workflow-group swarm-workflow-group--${group.status}`}>
+            <div
+                class="swarm-workflow-header"
+                onClick={() => setExpanded(!expanded())}
+                title={group.name}
+            >
+                <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
+                <span class="swarm-workflow-name">{group.name}</span>
+                <span class="swarm-workflow-count">
+                    {group.status === "active" ? `${group.activeCount}/${group.totalCount} active` : `${group.totalCount} retired`}
+                </span>
+                <span class={`swarm-workflow-status-badge swarm-workflow-status-badge--${group.status}`}>
+                    {group.status === "active" ? "Active" : "Retired"}
+                </span>
+            </div>
+            <Show when={expanded()}>
+                <div class="swarm-workflow-members">
+                    <For each={group.subagents}>
+                        {(sub) => <SubagentRow sub={sub} />}
+                    </For>
+                </div>
+            </Show>
         </div>
     );
 }
