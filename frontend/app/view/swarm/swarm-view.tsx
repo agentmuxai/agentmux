@@ -2,16 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowGroup } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowGroup, SubagentDetail, SubagentEvent } from "./swarm-model";
 import { isWorkflowGroup } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
-import { openSubagentPane, isSubagentPaneOpen } from "@/app/store/subagent-pane-manager";
+import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WOS, workspace, setActiveTab, atoms, getApi } from "@/app/store/global";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { WorkspaceService } from "@/app/store/services";
+import { recordTurn } from "@/app/store/token-usage";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs and windows as needed.
@@ -256,7 +257,7 @@ function AgentRow({
                 <For each={node.subagents}>
                     {(child) => isWorkflowGroup(child)
                         ? <WorkflowGroupRow group={child} model={model} />
-                        : <SubagentRow sub={child} />}
+                        : <SubagentRow sub={child} model={model} />}
                 </For>
             </div>
         </div>
@@ -290,7 +291,7 @@ function WorkflowGroupRow({ group, model }: { group: WorkflowGroup; model: Swarm
             <Show when={expanded()}>
                 <div class="swarm-workflow-members">
                     <For each={group.subagents}>
-                        {(sub) => <SubagentRow sub={sub} />}
+                        {(sub) => <SubagentRow sub={sub} model={model} />}
                     </For>
                 </div>
             </Show>
@@ -300,28 +301,125 @@ function WorkflowGroupRow({ group, model }: { group: WorkflowGroup; model: Swarm
 
 // ── Subagent child row ───────────────────────────────────────────────────
 
-function SubagentRow({ sub }: { sub: ActiveSubagent }): JSX.Element {
-    const handleOpen = () => {
-        if (isSubagentPaneOpen(sub.agent_id)) return;
-        void openSubagentPane({
-            subagentId: sub.agent_id,
-            slug: sub.slug,
-            parentAgent: sub.parent_agent,
-            parentBlockId: sub.parent_block_id,
-            sessionId: sub.session_id,
-        });
+function SubagentRow({ sub, model }: { sub: ActiveSubagent; model: SwarmViewModel }): JSX.Element {
+    const expanded = createMemo(() => model.isExpanded(sub.agent_id));
+    const displayLabel = createMemo(() => sub.display_name || sub.slug || sub.agent_id.substring(0, 7));
+
+    const handleToggle = () => {
+        const wasExpanded = expanded();
+        model.toggleSubagentExpanded(sub.agent_id);
+        if (!wasExpanded && !sub.display_name) {
+            // Fire-and-forget — the row's label/detail header picks up the
+            // name via the subagent:named event (swarm-model.ts), not this
+            // call's return; we only need the return here for cost accounting.
+            void callBackendService("subagent", "GenerateName", [sub.agent_id]).then((result: any) => {
+                if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
+            });
+        }
     };
 
     return (
-        <div
-            class={`swarm-subagent-row swarm-subagent-row--${sub.status}`}
-            onClick={handleOpen}
-            title={sub.slug || sub.agent_id}
-        >
-            <span class="swarm-subagent-slug">{sub.slug || sub.agent_id.substring(0, 7)}</span>
-            <AgentStatusChip status={sub.status === "active" ? "working" : "idle"} />
+        <div class={`swarm-subagent-group swarm-subagent-group--${sub.status}`}>
+            <div
+                class={`swarm-subagent-row swarm-subagent-row--${sub.status}`}
+                onClick={handleToggle}
+                title={displayLabel()}
+            >
+                <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-expand-icon`} />
+                <span class="swarm-subagent-slug">{displayLabel()}</span>
+                <AgentStatusChip status={sub.status === "active" ? "working" : "idle"} />
+            </div>
+            <Show when={expanded()}>
+                <SubagentDetailPane sub={sub} detail={model.getSubagentDetail(sub.agent_id)} />
+            </Show>
         </div>
     );
+}
+
+// ── Subagent inline detail (expanded event log) ──────────────────────────
+
+function SubagentDetailPane({ sub, detail }: { sub: ActiveSubagent; detail: SubagentDetail }): JSX.Element {
+    const info = detail.infoAtom;
+    const events = detail.eventsAtom;
+    const status = detail.statusAtom;
+
+    const name = createMemo(() =>
+        info()?.display_name || sub.display_name || info()?.slug || sub.slug || sub.agent_id.substring(0, 7)
+    );
+    const modelName = createMemo(() => info()?.model ?? sub.model);
+    const eventCount = createMemo(() => info()?.event_count ?? sub.event_count);
+
+    return (
+        <div class="swarm-subagent-detail">
+            <div class="swarm-subagent-detail-header">
+                <span class="swarm-subagent-detail-name">{name()}</span>
+                <span class="swarm-subagent-detail-meta">{sub.agent_id.substring(0, 7)}</span>
+                <span class="swarm-subagent-detail-meta">{eventCount()} events</span>
+                <Show when={modelName()}>
+                    <span class="swarm-subagent-detail-meta">{modelName()}</span>
+                </Show>
+                <span class="swarm-subagent-detail-meta">{sub.parent_agent}</span>
+            </div>
+            <div class="swarm-subagent-detail-log">
+                <Show when={status() === "loading"}>
+                    <div class="swarm-subagent-detail-loading">Loading…</div>
+                </Show>
+                <Show when={events().length === 0 && status() !== "loading"}>
+                    <div class="swarm-subagent-detail-empty">No activity yet</div>
+                </Show>
+                <For each={events()}>{(event) => <SubagentDetailEvent event={event} />}</For>
+            </div>
+        </div>
+    );
+}
+
+function SubagentDetailEvent({ event }: { event: SubagentEvent }): JSX.Element {
+    const et = event.event_type;
+    const [expanded, setExpanded] = createSignal(false);
+
+    switch (et.type) {
+        case "text":
+        case "result":
+            return <pre class="swarm-subagent-detail-text">{et.content}</pre>;
+        case "tool_use":
+            return (
+                <div class="swarm-subagent-detail-tool">
+                    <div class="swarm-subagent-detail-tool-header" onClick={() => setExpanded(!expanded())}>
+                        <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
+                        <span class="swarm-subagent-detail-tool-name">{et.name}</span>
+                    </div>
+                    <Show when={expanded()}>
+                        <pre class="swarm-subagent-detail-text">{et.input_summary}</pre>
+                    </Show>
+                </div>
+            );
+        case "tool_result":
+            return (
+                <div class="swarm-subagent-detail-tool">
+                    <div
+                        class={`swarm-subagent-detail-tool-header ${et.is_error ? "swarm-subagent-detail-tool-header--error" : ""}`}
+                        onClick={() => setExpanded(!expanded())}
+                    >
+                        <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-detail-expand-icon`} />
+                        <span>{et.is_error ? "Error" : "Result"}</span>
+                    </div>
+                    <Show when={expanded()}>
+                        <pre class={`swarm-subagent-detail-text ${et.is_error ? "swarm-subagent-detail-text--error" : ""}`}>
+                            {et.preview}
+                        </pre>
+                    </Show>
+                </div>
+            );
+        case "progress":
+            return (
+                <div class="swarm-subagent-detail-progress">
+                    <i class="fa-solid fa-spinner fa-spin" />
+                    <span>{et.output}</span>
+                </div>
+            );
+        default:
+            return null;
+    }
 }
 
 // ── Status chip ──────────────────────────────────────────────────────────
