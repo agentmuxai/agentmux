@@ -16,6 +16,7 @@
 
 import { onMount, Show, type Accessor, type JSX } from "solid-js";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
+import { JektBubble } from "../components/JektBubble";
 import { MarkdownBlock } from "../components/MarkdownBlock";
 import { SubagentLinkBlock } from "../components/SubagentLinkBlock";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
@@ -64,6 +65,7 @@ const TOGGLEABLE_KINDS: ReadonlySet<DocumentNode["type"]> = new Set([
     "tool",
     "shell",
     "agent_message",
+    "jekt_message",
     "section",
 ]);
 
@@ -183,6 +185,13 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "agent_message"}>
                 <AgentMessageBlock
                     node={props.node() as Extract<DocumentNode, { type: "agent_message" }>}
+                    collapsed={props.documentState().collapsedNodes.has(props.node().id)}
+                    onToggle={() => props.onToggleCollapse(props.node().id)}
+                />
+            </Show>
+            <Show when={props.node() && props.node().type === "jekt_message"}>
+                <JektBubble
+                    node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
                     collapsed={props.documentState().collapsedNodes.has(props.node().id)}
                     onToggle={() => props.onToggleCollapse(props.node().id)}
                 />
