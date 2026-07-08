@@ -390,6 +390,121 @@ pub(crate) fn backend_get_window_opacity(web_endpoint: &str, auth_key: &str, win
     parsed.get("data")?.get("opacity")?.as_f64().map(|o| o as f32)
 }
 
+/// SPEC_PILLAR1_STEP4 Phase 3 — slow-path reproject: read srv's durable
+/// `Client.windowids` (the single source of window identity that survives
+/// even a full process-tree kill, unlike the launcher's in-memory snapshot).
+/// Same raw-TCP/blocking shape as `backend_get_window_opacity` — callers
+/// MUST invoke this off the UI thread (`reproject_from_srv` spawns a
+/// `std::thread`, mirroring `register_backend_window`'s write-through).
+pub(crate) fn backend_get_client_window_ids(web_endpoint: &str, auth_key: &str) -> Option<Vec<String>> {
+    use std::io::Write;
+
+    let addr = parse_web_endpoint(web_endpoint, "backend_get_client_window_ids")?;
+
+    let body = serde_json::json!({
+        "service": "client",
+        "method": "GetClientData",
+        "args": [],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
+        .map_err(|e| tracing::warn!(error = %e, "[backend_get_client_window_ids] connect failed"))
+        .ok()?;
+    stream.set_write_timeout(Some(timeout)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| tracing::warn!(error = %e, "[backend_get_client_window_ids] write failed"))
+        .ok()?;
+
+    use std::io::Read;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).ok()?;
+
+    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
+    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let ids = parsed.get("data")?.get("windowids")?.as_array()?;
+    Some(
+        ids.iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+/// SPEC_PILLAR1_STEP4 Phase 3 — read one window's persisted `kind` /
+/// `parent_window_id` (Step 3's fields) for the slow-path reproject driver.
+/// Same shape/thread contract as `backend_get_client_window_ids` above.
+pub(crate) fn backend_get_window_topology(
+    web_endpoint: &str,
+    auth_key: &str,
+    window_id: &str,
+) -> Option<(Option<String>, Option<String>)> {
+    use std::io::Write;
+
+    let addr = parse_web_endpoint(web_endpoint, "backend_get_window_topology")?;
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "GetWindow",
+        "args": [window_id],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
+        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_topology] connect failed"))
+        .ok()?;
+    stream.set_write_timeout(Some(timeout)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_topology] write failed"))
+        .ok()?;
+
+    use std::io::Read;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).ok()?;
+
+    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
+    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let data = parsed.get("data")?;
+    let kind = data.get("kind").and_then(|v| v.as_str()).map(str::to_string);
+    let parent_window_id = data.get("parent_window_id").and_then(|v| v.as_str()).map(str::to_string);
+    Some((kind, parent_window_id))
+}
+
 /// SPEC_PILLAR1_STEP2 Slice B Phase 4 — write-through a floating pane's
 /// OS-window placement to its block's `meta` map, via the existing generic
 /// `object.UpdateObjectMeta` RPC (Phase E.5.3 — `Command::UpdateBlockMeta`

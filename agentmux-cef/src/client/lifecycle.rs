@@ -399,12 +399,42 @@ impl AgentMuxHandler {
             // under the SAME lock acquisition the launcher-ipc reader task
             // uses to check-then-stash — this is what closes the TOCTOU
             // reagent's review caught in the first version of this fix.
-            let stashed = {
+            //
+            // SPEC_PILLAR1_STEP4 Phase 3 — this is also the decision point
+            // for fast-vs-slow path: if no fast-path snapshot has arrived by
+            // the time "main" registers (no launcher connected, or the
+            // launcher's own snapshot response hasn't landed yet), the slow
+            // path should run — but not from here. `reproject_from_srv`
+            // needs "main"'s own confirmed srv `window_id`, which isn't
+            // known yet at this point (native browser creation happens well
+            // before the frontend loads and calls `register_backend_window`
+            // — see `pending_slow_path`'s doc comment for why an earlier
+            // version's `windowids[0]` positional guess was wrong). So this
+            // only sets `pending_slow_path`; `register_backend_window`
+            // (`commands/window/meta.rs`) is what actually triggers it, once
+            // it has that id in hand.
+            //
+            // A stash existing is NOT the same as the fast path having
+            // anything useful: `Event::Snapshot` always stashes SOMETHING
+            // when it arrives before `ready` (even an empty list, or a list
+            // containing only a stale `"main"` entry — the launcher-ipc arm
+            // doesn't pre-filter). `has_extra` is what actually distinguishes
+            // "fast path found real data" from "otherwise" per the spec's
+            // §2.1 step 3-4 — checked live: a fresh launcher (full
+            // process-tree kill) sends a real, non-stale `Event::Snapshot`
+            // with `window_count=0`, which a naive `stashed.is_some()` check
+            // wrongly treated as "fast path succeeded," permanently
+            // suppressing the slow path.
+            let (action, stashed) = {
                 let mut gate = self.state.ui_thread_gate.lock();
-                gate.ready = true;
-                gate.stashed.take()
+                let stashed = gate.stashed.take();
+                let has_extra = stashed
+                    .as_ref()
+                    .is_some_and(|windows| windows.iter().any(|w| w.label != "main"));
+                (gate.on_main_ready(has_extra), stashed)
             };
-            if let Some(windows) = stashed {
+            if action == crate::state::MainReadyAction::ReplayFastPath {
+                let windows = stashed.unwrap_or_default();
                 tracing::info!(
                     target: "reproject",
                     window_count = windows.len(),

@@ -702,19 +702,39 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // bookkeeping call still succeeds. Stash and let `"main"`'s own
             // registration (proof the UI thread is alive) drain and replay.
             //
-            // The check and the stash happen under ONE lock acquisition
+            // The decision and the stash happen under ONE lock acquisition
             // (`ui_thread_gate`), not a load-then-separate-lock pair — see
-            // that field's doc comment for the TOCTOU this closes.
-            let mut gate = state.ui_thread_gate.lock();
-            if gate.ready {
-                drop(gate);
-                crate::commands::window::reproject_from_snapshot(state, windows);
-            } else {
-                tracing::info!(
-                    target: "reproject",
-                    "[reproject] UI thread not ready yet — stashing snapshot for replay after \"main\" registers"
-                );
-                gate.stashed = Some(windows.clone());
+            // `UiThreadGate::on_snapshot`'s doc comment for the TOCTOU this
+            // closes, and for what each outcome means.
+            let action = {
+                let mut gate = state.ui_thread_gate.lock();
+                let action = gate.on_snapshot();
+                if action == crate::state::SnapshotAction::Stash {
+                    gate.stashed = Some(windows.clone());
+                }
+                action
+            };
+            match action {
+                crate::state::SnapshotAction::Stash => {
+                    tracing::info!(
+                        target: "reproject",
+                        "[reproject] UI thread not ready yet — stashing snapshot for replay after \"main\" registers"
+                    );
+                }
+                crate::state::SnapshotAction::RunFastPath => {
+                    tracing::info!(
+                        target: "reproject",
+                        window_count = windows.len(),
+                        "[reproject] fast-path snapshot arrived while slow path was pending — using it instead"
+                    );
+                    crate::commands::window::reproject_from_snapshot(state, windows);
+                }
+                crate::state::SnapshotAction::Skip => {
+                    tracing::info!(
+                        target: "reproject",
+                        "[reproject] snapshot arrived after reproject already ran — skipping"
+                    );
+                }
             }
             return;
         }

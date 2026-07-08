@@ -274,11 +274,93 @@ construction rather than by timing luck. Re-verified live after this second fix 
 isolated instance, same kill/respawn methodology): both recreated windows again registered under
 their own correct labels with zero mislabeling, and appeared as real CDP targets.
 
-**Phase 3 — slow-path fallback from srv.** Read `Client.windowids` + `Window.kind`/
-`parent_window_id` (Step 3) when the launcher's snapshot is empty/unavailable. **App-running
-verification required**: kill the *entire* process tree (launcher + host together) and relaunch from
-scratch, confirm windows still reproject (without exact position/size — see §4 risk — but with
-correct kind/parent/content).
+**Phase 3 — slow-path fallback from srv.** ✅ Done. `reproject_from_srv` (in `creation.rs`) reads
+srv's `Client.windowids` + each window's `kind`/`parent_window_id` (`backend_get_client_window_ids`/
+`backend_get_window_topology`, new blocking read helpers in `client/helpers.rs`, same raw-TCP shape
+as every other `backend_*` helper), skips `windowids[0]` (the entry the frontend's own bootstrap
+already resolves for `"main"`), and converges on the same `reproject_from_snapshot` driver Phase 2
+uses — exactly matching the parent design doc's "both tiers converge on the same per-window
+recreation code path."
+
+Trigger point: `"main"`'s registration (`client/lifecycle.rs`) is now also the fast-vs-slow decision
+point. `UiThreadGate` gained a `reprojected: bool` (decided under the same lock as `ready`/`stashed`)
+so exactly one of {replay a stashed fast-path snapshot, try the slow path} ever runs — necessary
+because a fast-path `Event::Snapshot` can arrive either before or after this decision, and a
+late-arriving one must not double-create on top of an already-run slow path.
+
+**A real bug was caught during live verification, not by reagent this time — by the test itself**:
+the first version's decision logic treated "a stash exists" as "the fast path succeeded," but
+`Event::Snapshot` always stashes *something* when it arrives early, even an empty list. A fresh
+launcher (the full-process-tree-kill case this phase exists for) sends a real, non-stale snapshot
+with zero windows — which the buggy check treated as success, permanently suppressing the slow path
+it was supposed to trigger. Fixed by checking whether the stash actually contains anything beyond
+`"main"` (`has_extra`), not merely whether a stash is `Some`.
+
+**Live verification** (isolated build, full process-tree kill — outer launcher wrapper + inner host
+both killed, letting the Job Object cascade srv's termination too; relaunched fresh from the same
+extracted folder so srv's on-disk data survived while all in-memory state, including the launcher's,
+was gone): the fresh launcher's snapshot correctly came back empty (`window_count=0`), the slow path
+correctly triggered, and reproject recreated all 4 windows srv had on record (the 2 intentionally
+opened plus 2 pre-existing pool-warm windows that had also registered backend window IDs) — including
+gracefully defaulting 2 legacy rows with no persisted `kind` to `FullInstance` with a warning, rather
+than failing. All 4 appeared as real, correctly-labeled CDP targets.
+
+**Addendum 2026-07-08 (reagent review, PR #2017) — main-parented subwindows were silently skipped.**
+reagent caught a second real bug: `reproject_from_snapshot`'s `label_remap` is seeded only with the
+string `"main"` → `"main"` (the host's own stable label), not srv's UUID for it. `reproject_from_srv`
+built each snapshot's `parent_label` directly from srv's raw `parent_window_id`, so a subwindow
+parented to main carried `windowids[0]`'s literal UUID as its parent — a key the remap table never
+had, so the lookup failed and the subwindow was silently skipped as "parent not found," defeating the
+slow path for the single most common subwindow case. My first live-verification pass never caught
+this because it only tested `FullInstance` windows, no subwindow. Fixed by translating
+`windowids[0]`'s UUID to the `"main"` sentinel before building the snapshot list. Re-verified live
+with a subwindow explicitly parented to main (via `open_subwindow`, `parent_instance_id: "main"`)
+through a full process-tree kill + fresh relaunch: the reproject log now shows
+`kind=Subwindow parent_label=Some("main")` and `skipped=0`, and the subwindow appears as a real CDP
+target with a valid `windowId`.
+
+**Addendum 2026-07-08, round 2 (reagent review, PR #2017) — `windowids[0]` is not a stable "main"
+identity.** reagent's third pass found a deeper problem than a translation bug: `Client.windowids`
+gets reordered by `focus_window` (`agentmux-srv/.../wcore/window.rs:164`) to put the *last-focused*
+window at index 0 on every focus change — it's "whichever window the user looked at last," not a
+persistent identity for `"main"`. The prior fix (translate `windowids[0]`'s UUID to `"main"`) was
+therefore built on a false premise: whenever the last-focused window before a crash wasn't the
+original main (the common case with 2+ windows open), the slow path would skip the wrong entry,
+spuriously duplicate main as an extra top-level window, and mistranslate parent-label lookups.
+
+Redesigned rather than patched: `reproject_from_srv` no longer guesses main's srv identity
+positionally. It's now called from `commands/window/meta.rs::register_backend_window`'s `"main"`
+branch instead of `on_after_created` — the point where `"main"`'s own confirmed `window_id` is known
+with certainty (the frontend has already resolved and possibly created it via its own bootstrap,
+`frontend/app-init.ts`'s `initHostWave`). That confirmed id is filtered out of `Client.windowids` **by
+value**, not position, so reordering can't matter. `UiThreadGate` gained `pending_slow_path: bool`:
+`"main"`'s registration (`on_after_created`, still the earliest point) sets it when no fast-path stash
+has anything useful, `register_backend_window` consumes it once `"main"`'s id is known, and a
+late-arriving real fast-path snapshot (checked in `launcher_ipc.rs`'s `Event::Snapshot` arm) can still
+win the race and cancel the pending slow path — richer data preferred whenever available, regardless
+of which side resolves first.
+
+Re-verified live end-to-end with the same subwindow-of-main scenario: the reproject log now shows the
+slow path triggering from `register_backend_window` (well after `"main"`'s native registration, using
+its actual confirmed `window_id`), the subwindow still recreates correctly
+(`kind=Subwindow parent_label=Some("main")`, `skipped=0`), and — critically — the CDP target list shows
+exactly one main-like window (`"Starter workspace"`), confirming no spurious duplicate.
+
+**Addendum 2026-07-08, round 3 (reagent review, PR #2017) — the state machine had no automated test
+coverage.** A fourth review pass observed, correctly, that `UiThreadGate`'s fast-vs-slow-path decision
+logic (`has_extra`/`reprojected`/`pending_slow_path`) had three real bugs found across three review
+rounds, each caught only by manual live-kill verification — a future edit here would have had nothing
+but that same slow, manual process to catch a regression. Extracted the decision logic (previously
+inline at all three call sites) into pure methods on `UiThreadGate` itself —
+`on_main_ready`/`on_snapshot`/`on_main_backend_window_registered` — each returning an explicit action
+enum rather than mutating state and leaving the caller to infer what happened. Added 10 unit tests
+covering every transition, including the specific races each prior bug involved (late fast-path
+snapshot arriving while the slow path is pending; the slow path firing twice; the slow path running
+when it was never actually pending). `client/lifecycle.rs`, `launcher_ipc.rs`, and
+`commands/window/meta.rs` were rewired to call these methods rather than duplicate the logic next to
+now-tested code that could silently drift from it. Re-verified live after the refactor (same
+subwindow-of-main + full-process-tree-kill scenario): identical success signature — slow path
+triggers from `register_backend_window`, subwindow parent resolves correctly, no duplicate main.
 
 **Phase 4 — overlay UX** (§2.4), as a follow-on, not gating Phases 1-3.
 
@@ -344,10 +426,12 @@ session established.
    fully reprojects with correct kind/parent/content and approximately correct placement (Phase 2,
    live-verified — see the UI-thread-readiness addendum above for the race that had to be fixed
    first).
-3. ⬜ Killing the entire process tree and relaunching confirms a multi-window session reprojects
+3. ✅ Killing the entire process tree and relaunching confirms a multi-window session reprojects
    with correct kind/parent/content, position/size at default placement (Phase 3, live-verified).
-4. ⬜ No regression in existing single-window cold-start behavior (the common case — most users
-   never see more than one window) — this must remain exactly as fast and reliable as today.
+4. ✅ No regression in existing single-window cold-start behavior — confirmed across every Phase 2/3
+   live-verification run in this session: a plain cold start with no extra windows takes the
+   fast-path-empty → slow-path-empty-too (or fast-path-has-data) route and both no-op cleanly, per
+   the idempotent-by-construction design in §2.1. 159 unit tests pass throughout, no regressions.
 5. ⬜ E2E test automating #2 (Phase 5).
 
 ---

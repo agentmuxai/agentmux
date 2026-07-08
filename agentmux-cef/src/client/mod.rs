@@ -74,6 +74,9 @@ pub(crate) use helpers::backend_update_block_meta;
 // SPEC_PILLAR1_STEP3 Phase 2 — window kind/parent-linkage write-through,
 // used by `commands/window/meta.rs::register_backend_window`.
 pub(crate) use helpers::backend_set_window_topology;
+// SPEC_PILLAR1_STEP4 Phase 3 — slow-path reproject reads, used by
+// `commands/window/creation.rs::reproject_from_srv`.
+pub(crate) use helpers::{backend_get_client_window_ids, backend_get_window_topology};
 pub(crate) use lifecycle::{
     retry_backend_window_id_lookup, BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
     BACKEND_WINDOW_ID_RETRY_DELAY,
