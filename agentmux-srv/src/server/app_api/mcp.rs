@@ -380,7 +380,7 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if let Some(existing) = wstore.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.catalog.delete: {e}"))?
                 {
-    if !existing.is_global {
+                    if !existing.is_global {
                         return Err("FORBIDDEN: cannot delete a private MCP server via the catalog".to_string());
                     }
                 }

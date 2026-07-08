@@ -129,7 +129,12 @@ async fn probe_stdio(config: &Value) -> ProbeResult {
         .unwrap_or_default();
 
     let mut cmd = Command::new(command);
-    cmd.args(&args).envs(env).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(&args)
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
