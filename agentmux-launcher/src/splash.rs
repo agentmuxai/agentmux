@@ -202,6 +202,27 @@ pub fn spawn_splash(
     Some(event_name)
 }
 
+/// Signal an existing splash's dismiss event by name, same mechanism the CEF
+/// host uses from `on_load_end` (`agentmux-cef/src/client/navigation.rs`).
+/// Used by the crash-restart path (`supervisor/windows.rs`) to tear down the
+/// PREVIOUS restart's splash before spawning a new one — otherwise that
+/// thread stays blocked in `run_splash`'s `WaitForSingleObject` loop forever
+/// (the host that was supposed to dismiss it crashed before ever calling
+/// `on_load_end`), leaking its thread/HWND/GDI objects and, since each
+/// restart now gets its own uniquely-named event (reagent P1, PR #2032,
+/// 2026-07-08), stacking a visible duplicate splash window on screen.
+/// Fire-and-forget: a missing/already-signaled event is not an error.
+pub fn dismiss_splash(event_name: &str) {
+    let nul_name: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
+    unsafe {
+        let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul_name.as_ptr());
+        if !ev.is_null() {
+            SetEvent(ev);
+            CloseHandle(ev);
+        }
+    }
+}
+
 // ── Internals ────────────────────────────────────────────────────────────────
 
 unsafe fn run_splash(
