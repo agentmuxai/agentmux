@@ -282,6 +282,7 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         initial_view.as_deref(),
         initial_meta.as_deref(),
         None,
+        false,
     )
 }
 
@@ -330,6 +331,7 @@ pub fn open_subwindow(
         None,
         None,
         None,
+        false,
     )
 }
 
@@ -352,6 +354,7 @@ pub(crate) fn open_window_with_kind(
     initial_view: Option<&str>,
     initial_meta: Option<&str>,
     explicit_rect: Option<agentmux_common::ipc::Rect>,
+    is_reproject: bool,
 ) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
     // See `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` and the smoke retro
@@ -383,9 +386,15 @@ pub(crate) fn open_window_with_kind(
                 .filter(|m| !m.is_empty())
                 .map(|m| format!("&initialMeta={}", percent_encode(m)))
                 .unwrap_or_default();
+            // SPEC_PILLAR1_STEP4 Phase 4 — drives index.html's
+            // #startup-loading-headline ("Restoring session...") for
+            // reprojected windows only; an interactive "New Window"/"New
+            // Subwindow" never sets this. Cheap, frontend-only per the
+            // spec's §2.4 in-window-phase design.
+            let restoring_param = if is_reproject { "&restoring=1" } else { "" };
             format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}{}{}",
-                base_url, separator, ipc_port, ipc_token, label, view_param, meta_param
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}{}{}{}",
+                base_url, separator, ipc_port, ipc_token, label, view_param, meta_param, restoring_param
             )
         }
         Err(e) => {
@@ -463,17 +472,26 @@ pub(crate) fn open_window_with_kind(
 /// before being passed to `open_window_with_kind`. `"main"` is seeded into
 /// the remap table as `"main"` → `"main"` since its label is stable across
 /// restarts (never regenerated).
+///
+/// Returns the `label` of every `WindowSnapshot` that was successfully
+/// recreated (not the ones skipped/failed) — `reproject_from_srv` uses this
+/// to close the OLD srv window_id once its replacement exists (see that
+/// function's doc comment for why leaving it around causes unbounded
+/// accumulation across repeated crashes). The fast path (launcher snapshot)
+/// ignores this return value: a `WindowSnapshot.label` there is the
+/// launcher's own in-memory label, not necessarily a real srv window_id, so
+/// there is nothing meaningful to close.
 pub(crate) fn reproject_from_snapshot(
     state: &Arc<AppState>,
     windows: &[agentmux_common::ipc::WindowSnapshot],
-) {
+) -> Vec<String> {
     use std::collections::HashMap;
 
     let mut to_create: Vec<&agentmux_common::ipc::WindowSnapshot> =
         windows.iter().filter(|w| w.label != "main").collect();
     if to_create.is_empty() {
         tracing::debug!(target: "reproject", "[reproject] nothing to recreate beyond main");
-        return;
+        return Vec::new();
     }
     // FullInstance before Subwindow — stable sort preserves the snapshot's
     // own relative ordering within each kind. `WindowSnapshot.kind` is the
@@ -495,6 +513,7 @@ pub(crate) fn reproject_from_snapshot(
 
     let mut created = 0usize;
     let mut skipped = 0usize;
+    let mut recreated_old_labels: Vec<String> = Vec::new();
     for w in to_create {
         let new_parent = match &w.parent_label {
             Some(old_parent) => match label_remap.get(old_parent) {
@@ -517,7 +536,7 @@ pub(crate) fn reproject_from_snapshot(
             },
             None => None,
         };
-        match open_window_with_kind(state, to_host_kind(w.kind), new_parent, None, None, w.last_rect) {
+        match open_window_with_kind(state, to_host_kind(w.kind), new_parent, None, None, w.last_rect, true) {
             Ok(new_label_val) => {
                 let new_label = new_label_val.as_str().unwrap_or_default().to_string();
                 tracing::info!(
@@ -530,6 +549,7 @@ pub(crate) fn reproject_from_snapshot(
                     "[reproject] recreated window"
                 );
                 label_remap.insert(w.label.clone(), new_label);
+                recreated_old_labels.push(w.label.clone());
                 created += 1;
             }
             Err(e) => {
@@ -549,6 +569,7 @@ pub(crate) fn reproject_from_snapshot(
         skipped,
         "[reproject] fast-path reproject complete"
     );
+    recreated_old_labels
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 3 — the slow-path reproject driver. Called once
@@ -606,7 +627,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
         // translated to the `"main"` sentinel here — otherwise the remap
         // lookup finds nothing and the subwindow is silently skipped as if
         // its parent were missing.
-        let extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
+        let mut extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
         if extra_ids.is_empty() {
             tracing::debug!(
                 target: "reproject",
@@ -614,6 +635,33 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
                 "[reproject] slow path: nothing beyond main to recreate"
             );
             return;
+        }
+
+        // Safety cap — found live (2026-07-08): a build force-killed many
+        // times over one test session (never a graceful quit) accumulated
+        // 30+ stale `Client.windowids` entries, all recreated at once on the
+        // next cold boot. The direct cause (this function never closing the
+        // OLD id it just reprojected from) is fixed above/below, but that
+        // fix only covers entries THIS function itself creates — a
+        // separate, pre-existing leak (pool-warmup windows registering a
+        // real backend_window_id that's never closed either, since they're
+        // never gracefully closed) can still slowly inflate this list over
+        // many restarts. Bound the worst case regardless of root cause:
+        // recreate at most this many windows per pass; anything beyond that
+        // is left in place (not lost — just not recreated this launch) with
+        // a loud warning, rather than silently opening dozens of windows.
+        const MAX_SLOW_PATH_RECREATE: usize = 20;
+        if extra_ids.len() > MAX_SLOW_PATH_RECREATE {
+            tracing::warn!(
+                target: "reproject",
+                total = extra_ids.len(),
+                recreating = MAX_SLOW_PATH_RECREATE,
+                dropped = extra_ids.len() - MAX_SLOW_PATH_RECREATE,
+                "[reproject] slow path: Client.windowids has far more entries than a normal \
+                 session should — capping recreation to avoid a runaway window-open storm; \
+                 the rest are left in srv, uncreated, for now"
+            );
+            extra_ids.truncate(MAX_SLOW_PATH_RECREATE);
         }
 
         let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
@@ -657,7 +705,28 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
             window_count = snapshots.len(),
             "[reproject] slow path: recreating windows from srv"
         );
-        reproject_from_snapshot(&state, &snapshots);
+        let recreated_old_ids = reproject_from_snapshot(&state, &snapshots);
+
+        // Close each OLD window_id now that its replacement exists — srv's
+        // `close_window` already does the full cleanup (prunes
+        // `Client.windowids`, deletes the Window row and its workspace/tabs).
+        // Without this, repeated crashes accumulate `Client.windowids`
+        // forever: each crash's reproject only ADDS new ids via
+        // `register_backend_window`, never removes the old ones it just
+        // reprojected FROM, so every SUBSEQUENT crash reprojects an
+        // ever-growing pile including windows from crashes days/weeks
+        // earlier. Found live: a test that had force-killed this build many
+        // times over one session (never a graceful quit, so nothing ever
+        // pruned `Client.windowids` naturally) hit 30+ accumulated entries,
+        // all recreated at once on the next cold boot.
+        //
+        // Only the SUCCESSFULLY recreated ones are closed — a window that
+        // failed to recreate (network hiccup talking to srv, an unresolvable
+        // parent) is left alone so a future launch can still retry it,
+        // rather than closing it and losing it outright.
+        for old_id in recreated_old_ids {
+            crate::client::backend_close_window(&web_endpoint, &auth_key, &old_id);
+        }
     });
 }
 

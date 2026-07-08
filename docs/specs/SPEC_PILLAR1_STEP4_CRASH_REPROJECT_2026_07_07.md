@@ -362,10 +362,60 @@ now-tested code that could silently drift from it. Re-verified live after the re
 subwindow-of-main + full-process-tree-kill scenario): identical success signature — slow path
 triggers from `register_backend_window`, subwindow parent resolves correctly, no duplicate main.
 
-**Phase 4 — overlay UX** (§2.4), as a follow-on, not gating Phases 1-3.
+**Phase 4 — overlay UX.** ✅ Done (Windows only, matching Phases 1-3's scoping). Pre-window phase:
+`agentmux-launcher/src/splash.rs`'s `spawn_splash` gained a `restoring: bool` param that draws a
+"Restoring session..." headline (ASCII only — the bitmap font only covers 0x20-0x7E, a real ellipsis
+renders as `?`) in place of stage row 0, since a crash-restart has no stage-telemetry events at all
+to show. `supervisor/windows.rs`'s two restart branches (OOM, Abnormal) now call a new
+`respawn_splash_for_restart` helper — a fresh Win32 event + consumer thread, not a reuse of the
+cold-start splash's already-exited one (the original bug this addendum's own §1 already diagnosed:
+the stale event name was re-passed to the relaunched host, but nothing was listening on it anymore).
+In-window phase: `index.html` gained a hidden `#startup-loading-headline` node shown via an inline
+script reading `?restoring=1` (mirroring the existing `window_transparent` query-param pattern);
+`open_window_with_kind` gained an `is_reproject: bool` param that appends `&restoring=1` to the URL
+only for reprojected windows, threaded through from `reproject_from_snapshot`'s call site (shared by
+both fast and slow paths).
 
-**Phase 5 — E2E test** ("host OOM ⇒ session reprojects", per the parent design doc's §3 acceptance
-criterion): automate the Phase 2 manual verification.
+**Phase 5 — E2E test.** ✅ Done. `test/e2e/crash-reproject.e2e.test.ts` — greenfield (no prior E2E
+infra existed in this repo; Vitest is the only test runner, no Playwright), Windows-only, opt-in via
+`AGENTMUX_E2E_BUILD_DIR` (skips instantly under a plain `npm test`, since a real portable build takes
+minutes to produce). Spawns a real isolated instance (env-scrubbed, matching this session's manual
+methodology all Phases 1-3 were verified with), opens a `FullInstance` window and a subwindow of
+main, kills the inner host process only, and asserts the respawned host's CDP target list — not just
+its own log lines, per the explicit lesson from `docs/retro/retro-browser-pane-renderer-leak-2026-07-07.md`
+("a test that only checks host log lines... would have passed throughout this entire investigation").
+Uses Node's native global `WebSocket` rather than the `ws` npm package — the shared `vitest.config.ts`
+merges in the frontend's own browser-oriented `vite.config`, which redirects `ws` to a stub that
+throws even under `@vitest-environment node` and even via `createRequire` (vite-node intercepts
+Node's own `require`, not just ESM imports).
+
+**Addendum 2026-07-08 — a real accumulation bug found while building Phase 5's test, not by manual
+verification.** The E2E test's `beforeAll` did a plain cold boot and immediately triggered the slow
+path, which tried to recreate **30+ stale windows** left over from this whole session's testing (every
+manual verification pass used `taskkill /F`, never a graceful quit, so nothing ever pruned srv's
+`Client.windowids`). Root cause: `reproject_from_srv` recreates windows from `Client.windowids` but
+never removed the OLD ids it just reprojected FROM — only `register_backend_window` ever *adds* to
+that list. Across repeated crashes (exactly Phase 3's own target scenario), the list grows
+monotonically: every subsequent crash reprojects an ever-larger pile, including windows from crashes
+days or weeks earlier. This was sitting in `main` already (PR #2017), not merely a test artifact.
+
+Fixed in two parts:
+1. `reproject_from_snapshot` now returns the labels it successfully recreated (not skipped/failed
+   ones); `reproject_from_srv` closes each corresponding OLD srv `window_id` via the existing
+   `backend_close_window` (the same `window.CloseWindow` RPC used elsewhere), once its replacement
+   exists. Verified live with `AGENTMUX_DEBUG_CLOSE=1`: every close request gets `HTTP/1.1 200 OK`.
+2. A defensive cap (`MAX_SLOW_PATH_RECREATE = 20`) bounds the worst case regardless of root cause —
+   verified live by pushing `Client.windowids` to 44 entries (opening 23 windows on top of leftover
+   pool-window registrations) and confirming the slow path logged
+   `total=44 recreating=20 dropped=24` and created exactly 20, not 44.
+
+**Known, separate follow-up (not fixed here):** pool-warmup windows (the 1-2 windows CEF creates
+automatically on every cold boot for instant-open performance) also register a real
+`backend_window_id` that's never closed either, since they're never gracefully closed — only
+promoted or abandoned. This means `Client.windowids` still grows slowly across repeated restarts from
+that source alone, independent of Phase 3's own reprojection (which is now self-cleaning). Bounded by
+the same cap above, but the underlying pool-window leak itself is a separate, pre-existing gap
+(adjacent to Pillar 2's window-lifecycle work, not Phase 3-specific) and needs its own fix.
 
 Each phase independently shippable, matching every other Pillar 1 spec's phasing discipline this
 session established.
@@ -431,8 +481,12 @@ session established.
 4. ✅ No regression in existing single-window cold-start behavior — confirmed across every Phase 2/3
    live-verification run in this session: a plain cold start with no extra windows takes the
    fast-path-empty → slow-path-empty-too (or fast-path-has-data) route and both no-op cleanly, per
-   the idempotent-by-construction design in §2.1. 159 unit tests pass throughout, no regressions.
-5. ⬜ E2E test automating #2 (Phase 5).
+   the idempotent-by-construction design in §2.1. 169 unit tests pass throughout, no regressions.
+5. ✅ E2E test automating #2 (Phase 5) — `test/e2e/crash-reproject.e2e.test.ts`, opt-in via
+   `AGENTMUX_E2E_BUILD_DIR`, passing.
+6. ✅ Repeated crashes don't cause unbounded window-recreation growth — the accumulation bug found
+   while building #5 is fixed (old srv window_ids closed once reprojected) and capped as a defensive
+   backstop (`MAX_SLOW_PATH_RECREATE = 20`), both live-verified.
 
 ---
 

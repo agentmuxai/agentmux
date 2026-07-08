@@ -12,6 +12,24 @@ use crate::{
     startup_events, state,
 };
 
+/// SPEC_PILLAR1_STEP4 Phase 4 — re-arm the pre-splash for a crash-restart.
+/// Not a no-op wrapper around `spawn_splash`: it exists so both restart
+/// branches (OOM, Abnormal) share one call site rather than duplicating the
+/// "new channel, new splash, restoring=true" triplet inline. Respects
+/// `AGENTMUX_SPLASH=0` (`splash_disabled()`) the same as the cold-start path.
+/// No stage-telemetry events are ever sent into the fresh channel — a
+/// restart doesn't re-run saga recovery/migrations/etc., so the splash shows
+/// only the "Restoring session..." headline and the pulsing brain, nothing
+/// from the (empty) stage list.
+#[cfg(target_os = "windows")]
+fn respawn_splash_for_restart(dir_hash: &str) -> Option<String> {
+    if crate::splash_config::splash_disabled() {
+        return None;
+    }
+    let (_sink, rx) = startup_events::StartupEventSink::new();
+    crate::splash::spawn_splash(dir_hash, rx, true)
+}
+
 /// Windows main flow: resolve paths → create J0 → spawn srv → spawn
 /// host with srv endpoints in env → supervised wait → cleanup.
 #[cfg(target_os = "windows")]
@@ -191,12 +209,16 @@ pub(crate) async fn run_windows(
     // single-instance pipe — before srv spawn and CEF init.
     // The event name is forwarded to the CEF host as
     // AGENTMUX_SPLASH_EVENT so it can signal dismiss from on_load_end.
+    // SPEC_PILLAR1_STEP4 Phase 4 — `mut`: a crash-restart branch below
+    // re-spawns the splash (a fresh event + consumer thread, since this
+    // first thread's own event is one-shot — see `spawn_splash`'s doc
+    // comment) and reassigns this to the new event name.
     #[cfg(target_os = "windows")]
-    let splash_event_name = if crate::splash_config::splash_disabled() {
+    let mut splash_event_name = if crate::splash_config::splash_disabled() {
         drop(startup_rx); // no splash — let senders fail silently
         None // splash:disabled / AGENTMUX_SPLASH=0 — no event, no window (SPEC §6)
     } else {
-        crate::splash::spawn_splash(&dir_hash, startup_rx)
+        crate::splash::spawn_splash(&dir_hash, startup_rx, false)
     };
     #[cfg(not(target_os = "windows"))]
     let splash_event_name: Option<String> = { drop(startup_rx); None };
@@ -555,6 +577,15 @@ pub(crate) async fn run_windows(
                         // Relaunch degraded: the GPU process is a large commit
                         // consumer, so skip straight to software rendering for an
                         // OOM relaunch (SPEC §5.B.4).
+                        //
+                        // SPEC_PILLAR1_STEP4 Phase 4 — re-spawn the splash (fresh
+                        // event + consumer thread) with the "Restoring session..."
+                        // headline rather than reusing `splash_event_name` as-is:
+                        // the original splash thread already exited after the
+                        // cold-start dismiss, so nothing was listening on that
+                        // event name — the host would signal it and nothing would
+                        // happen. See `respawn_splash_for_restart`.
+                        splash_event_name = respawn_splash_for_restart(&dir_hash);
                         match spawn_host_supervised(
                             real_exe,
                             args,
@@ -604,6 +635,10 @@ pub(crate) async fn run_windows(
                             HOST_RESTART_BUDGET,
                             if host_degraded { ", degraded: --disable-gpu" } else { "" }
                         ));
+                        // SPEC_PILLAR1_STEP4 Phase 4 — see the OOM branch above for
+                        // why this re-spawns the splash rather than reusing
+                        // `splash_event_name` as-is.
+                        splash_event_name = respawn_splash_for_restart(&dir_hash);
                         match spawn_host_supervised(
                             real_exe,
                             args,

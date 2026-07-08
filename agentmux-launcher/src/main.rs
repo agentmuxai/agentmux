@@ -251,7 +251,7 @@ fn splash_selftest() {
     #[cfg(target_os = "windows")]
     {
         let (_sink, rx) = startup_events::StartupEventSink::new();
-        let _ = splash::spawn_splash("selftest", rx);
+        let _ = splash::spawn_splash("selftest", rx, false);
         std::thread::sleep(hold);
     }
 }
