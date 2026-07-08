@@ -8,6 +8,14 @@
 //!   POST /api/messaging/discord/send    — send a message via the Discord bridge
 //!   POST /api/messaging/telegram/send   — send a message via the Telegram bridge
 //!   POST /api/messaging/slack/send      — send a message via the Slack bridge
+//!   POST /api/messaging/whatsapp/send   — send a message via the WhatsApp bridge
+//!
+//! The WhatsApp *inbound* webhook receiver (`GET`/`POST /webhook/whatsapp`)
+//! is not here — it's unauthenticated by necessity (Meta can't supply
+//! `X-AuthKey`) and lives in `messaging::whatsapp::webhook`, registered
+//! directly on `server/mod.rs`'s top-level router alongside `health`, not in
+//! this authed handler module. See `server/mod.rs` and
+//! `docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md` §8.2.
 
 use axum::{
     extract::State,
@@ -22,6 +30,7 @@ use crate::messaging::{EmbedField, MsgEmbed, MessagingBridge, OutboundMsg};
 use crate::messaging::discord::DiscordBridge;
 use crate::messaging::slack::SlackBridge;
 use crate::messaging::telegram::TelegramBridge;
+use crate::messaging::whatsapp::WhatsAppBridge;
 
 /// GET /api/messaging/status
 pub(super) async fn handle_status(State(_state): State<AppState>) -> impl IntoResponse {
@@ -33,6 +42,9 @@ pub(super) async fn handle_status(State(_state): State<AppState>) -> impl IntoRe
         bridges.push((b as &dyn MessagingBridge).health());
     }
     if let Some(b) = SlackBridge::get() {
+        bridges.push((b as &dyn MessagingBridge).health());
+    }
+    if let Some(b) = WhatsAppBridge::get() {
         bridges.push((b as &dyn MessagingBridge).health());
     }
     Json(json!({ "bridges": bridges }))
@@ -102,6 +114,63 @@ pub(super) async fn handle_discord_send(
         channel_id: req.channel_id,
         reply_to: None,
         embed,
+        edit_message_id: None,
+        blocks: None,
+    };
+
+    match bridge.send(msg) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /api/messaging/whatsapp/send
+///
+/// No embed field — WhatsApp's Cloud API has no rich embed format (spec
+/// §5.3, §8.1). `to` maps onto `OutboundMsg.channel_id`, which WhatsApp
+/// repurposes as "recipient phone number" since the platform has no
+/// channel/room concept (see that field's doc comment in `messaging/mod.rs`).
+#[derive(Deserialize)]
+pub(super) struct WhatsAppSendRequest {
+    /// Recipient phone number, E.164 format preferred (e.g. "+14155552671").
+    #[serde(default)]
+    pub to: String,
+    #[serde(default)]
+    pub text: String,
+}
+
+pub(super) async fn handle_whatsapp_send(
+    State(_state): State<AppState>,
+    Json(req): Json<WhatsAppSendRequest>,
+) -> impl IntoResponse {
+    let bridge = match WhatsAppBridge::get() {
+        Some(b) => b,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error": "whatsapp bridge not initialized — set messaging:whatsapp:enabled in settings"})),
+            )
+                .into_response();
+        }
+    };
+
+    if req.to.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "whatsapp send: \"to\" (recipient phone number) is required"})),
+        )
+            .into_response();
+    }
+
+    let msg = OutboundMsg {
+        text: req.text,
+        channel_id: req.to,
+        reply_to: None,
+        embed: None,
         edit_message_id: None,
         blocks: None,
     };

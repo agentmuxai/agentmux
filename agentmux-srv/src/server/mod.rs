@@ -330,6 +330,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
         .route("/api/messaging/slack/send", post(messaging_handlers::handle_slack_send))
+        .route("/api/messaging/whatsapp/send", post(messaging_handlers::handle_whatsapp_send))
         // Persistent cron scheduler (SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2.4).
         // Auth-gated like reactive routes.
         .route("/agentmux/cron", post(cron::handle_cron_create))
@@ -346,8 +347,25 @@ pub fn build_router(state: AppState) -> Router {
     // Health endpoint (no auth)
     let health = Router::new().route("/", get(health_handler));
 
+    // WhatsApp Cloud API webhook receiver (no auth). Meta's servers call
+    // these directly and cannot supply the X-AuthKey header auth_middleware
+    // requires, so — like `health` — these must be merged at the top level,
+    // outside `authed_routes`'s `route_layer(auth_middleware)`, not added to
+    // that router. The GET handshake and POST delivery are authenticated by
+    // a different mechanism suited to a third party AgentMux doesn't
+    // control the request format of: hub.verify_token comparison on GET,
+    // and HMAC-SHA256(app_secret, raw_body) signature validation on every
+    // POST (see messaging/whatsapp/webhook.rs). See
+    // docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md §8.2.
+    let whatsapp_webhooks = Router::new().route(
+        "/webhook/whatsapp",
+        get(crate::messaging::whatsapp::handle_verify)
+            .post(crate::messaging::whatsapp::handle_inbound),
+    );
+
     Router::new()
         .merge(health)
+        .merge(whatsapp_webhooks)
         .merge(authed_routes)
         .layer(cors)
         .with_state(state)

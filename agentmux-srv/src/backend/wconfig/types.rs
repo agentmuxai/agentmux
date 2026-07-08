@@ -377,6 +377,65 @@ pub struct SettingsType {
     #[serde(rename = "messaging:slack:target", default, skip_serializing_if = "Option::is_none")]
     pub messaging_slack_target: Option<String>,
 
+    // -- WhatsApp Cloud API messaging bridge --
+    //
+    // See docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md.
+    // No `messaging:whatsapp:mode` key — the spec's decision (§2.1) is
+    // Cloud API only for v1, explicitly dropping the unofficial Baileys
+    // path, so there is exactly one mode.
+
+    /// Master enable for the WhatsApp Cloud API bridge.
+    /// When true, the outbound sender starts and the `/webhook/whatsapp`
+    /// routes become live (they're always registered on the router; this
+    /// flag controls whether `WhatsAppBridge::get()` resolves).
+    #[serde(rename = "messaging:whatsapp:enabled", default, skip_serializing_if = "is_false")]
+    pub messaging_whatsapp_enabled: bool,
+
+    /// WhatsApp Business phone number ID (Meta App Dashboard > WhatsApp > API Setup).
+    #[serde(rename = "messaging:whatsapp:phone_number_id", default, skip_serializing_if = "String::is_empty")]
+    pub messaging_whatsapp_phone_number_id: String,
+
+    /// System User access token (permanent). Treat as a secret — do not log.
+    #[serde(rename = "messaging:whatsapp:access_token", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_whatsapp_access_token: Option<String>,
+
+    /// Meta App Secret, used to validate X-Hub-Signature-256 on inbound
+    /// webhooks. Treat as a secret — do not log.
+    #[serde(rename = "messaging:whatsapp:app_secret", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_whatsapp_app_secret: Option<String>,
+
+    /// Verify token used in the GET /webhook/whatsapp handshake. User-chosen,
+    /// must match what's entered in Meta App Dashboard > WhatsApp > Configuration.
+    /// Treat as a secret — do not log.
+    #[serde(rename = "messaging:whatsapp:webhook_verify_token", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_whatsapp_webhook_verify_token: Option<String>,
+
+    /// Agent ID that receives inbound WhatsApp messages via the reactive bus.
+    /// Absent → messages are logged but not forwarded to any agent.
+    #[serde(rename = "messaging:whatsapp:target", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_whatsapp_target: Option<String>,
+
+    /// Template name used for outbound sends outside the 24h customer
+    /// service window. If unset and the window has expired, send() fails
+    /// fast rather than round-tripping to the Graph API (spec §3.4).
+    #[serde(rename = "messaging:whatsapp:fallback_template", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_whatsapp_fallback_template: Option<String>,
+
+    /// Template language code (BCP-47). Default "en_US" if unset.
+    #[serde(rename = "messaging:whatsapp:fallback_template_lang", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_whatsapp_fallback_template_lang: Option<String>,
+
+    /// Public webhook origin (e.g. "wa.yourdomain.com") that a
+    /// user-managed tunnel (Cloudflare Tunnel, ngrok, or otherwise) points
+    /// at this instance's webhook port. **v1 does not spawn or supervise a
+    /// tunnel subprocess** — this field is used only to print the full
+    /// callback URL in the startup log as a setup reminder; the user is
+    /// responsible for standing up the tunnel and registering
+    /// `https://<this>/webhook/whatsapp` in Meta's App Dashboard themselves.
+    /// See messaging/whatsapp/mod.rs for the full scoping rationale.
+    #[serde(rename = "messaging:whatsapp:tunnel_domain", default, skip_serializing_if = "String::is_empty")]
+    pub messaging_whatsapp_tunnel_domain: String,
+
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]

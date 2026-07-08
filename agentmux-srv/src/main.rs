@@ -822,6 +822,67 @@ async fn main() {
         }
     }
 
+    // WhatsApp Cloud API messaging bridge — outbound send + inbound webhook
+    // receiver. Unlike Discord/Telegram/Slack there is no bridge-managed
+    // network connection to open at startup: inbound delivery is passive
+    // HTTP (the GET/POST /webhook/whatsapp routes, registered unauthenticated
+    // in server/mod.rs — Meta cannot supply X-AuthKey), reachable only once
+    // the operator's own tunnel is up and the callback URL is registered in
+    // Meta's App Dashboard, both manual one-time steps this process does not
+    // perform (v1 does not manage a tunnel subprocess — see
+    // messaging/whatsapp/mod.rs). Set messaging:whatsapp:enabled +
+    // access_token/app_secret/webhook_verify_token in settings.json to activate.
+    // See docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md.
+    {
+        let settings = config_watcher.get_settings();
+        if settings.messaging_whatsapp_enabled {
+            match (
+                settings.messaging_whatsapp_access_token.clone(),
+                settings.messaging_whatsapp_app_secret.clone(),
+                settings.messaging_whatsapp_webhook_verify_token.clone(),
+            ) {
+                (Some(token), Some(secret), Some(verify_token))
+                    if !token.is_empty() && !secret.is_empty() && !verify_token.is_empty() =>
+                {
+                    messaging::whatsapp::WhatsAppBridge::init_global(
+                        messaging::whatsapp::WhatsAppConfig {
+                            phone_number_id: settings.messaging_whatsapp_phone_number_id.clone(),
+                            access_token: token,
+                            app_secret: secret,
+                            webhook_verify_token: verify_token,
+                            target_agent: settings.messaging_whatsapp_target.clone(),
+                            fallback_template: settings.messaging_whatsapp_fallback_template.clone(),
+                            fallback_template_lang: settings
+                                .messaging_whatsapp_fallback_template_lang
+                                .clone()
+                                .unwrap_or_else(|| "en_US".to_string()),
+                        },
+                        reqwest::Client::new(),
+                    );
+                    if settings.messaging_whatsapp_tunnel_domain.is_empty() {
+                        tracing::warn!(
+                            "whatsapp bridge: enabled but messaging:whatsapp:tunnel_domain is not set — \
+                             point your own tunnel at this instance's webhook port and register \
+                             https://<your-domain>/webhook/whatsapp in Meta App Dashboard > WhatsApp > Configuration"
+                        );
+                    } else {
+                        tracing::info!(
+                            "whatsapp bridge: initialized — webhook callback = https://{}/webhook/whatsapp \
+                             — verify this is registered in Meta App Dashboard > WhatsApp > Configuration \
+                             (v1 does not manage the tunnel subprocess; ensure it's already running)",
+                            settings.messaging_whatsapp_tunnel_domain
+                        );
+                    }
+                }
+                _ => {
+                    tracing::warn!(
+                        "whatsapp bridge: enabled but one of messaging:whatsapp:{{access_token,app_secret,webhook_verify_token}} is not set in settings.json"
+                    );
+                }
+            }
+        }
+    }
+
     // Set up docsite directory
     if let Some(app_path) = base::get_wave_app_path() {
         let docsite_dir = app_path.join("docsite");
