@@ -65,7 +65,7 @@ export const McpApi = {
         client: RpcClient,
         data: Record<string, never> = {},
         opts?: RpcOpts,
-    ): Promise<McpServer[]> {
+    ): Promise<McpServerCatalogItem[]> {
         return client.rpcCall("mcp.catalog.list", data, opts);
     },
 

@@ -76,7 +76,7 @@ export const SkillApi = {
         client: RpcClient,
         data: Record<string, never> = {},
         opts?: RpcOpts,
-    ): Promise<Skill[]> {
+    ): Promise<SkillCatalogItem[]> {
         return client.rpcCall("skill.catalog.list", data, opts);
     },
 

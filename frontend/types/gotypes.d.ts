@@ -436,6 +436,14 @@ declare global {
     /** `skill.list`'s response shape — see McpServerListItem. */
     type SkillListItem = Skill & { bound_to_agent: boolean };
 
+    /** `mcp.catalog.list`'s response shape: an McpServer plus how many
+     *  agents currently bind it — the Armory catalog's "used by N agents"
+     *  count (#1960 gap #2). */
+    type McpServerCatalogItem = McpServer & { bound_count: number };
+
+    /** `skill.catalog.list`'s response shape — see McpServerCatalogItem. */
+    type SkillCatalogItem = Skill & { bound_count: number };
+
     /** Drone pane (issue #753 Phase 1). Mirrors the Rust types in
      *  agentmux-srv/src/drone/types.rs. */
     type DroneDefinition = {
