@@ -1,6 +1,7 @@
 # Report: Swarm view floods with stale subagents on reopen
 
-**Status:** Root-caused and fixed.
+**Status:** Findings 1-3 fixed and merged (#2008). Finding 4 fixed
+(frontend-only, workflow grouping) — not yet committed/PR'd.
 **Author:** AgentX
 **Date:** 2026-07-07
 **Triggered by:** user report while live-testing the four PRs from
@@ -11,15 +12,19 @@ after the initial fix landed, live-tested again and reported: "when I opened
 an agent that had spawned subagents before, the swarm pane floods with old
 subagents... we need an architecture rethink, this looks sloppy." → after
 Findings 1-2 landed, reported a live agent ("Mazs") that had genuinely just
-spawned subagents still showed nothing, which led to Finding 3.
+spawned subagents still showed nothing, which led to Finding 3. → after
+Findings 1-3 merged and a fresh build tested, reported the flood *again*:
+"if I open a new agent pane with an existing agent, a bunch of old
+subagents appear in the swarm... why would that happen?" — Finding 4.
 
 ## tl;dr
 
-Three distinct, independently-confirmed bugs in `agentmux-srv/src/backend/subagent_watcher.rs` / `agentmux-srv/src/server/reactive.rs`, all stemming from the same root pattern this session's other findings share: state gets (re)constructed at "reopen"/"register" time from raw filesystem/process truth, with no scoping to — or even correct identification of — what's actually *current*.
+Four distinct, independently-confirmed issues in `agentmux-srv/src/backend/subagent_watcher.rs` / `agentmux-srv/src/server/reactive.rs`, all stemming from the same root pattern this session's other findings share: state gets (re)constructed at "reopen"/"register" time from raw filesystem/process truth, with no scoping to — or even correct identification of — what's actually *current*.
 
 1. **Subagents never appeared at all** — `watch_agent()` (called from the reactive-register handshake) failed outright and silently gave up when the Claude CLI's config directory didn't exist yet on disk, which is the common case (register fires ~47s before the directory is created).
 2. **Subagents flooded in from every past session** — once (1) was fixed, reopening any agent pane whose identity had prior conversations flooded the Swarm view with every subagent that identity had *ever* spawned, in *every* project, across the process's whole history — not just the current session.
 3. **The watched directory itself was often just wrong** — `derive_claude_config_dir()` hardcodes `~/.config/claude-<agent_id>`, which only matches reality for an agent with an explicit per-identity bundle override. Any agent without one (the common case — confirmed live for two different test agents) launches under the shared default auth path, `~/.agentmux/shared/providers/claude/`, a completely different subtree. Fix (1) above then watched forever for a directory that was never going to be created at that path, no matter how long it waited.
+4. **A single "current" session can itself be unbounded** — Finding 2's fix correctly scopes the backfill to exactly one session (the agent's ongoing "current" session — an AgentMux agent has exactly one, by design, resumed via the picker's reattach flow on every pane open). But that session persists indefinitely across every reopen, so its subagent history only ever grows. Live-confirmed: opening a pane for agent "Loap" replayed **45 subagent-spawned events in under 500ms** — the session's entire lifetime history, dumped in one instant burst, every single time the pane opens.
 
 ## Finding 1 — `watch_agent()` fails silently when the config dir doesn't exist yet
 
@@ -98,6 +103,45 @@ Added `resolve_claude_config_dir(meta, agent_id)`, which reads the block's own `
 
 Live-confirmed post-fix: both test agents ("AgentY", with an identity override, and "Mazs", without one) now resolve to `~/.agentmux/shared/providers/claude/projects` — the real shared path — and the watch succeeds immediately (no ancestor-fallback needed, since the real path already exists). Mazs's pending workflow batch of 13 subagents (all sharing one slug, confirming they're one legitimate concurrent spawn from the *current* session, not a resurfaced flood) appeared correctly as `subagent:spawned` events immediately after.
 
+## Finding 4 — a single "current" session has no lifetime bound on its own history
+
+### The gap
+
+Findings 1-3 shipped and merged (#2008). Live-tested again against a fresh build on latest `main` — the flood came back, this time for agent "Loap", opened via the *normal* agent picker (`MyAgentsList`/`AgentPicker`), not some edge case.
+
+Tracing why: opening an existing agent from the picker is not a fresh launch — it's a **reattach**. `MyAgentsList.tsx`'s own doc comment: "each entry triggers a normal definition launch... with `continueOfInstanceId` + `workDirOverride` set from the row... so Claude's `--continue` (and equivalents) resumes the session." `agent-model.ts:533` writes `"agent:sessionid": continueSid` directly onto the **new** block's meta as part of building the launch config — before the CLI ever spawns, well before `handle_reactive_register` fires. This is by design (`docs` for `META_SESSION_ID`: "under Option E, a user agent has exactly one 'current' session by construction" — session continuity across pane reopens is the intended UX, not a bug).
+
+That means Finding 2's `scan_session_subagents` check (`agent:sessionid` already non-empty at register time) is true on essentially *every* picker reopen of an existing agent — not just the "resuming mid-conversation" edge case it was originally reasoned about. It correctly scopes to exactly one session (verified — no cross-session leak), but that one session is the agent's entire lifetime conversation, with no upper bound on how long it's been running or how much subagent activity it has accumulated.
+
+Live trace, opening agent "Loap" from the picker:
+
+```
+22:08:15.690  reactive register request  agent_id=Loap
+22:08:15.703  subagent spawned  slug=zesty-crafting-kahan
+22:08:15.713  subagent spawned  slug=zesty-crafting-kahan
+   ... (45 total "subagent spawned" events) ...
+22:08:16.180  subagent spawned  slug=zesty-crafting-kahan
+```
+
+45 subagents "spawned" in under 500ms is not live activity — real subagent processes take real wall-clock time to run and complete. This is `scan_session_subagents` replaying Loap's entire current-session subagent history in one instant burst, 13ms after registration. Most share one slug (a single large historical workflow-tool batch, the same "one shared slug = one legitimate concurrent spawn" signature Finding 3 used to confirm Mazs's 13-subagent batch was real) — so this genuinely is the correct session's real history, just a lot of it, replayed with no sense of "how long ago."
+
+### Fix (chosen: group, not truncate)
+
+Considered three candidates: time-bound the backfill (arbitrary threshold, no precedent for what "recent" means for a sporadically-used agent), count-bound the backfill (predictable ceiling, but risks truncating a batch mid-workflow-run), and grouping — collapse subagents spawned together by one Task/Workflow-tool run into a single collapsed row instead of hiding any of them.
+
+Went with **grouping**. It targets the actual complaint (*volume of rows shown at once*, not the data being wrong or stale) without discarding anything — Loap's 45-subagent flood becomes a small number of workflow-group headers (collapsed by default), not 45 individual rows, with zero risk of hiding a subagent that's still relevant. Time/count-bounding remains an option later if a single agent accumulates enough *distinct* (non-grouped) workflow runs or loose subagents to still feel like a flood — not needed for what's been observed so far.
+
+Implementation (frontend-only — `SubagentInfo.workflow_id` was already on the wire, just typed away in `ActiveSubagent`):
+
+- `frontend/app/view/swarm/swarm-model.ts` — added `workflow_id` to `ActiveSubagent`; new `WorkflowGroup` type (`workflowId`, `name`, `subagents`, `activeCount`/`totalCount`, `status: "active" | "retired"`, `lastEventAt`) and `groupSubagentsByWorkflow()`, which partitions a block's subagents into loose (no `workflow_id`) vs. grouped (shared `workflow_id`), computing each group's name from the first member with a non-empty slug (no separate workflow-name concept on the backend) and status from whether any member is still `"active"`. `buildTree()` now calls this instead of returning a flat sorted list.
+- `frontend/app/view/swarm/swarm-view.tsx` — new `WorkflowGroupRow` component (local `expanded`/`setExpanded` signal, same pattern as `subagent-view.tsx`'s `EventContent` tool-use/tool-result disclosure rows): header shows name, `X/Y active` or `N retired`, and a status badge; click toggles expand **in place** (no pane navigation) — expanding reveals the member subagents using the existing `SubagentRow`, whose own click-to-open-a-pane behavior is unchanged for individual members.
+- `frontend/app/view/swarm/swarm-view.scss` — new `.swarm-workflow-*` rules, styled to match the existing `.swarm-subagent-row` hierarchy (members indented one level deeper than a loose subagent row).
+
+### Verification
+
+- `frontend/app/view/swarm/swarm-model.test.ts` (new) — 8 tests: loose subagents pass through ungrouped; shared `workflow_id` collapses to one group; groups and loose rows coexist per distinct `workflow_id`; a group is `"active"` if any member is still active, `"retired"` only once every member has completed; group name derives from the first member with a slug, falling back to the raw workflow id; loose rows and groups sort together by most recent activity.
+- `tsc --noEmit` — clean.
+
 ## Why this wasn't caught by the earlier report
 
 `REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md`'s Finding 2 (subagent completion detection) and this report's bugs live in the same file and the same general area (`subagent_watcher.rs`'s registration/scan path) but are functionally unrelated — Finding 2 was about a broken *completion* signal for subagents already correctly discovered; this report is about *discovery* itself being broken (Findings 1 and 3) and unscoped (Finding 2 of this report). Finding 2's fix in the earlier report (PR #2002) didn't touch `watch_agent()`, `reactive.rs`, or the scan functions at all. All three bugs here were pre-existing and unrelated to any of the four PRs from the earlier report — they only surfaced because this was the first time agent identities with real multi-session history, and a mix of identity-bound vs. shared-default auth configs, were tested against a live `task dev` build with subagent tracking actually exercised end-to-end.
@@ -115,3 +159,4 @@ Live-confirmed post-fix: both test agents ("AgentY", with an identity override, 
 - Live-verified in `task dev`:
   - Finding 2 against this agent identity's real 20-session history
   - Finding 3 against two live agents with different auth configurations (one identity-bound, one shared-default) — both resolved to their real config dirs and correctly picked up a live subagent spawn (13 subagents, one workflow batch) that had previously shown nothing
+  - Findings 1-3 merged (#2008), then Finding 4 found live on the *next* test pass — opening agent "Loap" from the picker replayed 45 subagent-spawned events in under 500ms. No fix shipped yet; see Finding 4's open design question above.
