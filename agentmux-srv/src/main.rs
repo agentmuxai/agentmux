@@ -789,6 +789,39 @@ async fn main() {
         }
     }
 
+    // Slack messaging bridge — opens a Socket Mode connection if configured.
+    // Set messaging:slack:enabled + messaging:slack:bot_token + messaging:slack:app_token
+    // in settings.json to activate.
+    {
+        let settings = config_watcher.get_settings();
+        if settings.messaging_slack_enabled {
+            match (
+                settings.messaging_slack_bot_token.clone(),
+                settings.messaging_slack_app_token.clone(),
+            ) {
+                (Some(bot_token), Some(app_token))
+                    if !bot_token.is_empty() && !app_token.is_empty() =>
+                {
+                    messaging::slack::SlackBridge::init_global(
+                        messaging::slack::SlackConfig {
+                            bot_token,
+                            app_token,
+                            channel_id: settings.messaging_slack_channel.clone(),
+                            target_agent: settings.messaging_slack_target.clone(),
+                        },
+                        reqwest::Client::new(),
+                    );
+                }
+                _ => {
+                    tracing::warn!(
+                        "slack bridge: enabled but messaging:slack:bot_token and/or \
+                         messaging:slack:app_token is not set in settings.json"
+                    );
+                }
+            }
+        }
+    }
+
     // Set up docsite directory
     if let Some(app_path) = base::get_wave_app_path() {
         let docsite_dir = app_path.join("docsite");
