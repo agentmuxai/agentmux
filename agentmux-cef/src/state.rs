@@ -1006,6 +1006,17 @@ mod pending_reproject_closures_tests {
 pub struct UiThreadGate {
     pub ready: bool,
     pub stashed: Option<Vec<agentmux_common::ipc::WindowSnapshot>>,
+    /// SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P1, PR #2032, 2026-07-08)
+    /// — the same `Event::Snapshot`'s sibling `backend_window_ids` field
+    /// (label → real srv window_id), stashed alongside `stashed` under the
+    /// same lock acquisition so the two never drift apart. Needed so the
+    /// fast-path replay can stage a deferred close for each recreated
+    /// window via `reproject_from_snapshot_and_stage_closures` — without
+    /// this, the fast path had no way to learn the OLD window's real srv
+    /// id (`WindowSnapshot.label` alone is only the launcher's in-memory
+    /// label), so `Client.windowids` grew unboundedly on every ordinary
+    /// (launcher-survives) crash.
+    pub stashed_backend_window_ids: Option<Vec<(String, String)>>,
     /// SPEC_PILLAR1_STEP4 Phase 3 — set true the moment EITHER reproject
     /// path (fast, from the launcher's snapshot; or slow, from srv) has
     /// actually been triggered, so only one of them ever creates windows.

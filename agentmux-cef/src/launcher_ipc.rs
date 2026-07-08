@@ -681,7 +681,7 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
         // request/response payload, not a typed delta the frontend's
         // launcher-event reducer expects — forwarding it would be either
         // dead weight or a mis-parse.
-        Event::Snapshot { version, windows, .. } => {
+        Event::Snapshot { version, windows, backend_window_ids, .. } => {
             tracing::info!(
                 target: "reproject",
                 version,
@@ -711,6 +711,7 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                 let action = gate.on_snapshot();
                 if action == crate::state::SnapshotAction::Stash {
                     gate.stashed = Some(windows.clone());
+                    gate.stashed_backend_window_ids = Some(backend_window_ids.clone());
                 }
                 action
             };
@@ -727,7 +728,11 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
                         window_count = windows.len(),
                         "[reproject] fast-path snapshot arrived while slow path was pending — using it instead"
                     );
-                    crate::commands::window::reproject_from_snapshot(state, windows);
+                    crate::commands::window::reproject_from_snapshot_and_stage_closures(
+                        state,
+                        windows,
+                        backend_window_ids,
+                    );
                 }
                 crate::state::SnapshotAction::Skip => {
                     tracing::info!(
