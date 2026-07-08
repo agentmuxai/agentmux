@@ -1,5 +1,32 @@
 # AgentMux Version History
 
+## 0.51.1 — 2026-07-08
+
+- fix(swarm): key subagent completion off the result-event discriminant, not derived text
+- fix(ambient): cap concurrent Haiku spawns across the two pull RPCs
+- feat(host): SPEC_PILLAR1_STEP3 Phase 1 -- SetWindowTopology RPC for window kind + parent linkage
+- fix(agent): reconcile TurnPhase from backend truth at pane mount
+- feat(subagent): brain-spinner loading overlay + targeted info lookup
+- feat(host): SPEC_PILLAR1_STEP3 Phase 2 -- wire SetWindowTopology into window creation
+- fix(subagent): stop the register-time historical-scan flood and the config-dir-missing race
+- feat(term): terminal picks up the app theme by default
+- fix(browser-pane): macOS click on pane body now selects the pane (Linux still open)
+- fix(window): nudge macOS hamburger button 2px up for optical alignment
+- feat(host): SPEC_PILLAR1_STEP4 Phase 1 -- request the launcher's live window snapshot on connect
+- docs(build): fix stale React/Vite references, app is SolidJS
+- fix(host): fix Pillar 1 Step 4 Phase 2 crash-reproject silently dropping recreated windows
+- fix(window): nudge macOS hamburger button 3px up for optical alignment
+- feat(host): SPEC_PILLAR1_STEP4 Phase 3 - slow-path srv reproject fallback
+- Group swarm subagents by workflow into a collapsible unit with active/retired status
+- feat(swarm): inline-expand subagent rows with Haiku-generated names, no timestamps
+- docs(messaging): status snapshot + implementation-ready specs for Telegram/Slack/WhatsApp/Teams bridges
+- feat(messaging): Telegram bridge — long-polling receive + send
+- feat(armory): used-by-N-agents count, catalog-side bind, and agent<->catalog deep-linking (#1960)
+- fix(armory): rename 'Brain' tab label to 'Memory' per the composable-model naming decision
+- feat(messaging): Slack bridge — Socket Mode receive + Web API send
+- feat(messaging): WhatsApp bridge — Cloud API webhook receiver + send
+- docs(messaging): status update — Telegram/Slack/WhatsApp bridges shipped, Teams deferred
+
 ## 0.51.0 — 2026-07-07
 
 - feat(host): SPEC_PILLAR1_STEP2 Phase 2 — wire per-window opacity write-through + crash-restart read-back
