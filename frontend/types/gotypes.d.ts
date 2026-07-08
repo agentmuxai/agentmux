@@ -433,6 +433,18 @@ declare global {
      *  this — `mcp.get`/`mcp.upsert`/`mcp.catalog.list` return bare McpServer. */
     type McpServerListItem = McpServer & { bound_to_agent: boolean };
 
+    /** `mcp.probe`/`mcp.catalog.probe`'s response shape — a protocol-level
+     *  health check (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md
+     *  §4.4). "connected" means the MCP handshake succeeded, not that any
+     *  external app/prerequisite the server itself depends on is available. */
+    type McpProbeResult = {
+        status: "connected" | "unreachable" | "handshake_failed" | "invalid_config";
+        tool_count: number | null;
+        server_name: string | null;
+        server_version: string | null;
+        error: string | null;
+    };
+
     /** `skill.list`'s response shape — see McpServerListItem. */
     type SkillListItem = Skill & { bound_to_agent: boolean };
 

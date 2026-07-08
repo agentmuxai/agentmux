@@ -336,12 +336,17 @@ pub const COMMAND_MCP_UPSERT: &str = "mcp.upsert";
 pub const COMMAND_MCP_DELETE: &str = "mcp.delete";
 pub const COMMAND_MCP_BIND: &str = "mcp.bind";
 pub const COMMAND_MCP_UNBIND: &str = "mcp.unbind";
+// Health/prerequisite probe (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.4):
+// opens a short-lived MCP client connection and reports whether the server
+// actually speaks the protocol, distinct from "does the JSON parse."
+pub const COMMAND_MCP_PROBE: &str = "mcp.probe";
 
 // App API — Armory-level MCP Server catalog (global servers only,
 // window-scoped — no agent_id, no check_s1 — mirrors bundle.* auth shape).
 pub const COMMAND_MCP_CATALOG_LIST: &str = "mcp.catalog.list";
 pub const COMMAND_MCP_CATALOG_UPSERT: &str = "mcp.catalog.upsert";
 pub const COMMAND_MCP_CATALOG_DELETE: &str = "mcp.catalog.delete";
+pub const COMMAND_MCP_CATALOG_PROBE: &str = "mcp.catalog.probe";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
