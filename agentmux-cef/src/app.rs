@@ -43,6 +43,18 @@ wrap_window_delegate! {
                 height: 800,
             }
         }
+
+        // Windows only: floor the window at 380px wide so the tab strip and
+        // widget bar can't be resized into an unusably cramped state. No
+        // extra height floor beyond CEF/Windows' own default — only width
+        // is constrained here.
+        #[cfg(target_os = "windows")]
+        fn minimum_size(&self, _view: Option<&mut View>) -> Size {
+            Size {
+                width: 380,
+                height: 1,
+            }
+        }
     }
 
     impl PanelDelegate {}
