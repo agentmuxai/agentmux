@@ -17,7 +17,7 @@
 
 mod client;
 mod introspect;
-mod layout_helpers;
+pub(crate) mod layout_helpers;
 mod misc;
 mod object;
 mod object_helpers;
