@@ -169,7 +169,7 @@
         "icon": "brands@whatsapp",
         "color": "#25d366",
         "label": "WhatsApp",
-        "description": "WhatsApp Web — real interface, agent-connected (bridge Phase 3)",
+        "description": "WhatsApp Web — real interface, agent-connected",
         "blockdef": {
             "meta": {
                 "view": "browser",

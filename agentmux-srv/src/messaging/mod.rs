@@ -10,6 +10,7 @@
 pub mod discord;
 pub mod slack;
 pub mod telegram;
+pub mod whatsapp;
 
 use serde::{Deserialize, Serialize};
 
