@@ -27,7 +27,6 @@
 - feat(messaging): WhatsApp bridge — Cloud API webhook receiver + send
 - docs(messaging): status update — Telegram/Slack/WhatsApp bridges shipped, Teams deferred
 
-
 ## 0.51.0 — 2026-07-07
 
 - feat(host): SPEC_PILLAR1_STEP2 Phase 2 — wire per-window opacity write-through + crash-restart read-back
