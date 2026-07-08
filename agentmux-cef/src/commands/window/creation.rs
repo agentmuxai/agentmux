@@ -552,18 +552,25 @@ pub(crate) fn reproject_from_snapshot(
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 3 — the slow-path reproject driver. Called once
-/// per process life from `client::lifecycle`'s `"main"` registration branch,
-/// only when no fast-path (launcher-snapshot) data was available by that
-/// point — e.g. a full process-tree kill (launcher died too, so it has no
-/// in-memory history either) or `task dev` standalone mode (no launcher at
-/// all). Reads srv's durable `Client.windowids` + each window's `kind`/
+/// per process life from `commands/window/meta.rs::register_backend_window`'s
+/// `"main"` branch, only when no fast-path (launcher-snapshot) data was
+/// available — e.g. a full process-tree kill (launcher died too, so it has
+/// no in-memory history either) or `task dev` standalone mode (no launcher
+/// at all). Reads srv's durable `Client.windowids` + each window's `kind`/
 /// `parent_window_id` (SPEC_PILLAR1_STEP3) instead.
 ///
-/// `windowids[0]` is skipped deliberately, not arbitrarily: it's the same
-/// entry the frontend's own per-window bootstrap (`frontend/app-init.ts`)
-/// already reads to resolve `"main"`'s own content, so recreating it here
-/// would double-create a second root window. Every remaining id becomes an
-/// extra top-level window.
+/// `main_window_id` is `"main"`'s own confirmed srv `window_id`, passed in
+/// by the caller — NOT derived positionally from `Client.windowids[0]`.
+/// reagent (P0, PR #2017, 2026-07-08) caught that the earlier design did
+/// exactly that, on the assumption index 0 was reliably `"main"`; it isn't —
+/// `focus_window` (`agentmux-srv/.../wcore/window.rs:164`) reorders
+/// `Client.windowids` to put the last-focused window at index 0 on every
+/// focus change, so index 0 is "whichever window the user looked at last,"
+/// not a stable identity. Filtering `main_window_id` out BY VALUE (wherever
+/// it appears in the list, or not at all) is correct regardless of
+/// reordering; the caller has it with certainty because this only runs from
+/// `register_backend_window`'s own `"main"` branch, i.e. after `"main"`
+/// itself resolved and confirmed that id.
 ///
 /// No `last_rect` is available this way — Step 2/3 never persisted window
 /// position/size (see the spec's §4 risk) — so every recreated window lands
@@ -573,17 +580,16 @@ pub(crate) fn reproject_from_snapshot(
 /// Does its network I/O on a spawned thread, never the calling (UI) thread —
 /// `backend_get_client_window_ids`/`backend_get_window_topology` are
 /// blocking calls (same raw-TCP shape as every other `backend_*` read/write
-/// helper in this codebase), and this is called directly from
-/// `on_after_created`. By the time this runs, `ui_thread_gate.ready` is
-/// already true (this IS "main"'s registration), so `open_window_with_kind`
-/// posting from this background thread is safe — the same
-/// already-verified-safe pattern as any pool-window creation posted after
-/// `"main"` registers.
+/// helper in this codebase). By the time this runs, `ui_thread_gate.ready`
+/// is already true (this fires well after "main"'s own registration), so
+/// `open_window_with_kind` posting from this background thread is safe —
+/// the same already-verified-safe pattern as any pool-window creation
+/// posted after `"main"` registers.
 ///
 /// Converges on the exact same per-window recreation code
 /// (`reproject_from_snapshot`) the fast path uses, per the parent design
 /// doc's "both tiers converge on the same per-window recreation code path."
-pub(crate) fn reproject_from_srv(state: &Arc<AppState>) {
+pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) {
     let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
     let auth_key = state.auth_key.lock().clone();
     let state = state.clone();
@@ -592,7 +598,16 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>) {
             tracing::warn!(target: "reproject", "[reproject] slow path: could not read Client.windowids from srv");
             return;
         };
-        if window_ids.len() <= 1 {
+
+        // reagent P1 (PR #2017) — `reproject_from_snapshot`'s `label_remap` is
+        // seeded only with the string `"main"` → `"main"` (the host's own
+        // stable label for it), not srv's UUID for it. A subwindow whose
+        // persisted `parent_window_id` equals `main_window_id` must be
+        // translated to the `"main"` sentinel here — otherwise the remap
+        // lookup finds nothing and the subwindow is silently skipped as if
+        // its parent were missing.
+        let extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
+        if extra_ids.is_empty() {
             tracing::debug!(
                 target: "reproject",
                 window_count = window_ids.len(),
@@ -601,16 +616,8 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>) {
             return;
         }
 
-        // reagent P1 (PR #2017) — `reproject_from_snapshot`'s `label_remap` is
-        // seeded only with the string `"main"` → `"main"` (the host's own
-        // stable label for it), not srv's UUID for it. A subwindow whose
-        // persisted `parent_window_id` equals `windowids[0]` (main's srv
-        // window_id) must be translated to the `"main"` sentinel here —
-        // otherwise the remap lookup finds nothing and the subwindow is
-        // silently skipped as if its parent were missing.
-        let main_srv_id = &window_ids[0];
         let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
-        for window_id in window_ids.iter().skip(1) {
+        for window_id in extra_ids {
             let Some((kind, parent_window_id)) = crate::client::backend_get_window_topology(&web_endpoint, &auth_key, window_id) else {
                 tracing::warn!(target: "reproject", window_id = %window_id, "[reproject] slow path: GetWindow failed — skipping this window");
                 continue;
@@ -628,7 +635,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>) {
                 }
             };
             let parent_label = parent_window_id.map(|pid| {
-                if &pid == main_srv_id {
+                if pid == main_window_id {
                     "main".to_string()
                 } else {
                     pid

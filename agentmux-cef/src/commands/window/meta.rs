@@ -269,6 +269,40 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
                 "[window-topology] no WindowMeta for label — skipping topology write-through (e.g. pool/browser-pane label)"
             );
         }
+
+        // SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P0, PR #2017,
+        // 2026-07-08) — this is the trigger point for the slow-path
+        // reproject, not "main"'s native browser registration
+        // (`on_after_created`). `reproject_from_srv` needs "main"'s own
+        // confirmed srv `window_id` to know which `Client.windowids` entry
+        // to exclude/treat as the parent-linkage sentinel — that's exactly
+        // this call's `window_id` argument, known with certainty here
+        // (unlike the original design's `windowids[0]` positional guess,
+        // which reagent correctly flagged as broken by `focus_window`
+        // reordering — see `ui_thread_gate.pending_slow_path`'s doc
+        // comment). Check-and-clear under the gate's lock so this and a
+        // late-arriving fast-path snapshot (`launcher_ipc.rs`'s
+        // `Event::Snapshot` arm) can't both fire.
+        if label == "main" {
+            let should_run_slow_path = {
+                let mut gate = state.ui_thread_gate.lock();
+                if gate.pending_slow_path && !gate.reprojected {
+                    gate.pending_slow_path = false;
+                    gate.reprojected = true;
+                    true
+                } else {
+                    false
+                }
+            };
+            if should_run_slow_path {
+                tracing::info!(
+                    target: "reproject",
+                    main_window_id = %window_id,
+                    "[reproject] \"main\"'s own backend window ID is now known — running the slow path"
+                );
+                crate::commands::window::reproject_from_srv(state, window_id.to_string());
+            }
+        }
     } else {
         tracing::warn!(label = %label, "[window] register_backend_window called with empty window_id — skipped");
     }

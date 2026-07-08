@@ -319,6 +319,33 @@ through a full process-tree kill + fresh relaunch: the reproject log now shows
 `kind=Subwindow parent_label=Some("main")` and `skipped=0`, and the subwindow appears as a real CDP
 target with a valid `windowId`.
 
+**Addendum 2026-07-08, round 2 (reagent review, PR #2017) — `windowids[0]` is not a stable "main"
+identity.** reagent's third pass found a deeper problem than a translation bug: `Client.windowids`
+gets reordered by `focus_window` (`agentmux-srv/.../wcore/window.rs:164`) to put the *last-focused*
+window at index 0 on every focus change — it's "whichever window the user looked at last," not a
+persistent identity for `"main"`. The prior fix (translate `windowids[0]`'s UUID to `"main"`) was
+therefore built on a false premise: whenever the last-focused window before a crash wasn't the
+original main (the common case with 2+ windows open), the slow path would skip the wrong entry,
+spuriously duplicate main as an extra top-level window, and mistranslate parent-label lookups.
+
+Redesigned rather than patched: `reproject_from_srv` no longer guesses main's srv identity
+positionally. It's now called from `commands/window/meta.rs::register_backend_window`'s `"main"`
+branch instead of `on_after_created` — the point where `"main"`'s own confirmed `window_id` is known
+with certainty (the frontend has already resolved and possibly created it via its own bootstrap,
+`frontend/app-init.ts`'s `initHostWave`). That confirmed id is filtered out of `Client.windowids` **by
+value**, not position, so reordering can't matter. `UiThreadGate` gained `pending_slow_path: bool`:
+`"main"`'s registration (`on_after_created`, still the earliest point) sets it when no fast-path stash
+has anything useful, `register_backend_window` consumes it once `"main"`'s id is known, and a
+late-arriving real fast-path snapshot (checked in `launcher_ipc.rs`'s `Event::Snapshot` arm) can still
+win the race and cancel the pending slow path — richer data preferred whenever available, regardless
+of which side resolves first.
+
+Re-verified live end-to-end with the same subwindow-of-main scenario: the reproject log now shows the
+slow path triggering from `register_backend_window` (well after `"main"`'s native registration, using
+its actual confirmed `window_id`), the subwindow still recreates correctly
+(`kind=Subwindow parent_label=Some("main")`, `skipped=0`), and — critically — the CDP target list shows
+exactly one main-like window (`"Starter workspace"`), confirming no spurious duplicate.
+
 **Phase 4 — overlay UX** (§2.4), as a follow-on, not gating Phases 1-3.
 
 **Phase 5 — E2E test** ("host OOM ⇒ session reprojects", per the parent design doc's §3 acceptance

@@ -909,11 +909,27 @@ pub struct UiThreadGate {
     pub stashed: Option<Vec<agentmux_common::ipc::WindowSnapshot>>,
     /// SPEC_PILLAR1_STEP4 Phase 3 — set true the moment EITHER reproject
     /// path (fast, from the launcher's snapshot; or slow, from srv) has
-    /// been triggered, so only one of them ever actually creates windows.
-    /// Without this, a fast-path snapshot arriving unusually late (after
-    /// `"main"`'s registration already decided to fall back to the slow
-    /// path) would run a second, redundant reproject on top of the first.
+    /// actually been triggered, so only one of them ever creates windows.
+    /// Without this, a fast-path snapshot arriving late (after the slow
+    /// path already ran, or vice versa) would run a second, redundant
+    /// reproject on top of the first.
     pub reprojected: bool,
+    /// SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P0, PR #2017,
+    /// 2026-07-08) — set true by `"main"`'s registration when no fast-path
+    /// stash was available, meaning the slow path SHOULD run but can't yet:
+    /// `reproject_from_srv` needs `"main"`'s own confirmed srv `window_id`
+    /// to know which entry in `Client.windowids` to exclude/treat as the
+    /// parent-linkage sentinel, and that isn't known until `"main"`'s own
+    /// `register_backend_window` call lands (well after native browser
+    /// creation — the frontend has to load and bootstrap first). The
+    /// original design used `windowids[0]` as a stand-in, positionally —
+    /// reagent caught that `windowids` gets reordered by `focus_window`
+    /// (`agentmux-srv/.../wcore/window.rs:164`) to put the last-focused
+    /// window at index 0, which is not reliably `"main"`. Consumed (cleared)
+    /// by whichever of {`register_backend_window`'s `"main"` branch, a
+    /// late-arriving real fast-path snapshot} runs first — see both call
+    /// sites' comments for why exactly one of them wins.
+    pub pending_slow_path: bool,
 }
 
 impl Default for AppState {

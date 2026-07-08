@@ -403,12 +403,16 @@ impl AgentMuxHandler {
             // SPEC_PILLAR1_STEP4 Phase 3 — this is also the decision point
             // for fast-vs-slow path: if no fast-path snapshot has arrived by
             // the time "main" registers (no launcher connected, or the
-            // launcher's own snapshot response hasn't landed yet), fall back
-            // to srv's durable `Client.windowids`. `reprojected` (decided
-            // under this SAME lock acquisition) ensures exactly one of
-            // {replay the stash, try the slow path} runs — see that field's
-            // doc comment for why a late-arriving fast-path snapshot must
-            // not double-create on top of an already-run slow path.
+            // launcher's own snapshot response hasn't landed yet), the slow
+            // path should run — but not from here. `reproject_from_srv`
+            // needs "main"'s own confirmed srv `window_id`, which isn't
+            // known yet at this point (native browser creation happens well
+            // before the frontend loads and calls `register_backend_window`
+            // — see `pending_slow_path`'s doc comment for why an earlier
+            // version's `windowids[0]` positional guess was wrong). So this
+            // only sets `pending_slow_path`; `register_backend_window`
+            // (`commands/window/meta.rs`) is what actually triggers it, once
+            // it has that id in hand.
             //
             // A stash existing is NOT the same as the fast path having
             // anything useful: `Event::Snapshot` always stashes SOMETHING
@@ -421,7 +425,6 @@ impl AgentMuxHandler {
             // with `window_count=0`, which a naive `stashed.is_some()` check
             // wrongly treated as "fast path succeeded," permanently
             // suppressing the slow path.
-            let mut try_slow_path = false;
             let stashed = {
                 let mut gate = self.state.ui_thread_gate.lock();
                 gate.ready = true;
@@ -432,8 +435,7 @@ impl AgentMuxHandler {
                 if has_extra {
                     gate.reprojected = true;
                 } else if !gate.reprojected {
-                    gate.reprojected = true;
-                    try_slow_path = true;
+                    gate.pending_slow_path = true;
                 }
                 stashed
             };
@@ -444,13 +446,6 @@ impl AgentMuxHandler {
                     "[reproject] replaying stashed snapshot now that \"main\" has registered"
                 );
                 crate::commands::window::reproject_from_snapshot(&self.state, &windows);
-            }
-            if try_slow_path {
-                tracing::info!(
-                    target: "reproject",
-                    "[reproject] no fast-path data available — falling back to srv (slow path)"
-                );
-                crate::commands::window::reproject_from_srv(&self.state);
             }
         } else if label.starts_with("window-pool-") {
             crate::commands::window_pool::register_pool_window(&self.state, &label);

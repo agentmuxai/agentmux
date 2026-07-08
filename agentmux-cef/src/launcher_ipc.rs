@@ -707,21 +707,36 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // that field's doc comment for the TOCTOU this closes.
             let mut gate = state.ui_thread_gate.lock();
             if gate.ready {
-                // SPEC_PILLAR1_STEP4 Phase 3 — reagent P2 (PR #2017,
-                // 2026-07-08): `gate.ready` only ever becomes true inside
-                // `client/lifecycle.rs`'s `"main"` registration block, which
-                // — under this SAME lock — always sets `gate.reprojected =
-                // true` too (both its branches do, whether it replayed a
-                // stash or fell back to the slow path). So any snapshot
-                // observed here with `ready == true` is, by construction, a
-                // late arrival after that decision already ran; there is no
-                // `ready && !reprojected` state to branch on, so this is a
-                // plain skip, not a conditional.
+                if gate.reprojected {
+                    // Fast path already ran (this is a genuine dupe/late
+                    // arrival), or the slow path already fired from
+                    // `register_backend_window`. Either way, something
+                    // already created the windows — skip.
+                    drop(gate);
+                    tracing::info!(
+                        target: "reproject",
+                        "[reproject] snapshot arrived after reproject already ran — skipping"
+                    );
+                    return;
+                }
+                // SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P0, PR #2017,
+                // 2026-07-08) — `ready == true && !reprojected` means
+                // `"main"` registered with nothing useful to replay and set
+                // `pending_slow_path`, which is still waiting on
+                // `register_backend_window` to fire. A real fast-path
+                // snapshot arriving in that window is strictly better data
+                // (has `last_rect`, no srv round-trip) than the slow path
+                // would produce, so it wins: cancel the pending slow path
+                // and use this instead.
+                gate.reprojected = true;
+                gate.pending_slow_path = false;
                 drop(gate);
                 tracing::info!(
                     target: "reproject",
-                    "[reproject] snapshot arrived after \"main\" already decided fast-vs-slow path — skipping"
+                    window_count = windows.len(),
+                    "[reproject] fast-path snapshot arrived while slow path was pending — using it instead"
                 );
+                crate::commands::window::reproject_from_snapshot(state, windows);
                 return;
             } else {
                 tracing::info!(
