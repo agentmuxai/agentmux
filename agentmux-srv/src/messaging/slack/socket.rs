@@ -325,8 +325,29 @@ async fn run_session(
                             FrameOutcome::Continue => {}
                             FrameOutcome::Closed => return Ok(()),
                             FrameOutcome::WarningReceived => {
-                                if cutover_pending {
-                                    tracing::debug!("slack_bridge: duplicate disconnect warning while a cutover is already in flight — ignoring");
+                                // Guard on `old.is_some()` too, not just
+                                // `cutover_pending`: a warning arriving on the
+                                // newly-promoted primary before the previous
+                                // retiring connection (`old`) has finished
+                                // draining must not start a second cutover —
+                                // its success arm below unconditionally
+                                // overwrites `old`, which would silently drop
+                                // the still-open first retiring connection
+                                // instead of finishing its drain, violating
+                                // "at most two live socket halves." Worst case
+                                // of ignoring it: Slack force-closes this
+                                // primary at the end of its warning window,
+                                // which falls through to the plain
+                                // unexpected-close error path below and
+                                // reconnects via the outer session retry loop
+                                // — the same degraded-but-safe fallback this
+                                // module already accepts when a cutover
+                                // connect attempt itself fails (see the `Err`
+                                // arm above).
+                                if cutover_pending || old.is_some() {
+                                    tracing::debug!(
+                                        "slack_bridge: disconnect warning while a cutover is already in flight or draining — ignoring"
+                                    );
                                 } else {
                                     tracing::info!("slack_bridge: disconnect warning received — starting make-before-break reconnect");
                                     cutover_pending = true;
@@ -607,9 +628,11 @@ async fn handle_outbound(
                     channel_last_sent.insert(channel_id.clone(), Instant::now());
                     channel_backoff_secs.remove(&channel_id);
                 }
-                Err(e2) => {
+                Err(e2) if e2.retry_after.is_some() => {
+                    // Still rate-limited after the single Retry-After wait —
+                    // apply exponential channel backoff.
                     tracing::warn!(
-                        "slack_bridge: retry after rate limit still failed for #{channel_id}: {e2}"
+                        "slack_bridge: retry after rate limit still rate-limited for #{channel_id}: {e2}"
                     );
                     let current = channel_backoff_secs
                         .get(&channel_id)
@@ -617,6 +640,15 @@ async fn handle_outbound(
                         .unwrap_or(RECONNECT_DELAY_SECS);
                     channel_backoff_until.insert(channel_id.clone(), Instant::now() + Duration::from_secs(current));
                     channel_backoff_secs.insert(channel_id, next_backoff_secs(current));
+                }
+                Err(e2) => {
+                    // A different, non-rate-limit failure (e.g.
+                    // channel_not_found, invalid_auth) — don't conflate it
+                    // with throttling by scheduling a rate-limit backoff;
+                    // just log it, matching the plain-failure arm below.
+                    tracing::warn!(
+                        "slack_bridge: retry after rate limit failed for #{channel_id} for an unrelated reason: {e2}"
+                    );
                 }
             }
         }
