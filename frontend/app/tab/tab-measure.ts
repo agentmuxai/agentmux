@@ -22,8 +22,17 @@ function getCtx(): CanvasRenderingContext2D | null {
 const TAB_PADDING_BUDGET = 52;
 export const TAB_MIN_WIDTH = 60;
 export const TAB_MAX_WIDTH = 260;
+// Chrome's own tab strip renders every tab at a fixed 232px (DIPs) — see
+// `TabStyle::GetStandardWidth()` / `kTabWidth` in
+// chrome/browser/ui/tabs/tab_style.cc — and only shrinks tabs below that
+// uniformly under crowding, never because a single label happens to be
+// short. Used as the resting-width floor here so a freshly-named (or
+// short-named) tab still reads as a normal-sized tab instead of shrinking
+// to hug its own text; longer labels can still grow past it, up to
+// TAB_MAX_WIDTH.
+export const TAB_STANDARD_WIDTH = 232;
 
-const DEFAULT_TAB_WIDTH = 160;
+const DEFAULT_TAB_WIDTH = TAB_STANDARD_WIDTH;
 
 /**
  * Measures the natural pixel width for a workspace tab with the given label.
@@ -42,5 +51,5 @@ export function measureTabWidth(label: string): number {
 
     const textWidth = ctx.measureText(label).width;
     const natural = Math.ceil(textWidth) + TAB_PADDING_BUDGET;
-    return Math.min(Math.max(natural, TAB_MIN_WIDTH), TAB_MAX_WIDTH);
+    return Math.min(Math.max(natural, TAB_STANDARD_WIDTH), TAB_MAX_WIDTH);
 }

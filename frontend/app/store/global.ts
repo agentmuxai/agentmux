@@ -706,12 +706,16 @@ export function removeNotification(id: string) {
 // ---------------------------------------------------------------------------
 
 /**
- * Default color for newly-created tabs. Matches the "Blue" entry in
- * TAB_COLORS and the startup-tab color applied by tabbar.tsx — every
- * new tab now starts the same way as the first one. Users can change
- * the colour per-tab via the right-click menu after creation.
+ * Picks a random color for a newly-created tab, so successive tabs read
+ * as visually distinct at a glance instead of all defaulting to the same
+ * hue. The first (startup) tab is unaffected — it keeps its fixed "Blue"
+ * standard color, applied separately by the startup-tab backfill in
+ * tabbar.tsx. Users can still change the colour per-tab via the
+ * right-click menu after creation.
  */
-const DEFAULT_NEW_TAB_COLOR = "#3b82f6";
+function randomNewTabColor(): string {
+    return TAB_COLORS[Math.floor(Math.random() * TAB_COLORS.length)].hex;
+}
 
 export function createTab() {
     const ws = workspace();
@@ -732,7 +736,7 @@ export function createTab() {
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
             await ObjectService.UpdateObjectMeta(
                 WOS.makeORef("tab", tabId),
-                { "tab:color": DEFAULT_NEW_TAB_COLOR } as MetaType,
+                { "tab:color": randomNewTabColor() } as MetaType,
             );
             // Default-layout preset (agent + sysinfo + swarm). Lives in
             // a single central module so any future tab-creation path
