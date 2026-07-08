@@ -8,6 +8,7 @@
 //! arrive via HTTP endpoint or MCP tool.
 
 pub mod discord;
+pub mod slack;
 pub mod telegram;
 
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,16 @@ pub struct OutboundMsg {
     /// by platforms that don't support editing (e.g. Discord in v1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edit_message_id: Option<i64>,
+    /// Slack-specific: raw Block Kit `blocks` array, passed through verbatim
+    /// to `chat.postMessage` (escape hatch — see
+    /// `SPEC_MESSAGING_INTEGRATION_SLACK_2026_07_07.md` §7, §11.1). Block
+    /// Kit doesn't map onto `MsgEmbed` (no shared shape with Discord's flat
+    /// embed record), so it gets its own field here rather than a forked
+    /// per-platform outbound type. Harmless no-op for platforms that don't
+    /// support it. `text` is still always sent alongside `blocks` — Slack
+    /// requires it as the notification/accessibility fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<Vec<serde_json::Value>>,
 }
 
 /// Rich embed for platforms that support structured output (Discord, Slack).
