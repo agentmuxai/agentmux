@@ -148,7 +148,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                 >
                     <div class="swarm-tree">
                         <For each={tree()}>
-                            {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} />}
+                            {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} model={model} />}
                         </For>
                     </div>
                 </Show>
@@ -201,9 +201,11 @@ function fmtCtx(tokens: number): string {
 function AgentRow({
     node,
     focusedBlockId,
+    model,
 }: {
     node: AgentTreeNode;
     focusedBlockId: () => string | null;
+    model: SwarmViewModel;
 }): JSX.Element {
     const displayStatus = createMemo<AgentDisplayStatus>(() =>
         phaseToDisplayStatus(node.blockId, node.agentStatus)
@@ -253,7 +255,7 @@ function AgentRow({
             <div class="swarm-children">
                 <For each={node.subagents}>
                     {(child) => isWorkflowGroup(child)
-                        ? <WorkflowGroupRow group={child} />
+                        ? <WorkflowGroupRow group={child} model={model} />
                         : <SubagentRow sub={child} />}
                 </For>
             </div>
@@ -263,14 +265,17 @@ function AgentRow({
 
 // ── Workflow group row (collapsed by default) ───────────────────────────
 
-function WorkflowGroupRow({ group }: { group: WorkflowGroup }): JSX.Element {
-    const [expanded, setExpanded] = createSignal(false);
+function WorkflowGroupRow({ group, model }: { group: WorkflowGroup; model: SwarmViewModel }): JSX.Element {
+    // Expand state lives on the ViewModel, not a local signal — see
+    // SwarmViewModel._expandedIds for why a local signal here silently
+    // collapses on unrelated tree refreshes.
+    const expanded = createMemo(() => model.isExpanded(group.workflowId));
 
     return (
         <div class={`swarm-workflow-group swarm-workflow-group--${group.status}`}>
             <div
                 class="swarm-workflow-header"
-                onClick={() => setExpanded(!expanded())}
+                onClick={() => model.toggleExpanded(group.workflowId)}
                 title={group.name}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />

@@ -164,6 +164,21 @@ export class SwarmViewModel implements ViewModel {
     loadingAtom: Accessor<boolean> = this._loading[0];
     private setLoading: Setter<boolean> = this._loading[1];
 
+    // Workflow groups the user has expanded, keyed by workflowId. Lives
+    // here, not as WorkflowGroupRow-local component state: `buildTree()`
+    // calls `groupSubagentsByWorkflow`, which builds brand-new WorkflowGroup
+    // wrapper objects on every recompute — including when an UNRELATED block
+    // changes (any subagent spawn/complete event, any `term:ctx-tokens` or
+    // activity-summary meta update touches `tree()`'s dependencies). Since
+    // `<For>` diffs list items by reference, a fresh wrapper object remounts
+    // WorkflowGroupRow and silently resets a local `expanded` signal on
+    // essentially every tree refresh — precisely while watching an active
+    // workflow's progress, the case this feature targets. Keying expand
+    // state by a stable string id here survives that churn.
+    private _expandedIds = createSignal<Set<string>>(new Set());
+    expandedIdsAtom: Accessor<Set<string>> = this._expandedIds[0];
+    private setExpandedIds: Setter<Set<string>> = this._expandedIds[1];
+
     private unsubs: (() => void)[] = [];
     // Per-block controllerstatus unsubs — cleaned up when block list refreshes
     private blockUnsubs: (() => void)[] = [];
@@ -250,6 +265,19 @@ export class SwarmViewModel implements ViewModel {
             // silently ignore
         }
     };
+
+    isExpanded(id: string): boolean {
+        return this.expandedIdsAtom().has(id);
+    }
+
+    toggleExpanded(id: string): void {
+        this.setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }
 
     // Subscribe to controllerstatus events for each tracked block and
     // seed the initial status from GetControllerStatus (not assumed "idle").
