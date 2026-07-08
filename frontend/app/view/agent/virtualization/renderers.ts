@@ -19,6 +19,7 @@ import type {
     ContextCompactedNode,
     DocumentNode,
     DocumentState,
+    JektMessageNode,
     MarkdownNode,
     SectionNode,
     ShellNode,
@@ -145,6 +146,11 @@ export function estimateAgentMessage(node: AgentMessageNode, state: DocumentStat
     return estimateTextHeight(node.message);
 }
 
+export function estimateJektMessage(node: JektMessageNode, state: DocumentState): number {
+    if (state.collapsedNodes.has(node.id)) return COLLAPSED_MESSAGE_PX;
+    return estimateTextHeight(node.message);
+}
+
 export function estimateUserMessage(node: UserMessageNode, state: DocumentState): number {
     // Per SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md,
     // user messages collapse on `isStartup` + `pinnedNodes`, NOT
@@ -183,6 +189,8 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     shell: false,
     agent_error: false, // fixed-content inline error — not a streaming node
     context_compacted: false,
+    // Arrives as a single complete user_message event, not chunk-by-chunk.
+    jekt_message: false,
 };
 
 // ── Registry factory ────────────────────────────────────────────────────────
@@ -192,6 +200,7 @@ export interface RendererComponents {
     Section: Component<{ node: SectionNode; state: DocumentState }>;
     Tool: Component<{ node: ToolNode; state: DocumentState }>;
     AgentMessage: Component<{ node: AgentMessageNode; state: DocumentState }>;
+    JektMessage: Component<{ node: JektMessageNode; state: DocumentState }>;
     UserMessage: Component<{ node: UserMessageNode; state: DocumentState }>;
     SubagentLink: Component<{ node: SubagentLinkNode; state: DocumentState }>;
     Shell: Component<{ node: ShellNode; state: DocumentState }>;
@@ -227,6 +236,11 @@ export function buildRendererRegistry(components: RendererComponents): NodeRende
             component: components.AgentMessage,
             estimatedSize: estimateAgentMessage,
             isStreamingCapable: STREAMING_CAPABLE.agent_message,
+        },
+        jekt_message: {
+            component: components.JektMessage,
+            estimatedSize: estimateJektMessage,
+            isStreamingCapable: STREAMING_CAPABLE.jekt_message,
         },
         user_message: {
             component: components.UserMessage,
@@ -267,6 +281,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "section": return estimateSection(node);
         case "tool": return estimateTool(node, state);
         case "agent_message": return estimateAgentMessage(node, state);
+        case "jekt_message": return estimateJektMessage(node, state);
         case "user_message": return estimateUserMessage(node, state);
         case "subagent_link": return estimateSubagentLink(node);
         case "shell": return estimateShell(node, state);
@@ -296,6 +311,7 @@ export function estimateNodeForState(
         switch (node.type) {
             case "tool":          return TOOL_COLLAPSED_PX;
             case "agent_message": return COLLAPSED_MESSAGE_PX;
+            case "jekt_message":  return COLLAPSED_MESSAGE_PX;
             case "user_message":
                 // Startup messages collapse; normal user input doesn't.
                 return node.isStartup
@@ -317,6 +333,7 @@ export function estimateNodeForState(
     switch (node.type) {
         case "tool":              return TOOL_EXPANDED_PX;
         case "agent_message":     return estimateTextHeight(node.message);
+        case "jekt_message":      return estimateTextHeight(node.message);
         case "user_message":      return estimateUnwrappedTextHeight(node.message);
         case "section":           return SECTION_PX;
         case "markdown":          return estimateTextHeight(node.content);

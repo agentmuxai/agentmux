@@ -794,8 +794,108 @@
         }
     }
 
+    // === Jekt Bubble (muxbus message marker) ===
+    // See docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
+    .agent-jekt-bubble {
+        border: none;
+        border-left: 2px solid var(--accent-color);
+        border-radius: 0;
+        background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+        cursor: default;
+
+        &.outgoing {
+            border-left-color: var(--secondary-text-color);
+            background: transparent;
+            opacity: 0.7;
+        }
+
+        // Sensitivity-tier accent overrides the base incoming/outgoing color —
+        // sensitive jekts must read as visually distinct at a glance (spec G3).
+        &.tier-sensitive {
+            border-left-color: var(--error-color);
+        }
+
+        &.tier-info {
+            border-left-color: var(--secondary-text-color);
+        }
+
+        .agent-jekt-summary {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1-5);
+            padding: 3px var(--space-1);
+            user-select: none;
+
+            .agent-jekt-chevron {
+                color: var(--secondary-text-color);
+                font-size: 10px;
+            }
+
+            .agent-jekt-peer {
+                flex: 1;
+                font-weight: 600;
+            }
+
+            .agent-jekt-tier-badge,
+            .agent-jekt-delivery-badge {
+                font-size: 11px;
+                color: var(--secondary-text-color);
+                padding: 1px var(--space-1);
+                border: 1px solid var(--border-color);
+                border-radius: 3px;
+                white-space: nowrap;
+            }
+        }
+
+        &.tier-sensitive .agent-jekt-tier-badge {
+            color: var(--error-color);
+            border-color: var(--error-color);
+        }
+
+        .agent-jekt-content {
+            padding: 0 var(--space-1) var(--space-1) var(--space-4);
+            cursor: default;
+
+            .agent-jekt-body {
+                background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+                padding: var(--space-1) var(--space-1-5);
+                border-radius: 0;
+                margin: 0 0 var(--space-1) 0;
+                white-space: pre-wrap;
+            }
+
+            .agent-jekt-meta {
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--space-2);
+                padding: 0 0 var(--space-1) 0;
+                font-size: 11px;
+                color: var(--secondary-text-color);
+            }
+
+            .agent-jekt-raw {
+                font-size: 11px;
+                color: var(--secondary-text-color);
+
+                summary {
+                    cursor: pointer;
+                    user-select: none;
+                }
+
+                pre {
+                    white-space: pre-wrap;
+                    word-break: break-all;
+                    background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
+                    padding: var(--space-1) var(--space-1-5);
+                    margin: var(--space-1) 0 0 0;
+                }
+            }
+        }
+    }
+
     // Linkified URLs in plain-text and markdown blocks
     .agent-message-body,
+    .agent-jekt-body,
     .agent-user-message-content pre,
     .agent-tool-log-line {
         a.linkified-url {

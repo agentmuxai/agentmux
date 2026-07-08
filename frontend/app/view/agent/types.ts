@@ -52,7 +52,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode | AgentErrorNode | ContextCompactedNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | SubagentLinkNode | ShellNode | AgentErrorNode | ContextCompactedNode | JektMessageNode;
 
 /**
  * Raw markdown text block
@@ -272,6 +272,48 @@ export interface AgentMessageNode {
     timestamp: number;
     collapsed: boolean;
     summary: string; // e.g., "📨 claude-1 → reviewer (mux)" or "📥 From claude-1 (mux)"
+}
+
+/** Sensitivity tier declared by the sender (or escalated on delivery). See
+ *  docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §4. */
+export type JektTier = "info" | "coord" | "sensitive";
+
+/** Network path the jekt crossed to reach this agent. */
+export type JektDeliveryTier = "host" | "lan" | "wan";
+
+/** Sender trust classification. Host-tier deliveries are agent-originated on
+ *  this machine; lan/wan cross a network boundary and are only as
+ *  trustworthy as the sender's token. Spec §5. */
+export type JektTrust = "host-verified" | "network-claimed";
+
+/**
+ * A muxbus jekt message, parsed out of the `[JEKT:FROM=... TIER=... ...]` /
+ * `[/JEKT]` marker block that `wrap_jekt_message` (agentmux-srv) and
+ * `wrapJektMessage` (muxbus-cloud) wrap around injected text before it lands
+ * in the agent's input stream. Rendered as a `JektBubble` instead of the raw
+ * marker text.
+ *
+ * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
+ */
+export interface JektMessageNode {
+    type: "jekt_message";
+    id: string;
+    from: string; // Agent ID (sender)
+    to: string; // Agent ID (recipient)
+    /** Inner message text with the marker's presentational scaffolding
+     *  (divider lines, From/To header, sensitive warning, reply hint)
+     *  stripped — what the sender actually typed/sent. */
+    message: string;
+    /** Full original `[JEKT:...]...[/JEKT]` block, unmodified. Shown in the
+     *  expanded metadata view (spec §3.3: "raw payload"). */
+    raw: string;
+    tier: JektTier;
+    deliveryTier: JektDeliveryTier;
+    trust: JektTrust;
+    msgId: string;
+    priority: "normal" | "urgent";
+    direction: "incoming" | "outgoing";
+    timestamp: number;
 }
 
 /**
@@ -684,4 +726,22 @@ export const AGENT_MESSAGE_ICONS: Record<string, string> = {
 export const DIRECTION_ICONS: Record<string, string> = {
     incoming: "📥",
     outgoing: "📤",
+};
+
+/**
+ * Jekt tier (sensitivity) icon mapping
+ */
+export const JEKT_TIER_ICONS: Record<JektTier, string> = {
+    info: "ℹ️",
+    coord: "🔗",
+    sensitive: "⚠️",
+};
+
+/**
+ * Jekt delivery-tier icon mapping
+ */
+export const JEKT_DELIVERY_ICONS: Record<JektDeliveryTier, string> = {
+    host: "🏠",
+    lan: "🛰️",
+    wan: "☁️",
 };
