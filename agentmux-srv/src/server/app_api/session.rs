@@ -179,7 +179,8 @@ pub(crate) async fn generate_pushed_activity_summary(
 
     let prompt = format!(
         "Summarize in {word_target} words or fewer what is currently being worked on. \
-         Use a short terse phrase with no quotes or punctuation.\n\n\
+         Plain text only — no markdown, no code fences, no backticks, no quotes, \
+         no punctuation, no preamble.\n\n\
          Recent activity:\n\n{extracted}"
     );
 
@@ -260,8 +261,9 @@ pub(crate) async fn generate_subagent_name(
     }
 
     let prompt = format!(
-        "Give a concise ~5-word name for this task. \
-         No punctuation, no quotes, no preamble — respond with just the name.\n\n\
+        "Give a concise ~5-word name for this task. Plain text only — no markdown, \
+         no code fences, no backticks, no punctuation, no quotes, no preamble. \
+         Respond with just the name.\n\n\
          Task:\n\n{task_prompt}"
     );
 
@@ -340,7 +342,8 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
 
                 let prompt = format!(
                     "Summarize in {word_target} words or fewer what is currently being worked on. \
-                     Use a short terse phrase with no quotes or punctuation.\n\n\
+                     Plain text only — no markdown, no code fences, no backticks, no quotes, \
+                     no punctuation, no preamble.\n\n\
                      Recent activity:\n\n{extracted}"
                 );
 
@@ -435,9 +438,10 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 let prompt = format!(
                     "Based on this recent activity, predict ONE short, natural next \
                      message the user might send to continue the conversation. \
-                     Respond with just that message and nothing else — no quotes, \
-                     no explanation, no preamble. If nothing plausible comes to mind, \
-                     respond with an empty string.\n\n\
+                     Respond with just that message and nothing else — plain text only, \
+                     no markdown, no code fences, no backticks, no quotes, no explanation, \
+                     no preamble. If nothing plausible comes to mind, respond with an \
+                     empty string.\n\n\
                      Recent activity:\n\n{extracted}"
                 );
 
@@ -612,11 +616,69 @@ pub(crate) async fn invoke_ambient_haiku_call(
         }
     }
 
+    let last_text = sanitize_ambient_text(&last_text);
     if last_text.is_empty() {
         return Err("no text in activity CLI response".to_string());
     }
 
     Ok((last_text, tokens))
+}
+
+/// Defends against the model wrapping its answer in markdown despite every
+/// ambient-call prompt asking for a bare line of plain text — instruction-
+/// following isn't guaranteed, and an unwrapped fence is exactly what
+/// produces a literal ` ``` `/newline/` ``` ` blob on a UI surface that
+/// renders this text verbatim (e.g. the ghost-text composer placeholder,
+/// which has no markdown renderer). Applied once here so every current and
+/// future `invoke_ambient_haiku_call` caller is covered, not just the one
+/// that first surfaced the bug.
+///
+/// Strips a wrapping code fence and wrapping quote characters, repeatedly (a
+/// model can nest both), then trims. A result left with nothing but
+/// backticks (e.g. an empty fence) collapses to "" so callers' existing
+/// empty-string handling (skip writing ghost text / filter out the summary)
+/// covers it without any caller-side change.
+fn sanitize_ambient_text(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    for _ in 0..4 {
+        let before = s.clone();
+        if let Some(inner) = strip_wrapping_fence(&s) {
+            s = inner;
+        }
+        s = s
+            .trim_matches(|c: char| {
+                matches!(c, '"' | '\'' | '\u{201C}' | '\u{201D}' | '\u{2018}' | '\u{2019}')
+            })
+            .trim()
+            .to_string();
+        if s == before {
+            break;
+        }
+    }
+    if !s.is_empty() && s.chars().all(|c| c == '`') {
+        s.clear();
+    }
+    s
+}
+
+/// Strip a wrapping code fence (triple-backtick, optionally with a language
+/// tag on the opening line, or a single inline backtick) if the *entire*
+/// string is wrapped — a fence-like substring embedded mid-sentence is left
+/// alone. Returns the un-fenced inner text (not yet trimmed of quotes).
+fn strip_wrapping_fence(s: &str) -> Option<String> {
+    let s = s.trim();
+    for fence in ["```", "`"] {
+        if s.len() >= fence.len() * 2 && s.starts_with(fence) && s.ends_with(fence) {
+            let mut inner = &s[fence.len()..s.len() - fence.len()];
+            if fence == "```" {
+                if let Some(nl) = inner.find('\n') {
+                    inner = &inner[nl + 1..];
+                }
+            }
+            return Some(inner.trim().to_string());
+        }
+    }
+    None
 }
 
 /// Extract meaningful text from raw stream-json lines for digest summarization.
@@ -720,5 +782,59 @@ mod pull_call_semaphore_tests {
         // Releasing one frees a slot for the next caller.
         held.pop();
         assert!(sem.try_acquire().is_ok(), "releasing a permit must free a slot");
+    }
+}
+
+#[cfg(test)]
+mod sanitize_ambient_text_tests {
+    use super::*;
+
+    #[test]
+    fn passes_plain_text_through_unchanged() {
+        assert_eq!(sanitize_ambient_text("Run the tests"), "Run the tests");
+    }
+
+    #[test]
+    fn strips_a_triple_backtick_fence() {
+        assert_eq!(sanitize_ambient_text("```\nRun the tests\n```"), "Run the tests");
+    }
+
+    #[test]
+    fn strips_a_fence_with_a_language_tag() {
+        assert_eq!(sanitize_ambient_text("```text\nRun the tests\n```"), "Run the tests");
+    }
+
+    #[test]
+    fn empty_fence_collapses_to_empty_string() {
+        assert_eq!(sanitize_ambient_text("```\n```"), "");
+        assert_eq!(sanitize_ambient_text("``````"), "");
+    }
+
+    #[test]
+    fn strips_wrapping_single_backticks() {
+        assert_eq!(sanitize_ambient_text("`Run the tests`"), "Run the tests");
+    }
+
+    #[test]
+    fn strips_wrapping_quotes() {
+        assert_eq!(sanitize_ambient_text("\"Run the tests\""), "Run the tests");
+        assert_eq!(sanitize_ambient_text("'Run the tests'"), "Run the tests");
+        assert_eq!(sanitize_ambient_text("\u{201C}Run the tests\u{201D}"), "Run the tests");
+    }
+
+    #[test]
+    fn strips_nested_fence_and_quotes() {
+        assert_eq!(sanitize_ambient_text("```\n\"Run the tests\"\n```"), "Run the tests");
+    }
+
+    #[test]
+    fn leaves_an_embedded_fence_like_substring_alone() {
+        let s = "Run `npm test` next";
+        assert_eq!(sanitize_ambient_text(s), s);
+    }
+
+    #[test]
+    fn lone_backticks_with_no_content_collapse_to_empty() {
+        assert_eq!(sanitize_ambient_text("```"), "");
     }
 }
