@@ -11,21 +11,35 @@ not-yet-built path and should not be confused with this one.
 
 ---
 
+> **Update 2026-07-08:** the program resumed and shipped 3 more bridges. Four new
+> implementation-ready specs were written for the remaining platforms (all merged in #2021),
+> and the `MessagingBridge` trait proposed in Telegram's spec was formalized and retrofitted
+> onto Discord. Telegram (#2022), Slack (#2026), and WhatsApp (#2028, Cloud API only) all
+> shipped — each PR's automated review caught and got a real fix for at least one genuine bug
+> before merging (a bot-token log leak + an inbound/outbound task-starvation bug in Telegram; a
+> socket-leak edge case + a rate-limit/permanent-failure conflation in Slack; a phone-number
+> normalization mismatch that would have broken the 24h-window check in WhatsApp). **Teams was
+> deliberately deferred** per its own spec's recommendation — design-complete, not built, pending
+> demonstrated demand from a user in an M365 tenant. Tracked in discussion
+> [#2020](https://github.com/agentmuxai/agentmux/discussions/2020). §1's table below and the
+> per-platform detail in §2-§4 are otherwise historical (predate this update) — this note and
+> the table are current.
+
 ## 1. Where we are (one-glance)
 
 | Workstream | State |
 |---|---|
 | Pane layer (all 5 apps as CEF webview panes) | ✅ Shipped — merged in #1763 (2026-06-24), icons fixed in #1777 (2026-06-25) |
-| Bridge framework (`MessagingBridge` trait, shared scaffold) | ✅ Merged (#1763) — `agentmux-srv/src/messaging/mod.rs` |
-| **Discord bridge (Phase 1)** | ✅ **Implemented and functional** — Gateway WS + REST send, opt-in via `settings.json`, `POST /api/messaging/discord/send` |
-| Slack bridge (Phase 2) | ⬜ Not started — pane only, widget description says "(bridge Phase 2)" |
-| Telegram bridge (Phase 2) | ⬜ Not started — pane only, widget description says "(bridge Phase 2)" |
-| WhatsApp bridge (Phase 3) | ⬜ Not started — pane only, widget description says "(bridge Phase 3)"; also policy-blocked, see §4 |
-| Teams bridge (Phase 3) | ⬜ Not started — pane only, widget description says "(bridge Phase 3)"; "Implement Last" per spec, enterprise-only |
+| Bridge framework (`MessagingBridge` trait, shared scaffold) | ✅ Merged (#1763), trait formalized + Discord retrofitted in #2022 (2026-07-08) — `agentmux-srv/src/messaging/mod.rs` |
+| **Discord bridge** | ✅ **Implemented and functional** — Gateway WS + REST send, opt-in via `settings.json`, `POST /api/messaging/discord/send` |
+| **Telegram bridge** | ✅ **Implemented and functional** — long-polling receive + send, `POST /api/messaging/telegram/send` (#2022, 2026-07-08) |
+| **Slack bridge** | ✅ **Implemented and functional** — Socket Mode receive (incl. make-before-break reconnect-on-warning) + Web API send, `POST /api/messaging/slack/send` (#2026, 2026-07-08) |
+| **WhatsApp bridge** | ✅ **Implemented and functional** — Cloud API webhook receiver + send only (unofficial Baileys path deliberately dropped), `POST /api/messaging/whatsapp/send` (#2028, 2026-07-08). Automated tunnel management out of scope — assumes a manually-configured tunnel. |
+| Teams bridge | ⬜ **Deliberately deferred** — design-complete (`SPEC_MESSAGING_INTEGRATION_TEAMS_2026_07_07.md`), pane only. Spec's own recommendation: build only on demonstrated demand, since it's unusable without an M365 org + Azure + admin sideloading regardless of implementation quality. |
 | Bridge health surfaced in Warden widget | ⬜ Not started — Warden's "Internet" section is still a stub |
-| Settings UI for messaging bridges | ⬜ Not started — Discord bridge is config-file-only (no in-app UI) |
+| Settings UI for messaging bridges | ⬜ Not started — all 4 bridges are config-file-only (no in-app UI) |
 | Pluggable/community bridge system (Signal, Matrix, iMessage, WeChat, …) | ⬜ Not spec'd — referenced but the API design doc doesn't exist yet |
-| Program activity | 🔴 **Dormant ~11 days.** Last touch: 2026-07-01 (#1876, an unrelated security-tier fix to already-shipped Discord code — not new platform work). No open PR or active branch for any of the remaining 4 bridges. |
+| Program activity | 🟢 **Active as of 2026-07-08** — 4 of 5 platforms bridged in one session after ~11 days dormant. Teams intentionally not in flight. |
 
 ---
 
