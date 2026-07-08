@@ -39,8 +39,8 @@ function draftFromSkill(s: Skill): SkillDraft {
 }
 
 export class SkillCatalogModel {
-    private _skills = createSignal<Skill[]>([]);
-    skillsAtom: Accessor<Skill[]> = this._skills[0];
+    private _skills = createSignal<SkillCatalogItem[]>([]);
+    skillsAtom: Accessor<SkillCatalogItem[]> = this._skills[0];
     private setSkills = this._skills[1];
 
     private _selectedId = createSignal<string | null>(null);
@@ -59,7 +59,17 @@ export class SkillCatalogModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    selectedAtom: Accessor<Skill | null>;
+    // Catalog-side bind action (#1960 gap #3) — the agent picker's options,
+    // and the id the user currently has selected in it.
+    private _agents = createSignal<AgentDefinition[]>([]);
+    agentsAtom: Accessor<AgentDefinition[]> = this._agents[0];
+    private setAgents = this._agents[1];
+
+    private _bindAgentId = createSignal<string>("");
+    bindAgentIdAtom: Accessor<string> = this._bindAgentId[0];
+    setBindAgentId = this._bindAgentId[1];
+
+    selectedAtom: Accessor<SkillCatalogItem | null>;
 
     constructor() {
         this.selectedAtom = createMemo(() => {
@@ -68,6 +78,7 @@ export class SkillCatalogModel {
             return this.skillsAtom().find((s) => s.id === id) ?? null;
         });
         void this.refresh();
+        void this.loadAgents();
     }
 
     async refresh(): Promise<void> {
@@ -77,6 +88,31 @@ export class SkillCatalogModel {
             this.setError(null);
         } catch (e) {
             this.setError(`Failed to load skills: ${(e as Error).message ?? e}`);
+        }
+    }
+
+    // Populates the catalog-side bind picker. Best-effort: a failure here
+    // shouldn't block viewing/editing the catalog, only disable binding.
+    async loadAgents(): Promise<void> {
+        try {
+            const agents = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
+            this.setAgents(agents);
+        } catch {
+            this.setAgents([]);
+        }
+    }
+
+    async bindToAgent(skillId: string, agentId: string): Promise<void> {
+        if (!agentId) {
+            this.setError("Pick an agent to bind to.");
+            return;
+        }
+        this.setError(null);
+        try {
+            await RpcApi.SkillBindCommand(TabRpcClient, { agent_id: agentId, skill_id: skillId });
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Bind failed: ${(e as Error).message ?? e}`);
         }
     }
 

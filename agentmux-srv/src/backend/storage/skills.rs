@@ -229,6 +229,16 @@ pub struct SkillListItem {
     pub bound_to_agent: bool,
 }
 
+/// `skill_list_global`'s response shape: the skill plus how many agents
+/// currently hold a `db_agent_skills_ref` to it — the Armory catalog's
+/// "used by N agents" count (gap #2 of #1960).
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillCatalogItem {
+    #[serde(flatten)]
+    pub skill: Skill,
+    pub bound_count: i64,
+}
+
 impl Store {
     /// List all skills visible to an agent: own (referenced) + global, each
     /// annotated with whether this specific agent holds the bind ref.
@@ -268,26 +278,34 @@ impl Store {
     /// List every GLOBAL skill — the Armory catalog view. Unlike
     /// `skill_list`, this takes no `agent_id` and never includes an agent's
     /// private skills; it backs the window-scoped `skill.catalog.*` App API
-    /// (no `check_s1`, so there is no agent context to scope by).
-    pub fn skill_list_global(&self) -> Result<Vec<Skill>, StoreError> {
+    /// (no `check_s1`, so there is no agent context to scope by). Each row
+    /// carries `bound_count` — how many agents currently hold a
+    /// `db_agent_skills_ref` to it — per
+    /// SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md §8 ("used by N agents"),
+    /// tracked as gap #2 of #1960.
+    pub fn skill_list_global(&self) -> Result<Vec<SkillCatalogItem>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
-             FROM db_skills
-             WHERE is_global = 1
-             ORDER BY updated_at DESC",
+            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
+                    (SELECT COUNT(*) FROM db_agent_skills_ref r WHERE r.skill_id = s.id) AS bound_count
+             FROM db_skills s
+             WHERE s.is_global = 1
+             ORDER BY s.updated_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok(Skill {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                trigger: row.get(2)?,
-                skill_type: row.get(3)?,
-                description: row.get(4)?,
-                content: row.get(5)?,
-                is_global: row.get::<_, i64>(6)? != 0,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
+            Ok(SkillCatalogItem {
+                skill: Skill {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger: row.get(2)?,
+                    skill_type: row.get(3)?,
+                    description: row.get(4)?,
+                    content: row.get(5)?,
+                    is_global: row.get::<_, i64>(6)? != 0,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                },
+                bound_count: row.get(9)?,
             })
         })?;
         let mut out = Vec::new();

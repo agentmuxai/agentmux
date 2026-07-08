@@ -37,6 +37,9 @@ export const McpManager = (): JSX.Element => {
                                     onClick={() => model.handleSelect(server)}
                                 >
                                     <span class="agent-primitive-modal-list-item-name">{server.name}</span>
+                                    <span class="agent-primitive-modal-list-item-badge">
+                                        {server.bound_count} {server.bound_count === 1 ? "agent" : "agents"}
+                                    </span>
                                 </button>
                             )}
                         </For>
@@ -63,10 +66,33 @@ export const McpManager = (): JSX.Element => {
                                 {(server) => (
                                     <div class="agent-primitive-modal-readonly">
                                         <h3 class="agent-primitive-modal-name">{server().name}</h3>
+                                        <p class="agent-primitive-modal-global-note">
+                                            Used by {server().bound_count} {server().bound_count === 1 ? "agent" : "agents"}
+                                        </p>
                                         <span class="agent-primitive-modal-field-label">Transport</span>
                                         <pre class="agent-primitive-modal-field-value">{server().transport}</pre>
                                         <span class="agent-primitive-modal-field-label">Config</span>
                                         <pre class="agent-primitive-modal-field-value">{server().config}</pre>
+                                        <span class="agent-primitive-modal-field-label">Bind to agent</span>
+                                        <div class="agent-primitive-modal-bind-row">
+                                            <select
+                                                class="agent-primitive-modal-input"
+                                                value={model.bindAgentIdAtom()}
+                                                onChange={(e) => model.setBindAgentId(e.currentTarget.value)}
+                                            >
+                                                <option value="">Select an agent…</option>
+                                                <For each={model.agentsAtom()}>
+                                                    {(agent) => <option value={agent.id}>{agent.name}</option>}
+                                                </For>
+                                            </select>
+                                            <button
+                                                class="agent-primitive-modal-btn"
+                                                disabled={!model.bindAgentIdAtom()}
+                                                onClick={() => void model.bindToAgent(server().id, model.bindAgentIdAtom())}
+                                            >
+                                                Bind
+                                            </button>
+                                        </div>
                                         <div class="agent-primitive-modal-actions">
                                             <button
                                                 class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"

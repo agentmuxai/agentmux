@@ -38,6 +38,16 @@ pub struct McpServerListItem {
     pub bound_to_agent: bool,
 }
 
+/// `mcp_server_list_global`'s response shape: the server plus how many
+/// agents currently hold a `db_agent_mcp_ref` to it — the Armory catalog's
+/// "used by N agents" count (gap #2 of #1960).
+#[derive(Debug, Clone, Serialize)]
+pub struct McpServerCatalogItem {
+    #[serde(flatten)]
+    pub server: McpServer,
+    pub bound_count: i64,
+}
+
 impl Store {
     /// List all MCP servers visible to an agent: own (referenced) + global,
     /// each annotated with whether this specific agent holds the bind ref.
@@ -76,23 +86,30 @@ impl Store {
     /// `mcp_server_list`, this takes no `agent_id` and never includes an
     /// agent's private servers; it backs the window-scoped `mcp.catalog.*`
     /// App API (no `check_s1`, so there is no agent context to scope by).
-    pub fn mcp_server_list_global(&self) -> Result<Vec<McpServer>, StoreError> {
+    /// Each row carries `bound_count` — how many agents currently hold a
+    /// `db_agent_mcp_ref` to it — per SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md
+    /// §8 ("used by N agents"), tracked as gap #2 of #1960.
+    pub fn mcp_server_list_global(&self) -> Result<Vec<McpServerCatalogItem>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, transport, config, is_global, created_at, updated_at
-             FROM db_mcp_servers
-             WHERE is_global = 1
-             ORDER BY updated_at DESC",
+            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
+                    (SELECT COUNT(*) FROM db_agent_mcp_ref r WHERE r.mcp_id = s.id) AS bound_count
+             FROM db_mcp_servers s
+             WHERE s.is_global = 1
+             ORDER BY s.updated_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok(McpServer {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                transport: row.get(2)?,
-                config: row.get(3)?,
-                is_global: row.get::<_, i64>(4)? != 0,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+            Ok(McpServerCatalogItem {
+                server: McpServer {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    transport: row.get(2)?,
+                    config: row.get(3)?,
+                    is_global: row.get::<_, i64>(4)? != 0,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                },
+                bound_count: row.get(7)?,
             })
         })?;
         let mut out = Vec::new();

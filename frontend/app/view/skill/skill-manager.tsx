@@ -37,6 +37,9 @@ export const SkillManager = (): JSX.Element => {
                                     onClick={() => model.handleSelect(skill)}
                                 >
                                     <span class="agent-primitive-modal-list-item-name">{skill.name}</span>
+                                    <span class="agent-primitive-modal-list-item-badge">
+                                        {skill.bound_count} {skill.bound_count === 1 ? "agent" : "agents"}
+                                    </span>
                                 </button>
                             )}
                         </For>
@@ -63,6 +66,9 @@ export const SkillManager = (): JSX.Element => {
                                 {(skill) => (
                                     <div class="agent-primitive-modal-readonly">
                                         <h3 class="agent-primitive-modal-name">{skill().name}</h3>
+                                        <p class="agent-primitive-modal-global-note">
+                                            Used by {skill().bound_count} {skill().bound_count === 1 ? "agent" : "agents"}
+                                        </p>
                                         <Show when={skill().description}>
                                             <span class="agent-primitive-modal-field-label">Description</span>
                                             <pre class="agent-primitive-modal-field-value">{skill().description}</pre>
@@ -73,6 +79,26 @@ export const SkillManager = (): JSX.Element => {
                                         </Show>
                                         <span class="agent-primitive-modal-field-label">Content</span>
                                         <pre class="agent-primitive-modal-field-value">{skill().content || "(none)"}</pre>
+                                        <span class="agent-primitive-modal-field-label">Bind to agent</span>
+                                        <div class="agent-primitive-modal-bind-row">
+                                            <select
+                                                class="agent-primitive-modal-input"
+                                                value={model.bindAgentIdAtom()}
+                                                onChange={(e) => model.setBindAgentId(e.currentTarget.value)}
+                                            >
+                                                <option value="">Select an agent…</option>
+                                                <For each={model.agentsAtom()}>
+                                                    {(agent) => <option value={agent.id}>{agent.name}</option>}
+                                                </For>
+                                            </select>
+                                            <button
+                                                class="agent-primitive-modal-btn"
+                                                disabled={!model.bindAgentIdAtom()}
+                                                onClick={() => void model.bindToAgent(skill().id, model.bindAgentIdAtom())}
+                                            >
+                                                Bind
+                                            </button>
+                                        </div>
                                         <div class="agent-primitive-modal-actions">
                                             <button
                                                 class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"
