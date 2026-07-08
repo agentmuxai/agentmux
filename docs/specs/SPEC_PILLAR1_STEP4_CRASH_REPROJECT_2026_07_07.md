@@ -346,6 +346,22 @@ its actual confirmed `window_id`), the subwindow still recreates correctly
 (`kind=Subwindow parent_label=Some("main")`, `skipped=0`), and — critically — the CDP target list shows
 exactly one main-like window (`"Starter workspace"`), confirming no spurious duplicate.
 
+**Addendum 2026-07-08, round 3 (reagent review, PR #2017) — the state machine had no automated test
+coverage.** A fourth review pass observed, correctly, that `UiThreadGate`'s fast-vs-slow-path decision
+logic (`has_extra`/`reprojected`/`pending_slow_path`) had three real bugs found across three review
+rounds, each caught only by manual live-kill verification — a future edit here would have had nothing
+but that same slow, manual process to catch a regression. Extracted the decision logic (previously
+inline at all three call sites) into pure methods on `UiThreadGate` itself —
+`on_main_ready`/`on_snapshot`/`on_main_backend_window_registered` — each returning an explicit action
+enum rather than mutating state and leaving the caller to infer what happened. Added 10 unit tests
+covering every transition, including the specific races each prior bug involved (late fast-path
+snapshot arriving while the slow path is pending; the slow path firing twice; the slow path running
+when it was never actually pending). `client/lifecycle.rs`, `launcher_ipc.rs`, and
+`commands/window/meta.rs` were rewired to call these methods rather than duplicate the logic next to
+now-tested code that could silently drift from it. Re-verified live after the refactor (same
+subwindow-of-main + full-process-tree-kill scenario): identical success signature — slow path
+triggers from `register_backend_window`, subwindow parent resolves correctly, no duplicate main.
+
 **Phase 4 — overlay UX** (§2.4), as a follow-on, not gating Phases 1-3.
 
 **Phase 5 — E2E test** ("host OOM ⇒ session reprojects", per the parent design doc's §3 acceptance

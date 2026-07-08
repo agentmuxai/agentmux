@@ -425,21 +425,16 @@ impl AgentMuxHandler {
             // with `window_count=0`, which a naive `stashed.is_some()` check
             // wrongly treated as "fast path succeeded," permanently
             // suppressing the slow path.
-            let stashed = {
+            let (action, stashed) = {
                 let mut gate = self.state.ui_thread_gate.lock();
-                gate.ready = true;
                 let stashed = gate.stashed.take();
                 let has_extra = stashed
                     .as_ref()
                     .is_some_and(|windows| windows.iter().any(|w| w.label != "main"));
-                if has_extra {
-                    gate.reprojected = true;
-                } else if !gate.reprojected {
-                    gate.pending_slow_path = true;
-                }
-                stashed
+                (gate.on_main_ready(has_extra), stashed)
             };
-            if let Some(windows) = stashed {
+            if action == crate::state::MainReadyAction::ReplayFastPath {
+                let windows = stashed.unwrap_or_default();
                 tracing::info!(
                     target: "reproject",
                     window_count = windows.len(),

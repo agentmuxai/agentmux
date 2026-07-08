@@ -284,16 +284,7 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         // late-arriving fast-path snapshot (`launcher_ipc.rs`'s
         // `Event::Snapshot` arm) can't both fire.
         if label == "main" {
-            let should_run_slow_path = {
-                let mut gate = state.ui_thread_gate.lock();
-                if gate.pending_slow_path && !gate.reprojected {
-                    gate.pending_slow_path = false;
-                    gate.reprojected = true;
-                    true
-                } else {
-                    false
-                }
-            };
+            let should_run_slow_path = state.ui_thread_gate.lock().on_main_backend_window_registered();
             if should_run_slow_path {
                 tracing::info!(
                     target: "reproject",
