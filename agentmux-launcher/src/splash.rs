@@ -170,9 +170,20 @@ fn apply_event(stages: &mut Vec<StageRow>, ev: StartupEvent) {
 ///
 /// `events_rx` delivers `StartupEvent` messages from the launcher startup
 /// path; the splash thread consumes them each frame.
+///
+/// SPEC_PILLAR1_STEP4 Phase 4 — `restoring` draws a "Restoring session…"
+/// headline (a fresh concept, distinct from the stage-telemetry rows) in
+/// place of stage row 0. Set by crash-restart call sites
+/// (`supervisor/windows.rs`), which call this again — a brand-new Win32
+/// event object plus a brand-new consumer thread — rather than reusing the
+/// original cold-start splash's already-exited one (see that module for why
+/// the original design silently produced no visible splash on restart: the
+/// event name was re-passed to the host, but nothing was listening on it
+/// anymore once the first splash's thread had already exited).
 pub fn spawn_splash(
     dir_hash: &str,
     events_rx: std::sync::mpsc::Receiver<StartupEvent>,
+    restoring: bool,
 ) -> Option<String> {
     let event_name = format!("AgentMuxSplash-{}", dir_hash);
     let nul_name: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
@@ -187,7 +198,7 @@ pub fn spawn_splash(
 
     let class_name = format!("AgentMuxSplash-{}", dir_hash);
     let handle = SendHandle(ev);
-    thread::spawn(move || unsafe { run_splash(handle.take(), class_name, events_rx) });
+    thread::spawn(move || unsafe { run_splash(handle.take(), class_name, events_rx, restoring) });
     Some(event_name)
 }
 
@@ -197,6 +208,7 @@ unsafe fn run_splash(
     dismiss_ev: HANDLE,
     class_name: String,
     events_rx: std::sync::mpsc::Receiver<StartupEvent>,
+    restoring: bool,
 ) {
     let class: Vec<u16> = format!("{}\0", class_name).encode_utf16().collect();
     let hinst = GetModuleHandleW(std::ptr::null());
@@ -299,7 +311,7 @@ unsafe fn run_splash(
             let total_ms = splash_start.elapsed().as_millis() as u64;
 
             // Freeze: render final state with brain steady.
-            composite(dib_pixels, 200u8, &stages, Some(total_ms), &footer);
+            composite(dib_pixels, 200u8, &stages, Some(total_ms), &footer, restoring);
             push_layered(hwnd, mem_dc, 255);
 
             // Summary hold — 2 s default, shortened for very fast starts.
@@ -325,7 +337,7 @@ unsafe fn run_splash(
             (160.0 + pulse * 60.0) as u8
         };
 
-        composite(dib_pixels, brain_alpha, &stages, None, &footer);
+        composite(dib_pixels, brain_alpha, &stages, None, &footer, restoring);
         push_layered(hwnd, mem_dc, 255);
 
         std::thread::sleep(std::time::Duration::from_millis(16)); // ~60 fps
@@ -346,6 +358,7 @@ fn composite(
     stages: &[StageRow],
     total_ms: Option<u64>,
     footer: &[String],
+    restoring: bool,
 ) {
     // Opaque BG fill.
     for px in dib.chunks_exact_mut(4) {
@@ -377,7 +390,7 @@ fn composite(
     }
 
     // Stage telemetry list.
-    draw_stages(dib, stages, total_ms);
+    draw_stages(dib, stages, total_ms, restoring);
 
     // Separator line between stage area and footer.
     let sep_y = SPLASH_SIZE + STAGE_AREA_H - STAGE_PAD_BOTTOM / 2;
@@ -400,7 +413,7 @@ fn composite(
     }
 }
 
-fn draw_stages(dib: &mut [u8], stages: &[StageRow], total_ms: Option<u64>) {
+fn draw_stages(dib: &mut [u8], stages: &[StageRow], total_ms: Option<u64>, restoring: bool) {
     use crate::splash_text::{draw_text, text_width};
 
     let y0 = SPLASH_SIZE + STAGE_PAD_TOP;
@@ -409,6 +422,19 @@ fn draw_stages(dib: &mut [u8], stages: &[StageRow], total_ms: Option<u64>) {
     let x_time_right = SPLASH_W - STAGE_MARGIN_R;
 
     let mut row = 0usize;
+
+    // SPEC_PILLAR1_STEP4 Phase 4 — a crash-restart splash has no stage
+    // events at all (nothing re-emits "Saga recovery"/"Migrations"/etc. for
+    // a restart — see `spawn_splash`'s doc comment), so this headline is
+    // the only thing telling the user anything is happening. Takes row 0's
+    // slot rather than growing `SPLASH_H`/`MAX_STAGE_ROWS` — the restart
+    // splash never has more than one or two real rows anyway (if any).
+    if restoring {
+        // ASCII only — the bitmap font (`splash_font::FIRST..=LAST`) only
+        // covers 0x20-0x7E, so a real ellipsis (U+2026) would render as '?'.
+        draw_text(dib, SPLASH_W, SPLASH_H, x_label, y0, "Restoring session...", TIME_RUN_COLOR, 1.0, true);
+        row += 1;
+    }
 
     for stage in stages {
         if row >= MAX_STAGE_ROWS { break; }

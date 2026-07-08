@@ -58,6 +58,17 @@
         0%, 100% { opacity: 0.9; transform: scale(1) translateZ(0); }
         50%       { opacity: 0.65; transform: scale(0.97) translateZ(0); }
       }
+      /* SPEC_PILLAR1_STEP4 Phase 4 — hidden by default; the inline script
+         below shows it only when the host appended ?restoring=1 (a
+         reprojected window, not a cold-start one). Cheap, frontend-only —
+         same `?restoring=1`-driven-headline design as the launcher's
+         native pre-splash (Phase 4's other half, agentmux-launcher/src/splash.rs). */
+      #startup-loading-headline {
+        display: none;
+        font-size: 14px;
+        color: #b8b8c0;
+        letter-spacing: 0.02em;
+      }
     </style>
     <link rel="stylesheet" href="/fontawesome/css/fontawesome.min.css" />
     <link rel="stylesheet" href="/fontawesome/css/brands.min.css" />
@@ -73,6 +84,21 @@
         var t = new URLSearchParams(location.search).get('window_transparent');
         if (t === '0') {
           document.documentElement.style.setProperty('--window-opacity', '1');
+        }
+      })();
+    </script>
+    <script>
+      // SPEC_PILLAR1_STEP4 Phase 4 — show the "Restoring session..." headline
+      // before first paint when this window was opened by the crash-reproject
+      // driver (reproject_from_snapshot / reproject_from_srv in
+      // agentmux-cef/src/commands/window/creation.rs append &restoring=1 to
+      // the URL; an interactive "New Window"/"New Subwindow" never does).
+      (function() {
+        if (new URLSearchParams(location.search).get('restoring') === '1') {
+          document.addEventListener('DOMContentLoaded', function() {
+            var el = document.getElementById('startup-loading-headline');
+            if (el) { el.style.display = 'block'; }
+          });
         }
       })();
     </script>
@@ -127,7 +153,7 @@
       <path d="m363.1,701.79h-18c-4.42,0-8-3.58-8-8v-82.97h-36.15v82.97c0,4.42-3.58,8-8,8h-18c-4.42,0-8-3.58-8-8v-108.97c0-4.42,3.58-8,8-8h88.15c4.42,0,8,3.58,8,8v108.97c0,4.42-3.58,8-8,8Z" fill="url(#ag-lg-16)" stroke-width="0"/>
     </g>
   </g>
-</svg></div>
+</svg><div id="startup-loading-headline">Restoring session&hellip;</div></div>
     <div id="main"></div>
   </body>
 </html>
