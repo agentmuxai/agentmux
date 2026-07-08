@@ -322,6 +322,33 @@ pub struct SettingsType {
     #[serde(rename = "messaging:discord:guild", default, skip_serializing_if = "Option::is_none")]
     pub messaging_discord_guild: Option<String>,
 
+    // -- Messaging bridge settings (Telegram) --
+
+    /// Master enable for the Telegram messaging bridge.
+    /// When true, the bridge starts long-polling getUpdates at startup.
+    #[serde(rename = "messaging:telegram:enabled", default, skip_serializing_if = "is_false")]
+    pub messaging_telegram_enabled: bool,
+
+    /// Telegram bot token from @BotFather. Treat as a secret — do not log.
+    #[serde(rename = "messaging:telegram:token", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_telegram_token: Option<String>,
+
+    /// Comma-separated allowlist of chat IDs permitted to reach the bridge.
+    /// Inbound updates from any other chat are silently dropped.
+    /// Stored as a string (not Vec<i64>) to keep the flat-key/settings.json
+    /// convention simple — parsed to Vec<i64> at startup wiring time.
+    #[serde(rename = "messaging:telegram:allowed_chats", default, skip_serializing_if = "String::is_empty")]
+    pub messaging_telegram_allowed_chats: String,
+
+    /// Default chat ID for outbound sends when a request doesn't override one.
+    #[serde(rename = "messaging:telegram:default_chat", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_telegram_default_chat: Option<String>,
+
+    /// Agent ID that receives inbound Telegram messages via the reactive bus.
+    /// Absent → messages are logged but not forwarded to any agent.
+    #[serde(rename = "messaging:telegram:target", default, skip_serializing_if = "Option::is_none")]
+    pub messaging_telegram_target: Option<String>,
+
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]

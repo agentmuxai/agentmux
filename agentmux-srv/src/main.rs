@@ -754,6 +754,41 @@ async fn main() {
         }
     }
 
+    // Telegram messaging bridge — long-polls getUpdates if configured.
+    // Set messaging:telegram:enabled + messaging:telegram:token in settings.json to activate.
+    {
+        let settings = config_watcher.get_settings();
+        if settings.messaging_telegram_enabled {
+            match settings.messaging_telegram_token.clone() {
+                Some(token) if !token.is_empty() => {
+                    let allowed_chat_ids = settings
+                        .messaging_telegram_allowed_chats
+                        .split(',')
+                        .filter_map(|s| s.trim().parse::<i64>().ok())
+                        .collect::<Vec<_>>();
+                    let default_chat_id = settings
+                        .messaging_telegram_default_chat
+                        .as_deref()
+                        .and_then(|s| s.parse::<i64>().ok());
+                    messaging::telegram::TelegramBridge::init_global(
+                        messaging::telegram::TelegramConfig {
+                            token,
+                            allowed_chat_ids,
+                            default_chat_id,
+                            target_agent: settings.messaging_telegram_target.clone(),
+                        },
+                        reqwest::Client::new(),
+                    );
+                }
+                _ => {
+                    tracing::warn!(
+                        "telegram bridge: enabled but messaging:telegram:token is not set in settings.json"
+                    );
+                }
+            }
+        }
+    }
+
     // Set up docsite directory
     if let Some(app_path) = base::get_wave_app_path() {
         let docsite_dir = app_path.join("docsite");

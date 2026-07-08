@@ -328,6 +328,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
+        .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
         // Persistent cron scheduler (SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2.4).
         // Auth-gated like reactive routes.
         .route("/agentmux/cron", post(cron::handle_cron_create))
