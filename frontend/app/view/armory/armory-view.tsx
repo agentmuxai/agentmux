@@ -3,6 +3,7 @@
 
 import { createSignal, For, type JSX } from "solid-js";
 
+import { Tooltip } from "@/app/element/tooltip";
 import { IdentityManager } from "@/app/view/identity/identity-manager";
 import { MemoryManager } from "@/app/view/memory/memory-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
@@ -33,16 +34,18 @@ export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Ele
                 <nav class="bundle-manager-rail" aria-label="Armory section">
                     <For each={RAIL}>
                         {(item) => (
-                            <button
-                                type="button"
-                                class="bundle-manager-rail-item"
-                                classList={{ "is-active": section() === item.id }}
-                                aria-pressed={section() === item.id}
-                                onClick={() => setSection(item.id)}
-                            >
-                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                                <span>{item.label}</span>
-                            </button>
+                            <Tooltip content={item.label} placement="right">
+                                <button
+                                    type="button"
+                                    class="bundle-manager-rail-item"
+                                    classList={{ "is-active": section() === item.id }}
+                                    aria-pressed={section() === item.id}
+                                    onClick={() => setSection(item.id)}
+                                >
+                                    <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
+                                    <span>{item.label}</span>
+                                </button>
+                            </Tooltip>
                         )}
                     </For>
                 </nav>
