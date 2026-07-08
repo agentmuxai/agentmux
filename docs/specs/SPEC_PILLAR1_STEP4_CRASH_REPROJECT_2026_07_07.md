@@ -274,11 +274,36 @@ construction rather than by timing luck. Re-verified live after this second fix 
 isolated instance, same kill/respawn methodology): both recreated windows again registered under
 their own correct labels with zero mislabeling, and appeared as real CDP targets.
 
-**Phase 3 — slow-path fallback from srv.** Read `Client.windowids` + `Window.kind`/
-`parent_window_id` (Step 3) when the launcher's snapshot is empty/unavailable. **App-running
-verification required**: kill the *entire* process tree (launcher + host together) and relaunch from
-scratch, confirm windows still reproject (without exact position/size — see §4 risk — but with
-correct kind/parent/content).
+**Phase 3 — slow-path fallback from srv.** ✅ Done. `reproject_from_srv` (in `creation.rs`) reads
+srv's `Client.windowids` + each window's `kind`/`parent_window_id` (`backend_get_client_window_ids`/
+`backend_get_window_topology`, new blocking read helpers in `client/helpers.rs`, same raw-TCP shape
+as every other `backend_*` helper), skips `windowids[0]` (the entry the frontend's own bootstrap
+already resolves for `"main"`), and converges on the same `reproject_from_snapshot` driver Phase 2
+uses — exactly matching the parent design doc's "both tiers converge on the same per-window
+recreation code path."
+
+Trigger point: `"main"`'s registration (`client/lifecycle.rs`) is now also the fast-vs-slow decision
+point. `UiThreadGate` gained a `reprojected: bool` (decided under the same lock as `ready`/`stashed`)
+so exactly one of {replay a stashed fast-path snapshot, try the slow path} ever runs — necessary
+because a fast-path `Event::Snapshot` can arrive either before or after this decision, and a
+late-arriving one must not double-create on top of an already-run slow path.
+
+**A real bug was caught during live verification, not by reagent this time — by the test itself**:
+the first version's decision logic treated "a stash exists" as "the fast path succeeded," but
+`Event::Snapshot` always stashes *something* when it arrives early, even an empty list. A fresh
+launcher (the full-process-tree-kill case this phase exists for) sends a real, non-stale snapshot
+with zero windows — which the buggy check treated as success, permanently suppressing the slow path
+it was supposed to trigger. Fixed by checking whether the stash actually contains anything beyond
+`"main"` (`has_extra`), not merely whether a stash is `Some`.
+
+**Live verification** (isolated build, full process-tree kill — outer launcher wrapper + inner host
+both killed, letting the Job Object cascade srv's termination too; relaunched fresh from the same
+extracted folder so srv's on-disk data survived while all in-memory state, including the launcher's,
+was gone): the fresh launcher's snapshot correctly came back empty (`window_count=0`), the slow path
+correctly triggered, and reproject recreated all 4 windows srv had on record (the 2 intentionally
+opened plus 2 pre-existing pool-warm windows that had also registered backend window IDs) — including
+gracefully defaulting 2 legacy rows with no persisted `kind` to `FullInstance` with a warning, rather
+than failing. All 4 appeared as real, correctly-labeled CDP targets.
 
 **Phase 4 — overlay UX** (§2.4), as a follow-on, not gating Phases 1-3.
 
@@ -344,10 +369,12 @@ session established.
    fully reprojects with correct kind/parent/content and approximately correct placement (Phase 2,
    live-verified — see the UI-thread-readiness addendum above for the race that had to be fixed
    first).
-3. ⬜ Killing the entire process tree and relaunching confirms a multi-window session reprojects
+3. ✅ Killing the entire process tree and relaunching confirms a multi-window session reprojects
    with correct kind/parent/content, position/size at default placement (Phase 3, live-verified).
-4. ⬜ No regression in existing single-window cold-start behavior (the common case — most users
-   never see more than one window) — this must remain exactly as fast and reliable as today.
+4. ✅ No regression in existing single-window cold-start behavior — confirmed across every Phase 2/3
+   live-verification run in this session: a plain cold start with no extra windows takes the
+   fast-path-empty → slow-path-empty-too (or fast-path-has-data) route and both no-op cleanly, per
+   the idempotent-by-construction design in §2.1. 159 unit tests pass throughout, no regressions.
 5. ⬜ E2E test automating #2 (Phase 5).
 
 ---

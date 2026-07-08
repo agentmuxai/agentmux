@@ -907,6 +907,13 @@ pub struct AppState {
 pub struct UiThreadGate {
     pub ready: bool,
     pub stashed: Option<Vec<agentmux_common::ipc::WindowSnapshot>>,
+    /// SPEC_PILLAR1_STEP4 Phase 3 — set true the moment EITHER reproject
+    /// path (fast, from the launcher's snapshot; or slow, from srv) has
+    /// been triggered, so only one of them ever actually creates windows.
+    /// Without this, a fast-path snapshot arriving unusually late (after
+    /// `"main"`'s registration already decided to fall back to the slow
+    /// path) would run a second, redundant reproject on top of the first.
+    pub reprojected: bool,
 }
 
 impl Default for AppState {

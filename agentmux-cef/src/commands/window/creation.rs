@@ -551,6 +551,94 @@ pub(crate) fn reproject_from_snapshot(
     );
 }
 
+/// SPEC_PILLAR1_STEP4 Phase 3 — the slow-path reproject driver. Called once
+/// per process life from `client::lifecycle`'s `"main"` registration branch,
+/// only when no fast-path (launcher-snapshot) data was available by that
+/// point — e.g. a full process-tree kill (launcher died too, so it has no
+/// in-memory history either) or `task dev` standalone mode (no launcher at
+/// all). Reads srv's durable `Client.windowids` + each window's `kind`/
+/// `parent_window_id` (SPEC_PILLAR1_STEP3) instead.
+///
+/// `windowids[0]` is skipped deliberately, not arbitrarily: it's the same
+/// entry the frontend's own per-window bootstrap (`frontend/app-init.ts`)
+/// already reads to resolve `"main"`'s own content, so recreating it here
+/// would double-create a second root window. Every remaining id becomes an
+/// extra top-level window.
+///
+/// No `last_rect` is available this way — Step 2/3 never persisted window
+/// position/size (see the spec's §4 risk) — so every recreated window lands
+/// at `open_window_with_kind`'s default offset placement, not where the
+/// user left it. Kind/parent/content are still fully correct.
+///
+/// Does its network I/O on a spawned thread, never the calling (UI) thread —
+/// `backend_get_client_window_ids`/`backend_get_window_topology` are
+/// blocking calls (same raw-TCP shape as every other `backend_*` read/write
+/// helper in this codebase), and this is called directly from
+/// `on_after_created`. By the time this runs, `ui_thread_gate.ready` is
+/// already true (this IS "main"'s registration), so `open_window_with_kind`
+/// posting from this background thread is safe — the same
+/// already-verified-safe pattern as any pool-window creation posted after
+/// `"main"` registers.
+///
+/// Converges on the exact same per-window recreation code
+/// (`reproject_from_snapshot`) the fast path uses, per the parent design
+/// doc's "both tiers converge on the same per-window recreation code path."
+pub(crate) fn reproject_from_srv(state: &Arc<AppState>) {
+    let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+    let auth_key = state.auth_key.lock().clone();
+    let state = state.clone();
+    std::thread::spawn(move || {
+        let Some(window_ids) = crate::client::backend_get_client_window_ids(&web_endpoint, &auth_key) else {
+            tracing::warn!(target: "reproject", "[reproject] slow path: could not read Client.windowids from srv");
+            return;
+        };
+        if window_ids.len() <= 1 {
+            tracing::debug!(
+                target: "reproject",
+                window_count = window_ids.len(),
+                "[reproject] slow path: nothing beyond main to recreate"
+            );
+            return;
+        }
+
+        let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
+        for window_id in window_ids.iter().skip(1) {
+            let Some((kind, parent_window_id)) = crate::client::backend_get_window_topology(&web_endpoint, &auth_key, window_id) else {
+                tracing::warn!(target: "reproject", window_id = %window_id, "[reproject] slow path: GetWindow failed — skipping this window");
+                continue;
+            };
+            let kind = match kind.as_deref() {
+                Some("subwindow") => agentmux_common::ipc::WindowKind::Subwindow,
+                Some("full_instance") => agentmux_common::ipc::WindowKind::FullInstance,
+                Some(other) => {
+                    tracing::warn!(target: "reproject", window_id = %window_id, kind = %other, "[reproject] slow path: unrecognized persisted kind — defaulting to FullInstance");
+                    agentmux_common::ipc::WindowKind::FullInstance
+                }
+                None => {
+                    tracing::warn!(target: "reproject", window_id = %window_id, "[reproject] slow path: no persisted kind (pre-Step-3 window row?) — defaulting to FullInstance");
+                    agentmux_common::ipc::WindowKind::FullInstance
+                }
+            };
+            snapshots.push(agentmux_common::ipc::WindowSnapshot {
+                label: window_id.clone(),
+                kind,
+                parent_label: parent_window_id,
+                hwnd: None,
+                visible: true,
+                iconic: false,
+                last_rect: None,
+                foregrounded_since_open: true,
+            });
+        }
+        tracing::info!(
+            target: "reproject",
+            window_count = snapshots.len(),
+            "[reproject] slow path: recreating windows from srv"
+        );
+        reproject_from_snapshot(&state, &snapshots);
+    });
+}
+
 fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3 / 2);
     for byte in s.bytes() {

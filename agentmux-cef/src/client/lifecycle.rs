@@ -399,10 +399,43 @@ impl AgentMuxHandler {
             // under the SAME lock acquisition the launcher-ipc reader task
             // uses to check-then-stash — this is what closes the TOCTOU
             // reagent's review caught in the first version of this fix.
+            //
+            // SPEC_PILLAR1_STEP4 Phase 3 — this is also the decision point
+            // for fast-vs-slow path: if no fast-path snapshot has arrived by
+            // the time "main" registers (no launcher connected, or the
+            // launcher's own snapshot response hasn't landed yet), fall back
+            // to srv's durable `Client.windowids`. `reprojected` (decided
+            // under this SAME lock acquisition) ensures exactly one of
+            // {replay the stash, try the slow path} runs — see that field's
+            // doc comment for why a late-arriving fast-path snapshot must
+            // not double-create on top of an already-run slow path.
+            //
+            // A stash existing is NOT the same as the fast path having
+            // anything useful: `Event::Snapshot` always stashes SOMETHING
+            // when it arrives before `ready` (even an empty list, or a list
+            // containing only a stale `"main"` entry — the launcher-ipc arm
+            // doesn't pre-filter). `has_extra` is what actually distinguishes
+            // "fast path found real data" from "otherwise" per the spec's
+            // §2.1 step 3-4 — checked live: a fresh launcher (full
+            // process-tree kill) sends a real, non-stale `Event::Snapshot`
+            // with `window_count=0`, which a naive `stashed.is_some()` check
+            // wrongly treated as "fast path succeeded," permanently
+            // suppressing the slow path.
+            let mut try_slow_path = false;
             let stashed = {
                 let mut gate = self.state.ui_thread_gate.lock();
                 gate.ready = true;
-                gate.stashed.take()
+                let stashed = gate.stashed.take();
+                let has_extra = stashed
+                    .as_ref()
+                    .is_some_and(|windows| windows.iter().any(|w| w.label != "main"));
+                if has_extra {
+                    gate.reprojected = true;
+                } else if !gate.reprojected {
+                    gate.reprojected = true;
+                    try_slow_path = true;
+                }
+                stashed
             };
             if let Some(windows) = stashed {
                 tracing::info!(
@@ -411,6 +444,13 @@ impl AgentMuxHandler {
                     "[reproject] replaying stashed snapshot now that \"main\" has registered"
                 );
                 crate::commands::window::reproject_from_snapshot(&self.state, &windows);
+            }
+            if try_slow_path {
+                tracing::info!(
+                    target: "reproject",
+                    "[reproject] no fast-path data available — falling back to srv (slow path)"
+                );
+                crate::commands::window::reproject_from_srv(&self.state);
             }
         } else if label.starts_with("window-pool-") {
             crate::commands::window_pool::register_pool_window(&self.state, &label);

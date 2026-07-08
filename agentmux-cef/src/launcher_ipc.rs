@@ -707,6 +707,20 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // that field's doc comment for the TOCTOU this closes.
             let mut gate = state.ui_thread_gate.lock();
             if gate.ready {
+                // SPEC_PILLAR1_STEP4 Phase 3 — `"main"`'s registration may
+                // have already given up waiting for this snapshot and
+                // fallen back to the slow (srv) path. `reprojected` ensures
+                // whichever path runs first is the only one that actually
+                // creates windows.
+                if gate.reprojected {
+                    drop(gate);
+                    tracing::info!(
+                        target: "reproject",
+                        "[reproject] snapshot arrived after the slow path already ran — skipping fast-path reproject"
+                    );
+                    return;
+                }
+                gate.reprojected = true;
                 drop(gate);
                 crate::commands::window::reproject_from_snapshot(state, windows);
             } else {
