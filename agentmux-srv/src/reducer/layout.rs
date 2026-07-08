@@ -90,6 +90,9 @@ pub(super) fn handle_layout_set_tree(
     correlation_id: String,
     slices: Option<agentmux_common::LayoutClientSlices>,
 ) -> Vec<Event> {
+    // Computed before the `state.tabs` borrow below — `blocks` and `tabs`
+    // are disjoint fields, but an owned snapshot avoids any doubt.
+    let live_blocks: std::collections::HashSet<String> = state.blocks.keys().cloned().collect();
     let Some(tab) = state.tabs.get_mut(&tab_id) else {
         let v = state.bump_version();
         return vec![Event::Error {
@@ -115,6 +118,26 @@ pub(super) fn handle_layout_set_tree(
         tab.focused_node_id = String::new();
         tab.magnified_node_id = String::new();
     }
+    // Referential-integrity enforcement (see
+    // `backend::layout::prune_dangling_block_refs`'s doc comment): this is
+    // the exact vector — a wholesale tree push — that let a stale frontend
+    // copy resurrect a deleted block's leaf
+    // (INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md).
+    // Re-derive `new_tree`/the event from the now-authoritative (possibly
+    // pruned) `tab.rootnode` rather than the caller's original value, so
+    // what gets persisted matches what the reducer actually holds — a
+    // pruned `tab.rootnode` with a stale `new_tree` in the emitted event
+    // would just move the divergence downstream instead of closing it.
+    let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &live_blocks);
+    if pruned > 0 {
+        reconcile_focus_magnify(tab);
+        tracing::warn!(
+            tab_id = %tab_id,
+            pruned,
+            "reducer: LayoutSetTree pruned dangling layout leaf/leaves referencing since-deleted blocks"
+        );
+    }
+    let new_tree = tab.rootnode.clone();
     let v = state.bump_version();
     vec![Event::LayoutTreeReplaced {
         tab_id,
@@ -653,6 +676,7 @@ pub(super) fn handle_layout_insert_node_at_index(
 ) -> Vec<Event> {
     let new_id = node.id.clone();
     let node_event = node.clone();
+    let live_blocks: std::collections::HashSet<String> = state.blocks.keys().cloned().collect();
     let Some(tab) = state.tabs.get_mut(&tab_id) else {
         return unknown_tab(state, "LayoutInsertNodeAtIndex", &tab_id);
     };
@@ -689,6 +713,17 @@ pub(super) fn handle_layout_insert_node_at_index(
     }
     if magnify_after {
         tab.magnified_node_id = new_id;
+    }
+    // Referential-integrity enforcement, same choke point as
+    // `handle_layout_set_tree` — see `prune_dangling_block_refs`'s doc
+    // comment. The caller-supplied `node` could carry a stale `block_id`.
+    let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &live_blocks);
+    if pruned > 0 {
+        tracing::warn!(
+            tab_id = %tab_id,
+            pruned,
+            "reducer: LayoutInsertNodeAtIndex pruned dangling layout leaf/leaves referencing since-deleted blocks"
+        );
     }
     reconcile_focus_magnify(tab);
     let new_tree = tab.rootnode.clone();
@@ -736,5 +771,25 @@ where
         return Err(op_error(state, format!("{} balance: {} (tab {})", op, e, tab_id)));
     }
     tab.rootnode = Some(working);
+    // Referential-integrity enforcement, same choke point as
+    // `handle_layout_set_tree` — see `prune_dangling_block_refs`'s doc
+    // comment. `replace_node`/`split_horizontal`/`split_vertical` accept a
+    // caller-supplied new node that could carry a stale `block_id`; this
+    // also opportunistically cleans up any pre-existing dangling leaf a
+    // move/swap/resize just happened to touch, for free. Every caller of
+    // `apply_atomic` already calls `reconcile_focus_magnify` on its own
+    // next line, so a pruned focused/magnified id is handled there — no
+    // need to duplicate that call here.
+    let live_blocks: std::collections::HashSet<String> = state.blocks.keys().cloned().collect();
+    let tab = state.tabs.get_mut(tab_id).expect("tab present — just written above");
+    let pruned = crate::backend::layout::prune_dangling_block_refs(&mut tab.rootnode, &live_blocks);
+    if pruned > 0 {
+        tracing::warn!(
+            tab_id = %tab_id,
+            op,
+            pruned,
+            "reducer: pruned dangling layout leaf/leaves referencing since-deleted blocks"
+        );
+    }
     Ok(())
 }

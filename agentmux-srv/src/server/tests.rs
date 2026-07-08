@@ -522,6 +522,22 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
     let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
     let layout_oid = tab.layoutstate.clone();
 
+    // The push below references block "b-1" directly (a predetermined id
+    // the test asserts on) rather than one the reducer would assign via
+    // Command::CreateBlock, so it's seeded straight into reducer state.
+    // Required since prune_dangling_block_refs (added alongside
+    // LayoutSetTree — see
+    // docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
+    // now prunes any pushed leaf whose block_id isn't live, and this test's
+    // "b-1" was never otherwise registered.
+    {
+        let mut s = srv_state.lock().await;
+        s.blocks.insert(
+            "b-1".to_string(),
+            crate::state::BlockRecord { block_id: "b-1".to_string(), tab_id: tab_id.clone() },
+        );
+    }
+
     // Seed a pending backend action (as a redock would); the push below
     // omits pendingbackendactions — the ack must clear it.
     {
@@ -751,6 +767,18 @@ async fn layout_seeders_route_through_reducer_coherently() {
             _ => None,
         })
         .unwrap();
+    // Seeded straight into reducer state (predetermined block ids the test
+    // asserts on, not reducer-assigned) — required since
+    // prune_dangling_block_refs (added alongside LayoutSetTree/the
+    // reducer-routed seeders — see
+    // docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
+    // now prunes any seeded leaf whose block_id isn't live.
+    for bid in ["b-agent", "b-sysinfo", "b-swarm"] {
+        srv_state.lock().await.blocks.insert(
+            bid.to_string(),
+            crate::state::BlockRecord { block_id: bid.to_string(), tab_id: tab1.clone() },
+        );
+    }
     let (tree, focused, leaforder) =
         crate::backend::wcore::default_three_pane_tree("b-agent", "b-sysinfo", "b-swarm");
     crate::server::service::seed_layout_via_reducer(
@@ -789,6 +817,10 @@ async fn layout_seeders_route_through_reducer_coherently() {
             _ => None,
         })
         .unwrap();
+    srv_state.lock().await.blocks.insert(
+        "b-moved".to_string(),
+        crate::state::BlockRecord { block_id: "b-moved".to_string(), tab_id: tab2.clone() },
+    );
     crate::server::service::setup_torn_off_block_layout(&state, &tab2, "b-moved")
         .await
         .expect("tear-off seed via reducer");
@@ -906,6 +938,20 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
             _ => None,
         })
         .unwrap();
+
+    // Every block id this test's layout tree ever references, seeded
+    // straight into reducer state up front (predetermined ids the test
+    // asserts on throughout, not reducer-assigned) — required since
+    // prune_dangling_block_refs (added alongside every reducer-routed
+    // layout-tree write in this lifecycle — see
+    // docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
+    // now prunes any leaf whose block_id isn't live.
+    for bid in ["b1", "b2", "b3", "b-fe"] {
+        srv_state.lock().await.blocks.insert(
+            bid.to_string(),
+            crate::state::BlockRecord { block_id: bid.to_string(), tab_id: tab_id.clone() },
+        );
+    }
 
     // Seed: single leaf via the reducer-routed tear-off-style seeder.
     crate::server::service::setup_torn_off_block_layout(&state, &tab_id, "b1")
