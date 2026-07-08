@@ -50,6 +50,10 @@ pub struct SubagentInfo {
     /// Some("wf_<id>") when this subagent runs inside a Workflow tool run
     /// (JSONL under `subagents/workflows/<id>/`); None for direct subagents.
     pub workflow_id: Option<String>,
+    /// Concise Haiku-generated name, set once on-demand when a client first
+    /// expands this subagent (see `subagent.GenerateName`). None until then
+    /// — callers fall back to `slug`/`agent_id` themselves.
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -478,6 +482,47 @@ impl SubagentWatcher {
         None
     }
 
+    /// Set a subagent's Haiku-generated display name and broadcast
+    /// `subagent:named` so every client watching this session picks up the
+    /// result, not just the one that triggered the naming call. Returns
+    /// `false` if the subagent isn't tracked (e.g. it aged out between the
+    /// RPC firing and resolving) — the caller should treat that as a no-op,
+    /// not an error.
+    pub fn set_display_name(&self, agent_id: &str, display_name: &str) -> bool {
+        let found = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let mut found = false;
+            for session in sessions.values_mut() {
+                if let Some(state) = session.subagents.get_mut(agent_id) {
+                    state.info.display_name = Some(display_name.to_string());
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        // Mutex released here — broadcast outside the lock
+
+        if found {
+            let named_event = WSEventType {
+                eventtype: WS_EVENT_RPC.to_string(),
+                oref: String::new(),
+                data: Some(json!({
+                    "command": "eventrecv",
+                    "data": {
+                        "event": "subagent:named",
+                        "data": {
+                            "agentId": agent_id,
+                            "displayName": display_name,
+                        }
+                    }
+                })),
+            };
+            self.event_bus.broadcast_event(&named_event);
+        }
+        found
+    }
+
     // ── Internal methods ──────────────────────────────────────────────────
 
     /// Backfill subagents that already existed before this pane (re)opened,
@@ -618,6 +663,7 @@ impl SubagentWatcher {
                         event_count: 0,
                         model: None,
                         workflow_id: None,
+                        display_name: None,
                     },
                     file_offset: 0,
                     events: Vec::new(),
@@ -1051,6 +1097,52 @@ fn read_jsonl_from_offset(
     Ok((events, current_offset, meta))
 }
 
+/// Read just the subagent's own initial task prompt from the first JSONL
+/// line (a `"type":"user"` init record) — used by `subagent.GenerateName` as
+/// the source text for the Haiku naming call. Deliberately bypasses the
+/// events cache/offset machinery `read_jsonl_from_offset` uses: naming only
+/// ever needs the first line, is called at most once per subagent (cached
+/// via `display_name` thereafter), and must work even for a subagent whose
+/// events haven't been scanned into `SubagentState` yet.
+///
+/// `message.content` is either a plain string or an array of content blocks
+/// (mirrors the two shapes `parse_event_type`'s "assistant" arm already
+/// handles) — both are accepted here.
+pub(crate) fn read_task_prompt(jsonl_path: &str) -> Option<String> {
+    let file = std::fs::File::open(jsonl_path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut first_line = String::new();
+    reader.read_line(&mut first_line).ok()?;
+
+    let value: serde_json::Value = serde_json::from_str(first_line.trim()).ok()?;
+    if value.get("type").and_then(|v| v.as_str()) != Some("user") {
+        return None;
+    }
+    let content = value.get("message")?.get("content")?;
+
+    if let Some(text) = content.as_str() {
+        let trimmed = text.trim();
+        return (!trimmed.is_empty()).then(|| trimmed.to_string());
+    }
+
+    if let Some(arr) = content.as_array() {
+        let texts: Vec<&str> = arr
+            .iter()
+            .filter_map(|block| {
+                if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    block.get("text").and_then(|t| t.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let joined = texts.join("\n").trim().to_string();
+        return (!joined.is_empty()).then_some(joined);
+    }
+
+    None
+}
+
 /// Parse a JSONL line into a SubagentEventType based on the `type` field.
 fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEventType> {
     let event_type = value.get("type").and_then(|v| v.as_str())?;
@@ -1347,6 +1439,7 @@ mod tests {
                 event_count: 0,
                 model: None,
                 workflow_id: None,
+                display_name: None,
             },
             file_offset: 0,
             events: Vec::new(),
@@ -1398,6 +1491,78 @@ mod tests {
         assert_eq!(found.parent_agent, "parent-1");
 
         assert!(watcher.get_info("never-spawned").is_none());
+    }
+
+    #[test]
+    fn set_display_name_updates_info_and_reports_found() {
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            s1.subagents.insert("sub-a".to_string(), fixture_state("parent-1", "sub-a", "s1"));
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        assert!(watcher.set_display_name("sub-a", "Refactor shell module"));
+        let info = watcher.get_info("sub-a").expect("sub-a should be found");
+        assert_eq!(info.display_name.as_deref(), Some("Refactor shell module"));
+    }
+
+    #[test]
+    fn set_display_name_on_unknown_agent_is_noop_and_reports_not_found() {
+        let watcher = fixture_watcher();
+        assert!(!watcher.set_display_name("never-spawned", "Some name"));
+    }
+
+    #[test]
+    fn read_task_prompt_extracts_plain_string_content_from_first_line() {
+        let dir = std::env::temp_dir().join(format!("amx-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-prompt-string.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"Analyze the shell module\"}}\n\
+             {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n",
+        )
+        .unwrap();
+
+        let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
+        assert_eq!(prompt.as_deref(), Some("Analyze the shell module"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_task_prompt_extracts_joined_text_blocks_from_content_array() {
+        let dir = std::env::temp_dir().join(format!("amx-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-prompt-array.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Part one\"},{\"type\":\"text\",\"text\":\"Part two\"}]}}\n",
+        )
+        .unwrap();
+
+        let prompt = read_task_prompt(jsonl_path.to_str().unwrap());
+        assert_eq!(prompt.as_deref(), Some("Part one\nPart two"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn read_task_prompt_returns_none_when_first_line_is_not_a_user_record() {
+        let dir = std::env::temp_dir().join(format!("amx-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let jsonl_path = dir.join("agent-prompt-none.jsonl");
+        std::fs::write(
+            &jsonl_path,
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+        )
+        .unwrap();
+
+        assert!(read_task_prompt(jsonl_path.to_str().unwrap()).is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
