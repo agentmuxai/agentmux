@@ -7,13 +7,16 @@
     // Content-aware tab sizing (VS Code model): each tab's preferred width
     // is measured from its label text via canvas.measureText() and injected
     // as `--tab-natural-width` inline style on the wrapper by DroppableTab.
-    // This matches VS Code's "shrink" mode — short labels get narrow tabs,
-    // long labels get wide tabs, and all shrink proportionally under pressure.
+    // The measured width floors at TAB_STANDARD_WIDTH (232px — Chrome's own
+    // tab strip standard width, tab-measure.ts) so a short/default label
+    // still reads as a normal-sized tab at rest; long labels can still grow
+    // past it, up to 260px. All tabs shrink proportionally under pressure.
     // Spec: specs/SPEC_TAB_CONTENT_AWARE_SIZING_2026-06-14.md.
     //
-    // `--tab-natural-width` fallback (160px) covers the initial paint before
-    // JS has run a measurement. Floor at 60px keeps the close button reachable.
-    // Cap at 260px prevents very long labels from dominating the bar.
+    // `--tab-natural-width` fallback (232px, matches TAB_STANDARD_WIDTH)
+    // covers the initial paint before JS has run a measurement. Floor at
+    // 60px keeps the close button reachable. Cap at 260px prevents very
+    // long labels from dominating the bar.
     --ws-tab-min: 60px;
     --ws-tab-max: 260px;
 
@@ -57,11 +60,11 @@
         // sprawl to fill slack — the `.tab-bar-fill` filler absorbs that.
         // shrink=1 so all tabs compress proportionally under overflow;
         // `.name`'s `text-overflow: ellipsis` trips once the tab narrows
-        // past its text. The 160px fallback covers initial paint before JS.
+        // past its text. The 232px fallback covers initial paint before JS.
         .tab {
             position: relative;
             opacity: 1;
-            flex: 0 1 var(--tab-natural-width, 160px);
+            flex: 0 1 var(--tab-natural-width, 232px);
             min-width: var(--ws-tab-min);
             max-width: var(--ws-tab-max);
             overflow: hidden;
@@ -115,8 +118,8 @@
         // Wrapper mirrors the inner .tab sizing contract so both shrink
         // in lockstep. `--tab-natural-width` is set as an inline style
         // by DroppableTab once Tab fires onNaturalWidth; falls back to
-        // 160px until JS measures the label.
-        flex: 0 1 var(--tab-natural-width, 160px);
+        // 232px until JS measures the label.
+        flex: 0 1 var(--tab-natural-width, 232px);
         min-width: var(--ws-tab-min);
         max-width: var(--ws-tab-max);
         display: flex;
