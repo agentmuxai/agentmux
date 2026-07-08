@@ -159,4 +159,4 @@ Implementation (frontend-only — `SubagentInfo.workflow_id` was already on the 
 - Live-verified in `task dev`:
   - Finding 2 against this agent identity's real 20-session history
   - Finding 3 against two live agents with different auth configurations (one identity-bound, one shared-default) — both resolved to their real config dirs and correctly picked up a live subagent spawn (13 subagents, one workflow batch) that had previously shown nothing
-  - Findings 1-3 merged (#2008), then Finding 4 found live on the *next* test pass — opening agent "Loap" from the picker replayed 45 subagent-spawned events in under 500ms. No fix shipped yet; see Finding 4's open design question above.
+  - Findings 1-3 merged (#2008), then Finding 4 found live on the *next* test pass — opening agent "Loap" from the picker replayed 45 subagent-spawned events in under 500ms. Fixed by grouping (#2018) — see "Fix (chosen: group, not truncate)" above.
