@@ -33,14 +33,24 @@ pub async fn send_message(
     // repurposed as "recipient phone number" (spec §5.3). There is no
     // bridge-level default to fall back to the way Discord/Slack have a
     // default channel, so an empty recipient is a caller error.
-    let to = msg.channel_id.trim();
+    //
+    // Normalized (digits only) before anything else: `handle_whatsapp_send`
+    // documents `to` as "E.164 preferred" (e.g. "+14155552671"), but Meta's
+    // inbound webhook `from` field has no `+` (e.g. "14155552671"). Without
+    // normalizing both to the same form, the window-state lookup below
+    // key-misses every caller following the documented `+`-prefixed format,
+    // always falling through to "24h window expired" even when Meta's real
+    // window is open. Digits-only also matches the format the Graph API's
+    // own `to` field expects, so the normalized value is used for the send
+    // body too, not just the lookup.
+    let to = normalize_phone(msg.channel_id.trim());
     if to.is_empty() {
         return Err(
             "whatsapp: OutboundMsg.channel_id (recipient phone number) is required".to_string(),
         );
     }
 
-    let last_inbound = window_state.lock().unwrap().get(to).copied();
+    let last_inbound = window_state.lock().unwrap().get(&to).copied();
     let within_window = last_inbound
         .map(|last| window_ok(last, now_ms()))
         .unwrap_or(false);
@@ -48,10 +58,10 @@ pub async fn send_message(
     let text = flatten_text(msg);
 
     let body = if within_window {
-        SendBody::text(to, &text)
+        SendBody::text(&to, &text)
     } else {
         match config.fallback_template.as_deref().filter(|t| !t.is_empty()) {
-            Some(template) => SendBody::template(to, template, &config.fallback_template_lang),
+            Some(template) => SendBody::template(&to, template, &config.fallback_template_lang),
             None => {
                 return Err(
                     "whatsapp: 24h window expired and no fallback template configured"
@@ -123,6 +133,15 @@ fn window_ok(last_inbound_ms: u64, now_ms: u64) -> bool {
     now_ms.saturating_sub(last_inbound_ms) <= TWENTY_FOUR_HOURS_MS
 }
 
+/// Strips everything but ASCII digits, so the same phone number in different
+/// formats — Meta's inbound `from` (no `+`) vs. a caller-supplied `to` in
+/// E.164 (`+`-prefixed) or with spaces/dashes — normalizes to one 24h-window
+/// state key. `WhatsAppBridge::record_inbound` (mod.rs) applies this same
+/// normalization when storing, so the two call sites always agree.
+pub(crate) fn normalize_phone(raw: &str) -> String {
+    raw.chars().filter(|c| c.is_ascii_digit()).collect()
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -157,6 +176,29 @@ mod tests {
     fn window_ok_now_before_last_does_not_panic() {
         // Clock skew / stale entry — saturating_sub prevents underflow panic.
         assert!(window_ok(2_000_000, 1_000_000));
+    }
+
+    #[test]
+    fn normalize_phone_strips_plus_and_formatting() {
+        assert_eq!(normalize_phone("+14155552671"), "14155552671");
+        assert_eq!(normalize_phone("1-415-555-2671"), "14155552671");
+        assert_eq!(normalize_phone("(415) 555-2671"), "4155552671");
+    }
+
+    #[test]
+    fn normalize_phone_is_noop_on_already_digits_only() {
+        // Meta's inbound `from` format — no `+`, no separators.
+        assert_eq!(normalize_phone("14155552671"), "14155552671");
+    }
+
+    #[test]
+    fn normalize_phone_produces_matching_keys_for_meta_inbound_and_e164_outbound() {
+        // Regression for the window-state key mismatch a review caught:
+        // Meta's inbound `from` and a caller's documented E.164 `to` must
+        // normalize to the identical map key.
+        let meta_inbound_from = "14155552671";
+        let caller_supplied_to = "+14155552671";
+        assert_eq!(normalize_phone(meta_inbound_from), normalize_phone(caller_supplied_to));
     }
 
     #[test]

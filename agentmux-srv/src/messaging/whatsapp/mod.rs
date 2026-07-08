@@ -186,12 +186,19 @@ impl WhatsAppBridge {
     /// Called by `webhook::handle_inbound` on each valid inbound message, to
     /// update the 24h window state (spec §3.3) and the health snapshot's
     /// `last_event_at`.
+    ///
+    /// Keys on `rest::normalize_phone(from_id)`, not the raw id, so this
+    /// matches whatever normalized form `rest::send_message` looks the
+    /// number up under — Meta's inbound `from` has no `+` prefix, but a
+    /// caller sending via `handle_whatsapp_send` may supply one (E.164);
+    /// without a shared normalization the window lookup always missed
+    /// (found via review).
     pub(crate) fn record_inbound(&self, from_id: &str) {
         let now = now_ms();
         self.window_state
             .lock()
             .unwrap()
-            .insert(from_id.to_string(), now);
+            .insert(rest::normalize_phone(from_id), now);
         let mut h = self.health.lock().unwrap();
         h.last_event_at = Some(now / 1000);
     }
