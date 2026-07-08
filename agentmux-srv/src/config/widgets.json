@@ -154,7 +154,7 @@
         "icon": "brands@telegram",
         "color": "#229ed9",
         "label": "Telegram",
-        "description": "Telegram Web — real interface, agent-connected (bridge Phase 2)",
+        "description": "Telegram Web — real interface, agent-connected",
         "blockdef": {
             "meta": {
                 "view": "browser",

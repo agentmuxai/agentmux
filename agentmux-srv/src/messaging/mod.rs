@@ -8,6 +8,7 @@
 //! arrive via HTTP endpoint or MCP tool.
 
 pub mod discord;
+pub mod telegram;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +41,11 @@ pub struct OutboundMsg {
     pub reply_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub embed: Option<MsgEmbed>,
+    /// Telegram-specific: if set, edit this existing message instead of
+    /// sending a new one (streaming-output simulation, spec §2.3). Ignored
+    /// by platforms that don't support editing (e.g. Discord in v1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edit_message_id: Option<i64>,
 }
 
 /// Rich embed for platforms that support structured output (Discord, Slack).
@@ -100,4 +106,25 @@ impl BridgeHealth {
             error: None,
         }
     }
+}
+
+// ── Common bridge interface ────────────────────────────────────────────────
+
+/// Common interface implemented by every platform bridge (Discord, Telegram, …).
+///
+/// Bridges are singletons accessed via `get()`-style static accessors on the
+/// concrete type (see `DiscordBridge::get()`, `TelegramBridge::get()`) for the
+/// call sites that know their platform statically (e.g. platform-specific HTTP
+/// handlers). This trait exists for call sites that need to treat bridges
+/// polymorphically — today, only `handle_status`'s aggregation loop.
+pub trait MessagingBridge: Send + Sync {
+    /// Enqueue a message for delivery. Fire-and-forget: pushes onto the
+    /// bridge's internal mpsc channel and returns as soon as the send is
+    /// queued, not once it's delivered. Matches the existing Discord
+    /// contract exactly.
+    fn send(&self, msg: OutboundMsg) -> Result<(), String>;
+
+    /// Current connection/health snapshot. Cheap, non-blocking (reads an
+    /// `Arc<Mutex<BridgeHealth>>` guarded by a short-lived lock).
+    fn health(&self) -> BridgeHealth;
 }
