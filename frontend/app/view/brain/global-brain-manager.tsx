@@ -1,9 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBrainManager — the Armory "Brain" tab. Presents the
-// workspace-wide global brain (is_global Memory bundles) as an ordered list
-// of editable sections that compose into every agent's CLAUDE.md at launch.
+// GlobalBrainManager — the Armory "Memory" tab (labeled "Brain" prior to the
+// PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md §4.2 naming decision — "the
+// brain" is a colloquial nickname, "Memory" is the canonical term). Presents
+// the workspace-wide global brain (is_global Memory bundles) as an ordered
+// list of editable sections that compose into every agent's CLAUDE.md at
+// launch.
 //
 // Context-free: owns its own GlobalBrainViewModel and drives off the
 // bundle_* RPCs. Spec: SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.

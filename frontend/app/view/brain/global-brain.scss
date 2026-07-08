@@ -1,8 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Styles for the Armory "Brain" tab (GlobalBrainManager). Renders
-// inside the bundle-manager pane, which provides the scroll container.
+// Styles for the Armory "Memory" tab (GlobalBrainManager, labeled "Brain"
+// prior to the naming decision in PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md
+// §4.2). Renders inside the bundle-manager pane, which provides the scroll
+// container.
 
 .global-brain {
     display: flex;

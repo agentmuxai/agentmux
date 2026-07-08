@@ -1,8 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBrainViewModel — drives the Armory "Brain" tab: the
-// workspace-wide global brain that every agent inherits at launch.
+// GlobalBrainViewModel — drives the Armory "Memory" tab (labeled "Brain"
+// prior to the PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md §4.2 naming
+// decision): the workspace-wide global brain that every agent inherits at
+// launch.
 //
 // A "section" is a Memory bundle with is_global=true. The global brain is
 // the ordered list of those sections; their instructions concatenate into
