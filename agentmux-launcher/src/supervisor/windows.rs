@@ -21,13 +21,27 @@ use crate::{
 /// restart doesn't re-run saga recovery/migrations/etc., so the splash shows
 /// only the "Restoring session..." headline and the pulsing brain, nothing
 /// from the (empty) stage list.
+///
+/// `seq` (reagent P2, PR #2032, 2026-07-08) makes each restart's Win32 event
+/// + window class name genuinely unique (`AgentMuxSplash-{dir_hash}-r{seq}`),
+/// rather than reusing the SAME name every restart. Reusing the name is
+/// unsafe in exactly the repeated-crash-loop scenario `HOST_RESTART_BUDGET`
+/// exists to bound: if a newly-respawned host crashes again before ever
+/// calling `on_load_end` (so the prior splash thread is still blocked in its
+/// `WaitForSingleObject` loop, `splash.rs`'s dismiss check, holding the
+/// event open), `CreateEventW` with an already-open name returns a handle to
+/// that SAME still-live object instead of a fresh one — both splash threads
+/// then wait on one shared event and can render stacked/duplicate splash
+/// windows simultaneously. A per-restart unique name sidesteps the collision
+/// entirely; the caller passes a monotonic counter that only increases.
 #[cfg(target_os = "windows")]
-fn respawn_splash_for_restart(dir_hash: &str) -> Option<String> {
+fn respawn_splash_for_restart(dir_hash: &str, seq: u32) -> Option<String> {
     if crate::splash_config::splash_disabled() {
         return None;
     }
     let (_sink, rx) = startup_events::StartupEventSink::new();
-    crate::splash::spawn_splash(dir_hash, rx, true)
+    let unique_id = format!("{}-r{}", dir_hash, seq);
+    crate::splash::spawn_splash(&unique_id, rx, true)
 }
 
 /// Windows main flow: resolve paths → create J0 → spawn srv → spawn
@@ -496,6 +510,11 @@ pub(crate) async fn run_windows(
     // Separate budget for system-OOM host exits (memory-aware relaunch); see
     // mem_supervisor + SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.
     let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
+    // SPEC_PILLAR1_STEP4 Phase 4 (reagent P2, PR #2032) — monotonic, only
+    // ever incremented, never reset: guarantees `respawn_splash_for_restart`
+    // never reuses a Win32 event/class name a still-alive prior splash
+    // thread might still be holding open. See that function's doc comment.
+    let mut restart_splash_seq: u32 = 0;
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
     let exit_code = loop {
@@ -585,7 +604,8 @@ pub(crate) async fn run_windows(
                         // cold-start dismiss, so nothing was listening on that
                         // event name — the host would signal it and nothing would
                         // happen. See `respawn_splash_for_restart`.
-                        splash_event_name = respawn_splash_for_restart(&dir_hash);
+                        restart_splash_seq += 1;
+                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
                         match spawn_host_supervised(
                             real_exe,
                             args,
@@ -638,7 +658,8 @@ pub(crate) async fn run_windows(
                         // SPEC_PILLAR1_STEP4 Phase 4 — see the OOM branch above for
                         // why this re-spawns the splash rather than reusing
                         // `splash_event_name` as-is.
-                        splash_event_name = respawn_splash_for_restart(&dir_hash);
+                        restart_splash_seq += 1;
+                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
                         match spawn_host_supervised(
                             real_exe,
                             args,
