@@ -14,8 +14,18 @@
 // **Steps:**
 // 1. `DeleteBlock { tab_id, block_id }` — reducer removes the block
 //    from canonical state and emits `Event::BlockDeleted`. The
-//    persist subscriber writes SQLite via `wcore::delete_block`
-//    (cascades to layout pruning).
+//    persist subscriber writes SQLite via `wcore::delete_block`.
+// 2. `LayoutDeleteNodeByBlock` (SPEC_864 site #6) — reducer prunes the
+//    block's layout node from `db_layout`, the single writer's own
+//    copy of the tree.
+// 2b. `queue_source_layout_delete` — tells any frontend that already
+//    has this tab's tree loaded (via `LayoutState.pendingbackendactions`)
+//    to prune the node too. Added after
+//    `INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`
+//    found that without this, step 2's direct backend write is
+//    invisible to an already-loaded frontend, whose next unrelated
+//    edit in the tab silently resurrects the just-pruned node as a
+//    dangling reference.
 //
 // **Block controller side-effect:** the legacy RPC handler killed
 // the block's PTY/controller via `blockcontroller::delete_controller`
@@ -176,11 +186,20 @@ async fn run_inner(
     //
     // Best-effort, mirroring the old wcore prune's `let _ =
     // store.update(&mut layout)`: a prune failure must not fail the
-    // block deletion itself (the block + controller are already gone);
-    // an orphaned node is exactly what the frontend's own delete-push
-    // converges away (SPEC_864 Phase 5 deleted the `heal_layout`
-    // backstop this comment used to reference — no Path-B writer
-    // remains to produce the orphans it swept).
+    // block deletion itself (the block + controller are already gone).
+    //
+    // CORRECTION (found via INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_
+    // RESURRECTION_2026_07_08.md): this comment used to claim "an
+    // orphaned node is exactly what the frontend's own delete-push
+    // converges away" — that's backwards. The frontend's `LayoutModel`
+    // doesn't auto-sync from a bare backend rootnode write (see
+    // `layout_helpers.rs::queue_target_layout_insert`'s doc comment); a
+    // frontend that already has this tab's tree loaded is never told
+    // this dispatch happened, so its *next* unrelated edit re-pushes
+    // its stale copy — still containing this node — and resurrects the
+    // dangling reference instead of converging it away. Step 2b below
+    // closes that gap via the same `pendingbackendactions` channel
+    // tear-off/redock already use for exactly this reason.
     if let Err(reason) = ctx
         .dispatch(Command::LayoutDeleteNodeByBlock {
             tab_id: tab_id.clone(),
@@ -193,6 +212,28 @@ async fn run_inner(
             tab_id = %tab_id,
             block_id = %block_id,
             "[saga] LayoutDeleteNodeByBlock dispatch failed (best-effort; layout node may orphan until frontend push): {}",
+            reason
+        );
+    }
+
+    // Step 2b: tell any frontend that already has this tab's layout
+    // tree loaded to prune the node too, via the same pendingbackendactions
+    // channel `queue_source_layout_delete` already uses for tear-off's
+    // source-tab prune. Without this, Step 2's direct reducer write is
+    // invisible to an already-loaded frontend, and its next unrelated
+    // edit in this tab resurrects the just-deleted node as a dangling
+    // reference (empty/dead pane). Best-effort for the same reason as
+    // Step 2 — the block is already gone either way.
+    if let Err(reason) =
+        crate::server::service::layout_helpers::queue_source_layout_delete(
+            ctx.state, &tab_id, &block_id,
+        )
+        .await
+    {
+        tracing::warn!(
+            tab_id = %tab_id,
+            block_id = %block_id,
+            "[saga] queue_source_layout_delete failed (best-effort; a frontend with a stale loaded copy of this tab may resurrect the node): {}",
             reason
         );
     }
@@ -369,6 +410,57 @@ mod tests {
                 .rootnode
                 .is_none(),
             "db_layout must agree with the reducer post-saga (single-writer coherence)"
+        );
+    }
+
+    #[tokio::test]
+    async fn saga_queues_a_pendingbackendactions_delete_for_a_stale_frontend() {
+        // Regression test for
+        // INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md:
+        // Step 2 (LayoutDeleteNodeByBlock) alone prunes db_layout correctly
+        // but is invisible to a frontend that already has this tab's tree
+        // loaded — its next unrelated edit re-pushes its stale copy and
+        // resurrects the just-deleted node. Step 2b must queue a "delete"
+        // pendingbackendactions entry so that frontend converges instead.
+        let (state, _ws_id, tab_id, block_id) = seed().await;
+
+        let tree = agentmux_common::LayoutNode {
+            id: "n-solo".into(),
+            data: Some(agentmux_common::LayoutNodeData {
+                block_id: block_id.clone(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        dispatch_apply(
+            &state,
+            agentmux_common::ipc::Command::LayoutSetTree {
+                tab_id: tab_id.clone(),
+                new_tree: Some(tree),
+                correlation_id: String::new(),
+                slices: None,
+            },
+        )
+        .await;
+
+        run(&state, tab_id.clone(), block_id.clone()).await.unwrap();
+
+        let tab = state
+            .wstore
+            .must_get::<crate::backend::obj::Tab>(&tab_id)
+            .unwrap();
+        let layout = state
+            .wstore
+            .must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate)
+            .unwrap();
+        let actions = layout.pendingbackendactions.unwrap_or_default();
+        let delete_action = actions
+            .iter()
+            .find(|a| a.actiontype == "delete" && a.blockid == block_id);
+        assert!(
+            delete_action.is_some(),
+            "expected a queued 'delete' pendingbackendactions entry for the pruned block \
+             (matches LayoutTreeActionType.DeleteNode in frontend/layout/lib/types.ts), got: {actions:?}"
         );
     }
 

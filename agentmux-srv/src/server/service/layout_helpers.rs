@@ -164,7 +164,17 @@ pub(super) async fn queue_target_layout_split(
 /// poll. Used by the TearOffBlock/PromoteBlockToTab/RedockFloatingPane
 /// RPC handlers (the wcore-direct `tear_off_block` this used to mirror
 /// was dead code, deleted in SPEC_864 Phase 5).
-pub(super) async fn queue_source_layout_delete(
+///
+/// Also used by `sagas::delete_block` (`pub(crate)`, not `pub(super)`,
+/// for that reason) — a direct `LayoutDeleteNodeByBlock` reducer
+/// dispatch prunes `db_layout` correctly but, per this function's own
+/// "why this and not direct writes" doc above, does nothing to tell a
+/// frontend that already has the tab's tree loaded. Without this call
+/// too, that frontend's next unrelated edit in the tab re-pushes its
+/// stale copy — still containing the just-deleted block's leaf — and
+/// silently resurrects it as a dangling reference (empty/dead pane;
+/// see `INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`).
+pub(crate) async fn queue_source_layout_delete(
     state: &super::super::AppState,
     source_tab_id: &str,
     block_id: &str,
