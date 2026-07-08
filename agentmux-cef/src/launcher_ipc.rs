@@ -707,22 +707,22 @@ fn apply_event_to_shadow(state: &std::sync::Arc<crate::state::AppState>, event: 
             // that field's doc comment for the TOCTOU this closes.
             let mut gate = state.ui_thread_gate.lock();
             if gate.ready {
-                // SPEC_PILLAR1_STEP4 Phase 3 — `"main"`'s registration may
-                // have already given up waiting for this snapshot and
-                // fallen back to the slow (srv) path. `reprojected` ensures
-                // whichever path runs first is the only one that actually
-                // creates windows.
-                if gate.reprojected {
-                    drop(gate);
-                    tracing::info!(
-                        target: "reproject",
-                        "[reproject] snapshot arrived after the slow path already ran — skipping fast-path reproject"
-                    );
-                    return;
-                }
-                gate.reprojected = true;
+                // SPEC_PILLAR1_STEP4 Phase 3 — reagent P2 (PR #2017,
+                // 2026-07-08): `gate.ready` only ever becomes true inside
+                // `client/lifecycle.rs`'s `"main"` registration block, which
+                // — under this SAME lock — always sets `gate.reprojected =
+                // true` too (both its branches do, whether it replayed a
+                // stash or fell back to the slow path). So any snapshot
+                // observed here with `ready == true` is, by construction, a
+                // late arrival after that decision already ran; there is no
+                // `ready && !reprojected` state to branch on, so this is a
+                // plain skip, not a conditional.
                 drop(gate);
-                crate::commands::window::reproject_from_snapshot(state, windows);
+                tracing::info!(
+                    target: "reproject",
+                    "[reproject] snapshot arrived after \"main\" already decided fast-vs-slow path — skipping"
+                );
+                return;
             } else {
                 tracing::info!(
                     target: "reproject",
