@@ -15,7 +15,7 @@ import "./armory-view.scss";
 const RAIL: { id: ArmorySection; label: string; icon: string }[] = [
     { id: "accounts",   label: "Accounts",   icon: "key" },
     { id: "identities", label: "Identities", icon: "id-card" },
-    { id: "brain",      label: "Brain",      icon: "brain" },
+    { id: "brain",      label: "Memory",     icon: "brain" },
     { id: "memories",   label: "Bundles",    icon: "layer-group" },
     { id: "mcp",        label: "MCP Servers", icon: "plug" },
     { id: "skills",     label: "Skills",      icon: "wand-magic-sparkles" },
