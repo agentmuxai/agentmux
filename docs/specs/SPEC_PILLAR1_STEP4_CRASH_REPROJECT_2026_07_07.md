@@ -417,6 +417,30 @@ that source alone, independent of Phase 3's own reprojection (which is now self-
 the same cap above, but the underlying pool-window leak itself is a separate, pre-existing gap
 (adjacent to Pillar 2's window-lifecycle work, not Phase 3-specific) and needs its own fix.
 
+**Addendum 2026-07-08, round 2 (reagent review, PR #2032) — closing on an unconfirmed signal risked
+silent data loss.** reagent caught that the fix above closed the OLD window_id immediately after
+`open_window_with_kind` returned `Ok` — but `Ok` there only means a `CreateWindowTask` was
+successfully *posted* to the UI thread (fire-and-forget via `post_task`), not that the window
+actually exists. This session's own Phase 2 investigation already found `post_task` can silently drop
+a posted task (the UI-thread-readiness race). Had that happened here, the old session's
+window/workspace/tabs would already be deleted with no replacement and no retry — a strictly worse
+outcome than the original bug (unclosed-but-not-lost).
+
+Fixed by deferring: `reproject_from_snapshot` now returns `(old_label, new_label)` pairs;
+`reproject_from_srv` stashes `new_label → old_window_id` in a new `AppState.pending_reproject_closures`
+map instead of closing immediately. `register_backend_window` (`commands/window/meta.rs`) drains this
+map for its own label after every registration — that call firing at all is the real confirmation
+(the new window's frontend loaded and round-tripped IPC), and only then is the old id closed. If
+creation silently fails, the entry just sits unclosed forever — the same safe-but-imperfect fallback
+as before any of this cleanup existed.
+
+Re-verified live: reproject completed (`created=4`) at one timestamp; the four
+`"new window confirmed live — closing..."` log lines fired 2-3 seconds later, after each new window's
+own `register_backend_window` call — confirming the deferral is real, not just structurally present.
+All four `CloseWindow` calls still got `HTTP/1.1 200 OK`, and all four reprojected windows still
+appeared as correctly-labeled CDP targets (bonus confirmation: their URLs carried `&restoring=1`,
+verifying Phase 4's frontend wiring end-to-end too).
+
 Each phase independently shippable, matching every other Pillar 1 spec's phasing discipline this
 session established.
 

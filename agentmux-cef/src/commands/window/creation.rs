@@ -473,18 +473,25 @@ pub(crate) fn open_window_with_kind(
 /// the remap table as `"main"` → `"main"` since its label is stable across
 /// restarts (never regenerated).
 ///
-/// Returns the `label` of every `WindowSnapshot` that was successfully
-/// recreated (not the ones skipped/failed) — `reproject_from_srv` uses this
-/// to close the OLD srv window_id once its replacement exists (see that
-/// function's doc comment for why leaving it around causes unbounded
-/// accumulation across repeated crashes). The fast path (launcher snapshot)
-/// ignores this return value: a `WindowSnapshot.label` there is the
-/// launcher's own in-memory label, not necessarily a real srv window_id, so
-/// there is nothing meaningful to close.
+/// Returns `(old_label, new_label)` for every `WindowSnapshot` whose
+/// `open_window_with_kind` call returned `Ok` (not the ones skipped/failed).
+///
+/// reagent P1 (PR #2032, 2026-07-08): `Ok` here means only that a
+/// `CreateWindowTask` was successfully POSTED to the UI thread
+/// (`open_window_with_kind` → `post_task`, fire-and-forget) — not that the
+/// window actually exists yet. This session's own Phase 2 investigation
+/// found `post_task` can silently drop a posted task (the UI-thread-readiness
+/// race). The caller MUST NOT treat this return value as "safe to delete the
+/// old data" — `reproject_from_srv` instead stashes `new_label → old_id` and
+/// waits for `new_label`'s own `register_backend_window` call (proof the new
+/// window's frontend actually loaded and round-tripped IPC) before closing
+/// the old one. The fast path (launcher snapshot) ignores this return value
+/// entirely: a `WindowSnapshot.label` there is the launcher's own in-memory
+/// label, not a real srv window_id, so there is nothing to close either way.
 pub(crate) fn reproject_from_snapshot(
     state: &Arc<AppState>,
     windows: &[agentmux_common::ipc::WindowSnapshot],
-) -> Vec<String> {
+) -> Vec<(String, String)> {
     use std::collections::HashMap;
 
     let mut to_create: Vec<&agentmux_common::ipc::WindowSnapshot> =
@@ -513,7 +520,7 @@ pub(crate) fn reproject_from_snapshot(
 
     let mut created = 0usize;
     let mut skipped = 0usize;
-    let mut recreated_old_labels: Vec<String> = Vec::new();
+    let mut recreated_pairs: Vec<(String, String)> = Vec::new();
     for w in to_create {
         let new_parent = match &w.parent_label {
             Some(old_parent) => match label_remap.get(old_parent) {
@@ -548,8 +555,8 @@ pub(crate) fn reproject_from_snapshot(
                     had_rect = w.last_rect.is_some(),
                     "[reproject] recreated window"
                 );
-                label_remap.insert(w.label.clone(), new_label);
-                recreated_old_labels.push(w.label.clone());
+                label_remap.insert(w.label.clone(), new_label.clone());
+                recreated_pairs.push((w.label.clone(), new_label));
                 created += 1;
             }
             Err(e) => {
@@ -569,7 +576,7 @@ pub(crate) fn reproject_from_snapshot(
         skipped,
         "[reproject] fast-path reproject complete"
     );
-    recreated_old_labels
+    recreated_pairs
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 3 — the slow-path reproject driver. Called once
@@ -705,27 +712,30 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
             window_count = snapshots.len(),
             "[reproject] slow path: recreating windows from srv"
         );
-        let recreated_old_ids = reproject_from_snapshot(&state, &snapshots);
+        let recreated_pairs = reproject_from_snapshot(&state, &snapshots);
 
-        // Close each OLD window_id now that its replacement exists — srv's
-        // `close_window` already does the full cleanup (prunes
-        // `Client.windowids`, deletes the Window row and its workspace/tabs).
-        // Without this, repeated crashes accumulate `Client.windowids`
-        // forever: each crash's reproject only ADDS new ids via
-        // `register_backend_window`, never removes the old ones it just
-        // reprojected FROM, so every SUBSEQUENT crash reprojects an
-        // ever-growing pile including windows from crashes days/weeks
-        // earlier. Found live: a test that had force-killed this build many
-        // times over one session (never a graceful quit, so nothing ever
-        // pruned `Client.windowids` naturally) hit 30+ accumulated entries,
-        // all recreated at once on the next cold boot.
+        // Stash `new_label → old_window_id` — do NOT close the old id yet.
+        // `reagent P1 (PR #2032): `open_window_with_kind`'s `Ok` only means a
+        // `CreateWindowTask` was posted to the UI thread (fire-and-forget);
+        // it is not proof the window exists. `register_backend_window`
+        // (`commands/window/meta.rs`) drains this map and does the actual
+        // close once `new_label`'s own registration fires — real
+        // confirmation the new window's frontend loaded and round-tripped
+        // IPC. Without this deferral (the first version of this fix),
+        // closing right here on the unconfirmed `Ok` would delete the old
+        // session's window/workspace/tabs with no replacement and no retry
+        // if window creation subsequently failed silently (this session's
+        // own Phase 2 investigation found `post_task` can do exactly that).
         //
-        // Only the SUCCESSFULLY recreated ones are closed — a window that
-        // failed to recreate (network hiccup talking to srv, an unresolvable
-        // parent) is left alone so a future launch can still retry it,
-        // rather than closing it and losing it outright.
-        for old_id in recreated_old_ids {
-            crate::client::backend_close_window(&web_endpoint, &auth_key, &old_id);
+        // This is what actually fixes the unbounded `Client.windowids`
+        // growth found live (2026-07-08, 30+ accumulated entries from a test
+        // session that only ever force-killed, never gracefully quit) —
+        // deferred to a confirmed point rather than an optimistic one.
+        if !recreated_pairs.is_empty() {
+            let mut pending = state.pending_reproject_closures.lock();
+            for (old_id, new_label) in recreated_pairs {
+                pending.insert(new_label, old_id);
+            }
         }
     });
 }

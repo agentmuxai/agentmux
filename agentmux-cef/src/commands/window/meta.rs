@@ -215,6 +215,30 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
             .lock()
             .insert(label.to_string(), window_id.to_string());
 
+        // SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P1, PR #2032,
+        // 2026-07-08) — this label's own registration is exactly the
+        // confirmation `reproject_from_srv` was waiting for: proof this
+        // window's frontend actually loaded and round-tripped IPC, not just
+        // that a CreateWindowTask was posted. Drain-and-close the OLD srv
+        // window_id it was reprojected from, if any. See
+        // `AppState::pending_reproject_closures`'s doc comment for why this
+        // can't happen any earlier (right after `open_window_with_kind`
+        // returns `Ok`) without risking silent data loss.
+        let old_reprojected_id = state.pending_reproject_closures.lock().remove(label);
+        if let Some(old_id) = old_reprojected_id {
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            tracing::info!(
+                target: "reproject",
+                new_label = %label,
+                old_window_id = %old_id,
+                "[reproject] new window confirmed live — closing the old srv window_id it replaced"
+            );
+            std::thread::spawn(move || {
+                crate::client::backend_close_window(&web_endpoint, &auth_key, &old_id);
+            });
+        }
+
         // SPEC_PILLAR1_STEP3 Phase 2 — write-through this window's kind +
         // parent linkage to srv now that its concrete window_id is known.
         // This is the first point in the window's life where the host has
