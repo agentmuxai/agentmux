@@ -208,15 +208,17 @@ const AMBIENT_PURPOSE_SUBAGENT_NAME: &str = "subagent_name";
 /// Returns `None` when there's nothing to name (unknown subagent, no task
 /// prompt on the first JSONL line, parent block unresolvable, or the call
 /// was superseded/capped/failed) — callers should treat that as "leave the
-/// row showing its slug/id fallback," not an error.
+/// row showing its slug/id fallback," not an error. A cache hit (name
+/// already generated) returns the cached name with `tokens: None` — there's
+/// no new spend to report.
 pub(crate) async fn generate_subagent_name(
     wstore: &Store,
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     agent_id: &str,
-) -> Option<String> {
+) -> Option<(String, Option<crate::agents::TokenCounts>)> {
     let info = subagent_watcher.get_info(agent_id)?;
     if let Some(existing) = info.display_name {
-        return Some(existing);
+        return Some((existing, None));
     }
 
     let key = crate::ambient::AmbientCallKey::new(agent_id.to_string(), AMBIENT_PURPOSE_SUBAGENT_NAME);
@@ -266,14 +268,14 @@ pub(crate) async fn generate_subagent_name(
     let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
     drop(guard);
 
-    let (name, _tokens) = result?;
+    let (name, tokens) = result?;
     let name = name.trim().to_string();
     if name.is_empty() {
         return None;
     }
 
     subagent_watcher.set_display_name(agent_id, &name);
-    Some(name)
+    Some((name, tokens))
 }
 
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {

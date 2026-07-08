@@ -12,6 +12,7 @@ import { WOS, workspace, setActiveTab, atoms, getApi } from "@/app/store/global"
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { WorkspaceService } from "@/app/store/services";
+import { recordTurn } from "@/app/store/token-usage";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs and windows as needed.
@@ -308,9 +309,12 @@ function SubagentRow({ sub, model }: { sub: ActiveSubagent; model: SwarmViewMode
         const wasExpanded = expanded();
         model.toggleSubagentExpanded(sub.agent_id);
         if (!wasExpanded && !sub.display_name) {
-            // Fire-and-forget — the row picks up the result via the
-            // subagent:named event (swarm-model.ts), not this call's return.
-            void callBackendService("subagent", "GenerateName", [sub.agent_id]);
+            // Fire-and-forget — the row's label/detail header picks up the
+            // name via the subagent:named event (swarm-model.ts), not this
+            // call's return; we only need the return here for cost accounting.
+            void callBackendService("subagent", "GenerateName", [sub.agent_id]).then((result: any) => {
+                if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
+            });
         }
     };
 

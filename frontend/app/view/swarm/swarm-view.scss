@@ -352,6 +352,14 @@
     color: var(--accent-color);
 }
 
+.swarm-subagent-detail-expand-icon {
+    width: 10px;
+    font-size: 9px;
+    text-align: center;
+    color: var(--secondary-text-color);
+    flex-shrink: 0;
+}
+
 .swarm-subagent-detail-progress {
     display: flex;
     align-items: center;
