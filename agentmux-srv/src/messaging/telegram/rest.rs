@@ -26,9 +26,10 @@ const POLL_TIMEOUT_SECS: u64 = 30;
 /// margin, or the client aborts the request right as data would have arrived
 /// (spec §9 — long-poll timeout vs HTTP client timeout mismatch).
 const POLL_CLIENT_TIMEOUT_SECS: u64 = 35;
-/// Per-request timeout for send/edit calls. These share a `tokio::select!`
-/// with the long poll, so a stuck send must not block inbound polling for
-/// anywhere near 30s.
+/// Per-request timeout for send/edit calls. Inbound polling and outbound
+/// sending run as fully independent tasks (poller.rs), so a stuck send can no
+/// longer block polling — this timeout instead bounds how long a single
+/// outbound send can delay the *next* queued send on the same task.
 const SEND_TIMEOUT_SECS: u64 = 10;
 
 /// Error from a Telegram Bot API call, carrying enough of the `429` envelope
