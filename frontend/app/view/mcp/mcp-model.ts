@@ -30,8 +30,8 @@ function draftFromServer(s: McpServer): McpDraft {
 }
 
 export class McpCatalogModel {
-    private _servers = createSignal<McpServer[]>([]);
-    serversAtom: Accessor<McpServer[]> = this._servers[0];
+    private _servers = createSignal<McpServerCatalogItem[]>([]);
+    serversAtom: Accessor<McpServerCatalogItem[]> = this._servers[0];
     private setServers = this._servers[1];
 
     private _selectedId = createSignal<string | null>(null);
@@ -50,7 +50,17 @@ export class McpCatalogModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    selectedAtom: Accessor<McpServer | null>;
+    // Catalog-side bind action (#1960 gap #3) — the agent picker's options,
+    // and the id the user currently has selected in it.
+    private _agents = createSignal<AgentDefinition[]>([]);
+    agentsAtom: Accessor<AgentDefinition[]> = this._agents[0];
+    private setAgents = this._agents[1];
+
+    private _bindAgentId = createSignal<string>("");
+    bindAgentIdAtom: Accessor<string> = this._bindAgentId[0];
+    setBindAgentId = this._bindAgentId[1];
+
+    selectedAtom: Accessor<McpServerCatalogItem | null>;
 
     constructor() {
         this.selectedAtom = createMemo(() => {
@@ -59,6 +69,7 @@ export class McpCatalogModel {
             return this.serversAtom().find((s) => s.id === id) ?? null;
         });
         void this.refresh();
+        void this.loadAgents();
     }
 
     async refresh(): Promise<void> {
@@ -68,6 +79,31 @@ export class McpCatalogModel {
             this.setError(null);
         } catch (e) {
             this.setError(`Failed to load MCP servers: ${(e as Error).message ?? e}`);
+        }
+    }
+
+    // Populates the catalog-side bind picker. Best-effort: a failure here
+    // shouldn't block viewing/editing the catalog, only disable binding.
+    async loadAgents(): Promise<void> {
+        try {
+            const agents = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
+            this.setAgents(agents);
+        } catch {
+            this.setAgents([]);
+        }
+    }
+
+    async bindToAgent(serverId: string, agentId: string): Promise<void> {
+        if (!agentId) {
+            this.setError("Pick an agent to bind to.");
+            return;
+        }
+        this.setError(null);
+        try {
+            await RpcApi.McpBindCommand(TabRpcClient, { agent_id: agentId, mcp_id: serverId });
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Bind failed: ${(e as Error).message ?? e}`);
         }
     }
 

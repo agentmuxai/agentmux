@@ -12,6 +12,7 @@
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
+import { openOrFocusPaneByView } from "@/app/store/global";
 import { AgentSkillModel } from "../agent-skill-model";
 import "./AgentPrimitiveModal.scss";
 
@@ -60,6 +61,12 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                     <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
                         + New skill
                     </button>
+                    <button
+                        class="agent-primitive-modal-new-btn"
+                        onClick={() => void openOrFocusPaneByView("armory")}
+                    >
+                        Browse the Armory catalog →
+                    </button>
                 </div>
 
                 <div class="agent-primitive-modal-detail">
@@ -70,7 +77,9 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                 when={model.selectedAtom()}
                                 fallback={
                                     <div class="agent-primitive-modal-empty">
-                                        Select a skill from the list, or create a new one.
+                                        Select a skill from the list, or create a new one. Skills
+                                        created here are private to this agent — for one shared across
+                                        every agent, create it in the Armory catalog instead.
                                     </div>
                                 }
                             >
@@ -79,7 +88,16 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                                         <h3 class="agent-primitive-modal-name">{skill().name}</h3>
                                         <Show when={skill().is_global}>
                                             <p class="agent-primitive-modal-global-note">
-                                                Global — managed in the Armory. You can bind/unbind it here.
+                                                Global — managed in the Armory. You can bind/unbind it
+                                                here, or{" "}
+                                                <button
+                                                    type="button"
+                                                    class="agent-primitive-modal-link-btn"
+                                                    onClick={() => void openOrFocusPaneByView("armory")}
+                                                >
+                                                    edit it there
+                                                </button>
+                                                .
                                             </p>
                                         </Show>
                                         <Show when={skill().description}>
