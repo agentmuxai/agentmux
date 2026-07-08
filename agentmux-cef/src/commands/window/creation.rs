@@ -485,9 +485,21 @@ pub(crate) fn open_window_with_kind(
 /// old data" — `reproject_from_srv` instead stashes `new_label → old_id` and
 /// waits for `new_label`'s own `register_backend_window` call (proof the new
 /// window's frontend actually loaded and round-tripped IPC) before closing
-/// the old one. The fast path (launcher snapshot) ignores this return value
-/// entirely: a `WindowSnapshot.label` there is the launcher's own in-memory
-/// label, not a real srv window_id, so there is nothing to close either way.
+/// the old one. The fast path (launcher snapshot) used to ignore this return
+/// value entirely, on the theory that a `WindowSnapshot.label` there is the
+/// launcher's own in-memory label, not a real srv window_id, so there was
+/// nothing to close either way.
+///
+/// reagent P1 (PR #2032, 2026-07-08, second finding): that theory was
+/// wrong — the launcher's `Event::Snapshot` carries a sibling
+/// `backend_window_ids: Vec<(String, String)>` field (that same in-memory
+/// label → the real srv window_id it registered), which both fast-path
+/// call sites already receive but were discarding. `Client.windowids` grew
+/// unboundedly on every ordinary (launcher-survives) crash — the exact
+/// scenario this PR's own E2E test exercises — because nothing ever staged
+/// a deferred close for it. See `reproject_from_snapshot_and_stage_closures`,
+/// which both fast-path call sites (`launcher_ipc.rs`, `client/lifecycle.rs`)
+/// now use instead of calling this function directly.
 pub(crate) fn reproject_from_snapshot(
     state: &Arc<AppState>,
     windows: &[agentmux_common::ipc::WindowSnapshot],
@@ -577,6 +589,53 @@ pub(crate) fn reproject_from_snapshot(
         "[reproject] fast-path reproject complete"
     );
     recreated_pairs
+}
+
+/// SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P1, PR #2032, 2026-07-08,
+/// second finding) — fast-path counterpart to `reproject_from_srv`'s
+/// deferred-close staging, using the same `PendingReprojectClosures`
+/// mechanism so a recreated window's old srv id is only closed once the
+/// new one is confirmed live via its own `register_backend_window` call
+/// (never on the unconfirmed `Ok` from `open_window_with_kind`).
+///
+/// `backend_window_ids` is the launcher's `Event::Snapshot.backend_window_ids`
+/// — the SAME pre-crash label used in `windows` (`WindowSnapshot.label`),
+/// mapped to the real srv window_id the launcher last saw it register. A
+/// window the launcher never learned a backend_window_id for (e.g. it
+/// crashed before its own `register_backend_window` round trip) has
+/// nothing real to close and is silently skipped — same as an unconfirmed
+/// `reproject_from_srv` entry, the old (nonexistent-to-us) state just
+/// lingers rather than being lost.
+///
+/// Both fast-path call sites (`launcher_ipc.rs`'s `RunFastPath` arm,
+/// `client/lifecycle.rs`'s `ReplayFastPath` arm) use this instead of
+/// calling `reproject_from_snapshot` directly, so neither can regress back
+/// to silently discarding the recreated pairs.
+pub(crate) fn reproject_from_snapshot_and_stage_closures(
+    state: &Arc<AppState>,
+    windows: &[agentmux_common::ipc::WindowSnapshot],
+    backend_window_ids: &[(String, String)],
+) {
+    let recreated_pairs = reproject_from_snapshot(state, windows);
+    if recreated_pairs.is_empty() {
+        return;
+    }
+    let old_ids: std::collections::HashMap<&str, &str> = backend_window_ids
+        .iter()
+        .map(|(label, id)| (label.as_str(), id.as_str()))
+        .collect();
+    let mut pending = state.pending_reproject_closures.lock();
+    for (old_label, new_label) in recreated_pairs {
+        if let Some(old_id) = old_ids.get(old_label.as_str()) {
+            pending.stage(new_label, old_id.to_string());
+        } else {
+            tracing::debug!(
+                target: "reproject",
+                old_label = %old_label,
+                "[reproject] fast path: no known backend_window_id for this old label — nothing to close"
+            );
+        }
+    }
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 3 — the slow-path reproject driver. Called once

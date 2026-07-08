@@ -425,22 +425,28 @@ impl AgentMuxHandler {
             // with `window_count=0`, which a naive `stashed.is_some()` check
             // wrongly treated as "fast path succeeded," permanently
             // suppressing the slow path.
-            let (action, stashed) = {
+            let (action, stashed, stashed_backend_window_ids) = {
                 let mut gate = self.state.ui_thread_gate.lock();
                 let stashed = gate.stashed.take();
+                let stashed_backend_window_ids = gate.stashed_backend_window_ids.take();
                 let has_extra = stashed
                     .as_ref()
                     .is_some_and(|windows| windows.iter().any(|w| w.label != "main"));
-                (gate.on_main_ready(has_extra), stashed)
+                (gate.on_main_ready(has_extra), stashed, stashed_backend_window_ids)
             };
             if action == crate::state::MainReadyAction::ReplayFastPath {
                 let windows = stashed.unwrap_or_default();
+                let backend_window_ids = stashed_backend_window_ids.unwrap_or_default();
                 tracing::info!(
                     target: "reproject",
                     window_count = windows.len(),
                     "[reproject] replaying stashed snapshot now that \"main\" has registered"
                 );
-                crate::commands::window::reproject_from_snapshot(&self.state, &windows);
+                crate::commands::window::reproject_from_snapshot_and_stage_closures(
+                    &self.state,
+                    &windows,
+                    &backend_window_ids,
+                );
             }
         } else if label.starts_with("window-pool-") {
             crate::commands::window_pool::register_pool_window(&self.state, &label);
