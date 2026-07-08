@@ -1,7 +1,7 @@
 # Report: Swarm view floods with stale subagents on reopen
 
 **Status:** Findings 1-3 fixed and merged (#2008). Finding 4 fixed
-(frontend-only, workflow grouping) — not yet committed/PR'd.
+(frontend-only, workflow grouping) — PR #2018.
 **Author:** AgentX
 **Date:** 2026-07-07
 **Triggered by:** user report while live-testing the four PRs from
