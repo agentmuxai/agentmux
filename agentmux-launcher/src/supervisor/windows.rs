@@ -12,6 +12,46 @@ use crate::{
     startup_events, state,
 };
 
+/// SPEC_PILLAR1_STEP4 Phase 4 — re-arm the pre-splash for a crash-restart.
+/// Not a no-op wrapper around `spawn_splash`: it exists so both restart
+/// branches (OOM, Abnormal) share one call site rather than duplicating the
+/// "new channel, new splash, restoring=true" triplet inline. Respects
+/// `AGENTMUX_SPLASH=0` (`splash_disabled()`) the same as the cold-start path.
+/// No stage-telemetry events are ever sent into the fresh channel — a
+/// restart doesn't re-run saga recovery/migrations/etc., so the splash shows
+/// only the "Restoring session..." headline and the pulsing brain, nothing
+/// from the (empty) stage list.
+///
+/// `seq` (reagent P2, PR #2032, 2026-07-08) makes each restart's Win32 event
+/// + window class name genuinely unique (`AgentMuxSplash-{dir_hash}-r{seq}`),
+/// rather than reusing the SAME name every restart. Reusing the name is
+/// unsafe in exactly the repeated-crash-loop scenario `HOST_RESTART_BUDGET`
+/// exists to bound: if a newly-respawned host crashes again before ever
+/// calling `on_load_end` (so the prior splash thread is still blocked in its
+/// `WaitForSingleObject` loop, `splash.rs`'s dismiss check, holding the
+/// event open), `CreateEventW` with an already-open name returns a handle to
+/// that SAME still-live object instead of a fresh one — both splash threads
+/// then wait on one shared event and can render stacked/duplicate splash
+/// windows simultaneously. A per-restart unique name sidesteps the collision
+/// entirely; the caller passes a monotonic counter that only increases.
+///
+/// The unique name alone only stops two splashes from *sharing one event* —
+/// it does nothing to stop the PREVIOUS restart's splash from being
+/// orphaned if its host crashed again before calling `on_load_end` (reagent
+/// P1, PR #2032, 2026-07-08). Every call site MUST call
+/// `crate::splash::dismiss_splash` on the outgoing `splash_event_name`
+/// immediately before calling this function, so the old thread tears itself
+/// down via its own normal dismiss path instead of leaking forever.
+#[cfg(target_os = "windows")]
+fn respawn_splash_for_restart(dir_hash: &str, seq: u32) -> Option<String> {
+    if crate::splash_config::splash_disabled() {
+        return None;
+    }
+    let (_sink, rx) = startup_events::StartupEventSink::new();
+    let unique_id = format!("{}-r{}", dir_hash, seq);
+    crate::splash::spawn_splash(&unique_id, rx, true)
+}
+
 /// Windows main flow: resolve paths → create J0 → spawn srv → spawn
 /// host with srv endpoints in env → supervised wait → cleanup.
 #[cfg(target_os = "windows")]
@@ -191,12 +231,16 @@ pub(crate) async fn run_windows(
     // single-instance pipe — before srv spawn and CEF init.
     // The event name is forwarded to the CEF host as
     // AGENTMUX_SPLASH_EVENT so it can signal dismiss from on_load_end.
+    // SPEC_PILLAR1_STEP4 Phase 4 — `mut`: a crash-restart branch below
+    // re-spawns the splash (a fresh event + consumer thread, since this
+    // first thread's own event is one-shot — see `spawn_splash`'s doc
+    // comment) and reassigns this to the new event name.
     #[cfg(target_os = "windows")]
-    let splash_event_name = if crate::splash_config::splash_disabled() {
+    let mut splash_event_name = if crate::splash_config::splash_disabled() {
         drop(startup_rx); // no splash — let senders fail silently
         None // splash:disabled / AGENTMUX_SPLASH=0 — no event, no window (SPEC §6)
     } else {
-        crate::splash::spawn_splash(&dir_hash, startup_rx)
+        crate::splash::spawn_splash(&dir_hash, startup_rx, false)
     };
     #[cfg(not(target_os = "windows"))]
     let splash_event_name: Option<String> = { drop(startup_rx); None };
@@ -474,6 +518,11 @@ pub(crate) async fn run_windows(
     // Separate budget for system-OOM host exits (memory-aware relaunch); see
     // mem_supervisor + SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.
     let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
+    // SPEC_PILLAR1_STEP4 Phase 4 (reagent P2, PR #2032) — monotonic, only
+    // ever incremented, never reset: guarantees `respawn_splash_for_restart`
+    // never reuses a Win32 event/class name a still-alive prior splash
+    // thread might still be holding open. See that function's doc comment.
+    let mut restart_splash_seq: u32 = 0;
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
     let exit_code = loop {
@@ -555,6 +604,27 @@ pub(crate) async fn run_windows(
                         // Relaunch degraded: the GPU process is a large commit
                         // consumer, so skip straight to software rendering for an
                         // OOM relaunch (SPEC §5.B.4).
+                        //
+                        // SPEC_PILLAR1_STEP4 Phase 4 — re-spawn the splash (fresh
+                        // event + consumer thread) with the "Restoring session..."
+                        // headline rather than reusing `splash_event_name` as-is:
+                        // the original splash thread already exited after the
+                        // cold-start dismiss, so nothing was listening on that
+                        // event name — the host would signal it and nothing would
+                        // happen. See `respawn_splash_for_restart`.
+                        // Tear down the PREVIOUS restart's splash before spawning a
+                        // new one (reagent P1, PR #2032, 2026-07-08): the unique
+                        // per-restart event name (above) stops two splashes from
+                        // sharing one Win32 event, but does nothing to stop the old
+                        // one from being orphaned — if the host that was supposed to
+                        // dismiss it crashed again first, its thread would otherwise
+                        // block in `WaitForSingleObject` for the rest of the
+                        // launcher's life and its window could still be on screen.
+                        if let Some(prev_event) = splash_event_name.as_deref() {
+                            crate::splash::dismiss_splash(prev_event);
+                        }
+                        restart_splash_seq += 1;
+                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
                         match spawn_host_supervised(
                             real_exe,
                             args,
@@ -604,6 +674,22 @@ pub(crate) async fn run_windows(
                             HOST_RESTART_BUDGET,
                             if host_degraded { ", degraded: --disable-gpu" } else { "" }
                         ));
+                        // SPEC_PILLAR1_STEP4 Phase 4 — see the OOM branch above for
+                        // why this re-spawns the splash rather than reusing
+                        // `splash_event_name` as-is.
+                        // Tear down the PREVIOUS restart's splash before spawning a
+                        // new one (reagent P1, PR #2032, 2026-07-08): the unique
+                        // per-restart event name (above) stops two splashes from
+                        // sharing one Win32 event, but does nothing to stop the old
+                        // one from being orphaned — if the host that was supposed to
+                        // dismiss it crashed again first, its thread would otherwise
+                        // block in `WaitForSingleObject` for the rest of the
+                        // launcher's life and its window could still be on screen.
+                        if let Some(prev_event) = splash_event_name.as_deref() {
+                            crate::splash::dismiss_splash(prev_event);
+                        }
+                        restart_splash_seq += 1;
+                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
                         match spawn_host_supervised(
                             real_exe,
                             args,

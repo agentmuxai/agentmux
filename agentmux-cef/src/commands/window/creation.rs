@@ -282,6 +282,7 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
         initial_view.as_deref(),
         initial_meta.as_deref(),
         None,
+        false,
     )
 }
 
@@ -330,6 +331,7 @@ pub fn open_subwindow(
         None,
         None,
         None,
+        false,
     )
 }
 
@@ -352,6 +354,7 @@ pub(crate) fn open_window_with_kind(
     initial_view: Option<&str>,
     initial_meta: Option<&str>,
     explicit_rect: Option<agentmux_common::ipc::Rect>,
+    is_reproject: bool,
 ) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
     // See `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` and the smoke retro
@@ -383,9 +386,15 @@ pub(crate) fn open_window_with_kind(
                 .filter(|m| !m.is_empty())
                 .map(|m| format!("&initialMeta={}", percent_encode(m)))
                 .unwrap_or_default();
+            // SPEC_PILLAR1_STEP4 Phase 4 — drives index.html's
+            // #startup-loading-headline ("Restoring session...") for
+            // reprojected windows only; an interactive "New Window"/"New
+            // Subwindow" never sets this. Cheap, frontend-only per the
+            // spec's §2.4 in-window-phase design.
+            let restoring_param = if is_reproject { "&restoring=1" } else { "" };
             format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}{}{}",
-                base_url, separator, ipc_port, ipc_token, label, view_param, meta_param
+                "{}{}ipc_port={}&ipc_token={}&windowLabel={}{}{}{}",
+                base_url, separator, ipc_port, ipc_token, label, view_param, meta_param, restoring_param
             )
         }
         Err(e) => {
@@ -463,17 +472,45 @@ pub(crate) fn open_window_with_kind(
 /// before being passed to `open_window_with_kind`. `"main"` is seeded into
 /// the remap table as `"main"` → `"main"` since its label is stable across
 /// restarts (never regenerated).
+///
+/// Returns `(old_label, new_label)` for every `WindowSnapshot` whose
+/// `open_window_with_kind` call returned `Ok` (not the ones skipped/failed).
+///
+/// reagent P1 (PR #2032, 2026-07-08): `Ok` here means only that a
+/// `CreateWindowTask` was successfully POSTED to the UI thread
+/// (`open_window_with_kind` → `post_task`, fire-and-forget) — not that the
+/// window actually exists yet. This session's own Phase 2 investigation
+/// found `post_task` can silently drop a posted task (the UI-thread-readiness
+/// race). The caller MUST NOT treat this return value as "safe to delete the
+/// old data" — `reproject_from_srv` instead stashes `new_label → old_id` and
+/// waits for `new_label`'s own `register_backend_window` call (proof the new
+/// window's frontend actually loaded and round-tripped IPC) before closing
+/// the old one. The fast path (launcher snapshot) used to ignore this return
+/// value entirely, on the theory that a `WindowSnapshot.label` there is the
+/// launcher's own in-memory label, not a real srv window_id, so there was
+/// nothing to close either way.
+///
+/// reagent P1 (PR #2032, 2026-07-08, second finding): that theory was
+/// wrong — the launcher's `Event::Snapshot` carries a sibling
+/// `backend_window_ids: Vec<(String, String)>` field (that same in-memory
+/// label → the real srv window_id it registered), which both fast-path
+/// call sites already receive but were discarding. `Client.windowids` grew
+/// unboundedly on every ordinary (launcher-survives) crash — the exact
+/// scenario this PR's own E2E test exercises — because nothing ever staged
+/// a deferred close for it. See `reproject_from_snapshot_and_stage_closures`,
+/// which both fast-path call sites (`launcher_ipc.rs`, `client/lifecycle.rs`)
+/// now use instead of calling this function directly.
 pub(crate) fn reproject_from_snapshot(
     state: &Arc<AppState>,
     windows: &[agentmux_common::ipc::WindowSnapshot],
-) {
+) -> Vec<(String, String)> {
     use std::collections::HashMap;
 
     let mut to_create: Vec<&agentmux_common::ipc::WindowSnapshot> =
         windows.iter().filter(|w| w.label != "main").collect();
     if to_create.is_empty() {
         tracing::debug!(target: "reproject", "[reproject] nothing to recreate beyond main");
-        return;
+        return Vec::new();
     }
     // FullInstance before Subwindow — stable sort preserves the snapshot's
     // own relative ordering within each kind. `WindowSnapshot.kind` is the
@@ -495,6 +532,7 @@ pub(crate) fn reproject_from_snapshot(
 
     let mut created = 0usize;
     let mut skipped = 0usize;
+    let mut recreated_pairs: Vec<(String, String)> = Vec::new();
     for w in to_create {
         let new_parent = match &w.parent_label {
             Some(old_parent) => match label_remap.get(old_parent) {
@@ -517,7 +555,7 @@ pub(crate) fn reproject_from_snapshot(
             },
             None => None,
         };
-        match open_window_with_kind(state, to_host_kind(w.kind), new_parent, None, None, w.last_rect) {
+        match open_window_with_kind(state, to_host_kind(w.kind), new_parent, None, None, w.last_rect, true) {
             Ok(new_label_val) => {
                 let new_label = new_label_val.as_str().unwrap_or_default().to_string();
                 tracing::info!(
@@ -529,7 +567,8 @@ pub(crate) fn reproject_from_snapshot(
                     had_rect = w.last_rect.is_some(),
                     "[reproject] recreated window"
                 );
-                label_remap.insert(w.label.clone(), new_label);
+                label_remap.insert(w.label.clone(), new_label.clone());
+                recreated_pairs.push((w.label.clone(), new_label));
                 created += 1;
             }
             Err(e) => {
@@ -549,6 +588,54 @@ pub(crate) fn reproject_from_snapshot(
         skipped,
         "[reproject] fast-path reproject complete"
     );
+    recreated_pairs
+}
+
+/// SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P1, PR #2032, 2026-07-08,
+/// second finding) — fast-path counterpart to `reproject_from_srv`'s
+/// deferred-close staging, using the same `PendingReprojectClosures`
+/// mechanism so a recreated window's old srv id is only closed once the
+/// new one is confirmed live via its own `register_backend_window` call
+/// (never on the unconfirmed `Ok` from `open_window_with_kind`).
+///
+/// `backend_window_ids` is the launcher's `Event::Snapshot.backend_window_ids`
+/// — the SAME pre-crash label used in `windows` (`WindowSnapshot.label`),
+/// mapped to the real srv window_id the launcher last saw it register. A
+/// window the launcher never learned a backend_window_id for (e.g. it
+/// crashed before its own `register_backend_window` round trip) has
+/// nothing real to close and is silently skipped — same as an unconfirmed
+/// `reproject_from_srv` entry, the old (nonexistent-to-us) state just
+/// lingers rather than being lost.
+///
+/// Both fast-path call sites (`launcher_ipc.rs`'s `RunFastPath` arm,
+/// `client/lifecycle.rs`'s `ReplayFastPath` arm) use this instead of
+/// calling `reproject_from_snapshot` directly, so neither can regress back
+/// to silently discarding the recreated pairs.
+pub(crate) fn reproject_from_snapshot_and_stage_closures(
+    state: &Arc<AppState>,
+    windows: &[agentmux_common::ipc::WindowSnapshot],
+    backend_window_ids: &[(String, String)],
+) {
+    let recreated_pairs = reproject_from_snapshot(state, windows);
+    if recreated_pairs.is_empty() {
+        return;
+    }
+    let old_ids: std::collections::HashMap<&str, &str> = backend_window_ids
+        .iter()
+        .map(|(label, id)| (label.as_str(), id.as_str()))
+        .collect();
+    let mut pending = state.pending_reproject_closures.lock();
+    for (old_label, new_label) in recreated_pairs {
+        if let Some(old_id) = old_ids.get(old_label.as_str()) {
+            pending.stage(new_label, old_id.to_string());
+        } else {
+            tracing::debug!(
+                target: "reproject",
+                old_label = %old_label,
+                "[reproject] fast path: no known backend_window_id for this old label — nothing to close"
+            );
+        }
+    }
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 3 — the slow-path reproject driver. Called once
@@ -606,7 +693,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
         // translated to the `"main"` sentinel here — otherwise the remap
         // lookup finds nothing and the subwindow is silently skipped as if
         // its parent were missing.
-        let extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
+        let mut extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
         if extra_ids.is_empty() {
             tracing::debug!(
                 target: "reproject",
@@ -614,6 +701,32 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
                 "[reproject] slow path: nothing beyond main to recreate"
             );
             return;
+        }
+
+        // Safety cap — found live (2026-07-08): a build force-killed many
+        // times over one test session (never a graceful quit) accumulated
+        // 30+ stale `Client.windowids` entries, all recreated at once on the
+        // next cold boot. The direct cause (this function never closing the
+        // OLD id it just reprojected from) is fixed above/below, but that
+        // fix only covers entries THIS function itself creates — a
+        // separate, pre-existing leak (pool-warmup windows registering a
+        // real backend_window_id that's never closed either, since they're
+        // never gracefully closed) can still slowly inflate this list over
+        // many restarts. Bound the worst case regardless of root cause:
+        // recreate at most this many windows per pass; anything beyond that
+        // is left in place (not lost — just not recreated this launch) with
+        // a loud warning, rather than silently opening dozens of windows.
+        let dropped = cap_recreate_list(&mut extra_ids, MAX_SLOW_PATH_RECREATE);
+        if dropped > 0 {
+            tracing::warn!(
+                target: "reproject",
+                total = extra_ids.len() + dropped,
+                recreating = extra_ids.len(),
+                dropped,
+                "[reproject] slow path: Client.windowids has far more entries than a normal \
+                 session should — capping recreation to avoid a runaway window-open storm; \
+                 the rest are left in srv, uncreated, for now"
+            );
         }
 
         let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
@@ -657,7 +770,31 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
             window_count = snapshots.len(),
             "[reproject] slow path: recreating windows from srv"
         );
-        reproject_from_snapshot(&state, &snapshots);
+        let recreated_pairs = reproject_from_snapshot(&state, &snapshots);
+
+        // Stash `new_label → old_window_id` — do NOT close the old id yet.
+        // `reagent P1 (PR #2032): `open_window_with_kind`'s `Ok` only means a
+        // `CreateWindowTask` was posted to the UI thread (fire-and-forget);
+        // it is not proof the window exists. `register_backend_window`
+        // (`commands/window/meta.rs`) drains this map and does the actual
+        // close once `new_label`'s own registration fires — real
+        // confirmation the new window's frontend loaded and round-tripped
+        // IPC. Without this deferral (the first version of this fix),
+        // closing right here on the unconfirmed `Ok` would delete the old
+        // session's window/workspace/tabs with no replacement and no retry
+        // if window creation subsequently failed silently (this session's
+        // own Phase 2 investigation found `post_task` can do exactly that).
+        //
+        // This is what actually fixes the unbounded `Client.windowids`
+        // growth found live (2026-07-08, 30+ accumulated entries from a test
+        // session that only ever force-killed, never gracefully quit) —
+        // deferred to a confirmed point rather than an optimistic one.
+        if !recreated_pairs.is_empty() {
+            let mut pending = state.pending_reproject_closures.lock();
+            for (old_id, new_label) in recreated_pairs {
+                pending.stage(new_label, old_id);
+            }
+        }
     });
 }
 
@@ -706,6 +843,61 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
         }
     }
     (1200, 800)
+}
+
+/// SPEC_PILLAR1_STEP4 Phase 3 safety cap — see `reproject_from_srv`'s own
+/// comment at the call site for why this exists (found live, 2026-07-08:
+/// 30+ accumulated `Client.windowids` entries recreated all at once).
+const MAX_SLOW_PATH_RECREATE: usize = 20;
+
+/// Truncates `items` to at most `max` entries in place; returns how many
+/// were dropped. Extracted as a pure function (reagent P2, PR #2032,
+/// 2026-07-08) so the cap itself has direct unit test coverage, not just
+/// the live-verified end-to-end behavior.
+fn cap_recreate_list<T>(items: &mut Vec<T>, max: usize) -> usize {
+    if items.len() <= max {
+        return 0;
+    }
+    let dropped = items.len() - max;
+    items.truncate(max);
+    dropped
+}
+
+#[cfg(test)]
+mod cap_recreate_list_tests {
+    use super::cap_recreate_list;
+
+    #[test]
+    fn under_the_cap_is_untouched() {
+        let mut items = vec![1, 2, 3];
+        assert_eq!(cap_recreate_list(&mut items, 20), 0);
+        assert_eq!(items, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn exactly_at_the_cap_is_untouched() {
+        let mut items: Vec<i32> = (0..20).collect();
+        assert_eq!(cap_recreate_list(&mut items, 20), 0);
+        assert_eq!(items.len(), 20);
+    }
+
+    #[test]
+    fn over_the_cap_truncates_and_reports_dropped_count() {
+        let mut items: Vec<i32> = (0..44).collect();
+        assert_eq!(cap_recreate_list(&mut items, 20), 24);
+        assert_eq!(items.len(), 20);
+        // Keeps the FIRST `max`, not an arbitrary subset — matters because
+        // callers may care about ordering (e.g. FullInstance-before-Subwindow
+        // sort already applied upstream).
+        assert_eq!(items, (0..20).collect::<Vec<i32>>());
+    }
+
+    #[test]
+    fn empty_list_is_a_noop() {
+        let mut items: Vec<i32> = Vec::new();
+        assert_eq!(cap_recreate_list(&mut items, 20), 0);
+        assert!(items.is_empty());
+    }
 }
 
 #[cfg(test)]

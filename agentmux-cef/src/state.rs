@@ -900,6 +900,105 @@ pub struct AppState {
     /// completes before the other starts.
     pub ui_thread_gate: Mutex<UiThreadGate>,
 
+    /// SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P1, PR #2032, 2026-07-08)
+    /// — `new_label → old_srv_window_id`. The slow path's `reproject_from_srv`
+    /// must NOT close the old window_id right after `open_window_with_kind`
+    /// returns `Ok`: that only means a `CreateWindowTask` was posted to the
+    /// UI thread (fire-and-forget), not that the window actually exists —
+    /// this session's own Phase 2 investigation found `post_task` can
+    /// silently drop a posted task. Closing on that unconfirmed signal would
+    /// delete the old session's window/workspace/tabs with no replacement
+    /// and no retry if creation then failed. Instead, the old id is stashed
+    /// here keyed by the NEW label, and only closed once that label's own
+    /// `register_backend_window` call fires — proof the new window's
+    /// frontend actually loaded and round-tripped IPC. If creation silently
+    /// fails, the entry just sits here unclosed forever, which is the same
+    /// (safe, if imperfect) fallback behavior as before this whole cleanup
+    /// existed: the old data lingers, but is never lost.
+    pub pending_reproject_closures: Mutex<PendingReprojectClosures>,
+}
+
+/// See `AppState::pending_reproject_closures`. A thin, named wrapper around
+/// `HashMap<new_label, old_window_id>` rather than a bare map — reagent P2
+/// (PR #2032, 2026-07-08) noted the deferred-close logic had no automated
+/// test coverage; giving it named methods makes the intent explicit and
+/// gives something to unit-test directly, without needing a live instance.
+#[derive(Debug, Default)]
+pub struct PendingReprojectClosures(std::collections::HashMap<String, String>);
+
+impl PendingReprojectClosures {
+    /// Record that `new_label`'s eventual `register_backend_window` call
+    /// should trigger closing `old_window_id`. Called right after
+    /// `reproject_from_snapshot` returns — before any confirmation the new
+    /// window actually exists.
+    pub fn stage(&mut self, new_label: String, old_window_id: String) {
+        self.0.insert(new_label, old_window_id);
+    }
+
+    /// Called from `register_backend_window` for every label that
+    /// registers. Returns the old window_id to close if `label` was staged
+    /// (removing the entry so it fires at most once); `None` for any
+    /// ordinary (non-reprojected) window registration.
+    pub fn confirm(&mut self, label: &str) -> Option<String> {
+        self.0.remove(label)
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+#[cfg(test)]
+mod pending_reproject_closures_tests {
+    use super::*;
+
+    #[test]
+    fn confirm_returns_none_for_unstaged_label() {
+        let mut p = PendingReprojectClosures::default();
+        assert_eq!(p.confirm("window-abc"), None);
+    }
+
+    #[test]
+    fn confirm_returns_the_staged_old_id() {
+        let mut p = PendingReprojectClosures::default();
+        p.stage("window-new".to_string(), "old-srv-id".to_string());
+        assert_eq!(p.confirm("window-new"), Some("old-srv-id".to_string()));
+    }
+
+    #[test]
+    fn confirm_only_fires_once() {
+        let mut p = PendingReprojectClosures::default();
+        p.stage("window-new".to_string(), "old-srv-id".to_string());
+        assert_eq!(p.confirm("window-new"), Some("old-srv-id".to_string()));
+        // A second registration for the same label (shouldn't normally
+        // happen, but must not re-trigger a close) gets nothing.
+        assert_eq!(p.confirm("window-new"), None);
+    }
+
+    #[test]
+    fn confirm_is_independent_per_label() {
+        let mut p = PendingReprojectClosures::default();
+        p.stage("window-a".to_string(), "old-a".to_string());
+        p.stage("window-b".to_string(), "old-b".to_string());
+        assert_eq!(p.len(), 2);
+        assert_eq!(p.confirm("window-a"), Some("old-a".to_string()));
+        assert_eq!(p.len(), 1);
+        assert_eq!(p.confirm("window-b"), Some("old-b".to_string()));
+        assert_eq!(p.len(), 0);
+    }
+
+    #[test]
+    fn unrelated_label_registration_is_a_noop() {
+        // e.g. a pool window, or main itself — never staged, must not panic
+        // or spuriously return something.
+        let mut p = PendingReprojectClosures::default();
+        p.stage("window-real-reproject".to_string(), "old-id".to_string());
+        assert_eq!(p.confirm("window-pool-abc123"), None);
+        assert_eq!(p.confirm("main"), None);
+        // The real one is still there, untouched.
+        assert_eq!(p.confirm("window-real-reproject"), Some("old-id".to_string()));
+    }
 }
 
 /// See `AppState::ui_thread_gate`.
@@ -907,6 +1006,17 @@ pub struct AppState {
 pub struct UiThreadGate {
     pub ready: bool,
     pub stashed: Option<Vec<agentmux_common::ipc::WindowSnapshot>>,
+    /// SPEC_PILLAR1_STEP4 Phase 3 addendum (reagent P1, PR #2032, 2026-07-08)
+    /// — the same `Event::Snapshot`'s sibling `backend_window_ids` field
+    /// (label → real srv window_id), stashed alongside `stashed` under the
+    /// same lock acquisition so the two never drift apart. Needed so the
+    /// fast-path replay can stage a deferred close for each recreated
+    /// window via `reproject_from_snapshot_and_stage_closures` — without
+    /// this, the fast path had no way to learn the OLD window's real srv
+    /// id (`WindowSnapshot.label` alone is only the launcher's in-memory
+    /// label), so `Client.windowids` grew unboundedly on every ordinary
+    /// (launcher-survives) crash.
+    pub stashed_backend_window_ids: Option<Vec<(String, String)>>,
     /// SPEC_PILLAR1_STEP4 Phase 3 — set true the moment EITHER reproject
     /// path (fast, from the launcher's snapshot; or slow, from srv) has
     /// actually been triggered, so only one of them ever creates windows.
@@ -1182,6 +1292,7 @@ impl Default for AppState {
             floating_redock_ghost: Mutex::new(HashMap::new()),
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
+            pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
         }
     }
 }
