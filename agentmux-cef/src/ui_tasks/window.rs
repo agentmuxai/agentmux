@@ -155,6 +155,22 @@ wrap_task! {
                     {
                         return;
                     }
+                    // SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md — a non-demotable
+                    // window-* close (pool at cap, or a foreign window-{uuid}
+                    // the pool prefix gate rejects) used to fall to the round-5
+                    // destroy, which parks the browser anyway (no
+                    // on_before_close on this build) with the FULL workspace
+                    // page still running — ~90MB+ commit leaked per close,
+                    // measured. Park deliberately and blank the content
+                    // instead; round 5 remains the strict-HWND-failure
+                    // fallback (and the working path for floaters, which are
+                    // not window-* and never reach this branch).
+                    if crate::commands::window_pool::park_and_blank_window(
+                        &self.state,
+                        &self.label,
+                    ) {
+                        return;
+                    }
                     // fall through to round-5 destroy below
                 }
                 #[cfg(target_os = "windows")]
@@ -345,7 +361,7 @@ wrap_task! {
 /// `on_before_close` runs the full cleanup chain, and a parallel dispatch
 /// would break that chain's label-by-identity lookup.
 #[cfg(target_os = "windows")]
-fn unregister_after_parking_close(state: &Arc<AppState>, label: &str) {
+pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str) {
     tracing::info!(
         target: "wrr",
         "[close-window] {} close initiated — dispatching UnregisterBrowser (parked browser fires no on_before_close)",

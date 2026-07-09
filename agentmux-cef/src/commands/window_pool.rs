@@ -813,6 +813,89 @@ pub fn demote_promoted_pool_window(
     true
 }
 
+/// SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md — close path for `window-*`
+/// windows that CANNOT demote into the pool (beyond `POOL_DEMOTE_CAP`, or a
+/// foreign `window-{uuid}` label the pool handshake's `window-pool-` prefix
+/// gate rejects). The round-5 destroy these closes used to take parks the
+/// browser anyway (CEF 148 Views, no `on_before_close` — live-verified in the
+/// quit-gate work) with the FULL workspace page still running: xterm WebGL
+/// surfaces (SwiftShader = CPU shared memory = pagefile-backed commit),
+/// websockets, timers — ~90MB+ commit per closed window, measured. Parking
+/// DELIBERATELY and blanking the content turns that zombie into an inert
+/// `about:blank` page.
+///
+/// Same primitives and same discipline as `demote_promoted_pool_window`:
+/// strict HWND resolution FIRST with a mutation-free failure path (caller
+/// falls back to the round-5 destroy), then park + hide + blank + unregister.
+/// The `load_url` MUST precede the `UnregisterBrowser` dispatch —
+/// `get_browser` resolves through `state.browsers` (the ordering lesson the
+/// quit-gate spec learned live).
+///
+/// Returns `true` when the window was parked (caller stops); `false` leaves
+/// all state untouched.
+#[cfg(target_os = "windows")]
+pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
+    use cef::{ImplBrowser, ImplFrame};
+
+    // 1. Strict HWND only — never EnumWindows (round-5 safety note: a loose
+    // fallback can resolve MAIN for an unknown label).
+    let hwnd = unsafe { super::window::resolve_window_hwnd_strict(state, label) };
+    let Some(hwnd) = hwnd else {
+        crate::client::dlog(&format!(
+            "park_and_blank({}): no strict HWND — round-5 fallback (no state mutated)",
+            label
+        ));
+        return false;
+    };
+    let main_hwnd = state.window_hwnds.lock().get("main").copied();
+    if main_hwnd == Some(hwnd as isize) {
+        crate::client::dlog(&format!(
+            "park_and_blank({}): strict HWND resolved to MAIN — refusing, round-5 fallback",
+            label
+        ));
+        return false;
+    }
+
+    // 2. Park off-screen (keep size — no reuse planned) + strip from the
+    // taskbar; set_taskbar_hidden also fully hides the window.
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOSIZE,
+        };
+        SetWindowPos(
+            hwnd,
+            HWND_TOP,
+            POOL_OFFSCREEN_X,
+            POOL_OFFSCREEN_Y,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOSIZE,
+        );
+    }
+    set_taskbar_hidden(hwnd, true);
+    state.window_hwnds.lock().remove(label);
+
+    // 3. Blank the content — releases the workspace app (WebGL, websockets,
+    // timers). Same load_url-on-a-parked-window call demote's step 5 has
+    // proven for months.
+    if let Some(mut browser) = state.get_browser(label) {
+        if let Some(frame) = browser.main_frame() {
+            frame.load_url(Some(&cef::CefString::from("about:blank")));
+        }
+    }
+
+    // 4. Shared parking-close discipline (PR #2043): UnregisterBrowser +
+    // quit-watchdog arm.
+    crate::ui_tasks::unregister_after_parking_close(state, label);
+
+    tracing::info!(
+        target: "wrr",
+        label = %label,
+        "[close-window] parked-and-blanked (non-demotable close; renderer kept, workspace unloaded)"
+    );
+    true
+}
+
 pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
