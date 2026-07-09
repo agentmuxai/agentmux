@@ -693,7 +693,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
         // translated to the `"main"` sentinel here — otherwise the remap
         // lookup finds nothing and the subwindow is silently skipped as if
         // its parent were missing.
-        let mut extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
+        let extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
         if extra_ids.is_empty() {
             tracing::debug!(
                 target: "reproject",
@@ -703,33 +703,8 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
             return;
         }
 
-        // Safety cap — found live (2026-07-08): a build force-killed many
-        // times over one test session (never a graceful quit) accumulated
-        // 30+ stale `Client.windowids` entries, all recreated at once on the
-        // next cold boot. The direct cause (this function never closing the
-        // OLD id it just reprojected from) is fixed above/below, but that
-        // fix only covers entries THIS function itself creates — a
-        // separate, pre-existing leak (pool-warmup windows registering a
-        // real backend_window_id that's never closed either, since they're
-        // never gracefully closed) can still slowly inflate this list over
-        // many restarts. Bound the worst case regardless of root cause:
-        // recreate at most this many windows per pass; anything beyond that
-        // is left in place (not lost — just not recreated this launch) with
-        // a loud warning, rather than silently opening dozens of windows.
-        let dropped = cap_recreate_list(&mut extra_ids, MAX_SLOW_PATH_RECREATE);
-        if dropped > 0 {
-            tracing::warn!(
-                target: "reproject",
-                total = extra_ids.len() + dropped,
-                recreating = extra_ids.len(),
-                dropped,
-                "[reproject] slow path: Client.windowids has far more entries than a normal \
-                 session should — capping recreation to avoid a runaway window-open storm; \
-                 the rest are left in srv, uncreated, for now"
-            );
-        }
-
         let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
+        let mut garbage: Vec<&String> = Vec::new();
         for window_id in extra_ids {
             let Some((kind, parent_window_id)) = crate::client::backend_get_window_topology(&web_endpoint, &auth_key, window_id) else {
                 tracing::warn!(target: "reproject", window_id = %window_id, "[reproject] slow path: GetWindow failed — skipping this window");
@@ -743,8 +718,18 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
                     agentmux_common::ipc::WindowKind::FullInstance
                 }
                 None => {
-                    tracing::warn!(target: "reproject", window_id = %window_id, "[reproject] slow path: no persisted kind (pre-Step-3 window row?) — defaulting to FullInstance");
-                    agentmux_common::ipc::WindowKind::FullInstance
+                    // No persisted kind means this row never completed a
+                    // `register_backend_window` round trip (Step 3's
+                    // write-through stamps `kind` on every registration,
+                    // main included) — it is an orphan, not a window the
+                    // user ever saw: the frontend double-init strands one
+                    // such row per window creation, and pre-Step-3 rows
+                    // have no restorable identity either. Recreating these
+                    // as FullInstance windows is what turned a polluted
+                    // `Client.windowids` into a window storm on every
+                    // launch. Garbage-collect instead of recreating.
+                    garbage.push(window_id);
+                    continue;
                 }
             };
             let parent_label = parent_window_id.map(|pid| {
@@ -764,6 +749,47 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
                 last_rect: None,
                 foregrounded_since_open: true,
             });
+        }
+
+        // GC the orphans right now — these ids never had a live window, so
+        // there is nothing to confirm before closing (unlike the recreate
+        // path's deferred closures below). `CloseWindow` prunes the
+        // `Client.windowids` entry, deletes the row, and cascades the
+        // orphan's (empty, auto-created) workspace only when no other
+        // window references it — a polluted store self-heals here instead
+        // of feeding next launch's reproject.
+        if !garbage.is_empty() {
+            tracing::warn!(
+                target: "reproject",
+                count = garbage.len(),
+                "[reproject] slow path: garbage-collecting never-registered window rows"
+            );
+            for window_id in garbage {
+                crate::client::backend_close_window(&web_endpoint, &auth_key, window_id);
+            }
+        }
+
+        // Safety cap — found live (2026-07-08): a build force-killed many
+        // times over one test session (never a graceful quit) accumulated
+        // 30+ stale `Client.windowids` entries, all recreated at once on the
+        // next cold boot. Orphan rows are now GC'd above rather than
+        // recreated, but genuinely-restorable entries can still pile up
+        // (e.g. repeated force-kills of real multi-window sessions). Bound
+        // the worst case regardless of root cause: recreate at most this
+        // many windows per pass; anything beyond that is left in place (not
+        // lost — just not recreated this launch) with a loud warning,
+        // rather than silently opening dozens of windows.
+        let dropped = cap_recreate_list(&mut snapshots, MAX_SLOW_PATH_RECREATE);
+        if dropped > 0 {
+            tracing::warn!(
+                target: "reproject",
+                total = snapshots.len() + dropped,
+                recreating = snapshots.len(),
+                dropped,
+                "[reproject] slow path: Client.windowids has far more restorable entries than \
+                 a normal session should — capping recreation to avoid a runaway window-open \
+                 storm; the rest are left in srv, uncreated, for now"
+            );
         }
         tracing::info!(
             target: "reproject",
