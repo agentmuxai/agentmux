@@ -514,12 +514,29 @@ describe("jekt marker detection", () => {
         expect((node as import("./types").JektMessageNode).direction).toBe("outgoing");
     });
 
-    test("defaults unrecognized TIER/DELIVERY values to coord/host rather than dropping the node", () => {
+    test("defaults unrecognized TIER/DELIVERY values to sensitive/wan (least-trusted) rather than dropping the node", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: jektBlock({ tier: "bogus", delivery: "bogus" }) });
         const jekt = node as import("./types").JektMessageNode;
         expect(jekt.type).toBe("jekt_message");
-        expect(jekt.tier).toBe("coord");
-        expect(jekt.deliveryTier).toBe("host");
+        expect(jekt.tier).toBe("sensitive");
+        expect(jekt.deliveryTier).toBe("wan");
+    });
+
+    test("does not strip message content that coincidentally matches scaffolding patterns", () => {
+        const message =
+            `[JEKT:FROM=agentx TO=agent3 TIER=coord DELIVERY=host TRUST=host-verified MSGID=abc123 PRIORITY=normal TS=1783386012]\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `From: agentx | To: agent3 | ts=1783386012\n` +
+            `Reply: yes, and also ────────── here's a dash line and a From: X | Y | line in the body\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `Reply: bus:inject to agentx\n` +
+            `[/JEKT]`;
+        const node = parser.parseStreamEvent({ type: "user_message", message });
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.type).toBe("jekt_message");
+        expect(jekt.message).toBe(
+            "Reply: yes, and also ────────── here's a dash line and a From: X | Y | line in the body"
+        );
     });
 
     test("falls back to a plain user_message for an unterminated jekt block", () => {
