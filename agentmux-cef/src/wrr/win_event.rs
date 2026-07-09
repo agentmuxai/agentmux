@@ -221,6 +221,18 @@ static HAD_VISIBLE_USER_WINDOW: std::sync::atomic::AtomicBool =
 /// events can't call `quit_message_loop()` more than once.
 static QUIT_INITIATED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+/// Set true while the grace-period quit watchdog (Step D) is armed, so a
+/// flurry of HIDE/DESTROY events in the stuck state spawns one watchdog
+/// thread, not one per event. Cleared by the watchdog's UI-thread re-check
+/// (whether or not it quits), re-arming future watchdogs.
+static WATCHDOG_ARMED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// How long the quit watchdog waits before trusting the OS signal alone.
+/// Long enough for any in-flight UnregisterBrowser dispatch (close_window
+/// RPC → CloseWindowTask, or the LOCATIONCHANGE pool-move handler) to land;
+/// short enough that a genuinely-stuck reducer doesn't leave the user with
+/// an invisible zombie instance for long.
+const QUIT_WATCHDOG_GRACE: std::time::Duration = std::time::Duration::from_millis(3000);
 
 /// X-coordinate below which a top-level window is an off-screen warm-pool member
 /// (created at -32000), not a real user window. Mirrors
@@ -278,6 +290,113 @@ unsafe fn count_visible_user_windows() -> usize {
     ctx.count
 }
 
+/// Pure decision extracted for unit testing (SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md).
+///
+/// Requires BOTH the OS-level `EnumWindows` count (`visible`) AND the reducer's own
+/// `count_live_user_windows()` (`registered`) to read zero before quitting. Before this
+/// fix, `visible` alone decided — but a synchronous `EnumWindows` pass can transiently
+/// misread during window-pool refill/promote churn on the same UI thread (e.g. a
+/// promoted pool window not yet moved on-screen), so closing a non-last window could
+/// momentarily read `visible == 0` while real windows remained, killing the whole host.
+///
+/// This AND is only safe because `registered` is now kept accurate for the one case
+/// that previously left it permanently stale — the CEF Views main-window
+/// recycle-on-close, which never fires `on_before_close` — via the LOCATIONCHANGE
+/// pool-move handler above now also dispatching `UnregisterBrowser` (Step A of the
+/// same spec). Without that companion fix, ANDing `registered` in here would hang the
+/// process open on a recycle-close, regressing #1676.
+fn should_quit_on_last_window(armed: bool, visible: usize, registered: usize) -> bool {
+    armed && visible == 0 && registered == 0
+}
+
+/// Companion pure decision: the state where the OS says every window is gone
+/// but the reducer disagrees. Either a transient (an UnregisterBrowser dispatch
+/// is in flight and will land in milliseconds) or a stuck reducer (a close path
+/// that never dispatched — the failure mode Step D's watchdog exists to bound).
+fn is_reducer_lagging_os(armed: bool, visible: usize, registered: usize) -> bool {
+    armed && visible == 0 && registered > 0
+}
+
+/// Step D — bounded fallback so a missed `UnregisterBrowser` path degrades to
+/// "quit a few seconds late with a loud log" instead of "hang forever as an
+/// invisible zombie instance" (the regression the first cut of this fix caused:
+/// requiring reducer agreement coupled the quit to reducer paths that weren't
+/// all wired yet). One watchdog at a time; the sleep happens on a throwaway
+/// thread and the DECISION + `quit_message_loop()` happen in a UI-posted task
+/// (UI-thread-only primitive — off-thread it silently no-ops, v0.33.492).
+/// `post_task` is reliable here: the message loop is running normally in this
+/// state (nothing has begun tearing down — that's the problem).
+pub(crate) fn arm_quit_watchdog(registered: usize) {
+    use std::sync::atomic::Ordering::SeqCst;
+    if WATCHDOG_ARMED.swap(true, SeqCst) {
+        return; // one in flight already
+    }
+    // Two callers: maybe_quit_on_last_user_window (visible==0 confirmed) and
+    // unregister_after_parking_close (unconditional belt-and-suspenders) — so
+    // this message must not claim windows are hidden; the re-check decides.
+    tracing::warn!(
+        target: "wrr",
+        "[wrr] arming {}ms quit watchdog (reducer counts {} live) — will re-check visibility on fire",
+        QUIT_WATCHDOG_GRACE.as_millis(),
+        registered
+    );
+    let Some(state) = app_state().get().cloned() else {
+        WATCHDOG_ARMED.store(false, SeqCst);
+        return; // hooks not installed yet — nothing to watch
+    };
+    std::thread::spawn(move || {
+        std::thread::sleep(QUIT_WATCHDOG_GRACE);
+        let mut task = QuitWatchdogRecheckTask::new(state);
+        cef::post_task(cef::ThreadId::UI, Some(&mut task));
+    });
+}
+
+// `wrap_task!` is unhygienic — it references `Task`/`WrapTask`/`ImplTask`
+// unqualified and calls the `rc::Rc` trait's provided `.add_ref()` (every
+// other call site has `use cef::*` + `rc::*`; this module keeps its imports
+// explicit, so pull in just what the macro expansion needs).
+use cef::rc::Rc as _;
+use cef::{ImplTask, Task, WrapTask};
+
+cef::wrap_task! {
+    pub struct QuitWatchdogRecheckTask {
+        state: Arc<AppState>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            use std::sync::atomic::Ordering::SeqCst;
+            WATCHDOG_ARMED.store(false, SeqCst); // allow future watchdogs either way
+            if QUIT_INITIATED.load(SeqCst) {
+                return;
+            }
+            let visible = unsafe { count_visible_user_windows() };
+            if visible != 0 {
+                tracing::info!(
+                    target: "wrr",
+                    "[wrr] quit watchdog: {} window(s) visible again — stand down",
+                    visible
+                );
+                return;
+            }
+            let registered = self.state.count_live_user_windows();
+            if QUIT_INITIATED.swap(true, SeqCst) {
+                return;
+            }
+            // Trusting the OS signal alone (the pre-Step-B behavior). The
+            // registered count logged here is a live bug report: some close
+            // path failed to dispatch UnregisterBrowser — find it.
+            tracing::warn!(
+                target: "wrr",
+                "[wrr] quit watchdog fired: 0 visible for {}ms but reducer still counts {} live — quitting on OS signal alone (reducer desync, investigate)",
+                QUIT_WATCHDOG_GRACE.as_millis(),
+                registered
+            );
+            cef::quit_message_loop();
+        }
+    }
+}
+
 /// Called from HIDE/DESTROY of an app-class window. If a user window has ever
 /// been shown and now zero user-visible windows remain, quit the CEF message
 /// loop. Idempotent (QUIT_INITIATED guard).
@@ -309,7 +428,10 @@ unsafe fn maybe_quit_on_last_user_window() {
         "[wrr] last-window check: registered_user_windows={} os_visible={}",
         registered, visible
     );
-    if visible != 0 {
+    if !should_quit_on_last_window(armed, visible, registered) {
+        if is_reducer_lagging_os(armed, visible, registered) {
+            arm_quit_watchdog(registered);
+        }
         return;
     }
     if QUIT_INITIATED.swap(true, SeqCst) {
@@ -321,6 +443,51 @@ unsafe fn maybe_quit_on_last_user_window() {
         registered
     );
     cef::quit_message_loop();
+}
+
+#[cfg(test)]
+mod should_quit_tests {
+    use super::should_quit_on_last_window;
+
+    #[test]
+    fn not_armed_never_quits() {
+        assert!(!should_quit_on_last_window(false, 0, 0));
+    }
+
+    #[test]
+    fn quits_only_when_both_signals_agree_at_zero() {
+        assert!(should_quit_on_last_window(true, 0, 0));
+    }
+
+    #[test]
+    fn os_transient_zero_with_live_registered_window_does_not_quit() {
+        // The false-positive this fix closes: a transient EnumWindows misread
+        // (visible == 0) while the reducer still shows a live window.
+        assert!(!should_quit_on_last_window(true, 0, 1));
+    }
+
+    #[test]
+    fn registered_stale_with_os_confirming_windows_gone_does_not_quit() {
+        assert!(!should_quit_on_last_window(true, 1, 0));
+    }
+
+    #[test]
+    fn both_nonzero_does_not_quit() {
+        assert!(!should_quit_on_last_window(true, 2, 1));
+    }
+
+    #[test]
+    fn watchdog_arms_only_when_os_zero_but_reducer_nonzero() {
+        use super::is_reducer_lagging_os;
+        // The stuck state (Step D's target): OS says gone, reducer disagrees.
+        assert!(is_reducer_lagging_os(true, 0, 1));
+        // Not armed: clean quit state (should_quit handles it instead)…
+        assert!(!is_reducer_lagging_os(true, 0, 0));
+        // …windows still visible…
+        assert!(!is_reducer_lagging_os(true, 3, 1));
+        // …or before any user window was ever shown (startup).
+        assert!(!is_reducer_lagging_os(false, 0, 1));
+    }
 }
 
 unsafe extern "system" fn win_event_callback(
@@ -536,7 +703,25 @@ unsafe extern "system" fn win_event_callback(
                                 "[wrr] LOCATIONCHANGE pool-move → report_window_closed label={}",
                                 label
                             );
-                            crate::launcher_ipc::report_window_closed(label);
+                            crate::launcher_ipc::report_window_closed(label.clone());
+                            // SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md Step A — this is the
+                            // one close path where CEF's own `on_before_close` never fires (a
+                            // Views recycle-on-close hides/reuses the browser instead of
+                            // destroying it), so without this dispatch `count_live_user_windows()`
+                            // never learns this window is gone and stays stuck non-zero forever.
+                            // Idempotent: `handle_unregister_browser` no-ops on an
+                            // already-removed/unknown label.
+                            state.host_dispatch(
+                                crate::reducer::HostCommand::UnregisterBrowser { label },
+                            );
+                            // Re-evaluate the quit gate NOW: this LOCATIONCHANGE may be
+                            // the last event this window ever fires (HIDE preceded the
+                            // pool-move), and the gate requires the registered count we
+                            // just corrected. Without this, a recycle-close of the last
+                            // window would wait on the watchdog instead of quitting
+                            // promptly. Same-thread (UI), same fn HIDE/DESTROY call —
+                            // idempotent via QUIT_INITIATED.
+                            maybe_quit_on_last_user_window();
                         }
                     }
                 }

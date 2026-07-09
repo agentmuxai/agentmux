@@ -82,6 +82,15 @@ HIDE/DESTROY OS signal INTO the reducer as a transition, then let `reconcile_qui
 than fork a parallel coordinate-based authority.*
 → Owner: `reducer::quit::reconcile_quit` over typed state; the OS hook becomes a transition source, not a decider.
 
+**Addendum 2026-07-08 — minimal slice scoped, in progress.**
+`SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md` fixes only the false-*positive* direction of this
+finding (WRR fires while a live window remains — user-reported: closing a non-last window killed
+the host) by feeding the LOCATIONCHANGE-detected recycle-close into the reducer
+(`UnregisterBrowser`) and then requiring `count_live_user_windows() == 0` to agree with the OS
+`visible == 0` count before quitting. This is a stepping stone, not L1's full completion — WRR
+remains a parallel decider (not yet a pure transition source into `reconcile_quit`/`request_drain`);
+the pixel-coordinate heuristic is kept as a live confirming signal, not deleted.
+
 **L2 🔴 — `reconcile_quit`/`should_begin_drain`/`user_creation_in_flight` are built, tested, UNWIRED.**
 `reducer/quit.rs:131-167`, all `#[allow(dead_code)]` (quit.rs:73,130,143,160), zero production callers
 (grep-confirmed: only quit.rs + tests). The level-triggered reconciler the lifecycle spec is built
