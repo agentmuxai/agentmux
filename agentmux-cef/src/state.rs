@@ -847,11 +847,12 @@ pub struct AppState {
     /// pane targets. See `docs/specs/SPEC_BROWSER_DOM_API.md` §6.
     pub debug_port: Mutex<u16>,
 
-    /// CEF `root_cache_path` (the version's `cef-cache` dir). Stored so
-    /// per-window RequestContexts (`create_isolated_request_context`) root their
-    /// `cache_path` UNDER it — CEF requires every context cache_path to be a
-    /// descendant of root_cache_path, else it rejects it and falls back to
-    /// in-memory storage. See SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.
+    /// CEF `root_cache_path` (the version's `cef-cache` dir). Per-window
+    /// RequestContexts are in-memory (unique off-the-record profiles — see
+    /// `create_isolated_request_context`) and place nothing under it; the
+    /// resolved path is kept for the startup legacy-litter sweep
+    /// (`cleanup_legacy_context_dirs`) and any future consumers. See
+    /// SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.6.
     pub cef_cache_dir: Mutex<Option<String>>,
 
     // Phase B.1 removed `job_handle` (was Windows-only). Launcher
