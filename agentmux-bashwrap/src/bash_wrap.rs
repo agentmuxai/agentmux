@@ -647,13 +647,32 @@ async fn run_via_pipes(
     buffered: Arc<Mutex<Vec<u8>>>,
     bash: &std::path::Path,
 ) -> Result<i32> {
-    let mut child = Command::new(bash)
-        .arg("-c")
+    let mut cmd = Command::new(bash);
+    cmd.arg("-c")
         .arg(command)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    // Windows only: bash.exe is a console-subsystem binary, so spawning it
+    // without CREATE_NO_WINDOW pops a new visible (and orphaned-looking)
+    // console window for every fallback exec — this path only runs when
+    // PTY allocation fails, which is why it slipped past
+    // SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20's audit (that pass
+    // covered bashwrap's own process subsystem and shell_node.rs, not this
+    // rarely-exercised inner spawn). Same fix as shell_node.rs.
+    #[cfg(windows)]
+    {
+        // `cmd` is `tokio::process::Command`, which provides `creation_flags`
+        // as a native inherent method on Windows — unlike `std::process::
+        // Command`, no `use std::os::windows::process::CommandExt` is needed
+        // to call it here. Verified via a clean `cargo check --target
+        // x86_64-pc-windows-msvc` (0 errors) and this crate's windows-latest
+        // CI job, both passing without the import. See PR #2042 discussion.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd
         .spawn()
         .with_context(|| format!("pipe spawn of bash at {}", bash.display()))?;
 
