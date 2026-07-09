@@ -1,0 +1,318 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * AgentRuntimeDropup — single trigger + floating panel consolidating the
+ * Mode / Model / Effort drop-ups that used to be three separate FlyoutMenu
+ * pills in AgentComposerStrip (SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02
+ * Fix 7). One button shows a live "Mode · Model · Effort" summary; the panel
+ * floats upward from it, grouped into three labeled sections, and stays open
+ * across selections so one visit can touch all three axes (deliberate
+ * departure from FlyoutMenu's close-on-select — SPEC §9.2).
+ *
+ * Reuses the same positioning primitives FlyoutMenu itself uses
+ * (@floating-ui/dom autoUpdate + computeMenuPosition + Portal +
+ * data-pane-overlay) rather than FlyoutMenu directly: FlyoutMenu only renders
+ * a flat MenuItem[] list and has no concept of grouped sections with headers.
+ *
+ * Model options stay registry-driven via getProvider(providerId)?.models
+ * (live-overlaid from the providers.models RPC, same as the prior three-pill
+ * implementation) so an API-sourced catalog surfaces new labels automatically.
+ *
+ * Spec: docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
+ */
+
+import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
+import { autoUpdate } from "@floating-ui/dom";
+import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
+import { getRuntimeConfig } from "../buildRuntimeArgs";
+import { getProvider, type ProviderModel } from "../providers";
+import { applyRuntimeChange } from "../runtime-apply";
+import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
+
+/** Serialize a MenuPositionResult.style the same way flyoutmenu.tsx does. */
+function styleToString(s: JSX.CSSProperties): string {
+    return `position:${s.position};left:${s.left};top:${s.top}`;
+}
+
+const PERMISSION_COLORS: Record<PermissionMode, string> = {
+    bypass: "var(--error-color, #ef4444)",
+    auto: "var(--accent-color, #3b82f6)",
+    acceptEdits: "var(--warning-color, #eab308)",
+    plan: "var(--success-color, #22c55e)",
+    default: "var(--main-text-color)",
+};
+
+// Mode: trigger shows the short `label`; the panel shows `menuLabel` (the
+// descriptive form) when present — matches the prior StripSelect convention.
+const MODE_OPTIONS = [
+    { value: "bypass", label: "Bypass", menuLabel: "Bypass (no prompts)" },
+    { value: "auto", label: "Auto", menuLabel: "Auto (AI classifier)" },
+    { value: "acceptEdits", label: "Accept Edits" },
+    { value: "plan", label: "Plan", menuLabel: "Plan (read-only)" },
+    { value: "default", label: "Default", menuLabel: "Default (prompt all)" },
+] as const;
+
+// Fallback when a provider defines no static model list — matches the prior
+// StripSelect fallback exactly.
+const FALLBACK_MODEL_OPTIONS: ProviderModel[] = [
+    { value: "opus", label: "Opus" },
+    { value: "sonnet", label: "Sonnet" },
+    { value: "haiku", label: "Haiku" },
+];
+
+const EFFORT_OPTIONS = [
+    { value: "low", label: "low" },
+    { value: "medium", label: "medium" },
+    { value: "high", label: "high" },
+    { value: "xhigh", label: "xhigh" },
+    { value: "max", label: "max" },
+] as const;
+
+type Section = "mode" | "model" | "effort";
+
+interface OptionRow {
+    section: Section;
+    value: string;
+    label: string;
+    description?: string;
+    current: boolean;
+    color?: string;
+}
+
+type Row = { kind: "header"; section: Section } | (OptionRow & { kind: "option" });
+
+interface AgentRuntimeDropupProps {
+    blockId: string;
+    blockAtom: () => Block | undefined;
+    providerId: string;
+}
+
+export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element => {
+    const [open, setOpen] = createSignal(false);
+    const [selectedOptIndex, setSelectedOptIndex] = createSignal(0);
+    const [floatingStyle, setFloatingStyle] = createSignal("position:fixed;left:0px;top:0px");
+
+    let referenceEl: HTMLButtonElement | undefined;
+    let floatingEl: HTMLDivElement | undefined;
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const runtime = (): AgentRuntimeConfig => getRuntimeConfig(props.blockAtom()?.meta);
+
+    const updateRuntime = async (patch: Partial<AgentRuntimeConfig>) => {
+        try {
+            await applyRuntimeChange(props.blockId, getProvider(props.providerId), { ...runtime(), ...patch });
+        } catch {
+            // Silent — settings retry on next change (matches the prior
+            // AgentComposerStrip.updateRuntime tolerance).
+        }
+    };
+
+    const modelOptions = (): ProviderModel[] => getProvider(props.providerId)?.models ?? FALLBACK_MODEL_OPTIONS;
+
+    const modelLabel = (value: string): string => modelOptions().find((o) => o.value === value)?.label ?? value;
+    const effortLabel = (value: string): string => EFFORT_OPTIONS.find((o) => o.value === value)?.label ?? value;
+    const modeLabel = (value: string): string => MODE_OPTIONS.find((o) => o.value === value)?.label ?? value;
+
+    const compactSummary = (): string => {
+        const r = runtime();
+        return [modeLabel(r.permissionMode), modelLabel(r.model), effortLabel(r.effort)].join(" · ");
+    };
+
+    // Single pass builds both the render list (rows, incl. section headers)
+    // and the flat option list keyboard nav / selection walks.
+    const build = (): { rows: Row[]; options: OptionRow[] } => {
+        const r = runtime();
+        const rows: Row[] = [];
+        const options: OptionRow[] = [];
+
+        const addSection = <T extends { value: string; label: string; menuLabel?: string; description?: string }>(
+            section: Section,
+            opts: readonly T[],
+            currentValue: string,
+            withColor: boolean
+        ) => {
+            rows.push({ kind: "header", section });
+            for (const o of opts) {
+                const row: OptionRow = {
+                    section,
+                    value: o.value,
+                    label: o.menuLabel ?? o.label,
+                    description: o.description,
+                    current: currentValue === o.value,
+                    color: withColor ? PERMISSION_COLORS[o.value as PermissionMode] : undefined,
+                };
+                rows.push({ kind: "option", ...row });
+                options.push(row);
+            }
+        };
+
+        addSection("mode", MODE_OPTIONS, r.permissionMode, true);
+        addSection("model", modelOptions(), r.model, false);
+        addSection("effort", EFFORT_OPTIONS, r.effort, false);
+        return { rows, options };
+    };
+
+    const move = (delta: number) => {
+        const { options } = build();
+        if (options.length === 0) return;
+        setSelectedOptIndex((i) => (i + delta + options.length) % options.length);
+    };
+
+    // Enter applies and keeps the panel open — deliberate departure from
+    // FlyoutMenu's close-on-select. This panel hosts three independent axes,
+    // not one value from one list; SPEC §9.2.
+    const applySelection = async (idx: number) => {
+        const { options } = build();
+        const choice = options[idx];
+        if (!choice) return;
+        if (choice.section === "mode") await updateRuntime({ permissionMode: choice.value as PermissionMode });
+        else if (choice.section === "model") await updateRuntime({ model: choice.value });
+        else await updateRuntime({ effort: choice.value as EffortLevel });
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            move(1);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            move(-1);
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            void applySelection(selectedOptIndex());
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            setOpen(false);
+        } else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) {
+            const k = e.key.toLowerCase();
+            const idx = build().options.findIndex((o) => o.label.toLowerCase().startsWith(k));
+            if (idx >= 0) {
+                e.preventDefault();
+                setSelectedOptIndex(idx);
+            }
+        }
+    };
+
+    const handleClickOutside = (e: MouseEvent) => {
+        if (!open()) return;
+        const target = e.target as Node;
+        if (referenceEl?.contains(target) || floatingEl?.contains(target)) return;
+        setOpen(false);
+    };
+
+    onMount(() => {
+        document.addEventListener("mousedown", handleClickOutside);
+        document.addEventListener("keydown", handleKeyDown, true);
+    });
+    onCleanup(() => {
+        document.removeEventListener("mousedown", handleClickOutside);
+        document.removeEventListener("keydown", handleKeyDown, true);
+        cleanupAutoUpdate?.();
+    });
+
+    // Positioning mirrors flyoutmenu.tsx's updatePosition/registerFloating
+    // exactly (same primitive, same avoidNativePanes:false rationale — this
+    // panel also carries data-pane-overlay so it should open in place at its
+    // anchor, not get pushed toward the window edge by a native pane rect).
+    const updatePosition = async () => {
+        if (!referenceEl || !floatingEl) return;
+        const pos = await computeMenuPosition(
+            { anchor: referenceEl, placement: "top-start", avoidNativePanes: false },
+            floatingEl
+        );
+        setFloatingStyle(styleToString(pos.style));
+    };
+
+    const registerFloating = (el: HTMLDivElement) => {
+        floatingEl = el;
+        requestAnimationFrame(() => {
+            if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            assertMenuInPaintableArea(el, "agent-runtime-dropup");
+        });
+    };
+
+    const toggleOpen = () => {
+        if (open()) {
+            setOpen(false);
+            return;
+        }
+        const { options } = build();
+        const idx = options.findIndex((o) => o.section === "mode" && o.current);
+        setSelectedOptIndex(idx >= 0 ? idx : 0);
+        setOpen(true);
+    };
+
+    return (
+        <>
+            <button
+                type="button"
+                ref={referenceEl}
+                class="agent-runtime-dropup-trigger"
+                style={{ "border-left": `3px solid ${PERMISSION_COLORS[runtime().permissionMode]}` }}
+                title="Mode / Model / Effort — applies on the next turn"
+                aria-haspopup="listbox"
+                aria-expanded={open()}
+                aria-label={`Runtime settings: ${compactSummary()}`}
+                onClick={() => toggleOpen()}
+            >
+                <span class="agent-runtime-dropup-trigger-label">{compactSummary()}</span>
+                <span class="agent-runtime-dropup-trigger-caret" aria-hidden="true">
+                    ▴
+                </span>
+            </button>
+            <Show when={open()}>
+                <Portal>
+                    <div
+                        ref={registerFloating}
+                        class="menu agent-runtime-dropup-panel"
+                        style={floatingStyle()}
+                        data-pane-overlay
+                        role="listbox"
+                        aria-label="Runtime settings"
+                    >
+                        <For each={build().rows}>
+                            {(row) => {
+                                if (row.kind === "header") {
+                                    return <div class="agent-runtime-dropup-section">{row.section}</div>;
+                                }
+                                const optIndex = () =>
+                                    build().options.findIndex(
+                                        (o) => o.section === row.section && o.value === row.value
+                                    );
+                                return (
+                                    <div
+                                        class="menu-item agent-runtime-dropup-row"
+                                        classList={{ active: optIndex() === selectedOptIndex() }}
+                                        role="option"
+                                        aria-selected={row.current}
+                                        onMouseEnter={() => setSelectedOptIndex(optIndex())}
+                                        onClick={() => {
+                                            const idx = optIndex();
+                                            setSelectedOptIndex(idx);
+                                            void applySelection(idx);
+                                        }}
+                                    >
+                                        <i
+                                            class={`fa-solid fa-fw menu-item-icon menu-item-check${row.current ? " fa-check" : ""}`}
+                                            style={row.color ? { color: row.color } : undefined}
+                                        />
+                                        <span class="label">{row.label}</span>
+                                        <Show when={row.description}>
+                                            <span class="agent-runtime-dropup-description">{row.description}</span>
+                                        </Show>
+                                    </div>
+                                );
+                            }}
+                        </For>
+                    </div>
+                </Portal>
+            </Show>
+        </>
+    );
+};
+
+AgentRuntimeDropup.displayName = "AgentRuntimeDropup";
