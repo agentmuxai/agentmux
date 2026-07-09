@@ -693,7 +693,7 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
         // translated to the `"main"` sentinel here — otherwise the remap
         // lookup finds nothing and the subwindow is silently skipped as if
         // its parent were missing.
-        let extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
+        let mut extra_ids: Vec<&String> = window_ids.iter().filter(|id| *id != &main_window_id).collect();
         if extra_ids.is_empty() {
             tracing::debug!(
                 target: "reproject",
@@ -701,6 +701,25 @@ pub(crate) fn reproject_from_srv(state: &Arc<AppState>, main_window_id: String) 
                 "[reproject] slow path: nothing beyond main to recreate"
             );
             return;
+        }
+
+        // Scan cap — every entry costs one blocking GetWindow round trip
+        // (plus one CloseWindow if it turns out to be garbage), all
+        // sequential on this thread, so the per-boot work must stay
+        // bounded no matter how polluted the store is. Entries beyond the
+        // cap are left in srv untouched for the next boot's pass — the
+        // store still converges, just across a few launches instead of a
+        // single unbounded one.
+        let scan_dropped = cap_recreate_list(&mut extra_ids, MAX_SLOW_PATH_SCAN);
+        if scan_dropped > 0 {
+            tracing::warn!(
+                target: "reproject",
+                total = extra_ids.len() + scan_dropped,
+                scanning = extra_ids.len(),
+                dropped = scan_dropped,
+                "[reproject] slow path: Client.windowids has more entries than one boot's \
+                 scan budget — the rest are left in srv for the next launch"
+            );
         }
 
         let mut snapshots: Vec<agentmux_common::ipc::WindowSnapshot> = Vec::new();
@@ -875,6 +894,16 @@ fn get_secondary_window_size(px: i32, py: i32) -> (i32, i32) {
 /// comment at the call site for why this exists (found live, 2026-07-08:
 /// 30+ accumulated `Client.windowids` entries recreated all at once).
 const MAX_SLOW_PATH_RECREATE: usize = 20;
+
+/// Bound on how many `Client.windowids` entries one boot's slow path will
+/// even LOOK at (one blocking GetWindow round trip each, plus a CloseWindow
+/// for each entry classified as garbage — all sequential). Distinct from
+/// `MAX_SLOW_PATH_RECREATE`, which bounds windows actually opened: the scan
+/// budget is deliberately larger so a badly polluted store (the 2026-07-09
+/// storm left 60+ orphan rows per instance) still self-heals in one or two
+/// launches, while a pathologically large list can't turn boot into an
+/// unbounded sequence of network calls (reagent P1, PR #2048).
+const MAX_SLOW_PATH_SCAN: usize = 200;
 
 /// Truncates `items` to at most `max` entries in place; returns how many
 /// were dropped. Extracted as a pure function (reagent P2, PR #2032,
