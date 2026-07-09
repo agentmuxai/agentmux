@@ -137,6 +137,18 @@ returns once not `Running` (`quit.rs:15`), and `BeginDrain` is documented idempo
   signal instead of the CEF signal) *before* trusting `reconcile_quit`'s count — a real design task,
   not part of this rollout's original scope. Tracked as a separate follow-up; `quit_message_loop()`
   called directly from WRR, bypassing `QuitState` entirely, is unchanged for now.
+
+  **Addendum 2026-07-08 — a minimal, independently-shippable slice of this gap is now scoped and
+  in progress.** `SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md` fixes the false-*positive* direction
+  only (WRR quits while a live window remains, root-caused by a live user bug report — closing a
+  non-last window killed the whole host) by (a) extending the already-existing LOCATIONCHANGE
+  pool-move detector to also dispatch `UnregisterBrowser` to the CEF reducer on a Views
+  recycle-close (today it only reports to the launcher mirror), then (b) requiring
+  `count_live_user_windows() == 0` to agree with the OS-level `visible == 0` before WRR calls
+  `quit_message_loop()`. This does **not** close the gap described above (WRR still decides
+  independently rather than deferring to `reconcile_quit`/`request_drain`) — it only prevents WRR
+  from firing when the reducer disagrees. Full retirement of the parallel authority (this section's
+  original scope) remains open.
 - **`commands::orphan_reconcile`** — not started. Its `plan.begin_drain` computation
   (`orphan_reconcile.rs:189,345`) is still independent of `reconcile_quit`; per the research done
   2026-07-07 it also carries a "Race B" (`freshly_promoted`) guard with no `HostState` equivalent —

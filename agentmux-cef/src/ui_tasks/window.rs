@@ -217,6 +217,7 @@ wrap_task! {
                                     self.label, ret, err, alive
                                 ));
                             }
+                            unregister_after_parking_close(&self.state, &self.label);
                             return;
                         }
                     } else {
@@ -265,6 +266,8 @@ wrap_task! {
                         self.label
                     ));
                 }
+                #[cfg(target_os = "windows")]
+                unregister_after_parking_close(&self.state, &self.label);
                 return;
             }
             crate::client::dlog(&format!(
@@ -278,8 +281,66 @@ wrap_task! {
                     host.try_close_browser();
                 }
             }
+            #[cfg(target_os = "windows")]
+            unregister_after_parking_close(&self.state, &self.label);
         }
     }
+}
+
+/// SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md Step C — on this CEF build
+/// (148, Windows), every close path that ends in a PARKED browser fires no
+/// `on_before_close`, so the reducer's `browsers` map keeps counting the
+/// window as live forever. Live-verified 2026-07-09 for all three parking
+/// paths: main's `window.close()` (#1680 park), the round-5
+/// `close_browser(1)` + native `DestroyWindow` (browser parks anyway — two
+/// round-5-closed windows stayed registered and were caught only by the quit
+/// watchdog), and the round-3 no-strict-HWND fallback (documented "KNOWN
+/// INSUFFICIENT" above). That staleness was survivable only while the WRR
+/// last-window quit ignored the reducer; now that the quit gate requires
+/// reducer agreement (`win_event.rs::should_quit_on_last_window`), every
+/// parking close must tell the reducer imperatively — here, in the UI-thread
+/// executor of the close, where the label is known with certainty. Demoted
+/// pool windows are NOT routed here: `DemotePoolWindow` already flips their
+/// `is_pool` (excluding them from the live count) and the pool machinery
+/// owns their bookkeeping.
+///
+/// MUST run AFTER the close is initiated, never before: `get_window_on_ui`
+/// and the `get_browser` fallback both resolve through `state.browsers`, so a
+/// pre-close dispatch removes the registration the close itself needs and
+/// turns `CloseWindowTask` into a silent no-op — the window simply stays open
+/// (caught live 2026-07-09, first verification pass of this fix).
+///
+/// Also arms the WRR quit watchdog: a Views park is a *move*, not a
+/// hide/destroy, so it can produce ZERO further win-events — with nothing to
+/// re-run the quit gate, even a fully-correct registered count would sit
+/// unread forever. The watchdog re-check is idempotent and stands down if any
+/// window is still visible, so arming it while other windows remain open is
+/// harmless.
+///
+/// Launcher/srv cleanup is NOT duplicated here: the `close_window` RPC
+/// already sent `report_window_closed`, and `demote_srv_cleanup` already ran
+/// for `window-*` labels.
+///
+/// Windows-only: on macOS/Linux `window.close()` → `can_close` →
+/// `on_before_close` runs the full cleanup chain, and a parallel dispatch
+/// would break that chain's label-by-identity lookup.
+#[cfg(target_os = "windows")]
+fn unregister_after_parking_close(state: &Arc<AppState>, label: &str) {
+    tracing::info!(
+        target: "wrr",
+        "[close-window] {} close initiated — dispatching UnregisterBrowser (parked browser fires no on_before_close)",
+        label
+    );
+    state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
+        label: label.to_string(),
+    });
+    if label != "main" {
+        // Mirror on_before_close's cache eviction (stale entries break
+        // WM_CLOSE routing on label reuse). Main keeps its entry — the
+        // process is quitting and WRR still resolves it for logging.
+        state.window_hwnds.lock().remove(label);
+    }
+    crate::wrr::win_event::arm_quit_watchdog(state.count_live_user_windows());
 }
 
 pub fn post_close_window(state: &Arc<AppState>, label: &str) {
