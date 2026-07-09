@@ -70,6 +70,11 @@ export function currentExpansion(
             // Default OPEN; collapsed only when the user collapsed it.
             return state.collapsedNodes.has(node.id) ? CLOSED : OPEN_DEFAULT;
 
+        case "jekt_message":
+            // Same policy as agent_message, and for the same reason spec G1
+            // asks for: a jekt must be visible by default, not opt-in.
+            return state.collapsedNodes.has(node.id) ? CLOSED : OPEN_DEFAULT;
+
         case "user_message":
             // Only startup payloads collapse, and they key off `pinnedNodes`
             // (SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24 §D).
