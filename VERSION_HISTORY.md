@@ -1,5 +1,19 @@
 # AgentMux Version History
 
+## 0.51.2 — 2026-07-08
+
+- feat(mcp): probe App API + mcp-capabilities.ts — MCP server health check (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08)
+- feat(host): SPEC_PILLAR1_STEP4 Phase 4/5 - restoring-session overlay + crash-reproject E2E test
+- fix(layout): delete_block now notifies frontends of the layout prune, closing a stale-tree resurrection race
+- feat(armory): tooltips on collapsed rail nav items
+- fix(tabs): workspace tabs rest at Chrome's standard 232px width instead of collapsing to short-label content width
+- feat(tabs): random color for new tabs; min window width 380px on Windows
+- feat(layout): reducer self-heals dangling block references on every layout write (WRR-style)
+- fix(ambient): sanitize Haiku summaries against leaked markdown fences
+- fix(host): WRR last-window quit no longer fires while live windows remain — quit gate now requires reducer agreement, parking closes feed the reducer, 3s desync watchdog (SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08)
+- fix(host): park-and-blank non-demotable window closes — closed windows no longer keep the full workspace running invisibly (~90MB commit each) (SPEC_PARK_AND_BLANK_CLOSE_2026_07_09)
+
+
 ## 0.51.1 — 2026-07-08
 
 - fix(swarm): key subagent completion off the result-event discriminant, not derived text
