@@ -85,6 +85,52 @@ Implementation:
 - The on-disk `cef-cache/browser-contexts/<label>/` dir exists after a window
   opens.
 
+### 1.6 Amendment (2026-07-09) — §1.4 was wrong twice over; isolated contexts are now in-memory BY DESIGN
+
+Three findings from the 2026-07-09 investigation (each verified against CEF
+source and/or live instances):
+
+**(a) §1.4 didn't fix the error — it changed its signature.** The
+`<cef-cache>/browser-contexts/<label>` layout passed CEF's request-context
+descendant check (`context.cc:161` disappeared) but failed the **stricter**
+check in Chrome's profile initializer, `chrome_browser_context.cc`: a
+non-empty profile path must be a **direct child** of `root_cache_path`
+(`cache_path.DirName() == user_data_dir`). A grandchild logs `Cannot create
+profile at path …` and falls back to a **new/unique off-the-record profile**.
+This fired on 100% of launches since v0.33.x (2 pool windows at startup; up
+to 22 lines on a session-restore start), so §1.3's "lost capability" was
+never restored — but window isolation kept working, because the unique-OTR
+fallback provides it.
+
+**(b) The "obvious" fix — a valid direct-child path — is a trap.** Tested
+live (dev build, 2026-07-09): `<cef-cache>/ctx-<label>` makes
+`request_context_create_context` succeed and Chrome materializes a full
+profile on disk, but **browser creation then stalls indefinitely** — for the
+pool window `on_after_created` fired and the page never loaded; for a
+subsequent `open_new_window` even `on_after_created` never fired. No error
+is logged anywhere; the window simply never appears. Real per-window Chrome
+profiles are NOT safe in AgentMux's alloy-style-views-on-chrome-bootstrap
+host. Do not retry this without solving the stall.
+
+**(c) Persistence was never a coherent goal for these contexts.** Isolated
+windows' labels embed a per-run UUID — a disk profile could never be
+re-attached across runs. Browser panes, where cookie/localStorage
+persistence actually matters, use the shared default (disk-backed) context.
+
+**Fix shipped:** `create_isolated_request_context` passes an **empty**
+`cache_path`. `chrome_browser_context.cc` skips both disk-profile branches
+and creates the same new/unique OTR profile as the old error-fallback —
+identical proven behavior, zero error lines, zero disk litter. A startup
+sweep (`cleanup_legacy_context_dirs`) removes leftover `browser-contexts/`
+and `ctx-*` trees.
+
+**Verify:** launch → `grep -c "Cannot create profile\|context.cc:1"
+cef-debug.log` → 0; pool reaches target (2× `pool window renderer ready`);
+`open_new_window` produces a working window; no new dirs under `cef-cache`
+beyond Chromium's own. The §1.5 cookie-persistence check is RETIRED for
+isolated windows (persistence is out of scope by design); it remains valid
+for browser panes via the default context.
+
 ---
 
 ## 2. Error 2 — `bind()` collision on the remote-debugging port
