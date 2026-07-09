@@ -767,10 +767,15 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     }
     tracing::info!("CEF cache dir: {}", data_dir.display());
     let cache_dir = CefString::from(data_dir.to_str().unwrap_or(""));
-    // Expose root_cache_path so per-window RequestContexts root their cache_path
-    // UNDER it — CEF requires a descendant of root_cache_path, else it falls back
-    // to in-memory storage. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.
+    // Expose root_cache_path. Per-window RequestContexts no longer place
+    // anything under it (they are in-memory — see
+    // `create_isolated_request_context`), but the legacy-litter sweep below
+    // and future consumers still need the resolved path.
     *app_state.cef_cache_dir.lock() = Some(data_dir.to_string_lossy().to_string());
+    // Remove dirs left by the earlier isolated-context path schemes
+    // (`browser-contexts/`, `ctx-*`) — labels are per-run UUIDs, so they can
+    // never be referenced again. SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md §1.6.
+    crate::commands::cleanup_legacy_context_dirs(&data_dir.to_string_lossy());
 
     // Configure CEF settings.
     // Pick a FREE remote-debugging port instead of a fixed one: AgentMux runs
