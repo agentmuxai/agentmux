@@ -196,7 +196,7 @@ wrap_task! {
                             // Step 2 — deliver the window death Views defers.
                             // Forensics kept from round 4: same-thread
                             // ownership + ret/lasterr/liveness per close.
-                            unsafe {
+                            let destroy_confirmed = unsafe {
                                 use windows_sys::Win32::Foundation::GetLastError;
                                 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
                                 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -216,8 +216,28 @@ wrap_task! {
                                     "CloseWindowTask({}): round 5 — DestroyWindow ret={} lasterr={} IsWindow_after={}",
                                     self.label, ret, err, alive
                                 ));
+                                ret != 0 || alive == 0
+                            };
+                            // Unregister only when the native destroy actually
+                            // took (or the HWND is gone regardless) — a failed
+                            // DestroyWindow with the window still alive must
+                            // keep the registration, else the reducer
+                            // undercounts a REAL window and re-opens the exact
+                            // false-quit class this PR closes (reagent P2
+                            // #2043). The armed close_browser(1) may still
+                            // complete asynchronously → on_before_close does
+                            // the unregister; if nothing completes, the window
+                            // is visibly open and the quit gate correctly
+                            // counts it on both sides.
+                            if destroy_confirmed {
+                                unregister_after_parking_close(&self.state, &self.label);
+                            } else {
+                                tracing::warn!(
+                                    target: "wrr",
+                                    label = %self.label,
+                                    "[close-window] round 5: DestroyWindow failed with window still alive — keeping reducer registration"
+                                );
                             }
-                            unregister_after_parking_close(&self.state, &self.label);
                             return;
                         }
                     } else {
