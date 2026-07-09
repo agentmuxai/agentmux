@@ -492,7 +492,18 @@ async function initHostNewWindow(): Promise<void> {
     }
 }
 
-export async function initApp() {
+// initApp has two callers — bootstrap.ts and this module's self-start below —
+// and in CEF both fire (isHostApp() reads window.__AGENTMUX_IPC_PORT__, which
+// setupCefApi() only sets later, at bootstrap time). It must run exactly once
+// per page: a second concurrent run reaches CreateWindow twice and strands an
+// unregistered Window row in srv's Client.windowids.
+let initAppOnce: Promise<void> | undefined;
+
+export function initApp(): Promise<void> {
+    return (initAppOnce ??= initAppInner());
+}
+
+async function initAppInner() {
     // window.api is guaranteed to exist here — bootstrap.ts calls
     // setupCefApi() before calling initApp().
     // Defensive wait: if a race condition leaves window.api unset, poll briefly.
