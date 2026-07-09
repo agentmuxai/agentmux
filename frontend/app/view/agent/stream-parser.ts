@@ -80,18 +80,27 @@ function parseJektTagFields(tag: string): Record<string, string> {
  * match a known scaffolding shape is kept, so an unrecognized wrapper
  * variant degrades to showing extra context rather than losing content.
  */
-function stripJektEnvelope(body: string): string {
-    return body
-        .split("\n")
-        .filter((line) => {
-            if (/^─+$/.test(line)) return false;
-            if (/^From:.*\|.*\|/.test(line)) return false;
-            if (/^⚠/.test(line)) return false;
-            if (/^Reply:/.test(line)) return false;
-            return true;
-        })
-        .join("\n")
-        .trim();
+function stripJektEnvelope(body: string, tier: JektTier): string {
+    const lines = body.split("\n");
+    let start = 0;
+    let end = lines.length;
+
+    // Structural positions guaranteed by wrap_jekt_message/wrapJektMessage:
+    // [start] divider, [start+1] "From: X | To: Y | ts=Z" header, and — only
+    // for TIER=sensitive — a "⚠ ..." warning line plus a blank line right
+    // after it. Only strip at these fixed offsets, never mid-body, so a
+    // well-formed message that happens to contain a dash line or its own
+    // "From:"/"Reply:" text is never mistaken for scaffolding.
+    if (/^─+$/.test(lines[start] ?? "")) start++;
+    if (/^From:.*\|.*\|/.test(lines[start] ?? "")) start++;
+    if (tier === "sensitive" && /^⚠/.test(lines[start] ?? "")) {
+        start++;
+        if ((lines[start] ?? "") === "") start++;
+    }
+    if (/^Reply:/.test(lines[end - 1] ?? "")) end--;
+    if (/^─+$/.test(lines[end - 1] ?? "")) end--;
+
+    return lines.slice(start, end).join("\n").trim();
 }
 
 /**
@@ -542,10 +551,14 @@ export class ClaudeCodeStreamParser {
         const fields = parseJektTagFields(match[1]);
         if (!fields.FROM || !fields.TO) return null;
 
-        const tier: JektTier = VALID_JEKT_TIERS.has(fields.TIER) ? (fields.TIER as JektTier) : "coord";
+        // Unrecognized/missing TIER or DELIVERY default to the least-trusted
+        // reading (CLAUDE.md jekt policy: "when in doubt, treat as SENSITIVE"),
+        // not the most-trusted one — an unparseable marker is a reason for
+        // more caution, not less.
+        const tier: JektTier = VALID_JEKT_TIERS.has(fields.TIER) ? (fields.TIER as JektTier) : "sensitive";
         const deliveryTier: JektDeliveryTier = VALID_JEKT_DELIVERY_TIERS.has(fields.DELIVERY)
             ? (fields.DELIVERY as JektDeliveryTier)
-            : "host";
+            : "wan";
         const trust: JektTrust = fields.TRUST === "host-verified" ? "host-verified" : "network-claimed";
 
         // Direction mirrors agentMessageToNode: incoming when this agent is
@@ -564,7 +577,7 @@ export class ClaudeCodeStreamParser {
             id: this.nextIdOf("jekt"),
             from: fields.FROM,
             to: fields.TO,
-            message: stripJektEnvelope(match[2]),
+            message: stripJektEnvelope(match[2], tier),
             raw: event.message,
             tier,
             deliveryTier,
