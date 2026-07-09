@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.52.0 — 2026-07-09
+
+- feat(jekt): render [JEKT:...] markers as JektBubble in the agent pane
+- fix(identity): resolver reads direct account links only, drops bundle-binding fallback (#1624 PR-B)
+- fix(bashwrap): suppress orphaned console window on PTY-fallback pipe path
+- fix(cef): isolated window contexts are in-memory by design — ends the 'Cannot create profile' error logged on every launch since v0.33.x
+
+
 ## 0.51.2 — 2026-07-08
 
 - feat(mcp): probe App API + mcp-capabilities.ts — MCP server health check (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08)
