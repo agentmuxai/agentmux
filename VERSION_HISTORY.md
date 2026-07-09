@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.52.1 — 2026-07-09
+
+- fix(window): end the startup window storm — single-run initApp, reproject GCs never-registered rows
+
+
 ## 0.52.0 — 2026-07-09
 
 - feat(jekt): render [JEKT:...] markers as JektBubble in the agent pane
