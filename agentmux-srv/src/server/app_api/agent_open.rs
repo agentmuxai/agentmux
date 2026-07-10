@@ -203,15 +203,41 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // here to the default open path.
                 // See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md
                 // ("Mechanism 2 — continuity"), action item 4.
-                let resume_session_id: Option<String> = wstore.shared_agent_registry()
-                    .and_then(|reg| reg.list_active().ok())
-                    .and_then(|records| {
-                        records.into_iter()
-                            .filter(|r| r.data.definition_id == agent.id)
-                            .filter(|r| r.data.session_id.as_deref().map_or(false, |s| !s.is_empty()))
-                            .max_by_key(|r| r.data.last_launched_at_ms)
+                //
+                // Concurrency guard (reagent P1 on PR #2059): only seed
+                // agent:sessionid when no OTHER block for this same agent
+                // definition currently has a LIVE controller registered
+                // anywhere in this process — not just this tab (find_agent_block
+                // above only scoped the "reuse" check to the target tab).
+                // Without this, opening the same named agent in a second tab
+                // while the first is still live would seed the new block with
+                // the SAME session_id, letting two controllers concurrently
+                // `--resume` one provider session — risking transcript
+                // corruption or exactly the orphaning bug this fix exists to
+                // prevent. A block with no registered controller (e.g. right
+                // after an app restart, before anything has resynced) is not
+                // "live" and doesn't block seeding.
+                let agent_live_elsewhere = wstore.get_all::<Block>()
+                    .map(|blocks| {
+                        blocks.iter().any(|b| {
+                            obj::meta_get_string(&b.meta, "agentId", "") == agent.id
+                                && blockcontroller::get_controller(&b.oid).is_some()
+                        })
                     })
-                    .and_then(|r| r.data.session_id);
+                    .unwrap_or(false);
+                let resume_session_id: Option<String> = if agent_live_elsewhere {
+                    None
+                } else {
+                    wstore.shared_agent_registry()
+                        .and_then(|reg| reg.list_active().ok())
+                        .and_then(|records| {
+                            records.into_iter()
+                                .filter(|r| r.data.definition_id == agent.id)
+                                .filter(|r| r.data.session_id.as_deref().map_or(false, |s| !s.is_empty()))
+                                .max_by_key(|r| r.data.last_launched_at_ms)
+                        })
+                        .and_then(|r| r.data.session_id)
+                };
 
                 let mut meta = MetaMapType::new();
                 meta.insert("view".to_string(), json!("agent"));
