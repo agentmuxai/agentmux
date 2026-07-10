@@ -5,9 +5,10 @@
  * AgentComposerStrip — slim 28-32px status row that sits directly above
  * the textarea in the agent pane composer region.
  *
- * LEFT:  AgentRuntimeDropup (single Mode · Model · Effort trigger) · Shell toggle
- * RIGHT: tokens (↑in ↓out) · elapsed · ⚙N process badge ·
- *        context text (12.1k / 64k)
+ * LEFT:   AgentRuntimeDropup (single Mode · Model · Effort trigger)
+ * CENTER: tokens (↑in ↓out) · elapsed — true-centered in the bar
+ * RIGHT:  ⚙N process badge · context text (12.1k / 64k) · Shell toggle
+ *         (Shell is rightmost — SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md)
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
  * the details drawer (ActivityLogPanel + the AgentShellSubblock terminal,
@@ -168,24 +169,20 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
             </span>
 
-            {/* Right zone — Shell toggle + stats + process badge + context text.
-                Floats right via margin-left:auto (not space-between) so it stays
-                pinned right whether it's sharing the row with the controls zone
-                or has wrapped onto its own line at narrow widths — see the
-                flex-wrap rules in _composer-strip.scss. */}
-            <span class="agent-composer-strip-right">
-                <button
-                    type="button"
-                    class="agent-composer-strip-log-btn"
-                    classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
-                    title={props.logOpen ? "Hide the shell" : "Show the shell (activity log + interactive terminal)"}
-                    onClick={() => props.onToggleLog()}
-                >
-                    Shell
-                </button>
+            {/* Center zone — token/elapsed stats, true-centered in the bar via
+                the grid's middle column (see _composer-strip.scss). The
+                wrapper span always renders (even with no stats yet) so the
+                grid keeps 3 children and the right zone stays in the
+                rightmost column instead of sliding into the middle one. */}
+            <span class="agent-composer-strip-stats-zone">
                 <Show when={rightText()}>
                     <span class="agent-composer-strip-stats">{rightText()}</span>
                 </Show>
+            </span>
+
+            {/* Right zone — process badge + context text + Shell toggle, in
+                that order so Shell is the rightmost element in the bar. */}
+            <span class="agent-composer-strip-right">
                 <Show when={(props.processCount ?? 0) > 0}>
                     <button
                         type="button"
@@ -210,6 +207,15 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         {ctxText()}
                     </span>
                 </Show>
+                <button
+                    type="button"
+                    class="agent-composer-strip-log-btn"
+                    classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
+                    title={props.logOpen ? "Hide the shell" : "Show the shell (activity log + interactive terminal)"}
+                    onClick={() => props.onToggleLog()}
+                >
+                    Shell
+                </button>
             </span>
         </div>
     );

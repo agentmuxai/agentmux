@@ -11,7 +11,7 @@
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
  */
 
-import { createEffect, createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import type { AskUserQuestionAnswer, AskUserQuestionRequest, ToolNode } from "../types";
 import "./AgentQuestionPanel.scss";
@@ -147,11 +147,40 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         props.onDefer?.();
     };
 
-    const onKeyDown = (e: KeyboardEvent) => {
+    // Any `<input>`/`<textarea>`/contentEditable is "editable" — this is the
+    // broad check (reagent P1, PR #2060: an earlier version of this file
+    // narrowed it to TEXTAREA/contentEditable only, so it no longer
+    // recognized a plain text `<input>` elsewhere in the pane — e.g. the
+    // Ctrl+F search bar, AgentSearchBar.tsx — as something Enter shouldn't
+    // be stolen from, silently submitting a fully-answered pending question
+    // while the user was just navigating search matches).
+    const isEditableTarget = (target: EventTarget | null): boolean => {
+        const el = target as HTMLElement | null;
+        if (!el) return false;
+        if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return true;
+        return el.isContentEditable;
+    };
+
+    const handleKey = (e: KeyboardEvent) => {
+        const target = e.target as HTMLElement | null;
+        // Scope to this panel's own pane so a question in pane A doesn't
+        // react to keystrokes typed in pane B. Mirrors AgentDecisionPanel
+        // (codex P1, PR #556).
+        const paneRoot = rootRef?.closest(".agent-view") as HTMLElement | null;
+        if (paneRoot && target && !paneRoot.contains(target)) return;
+
+        // Whether the keystroke actually originated inside this panel's own
+        // DOM (an option, the "Other" input, or the panel root itself) —
+        // mirrors AgentDecisionPanel's `inPanel` (AgentDecisionPanel.tsx:208).
+        const inPanel = !!rootRef && !!target && rootRef.contains(target);
+
         if (e.key === "Enter" && !e.shiftKey) {
-            // Don't hijack Enter while typing in an "Other" field.
-            const tag = (e.target as HTMLElement | null)?.tagName;
-            if (tag === "INPUT" || tag === "TEXTAREA") return;
+            // Outside the panel, don't hijack Enter from a real editable
+            // control elsewhere in the pane (composer textarea, Ctrl+F
+            // search input, etc.). Inside the panel, every control (options,
+            // "Other" free-text input) submits on Enter regardless — none of
+            // them treat Enter as "insert a newline".
+            if (!inPanel && isEditableTarget(target)) return;
             e.preventDefault();
             submit();
         } else if (e.key === "Escape") {
@@ -159,6 +188,17 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
             defer();
         }
     };
+
+    // Global capture-phase listener, mirroring AgentDecisionPanel: the panel
+    // has tabindex=-1 and never auto-focuses, so a plain onKeyDown on the
+    // root div only fired once the user had already clicked something
+    // inside it — Enter otherwise never reached the handler at all.
+    createEffect(() => {
+        if (!request()) return;
+        const onWindowKey = (e: KeyboardEvent) => handleKey(e);
+        window.addEventListener("keydown", onWindowKey, true);
+        onCleanup(() => window.removeEventListener("keydown", onWindowKey, true));
+    });
 
     return (
         <Show when={request()} keyed>
@@ -168,6 +208,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                     fallback={
                         <button
                             type="button"
+                            ref={(el) => (rootRef = el)}
                             class="agent-question-panel-minimized"
                             onClick={() => setMinimized(false)}
                         >
@@ -185,7 +226,6 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                         role="group"
                         aria-label="Agent question"
                         tabindex={-1}
-                        onKeyDown={onKeyDown}
                     >
                         <div class="agent-question-panel-header">
                             <span class="agent-question-panel-icon" aria-hidden="true">❓</span>

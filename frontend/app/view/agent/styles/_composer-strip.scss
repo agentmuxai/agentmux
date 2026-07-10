@@ -1,22 +1,23 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// AgentComposerStrip — slim 28-32px status row above the textarea, growing to
-// two rows at narrow widths (see the flex-wrap rules below).
-//   LEFT:  AgentRuntimeDropup (single Mode · Model · Effort trigger)
-//   RIGHT: Shell toggle · token stats · elapsed · process badge · context text
-//          (floats right via margin-left:auto; wraps onto its own row below
-//          the controls zone once both zones no longer fit on one line)
+// AgentComposerStrip — slim 28-32px status row above the textarea.
+//   LEFT:   AgentRuntimeDropup (single Mode · Model · Effort trigger)
+//   CENTER: token/elapsed stats, true-centered in the bar
+//   RIGHT:  process badge · context text · Shell toggle (Shell is rightmost)
+// 3-column grid (1fr auto 1fr) so the center column sits at the bar's
+// mathematical center regardless of how wide the left/right content is —
+// a flex row with one auto-margin zone can't do that once something sits
+// to the right of the auto-margin zone too (Shell used to be left-most in
+// that zone; now it's the last child of the right column instead).
 
 @use "../../../mixins.scss";
 
 .agent-composer-strip {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: flex-start;
     gap: var(--space-2);
-    row-gap: var(--space-1);
     min-height: 28px;
     padding: var(--space-1) var(--space-2);
     font-size: 11px;
@@ -33,24 +34,32 @@
     }
 }
 
-// ── Controls zone (left) ────────────────────────────────────────────────────
+// ── Controls zone (left column) ─────────────────────────────────────────────
 
 .agent-composer-strip-controls {
     display: flex;
     align-items: center;
     gap: var(--space-1);
-    flex-shrink: 0;
+    justify-self: start;
+}
+
+// ── Stats zone (center column) ──────────────────────────────────────────────
+
+.agent-composer-strip-stats-zone {
+    justify-self: center;
 }
 
 // The consolidated Mode/Model/Effort trigger — a single <button> laying out
 // a "Mode · Model · Effort" summary label + up-caret; same slim-pill footprint
-// as the former three separate selects/drop-ups combined into one.
+// as the former three separate selects/drop-ups combined into one. No fixed
+// max-width — sizes to its content; a cap only reappears under real space
+// pressure (see the ≤320px container query below), so it only ellipsizes
+// when the pane genuinely has no room for it.
 .agent-runtime-dropup-trigger {
     display: inline-flex;
     align-items: center;
     justify-content: space-between;
     gap: 3px;
-    max-width: 160px;
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
     border-radius: 0;
@@ -158,17 +167,17 @@
     }
 }
 
-// ── Right zone ──────────────────────────────────────────────────────────────
-// margin-left:auto (not space-between on the parent) pins this zone to the
-// right edge whether it's sharing the row with the controls zone or has
-// wrapped onto its own row — see .agent-composer-strip's flex-wrap.
+// ── Right zone (right column) ───────────────────────────────────────────────
+// Process badge · context text · Shell toggle, in that order — Shell last so
+// it's the rightmost element in the whole bar. justify-self:end pins the
+// column to the grid's right edge (the grid, not a margin trick, does the
+// pinning now).
 
 .agent-composer-strip-right {
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
-    flex-shrink: 0;
-    margin-left: auto;
+    justify-self: end;
 }
 
 .agent-composer-strip-stats {
@@ -240,6 +249,9 @@
     // SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02. Progressive
     // collapse — short/icon/combined forms — is the follow-up.)
     .agent-composer-strip-log-btn { font-size: 9px; padding: 1px 3px; }
+    // Only reintroduce a cap here, where the pane genuinely doesn't have
+    // room for the trigger's full "Mode · Model · Effort" summary.
+    .agent-runtime-dropup-trigger { max-width: 120px; }
 }
 
 // ── Resizable details drawer (ResizableDetailsDrawer.tsx) ──────────────────
