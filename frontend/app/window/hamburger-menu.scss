@@ -20,32 +20,16 @@
     -webkit-app-region: no-drag;
     cursor: default;
     align-self: center;
-    // `.window-header` is 33px tall but has `padding-top: var(--space-1-5)`
-    // and no padding-bottom (window-header.*.scss) — its content box (where
-    // `align-self: center` actually centers this button, whether nested
-    // directly in `.window-header` (macOS `--right`) or one level down in
-    // `.tab-bar`, which adds no padding of its own) sits `padding-top / 2`
-    // below the bar's TRUE vertical center. `align-items: end` on both
-    // containers means tabs/traffic-lights never notice this — they anchor
-    // to the bottom regardless — but anything that wants to look centered
-    // in the whole bar (this icon) needs to shift up by that half-padding
-    // amount. This term is exact and platform-independent (same padding-top
-    // in all three window-header.*.scss files) — confirmed via
-    // getBoundingClientRect(): header center y=16.5, button center y=19.5
-    // unshifted, i.e. exactly padding-top/2 = 3px off.
-    --hb-geo-center: calc(var(--space-1-5) / -2);
+    // Windows/Linux left-of-tabs placement: manually tuned against a live
+    // task dev instance (three rounds: geometric center alone read too
+    // high, +1px still wasn't enough, +2px was) — independent of macOS's
+    // `--right` placement below, which has its own separate manual tuning
+    // history and is not derived from or related to this value. The two
+    // platforms sit in different contexts (different neighboring elements,
+    // different margins) and are tuned independently, not from one shared
+    // formula.
     position: relative;
-    // Windows/Linux (this base rule, left-of-tabs placement): exact
-    // geometric centering (--hb-geo-center alone) still read 2px too high
-    // on a live task dev smoke test, so this adds an empirical +2px optical
-    // correction on top (tuned in two rounds: +1px wasn't enough, +2px
-    // was). macOS's `--right` variant below does NOT add this — its own
-    // separate manual tuning history (#2013 "2px up", #2016 "3px up",
-    // i.e. exactly --hb-geo-center with zero extra fudge) already arrived
-    // at pure geometric center reading correctly there, so don't reapply
-    // a Windows-tuned correction to a platform that was never measured
-    // against it.
-    top: calc(var(--hb-geo-center) + 2px);
+    top: calc(var(--space-1-5) / -2 + 2px);
     // Left-of-tabs placement (Windows/Linux): symmetric 4px margin on both
     // sides so the whitespace left of the hamburger matches the right (which
     // also clears the leading .tab-separator → icon · 10px · 1px sep · 10px ·
@@ -70,11 +54,12 @@
 
     // macOS: pinned to the far right of the title bar, after the action
     // widgets. Add breathing room so it doesn't sit flush against the
-    // window's right frame. Vertical offset: pure geometric center, no
-    // extra optical fudge — see the comment on --hb-geo-center above.
+    // window's right frame.
     &--right {
         margin-left: 4px;
         margin-right: 8px;
-        top: var(--hb-geo-center);
+        // 3px optical alignment nudge vs. the other title-bar icons.
+        position: relative;
+        top: -3px;
     }
 }
