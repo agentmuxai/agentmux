@@ -148,12 +148,12 @@ No change to `build_mcp_config_from_refs`'s output shape — `config_hash`/`prer
 
 ## 7. Phasing
 
-| Phase | Scope | Depends on |
-|---|---|---|
-| **A** | §4.1 structured config UI + interpolation, §4.4 health probe + `mcp-capabilities.ts`, §5 migration | none — pure additive extension of the shipped Phase 1 primitive |
-| **B** | §4.6 catalog UI + the Ableton catalog entry + pilot acceptance bar (§6) | Phase A (needs the probe to render the remediation string) |
-| **C** | §4.2 secrets-via-Account indirection, §4.3 OAuth (DCR + static fallback) | Phase A; reuses existing Account/OAuth infra, additive |
-| **D** | §4.5 tool introspection/disable, §4.7 config-hash pinning | Phase A; D's approval-gate *enforcement* is explicitly deferred to the future Policy primitive — D here only stores the data it needs |
+| Phase | Scope | Depends on | Owner |
+|---|---|---|---|
+| **A** | §4.1 structured config UI + interpolation, §4.4 health probe + `mcp-capabilities.ts`, §5 migration | none — pure additive extension of the shipped Phase 1 primitive | Shipped (#2030) |
+| **B** | §4.6 catalog UI + the Ableton catalog entry + pilot acceptance bar (§6) | Phase A (needs the probe to render the remediation string) | AgentY (2026-07-10) — building on the shipped Phase A probe; TouchDesigner/ComfyUI entries fold in as follow-ons once the Ableton pattern validates, per this section's own recommendation, not a separate track |
+| **C** | §4.2 secrets-via-Account indirection, §4.3 OAuth (DCR + static fallback) | Phase A; reuses existing Account/OAuth infra, additive | Open |
+| **D** | §4.5 tool introspection/disable, §4.7 config-hash pinning | Phase A; D's approval-gate *enforcement* is explicitly deferred to the future Policy primitive — D here only stores the data it needs | Open |
 
 Ableton MCP (Phase B) intentionally ships **before** OAuth (Phase C) — it validates the highest-value, lowest-risk slice (structured config + health probe) end-to-end on a real third-party server before the OAuth surface (the piece with the largest security blast radius per §3's CVE notes) gets built.
 
