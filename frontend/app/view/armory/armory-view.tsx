@@ -4,7 +4,7 @@
 import { createSignal, For, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
-import { IdentityManager } from "@/app/view/identity/identity-manager";
+import { AgentIdentitiesPanel } from "@/app/view/identity/agent-identities-panel";
 import { MemoryManager } from "@/app/view/memory/memory-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
@@ -58,7 +58,7 @@ export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Ele
                         <AccountsManager />
                     </div>
                     <div class="bundle-manager-pane bundle-manager-pane--identity" classList={{ "is-hidden": section() !== "identities" }}>
-                        <IdentityManager />
+                        <AgentIdentitiesPanel />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "brain" }}>
                         <GlobalBrainManager />

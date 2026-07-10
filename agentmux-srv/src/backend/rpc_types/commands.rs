@@ -168,6 +168,12 @@ pub const COMMAND_ACCOUNT_OAUTH_CANCEL: &str = "account.oauth.cancel";
 pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";
 pub const COMMAND_UNLINK_AGENT_IDENTITY: &str = "unlinkagentidentity";
 pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
+/// Every (agent_id, account_id, provider) row across every agent — powers
+/// the Armory "Identities" read-only rail (issue #1624 PR-C), which needs
+/// all agents' bindings up front rather than one `listagentidentities` call
+/// per row. Wraps `Store::agent_identity_list_all`, previously only used by
+/// the m0013/m0014 backfill migrations.
+pub const COMMAND_LIST_ALL_AGENT_IDENTITIES: &str = "listallagentidentities";
 
 // Identity bundles (v7 — named credential bundles)
 pub const COMMAND_LIST_IDENTITY_BUNDLES: &str = "listidentitybundles";

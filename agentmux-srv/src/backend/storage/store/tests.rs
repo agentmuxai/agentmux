@@ -519,6 +519,37 @@
         assert!(store.agent_identity_list_for_agent("ag1").unwrap().is_empty());
     }
 
+    // Exercises agent_identity_list_all() across multiple agents and
+    // providers, not just the empty/single-agent cases the migration tests
+    // (m0013's `is_empty()` assertion) happen to cover. Backs the Armory
+    // "Identities" read-only rail (issue #1624 PR-C), the first live RPC
+    // consumer of this method beyond the startup-backfill migrations.
+    #[test]
+    fn test_agent_identity_list_all_spans_every_agent_and_provider() {
+        let store = v6_test_store();
+        let mut agent1 = sample_agent("ag1", "agent-x");
+        let mut agent2 = sample_agent("ag2", "agent-y");
+        store.agent_def_insert(&mut agent1).unwrap();
+        store.agent_def_insert(&mut agent2).unwrap();
+        store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
+        store.identity_upsert(&sample_account("id-claude", "claude")).unwrap();
+
+        store.agent_identity_link("ag1", "id-gh", "github").unwrap();
+        store.agent_identity_link("ag1", "id-claude", "claude").unwrap();
+        store.agent_identity_link("ag2", "id-claude", "claude").unwrap();
+
+        let mut all = store.agent_identity_list_all().unwrap();
+        all.sort_by(|a, b| (a.agent_id.as_str(), a.provider.as_str()).cmp(&(b.agent_id.as_str(), b.provider.as_str())));
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].agent_id, "ag1");
+        assert_eq!(all[0].provider, "claude");
+        assert_eq!(all[1].agent_id, "ag1");
+        assert_eq!(all[1].provider, "github");
+        assert_eq!(all[2].agent_id, "ag2");
+        assert_eq!(all[2].provider, "claude");
+        assert_eq!(all[2].account_id, "id-claude");
+    }
+
     #[test]
     fn test_instance_create_update_filter() {
         let store = v6_test_store();
