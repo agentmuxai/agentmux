@@ -3,8 +3,8 @@
 
 /**
  * ActivityDock — a strip pinned above the composer listing every long-running
- * activity (Phase 1: shells) as a uniform row. Click a row → its live view
- * expands in the dock; click again → collapses.
+ * activity (shells + subagents spawned by this pane) as a uniform row. Click
+ * a row → its live view expands in the dock; click again → collapses.
  *
  * Expansion state is local to the dock (`expandedIds` signal). It is intentionally
  * NOT shared with `documentState.pinnedNodes` — that shared state caused the
@@ -23,6 +23,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ActivityRow } from "./ActivityRow";
 import { shellActivities } from "../activity/shell-adapter";
+import { subagentActivities } from "../activity/subagent-adapter";
+import { allSubagentsAtom } from "../activity/subagent-source";
 import { RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
 import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
@@ -44,6 +46,10 @@ function overflowSummary(items: PinnedActivity[]): string {
 
 interface ActivityDockProps {
     documentAtom: SignalPair<DocumentNode[]>;
+    /** This pane's own block id — scopes the subagent adapter to subagents
+     *  spawned by THIS agent (D5: the dock is block-scoped), same as shells
+     *  are already scoped by living in this pane's own document. */
+    blockId: string;
 }
 
 export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
@@ -55,7 +61,10 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     // expanding in the dock does not also expand the inline PersistentShellBlock.
     const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
 
-    const allActivities = createMemo(() => shellActivities(nodes()));
+    const allActivities = createMemo(() => [
+        ...shellActivities(nodes()),
+        ...subagentActivities(allSubagentsAtom(), props.blockId),
+    ]);
 
     const activityById = createMemo(() => {
         const m = new Map<string, PinnedActivity>();

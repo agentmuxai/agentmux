@@ -21,6 +21,9 @@ export interface ActiveSubagent {
     parent_block_id: string;
     session_id: string;
     status: "active" | "completed";
+    /** Unix ms when this subagent was first observed — set once, immutable.
+     *  Distinct from `last_event_at`, which advances on every journal read. */
+    spawned_at: number;
     last_event_at: number;
     event_count: number;
     model: string | null;
