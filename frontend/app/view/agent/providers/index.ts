@@ -197,8 +197,14 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // trap for any `models.find(m => m.default)` reader.
         models: [
             { value: "opus", label: "Opus 4.8", description: "Claude Opus 4.8 — highest quality", aliases: ["claude-opus"] },
-            { value: "sonnet", label: "Sonnet 4.6", default: true, description: "Claude Sonnet 4.6 — balanced", aliases: ["claude-sonnet"] },
+            { value: "sonnet", label: "Sonnet 5", default: true, description: "Claude Sonnet 5 — balanced", aliases: ["claude-sonnet"] },
             { value: "haiku", label: "Haiku 4.5", description: "Claude Haiku 4.5 — fastest", aliases: ["claude-haiku"] },
+            // No confirmed generic "fable" alias (unlike opus/sonnet/haiku above), so this
+            // pins the concrete model id directly — same id already relied on by
+            // context-window.ts's 1M-context-window band. Kept current here so the
+            // offline/API-failure fallback still shows it (see setProviderModels below
+            // for how this stays in sync with the live catalog once reachable).
+            { value: "claude-fable-5", label: "Fable 5", description: "Claude Fable 5" },
         ],
     },
     codex: {
@@ -556,14 +562,23 @@ function cleanLabel(label: string): string {
 /**
  * Fold the authoritative catalog into a provider's model list. Behavior-
  * preserving by design:
- *  - Curated family entries (opus/sonnet/haiku) keep their short `value` (which
- *    `--model` resolves to the current version), `default` marker, `aliases`,
- *    and `description`; only their **label** is refreshed to the newest matching
+ *  - Curated family entries (opus/sonnet/haiku/fable) keep their curated
+ *    `value` (for opus/sonnet/haiku, a short alias `--model` resolves to the
+ *    current version; fable has no such alias yet, so its `value` is the
+ *    concrete pinned id instead), `default` marker, `aliases`, and
+ *    `description`; only their **label** is refreshed to the newest matching
  *    API model. This is what turns "Sonnet 4.6" into "Sonnet 5" without changing
  *    what `--model` receives or breaking `models.find(m => m.default)`.
- *  - Families the curated list doesn't cover (Fable today, any future family)
- *    are appended automatically, one newest entry each, using the concrete API
- *    id as `value` (always a valid `--model` target). No family is hardcoded.
+ *  - Families the curated list doesn't cover (any future family) are appended
+ *    automatically, one newest entry each, using the concrete API id as
+ *    `value` (always a valid `--model` target). No family is hardcoded.
+ *  - Matching uses `familyKey()` (alphabetic tokens, "claude" stripped, digits
+ *    dropped) rather than a raw substring test, so a *version-pinned* curated
+ *    `value` (fable's `claude-fable-5`) still matches a future API version
+ *    (`claude-fable-6`) the same way a generic alias (`sonnet`) already does —
+ *    a plain `.includes()` test would only match the exact pinned string,
+ *    leaving the curated row stale AND appending a duplicate "extra" entry
+ *    once a newer version showed up in the API.
  * Empty input (no token / macOS Keychain / offline) is a no-op → static list.
  */
 export function setProviderModels(id: string, apiModels: ProviderModel[]): void {
@@ -576,8 +591,8 @@ export function setProviderModels(id: string, apiModels: ProviderModel[]): void 
 
     // 1. Refresh curated family labels from the newest API model in that family.
     const curated = base.models.map((m) => {
-        const family = m.value.toLowerCase();
-        const matches = apiModels.filter((a) => a.value.toLowerCase().includes(family));
+        const family = familyKey(m.value);
+        const matches = apiModels.filter((a) => familyKey(a.value) === family);
         if (matches.length === 0) return m;
         matches.forEach((a) => consumed.add(a.value)); // don't re-surface as an "extra"
         return { ...m, label: cleanLabel(pickNewest(matches).label) };

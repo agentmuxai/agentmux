@@ -11,7 +11,7 @@
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
  */
 
-import { createEffect, createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import type { AskUserQuestionAnswer, AskUserQuestionRequest, ToolNode } from "../types";
 import "./AgentQuestionPanel.scss";
@@ -147,11 +147,31 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         props.onDefer?.();
     };
 
-    const onKeyDown = (e: KeyboardEvent) => {
+    // `<input>` covers both the radio/checkbox options AND the "Other"
+    // free-text field — none of them treat Enter as "insert a newline", so
+    // Enter should submit from any of them, same as the Submit button. Only
+    // a real multi-line field (a `<textarea>` elsewhere in the pane, e.g. the
+    // composer) or a contentEditable region needs Enter left alone.
+    const isTypingTarget = (target: EventTarget | null): boolean => {
+        const el = target as HTMLElement | null;
+        if (!el) return false;
+        if (el.tagName === "TEXTAREA") return true;
+        return el.isContentEditable;
+    };
+
+    const handleKey = (e: KeyboardEvent) => {
+        const target = e.target as HTMLElement | null;
+        // Scope to this panel's own pane so a question in pane A doesn't
+        // react to keystrokes typed in pane B. Mirrors AgentDecisionPanel
+        // (codex P1, PR #556).
+        const paneRoot = rootRef?.closest(".agent-view") as HTMLElement | null;
+        if (paneRoot && target && !paneRoot.contains(target)) return;
+
         if (e.key === "Enter" && !e.shiftKey) {
-            // Don't hijack Enter while typing in an "Other" field.
-            const tag = (e.target as HTMLElement | null)?.tagName;
-            if (tag === "INPUT" || tag === "TEXTAREA") return;
+            // Don't hijack Enter in a real multi-line field elsewhere in the
+            // pane (e.g. the composer textarea) — everything inside this
+            // panel (options, "Other" input) submits on Enter instead.
+            if (isTypingTarget(target)) return;
             e.preventDefault();
             submit();
         } else if (e.key === "Escape") {
@@ -159,6 +179,17 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
             defer();
         }
     };
+
+    // Global capture-phase listener, mirroring AgentDecisionPanel: the panel
+    // has tabindex=-1 and never auto-focuses, so a plain onKeyDown on the
+    // root div only fired once the user had already clicked something
+    // inside it — Enter otherwise never reached the handler at all.
+    createEffect(() => {
+        if (!request()) return;
+        const onWindowKey = (e: KeyboardEvent) => handleKey(e);
+        window.addEventListener("keydown", onWindowKey, true);
+        onCleanup(() => window.removeEventListener("keydown", onWindowKey, true));
+    });
 
     return (
         <Show when={request()} keyed>
@@ -168,6 +199,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                     fallback={
                         <button
                             type="button"
+                            ref={(el) => (rootRef = el)}
                             class="agent-question-panel-minimized"
                             onClick={() => setMinimized(false)}
                         >
@@ -185,7 +217,6 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                         role="group"
                         aria-label="Agent question"
                         tabindex={-1}
-                        onKeyDown={onKeyDown}
                     >
                         <div class="agent-question-panel-header">
                             <span class="agent-question-panel-icon" aria-hidden="true">❓</span>
