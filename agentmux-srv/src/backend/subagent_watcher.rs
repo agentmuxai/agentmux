@@ -43,6 +43,11 @@ pub struct SubagentInfo {
     pub parent_agent: String,
     pub parent_block_id: String,
     pub session_id: String,
+    /// Unix ms when this subagent was first observed (set once, at
+    /// creation, never updated) — distinct from `last_event_at`, which
+    /// advances on every journal read. Needed by the frontend's activity
+    /// dock to render an elapsed timer / sort by spawn recency.
+    pub spawned_at: u64,
     pub last_event_at: u64,
     pub status: SubagentStatus,
     pub event_count: usize,
@@ -658,6 +663,7 @@ impl SubagentWatcher {
                         parent_agent: parent_agent.to_string(),
                         parent_block_id: parent_block_id.to_string(),
                         session_id: session_id.clone(),
+                        spawned_at: now_millis(),
                         last_event_at: now_millis(),
                         status: SubagentStatus::Active,
                         event_count: 0,
@@ -1434,6 +1440,7 @@ mod tests {
                 parent_agent: parent_agent.to_string(),
                 parent_block_id: String::new(),
                 session_id: session_id.to_string(),
+                spawned_at: 0,
                 last_event_at: 0,
                 status: SubagentStatus::Active,
                 event_count: 0,

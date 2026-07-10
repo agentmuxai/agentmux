@@ -19,6 +19,7 @@ function mk(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id"
         parent_block_id: "block-1",
         session_id: "session-1",
         status: "completed",
+        spawned_at: 0,
         last_event_at: 0,
         event_count: 1,
         model: null,
