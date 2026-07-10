@@ -113,9 +113,10 @@ tasks:
             - bash scripts/package.sh {{.CLI_ARGS}}
 
     package:release:
-        desc: 'Like `task package` but (a) strips source maps (~28 MB) and (b) bakes the "stable" channel so the artifact opens the user''s real data dir. Use this for GitHub release artifacts. Local builds (`task package`) keep maps and use the branch-scoped local channel. See docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md.'
+        desc: 'Like `task package` but (a) strips source maps (~28 MB) and (b) bakes the "stable" channel so the artifact opens the user''s real data dir. Guarded: refuses unless the tree is clean and HEAD is a merged `chore: release v*` commit (AGENTMUX_STABLE_OVERRIDE=1 to bypass). Local builds (`task package`) keep maps and use the branch-scoped local channel. See docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md.'
         platforms: [windows]
         cmds:
+            - bash scripts/guard-stable-build.sh
             - bash -c 'STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh {{.CLI_ARGS}}'
 
     package:msix:
@@ -154,9 +155,10 @@ tasks:
             - bash scripts/package-linux.sh {{.CLI_ARGS}}
 
     package:release:linux:
-        desc: 'Like `task package:linux` but bakes the "stable" channel so the artifact opens the user''s real data dir. Use this for GitHub release artifacts. See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'
+        desc: 'Like `task package:linux` but bakes the "stable" channel so the artifact opens the user''s real data dir. Guarded: refuses unless the tree is clean and HEAD is a merged `chore: release v*` commit (AGENTMUX_STABLE_OVERRIDE=1 to bypass). See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'
         platforms: [linux]
         cmds:
+            - bash scripts/guard-stable-build.sh
             - bash -c 'RELEASE_CHANNEL=stable bash scripts/package-linux.sh {{.CLI_ARGS}}'
 
     check:menu-positioning:
