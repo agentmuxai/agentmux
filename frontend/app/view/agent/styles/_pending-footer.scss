@@ -75,9 +75,21 @@
             gap: 1px;
             position: relative;
 
+            // Pinned mic — right edge of the composer, matching the
+            // header mic's old top-right feel but anchored to the input
+            // itself. Sits in the container's top-right corner rather than
+            // vertically centered against the textarea's full (growable)
+            // height, so it doesn't drift as the box grows past one line.
+            .agent-input-mic {
+                position: absolute;
+                top: 3px;
+                right: 5px;
+                z-index: 1;
+            }
+
             .agent-input {
                 width: 100%;
-                padding: 3px var(--space-1);
+                padding: 3px 22px 3px var(--space-1);
                 background: var(--main-bg-color);
                 border: 1px solid var(--border-color);
                 border-radius: 0;
