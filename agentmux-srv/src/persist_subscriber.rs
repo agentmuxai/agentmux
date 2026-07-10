@@ -640,7 +640,13 @@ fn apply_srv_window_opened(
 /// prune client.windowids FIRST (so any read between the two ops
 /// doesn't see a dangling id), then delete the Window row.
 /// (codex P1 #619.)
-fn apply_srv_window_closed(
+///
+/// `pub(crate)`: besides the `SrvWindowClosed` subscriber arm, the
+/// `CloseWindow` handler calls this directly on its divergence path —
+/// when the reducer never knew the window (silent no-op, no event) but
+/// the store still holds it (#2051). Deliberately defensive/idempotent:
+/// both callers rely on the already-gone cases being safe.
+pub(crate) fn apply_srv_window_closed(
     wstore: &Store,
     window_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
