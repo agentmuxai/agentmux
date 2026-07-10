@@ -14,7 +14,7 @@ describe("createLaunchFlowStore", () => {
     it("starts in initial state", () => {
         const { state } = createLaunchFlowStore();
         expect(state.form.name).toBe("");
-        expect(state.form.identityId).toBe("");
+        expect(state.form.accountId).toBe("");
         expect(state.closed).toBe(false);
     });
 
@@ -24,24 +24,27 @@ describe("createLaunchFlowStore", () => {
         expect(state.form.name).toBe("hello");
     });
 
-    it("eventSink receives emitted events", () => {
+    it("eventSink receives emitted Auth events (AccountChanged emits none)", () => {
         const events: LaunchFlowEvent[] = [];
         const { dispatch } = createLaunchFlowStore({
             eventSink: (e) => events.push(e),
         });
-        dispatch({ type: "IdentityChanged", identityId: "a" });
-        expect(events).toEqual([{ type: "FetchBindings", identityId: "a" }]);
+        // Issue #1624 PR-C Part B — AccountChanged no longer emits a
+        // FetchBindings event (accounts load once and are filtered
+        // client-side; there's no per-selection binding fetch).
+        dispatch({ type: "AccountChanged", accountId: "a" });
+        expect(events).toEqual([]);
     });
 
     it("multiple dispatches preserve field-leaf reactivity (Store identity)", () => {
-        // Updating only name shouldn't recreate the identities subtree.
+        // Updating only name shouldn't recreate the accounts subtree.
         const { state, dispatch } = createLaunchFlowStore();
-        const idsRefBefore = state.identities;
+        const accountsRefBefore = state.accounts;
         dispatch({ type: "NameChanged", name: "x" });
         // Solid's reconcile preserves unchanged subtree identity.
-        // Reading state.identities again after the name dispatch
+        // Reading state.accounts again after the name dispatch
         // should yield the same proxy.
-        expect(state.identities).toBe(idsRefBefore);
+        expect(state.accounts).toBe(accountsRefBefore);
     });
 
     it("no-op dispatches don't fire eventSink", () => {
@@ -67,17 +70,16 @@ describe("createLaunchFlowStore", () => {
 
         it("captures emitted events alongside the command", () => {
             const { dispatch } = createLaunchFlowStore();
-            dispatch({ type: "IdentityChanged", identityId: "ident-a" });
+            dispatch({ type: "AccountChanged", accountId: "acct-a" });
             const records = getRecentDispatches();
-            expect(records[0].events).toEqual([
-                { type: "FetchBindings", identityId: "ident-a" },
-            ]);
+            // Issue #1624 PR-C Part B — AccountChanged emits no events.
+            expect(records[0].events).toEqual([]);
         });
 
         it("tags source — defaults to 'user', honors explicit override", () => {
             const { dispatch } = createLaunchFlowStore();
             dispatch({ type: "NameChanged", name: "alpha" });
-            dispatch({ type: "IdentitiesLoading" }, "system");
+            dispatch({ type: "AccountsLoading" }, "system");
             const records = getRecentDispatches();
             expect(records[0].source).toBe("user");
             expect(records[1].source).toBe("system");

@@ -21,21 +21,6 @@ import type {
 } from "./types";
 import { initialForm } from "./types";
 
-/** Helper: emit `FetchBindings` exactly when an identityId is real
- *  (non-empty), not yet cached, and not already in flight. Three
- *  commands trigger this fetch (Opened with preselect,
- *  IdentityChanged, ContinueOfChanged with carry-over), so the
- *  predicate lives here to keep the rule in one place. */
-function maybeFetchBindings(
-    state: LaunchFlowState,
-    identityId: string,
-): LaunchFlowEvent[] {
-    if (identityId === "") return [];
-    if (state.bindings[identityId] !== undefined) return [];
-    if (state.bindingsLoading[identityId]) return [];
-    return [{ type: "FetchBindings", identityId }];
-}
-
 export function update(
     state: LaunchFlowState,
     command: LaunchFlowCommand,
@@ -55,7 +40,7 @@ export function update(
                 form: { ...initialForm(), ...command.initial },
                 closed: false,
             };
-            return { state: next, events: maybeFetchBindings(state, next.form.identityId) };
+            return { state: next, events: [] };
         }
 
         case "NameChanged": {
@@ -82,13 +67,13 @@ export function update(
             };
         }
 
-        case "IdentityChanged": {
-            if (state.form.identityId === command.identityId) {
+        case "AccountChanged": {
+            if (state.form.accountId === command.accountId) {
                 return { state, events: [] };
             }
             return {
-                state: { ...state, form: { ...state.form, identityId: command.identityId } },
-                events: maybeFetchBindings(state, command.identityId),
+                state: { ...state, form: { ...state.form, accountId: command.accountId } },
+                events: [],
             };
         }
 
@@ -118,44 +103,42 @@ export function update(
                     // Carry-over (or clear) the form fields when the
                     // user picks a row. `carry` is supplied by the
                     // caller because the row's instance_name /
-                    // identity_id / memory_id translation (legacy
-                    // "" or "blank" → "") is a view concern.
+                    // account id / memory_id translation (legacy ""
+                    // or "blank" → "", or an unresolvable pre-PR-C
+                    // bundle id on an old row → "") is a view concern.
                     name: command.carry?.name ?? "",
-                    identityId: command.carry?.identityId ?? "",
+                    accountId: command.carry?.accountId ?? "",
                     memoryId: command.carry?.memoryId ?? "",
                 },
             };
-            return {
-                state: next,
-                events: maybeFetchBindings(state, next.form.identityId),
-            };
+            return { state: next, events: [] };
         }
 
-        case "IdentitiesLoading": {
+        case "AccountsLoading": {
             return {
                 state: {
                     ...state,
-                    identities: { ...state.identities, loading: true, error: null },
+                    accounts: { ...state.accounts, loading: true, error: null },
                 },
                 events: [],
             };
         }
 
-        case "IdentitiesLoaded": {
+        case "AccountsLoaded": {
             return {
                 state: {
                     ...state,
-                    identities: { list: command.list, loading: false, error: null },
+                    accounts: { list: command.list, loading: false, error: null },
                 },
                 events: [],
             };
         }
 
-        case "IdentitiesFailed": {
+        case "AccountsFailed": {
             return {
                 state: {
                     ...state,
-                    identities: { ...state.identities, loading: false, error: command.error },
+                    accounts: { ...state.accounts, loading: false, error: command.error },
                 },
                 events: [],
             };
@@ -178,39 +161,6 @@ export function update(
         case "MemoriesFailed": {
             return {
                 state: { ...state, memories: { ...state.memories, loading: false, error: command.error } },
-                events: [],
-            };
-        }
-
-        case "BindingsLoading": {
-            return {
-                state: {
-                    ...state,
-                    bindingsLoading: { ...state.bindingsLoading, [command.identityId]: true },
-                },
-                events: [],
-            };
-        }
-
-        case "BindingsLoaded":
-        case "BindingsChanged": {
-            // Both commands write the new bindings array. They differ
-            // only in what they do to the per-id loading flag:
-            //   - BindingsLoaded settles a fetch the reducer asked
-            //     for via FetchBindings → clears the loading flag.
-            //   - BindingsChanged is a backend push event arriving
-            //     unsolicited (no in-flight fetch) → leaves the
-            //     loading flag alone (likely already absent).
-            const nextLoading = { ...state.bindingsLoading };
-            if (command.type === "BindingsLoaded") {
-                delete nextLoading[command.identityId];
-            }
-            return {
-                state: {
-                    ...state,
-                    bindings: { ...state.bindings, [command.identityId]: command.bindings },
-                    bindingsLoading: nextLoading,
-                },
                 events: [],
             };
         }
