@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.52.2 — 2026-07-09
+
+- feat(agent): consolidate Mode/Model/Effort drop-up pills into a single Runtime panel
+- feat(agent): Working-indicator type-out + oscillating shimmer; mic moved from pane header to composer
+- fix(srv): CloseWindow prunes the store when the reducer never knew the window (#2051)
+- fix(build): restore CI-green package-lock — release resync dropped peer entries (react) and broke npm ci
+
+
 ## 0.52.1 — 2026-07-09
 
 - fix(window): end the startup window storm — single-run initApp, reproject GCs never-registered rows
@@ -1932,6 +1940,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.52.1 | 2026-07-09 | 171.6 MiB | 369.5 MiB | |
 | 0.44.0 | 2026-06-10 | 163.9 MiB | 349.8 MiB | |
 | 0.38.13 | 2026-05-26 | 164.8 MiB | 346.2 MiB | |
 | 0.38.11 | 2026-05-26 | 164.8 MiB | 346.1 MiB | |
