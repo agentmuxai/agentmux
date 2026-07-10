@@ -5,25 +5,32 @@ import { describe, expect, it } from "vitest";
 
 import { update } from "./reducer";
 import {
+    accountsForProvider,
+    accountSuppliesProvider,
     canSubmit,
     continueLocksIdentity,
     continueLocksMemory,
-    hasMatchingBinding,
     initialState,
     isContinue,
-    realIdentities,
     realMemories,
     type LaunchFlowCommand,
     type LaunchFlowState,
 } from "./types";
+import type { Account } from "@/app/view/identity/identity-model";
 
-// Test fixtures. Match the wire shapes in frontend/types/gotypes.d.ts.
-const ident = (id: string, name: string, is_blank = false): IdentityBundle => ({
+// Test fixtures. Match the wire shapes in frontend/types/gotypes.d.ts
+// and frontend/app/view/identity/identity-model.ts.
+const acct = (id: string, name: string, provider = "claude"): Account => ({
     id,
     name,
-    is_blank,
-    created_at: 0,
-    updated_at: 0,
+    provider: provider as Account["provider"],
+    kind: "oauth",
+    secret_ref: { backend: "env" },
+    context: {},
+    assigned_agents: [],
+    status: "valid",
+    created_at: "",
+    updated_at: "",
 });
 
 const mem = (id: string, name: string, is_blank = false): Memory => ({
@@ -34,28 +41,20 @@ const mem = (id: string, name: string, is_blank = false): Memory => ({
     updated_at: 0,
 });
 
-const binding = (identityId: string, provider: string): IdentityBinding => ({
-    identity_id: identityId,
-    provider,
-    account_id: "acc-1",
-});
-
 const dispatch = (state: LaunchFlowState, cmd: LaunchFlowCommand) => update(state, cmd);
 
 // ── Reducer transitions ────────────────────────────────────────────
 
 describe("launch-flow-state reducer", () => {
     describe("initial state", () => {
-        it("starts with empty form + no bundles + not closed", () => {
+        it("starts with empty form + no accounts/memories + not closed", () => {
             const s = initialState();
             expect(s.form.name).toBe("");
-            expect(s.form.identityId).toBe("");
+            expect(s.form.accountId).toBe("");
             expect(s.form.memoryId).toBe("");
             expect(s.form.continueOfId).toBe(null);
-            expect(s.identities.list).toEqual([]);
+            expect(s.accounts.list).toEqual([]);
             expect(s.memories.list).toEqual([]);
-            expect(s.bindings).toEqual({});
-            expect(s.bindingsLoading).toEqual({});
             expect(s.submit.inFlight).toBe(false);
             expect(s.closed).toBe(false);
         });
@@ -72,11 +71,11 @@ describe("launch-flow-state reducer", () => {
         it("applies initial form overrides", () => {
             const s = dispatch(initialState(), {
                 type: "Opened",
-                initial: { name: "carry", runtime: "container", identityId: "a" },
+                initial: { name: "carry", runtime: "container", accountId: "a" },
             }).state;
             expect(s.form.name).toBe("carry");
             expect(s.form.runtime).toBe("container");
-            expect(s.form.identityId).toBe("a");
+            expect(s.form.accountId).toBe("a");
         });
 
         it("clears the closed flag (reopen)", () => {
@@ -86,31 +85,11 @@ describe("launch-flow-state reducer", () => {
             expect(s.closed).toBe(false);
         });
 
-        it("emits FetchBindings for an uncached preselected identityId", () => {
+        it("emits no events (accounts load once, no per-selection fetch)", () => {
             const r = update(initialState(), {
                 type: "Opened",
-                initial: { identityId: "preselect-a" },
+                initial: { accountId: "preselect-a" },
             });
-            expect(r.events).toEqual([
-                { type: "FetchBindings", identityId: "preselect-a" },
-            ]);
-        });
-
-        it("does NOT emit FetchBindings when preselected identity already cached", () => {
-            let s = dispatch(initialState(), {
-                type: "BindingsLoaded",
-                identityId: "preselect-a",
-                bindings: [],
-            }).state;
-            const r = update(s, {
-                type: "Opened",
-                initial: { identityId: "preselect-a" },
-            });
-            expect(r.events).toEqual([]);
-        });
-
-        it("does NOT emit FetchBindings when initial identityId is empty", () => {
-            const r = update(initialState(), { type: "Opened", initial: { identityId: "" } });
             expect(r.events).toEqual([]);
         });
     });
@@ -135,34 +114,21 @@ describe("launch-flow-state reducer", () => {
         });
     });
 
-    describe("IdentityChanged", () => {
-        it("updates identityId", () => {
-            const s = dispatch(initialState(), { type: "IdentityChanged", identityId: "a" }).state;
-            expect(s.form.identityId).toBe("a");
+    describe("AccountChanged", () => {
+        it("updates accountId", () => {
+            const s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
+            expect(s.form.accountId).toBe("a");
         });
 
-        it("emits FetchBindings on selection of an uncached real id", () => {
-            const r = update(initialState(), { type: "IdentityChanged", identityId: "a" });
-            expect(r.events).toEqual([{ type: "FetchBindings", identityId: "a" }]);
-        });
-
-        it("does NOT emit FetchBindings when selecting the empty id", () => {
-            const r = update(initialState(), { type: "IdentityChanged", identityId: "" });
+        it("emits no events — accounts are already loaded client-side", () => {
+            const r = update(initialState(), { type: "AccountChanged", accountId: "a" });
             expect(r.events).toEqual([]);
         });
 
-        it("does NOT emit FetchBindings when bindings already cached", () => {
-            let s = initialState();
-            s = dispatch(s, { type: "BindingsLoaded", identityId: "a", bindings: [] }).state;
-            const r = update(s, { type: "IdentityChanged", identityId: "a" });
-            expect(r.events).toEqual([]);
-        });
-
-        it("does NOT emit FetchBindings when bindings query is already in flight", () => {
-            let s = initialState();
-            s = dispatch(s, { type: "BindingsLoading", identityId: "a" }).state;
-            const r = update(s, { type: "IdentityChanged", identityId: "a" });
-            expect(r.events).toEqual([]);
+        it("set-to-current is a no-op (same state identity)", () => {
+            const s0 = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
+            const r = update(s0, { type: "AccountChanged", accountId: "a" });
+            expect(r.state).toBe(s0);
         });
     });
 
@@ -171,11 +137,11 @@ describe("launch-flow-state reducer", () => {
             const s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", identityId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", memoryId: "m" },
             }).state;
             expect(s.form.continueOfId).toBe("inst-1");
             expect(s.form.name).toBe("prev");
-            expect(s.form.identityId).toBe("a");
+            expect(s.form.accountId).toBe("a");
             expect(s.form.memoryId).toBe("m");
             expect(continueLocksIdentity(s)).toBe(true);
             expect(continueLocksMemory(s)).toBe(true);
@@ -185,7 +151,7 @@ describe("launch-flow-state reducer", () => {
             const s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-legacy",
-                carry: { name: "old", identityId: "", memoryId: "" },
+                carry: { name: "old", accountId: "", memoryId: "" },
             }).state;
             expect(isContinue(s)).toBe(true);
             // Legacy continuation — user must pick replacements
@@ -193,29 +159,11 @@ describe("launch-flow-state reducer", () => {
             expect(continueLocksMemory(s)).toBe(false);
         });
 
-        it("emits FetchBindings for uncached real carry-over identity", () => {
-            const r = update(initialState(), {
-                type: "ContinueOfChanged",
-                continueOfId: "inst-1",
-                carry: { name: "prev", identityId: "a", memoryId: "m" },
-            });
-            expect(r.events).toEqual([{ type: "FetchBindings", identityId: "a" }]);
-        });
-
-        it("does NOT emit FetchBindings for empty carry-over identity (legacy)", () => {
-            const r = update(initialState(), {
-                type: "ContinueOfChanged",
-                continueOfId: "inst-legacy",
-                carry: { name: "old", identityId: "", memoryId: "" },
-            });
-            expect(r.events).toEqual([]);
-        });
-
         it("re-dispatch with same continueOfId is a no-op (preserves edits)", () => {
             let s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", identityId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", memoryId: "m" },
             }).state;
             // User edits name mid-flow
             s = dispatch(s, { type: "NameChanged", name: "edited" }).state;
@@ -223,7 +171,7 @@ describe("launch-flow-state reducer", () => {
             const r = update(s, {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", identityId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", memoryId: "m" },
             });
             expect(r.state).toBe(s);
             expect(r.state.form.name).toBe("edited");
@@ -233,37 +181,45 @@ describe("launch-flow-state reducer", () => {
             let s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", identityId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", memoryId: "m" },
             }).state;
             s = dispatch(s, { type: "ContinueOfChanged", continueOfId: null }).state;
             expect(s.form.continueOfId).toBe(null);
             expect(s.form.name).toBe("");
-            expect(s.form.identityId).toBe("");
+            expect(s.form.accountId).toBe("");
             expect(s.form.memoryId).toBe("");
             expect(isContinue(s)).toBe(false);
         });
     });
 
-    describe("identities resource", () => {
-        it("IdentitiesLoading sets loading + clears error", () => {
-            let s = dispatch(initialState(), { type: "IdentitiesFailed", error: "old" }).state;
-            s = dispatch(s, { type: "IdentitiesLoading" }).state;
-            expect(s.identities.loading).toBe(true);
-            expect(s.identities.error).toBe(null);
+    describe("accounts resource", () => {
+        it("AccountsLoading sets loading + clears error", () => {
+            let s = dispatch(initialState(), { type: "AccountsFailed", error: "old" }).state;
+            s = dispatch(s, { type: "AccountsLoading" }).state;
+            expect(s.accounts.loading).toBe(true);
+            expect(s.accounts.error).toBe(null);
         });
 
-        it("IdentitiesLoaded sets list + clears loading", () => {
-            const a = ident("a", "A");
-            const s = dispatch(initialState(), { type: "IdentitiesLoaded", list: [a] }).state;
-            expect(s.identities.list).toEqual([a]);
-            expect(s.identities.loading).toBe(false);
+        it("AccountsLoaded sets list + clears loading", () => {
+            const a = acct("a", "A");
+            const s = dispatch(initialState(), { type: "AccountsLoaded", list: [a] }).state;
+            expect(s.accounts.list).toEqual([a]);
+            expect(s.accounts.loading).toBe(false);
         });
 
-        it("realIdentities selector filters is_blank", () => {
-            const a = ident("a", "A");
-            const b = ident("blank", "Blank", true);
-            const s = dispatch(initialState(), { type: "IdentitiesLoaded", list: [b, a] }).state;
-            expect(realIdentities(s)).toEqual([a]);
+        it("AccountsFailed sets error + clears loading", () => {
+            let s = dispatch(initialState(), { type: "AccountsLoading" }).state;
+            s = dispatch(s, { type: "AccountsFailed", error: "boom" }).state;
+            expect(s.accounts.error).toBe("boom");
+            expect(s.accounts.loading).toBe(false);
+        });
+
+        it("accountsForProvider selector filters by provider", () => {
+            const a = acct("a", "A", "claude");
+            const b = acct("b", "B", "codex");
+            const s = dispatch(initialState(), { type: "AccountsLoaded", list: [a, b] }).state;
+            expect(accountsForProvider(s, "claude")).toEqual([a]);
+            expect(accountsForProvider(s, "codex")).toEqual([b]);
         });
 
         it("realMemories selector filters is_blank", () => {
@@ -274,56 +230,23 @@ describe("launch-flow-state reducer", () => {
         });
     });
 
-    describe("bindings", () => {
-        it("BindingsLoading sets per-id loading flag", () => {
-            const s = dispatch(initialState(), { type: "BindingsLoading", identityId: "a" }).state;
-            expect(s.bindingsLoading.a).toBe(true);
+    describe("accountSuppliesProvider selector", () => {
+        it("true when the selected account matches the provider", () => {
+            const a = acct("a", "A", "claude");
+            let s = dispatch(initialState(), { type: "AccountsLoaded", list: [a] }).state;
+            s = dispatch(s, { type: "AccountChanged", accountId: "a" }).state;
+            expect(accountSuppliesProvider(s, "claude")).toBe(true);
+            expect(accountSuppliesProvider(s, "codex")).toBe(false);
         });
 
-        it("BindingsLoaded sets list + clears loading", () => {
-            let s = dispatch(initialState(), { type: "BindingsLoading", identityId: "a" }).state;
-            const bs = [binding("a", "claude")];
-            s = dispatch(s, { type: "BindingsLoaded", identityId: "a", bindings: bs }).state;
-            expect(s.bindings.a).toEqual(bs);
-            expect(s.bindingsLoading.a).toBeUndefined();
-        });
-
-        it("BindingsChanged updates list without touching loading flag", () => {
-            // Simulates a backend push event arriving after the resource settled.
-            let s = dispatch(initialState(), {
-                type: "BindingsLoaded",
-                identityId: "a",
-                bindings: [],
-            }).state;
-            const bs = [binding("a", "claude")];
-            s = dispatch(s, { type: "BindingsChanged", identityId: "a", bindings: bs }).state;
-            expect(s.bindings.a).toEqual(bs);
-            expect(s.bindingsLoading.a).toBeUndefined();
-        });
-
-        it("hasMatchingBinding selector — provider match", () => {
-            let s = dispatch(initialState(), { type: "IdentityChanged", identityId: "a" }).state;
-            s = dispatch(s, {
-                type: "BindingsLoaded",
-                identityId: "a",
-                bindings: [binding("a", "claude")],
-            }).state;
-            expect(hasMatchingBinding(s, "claude")).toBe(true);
-            expect(hasMatchingBinding(s, "codex")).toBe(false);
-        });
-
-        it("hasMatchingBinding returns false while bindings loading", () => {
-            let s = dispatch(initialState(), { type: "IdentityChanged", identityId: "a" }).state;
-            s = dispatch(s, { type: "BindingsLoading", identityId: "a" }).state;
-            // Even if cache has stale data from a prior selection, the
-            // in-flight load is treated as "no match" — the gate stays on.
-            // (anti-vacuity guard for the race fixed in #910 round 5).
-            expect(hasMatchingBinding(s, "claude")).toBe(false);
-        });
-
-        it("hasMatchingBinding returns false on empty identityId", () => {
+        it("false when no account is selected", () => {
             const s = initialState();
-            expect(hasMatchingBinding(s, "claude")).toBe(false);
+            expect(accountSuppliesProvider(s, "claude")).toBe(false);
+        });
+
+        it("false when the selected id isn't in the loaded list", () => {
+            const s = dispatch(initialState(), { type: "AccountChanged", accountId: "ghost" }).state;
+            expect(accountSuppliesProvider(s, "claude")).toBe(false);
         });
     });
 
@@ -380,9 +303,9 @@ describe("launch-flow-state reducer", () => {
         it("Auth Selected drives inner reducer + updates outer state", () => {
             const r = update(initialState(), {
                 type: "Auth",
-                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-account" },
             });
-            // SelectionKind for "needs-bundle" → "unauthenticated"
+            // SelectionKind for "needs-account" → "unauthenticated"
             expect(r.state.auth.kind).toBe("unauthenticated");
             expect(r.state.auth.providerId).toBe("claude");
         });
@@ -390,14 +313,14 @@ describe("launch-flow-state reducer", () => {
         it("Auth no-op (same inner state) returns the same outer state", () => {
             const s0 = update(initialState(), {
                 type: "Auth",
-                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-account" },
             }).state;
             // Re-dispatching the same selection is the inner reducer's
             // own no-op surface. We just verify the outer wrapper
             // doesn't fabricate a state-change either.
             const r = update(s0, {
                 type: "Auth",
-                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-account" },
             });
             expect(r.state.auth).toBe(s0.auth);
         });
@@ -408,7 +331,7 @@ describe("launch-flow-state reducer", () => {
             // OAuth start RPC via `StartAuth` event.
             let s = update(initialState(), {
                 type: "Auth",
-                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-account" },
             }).state;
             const r = update(s, { type: "Auth", cmd: { type: "ConnectClicked" } });
             // Outer events should contain at least one wrapped Auth
@@ -431,7 +354,7 @@ describe("launch-flow-state reducer", () => {
                 cmd: {
                     type: "Selected",
                     providerId: "claude",
-                    bundleId: "ident-work",
+                    bundleId: "acct-work",
                     outcome: "ready",
                 },
             }).state;
@@ -463,33 +386,16 @@ describe("launch-flow-state reducer", () => {
             expect(s.auth.kind).toBe("ready");
         });
 
-        it("auth.kind survives IdentitiesLoaded + MemoriesLoaded", () => {
+        it("auth.kind survives AccountsLoaded + MemoriesLoaded", () => {
             let s = setupReady();
             const before = s.auth;
             s = update(s, {
-                type: "IdentitiesLoaded",
-                list: [ident("ident-work", "Work")],
+                type: "AccountsLoaded",
+                list: [acct("acct-work", "Work")],
             }).state;
             s = update(s, {
                 type: "MemoriesLoaded",
                 list: [mem("mem-notes", "Notes")],
-            }).state;
-            expect(s.auth).toBe(before);
-            expect(s.auth.kind).toBe("ready");
-        });
-
-        it("auth.kind survives BindingsLoaded + BindingsChanged", () => {
-            let s = setupReady();
-            const before = s.auth;
-            s = update(s, {
-                type: "BindingsLoaded",
-                identityId: "ident-work",
-                bindings: [binding("ident-work", "claude")],
-            }).state;
-            s = update(s, {
-                type: "BindingsChanged",
-                identityId: "ident-work",
-                bindings: [binding("ident-work", "claude")],
             }).state;
             expect(s.auth).toBe(before);
             expect(s.auth.kind).toBe("ready");
@@ -506,18 +412,18 @@ describe("launch-flow-state reducer", () => {
 
         it("form state survives Auth Connect (auth path doesn't touch form)", () => {
             let s = update(initialState(), { type: "NameChanged", name: "carry-name" }).state;
-            s = update(s, { type: "IdentityChanged", identityId: "ident-a" }).state;
+            s = update(s, { type: "AccountChanged", accountId: "acct-a" }).state;
             s = update(s, { type: "MemoryChanged", memoryId: "mem-a" }).state;
             const formBefore = s.form;
             // Drive auth machine
             s = update(s, {
                 type: "Auth",
-                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-bundle" },
+                cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-account" },
             }).state;
             s = update(s, { type: "Auth", cmd: { type: "ConnectClicked" } }).state;
             expect(s.form).toBe(formBefore);
             expect(s.form.name).toBe("carry-name");
-            expect(s.form.identityId).toBe("ident-a");
+            expect(s.form.accountId).toBe("acct-a");
             expect(s.form.memoryId).toBe("mem-a");
         });
     });
@@ -535,24 +441,24 @@ describe("launch-flow-state reducer", () => {
             expect(canSubmit(s, { ...baseAuth, nameValid: false })).toBe(false);
         });
 
-        it("blocks when identityId empty", () => {
+        it("blocks when accountId empty", () => {
             const s = initialState();
             expect(canSubmit(s, baseAuth)).toBe(false);
         });
 
         it("blocks when memoryId empty", () => {
-            let s = dispatch(initialState(), { type: "IdentityChanged", identityId: "a" }).state;
+            let s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
             expect(canSubmit(s, baseAuth)).toBe(false);
         });
 
         it("blocks when authReady false", () => {
-            let s = dispatch(initialState(), { type: "IdentityChanged", identityId: "a" }).state;
+            let s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
             s = dispatch(s, { type: "MemoryChanged", memoryId: "m" }).state;
             expect(canSubmit(s, { ...baseAuth, authReady: false })).toBe(false);
         });
 
-        it("passes when name + identity + memory + auth are all good", () => {
-            let s = dispatch(initialState(), { type: "IdentityChanged", identityId: "a" }).state;
+        it("passes when name + account + memory + auth are all good", () => {
+            let s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
             s = dispatch(s, { type: "MemoryChanged", memoryId: "m" }).state;
             expect(canSubmit(s, baseAuth)).toBe(true);
         });

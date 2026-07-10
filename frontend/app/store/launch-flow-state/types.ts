@@ -28,6 +28,7 @@
 
 import type { AuthCommand, AuthEvent, AuthState } from "@/app/view/agent/auth/auth-state";
 import { initialState as initialAuthState } from "@/app/view/agent/auth/auth-state";
+import type { Account } from "@/app/view/identity/identity-model";
 
 /** Editable Launch-modal form fields. Empty strings mean "no
  *  selection"; the view's submit predicate blocks Launch until the
@@ -36,8 +37,12 @@ export interface LaunchForm {
     name: string;
     runtime: "host" | "container";
     image: string;
-    /** Selected Identity bundle id. `""` = unselected. */
-    identityId: string;
+    /** Selected account id for the agent's own provider. `""` =
+     *  unselected. Issue #1624 PR-C Part B — was `identityId` (a
+     *  bundle id) before this; the launch modal now picks an account
+     *  directly instead of a named bundle that (hopefully) has a
+     *  binding for this provider. */
+    accountId: string;
     /** Selected Memory bundle id. `""` = unselected. */
     memoryId: string;
     /** When set, this launch is a continuation of a prior named
@@ -50,7 +55,7 @@ export const initialForm = (): LaunchForm => ({
     name: "",
     runtime: "container",
     image: "",
-    identityId: "",
+    accountId: "",
     memoryId: "",
     continueOfId: null,
 });
@@ -83,18 +88,15 @@ export const initialSubmit = (): SubmitStatus => ({
 /** Top-level reducer state. */
 export interface LaunchFlowState {
     form: LaunchForm;
-    identities: ResourceList<IdentityBundle>;
+    /** All loaded accounts (every provider, not pre-filtered) — the
+     *  view narrows to the agent's own provider via
+     *  `accountsForProvider`. Was `identities: ResourceList<IdentityBundle>`
+     *  before issue #1624 PR-C Part B; account lists load once and are
+     *  filtered client-side, so unlike bundles there's no per-selection
+     *  fetch needed (see the removed `bindings`/`bindingsLoading` slices
+     *  below). */
+    accounts: ResourceList<Account>;
     memories: ResourceList<Memory>;
-    /** Per-identity binding cache. Keyed on `identityId`. Push-
-     *  updated via `BindingsLoaded` (initial load) and `BindingsChanged`
-     *  (subsequent backend events). Empty value means "no bindings yet
-     *  / hasn't been queried"; the view distinguishes via the loading
-     *  side-channel below. */
-    bindings: Record<string, IdentityBinding[]>;
-    /** Identity ids whose bindings query is currently in flight.
-     *  Used by the view to render the auth gate as "loading" so a
-     *  fast Connect click doesn't slip through the race. */
-    bindingsLoading: Record<string, boolean>;
     submit: SubmitStatus;
     /** Folded-in OAuth state machine. The `Auth` command wraps an
      *  `AuthCommand` from auth-state.ts; the reducer delegates to
@@ -107,10 +109,8 @@ export interface LaunchFlowState {
 
 export const initialState = (): LaunchFlowState => ({
     form: initialForm(),
-    identities: initialResourceList<IdentityBundle>(),
+    accounts: initialResourceList<Account>(),
     memories: initialResourceList<Memory>(),
-    bindings: {},
-    bindingsLoading: {},
     submit: initialSubmit(),
     auth: initialAuthState(),
     closed: false,
@@ -126,10 +126,9 @@ export type LaunchFlowCommand =
     | { type: "NameChanged"; name: string }
     | { type: "RuntimeChanged"; runtime: "host" | "container" }
     | { type: "ImageChanged"; image: string }
-    /** Setting identity to `""` clears it (e.g. on legacy
-     *  continuation with no carry-over). The view auto-picks the
-     *  first non-blank bundle elsewhere. */
-    | { type: "IdentityChanged"; identityId: string }
+    /** Setting account to `""` clears it (e.g. on legacy
+     *  continuation with no carry-over). */
+    | { type: "AccountChanged"; accountId: string }
     | { type: "MemoryChanged"; memoryId: string }
     /** Continue dropdown — `null` = "— New agent —". Setting to a
      *  real instance id locks per-row selectors with the carry-over
@@ -137,21 +136,15 @@ export type LaunchFlowCommand =
     | {
           type: "ContinueOfChanged";
           continueOfId: string | null;
-          carry?: { name: string; identityId: string; memoryId: string };
+          carry?: { name: string; accountId: string; memoryId: string };
       }
     /** Resource lifecycle commands. */
-    | { type: "IdentitiesLoading" }
-    | { type: "IdentitiesLoaded"; list: IdentityBundle[] }
-    | { type: "IdentitiesFailed"; error: string }
+    | { type: "AccountsLoading" }
+    | { type: "AccountsLoaded"; list: Account[] }
+    | { type: "AccountsFailed"; error: string }
     | { type: "MemoriesLoading" }
     | { type: "MemoriesLoaded"; list: Memory[] }
     | { type: "MemoriesFailed"; error: string }
-    /** Bindings push events. `BindingsChanged` is the wire shape the
-     *  backend will emit in Stage 2c; until then it's only used by
-     *  unit tests. */
-    | { type: "BindingsLoading"; identityId: string }
-    | { type: "BindingsLoaded"; identityId: string; bindings: IdentityBinding[] }
-    | { type: "BindingsChanged"; identityId: string; bindings: IdentityBinding[] }
     /** Submit lifecycle. */
     | { type: "SubmitClicked" }
     | { type: "SubmitSucceeded" }
@@ -168,13 +161,10 @@ export type LaunchFlowCommand =
  *  stays pure; emits these for the view to dispatch onto the wire.
  *  Each event is keyed/tagged so the view can dedupe in-flight RPCs. */
 export type LaunchFlowEvent =
-    /** Fetch bindings for an identity that just became selected and
-     *  has no cached entry. */
-    | { type: "FetchBindings"; identityId: string }
     /** Pass-through of an auth-state event so the view can run the
      *  side-effect (RPC, openExternal, etc.). Wraps `AuthEvent` from
      *  auth-state.ts. */
-    | { type: "Auth"; event: AuthEvent };
+    { type: "Auth"; event: AuthEvent };
 
 export interface ReducerResult {
     state: LaunchFlowState;
@@ -186,10 +176,13 @@ export interface ReducerResult {
 // Pure read-only derivations over state. The view calls these instead
 // of repeating logic — keeps the cross-product testable in one place.
 
-/** Real (non-blank) identity bundles, filtering out any
- *  back-compat `is_blank` singleton the backend may still return. */
-export function realIdentities(state: LaunchFlowState): IdentityBundle[] {
-    return state.identities.list.filter((b) => !b.is_blank);
+/** Loaded accounts for one provider — the launch modal's Account
+ *  dropdown only ever shows accounts for the agent's own provider
+ *  (an agent has exactly one primary provider). Replaces
+ *  `realIdentities` (which filtered out the bundle system's
+ *  `is_blank` singleton — accounts have no such concept). */
+export function accountsForProvider(state: LaunchFlowState, providerId: string): Account[] {
+    return state.accounts.list.filter((a) => a.provider === providerId);
 }
 
 /** Real (non-blank) memory bundles. */
@@ -203,30 +196,31 @@ export function isContinue(state: LaunchFlowState): boolean {
     return state.form.continueOfId !== null;
 }
 
-/** Per-row continuation lock. Identity selector locks ONLY when
+/** Per-row continuation lock. Account selector locks ONLY when
  *  the continued row carried a real (non-empty, non-legacy-"blank")
- *  identity_id. Legacy carry-overs leave the selector editable so
+ *  account id. Legacy carry-overs leave the selector editable so
  *  the user can pick a replacement (codex P1 on PR #916). */
 export function continueLocksIdentity(state: LaunchFlowState): boolean {
-    return isContinue(state) && state.form.identityId !== "";
+    return isContinue(state) && state.form.accountId !== "";
 }
 
 export function continueLocksMemory(state: LaunchFlowState): boolean {
     return isContinue(state) && state.form.memoryId !== "";
 }
 
-/** Whether the selected identity bundle has a binding for the given
- *  provider. Used by the auth-gate predicate. While bindings are
- *  loading, returns false (safe — the gate stays on). */
-export function hasMatchingBinding(
+/** Whether the selected account actually supplies credentials for
+ *  the given provider. Used by the auth-gate predicate. Replaces
+ *  `hasMatchingBinding` — with a single account selection instead of
+ *  a bundle-of-bindings, this is a direct lookup against the already-
+ *  loaded account list, no per-selection fetch/loading state needed. */
+export function accountSuppliesProvider(
     state: LaunchFlowState,
     providerId: string,
 ): boolean {
-    const id = state.form.identityId;
+    const id = state.form.accountId;
     if (!id) return false;
-    if (state.bindingsLoading[id]) return false;
-    const bindings = state.bindings[id] ?? [];
-    return bindings.some((b) => b.provider === providerId);
+    const account = state.accounts.list.find((a) => a.id === id);
+    return account?.provider === providerId;
 }
 
 /** Whether Launch can fire. Combines form completeness with the
@@ -239,7 +233,7 @@ export function canSubmit(
 ): boolean {
     if (state.submit.inFlight) return false;
     if (!opts.nameValid) return false;
-    if (state.form.identityId === "") return false;
+    if (state.form.accountId === "") return false;
     if (state.form.memoryId === "") return false;
     if (!opts.authReady) return false;
     return true;

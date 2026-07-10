@@ -23,10 +23,10 @@ import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities
 import { waveEventSubscribe } from "@/app/store/wps";
 import {
     createLaunchFlowStore,
+    accountsForProvider,
+    accountSuppliesProvider,
     continueLocksIdentity as flowContinueLocksIdentity,
     continueLocksMemory as flowContinueLocksMemory,
-    hasMatchingBinding,
-    realIdentities,
     realMemories,
 } from "@/app/store/launch-flow-state";
 
@@ -35,11 +35,7 @@ import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slu
 import { getProvider } from "../providers";
 import { PreLaunchAuthPanel } from "./PreLaunchAuthPanel";
 import { AuthFlowController } from "../auth";
-import {
-    loadAccounts,
-    refreshAccountCache,
-    subscribeAccountChanges,
-} from "@/app/view/identity/identity-model";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to
@@ -52,9 +48,10 @@ export interface LaunchOverrides {
     environment: "local" | "docker";
     /** Only set when agentType === "container". */
     containerImage?: string;
-    /** Selected Identity bundle id. Required (non-empty) at submit;
-     *  the form blocks Launch until the user picks or creates one. */
-    identityId: string;
+    /** Selected account id. Required (non-empty) at submit; the form
+     *  blocks Launch until the user picks or creates one. Issue #1624
+     *  PR-C Part B — was `identityId` (a bundle id). */
+    accountId: string;
     /** Selected Memory bundle id. Required (non-empty) at submit. */
     memoryId: string;
     /** v8 — when set, this launch is a continuation of a prior named
@@ -86,25 +83,15 @@ interface AgentLaunchModalPanelProps {
      *  Codex P2 on PR #910 rounds 6 + 7: rounds 1-6 only restored
      *  identity/memory selection; round 7 added the rest of the form. */
     initialFormState?: Partial<LaunchFormState>;
-    /** When true, the OAuth Connect panel fires `startConnect()` once
-     *  on mount — set by the OAuth-Connect → New Identity → launch
-     *  round-trip so the user doesn't re-click Connect after naming
-     *  the bundle. Spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
-    autoStartAuth?: boolean;
-    /** Called when the "+" / empty-state New buttons fire, OR when the
-     *  OAuth Connect panel needs the New Identity modal interposed
-     *  (`purpose: "oauth-continue"`). The picker is expected to chain
-     *  `modalLayer.replace(newIdentityRequest)` — this component doesn't
-     *  know how to build that request.
-     *
-     *  The current launch form state is passed through so the picker
-     *  can preserve it across the new-bundle round-trip; `purpose`
-     *  tells the picker whether to set `autoStartAuth` on the return
-     *  launch request. */
-    onRequestNewIdentity?: (
-        current: LaunchFormState,
-        purpose: "create" | "oauth-continue",
-    ) => void;
+    /** Called when the "+ Add account" button fires — the picker is
+     *  expected to chain `modalLayer.replace(addAccountRequest)` — this
+     *  component doesn't know how to build that request. The current
+     *  launch form state is passed through so the picker can preserve
+     *  it across the round-trip. Issue #1624 PR-C Part B — OAuth
+     *  Connect no longer routes through this callback (it starts
+     *  directly from `PreLaunchAuthPanel`); this now only fires for
+     *  manual/API-key account creation. Replaces `onRequestNewIdentity`. */
+    onRequestAddAccount?: (current: LaunchFormState) => void;
     onRequestNewMemory?: (current: LaunchFormState) => void;
 }
 
@@ -115,7 +102,7 @@ export interface LaunchFormState {
     name: string;
     runtime: "host" | "container";
     image: string;
-    identityId: string;
+    accountId: string;
     memoryId: string;
     /** Continuation context. `null` = "— New agent —". Round-trip
      *  preserved alongside the form fields so Continue mode survives
@@ -129,6 +116,11 @@ export interface LaunchFormState {
 export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
     const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
+    // Declared early — `createMemo`'s first run is synchronous (unlike
+    // `createEffect`, which defers to after setup completes), so any
+    // memo below that reads `provider()` needs the binding to already
+    // exist at the point it's created.
+    const provider = createMemo(() => getProvider(props.agent.provider));
 
     // Form + submit state live in the launch-flow-state reducer slice
     // (Stage 2b/2c of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md).
@@ -139,24 +131,18 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // stay unchanged.
     //
     // What's still local (Stage 2d candidates):
-    //  - `identities`, `memories`, `selectedBundleBindings` — local
-    //    resources. Stage 2d migrates them to the store with push-
-    //    based binding events.
+    //  - `memories` — local resource.
     //  - `namedAgents` (continuation list) — out of slice scope.
     //  - `authController` — auth state stays in its own controller
     //    (lifted to this component in Stage 1).
     // Reducer events drive side-effects. The store calls `eventSink`
-    // every time the reducer emits one; we wire `FetchBindings` to
-    // run the listidentitybindings RPC + dispatch back into the
-    // store. Defining the store with the sink at creation time
-    // means the `Opened` dispatch below (with potentially preselected
-    // identityId) goes through the sink immediately.
+    // every time the reducer emits one; the only wrapped event left
+    // is `Auth` (issue #1624 PR-C Part B removed `FetchBindings` —
+    // accounts load once and are filtered client-side, no per-
+    // selection binding fetch needed). Auth events are handled by the
+    // AuthFlowController itself, not here.
     const flow = createLaunchFlowStore({
-        eventSink: (event) => {
-            if (event.type === "FetchBindings") {
-                void fetchBindings(event.identityId);
-            }
-        },
+        eventSink: () => {},
     });
     flow.dispatch({ type: "Opened", initial: props.initialFormState });
     const name = () => flow.state.form.name;
@@ -166,9 +152,9 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         flow.dispatch({ type: "RuntimeChanged", runtime: v });
     const image = () => flow.state.form.image;
     const setImage = (v: string) => flow.dispatch({ type: "ImageChanged", image: v });
-    const identityId = () => flow.state.form.identityId;
-    const setIdentityId = (v: string) =>
-        flow.dispatch({ type: "IdentityChanged", identityId: v });
+    const accountId = () => flow.state.form.accountId;
+    const setAccountId = (v: string) =>
+        flow.dispatch({ type: "AccountChanged", accountId: v });
     const memoryId = () => flow.state.form.memoryId;
     const setMemoryId = (v: string) =>
         flow.dispatch({ type: "MemoryChanged", memoryId: v });
@@ -182,19 +168,22 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
 
     onCleanup(() => flow.dispatch({ type: "Closed" }));
 
-    // Identities + Memories now live in the reducer slice
+    // Accounts + Memories now live in the reducer slice
     // (Stage 2c.2 of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md).
-    // `loadIdentities` / `loadMemories` are async wrappers around the
-    // RPCs that dispatch the loading lifecycle commands; the view
-    // reads via `flow.state.identities.list` etc. Existing accessor
-    // names (`identities()`, `memories()`) are kept as thin façades.
-    const loadIdentities = async () => {
-        flow.dispatch({ type: "IdentitiesLoading" });
+    // `loadAccountsIntoForm` / `loadMemories` are async wrappers that
+    // dispatch the loading lifecycle commands; the view reads via
+    // `flow.state.accounts.list` etc. Issue #1624 PR-C Part B —
+    // accounts source from the shared account cache
+    // (`identity-model.ts`) instead of `ListIdentityBundlesCommand`,
+    // and load once (no per-selection binding fetch needed — an
+    // account's `provider` is already known client-side).
+    const loadAccountsIntoForm = async () => {
+        flow.dispatch({ type: "AccountsLoading" });
         try {
-            const list = await RpcApi.ListIdentityBundlesCommand(TabRpcClient, {});
-            flow.dispatch({ type: "IdentitiesLoaded", list: list ?? [] });
+            const list = await refreshAccountCache();
+            flow.dispatch({ type: "AccountsLoaded", list });
         } catch (e: any) {
-            flow.dispatch({ type: "IdentitiesFailed", error: String(e?.message ?? e) });
+            flow.dispatch({ type: "AccountsFailed", error: String(e?.message ?? e) });
         }
     };
     const loadMemories = async () => {
@@ -206,26 +195,41 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             flow.dispatch({ type: "MemoriesFailed", error: String(e?.message ?? e) });
         }
     };
-    void loadIdentities();
+    void loadAccountsIntoForm();
     void loadMemories();
-    const identities = () => flow.state.identities.list;
     const memories = () => flow.state.memories.list;
 
-    // Empty-state predicate via the slice's `realIdentities` /
-    // `realMemories` selectors, which filter out any back-compat
-    // `is_blank` singleton.
-    const hasUserIdentities = createMemo(() => realIdentities(flow.state).length > 0);
+    // Cross-tab + cross-pane reactivity: the shared account cache
+    // (`identity-model.ts`) isn't itself subscribed to the backend's
+    // `identityaccounts:changed` broadcast — callers refresh it
+    // explicitly. Subscribe here so an account created/verified from
+    // another tab (or this modal's own OAuth/API-key flows) keeps the
+    // dropdown + status live without a manual reopen. Replaces the
+    // old `identitybundlebindings:changed:<id>` subscription (bundle
+    // bindings no longer exist in this flow).
+    createEffect(() => {
+        const unsub = waveEventSubscribe({
+            eventType: "identityaccounts:changed",
+            handler: () => void loadAccountsIntoForm(),
+        });
+        onCleanup(unsub);
+    });
+
+    // Empty-state predicate — accounts for the agent's own provider.
+    const hasAccountsForProvider = createMemo(
+        () => accountsForProvider(flow.state, provider()?.id ?? "").length > 0,
+    );
     const hasUserMemories = createMemo(() => realMemories(flow.state).length > 0);
 
-    // Auto-pick the first available bundle when nothing is selected
-    // yet — saves a click for users with existing bundles. Gated on
-    // `!isContinue()` so legacy-continuation rows don't get filled
-    // with an unrelated bundle's credentials.
+    // Auto-pick the first available account for this provider when
+    // nothing is selected yet — saves a click for users with existing
+    // accounts. Gated on `!isContinue()` so legacy-continuation rows
+    // don't get filled with an unrelated account's credentials.
     createEffect(() => {
         if (isContinue()) return;
-        if (identityId()) return;
-        const firstReal = realIdentities(flow.state)[0];
-        if (firstReal) setIdentityId(firstReal.id);
+        if (accountId()) return;
+        const first = accountsForProvider(flow.state, provider()?.id ?? "")[0];
+        if (first) setAccountId(first.id);
     });
     createEffect(() => {
         if (isContinue()) return;
@@ -245,7 +249,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         name: name(),
         runtime: runtime(),
         image: image(),
-        identityId: identityId(),
+        accountId: accountId(),
         memoryId: memoryId(),
         // Capture continuation context so the `+ New bundle` round-trip
         // restores Continue mode on return; without this the launch
@@ -253,12 +257,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         // gate wrongly re-engages.
         continueOfId: flow.state.form.continueOfId,
     });
-    // The plain `+ New identity` button uses `purpose: "create"`. The
-    // OAuth Connect (`needs-bundle`) interposition routes through the
-    // same callback with `purpose: "oauth-continue"` — see the
-    // PreLaunchAuthPanel `onRequestNewIdentity` wiring below.
-    const handleNewIdentity = () =>
-        props.onRequestNewIdentity?.(snapshot(), "create");
+    // OAuth Connect no longer routes through this callback (issue
+    // #1624 PR-C Part B) — it fires only for the "+ Add account"
+    // (manual/API-key) path now.
+    const handleAddAccount = () => props.onRequestAddAccount?.(snapshot());
     const handleNewMemory = () => props.onRequestNewMemory?.(snapshot());
 
     // v8 — "Continue agent" dropdown. Filters to instances of the
@@ -314,12 +316,16 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                 ? null
                 : (namedAgents() ?? []).find((r) => r.instance_id === id) ?? null;
         // Legacy rows may carry "" or "blank" identity_id/memory_id
-        // from before the blank-removal. Treat both as "no carry-over"
-        // so the user must pick a real bundle for the continuation.
+        // from before the blank-removal, or (pre-issue-#1624-PR-C rows)
+        // a bundle id that no longer resolves to an account. Treat all
+        // three as "no carry-over" so the user must pick a real account
+        // for the continuation — see the plan's migration note; an
+        // unresolvable carried id already falls back to "re-pick" here
+        // rather than needing a backend resolution step.
         const carry = row
             ? {
                   name: row.instance_name,
-                  identityId:
+                  accountId:
                       row.identity_id && row.identity_id !== "blank"
                           ? row.identity_id
                           : "",
@@ -429,180 +435,83 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     });
     onCleanup(() => authController.dispose());
     const authStateKind = () => flow.state.auth.kind;
-    const onBundleCreated = (bundleId: string) => {
-        // The new bundle was just persisted backend-side. Switch the
-        // dropdown to it AND refetch the identities list so the new
-        // row appears in the dropdown options (otherwise hover/options
-        // would show stale data until reopen).
+    const onAccountCreated = (accId: string) => {
+        // The new account was just persisted backend-side (OAuth or
+        // API-key). Switch the dropdown to it AND refresh the account
+        // cache so the new row appears in the dropdown options
+        // (otherwise hover/options would show stale data until reopen).
         //
-        // Defense-in-depth — `PreLaunchAuthPanel` filters
-        // `pending-bundle-for-...` placeholders before calling, but
-        // guard here too so any future call site can't poison the
-        // dropdown with a non-existent bundle row.
-        if (!bundleId || bundleId.startsWith("pending-bundle-for-")) {
-            return;
-        }
-        setIdentityId(bundleId);
-        void loadIdentities();
+        // Defense-in-depth — guard against an empty id so a future call
+        // site can't poison the dropdown with a non-existent row.
+        if (!accId) return;
+        setAccountId(accId);
+        void loadAccountsIntoForm();
     };
-    const provider = createMemo(() => getProvider(props.agent.provider));
 
-    // Bindings for the currently selected identity bundle — used by
-    // authRequired() to detect non-blank bundles that have no
-    // credential binding for the agent's provider (e.g. a "Work"
-    // identity created via "+ New" but never connected to Claude/Codex
-    // yet). Reagent + codex P1 on PR #910 round 3 — without this
-    // check, "+ New" could bypass the OAuth gate entirely.
-    // Bindings now live in the reducer slice (Stage 2c.3). The store
-    // emits `FetchBindings` events whenever an identity is selected
-    // (IdentityChanged / Opened / ContinueOfChanged for uncached id).
-    // We respond by running the RPC + dispatching BindingsLoading →
-    // BindingsLoaded. The reducer's `hasMatchingBinding(state, providerId)`
-    // selector handles the race guard (loading → false) that the
-    // legacy memo did inline.
-    async function fetchBindings(id: string): Promise<void> {
-        if (!id || id.startsWith("pending-bundle-for-")) return;
-        flow.dispatch({ type: "BindingsLoading", identityId: id });
-        try {
-            const list = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
-                identity_id: id,
-            });
-            flow.dispatch({ type: "BindingsLoaded", identityId: id, bindings: list ?? [] });
-        } catch {
-            // Settle the loading flag with an empty list — same
-            // safe-default the prior createResource catch returned.
-            flow.dispatch({ type: "BindingsLoaded", identityId: id, bindings: [] });
-        }
-    }
+    // True when the selected account actually supplies credentials for
+    // the agent's provider. Replaces `bundleHasMatchingBinding` — with
+    // a direct account selection instead of a bundle-of-bindings, this
+    // is a plain lookup against the already-loaded account list (issue
+    // #1624 PR-C Part B).
+    const accountSupplies = createMemo(() =>
+        accountSuppliesProvider(flow.state, provider()?.id ?? ""),
+    );
 
-    // Cross-tab + cross-pane reactivity: subscribe to the backend's
-    // `identitybundlebindings:changed:<id>` push event so a bind/
-    // unbind in another tab's Identity pane updates this modal
-    // without a manual refetch. Re-subscribes on identityId change
-    // since the event name embeds the identity id.
-    createEffect(() => {
-        const id = identityId();
-        if (!id) return;
-        const unsub = waveEventSubscribe({
-            eventType: `identitybundlebindings:changed:${id}`,
-            handler: () => {
-                void (async () => {
-                    // Refresh the account cache too. The backend's
-                    // expiry probe (PR D) updates IdentityAccount.status
-                    // and publishes this same event — without refreshing
-                    // accounts here, `bundleBindingStatus` reads stale
-                    // status from the in-memory cache until something
-                    // unrelated triggers a refresh. codex P2 on #982.
-                    void refreshAccountCache();
-                    try {
-                        const list = await RpcApi.ListIdentityBindingsCommand(TabRpcClient, {
-                            identity_id: id,
-                        });
-                        flow.dispatch({
-                            type: "BindingsChanged",
-                            identityId: id,
-                            bindings: list ?? [],
-                        });
-                    } catch {
-                        // Best-effort; leave the cache unchanged on
-                        // failure so the user can still launch with
-                        // whatever the last good fetch saw.
-                    }
-                })();
-            },
-        });
-        onCleanup(unsub);
+    // The selected account's own `status` field. Replaces
+    // `bundleBindingStatus` — no bundle→binding→account join needed
+    // anymore, `flow.state.accounts.list` is already reactive (updated
+    // by `loadAccountsIntoForm` on the `identityaccounts:changed`
+    // subscription above), so no separate cache-tick signal is needed
+    // either.
+    const selectedAccountStatus = createMemo<string | null>(() => {
+        const id = accountId();
+        if (!id) return null;
+        return flow.state.accounts.list.find((a) => a.id === id)?.status ?? null;
     });
 
-    const bundleHasMatchingBinding = createMemo(() => {
-        const providerId = provider()?.id;
-        if (!providerId) return false;
-        return hasMatchingBinding(flow.state, providerId);
-    });
-
-    // Account-cache backed memo that resolves the bound account row for
-    // the current (identity, provider) pair and exposes its `status`
-    // string. Per spec §4.4 the canonical oauth-class values are
-    // `"valid" | "expired" | "needs_reauth" | "unknown"`. Returns `null`
-    // when there's no matching binding or the account row isn't in the
-    // cache yet — the consumer (`PreLaunchAuthPanel`) treats `null` as
-    // "no status info, use generic wording".
-    //
-    // The cache is the same one `IdentityPaneViewModel` subscribes to,
-    // so a status flip pushed by the backend's expiry probe
-    // (`identitybundlebindings:changed:<id>` → refreshes cache)
-    // reactively updates this memo and re-renders the panel.
-    const [accountCacheTick, setAccountCacheTick] = createSignal(0);
-    const accountCacheUnsub = subscribeAccountChanges(() => {
-        setAccountCacheTick((n) => n + 1);
-    });
-    onCleanup(accountCacheUnsub);
-    const bundleBindingStatus = createMemo<string | null>(() => {
-        accountCacheTick();
-        const id = flow.state.form.identityId;
-        const providerId = provider()?.id;
-        if (!id || !providerId) return null;
-        const bindings = flow.state.bindings[id] ?? [];
-        const b = bindings.find((bb) => bb.provider === providerId);
-        if (!b) return null;
-        const acc = loadAccounts().find((a) => a.id === b.account_id);
-        return acc?.status ?? null;
-    });
-
-    // True when the bound account is in an oauth-class state that
+    // True when the selected account is in an oauth-class state that
     // benefits from a Reconnect nudge — strictly a wording trigger, not
     // a launch-blocker (spec §4.4: "wording-only nudge"). The Launch
-    // button stays enabled because the binding still counts; the CLI
+    // button stays enabled because the account still counts; the CLI
     // will refresh on its first call.
-    const bundleNeedsReconnectNudge = createMemo(() => {
-        const s = bundleBindingStatus();
+    const accountNeedsReconnectNudge = createMemo(() => {
+        const s = selectedAccountStatus();
         return s === "needs_reauth" || s === "expired";
     });
 
     // Auth gate applies to fresh launches of OAuth providers when the
-    // selected identity can't supply credentials for the agent's
+    // selected account can't supply credentials for the agent's
     // provider. That's true when:
     //
-    // - `blank`/empty is selected — ambient creds, OAuth flow runs once.
-    // - A non-blank bundle without a matching provider binding —
-    //   e.g. "+ New" just created an empty "Work" bundle. Reagent +
-    //   codex P1 on PR #910 round 3.
+    // - No account selected — ambient creds, OAuth flow runs once.
+    // - A selected account for a different provider.
     //
     // Bypasses:
     // - `isContinue` — prior launch already produced creds.
-    // - API-key providers (kimi/pi) — until the backend
-    //   `auth.submitapikey` persists bundles (PR C-2), the gate would
-    //   deadlock. Their existing `launch-flow.ts` Phase 2 prompts for
-    //   the key in-line. Reagent + codex P1 on #847.
+    // - API-key providers (kimi/pi) — their existing `launch-flow.ts`
+    //   Phase 2 prompts for the key in-line. Reagent + codex P1 on #847.
     //
     // Hard auth-blockers: launch CANNOT proceed without the user
     // completing OAuth. Drives both the panel mount AND the launch
     // gate.
-    //
-    // (Historical note: PRs A–E of SPEC_OAUTH_IDENTITY_BUNDLES wired
-    //  oauth-class providers — including openclaw — through real
-    //  per-bundle credential dirs, so the previous `provider.id ===
-    //  "openclaw"` always-gate is no longer needed. The standard
-    //  `hasMatchingBinding` path handles every oauth provider.
-    //  PR F cleanup, 2026-05-22.)
     const authBlocksLaunch = () =>
         !isContinue()
         && provider()?.authType === "oauth"
         && (
-            identityId() === ""
-            || !bundleHasMatchingBinding()
+            accountId() === ""
+            || !accountSupplies()
         );
     // Soft nudges: show the Connect CTA (with status-aware wording)
-    // when the binding is present but its account status is
-    // `needs_reauth` / `expired`. Per spec §4.4 this is a "wording-only
-    // nudge" — does NOT block Launch. The CLI's own refresh path
-    // handles the rest on first call; the nudge just gives the user a
-    // one-click path to refresh proactively.
+    // when the account is selected but its status is `needs_reauth` /
+    // `expired`. Per spec §4.4 this is a "wording-only nudge" — does
+    // NOT block Launch. The CLI's own refresh path handles the rest on
+    // first call; the nudge just gives the user a one-click path to
+    // refresh proactively.
     const authNeedsReconnectWording = () =>
         !isContinue()
         && provider()?.authType === "oauth"
-        && bundleHasMatchingBinding()
-        && bundleNeedsReconnectNudge();
+        && accountSupplies()
+        && accountNeedsReconnectNudge();
     // Mount the panel for EITHER reason (hard block or soft nudge).
     const authRequired = () => authBlocksLaunch() || authNeedsReconnectWording();
     // Launch-readiness gate. Note this only consults `authBlocksLaunch`
@@ -613,7 +522,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const canSubmit = () =>
         !submitting()
         && slugifyInstanceName(name()).length > 0
-        && identityId() !== ""
+        && accountId() !== ""
         && memoryId() !== ""
         && authReady();
 
@@ -633,7 +542,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                 agentType: runtime(),
                 environment: runtime() === "container" ? "docker" : "local",
                 containerImage: runtime() === "container" ? resolvedImage() : undefined,
-                identityId: identityId(),
+                accountId: accountId(),
                 memoryId: memoryId(),
                 // v8 — when continuing a past agent, thread the id +
                 // working directory through. Launch flow uses
@@ -835,58 +744,60 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         <div class="agent-launch-modal-bundle-row">
                             <span class="agent-launch-modal-bundle-row-label">Identity</span>
                             <Show
-                                when={hasUserIdentities()}
+                                when={hasAccountsForProvider()}
                                 fallback={
                                     <button
                                         type="button"
                                         class="agent-launch-modal-bundle-empty-btn"
-                                        onClick={handleNewIdentity}
+                                        onClick={handleAddAccount}
                                         disabled={
                                             submitting() ||
                                             continueLocksIdentity() ||
-                                            !props.onRequestNewIdentity
+                                            !props.onRequestAddAccount
                                         }
                                         title={
-                                            props.onRequestNewIdentity
+                                            props.onRequestAddAccount
                                                 ? undefined
                                                 : "Coming soon"
                                         }
                                     >
-                                        + New identity bundle...
+                                        + Add {provider()?.displayName ?? "account"}...
                                     </button>
                                 }
                             >
                                 <select
                                     class="agent-launch-modal-input"
-                                    value={identityId()}
-                                    onChange={(e) => setIdentityId(e.currentTarget.value)}
+                                    value={accountId()}
+                                    onChange={(e) => setAccountId(e.currentTarget.value)}
                                     disabled={submitting() || continueLocksIdentity()}
-                                    aria-label="Identity bundle"
+                                    aria-label="Account"
                                 >
-                                    <Show when={!identityId()}>
-                                        <option value="" disabled>— Pick an identity —</option>
+                                    <Show when={!accountId()}>
+                                        <option value="" disabled>— Pick an account —</option>
                                     </Show>
-                                    <For each={(identities() ?? []).filter((b) => !b.is_blank)}>
-                                        {(bundle) => (
-                                            <option value={bundle.id}>{bundle.name}</option>
+                                    <For each={accountsForProvider(flow.state, provider()?.id ?? "")}>
+                                        {(account) => (
+                                            <option value={account.id}>
+                                                {account.display_name?.trim() || account.name}
+                                            </option>
                                         )}
                                     </For>
                                 </select>
                                 <button
                                     type="button"
                                     class="agent-launch-modal-bundle-new-btn"
-                                    onClick={handleNewIdentity}
+                                    onClick={handleAddAccount}
                                     disabled={
                                         submitting() ||
                                         continueLocksIdentity() ||
-                                        !props.onRequestNewIdentity
+                                        !props.onRequestAddAccount
                                     }
                                     title={
-                                        props.onRequestNewIdentity
-                                            ? "New identity bundle..."
+                                        props.onRequestAddAccount
+                                            ? `Add ${provider()?.displayName ?? "account"}...`
                                             : "Coming soon"
                                     }
-                                    aria-label="New identity bundle"
+                                    aria-label="Add account"
                                 >
                                     +
                                 </button>
@@ -973,30 +884,23 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                      * Pre-launch OAuth panel (spec:
                      * SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md).
                      * Shows the Connect CTA whenever the selected
-                     * identity can't supply creds for this provider —
-                     * blank singleton, openclaw, or a non-blank bundle
-                     * without a matching binding (e.g. "+ New" just
-                     * created an empty bundle). The panel uses
-                     * `hasMatchingBinding` to compute its own outcome
-                     * so non-blank-but-empty bundles don't shortcut
-                     * to `ready`.
+                     * account can't supply creds for this provider — no
+                     * account selected, or a selected account for a
+                     * different provider. Issue #1624 PR-C Part B: OAuth
+                     * Connect starts directly (no "+ New identity"
+                     * interposition) — the backend mints the account.
                      */}
                     <Show when={authRequired()}>
                         <PreLaunchAuthPanel
                             provider={provider()}
-                            identityId={identityId}
-                            hasMatchingBinding={bundleHasMatchingBinding}
-                            bindingStatus={bundleBindingStatus}
+                            accountId={accountId}
+                            accountSuppliesProvider={accountSupplies}
+                            accountStatus={selectedAccountStatus}
                             controller={authController}
-                            onBundleCreated={onBundleCreated}
-                            autoStartAuth={props.initialFormState != null && props.autoStartAuth === true}
-                            onRequestNewIdentity={
-                                props.onRequestNewIdentity
-                                    ? () =>
-                                          props.onRequestNewIdentity?.(
-                                              snapshot(),
-                                              "oauth-continue",
-                                          )
+                            onAccountCreated={onAccountCreated}
+                            onRequestAddAccount={
+                                props.onRequestAddAccount
+                                    ? () => props.onRequestAddAccount?.(snapshot())
                                     : undefined
                             }
                             disabled={submitting()}

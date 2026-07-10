@@ -32,11 +32,19 @@ import {
 } from "./auth-state";
 
 /** Backend-facing RPC surface. Allowed to be injected so tests can
- *  swap in a stub. Production passes the `defaultAuthRpc` adapter. */
+ *  swap in a stub. Production passes the `defaultAuthRpc` adapter.
+ *
+ *  `start()`'s request shape is direct-account only (issue #1624
+ *  PR-C Part B) — `AuthFlowController` has exactly one production
+ *  consumer (`AgentLaunchModal`, via `PreLaunchAuthPanel`), and that
+ *  caller always wants a standalone account, never a bundle. No
+ *  `intoBundleId` field: there is no remaining bundle-mode caller of
+ *  this interface to keep it for. */
 export interface AuthRpc {
     start(req: {
         providerId: string;
-        intoBundleId?: string;
+        directAccount: true;
+        existingAccountId?: string;
         cliPath: string;
         authLoginArgs: string[];
         authCheckArgs: string[];
@@ -255,7 +263,13 @@ export class AuthFlowController {
         try {
             const { sessionId, authUrl } = await this.rpc.start({
                 providerId: s.providerId,
-                intoBundleId: s.intoBundleId || undefined,
+                directAccount: true,
+                // `intoBundleId` (unrenamed — see auth-state.ts's
+                // foldPolled comment) carries the account id to
+                // reconnect into when the outcome was `expired`/
+                // `needs-account` against an already-selected account;
+                // empty for a genuinely fresh connect.
+                existingAccountId: s.intoBundleId || undefined,
                 cliPath: cli.cliPath,
                 authLoginArgs: cli.authLoginArgs,
                 authCheckArgs: cli.authCheckArgs,
