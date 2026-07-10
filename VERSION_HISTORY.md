@@ -1,5 +1,10 @@
 # AgentMux Version History
 
+## 0.52.3 — 2026-07-09
+
+- chore(build): guard stable-channel packaging — clean tree + merged release commit required
+
+
 ## 0.52.2 — 2026-07-09
 
 - feat(agent): consolidate Mode/Model/Effort drop-up pills into a single Runtime panel
