@@ -190,6 +190,29 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     env_vars.insert("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY".to_string(), json!("30000"));
                 }
 
+                // Cross-tab/cross-restart continuity: this agent may already have
+                // a captured provider session sitting in the shared registry
+                // (backfilled from its provider transcript, or captured live by a
+                // prior block) even though no block for it exists in THIS tab —
+                // e.g. after a full app restart lands on a different/rehydrated
+                // tab. Seed the new block's agent:sessionid meta so its FIRST
+                // turn resumes that conversation instead of silently starting
+                // fresh and orphaning the original — the same thing the
+                // picker's explicit "Continue" flow already does via
+                // continueOfInstanceId (RecentSessionRow.session_id), extended
+                // here to the default open path.
+                // See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md
+                // ("Mechanism 2 — continuity"), action item 4.
+                let resume_session_id: Option<String> = wstore.shared_agent_registry()
+                    .and_then(|reg| reg.list_active().ok())
+                    .and_then(|records| {
+                        records.into_iter()
+                            .filter(|r| r.data.definition_id == agent.id)
+                            .filter(|r| r.data.session_id.as_deref().map_or(false, |s| !s.is_empty()))
+                            .max_by_key(|r| r.data.last_launched_at_ms)
+                    })
+                    .and_then(|r| r.data.session_id);
+
                 let mut meta = MetaMapType::new();
                 meta.insert("view".to_string(), json!("agent"));
                 meta.insert("agentId".to_string(), json!(&agent.id));
@@ -239,6 +262,9 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
                 meta.insert("agent:session_id_field".to_string(), json!(provider.session_id_field));
+                if let Some(sid) = &resume_session_id {
+                    meta.insert("agent:sessionid".to_string(), json!(sid));
+                }
 
                 // 7. Create block + insert into layout tree.
                 // Through the reducer (#1681), not wcore-direct: a store-only

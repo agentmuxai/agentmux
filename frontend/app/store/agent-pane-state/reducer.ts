@@ -368,6 +368,20 @@ export function update(
             };
         }
 
+        case "ReconcileContextFromHistory": {
+            // Only ever seeds the mount-default null — never overrides a
+            // real live TokensIn (or an earlier reconciliation) that already
+            // landed. Mirrors ReconcileTurnActive's only-if-still-default
+            // guard above.
+            if (state.lastContextTokens != null) {
+                return { state, events: [] };
+            }
+            return {
+                state: { ...state, lastContextTokens: command.tokens },
+                events: [{ type: "context-reconciled-at-mount", tokens: command.tokens }],
+            };
+        }
+
         case "TurnStart": {
             // Invariant 1: can't start a turn without a subscribed
             // stream. PR G: `state.lastEventMs !== null` replaces the
