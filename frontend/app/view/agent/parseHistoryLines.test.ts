@@ -93,4 +93,21 @@ describe("parseHistoryLines", () => {
         const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
         expect(lastSessionStats).toBeNull();
     });
+
+    it("does not let a later empty-stats session_end clobber real historical stats", () => {
+        // reagent P1 on PR #2059: Claude's persistent-mode controller emits a
+        // session_end with stats: {} after EVERY plain-text turn (the per-turn
+        // boundary marker) — the real usage-bearing `result` event only fires
+        // at process teardown, which can be much earlier in the window. The
+        // chronologically-last session_end here is the empty turn-boundary
+        // marker; the real stats from the earlier turn must still win.
+        const lines = [
+            line({ type: "text", content: "turn one" }),
+            line({ type: "session_end", stats: { input_tokens: 500, output_tokens: 50 } }),
+            line({ type: "text", content: "turn two" }),
+            line({ type: "session_end", stats: {} }),
+        ];
+        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
+        expect(lastSessionStats).toEqual({ input_tokens: 500, output_tokens: 50 });
+    });
 });
