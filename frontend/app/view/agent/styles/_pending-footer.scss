@@ -87,9 +87,21 @@
                 z-index: 1;
             }
 
+            // Reserve right padding for the pinned mic only when the mic is
+            // actually rendered. MicButton hides itself entirely (internal
+            // <Show>, MicButton.tsx) when voice is unavailable or
+            // voice:enabled is false — the .agent-input-mic wrapper stays
+            // mounted but empty, so keying off :has(.mic-button-wrap)
+            // tracks the button's own visibility logic without duplicating
+            // it here. Scoped to this one small container; not the
+            // tab-switch-hot path where :has() is banned (tabbar.scss).
+            &:has(.mic-button-wrap) .agent-input {
+                padding-right: 22px;
+            }
+
             .agent-input {
                 width: 100%;
-                padding: 3px 22px 3px var(--space-1);
+                padding: 3px var(--space-1);
                 background: var(--main-bg-color);
                 border: 1px solid var(--border-color);
                 border-radius: 0;
