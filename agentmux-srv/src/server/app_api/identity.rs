@@ -26,14 +26,14 @@ fn register_identity_self_accounts(engine: &Arc<WshRpcEngine>, state: &AppState)
 }
 
 fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
-    let broker = state.broker.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_IDENTITY_ACCOUNT_UPSERT,
         Box::new(move |data, ctx| {
-            let id_store = id_store.clone();
-            let broker = broker.clone();
+            let state = state.clone();
             Box::pin(async move {
+                let id_store = &state.id_store;
+                let broker = &state.broker;
                 #[derive(serde::Deserialize)]
                 #[serde(rename_all = "snake_case")]
                 struct Req {
@@ -55,6 +55,13 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     return Err("identity.account.upsert: secret must not be empty".to_string());
                 }
 
+                // The link table is keyed by definition id; req.agent_id is
+                // the S1 slug. Resolve once, use for every link-table call
+                // below. See resolve_agent_definition_id (mod.rs) for the
+                // two failure modes writing the slug causes.
+                let def_id = resolve_agent_definition_id(&state, &req.agent_id)
+                    .map_err(|e| format!("identity.account.upsert: {e}"))?;
+
                 let is_new = req.account_id.is_empty();
                 let account_id = if is_new {
                     uuid::Uuid::new_v4().to_string()
@@ -63,7 +70,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     // linked to the calling agent, so callers can't overwrite
                     // another agent's credentials by guessing a UUID.
                     let links = id_store
-                        .agent_identity_list_for_agent(&req.agent_id)
+                        .agent_identity_list_for_agent(&def_id)
                         .map_err(|e| format!("identity.account.upsert: {e}"))?;
                     let owned = links.iter().any(|l| l.account_id == req.account_id);
                     if !owned {
@@ -145,13 +152,25 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     return Err(format!("identity.account.upsert: db: {e}"));
                 }
 
-                // Steps 2+4: replace provider link (unlink old, link new).
-                let _ = id_store.agent_identity_unlink(&req.agent_id, &req.provider);
-                if let Err(e) = id_store.agent_identity_link(&req.agent_id, &account_id, &req.provider) {
-                    // Only clean up keychain for new accounts — on the update path the
+                // Step 2/4: (re)point the agent's provider link at this account.
+                // agent_identity_link's own `ON CONFLICT(agent_id, provider) DO
+                // UPDATE` already overwrites whatever account_id was linked
+                // before, so no separate unlink is needed for the success path.
+                // A preceding unlink-then-link was here previously (reagent P1 on
+                // PR #2056): now that def_id resolves correctly, an unlink that
+                // succeeds followed by a link that fails would permanently drop
+                // the agent's existing provider link with no compensation (the
+                // failure branch below only cleans up for is_new accounts) —
+                // removed rather than adding yet another compensating delete.
+                if let Err(e) = id_store.agent_identity_link(&def_id, &account_id, &req.provider) {
+                    // Only clean up for new accounts — on the update path the
                     // account still exists in the DB and may be linked to other providers,
                     // so deleting the keychain secret would destroy a valid credential.
+                    // Delete the just-upserted db_identity_accounts row too, not only the
+                    // keychain secret: without it a failed link left an orphaned,
+                    // unlinked account row behind (agent3's report on #1624 PR-C).
                     if is_new {
+                        let _ = id_store.identity_delete(&account_id);
                         let aid = account_id.clone();
                         let _ = tokio::task::spawn_blocking(move || {
                             crate::identity::secret_store::delete(&aid)
@@ -228,22 +247,26 @@ fn register_identity_account_validate(engine: &Arc<WshRpcEngine>, state: &AppSta
 }
 
 fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let id_store = state.id_store.clone();
-    let broker = state.broker.clone();
+    let state = state.clone();
     engine.register_handler(
         COMMAND_IDENTITY_SELF_UNLINK,
         Box::new(move |data, ctx| {
-            let id_store = id_store.clone();
-            let broker = broker.clone();
+            let state = state.clone();
             Box::pin(async move {
+                let id_store = &state.id_store;
+                let broker = &state.broker;
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, provider: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
 
+                // Link rows are keyed by definition id, not the S1 slug —
+                // unlinking by slug always matched zero rows (silent no-op).
+                let def_id = resolve_agent_definition_id(&state, &req.agent_id)
+                    .map_err(|e| format!("identity.self.unlink: {e}"))?;
                 let unlinked = id_store
-                    .agent_identity_unlink(&req.agent_id, &req.provider)
+                    .agent_identity_unlink(&def_id, &req.provider)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
                 if unlinked {
                     broker.publish(crate::backend::wps::WaveEvent {
