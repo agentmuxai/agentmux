@@ -1185,3 +1185,54 @@ async fn introspection_lists_return_collections() {
         assert!(!json[key].as_array().unwrap().is_empty(), "{path} non-empty");
     }
 }
+
+/// `resolve_agent_definition_id` maps the S1-authenticated agent slug
+/// (instance_name) to the definition id that keys
+/// `db_agent_identity_links`, passes real definition ids through
+/// unchanged, and errors on unknown ids. Guards the #1624 PR-C fix for
+/// identity.account.upsert/self.accounts/self.unlink writing the slug
+/// into the link table (FK failure on per-channel stores; silent
+/// resolver-invisible rows on the shared store).
+#[tokio::test]
+async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
+    let state = test_state();
+
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-test-1", // caller-assigned; agent_def_insert stores it as-is
+        "slug": "testslug",
+        "name": "TestSlug",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+
+    let inst: crate::backend::storage::AgentInstance = serde_json::from_value(serde_json::json!({
+        "id": "inst-1",
+        "definition_id": def.id,
+        "status": "running",
+        "started_at": 1,
+        "created_at": 1,
+        "identity_id": "",
+        "memory_id": "",
+        "instance_name": "TestSlug",
+        "working_directory": "",
+    }))
+    .expect("instance fixture");
+    state.wstore.instance_create(&inst).expect("create instance");
+
+    // Slug → definition id.
+    let resolved = super::app_api::resolve_agent_definition_id(&state, "TestSlug")
+        .expect("slug resolves");
+    assert_eq!(resolved, def.id);
+
+    // A definition id passes through unchanged (internal non-S1 callers).
+    let passthrough = super::app_api::resolve_agent_definition_id(&state, &def.id)
+        .expect("definition id passes through");
+    assert_eq!(passthrough, def.id);
+
+    // Unknown ids error instead of silently writing bogus link rows.
+    assert!(super::app_api::resolve_agent_definition_id(&state, "no-such-agent").is_err());
+}
