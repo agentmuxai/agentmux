@@ -21,6 +21,8 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX 
 import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { callBackendService } from "@/app/store/wos";
+import { recordTurn } from "@/app/store/token-usage";
 import { ActivityRow } from "./ActivityRow";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
@@ -148,12 +150,26 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
     });
 
     const togglePin = (id: string): void => {
+        const wasExpanded = expandedIds().has(id);
         setExpandedIds((prev) => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return next;
         });
+        // First-expand-ever name generation — mirrors SubagentRow.handleToggle
+        // (swarm-view.tsx). Without this, a subagent expanded only via the
+        // dock (never via the Swarm pane) would permanently show its raw
+        // slug/agent_id: nothing else triggers GenerateName (reagent P2, PR
+        // #2062).
+        if (!wasExpanded) {
+            const a = activityById().get(id);
+            if (a?.kind === "subagent" && a.subagent && !a.subagent.display_name) {
+                void callBackendService("subagent", "GenerateName", [id]).then((result: any) => {
+                    if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
+                });
+            }
+        }
     };
 
     const stop = (id: string): void => {
