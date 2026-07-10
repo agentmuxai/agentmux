@@ -14,7 +14,7 @@ use crate::backend::rpc_types::{
     COMMAND_ACCOUNT_KEY_VERIFY,
     COMMAND_ACCOUNT_OAUTH_START, COMMAND_ACCOUNT_OAUTH_POLL, COMMAND_ACCOUNT_OAUTH_CANCEL,
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
-    COMMAND_LIST_AGENT_IDENTITIES,
+    COMMAND_LIST_AGENT_IDENTITIES, COMMAND_LIST_ALL_AGENT_IDENTITIES,
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
     CommandListNamedAgentsData, CommandHideNamedAgentData,
     NamedAgentRow,
@@ -504,6 +504,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let rows = wstore
                     .agent_identity_list_for_agent(&cmd.agent_id)
                     .map_err(|e| format!("listagentidentities: {e}"))?;
+                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
+            })
+        }),
+    );
+
+    // Every direct link across every agent — see the constant's doc comment.
+    let wstore = state.id_store.clone();
+    engine.register_handler(
+        COMMAND_LIST_ALL_AGENT_IDENTITIES,
+        Box::new(move |_data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let rows = wstore
+                    .agent_identity_list_all()
+                    .map_err(|e| format!("listallagentidentities: {e}"))?;
                 Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
             })
         }),
