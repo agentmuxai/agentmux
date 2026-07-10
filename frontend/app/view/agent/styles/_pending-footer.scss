@@ -75,15 +75,16 @@
             gap: 1px;
             position: relative;
 
-            // Pinned mic — right edge of the composer, matching the
-            // header mic's old top-right feel but anchored to the input
-            // itself. Sits in the container's top-right corner rather than
-            // vertically centered against the textarea's full (growable)
-            // height, so it doesn't drift as the box grows past one line.
+            // Pinned mic — right edge of the composer, vertically centered
+            // against the input's current (growable) height so it tracks the
+            // middle of the box as more lines are typed, rather than staying
+            // fixed to the top-right corner (the earlier behavior — reversed
+            // per explicit request, SPEC_COMPOSER_STRIP_LAYOUT_MIC_CENTER_MODEL_DEFAULTS_2026_07_10.md).
             .agent-input-mic {
                 position: absolute;
-                top: 3px;
+                top: 50%;
                 right: 5px;
+                transform: translateY(-50%);
                 z-index: 1;
             }
 
