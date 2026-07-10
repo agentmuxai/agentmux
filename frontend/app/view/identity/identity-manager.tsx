@@ -51,7 +51,7 @@ interface IdentityManagerBodyProps {
  * api-key rows whose `status` is a freeform legacy string visible
  * without forcing them through this dispatch.
  */
-function statusBadge(status: string | undefined): {
+export function statusBadge(status: string | undefined): {
     label: string;
     dot: "valid" | "expired" | "needs_reauth" | "unknown";
     reconnect: boolean;

@@ -124,6 +124,17 @@ export const IdentityApi = {
         return client.rpcCall("listagentidentities", data, opts);
     },
 
+    // Every direct link across every agent — powers the Armory "Identities"
+    // read-only rail (issue #1624 PR-C), which needs all agents' bindings
+    // up front rather than one ListAgentIdentitiesCommand call per rail row.
+    ListAllAgentIdentitiesCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<AgentDefinitionIdentity[]> {
+        return client.rpcCall("listallagentidentities", data, opts);
+    },
+
     // ────────────────────────────────────────────────────────────────────
     // v7 — Identity bundles
     // ────────────────────────────────────────────────────────────────────
