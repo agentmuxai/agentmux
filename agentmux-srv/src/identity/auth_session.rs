@@ -55,6 +55,13 @@ pub enum AuthSessionStatus {
         /// Best-effort — extracted from the CLI's "logged in as..."
         /// line. Used by the frontend to name the bundle.
         email: Option<String>,
+        /// Set only for a direct-account session (issue #1624 PR-C
+        /// Part B) — the newly-minted or reused `IdentityAccount` id,
+        /// with no bundle involved. `bundle_id` is an empty string in
+        /// that mode; existing bundle-mode callers never populate
+        /// this field, so it's skipped on the wire when absent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        account_id: Option<String>,
     },
     /// Auth attempt failed. `error` is a short human-readable phrase
     /// suitable to render inline.
@@ -228,8 +235,15 @@ impl AuthSessionManager {
 
     /// Handler-side completion hook. Called when the CLI exits or
     /// auth check confirms success. Transitions the session to a
-    /// terminal state.
-    pub fn finish_success(&self, session_id: &str, bundle_id: String) -> bool {
+    /// terminal state. `account_id` is `None` for the legacy
+    /// bundle-mode path; `Some(id)` for a direct-account session
+    /// (issue #1624 PR-C Part B) — see `AuthSessionStatus::Success`.
+    pub fn finish_success(
+        &self,
+        session_id: &str,
+        bundle_id: String,
+        account_id: Option<String>,
+    ) -> bool {
         let mut sessions = self.sessions.lock().unwrap();
         let Some(session) = sessions.get_mut(session_id) else {
             return false;
@@ -240,6 +254,7 @@ impl AuthSessionManager {
         session.status = AuthSessionStatus::Success {
             bundle_id,
             email: session.captured_email.clone(),
+            account_id,
         };
         true
     }
@@ -476,12 +491,13 @@ mod tests {
         let m = mgr();
         let r = m.start_session("claude".to_string(), None);
         let _ = m.record_line(&r.session_id, "Successfully logged in as asaf@example.com");
-        assert!(m.finish_success(&r.session_id, "bundle-1".to_string()));
+        assert!(m.finish_success(&r.session_id, "bundle-1".to_string(), None));
         let p = m.poll_session(&r.session_id).unwrap();
         match p.status {
-            AuthSessionStatus::Success { bundle_id, email } => {
+            AuthSessionStatus::Success { bundle_id, email, account_id } => {
                 assert_eq!(bundle_id, "bundle-1");
                 assert_eq!(email.as_deref(), Some("asaf@example.com"));
+                assert_eq!(account_id, None);
             }
             other => panic!("expected Success, got {other:?}"),
         }
@@ -524,7 +540,7 @@ mod tests {
     fn terminal_states_cannot_be_re_transitioned() {
         let m = mgr();
         let r = m.start_session("claude".to_string(), None);
-        assert!(m.finish_success(&r.session_id, "bundle-1".to_string()));
+        assert!(m.finish_success(&r.session_id, "bundle-1".to_string(), None));
         // Second finish_failure is a no-op.
         assert!(!m.finish_failure(&r.session_id, "should be ignored".to_string()));
         let p = m.poll_session(&r.session_id).unwrap();
@@ -597,6 +613,7 @@ mod tests {
         let s = AuthSessionStatus::Success {
             bundle_id: "bundle-1".to_string(),
             email: Some("asaf@example.com".to_string()),
+            account_id: None,
         };
         let v = serde_json::to_value(&s).unwrap();
         assert_eq!(
@@ -605,6 +622,24 @@ mod tests {
                 "status": "success",
                 "bundleId": "bundle-1",
                 "email": "asaf@example.com"
+            })
+        );
+
+        // Direct-account mode (issue #1624 PR-C Part B) — accountId
+        // appears on the wire; bundleId is present but empty.
+        let s = AuthSessionStatus::Success {
+            bundle_id: String::new(),
+            email: Some("asaf@example.com".to_string()),
+            account_id: Some("acc-1".to_string()),
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "status": "success",
+                "bundleId": "",
+                "email": "asaf@example.com",
+                "accountId": "acc-1"
             })
         );
     }
