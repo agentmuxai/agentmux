@@ -13,6 +13,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { McpPreloadEntry } from "./mcp-preload-catalog";
 
 export interface McpDraft {
     id?: string;
@@ -59,6 +60,11 @@ export class McpCatalogModel {
     private _bindAgentId = createSignal<string>("");
     bindAgentIdAtom: Accessor<string> = this._bindAgentId[0];
     setBindAgentId = this._bindAgentId[1];
+
+    // "+ Browse catalog" picker (SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.6).
+    private _catalogPickerOpen = createSignal<boolean>(false);
+    catalogPickerOpenAtom: Accessor<boolean> = this._catalogPickerOpen[0];
+    setCatalogPickerOpen = this._catalogPickerOpen[1];
 
     selectedAtom: Accessor<McpServerCatalogItem | null>;
 
@@ -117,6 +123,30 @@ export class McpCatalogModel {
         this.setError(null);
         this.setDraft(emptyMcpDraft());
         this.setSelectedId(null);
+    }
+
+    openCatalogPicker(): void {
+        this.setError(null);
+        this.setCatalogPickerOpen(true);
+    }
+
+    closeCatalogPicker(): void {
+        this.setCatalogPickerOpen(false);
+    }
+
+    /** Catalog entry pick — pre-fill the normal draft form, name included
+     *  (unlike a from-scratch draft, the name is meaningful and rarely
+     *  needs editing) — and drop straight into it, same form as "+ New". */
+    startFromCatalog(entry: McpPreloadEntry): void {
+        this.setError(null);
+        this.setSelectedId(null);
+        this.setDraft({
+            id: undefined,
+            name: entry.name,
+            transport: entry.transport,
+            config: JSON.stringify(entry.config, null, 2),
+        });
+        this.setCatalogPickerOpen(false);
     }
 
     startEdit(server: McpServer): void {

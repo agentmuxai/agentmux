@@ -1,0 +1,92 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Styles for McpCatalogPicker — the "+ Browse catalog" overlay in the
+// Armory's MCP Servers tab. Mirrors accounts-gallery.scss's overlay shape
+// for visual consistency across Armory tabs.
+
+.mcp-picker-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, black 45%, transparent);
+    z-index: 100;
+}
+
+.mcp-picker {
+    display: flex;
+    flex-direction: column;
+    width: 480px;
+    max-width: 92vw;
+    max-height: 80vh;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.mcp-picker-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.mcp-picker-title {
+    font-size: var(--text-md, 14px);
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.mcp-picker-close {
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: default;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.mcp-picker-list {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-2);
+    gap: var(--space-1-5);
+    overflow-y: auto;
+}
+
+.mcp-picker-entry {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--border-color);
+    background: var(--panel-bg-color);
+    color: var(--main-text-color);
+    text-align: left;
+    cursor: default;
+
+    &:hover {
+        border-color: var(--accent-color);
+    }
+}
+
+.mcp-picker-entry-name {
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.mcp-picker-entry-note {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.mcp-picker-entry-docs {
+    font-size: 10px;
+    color: var(--accent-color);
+}
