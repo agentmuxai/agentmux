@@ -147,15 +147,17 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         props.onDefer?.();
     };
 
-    // `<input>` covers both the radio/checkbox options AND the "Other"
-    // free-text field — none of them treat Enter as "insert a newline", so
-    // Enter should submit from any of them, same as the Submit button. Only
-    // a real multi-line field (a `<textarea>` elsewhere in the pane, e.g. the
-    // composer) or a contentEditable region needs Enter left alone.
-    const isTypingTarget = (target: EventTarget | null): boolean => {
+    // Any `<input>`/`<textarea>`/contentEditable is "editable" — this is the
+    // broad check (reagent P1, PR #2060: an earlier version of this file
+    // narrowed it to TEXTAREA/contentEditable only, so it no longer
+    // recognized a plain text `<input>` elsewhere in the pane — e.g. the
+    // Ctrl+F search bar, AgentSearchBar.tsx — as something Enter shouldn't
+    // be stolen from, silently submitting a fully-answered pending question
+    // while the user was just navigating search matches).
+    const isEditableTarget = (target: EventTarget | null): boolean => {
         const el = target as HTMLElement | null;
         if (!el) return false;
-        if (el.tagName === "TEXTAREA") return true;
+        if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return true;
         return el.isContentEditable;
     };
 
@@ -167,11 +169,18 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         const paneRoot = rootRef?.closest(".agent-view") as HTMLElement | null;
         if (paneRoot && target && !paneRoot.contains(target)) return;
 
+        // Whether the keystroke actually originated inside this panel's own
+        // DOM (an option, the "Other" input, or the panel root itself) —
+        // mirrors AgentDecisionPanel's `inPanel` (AgentDecisionPanel.tsx:208).
+        const inPanel = !!rootRef && !!target && rootRef.contains(target);
+
         if (e.key === "Enter" && !e.shiftKey) {
-            // Don't hijack Enter in a real multi-line field elsewhere in the
-            // pane (e.g. the composer textarea) — everything inside this
-            // panel (options, "Other" input) submits on Enter instead.
-            if (isTypingTarget(target)) return;
+            // Outside the panel, don't hijack Enter from a real editable
+            // control elsewhere in the pane (composer textarea, Ctrl+F
+            // search input, etc.). Inside the panel, every control (options,
+            // "Other" free-text input) submits on Enter regardless — none of
+            // them treat Enter as "insert a newline".
+            if (!inPanel && isEditableTarget(target)) return;
             e.preventDefault();
             submit();
         } else if (e.key === "Escape") {
