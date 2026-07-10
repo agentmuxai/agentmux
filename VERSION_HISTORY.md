@@ -1940,6 +1940,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 | Version | Date | ZIP (compressed) | Folder (uncompressed) | Note |
 |---------|------|------------------|-----------------------|------|
+| 0.52.2 | 2026-07-09 | 171.6 MiB | 369.5 MiB | |
 | 0.52.1 | 2026-07-09 | 171.6 MiB | 369.5 MiB | |
 | 0.44.0 | 2026-06-10 | 163.9 MiB | 349.8 MiB | |
 | 0.38.13 | 2026-05-26 | 164.8 MiB | 346.2 MiB | |
