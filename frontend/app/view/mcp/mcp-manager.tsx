@@ -11,7 +11,47 @@
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
 import { McpCatalogModel } from "./mcp-model";
+import { McpCatalogPicker } from "./McpCatalogPicker";
+import { findPreloadEntryByName } from "./mcp-preload-catalog";
+import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import "../agent/components/AgentPrimitiveModal.scss";
+import "./mcp-status-pill.scss";
+
+const STATUS_LABEL: Record<McpCapabilityStatus, string> = {
+    unknown: "Not checked",
+    checking: "Checking…",
+    connected: "Connected",
+    unreachable: "Unreachable",
+    handshake_failed: "Not responding",
+    invalid_config: "Invalid config",
+};
+
+function McpStatusPill(props: { serverId: string; serverName: string }): JSX.Element {
+    onCleanup(watchMcpCapability(props.serverId));
+    const cap = () => getMcpCapability(props.serverId);
+    // §6 acceptance bar: a non-"connected" status pairs with the catalog's
+    // static remediation text (when this server was created from a known
+    // catalog entry) instead of a bare status word.
+    const remediation = () => {
+        const s = cap().status;
+        if (s === "unknown" || s === "checking" || s === "connected") return null;
+        return findPreloadEntryByName(props.serverName)?.prereqNote ?? null;
+    };
+
+    return (
+        <div class="mcp-status-block">
+            <span class="mcp-status-pill" classList={{ "is-connected": cap().status === "connected" }}>
+                {STATUS_LABEL[cap().status]}
+                <Show when={cap().status === "connected" && cap().toolCount !== undefined}>
+                    {" "}· {cap().toolCount} tools
+                </Show>
+            </span>
+            <Show when={remediation()}>
+                <p class="mcp-status-remediation">{remediation()}</p>
+            </Show>
+        </div>
+    );
+}
 
 export const McpManager = (): JSX.Element => {
     const model = new McpCatalogModel();
@@ -45,6 +85,9 @@ export const McpManager = (): JSX.Element => {
                         </For>
                     </Show>
 
+                    <button class="agent-primitive-modal-new-btn" onClick={() => model.openCatalogPicker()}>
+                        + Browse catalog
+                    </button>
                     <button class="agent-primitive-modal-new-btn" onClick={() => model.startNew()}>
                         + New MCP server
                     </button>
@@ -69,6 +112,7 @@ export const McpManager = (): JSX.Element => {
                                         <p class="agent-primitive-modal-global-note">
                                             Used by {server().bound_count} {server().bound_count === 1 ? "agent" : "agents"}
                                         </p>
+                                        <McpStatusPill serverId={server().id} serverName={server().name} />
                                         <span class="agent-primitive-modal-field-label">Transport</span>
                                         <pre class="agent-primitive-modal-field-value">{server().transport}</pre>
                                         <span class="agent-primitive-modal-field-label">Config</span>
@@ -164,6 +208,10 @@ export const McpManager = (): JSX.Element => {
                     </Show>
                 </div>
             </div>
+
+            <Show when={model.catalogPickerOpenAtom()}>
+                <McpCatalogPicker model={model} />
+            </Show>
         </div>
     );
 };
