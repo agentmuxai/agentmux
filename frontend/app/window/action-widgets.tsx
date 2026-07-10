@@ -528,28 +528,13 @@ const ActionWidgets = (): JSX.Element => {
     }
 
     // ── Context menus ─────────────────────────────────────────────────────────
-
-    const handleBarContextMenu = (e: MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation(); // prevent bubbling to window-header onContextMenu (opens TitleBarContextMenu)
-        ContextMenuModel.showContextMenu(
-            [
-                {
-                    label: "Icon Only",
-                    type: "checkbox",
-                    checked: iconOnly(),
-                    click: () => {
-                        fireAndForget(async () => {
-                            await RpcApi.SetConfigCommand(TabRpcClient, {
-                                "widget:icononly": !iconOnly(),
-                            } as any);
-                        });
-                    },
-                },
-            ],
-            e
-        );
-    };
+    // Right-clicking the gaps between pinned widgets used to open its own
+    // one-item ("Icon Only") menu here, separate from — and hidden behind —
+    // the unified TitleBarContextMenu the rest of the empty tab-bar space
+    // opens. Removed: the bar's own onContextMenu no longer intercepts the
+    // event, so it now bubbles up to window-header's handler like any other
+    // empty-space right-click, landing on the single shared menu (which
+    // already has its own "Show Icons Only" entry).
 
     const handlePinnedContextMenu = (e: MouseEvent, key: string) => {
         e.preventDefault();
@@ -580,7 +565,6 @@ const ActionWidgets = (): JSX.Element => {
                 class="action-widgets"
                 data-testid="action-widgets"
                 data-drag-region="false"
-                onContextMenu={handleBarContextMenu}
             >
                 <For each={visiblePinnedWidgets()}>
                     {({ key, widget }, idx) => (
