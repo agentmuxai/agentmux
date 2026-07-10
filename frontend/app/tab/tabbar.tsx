@@ -18,7 +18,7 @@ import { TabRpcClient } from "@/store/rpc-util";
 import { makeORef, getObjectValue, getWaveObjectAtom } from "../store/wos";
 import { ConfirmModal } from "@/element/modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
-import { deleteLayoutModelForTab } from "@/layout/index";
+import { deleteLayoutModelForTab, tileItemType } from "@/layout/index";
 import { DroppableTab } from "./droppable-tab";
 import {
     tabItemType,
@@ -29,6 +29,8 @@ import {
     computeInsertionPoint,
     InsertionPoint,
     tabWrapperRefs,
+    setHoveredDropTabId,
+    computeHoveredTab,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
@@ -367,6 +369,49 @@ function TabBar(props: TabBarProps): JSX.Element {
             },
         });
         onCleanup(cleanup);
+
+        // Pane (tile) drags: tab-level drop UI (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md).
+        // A pane can only be dragged from the currently active tab — every
+        // other tab is `display:none` (workspace.tsx keeps them mounted but
+        // hidden) and so cannot receive the pointer events needed to start
+        // a drag — so `atoms.activeTabId()` is always the drag's source tab
+        // for the lifetime of a single drag gesture (it cannot change while
+        // the mouse button is held).
+        const cleanupTileDrop = monitorForElements({
+            canMonitor: ({ source }) => source.data.type === tileItemType,
+            onDrag: ({ location }) => {
+                const input = location.current.input;
+                setHoveredDropTabId(
+                    computeHoveredTab(input.clientX, input.clientY, atoms.activeTabId()),
+                );
+            },
+            onDrop: ({ location }) => {
+                setHoveredDropTabId(null);
+
+                // Without this, a pane dropped over the tab bar would leave
+                // `currentDragPayload` set (TileLayout's own onDrop
+                // deliberately doesn't clear it — see its comment —
+                // because it fires for every drop, including in-window ones
+                // already handled by an OverlayNode drop target). The
+                // unhandled payload then reaches CrossWindowDragMonitor's
+                // dragend listener, which finds no other AgentMux window
+                // under the cursor and misinterprets the release as a
+                // tear-off, spawning an unwanted floating pane window.
+                // Consume the drop here so that mis-fire becomes a no-op.
+                // (The actual cross-tab move lands in a later phase of the
+                // spec — this only prevents the tear-off regression.)
+                const input = location.current.input;
+                const rect = tabBarScrollRef?.getBoundingClientRect();
+                const dropInsideBar =
+                    rect != null &&
+                    input.clientX >= rect.left && input.clientX <= rect.right &&
+                    input.clientY >= rect.top && input.clientY <= rect.bottom;
+                if (dropInsideBar) {
+                    setCurrentDragPayload(null);
+                }
+            },
+        });
+        onCleanup(cleanupTileDrop);
     });
 
     // Phase 4 — listen for the host's tear-off events. Each AgentMux

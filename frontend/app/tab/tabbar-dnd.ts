@@ -30,8 +30,35 @@ export const [insertionPoint, setInsertionPoint] = createSignal<InsertionPoint |
 // Which tab (by id) should play the landing bounce animation.
 export const [bouncingTabId, setBouncingTabId] = createSignal<string | null>(null);
 
+// Which tab (by id), if any, is currently a valid drop target for a
+// pane (tile) being dragged over the tab bar. Drives the `.tile-drop-hover`
+// pulse (see tabbar.scss) — the frontend half of
+// SPEC_PANE_DRAG_TO_TAB_2026_07_10.md's "tab flashes" UX beat.
+export const [hoveredDropTabId, setHoveredDropTabId] = createSignal<string | null>(null);
+
 // Registry of tab wrapper elements, keyed by tabId.
 export const tabWrapperRefs = new Map<string, HTMLDivElement>();
+
+/**
+ * Returns the tabId whose wrapper rect contains (clientX, clientY), or null
+ * if the point isn't over any registered tab. `excludeTabId` is normally the
+ * pane's own current tab — dragging a pane over the tab it's already in is
+ * a no-op, not a valid drop target.
+ */
+export function computeHoveredTab(
+    clientX: number,
+    clientY: number,
+    excludeTabId?: string | null
+): string | null {
+    for (const [tabId, el] of tabWrapperRefs) {
+        if (tabId === excludeTabId) continue;
+        const rect = el.getBoundingClientRect();
+        if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+            return tabId;
+        }
+    }
+    return null;
+}
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
