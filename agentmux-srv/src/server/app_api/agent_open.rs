@@ -1,5 +1,36 @@
 use super::*;
 
+/// Per-agent-definition async lock serializing `agent.open`'s "check for a
+/// live block / seed resume session / create block / register controller"
+/// sequence.
+///
+/// Without this, two concurrent `agent.open` calls for the same agent (a
+/// double-invocation, or two tabs opened for the same agent close together)
+/// can both observe "not live yet" before either controller actually
+/// registers — `CreateBlock` dispatch, the layout-action enqueue, and
+/// `write_agent_config_files` all await in between — and both seed the same
+/// `resume_session_id`, spawning two controllers that `--resume` the
+/// identical provider session concurrently. That's the TOCTOU reagent
+/// flagged on PR #2059's first concurrency-guard attempt (the earlier
+/// single-point-in-time `agent_live_elsewhere` check closed the
+/// already-live case but not the still-racing-to-become-live case).
+///
+/// Scope note: this only serializes calls handled by THIS process — like
+/// the in-memory `CONTROLLER_REGISTRY` it guards, it can't see a genuinely
+/// different AgentMux instance/channel racing the same registry entry.
+/// Same boundary the live-elsewhere check already accepted.
+static AGENT_OPEN_LOCKS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = AGENT_OPEN_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks
+        .entry(agent_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_open(engine, state);
 }
@@ -34,6 +65,12 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
                     .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{}'", cmd.agent_id))?
                     .clone();
+
+                // Serialize the rest of this handler per agent definition —
+                // held until the function returns (guard drops at every exit
+                // path, success or error). See AGENT_OPEN_LOCKS' doc comment.
+                let open_lock = agent_open_lock(&agent.id);
+                let _open_guard = open_lock.lock().await;
 
                 // 2. Resolve provider
                 let provider = providers::get_provider(&agent.provider)
