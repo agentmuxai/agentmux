@@ -423,6 +423,21 @@ async fn main() {
         match registry::Registry::open(root.clone()) {
             Ok(reg) => {
                 tracing::info!(root = %root.display(), "registry: shared agent registry attached");
+                // Best-effort catch-up pass, run every startup (not just the
+                // one-shot m0010 migration): fills session_id for any agent
+                // record that still lacks one, e.g. one named after m0010
+                // already ran. Idempotent — skips records that already carry
+                // a non-empty session_id. Without this, an agent created
+                // after the migration ran would never get a resumable
+                // session_id in the registry, so a cross-tab/cross-restart
+                // open would silently orphan its conversation (the still-open
+                // half of docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md).
+                if let Some(shared_dir) = root.parent().and_then(|p| p.parent()) {
+                    let filled = backend::session_backfill::backfill_session_ids(&reg, shared_dir);
+                    if filled > 0 {
+                        tracing::info!(filled, "registry: backfilled session_id for cross-channel resume (startup pass)");
+                    }
+                }
                 wstore_raw.set_registry(Arc::new(reg));
                 if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
                     if !base.is_empty() {

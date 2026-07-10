@@ -11,7 +11,20 @@
 
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode } from "./types";
+import type { DocumentNode, SessionStats } from "./types";
+
+export interface ParsedHistory {
+    nodes: DocumentNode[];
+    /**
+     * Stats payload of the LAST `session_end` event seen during replay, or
+     * `null` if none was found. The live stream discards this same event's
+     * stats after using them to hydrate the composer strip's context-fill
+     * bar (see useAgentStream's `finalizeTurn` / `TokensIn`); history replay
+     * used to discard it too, leaving the bar blank until the next live
+     * turn. Callers use this to seed the bar immediately at mount instead.
+     */
+    lastSessionStats: SessionStats | null;
+}
 
 /**
  * Parse an array of raw NDJSON lines (as stored in the "output" blockfile)
@@ -19,15 +32,17 @@ import type { DocumentNode } from "./types";
  *
  * @param lines        Raw text lines from blockfile:read_range
  * @param outputFormat Provider output format string (e.g. "claude-stream-json")
- * @returns            Ordered array of DocumentNodes, deduped by node id
+ * @returns            Ordered DocumentNodes (deduped by node id) plus the
+ *                      last `session_end` stats payload found, if any.
  */
 export function parseHistoryLines(
     lines: string[],
     outputFormat: string,
-): DocumentNode[] {
+): ParsedHistory {
     const translator = createTranslator(outputFormat);
     const parser = new ClaudeCodeStreamParser();
     const nodes: DocumentNode[] = [];
+    let lastSessionStats: SessionStats | null = null;
     // Same-id events update IN PLACE rather than first-wins.
     // The previous "skip if seen" rule dropped legitimate state
     // transitions during replay — most importantly, a `tool_result`
@@ -58,6 +73,10 @@ export function parseHistoryLines(
         const streamEvents = translator.translate(rawEvent);
 
         for (const event of streamEvents) {
+            if (event.type === "session_end") {
+                lastSessionStats = event.stats ?? null;
+                continue;
+            }
             const node = parser.parseLine(JSON.stringify(event));
             if (!node) continue;
             const existing = indexById.get(node.id);
@@ -73,5 +92,5 @@ export function parseHistoryLines(
         }
     }
 
-    return nodes;
+    return { nodes, lastSessionStats };
 }

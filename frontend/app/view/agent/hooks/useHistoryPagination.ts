@@ -152,7 +152,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 limit: loadLimit,
             }, { timeout: 15000 });
 
-            const newNodes = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
+            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
             if (newNodes.length > 0) {
                 // batch() ensures HistoryLoaded's documentAtom write is not a
                 // standalone runUpdates frame that could interleave with a
@@ -282,8 +282,18 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             limit: hwm - windowStart,
                         }, { timeout: 30_000 });
                         if (!mounted) return;
-                        const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
+                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
+                        // Hydrate the composer strip's context-fill bar from the
+                        // resumed conversation's last known usage instead of
+                        // leaving it blank until the first live turn — see
+                        // docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md.
+                        if (typeof lastSessionStats?.input_tokens === "number") {
+                            opts.model.dispatchPane({
+                                type: "ReconcileContextFromHistory",
+                                tokens: lastSessionStats.input_tokens,
+                            });
+                        }
                         // Apply DocumentState + pane overlay via caller callback.
                         const ds = snapshot.documentState;
                         if (ds && opts.onSnapshotOverlay) {
@@ -405,9 +415,16 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 }, { timeout: 15000 });
                 if (!mounted) return;
 
-                const nodes = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
+                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
+                }
+                // See the v2-restore branch above for rationale.
+                if (typeof lastSessionStats?.input_tokens === "number") {
+                    opts.model.dispatchPane({
+                        type: "ReconcileContextFromHistory",
+                        tokens: lastSessionStats.input_tokens,
+                    });
                 }
 
                 // `resp.total` from the backend is the actual available
