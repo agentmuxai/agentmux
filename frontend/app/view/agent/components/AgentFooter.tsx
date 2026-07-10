@@ -10,8 +10,10 @@ import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
 import { makeORef } from "@/app/store/wos";
+import { atoms } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
+import { MicButton } from "@/app/element/MicButton";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
@@ -66,10 +68,81 @@ interface AgentWorkingRowProps {
     retryAfterMs?: number | null;
 }
 
+/** The exact string the loading row's left zone shows right now — pulled out
+ *  of the JSX ternary chain so both the type-out reveal effect and the
+ *  render itself read the same computed value. */
+function loadingLeftText(props: AgentWorkingRowProps, phrase: string): string {
+    if (props.stopping) return "Stopping…";
+    if (props.waitingReason === "rate_limited") {
+        return props.retryAfterMs != null
+            ? `Rate limited — retrying in ${Math.ceil(props.retryAfterMs / 1000)}s`
+            : "Rate limited — retrying…";
+    }
+    if (props.currentTool) {
+        return props.currentToolArg
+            ? `${props.currentTool}  ·  ${abbreviateArg(props.currentToolArg, 40)}`
+            : props.currentTool;
+    }
+    return `${phrase}…`;
+}
+
 export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const [phrase, setPhrase] = createSignal(pickThinkingPhrase());
     const [lastPhrase, setLastPhrase] = createSignal(pickThinkingPhrase());
     const tick = useTick(1000);
+
+    // ── Type-out + shimmer ──────────────────────────────────────────────
+    // First display of a new left-zone string (a phrase, tool name, or
+    // status change) reveals character-by-character; once fully revealed,
+    // a gradient highlight sweeps back and forth over it for as long as
+    // this string stays on screen. See
+    // SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md §2.
+    //
+    // Reduced motion: read the app's centralized atom (settings override OR
+    // OS preference — see atoms.prefersReducedMotionAtom / BrainSpinner.tsx),
+    // not a one-off matchMedia() call, so it stays in sync with the same
+    // signal every other animated element in the app honors. Skips the
+    // one-shot type-out (jumps straight to full text, matching modal.tsx's
+    // "brief, non-moving" convention for one-shot reveals under reduced
+    // motion) but keeps the shimmer running — same precedent as
+    // .agent-pane-progress-bar's marching ants above: this is a small,
+    // essential, looping "still working" signal, not large/parallax motion,
+    // so it slows down (CSS below) rather than disappearing entirely.
+    const reducedMotion = atoms.prefersReducedMotionAtom;
+    const leftText = createMemo(() => loadingLeftText(props, phrase()));
+    const [revealed, setRevealed] = createSignal(leftText().length);
+    const [typing, setTyping] = createSignal(false);
+    const REVEAL_CHAR_MS = 28;
+
+    // The shimmer class is ALWAYS on (baked into the class attribute below);
+    // this effect only toggles `.is-typing`, which overlays opaque white
+    // text during the reveal. Toggling the shimmer class itself on every
+    // phrase/tool change would restart the CSS animation from 0% each time
+    // — and since the sweep period doesn't divide evenly into the interval
+    // between tool transitions, the return (right→left) leg kept getting
+    // truncated, so the highlight visibly "went right but never came back"
+    // (found in the sandbox, sandbox/working-shimmer.html on this machine).
+    createEffect(() => {
+        const text = leftText();
+        if (reducedMotion() || !text) {
+            setRevealed(text.length);
+            setTyping(false);
+            return;
+        }
+        setTyping(true);
+        setRevealed(0);
+        const id = setInterval(() => {
+            setRevealed((n) => {
+                const next = n + 1;
+                if (next >= text.length) {
+                    clearInterval(id);
+                    setTyping(false);
+                }
+                return next;
+            });
+        }, REVEAL_CHAR_MS);
+        onCleanup(() => clearInterval(id));
+    });
     const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
     const elapsedMs = createMemo(() => {
         const s = loadStartMs();
@@ -149,18 +222,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         >
             <span class="agent-working-row agent-working-row--loading">
                 <span class="agent-spinner-dot" />
-                <span class="agent-working-row-left">
-                    {props.stopping
-                        ? "Stopping…"
-                        : props.waitingReason === "rate_limited"
-                            ? props.retryAfterMs != null
-                                ? `Rate limited — retrying in ${Math.ceil(props.retryAfterMs / 1000)}s`
-                                : "Rate limited — retrying…"
-                        : props.currentTool
-                            ? props.currentToolArg
-                                ? `${props.currentTool}  ·  ${abbreviateArg(props.currentToolArg, 40)}`
-                                : props.currentTool
-                            : `${phrase()}…`}
+                <span class="agent-working-row-left agent-working-shimmer" classList={{ "is-typing": typing() }}>
+                    {leftText().slice(0, revealed())}
                 </span>
                 <span class="agent-working-row-right">{rightText()}</span>
             </span>
@@ -746,6 +809,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     }}
                     rows={1}
                 />
+                {/* Pinned to the composer's right edge instead of the pane's
+                    header (moved off blockframe.tsx — see
+                    SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md).
+                    Uses the same viewModel.voiceHandle() the header button
+                    used to, so voice wiring (registerPane, transcript
+                    writes) is unchanged — only the render location moved. */}
+                <Show when={props.viewModel?.voiceHandle}>
+                    <div class="agent-input-mic">
+                        <MicButton
+                            blockId={props.viewModel!.blockId}
+                            handle={props.viewModel!.voiceHandle!()}
+                            paneTitle="Speak into this agent (Ctrl+Shift+V)"
+                        />
+                    </div>
+                </Show>
             </div>
         </div>
     );
