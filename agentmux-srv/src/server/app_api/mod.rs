@@ -488,7 +488,11 @@ pub(crate) async fn identity_self_accounts_impl(
     state: &AppState,
     agent_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let links = state.id_store.agent_identity_list_for_agent(agent_id)
+    // Link rows are keyed by definition id, not the S1 slug callers
+    // authenticate with — see resolve_agent_definition_id.
+    let def_id = resolve_agent_definition_id(state, agent_id)
+        .map_err(|e| format!("identity.self.accounts: {e}"))?;
+    let links = state.id_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
     let mut accounts = Vec::new();
     for link in &links {
@@ -514,7 +518,11 @@ pub(crate) async fn identity_account_validate_stored_impl(
     agent_id: &str,
     account_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let links = state.id_store.agent_identity_list_for_agent(agent_id)
+    // Link rows are keyed by definition id, not the S1 slug — without the
+    // resolution this ownership check always saw zero links and rejected.
+    let def_id = resolve_agent_definition_id(state, agent_id)
+        .map_err(|e| format!("identity.account.validate: {e}"))?;
+    let links = state.id_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
     if !links.iter().any(|l| l.account_id == account_id) {
         return Err("FORBIDDEN: account not linked to this agent".to_string());
@@ -807,6 +815,42 @@ pub(super) fn check_s1(ctx: &RpcContext, req_agent_id: &str) -> Result<(), Strin
         return Err("FORBIDDEN: agent_id mismatch".to_string());
     }
     Ok(())
+}
+
+/// Resolve an S1-authenticated agent id (the slug — AGENTMUX_AGENT_ID /
+/// bus:register id, e.g. "Agent3") to the agent's DEFINITION id, which is
+/// what `db_agent_identity_links.agent_id` stores (== `AgentDefinition.id`;
+/// see m0013 and `identity/resolver.rs::resolve_bindings_for_instance`).
+///
+/// Every link-table operation reached from the App API must go through
+/// this: App API callers authenticate with the slug, but writing the slug
+/// into the link table either trips the per-channel schema's
+/// `FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id)` (loud
+/// "FOREIGN KEY constraint failed" — the id_store fallback path when the
+/// 0011 shared-store backfill hasn't applied), or — on the shared store,
+/// whose links table carries no agent_id FK — silently writes a row keyed
+/// by slug that the resolver (which reads by definition id) can never
+/// match. Reads have the mirror-image bug: listing links by slug always
+/// returns empty, so ownership checks reject and unlinks no-op.
+///
+/// A caller that already holds a definition id passes through unchanged
+/// (verified against `agent_def_get`), so internal non-S1 callers of the
+/// shared `*_impl` helpers stay valid.
+pub(super) fn resolve_agent_definition_id(
+    state: &AppState,
+    agent_id: &str,
+) -> Result<String, String> {
+    if let Ok(Some(instance)) = state.wstore.instance_get_by_name(agent_id) {
+        if !instance.definition_id.is_empty() {
+            return Ok(instance.definition_id);
+        }
+    }
+    if let Ok(Some(_)) = state.wstore.agent_def_get(agent_id) {
+        return Ok(agent_id.to_string());
+    }
+    Err(format!(
+        "unknown agent '{agent_id}': no instance with that name and no definition with that id"
+    ))
 }
 
 /// Current unix time in milliseconds (0 if the clock is before the epoch).
