@@ -21,7 +21,7 @@ describe("parseHistoryLines", () => {
             line({ type: "tool_call", tool: "Bash", id: "tool-1", params: { command: "ls" } }),
             line({ type: "tool_result", tool: "Bash", id: "tool-1", status: "success", duration: 0.1 }),
         ];
-        const nodes = parseHistoryLines(lines, "claude-stream-json");
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json");
         expect(nodes).toHaveLength(1);
         const tool = nodes[0] as ToolNode;
         expect(tool.id).toBe("tool-1");
@@ -39,7 +39,7 @@ describe("parseHistoryLines", () => {
             // tool_result lands later but should NOT push the tool past "after".
             line({ type: "tool_result", tool: "Read", id: "tool-1", status: "success", duration: 0 }),
         ];
-        const nodes = parseHistoryLines(lines, "claude-stream-json");
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json");
         expect(nodes).toHaveLength(3);
         expect(nodes[0].type).toBe("markdown");
         expect(nodes[1].type).toBe("tool");
@@ -57,7 +57,7 @@ describe("parseHistoryLines", () => {
             line({ type: "thinking", content: "Let me " }),
             line({ type: "thinking", content: "think about this..." }),
         ];
-        const nodes = parseHistoryLines(lines, "claude-stream-json");
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json");
         expect(nodes).toHaveLength(1);
         const node = nodes[0] as any;
         expect(node.type).toBe("markdown");
@@ -73,8 +73,41 @@ describe("parseHistoryLines", () => {
             "",
             "   ",
         ];
-        const nodes = parseHistoryLines(lines, "claude-stream-json");
+        const { nodes } = parseHistoryLines(lines, "claude-stream-json");
         expect(nodes).toHaveLength(1);
         expect((nodes[0] as any).content).toBe("real text");
+    });
+
+    it("surfaces the last session_end stats without emitting a node for it", () => {
+        const lines = [
+            line({ type: "text", content: "hi" }),
+            line({ type: "session_end", stats: { input_tokens: 111, output_tokens: 22 } }),
+        ];
+        const { nodes, lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
+        expect(nodes).toHaveLength(1);
+        expect(lastSessionStats).toEqual({ input_tokens: 111, output_tokens: 22 });
+    });
+
+    it("returns null lastSessionStats when no session_end is present", () => {
+        const lines = [line({ type: "text", content: "hi" })];
+        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
+        expect(lastSessionStats).toBeNull();
+    });
+
+    it("does not let a later empty-stats session_end clobber real historical stats", () => {
+        // reagent P1 on PR #2059: Claude's persistent-mode controller emits a
+        // session_end with stats: {} after EVERY plain-text turn (the per-turn
+        // boundary marker) — the real usage-bearing `result` event only fires
+        // at process teardown, which can be much earlier in the window. The
+        // chronologically-last session_end here is the empty turn-boundary
+        // marker; the real stats from the earlier turn must still win.
+        const lines = [
+            line({ type: "text", content: "turn one" }),
+            line({ type: "session_end", stats: { input_tokens: 500, output_tokens: 50 } }),
+            line({ type: "text", content: "turn two" }),
+            line({ type: "session_end", stats: {} }),
+        ];
+        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
+        expect(lastSessionStats).toEqual({ input_tokens: 500, output_tokens: 50 });
     });
 });

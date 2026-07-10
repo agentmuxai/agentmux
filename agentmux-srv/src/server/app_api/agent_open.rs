@@ -1,5 +1,36 @@
 use super::*;
 
+/// Per-agent-definition async lock serializing `agent.open`'s "check for a
+/// live block / seed resume session / create block / register controller"
+/// sequence.
+///
+/// Without this, two concurrent `agent.open` calls for the same agent (a
+/// double-invocation, or two tabs opened for the same agent close together)
+/// can both observe "not live yet" before either controller actually
+/// registers — `CreateBlock` dispatch, the layout-action enqueue, and
+/// `write_agent_config_files` all await in between — and both seed the same
+/// `resume_session_id`, spawning two controllers that `--resume` the
+/// identical provider session concurrently. That's the TOCTOU reagent
+/// flagged on PR #2059's first concurrency-guard attempt (the earlier
+/// single-point-in-time `agent_live_elsewhere` check closed the
+/// already-live case but not the still-racing-to-become-live case).
+///
+/// Scope note: this only serializes calls handled by THIS process — like
+/// the in-memory `CONTROLLER_REGISTRY` it guards, it can't see a genuinely
+/// different AgentMux instance/channel racing the same registry entry.
+/// Same boundary the live-elsewhere check already accepted.
+static AGENT_OPEN_LOCKS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = AGENT_OPEN_LOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    locks
+        .entry(agent_id.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_agent_open(engine, state);
 }
@@ -34,6 +65,12 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
                     .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{}'", cmd.agent_id))?
                     .clone();
+
+                // Serialize the rest of this handler per agent definition —
+                // held until the function returns (guard drops at every exit
+                // path, success or error). See AGENT_OPEN_LOCKS' doc comment.
+                let open_lock = agent_open_lock(&agent.id);
+                let _open_guard = open_lock.lock().await;
 
                 // 2. Resolve provider
                 let provider = providers::get_provider(&agent.provider)
@@ -190,6 +227,55 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     env_vars.insert("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY".to_string(), json!("30000"));
                 }
 
+                // Cross-tab/cross-restart continuity: this agent may already have
+                // a captured provider session sitting in the shared registry
+                // (backfilled from its provider transcript, or captured live by a
+                // prior block) even though no block for it exists in THIS tab —
+                // e.g. after a full app restart lands on a different/rehydrated
+                // tab. Seed the new block's agent:sessionid meta so its FIRST
+                // turn resumes that conversation instead of silently starting
+                // fresh and orphaning the original — the same thing the
+                // picker's explicit "Continue" flow already does via
+                // continueOfInstanceId (RecentSessionRow.session_id), extended
+                // here to the default open path.
+                // See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md
+                // ("Mechanism 2 — continuity"), action item 4.
+                //
+                // Concurrency guard (reagent P1 on PR #2059): only seed
+                // agent:sessionid when no OTHER block for this same agent
+                // definition currently has a LIVE controller registered
+                // anywhere in this process — not just this tab (find_agent_block
+                // above only scoped the "reuse" check to the target tab).
+                // Without this, opening the same named agent in a second tab
+                // while the first is still live would seed the new block with
+                // the SAME session_id, letting two controllers concurrently
+                // `--resume` one provider session — risking transcript
+                // corruption or exactly the orphaning bug this fix exists to
+                // prevent. A block with no registered controller (e.g. right
+                // after an app restart, before anything has resynced) is not
+                // "live" and doesn't block seeding.
+                let agent_live_elsewhere = wstore.get_all::<Block>()
+                    .map(|blocks| {
+                        blocks.iter().any(|b| {
+                            obj::meta_get_string(&b.meta, "agentId", "") == agent.id
+                                && blockcontroller::get_controller(&b.oid).is_some()
+                        })
+                    })
+                    .unwrap_or(false);
+                let resume_session_id: Option<String> = if agent_live_elsewhere {
+                    None
+                } else {
+                    wstore.shared_agent_registry()
+                        .and_then(|reg| reg.list_active().ok())
+                        .and_then(|records| {
+                            records.into_iter()
+                                .filter(|r| r.data.definition_id == agent.id)
+                                .filter(|r| r.data.session_id.as_deref().map_or(false, |s| !s.is_empty()))
+                                .max_by_key(|r| r.data.last_launched_at_ms)
+                        })
+                        .and_then(|r| r.data.session_id)
+                };
+
                 let mut meta = MetaMapType::new();
                 meta.insert("view".to_string(), json!("agent"));
                 meta.insert("agentId".to_string(), json!(&agent.id));
@@ -239,6 +325,9 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 meta.insert("cmd:env".to_string(), serde_json::Value::Object(env_vars));
                 meta.insert("agent:resume_flag".to_string(), json!(provider.resume_flag.unwrap_or("")));
                 meta.insert("agent:session_id_field".to_string(), json!(provider.session_id_field));
+                if let Some(sid) = &resume_session_id {
+                    meta.insert("agent:sessionid".to_string(), json!(sid));
+                }
 
                 // 7. Create block + insert into layout tree.
                 // Through the reducer (#1681), not wcore-direct: a store-only

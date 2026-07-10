@@ -103,6 +103,31 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    describe("ReconcileContextFromHistory (mount-time reconciliation)", () => {
+        it("seeds lastContextTokens from a fresh (never-set) pane", () => {
+            const start = mk();
+            expect(start.lastContextTokens).toBe(null);
+            const r = update(start, { type: "ReconcileContextFromHistory", tokens: 4200 });
+            expect(r.state.lastContextTokens).toBe(4200);
+            expect(r.events[0]).toMatchObject({ type: "context-reconciled-at-mount", tokens: 4200 });
+        });
+
+        it("does not override a value a live TokensIn already set", () => {
+            const s0 = update(mk(), { type: "TokensIn", input: 900, model: "claude-sonnet-5" }).state;
+            expect(s0.lastContextTokens).toBe(900);
+            const r = update(s0, { type: "ReconcileContextFromHistory", tokens: 4200 });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+
+        it("does not override an earlier reconciliation either (first-wins)", () => {
+            const s0 = update(mk(), { type: "ReconcileContextFromHistory", tokens: 4200 }).state;
+            const r = update(s0, { type: "ReconcileContextFromHistory", tokens: 999 });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([]);
+        });
+    });
+
     describe("Turn lifecycle invariants", () => {
         it("TurnStart while stream unsubscribed is suppressed", () => {
             const start = mk();
