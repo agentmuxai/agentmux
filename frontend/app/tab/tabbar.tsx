@@ -20,6 +20,7 @@ import { ConfirmModal } from "@/element/modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { deleteLayoutModelForTab, tileItemType } from "@/layout/index";
 import { DroppableTab } from "./droppable-tab";
+import { TabDropPreview } from "./tab-drop-preview";
 import {
     tabItemType,
     insertionPoint,
@@ -29,11 +30,16 @@ import {
     computeInsertionPoint,
     InsertionPoint,
     tabWrapperRefs,
+    hoveredDropTabId,
     setHoveredDropTabId,
     computeHoveredTab,
+    setHoveredDropClientPos,
+    dropGhost,
+    setDropGhost,
 } from "./tabbar-dnd";
-import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
+import { REDOCK_DWELL_MS } from "@/app/workspace/floating-pane-constants";
 import "./tabbar.scss";
 
 export { tabItemType } from "./tabbar-dnd";
@@ -93,6 +99,20 @@ function TabBar(props: TabBarProps): JSX.Element {
     // Latches once per drag — the tear-off handshake should only run a
     // single time even if the user keeps moving past the threshold.
     let tearOffFired = false;
+
+    // Which tab (if any) is showing the schematic drop preview. Distinct
+    // from hoveredDropTabId (which drives the instant flash): the preview
+    // is dwell-gated by REDOCK_DWELL_MS so a fast pass-through over several
+    // tabs doesn't spawn/despawn the popover per-frame. See
+    // SPEC_PANE_DRAG_TO_TAB_2026_07_10.md §4.2–§4.3.
+    const [previewTabId, setPreviewTabId] = createSignal<string | null>(null);
+    let previewDwellTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearPreviewDwellTimer = () => {
+        if (previewDwellTimer != null) {
+            clearTimeout(previewDwellTimer);
+            previewDwellTimer = null;
+        }
+    };
 
     // Pin feature removed — merge any legacy pinnedtabids into the regular list
     // so existing workspaces don't lose tabs. A one-time UpdateTabIds (below)
@@ -381,12 +401,34 @@ function TabBar(props: TabBarProps): JSX.Element {
             canMonitor: ({ source }) => source.data.type === tileItemType,
             onDrag: ({ location }) => {
                 const input = location.current.input;
-                setHoveredDropTabId(
-                    computeHoveredTab(input.clientX, input.clientY, atoms.activeTabId()),
-                );
+                setHoveredDropClientPos({ x: input.clientX, y: input.clientY });
+                const hovered = computeHoveredTab(input.clientX, input.clientY, atoms.activeTabId());
+                setHoveredDropTabId(hovered);
+
+                if (hovered !== previewTabId()) {
+                    clearPreviewDwellTimer();
+                    if (hovered == null) {
+                        setPreviewTabId(null);
+                    } else {
+                        previewDwellTimer = setTimeout(() => setPreviewTabId(hovered), REDOCK_DWELL_MS);
+                    }
+                }
             },
             onDrop: ({ location }) => {
+                clearPreviewDwellTimer();
+                // Snapshot everything the move needs BEFORE clearing state —
+                // the clears below (and setCurrentDragPayload(null) further
+                // down, needed for the tear-off fix) would otherwise erase it.
+                const targetTabId = previewTabId() ?? hoveredDropTabId();
+                const ghost = dropGhost();
+                const draggedPayload = getCurrentDragPayload();
+                const sourceTabId = atoms.activeTabId();
+                const wsId = props.workspace?.oid;
+
                 setHoveredDropTabId(null);
+                setHoveredDropClientPos(null);
+                setPreviewTabId(null);
+                setDropGhost(null);
 
                 // Without this, a pane dropped over the tab bar would leave
                 // `currentDragPayload` set (TileLayout's own onDrop
@@ -398,8 +440,6 @@ function TabBar(props: TabBarProps): JSX.Element {
                 // under the cursor and misinterprets the release as a
                 // tear-off, spawning an unwanted floating pane window.
                 // Consume the drop here so that mis-fire becomes a no-op.
-                // (The actual cross-tab move lands in a later phase of the
-                // spec — this only prevents the tear-off regression.)
                 const input = location.current.input;
                 const rect = tabBarScrollRef?.getBoundingClientRect();
                 const dropInsideBar =
@@ -409,9 +449,44 @@ function TabBar(props: TabBarProps): JSX.Element {
                 if (dropInsideBar) {
                     setCurrentDragPayload(null);
                 }
+
+                // The actual cross-tab move. Reuses RedockFloatingPane
+                // verbatim — its saga only rejects source === target TAB,
+                // never same-workspace (see redock_floating_pane.rs's guard
+                // comment: "use MoveBlockToTab" only fires for that check),
+                // so a same-window, different-tab call is already a
+                // supported case with zero backend changes. Its optional
+                // targetBlockId/direction args land the block in the exact
+                // slot the schematic preview's ghost showed; omitting them
+                // (e.g. a fast drop before the preview's dwell gate opened)
+                // falls back to a plain append (queue_target_layout_insert).
+                if (dropInsideBar && targetTabId && wsId && sourceTabId && sourceTabId !== targetTabId
+                    && draggedPayload?.kind === "tile") {
+                    const blockId = draggedPayload.node.data?.blockId;
+                    if (blockId) {
+                        fireAndForget(async () => {
+                            try {
+                                await WorkspaceService.RedockFloatingPane(
+                                    blockId,
+                                    sourceTabId,
+                                    wsId,
+                                    targetTabId,
+                                    wsId,
+                                    ghost?.targetBlockId ?? null,
+                                    ghost?.direction ?? null,
+                                );
+                            } catch (e) {
+                                Logger.error("dnd", "pane-to-tab move failed", { error: String(e) });
+                            }
+                        });
+                    }
+                }
             },
         });
-        onCleanup(cleanupTileDrop);
+        onCleanup(() => {
+            clearPreviewDwellTimer();
+            cleanupTileDrop();
+        });
     });
 
     // Phase 4 — listen for the host's tear-off events. Each AgentMux
@@ -820,6 +895,21 @@ function TabBar(props: TabBarProps): JSX.Element {
         });
     });
 
+    // Anchor rect for the schematic drop preview popover — the hovered
+    // tab's own wrapper rect, re-measured each time previewTabId changes
+    // (tab positions don't shift while a drag is merely hovering, so a
+    // one-shot measurement per tab is sufficient; unlike the active-tab
+    // color line above, no resize/scroll listener is needed here since the
+    // preview's lifetime is a single drag gesture).
+    const previewAnchorRect = createMemo<Dimensions | null>(() => {
+        const tabId = previewTabId();
+        if (!tabId) return null;
+        const el = tabWrapperRefs.get(tabId);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { top: r.top, left: r.left, width: r.width, height: r.height };
+    });
+
     return (
         <div ref={tabBarRef!} class="tab-bar" {...dragProps}>
             {/* Windows/Linux: hamburger sits at the LEFT of the tab strip.
@@ -895,6 +985,13 @@ function TabBar(props: TabBarProps): JSX.Element {
                     }}
                 />
                 </Portal>
+            </Show>
+            <Show when={previewAnchorRect()}>
+                {(anchorRect) => (
+                    <Portal mount={document.body}>
+                        <TabDropPreview tabId={previewTabId()!} anchorRect={anchorRect()} />
+                    </Portal>
+                )}
             </Show>
             <Show when={pendingCloseTabId() !== null}>
                 <TabCloseConfirmModal

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal } from "solid-js";
+import { DropDirection } from "@/layout/index";
 
 export const tabItemType = "TAB_ITEM";
 
@@ -35,6 +36,19 @@ export const [bouncingTabId, setBouncingTabId] = createSignal<string | null>(nul
 // pulse (see tabbar.scss) — the frontend half of
 // SPEC_PANE_DRAG_TO_TAB_2026_07_10.md's "tab flashes" UX beat.
 export const [hoveredDropTabId, setHoveredDropTabId] = createSignal<string | null>(null);
+
+// Live cursor position (viewport CSS px) while a pane is being dragged over
+// the tab bar. Consumed by TabDropPreview to hit-test against its schematic
+// leaf rects — see tab-drop-preview.tsx. Set alongside hoveredDropTabId in
+// tabbar.tsx's tile monitor; cleared on drop/drag-end.
+export const [hoveredDropClientPos, setHoveredDropClientPos] = createSignal<{ x: number; y: number } | null>(null);
+
+// Resolved drop target within the currently-shown TabDropPreview: which
+// leaf (by blockId) and which side of it the pointer is over. Read at
+// drop-commit time to build the cross-tab move RPC call; null whenever no
+// preview is shown or the pointer isn't over any leaf's schematic rect.
+export type DropGhost = { targetBlockId: string; direction: DropDirection };
+export const [dropGhost, setDropGhost] = createSignal<DropGhost | null>(null);
 
 // Registry of tab wrapper elements, keyed by tabId.
 export const tabWrapperRefs = new Map<string, HTMLDivElement>();
