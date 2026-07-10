@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.52.4 — 2026-07-10
+
+- fix(identity): App API link-table ops resolve the S1 slug to the definition id; failed upsert no longer orphans the account row
+- fix(agent): Enter submits AskUserQuestion answers; composer strip layout + mic centering + curated model defaults
+- feat(armory): Identities tab becomes a read-only per-agent view
+- feat(agent): activity dock surfaces subagents (Phase 2 of the pinned dock spec)
+- feat(identity): backend primitive for bundle-free OAuth account creation
+- feat(armory): MCP Servers catalog picker, piloted on Ableton Live
+- feat(identity): launch modal + create-from-template pick accounts directly, no bundle
+- fix(titlebar): move Icon Only under New Tab, rename to Show Icons Only
+- fix(window): hamburger icon precisely centered in the title bar (derived offset, not a hardcoded nudge)
+
+
 ## 0.52.3 — 2026-07-09
 
 - chore(build): guard stable-channel packaging — clean tree + merged release commit required
