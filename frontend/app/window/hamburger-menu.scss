@@ -20,6 +20,22 @@
     -webkit-app-region: no-drag;
     cursor: default;
     align-self: center;
+    // `.window-header` is 33px tall but has `padding-top: var(--space-1-5)`
+    // and no padding-bottom (window-header.*.scss) — its content box (where
+    // `align-self: center` actually centers this button, whether nested
+    // directly in `.window-header` (macOS `--right`) or one level down in
+    // `.tab-bar`, which adds no padding of its own) sits `padding-top / 2`
+    // below the bar's TRUE vertical center. `align-items: end` on both
+    // containers means tabs/traffic-lights never notice this — they anchor
+    // to the bottom regardless — but anything that wants to look centered
+    // in the whole bar (this icon) needs to shift up by exactly that half-
+    // padding amount. Derived from the variable (not a hardcoded px) so it
+    // self-corrects if `--space-1-5` or the header's padding ever changes —
+    // confirmed empirically via getBoundingClientRect() against a live
+    // instance: header center y=16.5, button center y=19.5 pre-fix, exactly
+    // padding-top/2 = 3px off.
+    position: relative;
+    top: calc(var(--space-1-5) / -2);
     // Left-of-tabs placement (Windows/Linux): symmetric 4px margin on both
     // sides so the whitespace left of the hamburger matches the right (which
     // also clears the leading .tab-separator → icon · 10px · 1px sep · 10px ·
@@ -44,12 +60,9 @@
 
     // macOS: pinned to the far right of the title bar, after the action
     // widgets. Add breathing room so it doesn't sit flush against the
-    // window's right frame.
+    // window's right frame. Vertical offset is the shared base rule above.
     &--right {
         margin-left: 4px;
         margin-right: 8px;
-        // 3px optical alignment nudge vs. the other title-bar icons.
-        position: relative;
-        top: -3px;
     }
 }
