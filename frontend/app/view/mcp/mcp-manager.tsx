@@ -112,7 +112,14 @@ export const McpManager = (): JSX.Element => {
                                         <p class="agent-primitive-modal-global-note">
                                             Used by {server().bound_count} {server().bound_count === 1 ? "agent" : "agents"}
                                         </p>
-                                        <McpStatusPill serverId={server().id} serverName={server().name} />
+                                        {/* Keyed specifically on id (a stable primitive, unlike the
+                                            outer non-keyed Show's `server` object, which is a fresh
+                                            reference on every refresh()) — remounts McpStatusPill, and
+                                            so restarts its watchMcpCapability poll, exactly when the
+                                            selected server actually changes, not on every list refresh. */}
+                                        <Show when={server().id} keyed>
+                                            {(id) => <McpStatusPill serverId={id} serverName={server().name} />}
+                                        </Show>
                                         <span class="agent-primitive-modal-field-label">Transport</span>
                                         <pre class="agent-primitive-modal-field-value">{server().transport}</pre>
                                         <span class="agent-primitive-modal-field-label">Config</span>
