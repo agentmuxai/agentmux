@@ -41,13 +41,19 @@
  *    User chooses a name → frontend fires `auth.savebundle` → backend
  *    transitions to `success` with the real bundleId.
  *  - `success`: post-save final state, bundleId is the real row id.
+ *
+ *  `accountId` (issue #1624 PR-C Part B) is set only for a direct-
+ *  account session (no bundle involved) — `bundleId` is `""` in that
+ *  mode. Wire-additive only in this PR; not yet consumed by the
+ *  reducer below (that's PR 3 of
+ *  docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md).
  */
 export type AuthSessionStatusWire =
     | { status: "pending" }
     | { status: "url-available"; authUrl: string }
     | { status: "code-emitted"; deviceCode: string; verificationUrl: string }
     | { status: "authenticated"; email: string | null }
-    | { status: "success"; bundleId: string; email: string | null }
+    | { status: "success"; bundleId: string; email: string | null; accountId?: string }
     | { status: "failed"; error: string };
 
 /** Outcome of the modal's bundle/provider selection. The view computes

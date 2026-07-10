@@ -46,6 +46,20 @@ struct StartProviderAuthReq {
     /// existing bundle. When None, a fresh bundle is created.
     #[serde(default)]
     into_bundle_id: Option<String>,
+    /// Issue #1624 PR-C Part B — bypass the legacy bundle system
+    /// entirely. When true, a successful auth persists a standalone
+    /// `IdentityAccount` with no bundle involved; `into_bundle_id` is
+    /// ignored (and expected to be absent — the frontend never sets
+    /// both). The actual agent<->account link is written later, once
+    /// the agent exists, by the launch-flow reconcile.
+    #[serde(default)]
+    direct_account: bool,
+    /// Direct-account reconnect: non-empty to refresh an already-
+    /// linked account's tokens in place (same isolation dir, same
+    /// account row updated). Empty mints a fresh account id. Ignored
+    /// unless `direct_account` is set.
+    #[serde(default)]
+    existing_account_id: String,
     /// Resolved CLI path. The frontend calls `resolvecli` first to
     /// install / locate the provider's CLI; the resulting path is
     /// passed here. Keeps the provider table single-sourced in the
@@ -133,6 +147,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     provider_id = %req.provider_id,
                     cli_path = %req.cli_path,
                     into_bundle_id = ?req.into_bundle_id,
+                    direct_account = req.direct_account,
                     "auth.start"
                 );
                 // OAuth Bundles PR C invariant — when an OAuth flow runs
@@ -154,12 +169,28 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 // Errors (path resolve, mkdir) log + fall back to the
                 // legacy env — never abort `auth.start` over a per-bundle
                 // dir issue. Mirrors the `inject_identity_env` pattern.
+                //
+                // Issue #1624 PR-C Part B: `direct_account` takes an
+                // entirely separate branch — mints/reuses an account id
+                // and resolves its OWN isolation dir, bypassing the
+                // bundle system completely. The two modes are mutually
+                // exclusive; the frontend never sets both.
                 let mut auth_env = req.auth_env;
-                let bundle_dir = compute_and_ensure_bundle_dir(
-                    req.into_bundle_id.as_deref(),
-                    &req.provider_id,
-                    &mut auth_env,
-                );
+                let (account_id, bundle_dir) = if req.direct_account {
+                    let (account_id, dir) = compute_and_ensure_account_dir(
+                        &req.existing_account_id,
+                        &req.provider_id,
+                        &mut auth_env,
+                    );
+                    (account_id, dir)
+                } else {
+                    let dir = compute_and_ensure_bundle_dir(
+                        req.into_bundle_id.as_deref(),
+                        &req.provider_id,
+                        &mut auth_env,
+                    );
+                    (String::new(), dir)
+                };
                 let r = mgr.start_session(req.provider_id.clone(), req.into_bundle_id.clone());
                 spawn_auth_cli(
                     mgr,
@@ -169,6 +200,8 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     req.provider_id,
                     req.into_bundle_id,
                     bundle_dir,
+                    req.direct_account,
+                    account_id,
                     req.cli_path,
                     req.auth_login_args,
                     req.auth_check_args,
@@ -292,6 +325,13 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
 /// per-bundle binding step is skipped. The bundle row (if any was
 /// auto-created by the New Identity modal) stays — the user's next
 /// attempt reuses it.
+///
+/// When `direct_account` is set (issue #1624 PR-C Part B), the bundle
+/// path above is bypassed entirely — `bundle_dir` instead carries the
+/// account's own isolation dir (see `compute_and_ensure_account_dir`),
+/// and the success path persists a standalone `IdentityAccount` with no
+/// bundle involved (`persist_oauth_direct_account`). `account_id` is the
+/// id minted/reused for that account; `into_bundle_id` is ignored.
 #[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
@@ -301,6 +341,8 @@ fn spawn_auth_cli(
     provider_id: String,
     into_bundle_id: Option<String>,
     bundle_dir: Option<String>,
+    direct_account: bool,
+    account_id: String,
     cli_path: String,
     auth_login_args: Vec<String>,
     auth_check_args: Vec<String>,
@@ -331,6 +373,8 @@ fn spawn_auth_cli(
             provider_id,
             into_bundle_id,
             bundle_dir,
+            direct_account,
+            account_id,
             cli_path,
             auth_login_args,
             auth_check_args,
@@ -351,6 +395,7 @@ fn spawn_auth_cli(
     let into_bundle_id_for_task = into_bundle_id.clone();
     let bundle_dir_for_task = bundle_dir.clone();
     let provider_id_for_task = provider_id.clone();
+    let account_id_for_task = account_id.clone();
 
     let handle = tokio::spawn(async move {
         tracing::info!(
@@ -436,6 +481,7 @@ fn spawn_auth_cli(
         let into_bundle_id_stdout = into_bundle_id_for_task.clone();
         let bundle_dir_stdout = bundle_dir_for_task.clone();
         let provider_id_stdout = provider_id_for_task.clone();
+        let account_id_stdout = account_id_for_task.clone();
         // Shared between drain + post-exit. The drain sets it after
         // persisting on a LoginSuccess match; the post-exit transition
         // block (below) checks it and skips its entire success path if
@@ -469,26 +515,25 @@ fn spawn_auth_cli(
                     )
                     .await
                     {
-                        // Persist the OAuthConfigDir binding into the
-                        // bundle. When `into_bundle_id` is empty (no
-                        // bundle context, e.g. ambient continuation) or
-                        // `bundle_dir` failed to resolve at spawn, the
-                        // helper skips persistence and the session still
-                        // succeeds — the user just won't get bundle-
-                        // backed token reuse next launch. Bundle id
-                        // returned to the frontend is the real bundle id
-                        // when persistence happened, or a synthetic
-                        // placeholder otherwise so existing UI keeps
-                        // its filter-on-prefix behaviour.
-                        let bundle_id = persist_oauth_binding_or_synthetic(
+                        // Persist the OAuthConfigDir account — into the
+                        // bundle (legacy path) or standalone (issue #1624
+                        // PR-C Part B direct-account path). When
+                        // `into_bundle_id`/`bundle_dir` (bundle mode) or
+                        // `bundle_dir` (direct-account mode, reused as the
+                        // account's own dir) failed to resolve at spawn,
+                        // persist_oauth_success skips persistence and the
+                        // session still succeeds.
+                        let (bundle_id, account_id) = persist_oauth_success(
                             &wstore_stdout,
                             &broker_stdout,
+                            direct_account,
+                            &account_id_stdout,
                             into_bundle_id_stdout.as_deref(),
                             &provider_id_stdout,
                             bundle_dir_stdout.as_deref(),
                             &sid_stdout,
                         );
-                        mgr_stdout.finish_success(&sid_stdout, bundle_id);
+                        mgr_stdout.finish_success(&sid_stdout, bundle_id, account_id);
                         success_transitioned_drain.store(true, Ordering::Release);
                     }
                 }
@@ -544,15 +589,17 @@ fn spawn_auth_cli(
                     )
                     .await
                     {
-                        let bundle_id = persist_oauth_binding_or_synthetic(
+                        let (bundle_id, account_id) = persist_oauth_success(
                             &wstore_for_task,
                             &broker_for_task,
+                            direct_account,
+                            &account_id_for_task,
                             into_bundle_id_for_task.as_deref(),
                             &provider_id_for_task,
                             bundle_dir_for_task.as_deref(),
                             &session_id_for_task,
                         );
-                        mgr_for_task.finish_success(&session_id_for_task, bundle_id);
+                        mgr_for_task.finish_success(&session_id_for_task, bundle_id, account_id);
                     } else {
                         mgr_for_task.finish_failure(
                             &session_id_for_task,
@@ -590,7 +637,8 @@ fn spawn_auth_cli(
 /// Same OAuth-success invariant as the pipes path — when
 /// `into_bundle_id` and `bundle_dir` are both set and `confirm_authenticated`
 /// returns true, persists `SecretRef::OAuthConfigDir` + binding before
-/// `finish_success`.
+/// `finish_success`. Same `direct_account`/`account_id` bypass as the
+/// pipes path too — see `spawn_auth_cli`'s doc comment.
 #[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli_pty(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
@@ -600,6 +648,8 @@ fn spawn_auth_cli_pty(
     provider_id: String,
     into_bundle_id: Option<String>,
     bundle_dir: Option<String>,
+    direct_account: bool,
+    account_id: String,
     cli_path: String,
     auth_login_args: Vec<String>,
     auth_check_args: Vec<String>,
@@ -619,6 +669,7 @@ fn spawn_auth_cli_pty(
     let into_bundle_id_for_task = into_bundle_id.clone();
     let bundle_dir_for_task = bundle_dir.clone();
     let provider_id_for_task = provider_id.clone();
+    let account_id_for_task = account_id.clone();
 
     tracing::info!(
         session_id = %session_id,
@@ -751,6 +802,7 @@ fn spawn_auth_cli_pty(
         let into_bundle_id_drain = into_bundle_id_for_task.clone();
         let bundle_dir_drain = bundle_dir_for_task.clone();
         let provider_id_drain = provider_id_for_task.clone();
+        let account_id_drain = account_id_for_task.clone();
         // Shared with the post-exit fallback block below — same pattern
         // as the pipes path. Drain's detached `Handle::current().spawn`
         // task does the persist + finish_success; the drain sets this
@@ -807,18 +859,21 @@ fn spawn_auth_cli_pty(
                             let into_bundle_id2 = into_bundle_id_drain.clone();
                             let bundle_dir2 = bundle_dir_drain.clone();
                             let provider_id2 = provider_id_drain.clone();
+                            let account_id2 = account_id_drain.clone();
                             let success_for_detached = Arc::clone(&success_transitioned_drain);
                             let handle = tokio::runtime::Handle::current().spawn(async move {
                                 if confirm_authenticated(&cli, &args, &env).await {
-                                    let bundle_id = persist_oauth_binding_or_synthetic(
+                                    let (bundle_id, account_id) = persist_oauth_success(
                                         &wstore2,
                                         &broker2,
+                                        direct_account,
+                                        &account_id2,
                                         into_bundle_id2.as_deref(),
                                         &provider_id2,
                                         bundle_dir2.as_deref(),
                                         &sid2,
                                     );
-                                    mgr2.finish_success(&sid2, bundle_id);
+                                    mgr2.finish_success(&sid2, bundle_id, account_id);
                                     // Atomic set ONLY on confirm-success
                                     // — mirrors the pipes path. On
                                     // confirm-miss the detached does
@@ -883,15 +938,17 @@ fn spawn_auth_cli_pty(
                     )
                     .await
                     {
-                        let bundle_id = persist_oauth_binding_or_synthetic(
+                        let (bundle_id, account_id) = persist_oauth_success(
                             &wstore_for_task,
                             &broker_for_task,
+                            direct_account,
+                            &account_id_for_task,
                             into_bundle_id_for_task.as_deref(),
                             &provider_id_for_task,
                             bundle_dir_for_task.as_deref(),
                             &session_id_for_task,
                         );
-                        mgr_for_task.finish_success(&session_id_for_task, bundle_id);
+                        mgr_for_task.finish_success(&session_id_for_task, bundle_id, account_id);
                     } else {
                         mgr_for_task.finish_failure(
                             &session_id_for_task,
@@ -1043,6 +1100,101 @@ fn compute_and_ensure_bundle_dir(
     Some(dir_str)
 }
 
+/// Direct-account sibling of `compute_and_ensure_bundle_dir` (issue
+/// #1624 PR-C Part B) — bypasses the bundle system entirely. Mints a
+/// fresh `account_id` when `existing_account_id` is empty (first-time
+/// OAuth connect from the launch modal); reuses it when non-empty
+/// (Reconnect — refresh tokens in place, same isolation dir, same
+/// account row updated in place).
+///
+/// Returns `(account_id, dir)` — `account_id` is always populated (even
+/// on a dir-resolution failure, so the caller can still log/track it);
+/// `dir` is `None` on the same gate/registry/fs failures
+/// `compute_and_ensure_bundle_dir` treats as soft failures — never
+/// abort `auth.start` over a config-dir issue.
+fn compute_and_ensure_account_dir(
+    existing_account_id: &str,
+    provider_id: &str,
+    auth_env: &mut std::collections::HashMap<String, String>,
+) -> (String, Option<String>) {
+    let account_id = if existing_account_id.is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        existing_account_id.to_string()
+    };
+
+    // Same provider_class gate as the bundle path — only oauth-class
+    // providers (claude/codex/openclaw) get a per-account isolation dir.
+    match crate::identity::resolver::provider_class(provider_id) {
+        Some(crate::identity::resolver::ProviderClass::OAuth { .. }) => {}
+        _ => return (account_id, None),
+    }
+    let provider = match get_provider(provider_id) {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                account_id,
+                "auth.start (direct-account): oauth-class provider not in registry — skipping config dir"
+            );
+            return (account_id, None);
+        }
+    };
+    if provider.auth_config_dir_env_var.is_empty() {
+        return (account_id, None);
+    }
+    let paths = match agentmux_common::DataPaths::from_env() {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                account_id,
+                "auth.start (direct-account): DataPaths::from_env() returned None — skipping config dir"
+            );
+            return (account_id, None);
+        }
+    };
+    // identity_dir is already generic (not bundle-specific) — same
+    // unsafe-path-segment rejection applies to account_id here.
+    let account_root = match paths.identity_dir(&account_id) {
+        Some(p) => p,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                account_id,
+                "auth.start (direct-account): account_id is not a safe path segment — skipping config dir"
+            );
+            return (account_id, None);
+        }
+    };
+    let dir = account_root.join(provider.auth_dir_name);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(
+            target: "identity",
+            provider_id,
+            account_id,
+            error = %e,
+            path = %dir.display(),
+            "auth.start (direct-account): failed to create config dir — skipping"
+        );
+        return (account_id, None);
+    }
+    let dir_str = dir.to_string_lossy().to_string();
+    auth_env.insert(provider.auth_config_dir_env_var.to_string(), dir_str.clone());
+    tracing::info!(
+        target: "identity",
+        provider_id,
+        account_id,
+        env_var = provider.auth_config_dir_env_var,
+        dir = %dir.display(),
+        "auth.start (direct-account): OAuth config dir wired"
+    );
+    (account_id, Some(dir_str))
+}
+
 /// On a successful OAuth handshake (CLI exited 0 + authCheckCommand
 /// confirmed), persist the OAuth binding into the bundle and return
 /// the real bundle id to use in the `Success` wire status.
@@ -1171,6 +1323,117 @@ fn persist_oauth_binding_or_synthetic(
     bundle_id.to_string()
 }
 
+/// Direct-account sibling of `persist_oauth_binding_or_synthetic` (issue
+/// #1624 PR-C Part B). Upserts the `IdentityAccount`
+/// (`SecretRef::OAuthConfigDir`, status "valid") exactly as the bundle
+/// path does, but does NOT call `bundle_identity_bind` — no
+/// `db_identity_bundles`/`db_identity_bindings` row is touched. The
+/// actual `agent_identity_link` write happens later, once the agent
+/// exists (the launch-flow write-through reconcile) — this function
+/// only makes sure the account itself exists and is ready to be linked.
+///
+/// Publishes `identityaccounts:changed` (the same broad event
+/// `account.key.verify`/`upsertidentityaccount` already use) rather
+/// than a bundle-scoped event, since there's no bundle id to scope to.
+///
+/// Returns `None` on any persistence failure (dir never resolved, or
+/// the account upsert itself failed) — same "log + skip, session still
+/// succeeds" contract as the bundle path, just without a synthetic
+/// placeholder to fall back to (direct-account mode has no "ambient"
+/// concept to fall back to; the caller surfaces `account_id: None` on
+/// the wire and the frontend treats that as "nothing to select").
+fn persist_oauth_direct_account(
+    wstore: &Arc<Store>,
+    broker: &Arc<Broker>,
+    account_id: &str,
+    provider_id: &str,
+    dir: Option<&str>,
+    _session_id: &str,
+) -> Option<String> {
+    let dir = match dir.filter(|s| !s.is_empty()) {
+        Some(d) => d,
+        None => {
+            tracing::warn!(
+                target: "identity",
+                account_id,
+                provider_id,
+                "auth success (direct-account): dir unresolved — skipping account persist"
+            );
+            return None;
+        }
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let account = IdentityAccount {
+        id: account_id.to_string(),
+        name: format!("{provider_id}-oauth"),
+        provider: provider_id.to_string(),
+        kind: "oauth".to_string(),
+        display_name: String::new(),
+        secret_ref: SecretRef::OAuthConfigDir { dir: dir.to_string() },
+        context: serde_json::json!({}),
+        // Same rationale as the bundle path: a binding the user JUST
+        // OAuth'd into is `valid` by definition.
+        status: crate::identity::resolver::oauth_status::VALID.to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+    if let Err(e) = wstore.identity_upsert(&account) {
+        tracing::warn!(
+            target: "identity",
+            account_id,
+            provider_id,
+            error = %e,
+            "auth success (direct-account): identity_upsert failed"
+        );
+        return None;
+    }
+    broker.publish(crate::backend::wps::WaveEvent {
+        event: "identityaccounts:changed".to_string(),
+        scopes: vec![],
+        sender: String::new(),
+        persist: 0,
+        data: None,
+    });
+    tracing::info!(
+        target: "identity",
+        account_id,
+        provider_id,
+        dir,
+        "auth success (direct-account): OAuth account persisted"
+    );
+    Some(account_id.to_string())
+}
+
+/// Shared by all 4 OAuth-success call sites (pipes drain/post-exit, PTY
+/// drain/post-exit) — branches on `direct_account` to call the right
+/// persist function and builds the `(bundle_id, account_id)` pair
+/// `AuthSessionManager::finish_success` expects. `dir` is `bundle_dir`
+/// in bundle mode or the account's own isolation dir in direct-account
+/// mode (both resolved once at spawn time by the matching
+/// `compute_and_ensure_*_dir` call in the `auth.start` handler).
+#[allow(clippy::too_many_arguments)]
+fn persist_oauth_success(
+    wstore: &Arc<Store>,
+    broker: &Arc<Broker>,
+    direct_account: bool,
+    account_id: &str,
+    into_bundle_id: Option<&str>,
+    provider_id: &str,
+    dir: Option<&str>,
+    session_id: &str,
+) -> (String, Option<String>) {
+    if direct_account {
+        let persisted = persist_oauth_direct_account(wstore, broker, account_id, provider_id, dir, session_id);
+        (String::new(), persisted)
+    } else {
+        let bundle_id = persist_oauth_binding_or_synthetic(wstore, broker, into_bundle_id, provider_id, dir, session_id);
+        (bundle_id, None)
+    }
+}
+
 /// Run the provider's auth-check subcommand and return true if it
 /// exits 0. Failure modes (binary missing, network error, etc.) are
 /// all treated as "not authenticated" — the caller will then either
@@ -1202,6 +1465,18 @@ async fn confirm_authenticated(
 mod tests {
     use super::*;
     use crate::backend::storage::store::Identity;
+
+    // Shared across every test in this module that mutates process-
+    // global env vars (`AGENTMUX_HOME_OVERRIDE` + `DataPaths::to_env_vars()`
+    // entries) via `compute_and_ensure_bundle_dir`/`compute_and_ensure_account_dir`
+    // round-trip tests. `cargo test` runs tests in this binary in
+    // parallel by default — a `static` declared inside a TEST FUNCTION
+    // body is a separate item per function, so per-function locks don't
+    // actually serialize against each other, only against repeated
+    // calls to the SAME test. One module-level lock, taken by every
+    // such test before touching the environment, is what actually
+    // prevents them from racing.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     // Request shape parsing tests — verify the wire contract matches
     // what the frontend (PR B) will send. The end-to-end RPC-engine
@@ -1313,11 +1588,9 @@ mod tests {
         // the same path — closing the bundle loop.
 
         // Use a tempdir as the agentmux home so DataPaths resolves
-        // without depending on the user's real ~/.agentmux. Local
-        // mutex so two env-var-touching tests in this module can't
-        // race (agentmux-common's TEST_ENV_LOCK is `pub(crate)`,
-        // not reachable from here).
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // without depending on the user's real ~/.agentmux. Module-
+        // level mutex (see its doc comment) so this can't race the
+        // other env-var-touching tests in this module.
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
@@ -1505,5 +1778,187 @@ mod tests {
             r, "pending-bundle-for-sess-y",
             "no bundle dir → no persistence → synthetic id"
         );
+    }
+
+    // ── Issue #1624 PR-C Part B: direct-account OAuth ─────────────
+
+    #[test]
+    fn start_req_parses_direct_account_fields() {
+        let v = serde_json::json!({
+            "providerId": "claude",
+            "cliPath": "/usr/bin/claude",
+            "authLoginArgs": ["login"],
+            "authCheckArgs": ["whoami"],
+            "directAccount": true,
+            "existingAccountId": "acc-1"
+        });
+        let r: StartProviderAuthReq = serde_json::from_value(v).unwrap();
+        assert!(r.direct_account);
+        assert_eq!(r.existing_account_id, "acc-1");
+    }
+
+    #[test]
+    fn start_req_direct_account_fields_default_when_absent() {
+        // Same minimal payload as start_req_parses_minimal — must still
+        // parse now that these two fields exist, defaulting to the
+        // legacy bundle-mode shape.
+        let v = serde_json::json!({
+            "providerId": "claude",
+            "cliPath": "/usr/bin/claude",
+            "authLoginArgs": ["login"],
+            "authCheckArgs": ["whoami"]
+        });
+        let r: StartProviderAuthReq = serde_json::from_value(v).unwrap();
+        assert!(!r.direct_account);
+        assert_eq!(r.existing_account_id, "");
+    }
+
+    #[test]
+    fn compute_account_dir_mints_fresh_id_when_existing_is_empty() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+
+        let mut env = std::collections::HashMap::new();
+        let (account_id, dir) = compute_and_ensure_account_dir("", "claude", &mut env);
+        assert!(!account_id.is_empty(), "must mint a fresh id when none supplied");
+        let dir = dir.expect("oauth-class provider must yield a dir");
+        let expected = paths.identity_dir(&account_id).unwrap().join("claude");
+        assert_eq!(std::path::Path::new(&dir), expected);
+        assert!(expected.is_dir());
+        assert_eq!(env.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some(dir.as_str()));
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[test]
+    fn compute_account_dir_reuses_existing_id() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+
+        let mut env = std::collections::HashMap::new();
+        let (account_id, _) = compute_and_ensure_account_dir("acc-reconnect", "claude", &mut env);
+        assert_eq!(account_id, "acc-reconnect", "reconnect must reuse the supplied id, not mint a new one");
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
+    }
+
+    #[test]
+    fn compute_account_dir_skipped_for_api_key_provider() {
+        // Same provider_class gate as the bundle path — dir is None,
+        // but the account id is still returned (unlike bundle mode,
+        // there's no "skip entirely" case here — the account always
+        // gets minted/reused, only the isolation dir is conditional).
+        let mut env = std::collections::HashMap::new();
+        let (account_id, dir) = compute_and_ensure_account_dir("", "kimi", &mut env);
+        assert!(!account_id.is_empty());
+        assert!(dir.is_none(), "api-key provider class must skip the OAuth dir path");
+        assert!(env.get("KIMI_SHARE_DIR").is_none());
+    }
+
+    #[test]
+    fn persist_oauth_direct_account_round_trip() {
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let r = persist_oauth_direct_account(
+            &wstore,
+            &broker,
+            "acc-1",
+            "claude",
+            Some("/some/account/dir"),
+            "sess-z",
+        );
+        assert_eq!(r, Some("acc-1".to_string()));
+
+        let acct = wstore.identity_get("acc-1").unwrap().expect("account row exists");
+        assert_eq!(acct.provider, "claude");
+        assert_eq!(acct.kind, "oauth");
+        assert_eq!(acct.status, "valid");
+        match acct.secret_ref {
+            SecretRef::OAuthConfigDir { dir } => assert_eq!(dir, "/some/account/dir"),
+            other => panic!("expected OAuthConfigDir, got {other:?}"),
+        }
+
+        // No bundle/binding tables touched — direct-account mode never
+        // creates a db_identity_bundles or db_identity_bindings row.
+        // Every fresh store seeds one sentinel "blank" bundle row as
+        // part of schema setup (migrations.rs's `INSERT OR IGNORE INTO
+        // db_identity_bundles ... is_blank=1`) — filter it out rather
+        // than asserting total emptiness.
+        assert!(
+            wstore.bundle_identity_list().unwrap().iter().all(|b| b.is_blank),
+            "direct-account persist must not create any non-blank bundle row"
+        );
+    }
+
+    #[test]
+    fn persist_oauth_direct_account_returns_none_when_dir_unresolved() {
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let r = persist_oauth_direct_account(&wstore, &broker, "acc-1", "claude", None, "sess-z");
+        assert!(r.is_none());
+        assert!(wstore.identity_get("acc-1").unwrap().is_none(), "nothing persisted when dir is unresolved");
+    }
+
+    #[test]
+    fn persist_oauth_success_routes_direct_account_mode_without_touching_bundles() {
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let (bundle_id, account_id) = persist_oauth_success(
+            &wstore,
+            &broker,
+            true,
+            "acc-1",
+            None,
+            "claude",
+            Some("/some/dir"),
+            "sess-route",
+        );
+        assert_eq!(bundle_id, "", "direct-account mode never populates a bundle id");
+        assert_eq!(account_id, Some("acc-1".to_string()));
+        assert!(wstore.identity_get("acc-1").unwrap().is_some());
+    }
+
+    #[test]
+    fn persist_oauth_success_routes_bundle_mode_without_touching_accounts_directly() {
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let (bundle_id, account_id) = persist_oauth_success(
+            &wstore,
+            &broker,
+            false,
+            "unused-in-bundle-mode",
+            None, // no bundle id → synthetic path, same as the legacy behaviour
+            "claude",
+            Some("/some/dir"),
+            "sess-route-2",
+        );
+        assert_eq!(bundle_id, "pending-bundle-for-sess-route-2");
+        assert_eq!(account_id, None, "bundle mode never populates account_id");
     }
 }

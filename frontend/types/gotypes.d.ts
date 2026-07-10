@@ -590,7 +590,7 @@ declare global {
         | { status: "pending" }
         | { status: "url-available"; authUrl: string }
         | { status: "code-emitted"; deviceCode: string; verificationUrl: string }
-        | { status: "success"; bundleId: string; email: string | null }
+        | { status: "success"; bundleId: string; email: string | null; accountId?: string }
         | { status: "failed"; error: string };
 
     type AgentRunResult = {
