@@ -38,16 +38,14 @@ describe("auth-state reducer", () => {
             expect(r.state.kind).toBe("expired");
         });
 
-        it("transitions to `unauthenticated` for needs-account and needs-bundle", () => {
-            for (const outcome of ["needs-account", "needs-bundle"] as const) {
-                const r = update(initialState(), {
-                    type: "Selected",
-                    providerId: "claude",
-                    bundleId: "b1",
-                    outcome,
-                });
-                expect(r.state.kind).toBe("unauthenticated");
-            }
+        it("transitions to `unauthenticated` for needs-account", () => {
+            const r = update(initialState(), {
+                type: "Selected",
+                providerId: "claude",
+                bundleId: "b1",
+                outcome: "needs-account",
+            });
+            expect(r.state.kind).toBe("unauthenticated");
         });
 
         it("clears prior session + error state on selection change", () => {
@@ -751,16 +749,6 @@ describe("auth-state reducer", () => {
                     outcome: "needs-account",
                 });
                 expect(r.state.intoBundleId).toBe("existing-b1");
-            });
-
-            it("needs-bundle → intoBundleId = '' (new bundle)", () => {
-                const r = update(initialState(), {
-                    type: "Selected",
-                    providerId: "claude",
-                    bundleId: "",
-                    outcome: "needs-bundle",
-                });
-                expect(r.state.intoBundleId).toBe("");
             });
 
             it("ready → intoBundleId = '' (no save flow needed)", () => {

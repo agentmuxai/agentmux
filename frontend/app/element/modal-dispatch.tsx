@@ -12,7 +12,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
-import { AgentNewIdentityModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
+import { AgentAddAccountModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
 import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMemoryModal";
 import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/AgentCreateFromTemplateModal";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
@@ -31,8 +31,8 @@ export function requestLabel(req: ModalLayerRequest): string {
     switch (req.kind) {
         case "launch-agent":
             return `Launch ${req.agent.name}`;
-        case "new-identity":
-            return "New Identity";
+        case "add-account":
+            return "Add Account";
         case "new-memory":
             return "New Preset";
         case "agent-prereqs":
@@ -77,54 +77,31 @@ export function renderRequest(
                             }
                         }}
                         initialFormState={req.initialFormState}
-                        autoStartAuth={req.autoStartAuth}
-                        onRequestNewIdentity={req.onRequestNewIdentity}
+                        onRequestAddAccount={req.onRequestAddAccount}
                         onRequestNewMemory={req.onRequestNewMemory}
                     />
                 ),
             };
-        case "new-identity":
+        case "add-account":
             return {
                 label: requestLabel(req),
                 panel: (
-                    <AgentNewIdentityModalPanel
+                    <AgentAddAccountModalPanel
+                        provider={req.provider}
                         initialName={req.initialName}
-                        purpose={req.purpose}
-                        // The layer owns the RPC + chaining so its
-                        // `submitting()` flag (which gates safeClose)
-                        // tracks the in-flight call. Mirrors the
-                        // launch-agent dispatch above — reagent P1 on
-                        // PR #911.
-                        onSubmit={async ({ name, description }) => {
-                            setSubmitting(true);
-                            try {
-                                // Wire convention from identity-pane-
-                                // model.ts:bundleDraftToWire — empty id
-                                // triggers server-side uuid; 0 timestamps
-                                // trigger server-side now-stamping. Keeps
-                                // id/timestamp handling in one place
-                                // (codex P2 on PR #910 round 3).
-                                const bundle = await RpcApi.UpsertIdentityBundleCommand(
-                                    TabRpcClient,
-                                    {
-                                        id: "",
-                                        name,
-                                        description,
-                                        is_blank: false,
-                                        created_at: 0,
-                                        updated_at: 0,
-                                    },
-                                );
-                                setSubmitting(false);
-                                // Caller's onCreated does modalLayer.replace
-                                // back to Launch with the new id
-                                // preselected — that's what unmounts this
-                                // panel. We don't `api.close()` here.
-                                req.onCreated(bundle.id, bundle.name);
-                            } catch (e) {
-                                setSubmitting(false);
-                                throw e;
-                            }
+                        // Unlike the old bundle flow, the RPC
+                        // (`account.key.verify`) lives inside the panel
+                        // itself — it needs to run the live-probe
+                        // before knowing the resulting account id, and
+                        // the panel already tracks its own submitting
+                        // state for that. This callback just forwards
+                        // the result to the caller's chain.
+                        onSubmit={async ({ accountId }) => {
+                            // Caller's onCreated does modalLayer.replace
+                            // back to Launch with the new id
+                            // preselected — that's what unmounts this
+                            // panel. We don't `api.close()` here.
+                            req.onCreated(accountId);
                         }}
                         // Caller's onCancel does modalLayer.replace back to
                         // Launch with the prior selection intact. Running
@@ -226,7 +203,7 @@ export function renderRequest(
                         // (spec note on CreateFromTemplateRequest) so
                         // `submitting()` covers both RPC steps and ESC
                         // / backdrop dismiss stay blocked end-to-end.
-                        onSubmit={async ({ name, identityId, memoryId, agentType }) => {
+                        onSubmit={async ({ name, accountId, memoryId, agentType }) => {
                             setSubmitting(true);
                             try {
                                 const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
@@ -234,7 +211,7 @@ export function renderRequest(
                                     {
                                         template_id: req.template.id,
                                         name,
-                                        identity_id: identityId,
+                                        identity_id: accountId,
                                         memory_id: memoryId,
                                         // Persist the chosen runtime on the
                                         // new user-owned definition so later

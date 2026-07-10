@@ -559,7 +559,12 @@ export class AgentViewModel implements ViewModel {
                     // PR-F.3: launch modal carries the user's bundle
                     // picks. Empty / "blank" → backend resolver short-
                     // circuits so the agent inherits ambient creds.
-                    identity_id: overrides?.identityId,
+                    // Issue #1624 PR-C Part B — `accountId` replaces
+                    // the old bundle-id `identityId`; this column
+                    // keeps its name (`identity_id`) since it's a
+                    // legacy `db_agent_instances` field, not part of
+                    // the new direct-link system.
+                    identity_id: overrides?.accountId,
                     memory_id: overrides?.memoryId,
                     // v8: named-agent continuation. The instance name
                     // is the AGENTMUX_AGENT_ID the user picked in the
@@ -588,55 +593,28 @@ export class AgentViewModel implements ViewModel {
                 );
             }
 
-            // Write-through: RECONCILE this agent definition's direct
-            // agent<->account links to exactly match the selected Identity
-            // bundle's bindings (add/update AND remove), in addition to
-            // (not instead of) the bundle-based instance.identity_id above.
+            // Write-through: link this agent definition directly to the
+            // selected account for its own provider. Issue #1624 PR-C
+            // Part B — the launch modal now picks an account directly
+            // (no bundle-of-bindings to reconcile against), so this
+            // collapses to a single upsert. `agent_identity_link`'s
+            // `ON CONFLICT(agent_id, provider) DO UPDATE` (identities.rs)
+            // makes one call correct without a diff/unlink pass.
             //
-            // Must be a full reconcile, not additive-only: the resolver
-            // (agentmux-srv/src/identity/resolver.rs's
-            // resolve_bindings_for_instance) treats ANY existing direct
-            // link for this definition as authoritative and skips the
-            // bundle path entirely. So on a relaunch/continue of the SAME
-            // definition with a different bundle — one that drops a
-            // provider, or "blank" for ambient creds — a stale direct link
-            // left over from an earlier launch would keep silently
-            // overriding the new selection. Reagent P1 on #1950 caught
-            // this in the additive-only version.
-            //
-            // This just makes sure every launch's direct-link set matches
-            // its bundle pick from day one, so the bundle-fallback path
-            // can eventually be removed without a live-credential
-            // regression. Best-effort, same as the instance-row write
-            // above: a failure here doesn't abort the launch, since the
-            // agent already started and the bundle path still works as a
-            // fallback. See
-            // docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.
+            // Best-effort, same as the instance-row write above: a
+            // failure here doesn't abort the launch, since the agent
+            // already started. This also covers the accepted migration
+            // gap where a pre-issue-#1624-PR-C continuation carries a
+            // stale bundle id instead of a real account id — the RPC
+            // fails gracefully and just logs a warning. See
+            // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
             try {
-                const identityId = overrides?.identityId;
-                const bindings =
-                    identityId && identityId !== "blank"
-                        ? await RpcApi.ListIdentityBindingsCommand(TabRpcClient, { identity_id: identityId })
-                        : [];
-                const targetProviders = new Set((bindings ?? []).map((b) => b.provider));
-
-                const existingLinks = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                    agent_id: agent.id,
-                });
-                for (const link of existingLinks ?? []) {
-                    if (!targetProviders.has(link.provider)) {
-                        await RpcApi.UnlinkAgentIdentityCommand(TabRpcClient, {
-                            agent_id: agent.id,
-                            provider: link.provider,
-                        });
-                    }
-                }
-
-                for (const binding of bindings ?? []) {
+                const accountId = overrides?.accountId;
+                if (accountId && accountId !== "blank") {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
                         agent_id: agent.id,
-                        account_id: binding.account_id,
-                        provider: binding.provider,
+                        account_id: accountId,
+                        provider: agent.provider,
                     });
                 }
             } catch (e: any) {

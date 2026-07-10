@@ -56,7 +56,7 @@ describe("AuthFlowController", () => {
         await createRoot(async (dispose) => {
             const timers = fakeTimers();
             const ctrl = new AuthFlowController({ rpc: fakeRpc(), timers });
-            ctrl.selected("claude", "b1", "needs-bundle");
+            ctrl.selected("claude", "b1", "needs-account");
             expect(ctrl.state().kind).toBe("unauthenticated");
             expect(ctrl.state().providerId).toBe("claude");
             dispose();
@@ -77,7 +77,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: ["login"],
@@ -112,7 +112,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -140,7 +140,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -171,7 +171,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -180,7 +180,7 @@ describe("AuthFlowController", () => {
             expect(ctrl.state().kind).toBe("waiting");
             expect(ctrl.state().sessionId).toBe("s1");
             // User switches provider while OAuth is in-flight.
-            ctrl.selected("openai", "", "needs-bundle");
+            ctrl.selected("openai", "", "needs-account");
             // Microtask flush so the fire-and-forget cancel resolves.
             await Promise.resolve();
             await Promise.resolve();
@@ -208,7 +208,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -244,7 +244,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             const connectP = ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -280,7 +280,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -308,7 +308,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("openclaw", "", "needs-bundle");
+            ctrl.selected("openclaw", "", "needs-account");
             await ctrl.submitApiKey("sk-test", "my-key-account");
             expect(ctrl.state().kind).toBe("ready");
             expect(ctrl.state().bundleId).toBe("persisted-bundle");
@@ -327,7 +327,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("openclaw", "", "needs-bundle");
+            ctrl.selected("openclaw", "", "needs-account");
             await ctrl.submitApiKey("sk-bad", "default");
             expect(ctrl.state().kind).toBe("failed");
             expect(ctrl.state().error).toBe("invalid key");
@@ -346,7 +346,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -367,7 +367,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -395,7 +395,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],
@@ -427,7 +427,7 @@ describe("AuthFlowController", () => {
                 }),
                 timers,
             });
-            ctrl.selected("claude", "", "needs-bundle");
+            ctrl.selected("claude", "", "needs-account");
             await ctrl.connect({
                 cliPath: "/x",
                 authLoginArgs: [],

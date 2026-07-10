@@ -29,10 +29,11 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
+import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 
 export interface CreateFromTemplateFormData {
     name: string;
-    identityId: string;
+    accountId: string;
     memoryId: string;
     /** Where the new agent runs. Chosen here at instantiation time —
      *  it is NOT a property of the template (a template is runtime-
@@ -55,9 +56,9 @@ export const AgentCreateFromTemplateModalPanel = (
     props: AgentCreateFromTemplateModalPanelProps,
 ): JSX.Element => {
     const [name, setName] = createSignal(props.initialName ?? props.template.name);
-    const [identityId, setIdentityId] = createSignal("");
+    const [accountId, setAccountId] = createSignal("");
     const [memoryId, setMemoryId] = createSignal("");
-    const [identities, setIdentities] = createSignal<IdentityBundle[]>([]);
+    const [accounts, setAccounts] = createSignal<Account[]>([]);
     const [memories, setMemories] = createSignal<Memory[]>([]);
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
@@ -109,14 +110,16 @@ export const AgentCreateFromTemplateModalPanel = (
         setRuntime(v);
     };
 
-    // Load bundle lists on mount. Bindings are stored on the
+    // Load account + memory lists on mount. The account list is
+    // filtered to the template's own provider (accounts are provider-
+    // specific — issue #1624 PR-C Part B). Bindings are stored on the
     // db_agent_instances row at launch time; the empty string sentinel
     // means "ambient creds / vanilla CLI" so an empty selection is OK.
     onMount(() => {
         void (async () => {
             try {
-                const list = await RpcApi.ListIdentityBundlesCommand(TabRpcClient, {});
-                setIdentities(list ?? []);
+                const list = await refreshAccountCache();
+                setAccounts(list.filter((a) => a.provider === props.template.provider));
             } catch {
                 /* non-fatal; user can still create without binding */
             }
@@ -129,17 +132,15 @@ export const AgentCreateFromTemplateModalPanel = (
         })();
     });
 
-    // Default-pick the first real bundle once the lists land, matching
-    // the launch modal's UX (saves a click for users with existing
-    // bundles). `is_blank` rows are back-compat singletons we filter
-    // out — empty string is the "ambient" sentinel and is the empty-
-    // list default anyway.
-    const realIdentities = createMemo(() => identities().filter((b) => !b.is_blank));
+    // Default-pick the first available account once the list lands,
+    // matching the launch modal's UX (saves a click for users with
+    // existing accounts). `is_blank` rows are a bundle-only concept —
+    // accounts have no such thing.
     const realMemories = createMemo(() => memories().filter((m) => !m.is_blank));
     createEffect(() => {
-        if (identityId()) return;
-        const first = realIdentities()[0];
-        if (first) setIdentityId(first.id);
+        if (accountId()) return;
+        const first = accounts()[0];
+        if (first) setAccountId(first.id);
     });
     createEffect(() => {
         if (memoryId()) return;
@@ -159,7 +160,7 @@ export const AgentCreateFromTemplateModalPanel = (
         try {
             await props.onSubmit({
                 name: name().trim(),
-                identityId: identityId(),
+                accountId: accountId(),
                 memoryId: memoryId(),
                 agentType: runtime(),
             });
@@ -240,14 +241,16 @@ export const AgentCreateFromTemplateModalPanel = (
                     <span class="agent-new-bundle-modal-label">Identity</span>
                     <select
                         class="agent-new-bundle-modal-input"
-                        value={identityId()}
-                        onChange={(e) => setIdentityId(e.currentTarget.value)}
+                        value={accountId()}
+                        onChange={(e) => setAccountId(e.currentTarget.value)}
                         disabled={submitting()}
                         data-testid="create-from-template-identity-select"
                     >
                         <option value="">(ambient credentials)</option>
-                        <For each={realIdentities()}>
-                            {(b) => <option value={b.id}>{b.name}</option>}
+                        <For each={accounts()}>
+                            {(a) => (
+                                <option value={a.id}>{a.display_name?.trim() || a.name}</option>
+                            )}
                         </For>
                     </select>
                 </label>

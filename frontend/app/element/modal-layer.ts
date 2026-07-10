@@ -19,7 +19,7 @@ export type ModalLayerRequest =
     | LaunchAgentRequest
     | InstallAgentRequest
     | AgentPrereqRequest
-    | NewIdentityBundleRequest
+    | AddAccountRequest
     | NewMemoryBundleRequest
     | CreateFromTemplateRequest
     | BrowserAuthRequest
@@ -41,36 +41,20 @@ export interface LaunchAgentRequest {
      */
     onSubmit: (overrides: LaunchAgentSubmit) => Promise<void> | void;
     /** Initial form state for the launch modal — used by the
-     *  "+ New" → create → replace-back flow to restore the user's
-     *  in-progress edits (name, runtime, image, identity, memory)
-     *  across the new-bundle round-trip. */
+     *  "+ Add account" → create → replace-back flow to restore the
+     *  user's in-progress edits (name, runtime, image, account, memory)
+     *  across the round-trip. */
     initialFormState?: Partial<LaunchFormStateWire>;
-    /** When true, the launch modal fires its OAuth `startConnect()`
-     *  exactly once on mount. Set by the OAuth-Connect → New Identity
-     *  → launch round-trip (spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md
-     *  §2): after the user names the bundle and clicks Continue, the
-     *  launch modal re-opens with the new identity preselected and
-     *  this hint set, so OAuth resumes automatically against the
-     *  freshly-named bundle instead of waiting for a second click. */
-    autoStartAuth?: boolean;
-    /** Optional callback fired when the user wants to create a new
-     *  identity bundle. Caller is expected to call
-     *  modalLayer.replace(newIdentityRequest) — the picker does this.
+    /** Optional callback fired when the user wants to add a new
+     *  (manual/API-key) account. Caller is expected to call
+     *  modalLayer.replace(addAccountRequest) — the picker does this.
      *  The `current` snapshot carries the modal's live form state so
-     *  the picker can preserve it across the new-bundle round-trip.
-     *
-     *  `purpose` distinguishes the two entry points:
-     *   - `"create"` (the plain `+ New identity` button): create a
-     *     named bundle and return to the launch form.
-     *   - `"oauth-continue"` (the OAuth Connect `needs-bundle` click):
-     *     create a named bundle, return to the launch form with the
-     *     new id preselected AND `autoStartAuth` set so OAuth resumes
-     *     automatically against the named bundle.
-     *  Spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
-    onRequestNewIdentity?: (
-        current: LaunchFormStateWire,
-        purpose: "create" | "oauth-continue",
-    ) => void;
+     *  the picker can preserve it across the round-trip. Issue #1624
+     *  PR-C Part B — OAuth Connect no longer routes through this
+     *  callback (it starts directly from the launch modal's auth
+     *  panel); this now only fires for the "+ Add account" button.
+     *  Replaces `onRequestNewIdentity`. */
+    onRequestAddAccount?: (current: LaunchFormStateWire) => void;
     /** Same for "+ New memory". */
     onRequestNewMemory?: (current: LaunchFormStateWire) => void;
 }
@@ -82,7 +66,7 @@ export interface LaunchFormStateWire {
     name: string;
     runtime: "host" | "container";
     image: string;
-    identityId: string;
+    accountId: string;
     memoryId: string;
     /** Continuation context — the `continueOfId` from the Continue
      *  dropdown. `null` = "— New agent —". Threaded through the
@@ -153,31 +137,32 @@ export interface AgentPrereqRequest {
 }
 
 /**
- * "+ New" affordance on the Launch modal's Identity row creates an
- * empty Identity bundle. Connector setup (Claude/Codex/GitHub/AWS)
- * happens in the Identity pane afterward.
+ * "+ Add account" affordance on the Launch modal's Identity row —
+ * creates a manual/API-key `IdentityAccount` directly (no bundle).
+ * OAuth Connect no longer routes through this modal (issue #1624
+ * PR-C Part B — it starts directly from the launch modal's auth
+ * panel, which mints the account backend-side).
  *
- * The actual UpsertIdentityBundle RPC is owned by the layer so its
+ * The actual account.key.verify RPC is owned by the layer so its
  * `submitting()` flag (which gates safeClose) tracks the in-flight
  * call. Callers only supply the chain callbacks for after-success / on-cancel.
  *
- * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
+ * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md. Replaces
+ * `NewIdentityBundleRequest`.
  */
-export interface NewIdentityBundleRequest {
-    kind: "new-identity";
+export interface AddAccountRequest {
+    kind: "add-account";
     originBlockId: string;
+    /** Provider the new account is scoped to — the agent's own
+     *  provider (accounts are provider-specific, unlike the old
+     *  provider-agnostic bundle system). */
+    provider: string;
     /** Initial value for the name field. Usually empty. */
     initialName?: string;
-    /** Why the modal opened — controls the primary button label only
-     *  ("Create" vs "Continue"). `"create"` (default) is the plain
-     *  `+ New identity` button; `"oauth-continue"` is the OAuth-Connect
-     *  (`needs-bundle`) interposition. Spec
-     *  SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
-    purpose?: "create" | "oauth-continue";
-    /** Called after the bundle is persisted on disk. Caller should
+    /** Called after the account is persisted. Caller should
      *  `modalLayer.replace(launchRequest)` with the new id preselected;
      *  the layer does NOT close after this fires. */
-    onCreated: (bundleId: string, bundleName: string) => void;
+    onCreated: (accountId: string) => void;
     /** Called when the user clicks Cancel. Caller should
      *  `modalLayer.replace(launchRequest)` with the prior selection
      *  intact, OR `modalLayer.close()` to exit. The layer does NOT
@@ -238,7 +223,7 @@ export interface CreateFromTemplateRequest {
      *  layer can keep `submitting()` true across the launch await. */
     onCreatedAndLaunch: (
         newDefinitionId: string,
-        identityId: string,
+        accountId: string,
         memoryId: string,
         name: string,
         /** Runtime the user picked in the modal. The launch override

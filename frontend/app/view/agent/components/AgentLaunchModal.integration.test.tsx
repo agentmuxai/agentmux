@@ -27,9 +27,7 @@ import { resetCapabilities } from "@/app/store/toolchain-capabilities";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {
-        ListIdentityBundlesCommand: vi.fn(),
         ListMemoriesCommand: vi.fn(),
-        ListIdentityBindingsCommand: vi.fn(),
         ListNamedAgentsCommand: vi.fn(),
         // Backs the shared toolchain-capabilities store's Docker liveness
         // probe — this modal polls it (watchCapability("docker")) for the
@@ -42,6 +40,14 @@ vi.mock("@/app/store/rpc-api", () => {
 });
 
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+
+// Issue #1624 PR-C Part B — the launch modal sources accounts from the
+// shared account cache instead of `ListIdentityBundlesCommand`/
+// `ListIdentityBindingsCommand`.
+vi.mock("@/app/view/identity/identity-model", () => ({
+    refreshAccountCache: vi.fn(),
+    subscribeAccountChanges: vi.fn(() => () => {}),
+}));
 
 vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: vi.fn(() => () => {}),
@@ -109,13 +115,18 @@ const claudeAgent = {
     is_seeded: 0,
 } as AgentDefinition;
 
-const workIdentity: IdentityBundle = {
-    id: "ident-work",
+const workAccount = {
+    id: "acct-work",
     name: "Work",
-    is_blank: false,
-    created_at: ts(),
-    updated_at: ts(),
-};
+    provider: "claude",
+    kind: "oauth",
+    secret_ref: { backend: "env" },
+    context: {},
+    assigned_agents: [],
+    status: "valid",
+    created_at: "",
+    updated_at: "",
+} as unknown as import("@/app/view/identity/identity-model").Account;
 
 const notesMemory: Memory = {
     id: "mem-notes",
@@ -133,22 +144,17 @@ const personalMemory: Memory = {
     updated_at: ts(),
 };
 
-const claudeBinding: IdentityBinding = {
-    identity_id: "ident-work",
-    provider: "claude",
-    account_id: "acc-1",
-};
-
-// Pull the mocked RpcApi after vi.mock has run.
+// Pull the mocked RpcApi + identity-model after vi.mock has run.
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
+let refreshAccountCache: typeof import("@/app/view/identity/identity-model").refreshAccountCache;
 
 beforeEach(async () => {
     vi.clearAllMocks();
     resetCapabilities();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
-    vi.mocked(RpcApi.ListIdentityBundlesCommand).mockResolvedValue([workIdentity]);
+    ({ refreshAccountCache } = await import("@/app/view/identity/identity-model"));
+    vi.mocked(refreshAccountCache).mockResolvedValue([workAccount]);
     vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([notesMemory, personalMemory]);
-    vi.mocked(RpcApi.ListIdentityBindingsCommand).mockResolvedValue([claudeBinding]);
     vi.mocked(RpcApi.ListNamedAgentsCommand).mockResolvedValue([]);
 });
 
@@ -159,10 +165,8 @@ afterEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("AgentLaunchModal — memory change must not reset auth state (§6.10)", () => {
-    // The §6.10 requirement holds — changing the bundle does NOT reset auth
-    // (asserted below). This test had gone stale on the "Memory bundle" → "Bundle"
-    // rename (the select's aria-label is now "Bundle"); the stale selector read as
-    // an auth "regression" when CI first ran it. Selector fixed; logic unchanged.
+    // The §6.10 requirement holds — changing the Bundle does NOT reset
+    // auth (asserted below).
     it("preserves auth-ready state across a Memory selection change", async () => {
         const user = userEvent.setup();
         const onSubmit = vi.fn();
@@ -175,26 +179,24 @@ describe("AgentLaunchModal — memory change must not reset auth state (§6.10)"
             />
         ));
 
-        // Wait for identities + memories + bindings to settle. The
-        // auto-pick effect runs after IdentitiesLoaded fires, then
-        // the FetchBindings event sink runs and dispatches
-        // BindingsLoaded.  The Identity selector renders once
-        // identities are loaded.
-        const identitySelect = await screen.findByLabelText("Identity bundle");
+        // Wait for accounts + memories to settle. The auto-pick effect
+        // runs after AccountsLoaded fires. The Account selector renders
+        // once accounts for the agent's provider are loaded.
+        const identitySelect = await screen.findByLabelText("Account");
         const memorySelect = await screen.findByLabelText("Bundle");
 
-        // Verify the auto-pick wired the bound identity. With Work
-        // bundle bound to claude, the Connect panel must NOT mount.
-        expect((identitySelect as HTMLSelectElement).value).toBe("ident-work");
+        // Verify the auto-pick wired the Work account. It supplies
+        // claude creds, so the Connect panel must NOT mount.
+        expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
 
         // Type a valid agent name.
         await user.type(screen.getByLabelText("Agent name"), "alpha");
 
-        // Auth should already be "ready" because hasMatchingBinding
-        // for claude on Work is true. The Connect button is the
-        // tell — it appears inside PreLaunchAuthPanel when
-        // authRequired() is true.  Asserting its absence is the
-        // strongest stable signal that the panel didn't mount.
+        // Auth should already be "ready" because the Work account
+        // supplies claude creds. The Connect button is the tell — it
+        // appears inside PreLaunchAuthPanel when authRequired() is
+        // true. Asserting its absence is the strongest stable signal
+        // that the panel didn't mount.
         expect(
             screen.queryByRole("button", { name: /connect/i }),
         ).not.toBeInTheDocument();
@@ -206,7 +208,7 @@ describe("AgentLaunchModal — memory change must not reset auth state (§6.10)"
         expect(
             screen.queryByRole("button", { name: /connect/i }),
         ).not.toBeInTheDocument();
-        expect((identitySelect as HTMLSelectElement).value).toBe("ident-work");
+        expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
         expect((memorySelect as HTMLSelectElement).value).toBe("mem-personal");
     });
 });

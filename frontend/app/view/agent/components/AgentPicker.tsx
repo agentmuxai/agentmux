@@ -151,25 +151,18 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // to `modalLayer.replace()` for a crossfade (no shell teardown).
     //
     // `initialFormState` carries the user's in-progress launch-form
-    // edits through the "+ New identity/memory" round-trip — name,
-    // runtime, image, identity, memory. Spec: Phase β of
+    // edits through the "+ Add account / + New memory" round-trip —
+    // name, runtime, image, account, memory. Spec: Phase β of
     // SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md; codex P2 on
     // round 7 expanded preservation from identity+memory only to the
     // full form.
     const buildLaunchRequest = (
         agent: AgentDefinition,
         initialFormState?: Partial<LaunchFormStateWire>,
-        // When set, the re-opened launch modal fires its OAuth
-        // `startConnect()` once on mount. Used by the OAuth-Connect →
-        // New Identity → launch round-trip so the user doesn't re-click
-        // Connect after naming the bundle — spec
-        // SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2.
-        autoStartAuth?: boolean,
     ) => ({
         kind: "launch-agent" as const,
         agent,
         originBlockId: props.model.blockId,
-        autoStartAuth,
         onSubmit: async (overrides: LaunchOverrides) => {
             setLaunching(agent.id);
             try {
@@ -186,38 +179,24 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             }
         },
         initialFormState,
-        onRequestNewIdentity: (
-            current: LaunchFormStateWire,
-            purpose: "create" | "oauth-continue",
-        ) => {
+        // OAuth Connect no longer routes through this callback (issue
+        // #1624 PR-C Part B) — it starts directly from the launch
+        // modal's auth panel. This now only fires for the "+ Add
+        // account" (manual/API-key) button.
+        onRequestAddAccount: (current: LaunchFormStateWire) => {
             // Thread the user's whole live form snapshot through the
-            // new-identity round-trip so name/runtime/image/memory
-            // survive alongside the freshly-created identity id.
-            //
-            // Two entry points share this chain (spec §2):
-            //  - `"create"`  — the plain `+ New identity` button. On
-            //    Continue/Create, return to the launch form with the
-            //    new id selected; the user clicks Launch when ready.
-            //  - `"oauth-continue"` — the OAuth Connect (`needs-bundle`)
-            //    click. The New Identity modal's primary button reads
-            //    "Continue"; on success the launch form re-opens with
-            //    the new id selected AND `autoStartAuth` set so OAuth
-            //    resumes automatically against the freshly-named
-            //    bundle.
+            // add-account round-trip so name/runtime/image/memory
+            // survive alongside the freshly-created account id.
             modalLayer.replace({
-                kind: "new-identity" as const,
+                kind: "add-account" as const,
                 originBlockId: props.model.blockId,
-                purpose,
+                provider: agent.provider,
                 onCreated: (id: string) => {
                     modalLayer.replace(
-                        buildLaunchRequest(
-                            agent,
-                            {
-                                ...current,
-                                identityId: id,
-                            },
-                            purpose === "oauth-continue",
-                        ),
+                        buildLaunchRequest(agent, {
+                            ...current,
+                            accountId: id,
+                        }),
                     );
                 },
                 onCancel: () => {
@@ -226,9 +205,9 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             });
         },
         onRequestNewMemory: (current: LaunchFormStateWire) => {
-            // Mirror of onRequestNewIdentity above — thread the live
+            // Mirror of onRequestAddAccount above — thread the live
             // form snapshot through the new-memory round-trip so the
-            // user's other edits (name, runtime, image, identity)
+            // user's other edits (name, runtime, image, account)
             // survive alongside the freshly-created memory id.
             modalLayer.replace({
                 kind: "new-memory" as const,
@@ -284,7 +263,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 instanceName: row.instance_name,
                 agentType: (def.agent_type as "host" | "container") || "host",
                 environment: def.agent_type === "container" ? "docker" : "local",
-                identityId: row.identity_id,
+                accountId: row.identity_id,
                 memoryId: row.memory_id,
                 continueOfInstanceId: row.instance_id,
                 workDirOverride: row.working_directory,
@@ -316,7 +295,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 instanceName: branchLabel,
                 agentType: (forkedDef.agent_type as "host" | "container") || "host",
                 environment: forkedDef.agent_type === "container" ? "docker" : "local",
-                identityId: row.identity_id,
+                accountId: row.identity_id,
                 memoryId: row.memory_id,
             });
         } finally {
@@ -422,14 +401,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const autoContinue = async (agent: AgentDefinition) => {
         setLaunching(agent.id);
         try {
-            // Identity / memory are launch-time picks that aren't
+            // Account / memory are launch-time picks that aren't
             // stored on the AgentDefinition itself — they live on the
             // last NamedAgentRow for this definition. We auto-continue
             // by reusing the most-recent instance's pair so the spawn
             // resolves credentials the same way as the previous run.
             // Empty strings are fine: the backend resolver treats them
-            // as "use ambient credentials" (matches the blank bundle).
-            let identityId = "";
+            // as "use ambient credentials".
+            let accountId = "";
             let memoryId = "";
             try {
                 const rows = await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
@@ -439,7 +418,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     (a, b) => (b.started_at ?? 0) - (a.started_at ?? 0),
                 )[0];
                 if (mostRecent) {
-                    identityId = mostRecent.identity_id && mostRecent.identity_id !== "blank"
+                    accountId = mostRecent.identity_id && mostRecent.identity_id !== "blank"
                         ? mostRecent.identity_id : "";
                     memoryId = mostRecent.memory_id && mostRecent.memory_id !== "blank"
                         ? mostRecent.memory_id : "";
@@ -451,7 +430,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 instanceName: agent.name,
                 agentType: (agent.agent_type as "host" | "container") || "host",
                 environment: agent.agent_type === "container" ? "docker" : "local",
-                identityId,
+                accountId,
                 memoryId,
                 // No `continueOfInstanceId` — the agent's session
                 // zone IS continuous now (E1, PR #1007). The new pane
@@ -482,7 +461,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             kind: "create-from-template" as const,
             template,
             originBlockId: props.model.blockId,
-            onCreatedAndLaunch: async (newDefId, identityIdSel, memoryIdSel, name, agentType) => {
+            onCreatedAndLaunch: async (newDefId, accountIdSel, memoryIdSel, name, agentType) => {
                 // The new definition is user-owned and carries the
                 // template's provider + cmd config. Build an
                 // AgentDefinition stub good enough for the launch flow
@@ -519,7 +498,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         instanceName: name,
                         agentType,
                         environment: agentType === "container" ? "docker" : "local",
-                        identityId: identityIdSel,
+                        accountId: accountIdSel,
                         memoryId: memoryIdSel,
                         // No `continueOfInstanceId` — the new definition
                         // has no prior session; its agent-anchored zone

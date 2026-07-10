@@ -7,8 +7,8 @@
  *
  * Covered:
  *  - default name field pre-fills with the template's name
- *  - Identity + Memory selects render the bundles list (empty option
- *    represents ambient creds / vanilla CLI sentinels)
+ *  - Identity + Memory selects render the accounts / bundles list
+ *    (empty option represents ambient creds / vanilla CLI sentinels)
  *  - clicking Create fires onSubmit with the form snapshot
  *  - the Create button is disabled while submitting
  *  - error from onSubmit surfaces in the panel body
@@ -19,7 +19,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListIdentityBundlesCommand: vi.fn(),
         ListMemoriesCommand: vi.fn(),
         // Mount-time daemon probe (drives the host/container dropdown).
         // Default → no reachable runtime → host-only.
@@ -27,9 +26,13 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("@/app/view/identity/identity-model", () => ({
+    refreshAccountCache: vi.fn(),
+}));
 
 import { AgentCreateFromTemplateModalPanel } from "./AgentCreateFromTemplateModal";
 import { resetCapabilities } from "@/app/store/toolchain-capabilities";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
@@ -61,8 +64,8 @@ beforeEach(async () => {
     // into the next via the shared cache.
     resetCapabilities();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
-    vi.mocked(RpcApi.ListIdentityBundlesCommand).mockResolvedValue([
-        { id: "id-work", name: "Work", description: "", is_blank: false } as any,
+    vi.mocked(refreshAccountCache).mockResolvedValue([
+        { id: "id-work", name: "Work", provider: "claude" } as any,
     ]);
     vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([
         { id: "mem-notes", name: "Notes", is_blank: false } as any,
@@ -119,9 +122,10 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         });
         const args = onSubmit.mock.calls[0][0];
         expect(args.name).toBe("Mary");
-        // Identity + Memory auto-picked from the first non-blank
-        // bundle each.
-        expect(args.identityId).toBe("id-work");
+        // Identity auto-picked from the first available account for
+        // the template's provider; Memory from the first non-blank
+        // bundle.
+        expect(args.accountId).toBe("id-work");
         expect(args.memoryId).toBe("mem-notes");
         // No Docker → runtime defaults to host (never a mode that
         // can't actually start).

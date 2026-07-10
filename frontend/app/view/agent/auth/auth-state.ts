@@ -56,14 +56,20 @@ export type AuthSessionStatusWire =
     | { status: "success"; bundleId: string; email: string | null; accountId?: string }
     | { status: "failed"; error: string };
 
-/** Outcome of the modal's bundle/provider selection. The view computes
- *  this from the dropdown + the loaded `IdentityBundle` / `Memory`
- *  lists and dispatches `Selected` once. */
+/** Outcome of the modal's account/provider selection. The view computes
+ *  this from the dropdown + the loaded account list and dispatches
+ *  `Selected` once.
+ *
+ *  Issue #1624 PR-C Part B dropped `"needs-bundle"` (blank-singleton —
+ *  Connect creates a new bundle first): the launch modal no longer has
+ *  a bundle picker to be blank, so that outcome can never be produced
+ *  by any caller. `selectionKind()` already treated it identically to
+ *  `"needs-account"`, so removing it is a pure type-level prune, no
+ *  reducer behavior change. */
 export type SelectionOutcome =
-    | "ready" // bundle has authenticated account for this provider
-    | "expired" // bundle has account but stale (re-auth needed)
-    | "needs-account" // bundle exists but no account for this provider
-    | "needs-bundle"; // blank singleton — Connect creates new bundle
+    | "ready" // account is authenticated for this provider
+    | "expired" // account exists but stale (re-auth needed)
+    | "needs-account"; // no account selected (or selected account doesn't match this provider)
 
 export interface AuthState {
     /** Terminal flag set by `Disposed`. Post-close commands are no-ops. */
@@ -293,7 +299,6 @@ const selectionKind = (outcome: SelectionOutcome): AuthState["kind"] => {
         case "expired":
             return "expired";
         case "needs-account":
-        case "needs-bundle":
             return "unauthenticated";
     }
 };
@@ -792,11 +797,25 @@ function foldPolled(state: AuthState, status: AuthSessionStatusWire): ReducerRes
             // the same RPC) or as a defensive late-Polled landing
             // after BundleSaved. The OAuth path goes through
             // `authenticated` → SaveBundleClicked → BundleSaved → ready.
+            //
+            // Issue #1624 PR-C Part B: a direct-account session (no
+            // bundle involved) reports its result via `status.accountId`
+            // instead of `status.bundleId` (which is `""` in that
+            // mode). `AuthState.bundleId`/the `succeeded` event's
+            // `bundleId` are deliberately NOT renamed here — this
+            // reducer has too much regression-pinned history (P1/P2
+            // fixes from #845/#847/#849/#850/#853/#981) to risk a
+            // sweeping rename for this PR. The field just carries
+            // "whatever terminal id this session produced" — an
+            // account id in direct-account mode, a bundle id
+            // otherwise. The caller (AgentLaunchModal) knows which
+            // mode it's in and treats the value accordingly.
+            const terminalId = status.accountId || status.bundleId;
             return {
                 state: {
                     ...state,
                     kind: "ready",
-                    bundleId: status.bundleId,
+                    bundleId: terminalId,
                     sessionId: "",
                     authUrl: "",
                     deviceCode: null,
@@ -805,7 +824,7 @@ function foldPolled(state: AuthState, status: AuthSessionStatusWire): ReducerRes
                 events: [
                     {
                         type: "succeeded",
-                        bundleId: status.bundleId,
+                        bundleId: terminalId,
                         email: status.email,
                     },
                 ],

@@ -51,32 +51,22 @@ import "./PreLaunchAuthPanel.scss";
 export interface PreLaunchAuthPanelProps {
     /** The provider to authenticate. */
     provider: ProviderDefinition | undefined;
-    /** Currently-selected identity bundle id, or "" if the user hasn't
-     *  picked one yet. The empty case triggers the Connect CTA so OAuth
-     *  can mint a fresh bundle. */
-    identityId: Accessor<string>;
-    /** True when the selected non-blank bundle has a binding for the
-     *  agent's provider. When false (or while bindings are still
-     *  loading), the panel routes to `needs-bundle` so the user goes
-     *  through the OAuth flow before Launch enables. */
-    hasMatchingBinding: Accessor<boolean>;
-    /** Status of the bound account for this (bundle, provider) pair,
-     *  or `null` when there's no matching binding. Per spec §4.4 the
-     *  oauth-class canonical values are `"valid" | "expired" |
-     *  "needs_reauth" | "unknown"`. When the panel sees `"expired"` /
-     *  `"needs_reauth"` together with `hasMatchingBinding=true`, the
-     *  Connect CTA's wording shifts from "Connect to <Provider>" to
-     *  "<Provider> credentials need reconnecting" — same OAuth flow,
-     *  just a clearer nudge. Optional: callers that don't surface
-     *  account status fall through to the generic wording.
-     *
-     *  Note: this does NOT change the launch-gate. A non-blank bundle
-     *  with a matching binding still counts toward `hasMatchingBinding`
-     *  even if its status is `expired` / `needs_reauth`; the agent CLI
-     *  will trigger its own OAuth refresh on first call. The wording
-     *  exists to surface the situation so the user can act proactively
-     *  via the Reconnect button in the bundle manager. */
-    bindingStatus?: Accessor<string | null>;
+    /** Currently-selected account id, or "" if the user hasn't picked
+     *  one yet. Issue #1624 PR-C Part B — was `identityId` (a bundle
+     *  id); OAuth Connect no longer requires a pre-selected account,
+     *  so the empty case is just "nothing chosen yet," not a gate. */
+    accountId: Accessor<string>;
+    /** True when the selected account actually supplies credentials
+     *  for the agent's provider. Replaces `hasMatchingBinding`. */
+    accountSuppliesProvider: Accessor<boolean>;
+    /** The selected account's own `status` field (`"valid" |
+     *  "expired" | "needs_reauth" | "unknown"` for oauth-class
+     *  accounts), or `null` when no account is selected. Replaces
+     *  `bindingStatus` — with a direct account selection instead of a
+     *  bundle→binding→account join, this is just the account's own
+     *  status. When `"expired"`/`"needs_reauth"`, the Connect CTA's
+     *  wording shifts to "credentials need reconnecting". */
+    accountStatus?: Accessor<string | null>;
     /** Auth flow controller — owned by the Launch modal so its
      *  lifetime spans the whole modal, not just the panel's
      *  conditional mount. Lifting fixed the "memory change forgot
@@ -84,27 +74,15 @@ export interface PreLaunchAuthPanelProps {
      *  destroyed an internally-constructed controller along with it.
      *  See docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md. */
     controller: AuthFlowController;
-    /** Called when a new bundle is created via OAuth or API-key
-     *  submission — parent should refresh the identity list and
-     *  switch the dropdown to this new bundle. */
-    onBundleCreated: (bundleId: string) => void;
-    /** Called when the user clicks Connect and the outcome is
-     *  `needs-bundle` (no identity bundle selected — a genuinely
-     *  fresh OAuth). Instead of starting OAuth immediately the panel
-     *  asks the parent to interpose the New Identity modal so the
-     *  user names the bundle first; OAuth then resumes against the
-     *  named bundle. When omitted the panel falls back to starting
-     *  OAuth directly (legacy behaviour). Spec
-     *  SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2. */
-    onRequestNewIdentity?: () => void;
-    /** When true, the panel fires its OAuth `startConnect()` exactly
-     *  once on mount — used by the New Identity → launch round-trip so
-     *  the user doesn't have to click Connect a second time after
-     *  naming the bundle. Spec SPEC_BUNDLE_MANAGEMENT_2026_05_22.md §2.
-     *  The auto-start only fires from a connect-able state
-     *  (`unauthenticated` / `expired`); a panel that already shows
-     *  `ready` / `waiting` is left alone. */
-    autoStartAuth?: boolean;
+    /** Called when a new account is created via OAuth — parent should
+     *  refresh the account list and select it. Replaces
+     *  `onBundleCreated`. */
+    onAccountCreated: (accountId: string) => void;
+    /** Called when the user clicks "+ Add account" for a manual
+     *  (API-key) account — separate from OAuth Connect, which no
+     *  longer needs any pre-step (issue #1624 PR-C Part B removed the
+     *  "+ New identity bundle" interposition; OAuth starts directly). */
+    onRequestAddAccount?: () => void;
     /** Inline-disabled flag mirroring the modal's submitting state.
      *  Prevents starting a Connect mid-launch. */
     disabled?: boolean;
@@ -139,24 +117,21 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         }
     });
 
-    // Forward `succeeded` / `api-key-accepted` to bundle-creation
-    // callback so the modal swaps its Identity selection to the
-    // newly-persisted bundle id. Skip placeholder ids
-    // (`pending-bundle-for-<sid>`) — those are pre-persistence
-    // synthetic ids; the real id arrives via the next state
-    // transition.
+    // Forward `succeeded` to account-creation callback so the modal
+    // selects the newly-persisted account. Replaces the old bundle-id
+    // placeholder filter (`pending-bundle-for-<sid>`) — that synthetic
+    // only ever applied to the legacy bundle path; a direct-account
+    // session's `bundleId` (see auth-state.ts's foldPolled comment for
+    // why the field itself isn't renamed) is either empty (failure, no
+    // persist) or a real account id, never a placeholder.
     createEffect(() => {
         const s = controller.state();
-        if (
-            s.kind === "ready" &&
-            s.bundleId &&
-            !s.bundleId.startsWith("pending-bundle-for-")
-        ) {
-            props.onBundleCreated(s.bundleId);
+        if (s.kind === "ready" && s.bundleId) {
+            props.onAccountCreated(s.bundleId);
         }
     });
 
-    // When the identity dropdown changes, drive the controller's
+    // When the account dropdown changes, drive the controller's
     // `selected` action. The outcome is computed below.
     //
     // `untrack` around the controller call: `controller.selected()`
@@ -167,60 +142,29 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     // dispatches `Selected`, wiping any in-flight session. That's
     // exactly the bug the diagnostic logs caught.
     createEffect(() => {
-        const id = props.identityId();
+        const id = props.accountId();
         const prov = props.provider;
-        // Track hasMatchingBinding so the effect re-fires when
-        // bindings finish loading — without this, a freshly created
-        // "+ New" bundle that initially reports `hasMatchingBinding=
-        // false` would never re-dispatch to `ready` once the user
-        // connects an account.
-        const hasBinding = props.hasMatchingBinding();
+        const suppliesProvider = props.accountSuppliesProvider();
         if (!prov) return;
-        // "" id (no bundle selected) tells the controller / backend
-        // to create a fresh bundle as part of the OAuth flow.
-        untrack(() => controller.selected(prov.id, id, outcomeFor(id, prov.id, hasBinding)));
+        // "" id (no account selected) is a genuinely fresh connect —
+        // the reducer's `Selected` command still takes a "bundleId"-
+        // named field (unrenamed, see auth-state.ts), but the value
+        // here is an account id.
+        untrack(() => controller.selected(prov.id, id, outcomeFor(id, suppliesProvider)));
     });
 
-    // Connect / Retry click handler. The OAuth invariant per
-    // SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md §4.5 is that OAuth
-    // never starts without a bundle id in hand — tokens always land
-    // INSIDE a known bundle dir, never ambient. So:
-    //   - empty identityId → route to New Identity modal first; OAuth
-    //     resumes against the new bundle on the autoStartAuth round
-    //     trip. The parent's `onRequestNewIdentity` owns the
-    //     modalLayer.replace chain into that modal.
-    //   - empty identityId AND no `onRequestNewIdentity` callback →
-    //     refuse to start OAuth. This is a guard against a future
-    //     parent forgetting to wire the callback; a silent ambient-
-    //     creds OAuth would re-open the §4.5 hole this PR closes.
-    //     Surface a failed state so the user sees something instead
-    //     of a dead Connect button.
-    //   - non-empty identityId → straight to OAuth. Reused for
-    //     `needs-account`, `expired`, and openclaw's force-fresh
-    //     `needs-bundle` (where outcomeFor() returns `needs-bundle`
-    //     even with a bundle selected — the gate is on the actual
-    //     identityId, not the outcome).
+    // Connect / Retry click handler. Issue #1624 PR-C Part B: OAuth no
+    // longer requires a pre-selected account — the backend mints one
+    // directly (`direct_account: true` in auth-flow-controller.ts's
+    // `connect()`). This used to gate on `identityId() === ""` and
+    // route through a "+ New identity bundle" interposition
+    // (SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md §4.5's "OAuth never
+    // starts without a bundle id" invariant) — that invariant no
+    // longer applies; the per-account isolation dir is resolved
+    // server-side regardless of whether an account was pre-selected.
     const handleConnect = (): void => {
         const prov = props.provider;
         if (!prov) return;
-        if (props.identityId() === "") {
-            if (props.onRequestNewIdentity) {
-                props.onRequestNewIdentity();
-                return;
-            }
-            // OAuth-without-bundle invariant — no quiet fallback to
-            // ambient OAuth (would defeat the per-bundle isolation
-            // PR C wires). Bail visibly.
-            console.warn(
-                "[auth-diag] handleConnect: empty identityId and no onRequestNewIdentity callback — refusing to start OAuth (PR C invariant)",
-            );
-            controller.failConnect(
-                new Error(
-                    "OAuth requires a named Identity bundle. Click '+ New identity' first.",
-                ),
-            );
-            return;
-        }
         void startConnect(controller, prov);
     };
 
@@ -247,7 +191,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         }
         const ok = await seedGlobalLogin(prov.id, seedLog, configDir);
         if (ok) {
-            controller.markSeeded(props.identityId());
+            controller.markSeeded(props.accountId());
         } else {
             controller.failConnect(
                 new Error(
@@ -256,24 +200,6 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
             );
         }
     };
-
-    // Auto-start OAuth once on mount when the parent set `autoStartAuth`
-    // — the New Identity → launch round-trip (spec §2). By this point
-    // the user has named + created the bundle, so the dropdown carries
-    // a non-blank `identityId` and `outcomeFor()` resolves to
-    // `needs-account`; `handleConnect()` therefore routes straight to
-    // OAuth (NOT back into the New Identity modal) with `intoBundleId`
-    // = the new bundle. Guarded so it fires exactly once and only from
-    // a connect-able state — a re-render must not re-trigger it, and a
-    // panel that's already `waiting`/`ready` is left untouched.
-    let autoStartFired = false;
-    createEffect(() => {
-        if (!props.autoStartAuth || autoStartFired) return;
-        const kind = controller.state().kind;
-        if (kind !== "unauthenticated" && kind !== "expired") return;
-        autoStartFired = true;
-        untrack(() => handleConnect());
-    });
 
     // No onCleanup here — controller lifetime is owned by the parent
     // (AgentLaunchModal). Disposing on panel unmount would destroy
@@ -284,30 +210,31 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     return (
         <div class="pre-launch-auth-panel">
             <Switch>
-                {/* A bound binding that the backend's expiry probe
-                    flagged stale (`needs_reauth` / `expired`) lands the
-                    controller in `ready` because outcomeFor() only
-                    looks at "has a binding?". Without this arm the
+                {/* An account the backend's expiry probe flagged stale
+                    (`needs_reauth` / `expired`) lands the controller in
+                    `ready` because outcomeFor() only looks at "does the
+                    account supply this provider?". Without this arm the
                     panel would render <ReadyBanner /> and the
                     reconnect wording in ConnectCta would never be
                     seen — the user would have no signal their
                     credentials need refreshing. Match BEFORE the
                     generic ready arm so the reconnect CTA wins.
                     Clicking Connect re-runs OAuth into the SAME
-                    bundle dir (PR C invariant), refreshing the
+                    account's isolation dir (existingAccountId in
+                    auth-flow-controller.ts's connect()), refreshing the
                     token in place. codex P1 on #982. */}
                 <Match
                     when={
                         controller.state().kind === "ready" &&
-                        (props.bindingStatus?.() === "needs_reauth" ||
-                            props.bindingStatus?.() === "expired")
+                        (props.accountStatus?.() === "needs_reauth" ||
+                            props.accountStatus?.() === "expired")
                     }
                 >
                     <ConnectCta
                         provider={props.provider}
                         state={controller.state()}
-                        bindingStatus={props.bindingStatus?.() ?? null}
-                        hasBinding={props.hasMatchingBinding()}
+                        accountStatus={props.accountStatus?.() ?? null}
+                        hasAccount={props.accountSuppliesProvider()}
                         onConnect={() => handleConnect()}
                         canSeed={props.provider?.id === "claude"}
                         onUseExistingLogin={() => void handleUseExistingLogin()}
@@ -359,8 +286,8 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                     <ConnectCta
                         provider={props.provider}
                         state={controller.state()}
-                        bindingStatus={props.bindingStatus?.() ?? null}
-                        hasBinding={props.hasMatchingBinding()}
+                        accountStatus={props.accountStatus?.() ?? null}
+                        hasAccount={props.accountSuppliesProvider()}
                         onConnect={() => handleConnect()}
                         canSeed={props.provider?.id === "claude"}
                         onUseExistingLogin={() => void handleUseExistingLogin()}
@@ -372,31 +299,15 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     );
 };
 
-/** Compute the SelectionOutcome from the bundle id and its binding
- *  state. Treat:
- *   - blank singleton or "+ New"-just-created (no matching binding)
- *     → `needs-bundle` (Connect creates new or attaches a binding).
- *   - non-blank bundle WITH a binding for this provider → `ready`. */
+/** Compute the SelectionOutcome from the account id and whether it
+ *  supplies the agent's provider. No account selected, or a selected
+ *  account for a different provider, → `needs-account`; a matching
+ *  account → `ready`. */
 function outcomeFor(
-    identityId: string,
-    providerId: string | undefined,
-    hasMatchingBinding: boolean,
+    accountId: string,
+    accountSuppliesProvider: boolean,
 ): SelectionOutcome {
-    // (Historical note: openclaw previously short-circuited to
-    //  `needs-bundle` here as a Phase α stub because identity bundles
-    //  didn't store openclaw auth. PRs A–E of
-    //  SPEC_OAUTH_IDENTITY_BUNDLES gave openclaw real per-bundle
-    //  credential dirs + bindings, so the standard binding-driven
-    //  outcome path handles it now. PR F cleanup, 2026-05-22.)
-    if (!identityId) return "needs-bundle";
-    // Reagent + codex P1 on PR #910 round 3 — a non-blank bundle
-    // without a binding for the agent's provider can't supply creds
-    // (e.g. "+ New identity" created an empty "Work" bundle that the
-    // user hasn't connected yet). Use `needs-account` (NOT
-    // `needs-bundle`) so the reducer preserves `intoBundleId` and
-    // OAuth lands on THIS bundle instead of creating a fresh one
-    // (codex P1 round 4 — `needs-bundle` clears the bundle id).
-    if (!hasMatchingBinding) return "needs-account";
+    if (!accountId || !accountSuppliesProvider) return "needs-account";
     return "ready";
 }
 
@@ -486,16 +397,15 @@ async function startConnect(
 const ConnectCta = (p: {
     provider: ProviderDefinition | undefined;
     state: AuthState;
-    /** `IdentityAccount.status` of the bound row for this (bundle,
-     *  provider) pair, or `null` when no binding exists yet. Drives
-     *  the spec §4.4 status-aware wording when the user has a
-     *  binding but its tokens are `expired` / `needs_reauth`. */
-    bindingStatus: string | null;
-    /** True when `hasMatchingBinding(state, provider)` is true — gates
-     *  the reconnect-wording branch so it only triggers when there IS
-     *  a binding to refresh (the no-binding case keeps the generic
-     *  Connect CTA wording the user already knows). */
-    hasBinding: boolean;
+    /** The selected account's own `status`, or `null` when no account
+     *  is selected. Drives the spec §4.4 status-aware wording when
+     *  the account's tokens are `expired` / `needs_reauth`. */
+    accountStatus: string | null;
+    /** True when `accountSuppliesProvider(state, provider)` is true —
+     *  gates the reconnect-wording branch so it only triggers when
+     *  there IS an account to refresh (the no-account case keeps the
+     *  generic Connect CTA wording the user already knows). */
+    hasAccount: boolean;
     onConnect: () => void;
     /** True for providers where seed-from-global is the path (Claude
      *  v2.1.x — in-app OAuth can't open a browser under our spawn, so the
@@ -509,15 +419,15 @@ const ConnectCta = (p: {
         p.provider ? getCliCatalogEntry(p.provider.id) : undefined;
     const providerLabel = () => p.provider?.displayName ?? "this provider";
     const isExpired = () => p.state.kind === "expired";
-    // Spec §4.4 — when the user has a binding for this provider but
-    // its account status flags a reconnect (expired / needs_reauth),
-    // shift to the "credentials need reconnecting" wording. Same
-    // Connect button, same OAuth flow underneath; just a clearer nudge
-    // so the user understands they're refreshing a known login rather
-    // than starting fresh.
+    // Spec §4.4 — when the user has an account for this provider but
+    // its status flags a reconnect (expired / needs_reauth), shift to
+    // the "credentials need reconnecting" wording. Same Connect
+    // button, same OAuth flow underneath; just a clearer nudge so the
+    // user understands they're refreshing a known login rather than
+    // starting fresh.
     const needsReconnect = () =>
-        p.hasBinding &&
-        (p.bindingStatus === "needs_reauth" || p.bindingStatus === "expired");
+        p.hasAccount &&
+        (p.accountStatus === "needs_reauth" || p.accountStatus === "expired");
     return (
         <div class="pre-launch-auth-panel-cta">
             <div class="pre-launch-auth-panel-warning">
@@ -549,10 +459,10 @@ const ConnectCta = (p: {
                         </Button>
                         <div class="pre-launch-auth-panel-hint">
                             {needsReconnect()
-                                ? `Re-runs OAuth into your existing Identity bundle. Launch stays available — your CLI will refresh on first call.`
+                                ? `Re-runs OAuth into your existing account. Launch stays available — your CLI will refresh on first call.`
                                 : `Opens browser → ${providerLabel()} login → returns to AgentMux.
-                                Tokens get saved into a new Identity bundle so the next
-                                agent doesn't have to re-authenticate.`}
+                                Tokens get saved as a new account so the next agent doesn't
+                                have to re-authenticate.`}
                         </div>
                     </>
                 }
