@@ -3,7 +3,7 @@
 
 // AgentComposerStrip — slim 28-32px status row above the textarea, growing to
 // two rows at narrow widths (see the flex-wrap rules below).
-//   LEFT:  mode select · model select · effort select
+//   LEFT:  AgentRuntimeDropup (single Mode · Model · Effort trigger)
 //   RIGHT: Shell toggle · token stats · elapsed · process badge · context text
 //          (floats right via margin-left:auto; wraps onto its own row below
 //          the controls zone once both zones no longer fit on one line)
@@ -42,33 +42,24 @@
     flex-shrink: 0;
 }
 
-// The drop-up trigger. Same slim pill as the former <select>, but a <button>
-// laying out a label + up-caret; the popup is a portaled FlyoutMenu (see below).
-.agent-composer-strip-select {
+// The consolidated Mode/Model/Effort trigger — a single <button> laying out
+// a "Mode · Model · Effort" summary label + up-caret; same slim-pill footprint
+// as the former three separate selects/drop-ups combined into one.
+.agent-runtime-dropup-trigger {
     display: inline-flex;
     align-items: center;
     justify-content: space-between;
     gap: 3px;
-    appearance: none;
-    -webkit-appearance: none;
+    max-width: 160px;
     background: transparent;
     border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
     border-radius: 0;
     color: var(--secondary-text-color);
     font: inherit;
     font-size: 10px;
-    padding: 1px var(--space-1);
+    padding: 1px var(--space-1-5);
     cursor: default;
     outline: none;
-
-    // Tight widths so the strip stays compact. Keyed on explicit modifier
-    // classes (not :nth-child) so control order can change without breaking
-    // widths — see SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.
-    // Mode also carries a color-coded left border (permission mode); the extra
-    // left padding keeps its label clear of the accent stripe.
-    &--mode { min-width: 68px; padding-left: var(--space-1-5); }
-    &--model { min-width: 62px; }
-    &--effort { min-width: 58px; }
 
     &:hover {
         border-color: var(--border-color);
@@ -81,43 +72,57 @@
     }
 }
 
-.agent-composer-strip-select-label {
+.agent-runtime-dropup-trigger-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.agent-composer-strip-select-caret {
+.agent-runtime-dropup-trigger-caret {
     font-size: 8px;
     line-height: 1;
     opacity: 0.7;
     flex-shrink: 0;
 }
 
-// The drop-up popup itself (portaled to <body> by FlyoutMenu, so this is a
-// top-level global rule). Inherits the app's clean `.menu` chrome — the whole
-// point of ditching the native <select> — and just tightens rows to strip
-// scale so each entry matches the collapsed control's height/style.
-.menu.strip-flyout {
-    min-width: 0;
+// The panel itself (portaled to <body>, so this is a top-level global rule).
+// Inherits the app's clean `.menu` chrome (same as any FlyoutMenu) and adds
+// grouped section headers, which FlyoutMenu's flat MenuItem[] list can't
+// express — see docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
+.menu.agent-runtime-dropup-panel {
+    min-width: 180px;
     font-size: 10px;
 
-    .menu-item {
+    .agent-runtime-dropup-row {
         padding: 2px var(--space-1-5);
         min-height: 0;
     }
+}
 
-    // Effort: options in a single horizontal row of equal-height chips.
-    &.strip-flyout--horizontal {
-        display: flex;
-        flex-direction: row;
-        gap: 2px;
+.agent-runtime-dropup-section {
+    padding: var(--space-1) var(--space-1-5) 2px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--secondary-text-color);
+    opacity: 0.75;
 
-        .menu-item {
-            white-space: nowrap;
-            justify-content: center;
-        }
+    &:not(:first-child) {
+        margin-top: var(--space-0-5);
+        border-top: 1px solid var(--border-color);
+        padding-top: var(--space-1-5);
     }
+}
+
+.agent-runtime-dropup-description {
+    margin-left: var(--space-1);
+    color: var(--secondary-text-color);
+    font-size: 9px;
+    opacity: 0.8;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 // Shell toggle — deliberately accent-colored at rest (not just when open) so
@@ -229,7 +234,7 @@
 }
 
 @container modal-mount (max-width: 320px) {
-    // Keep the runtime controls visible — the drop-up pills are compact enough.
+    // Keep the runtime dropup visible — one compact trigger fits easily.
     // (Previously `.agent-composer-strip-select { display:none }` here hid
     // Mode/Model/Effort on any pane ≤320px, leaving only Log — see
     // SPEC_COMPOSER_STRIP_RESPONSIVE_ARCHITECTURE_2026_07_02. Progressive
