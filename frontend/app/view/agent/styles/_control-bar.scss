@@ -151,6 +151,32 @@
             animation-duration: 1.5s;
             animation-iteration-count: infinite;
         }
+
+        // (The Working-row shimmer's reduced-motion slowdown is nested inside
+        // its own rule further down — NOT here. A rule in this block has the
+        // same specificity as the shimmer's `animation:` shorthand but
+        // earlier source order, so the shorthand would always win and the
+        // slowdown would silently never apply.)
+    }
+
+    // Back-and-forth highlight sweep for .agent-working-shimmer (below).
+    // `alternate` on the animation shorthand does the direction-reversal;
+    // this keyframe only needs to describe one pass.
+    //
+    // Endpoint math — these keep the WHOLE highlight band on-screen for the
+    // entire sweep (flush-left ↔ flush-right), so it never slides off an
+    // edge or thins out at the turning points. With `background-position:
+    // P%` on an X%-wide image, the image's left edge sits at container-x =
+    // (100-X)·(P/100), and the band spans image-fractions [lo,hi] of it.
+    // Solving band-flush-left and band-flush-right for the values used here
+    // (X=220, band [40%,60%] ⇒ 44 container-units wide):
+    //   P_left  = lo·X/(X-100)                    = 40·220/120  = 73.333%
+    //   P_right = 100·(100 - 44 - (lo/100)·X)/(100-X) = 100·(-32)/(-120) = 26.667%
+    // If band stops or background-size change, these must be re-derived
+    // (sandbox/working-shimmer.html on the dev machine computes them live).
+    @keyframes agent-working-shimmer-sweep {
+        0%   { background-position: 73.333% 0; }
+        100% { background-position: 26.667% 0; }
     }
 
     // === Working Row ===
@@ -178,6 +204,59 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+
+                // Always applied while loading (AgentFooter.tsx bakes the
+                // class in statically) — a soft highlight band sweeps back
+                // and forth across the text. The animation must run
+                // CONTINUOUSLY across phrase/tool changes: re-adding the
+                // class per phrase restarts the animation at 0%, which
+                // truncates the return leg of the sweep every time a tool
+                // transition lands mid-cycle (validated in the sandbox).
+                // During the type-out reveal the `.is-typing` variant below
+                // overlays opaque text without touching the animation.
+                // `--secondary-text-color` base + `--accent-color` highlight
+                // keeps it theme-adaptive the same way .agent-pane-progress-bar
+                // derives its sweep from --accent-color. `alternate` direction
+                // is what makes the sweep reverse instead of snapping back.
+                &.agent-working-shimmer {
+                    background-image: linear-gradient(
+                        90deg,
+                        var(--secondary-text-color) 0%,
+                        var(--secondary-text-color) 40%,
+                        var(--accent-color) 50%,
+                        var(--secondary-text-color) 60%,
+                        var(--secondary-text-color) 100%
+                    );
+                    background-size: 220% 100%;
+                    background-clip: text;
+                    -webkit-background-clip: text;
+                    color: transparent;
+                    animation: agent-working-shimmer-sweep 2.4s ease-in-out infinite alternate;
+
+                    // Reduced-motion slowdown — same precedent as the
+                    // marching-ants bar (keep the essential looping "still
+                    // working" signal, just gentler), incl. re-asserting
+                    // `infinite` for Chromium's single-iteration clamp.
+                    // Nested HERE, not in the shared reduced-motion block
+                    // near the top of the file: it must come after the
+                    // `animation:` shorthand above in source order (equal
+                    // specificity), or the shorthand's 2.4s always wins.
+                    @media (prefers-reduced-motion: reduce) {
+                        animation-duration: 4.5s;
+                        animation-iteration-count: infinite;
+                    }
+                }
+
+                // Type-out reveal overlay: opaque white glyphs painted over
+                // the (still-running) shimmer. Keep background-clip as
+                // `text` — resetting it would un-clip the gradient into a
+                // full near-white box behind the typing text. With the clip
+                // intact and an opaque -webkit-text-fill-color, the glyphs
+                // simply cover the clipped gradient until the reveal ends.
+                &.agent-working-shimmer.is-typing {
+                    color: var(--main-text-color);
+                    -webkit-text-fill-color: var(--main-text-color);
+                }
             }
 
             .agent-working-row-right {

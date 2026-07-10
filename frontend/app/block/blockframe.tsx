@@ -252,16 +252,18 @@ function EndIcons(props: {
                 </For>
                 <div class="block-frame-btn-separator" aria-hidden="true" />
             </Show>
-            <Show when={props.viewModel?.voiceHandle}>
+            {/* Agent panes render their own mic pinned beside the composer
+                input (AgentFooter.tsx) instead of here — see
+                SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md.
+                Terminal keeps the header mic unchanged. */}
+            <Show when={props.viewModel?.voiceHandle && props.blockView !== "agent"}>
                 <MicButton
                     blockId={props.nodeModel.blockId}
                     handle={props.viewModel.voiceHandle!()}
                     paneTitle={
                         props.blockView === "term"
                             ? "Speak into this terminal (Ctrl+Shift+V)"
-                            : props.blockView === "agent"
-                                ? "Speak into this agent (Ctrl+Shift+V)"
-                                : undefined
+                            : undefined
                     }
                 />
             </Show>

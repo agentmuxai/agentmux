@@ -75,6 +75,30 @@
             gap: 1px;
             position: relative;
 
+            // Pinned mic — right edge of the composer, matching the
+            // header mic's old top-right feel but anchored to the input
+            // itself. Sits in the container's top-right corner rather than
+            // vertically centered against the textarea's full (growable)
+            // height, so it doesn't drift as the box grows past one line.
+            .agent-input-mic {
+                position: absolute;
+                top: 3px;
+                right: 5px;
+                z-index: 1;
+            }
+
+            // Reserve right padding for the pinned mic only when the mic is
+            // actually rendered. MicButton hides itself entirely (internal
+            // <Show>, MicButton.tsx) when voice is unavailable or
+            // voice:enabled is false — the .agent-input-mic wrapper stays
+            // mounted but empty, so keying off :has(.mic-button-wrap)
+            // tracks the button's own visibility logic without duplicating
+            // it here. Scoped to this one small container; not the
+            // tab-switch-hot path where :has() is banned (tabbar.scss).
+            &:has(.mic-button-wrap) .agent-input {
+                padding-right: 22px;
+            }
+
             .agent-input {
                 width: 100%;
                 padding: 3px var(--space-1);
