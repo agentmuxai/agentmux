@@ -1072,6 +1072,7 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
                 SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
             <ActivityDock
                 documentAtom={agentAtoms().documentAtom}
+                blockId={model.blockId}
             />
 
             {/* Composer status strip — single 28-32px row with live

@@ -6,13 +6,15 @@
  *
  * Anything long-running an agent spawns (a shell, a cron, a subagent) maps onto
  * this contract and renders as a uniform row in the dock at the top of the
- * agent pane. Phase 1 implements only the `shell` kind; `cron` and `subagent`
- * adapters slot in later without touching the dock/row chrome.
+ * agent pane. Phase 1 implemented the `shell` kind; Phase 2 (this file) adds
+ * `subagent`. `cron` still has no adapter — it's sugar over a `shell` per the
+ * spec (§6), not yet built.
  *
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md
  */
 
 import type { ShellNode } from "../types";
+import type { ActiveSubagent } from "../../swarm/swarm-model";
 
 export type ActivityKind = "shell" | "cron" | "subagent";
 
@@ -34,6 +36,8 @@ export interface PinnedActivity {
     // ── Kind-specific source, read by the row's tail + Expanded view ──
     /** Present when `kind === "shell"` (also "cron", which is a shell). */
     shell?: ShellNode;
+    /** Present when `kind === "subagent"`. */
+    subagent?: ActiveSubagent;
 }
 
 /** Per-kind sigil; colored by status in CSS. */
