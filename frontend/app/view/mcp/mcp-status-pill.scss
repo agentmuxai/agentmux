@@ -1,0 +1,33 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Status pill + remediation text for a catalog server's live probe result
+// (mcp.catalog.probe via mcp-capabilities.ts). See McpStatusPill in
+// mcp-manager.tsx — SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §6.
+
+.mcp-status-block {
+    margin: var(--space-1) 0 var(--space-2) 0;
+}
+
+.mcp-status-pill {
+    display: inline-block;
+    padding: 1px 6px;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    border: 1px solid var(--border-color);
+
+    &.is-connected {
+        color: var(--success-color);
+        border-color: color-mix(in srgb, var(--success-color) 40%, transparent);
+        background: color-mix(in srgb, var(--success-color) 12%, transparent);
+    }
+}
+
+.mcp-status-remediation {
+    margin: var(--space-1) 0 0 0;
+    padding: var(--space-1-5) var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+    background: var(--panel-bg-color);
+    border-left: 2px solid var(--border-color);
+}
