@@ -5,112 +5,23 @@
  * AgentComposerStrip — slim 28-32px status row that sits directly above
  * the textarea in the agent pane composer region.
  *
- * LEFT:  Mode · Model · Effort drop-ups (open upward) · Shell toggle
+ * LEFT:  AgentRuntimeDropup (single Mode · Model · Effort trigger) · Shell toggle
  * RIGHT: tokens (↑in ↓out) · elapsed · ⚙N process badge ·
  *        context text (12.1k / 64k)
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
  * the details drawer (ActivityLogPanel + the AgentShellSubblock terminal,
- * SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md). Chevron and shell history panel removed per
- * SPEC_COMPOSER_STRIP_AND_HOST_POLISH_2026_06_25.md. Mode/Model/Effort are
- * top-level dropdowns here (Mode was previously a read-only pill + a nested
- * control in the Log region) per SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.
+ * SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md). Mode/Model/Effort used to be
+ * three separate FlyoutMenu drop-up pills here (SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02
+ * Fix 7); they're now consolidated into one AgentRuntimeDropup trigger + panel
+ * — see docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
  */
 
-import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
-import { getRuntimeConfig } from "../buildRuntimeArgs";
-import { applyRuntimeChange } from "../runtime-apply";
-import { getProvider } from "../providers";
-import { FlyoutMenu } from "@/app/element/flyoutmenu";
-import type { AgentRuntimeConfig, EffortLevel, ModelChoice, PermissionMode, SessionStats, TurnTokens } from "../types";
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-const PERMISSION_COLORS: Record<PermissionMode, string> = {
-    bypass: "var(--error-color, #ef4444)",
-    auto: "var(--accent-color, #3b82f6)",
-    acceptEdits: "var(--warning-color, #eab308)",
-    plan: "var(--success-color, #22c55e)",
-    default: "var(--main-text-color)",
-};
-
-const MODEL_OPTIONS = [
-    { value: "opus", label: "Opus" },
-    { value: "sonnet", label: "Sonnet" },
-    { value: "haiku", label: "Haiku" },
-] as const;
-
-const EFFORT_OPTIONS = [
-    { value: "low", label: "low" },
-    { value: "medium", label: "medium" },
-    { value: "high", label: "high" },
-    { value: "xhigh", label: "xhigh" },
-    { value: "max", label: "max" },
-] as const;
-
-// Mode: trigger shows the short `label`; the menu shows `menuLabel` (the
-// descriptive form) when present.
-const MODE_OPTIONS = [
-    { value: "bypass", label: "Bypass", menuLabel: "Bypass (no prompts)" },
-    { value: "auto", label: "Auto", menuLabel: "Auto (AI classifier)" },
-    { value: "acceptEdits", label: "Accept Edits" },
-    { value: "plan", label: "Plan", menuLabel: "Plan (read-only)" },
-    { value: "default", label: "Default", menuLabel: "Default (prompt all)" },
-] as const;
-
-// ── Drop-up select ───────────────────────────────────────────────────────────
-
-/**
- * A strip control rendered as a **drop-up**: the trigger is the same slim pill
- * as before, but the popup opens *upward* (via FlyoutMenu `placement="top-start"`)
- * with the app's own menu styling instead of the browser's native `<select>`
- * chrome. Each row is a uniform-height menu item; the selected row carries a
- * radio check. Effort uses `horizontal` to lay its options out in a single row.
- * See SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02 Fix 7.
- */
-function StripSelect(props: {
-    current: string | undefined;
-    options: readonly { value: string; label: string; menuLabel?: string }[];
-    onSelect: (value: string) => void;
-    title: string;
-    /** BEM modifier suffix on the trigger, e.g. "--mode" | "--model" | "--effort". */
-    modifier: string;
-    /** Color stripe on the trigger's left edge (Mode → permission color). */
-    leftColor?: string;
-    /** Lay the popup options out horizontally (Effort). */
-    horizontal?: boolean;
-}): JSX.Element {
-    const currentLabel = (): string =>
-        props.options.find((o) => o.value === props.current)?.label ?? props.current ?? "";
-    // Reactive: Solid wraps this prop expression in a getter, so FlyoutMenu's
-    // <For each={items}> re-reads it when `current` changes — the check mark
-    // and label stay in sync after a selection.
-    const items = (): MenuItem[] =>
-        props.options.map((o) => ({
-            label: o.menuLabel ?? o.label,
-            checked: o.value === props.current,
-            onClick: () => props.onSelect(o.value),
-        }));
-    return (
-        <FlyoutMenu
-            placement="top-start"
-            className={`strip-flyout${props.horizontal ? " strip-flyout--horizontal" : ""}`}
-            items={items()}
-        >
-            <button
-                type="button"
-                class={`agent-composer-strip-select agent-composer-strip-select${props.modifier}`}
-                title={props.title}
-                style={props.leftColor ? { "border-left": `3px solid ${props.leftColor}` } : undefined}
-            >
-                <span class="agent-composer-strip-select-label">{currentLabel()}</span>
-                <span class="agent-composer-strip-select-caret" aria-hidden="true">▴</span>
-            </button>
-        </FlyoutMenu>
-    );
-}
+import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import type { SessionStats, TurnTokens } from "../types";
+import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -219,24 +130,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return parts.join("  ·  ");
     });
 
-    // Mode/model/effort — derived from blockAtom meta when available.
-    const runtime = () =>
-        props.blockAtom ? getRuntimeConfig(props.blockAtom()?.meta) : null;
-
-    const updateRuntime = async (patch: { permissionMode?: PermissionMode; model?: ModelChoice; effort?: EffortLevel }): Promise<void> => {
-        const r = runtime();
-        if (!r || !props.blockId || !props.providerId) return;
-        try {
-            await applyRuntimeChange(
-                props.blockId,
-                getProvider(props.providerId),
-                { ...r, ...patch } as AgentRuntimeConfig,
-            );
-        } catch {
-            // Silent — settings retry on next change.
-        }
-    };
-
     // Show model/effort controls only for Claude agents (controls are claude-specific;
     // non-claude providers (codex/gemini/kimi) have different model enumerations and
     // buildRuntimeArgs silently drops effort for them — spec §1.3).
@@ -260,46 +153,17 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     };
 
     return (
-        <div
-            class="agent-composer-strip"
-            classList={{ "agent-composer-strip--expanded": props.logOpen }}
-        >
-            {/* Controls zone — mode/model/effort selects + Log button.
-                All three runtime controls now live here at the strip's top
-                level (Mode was previously a read-only pill + a nested control
-                inside the Log details region — see
-                SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02). Each reads its
-                value from `runtime()` (which falls back to
-                DEFAULT_RUNTIME_CONFIG), so the displayed state matches the
-                flags the agent actually runs with from first paint. */}
+        <div class="agent-composer-strip" classList={{ "agent-composer-strip--expanded": props.logOpen }}>
+            {/* Controls zone — the consolidated Mode/Model/Effort trigger +
+                panel, plus the Log button. Reads/writes block meta directly
+                (blockId/blockAtom/providerId), so the displayed state matches
+                the flags the agent actually runs with from first paint. */}
             <span class="agent-composer-strip-controls">
                 <Show when={showControls()}>
-                    {/* Drop-ups (open upward) replace the native <select>s — see
-                        SPEC_COMPOSER_STRIP_MODE_TOPLEVEL Fix 7. Model options are
-                        registry-driven (single source with /model), so an
-                        API-sourced catalog surfaces new labels automatically. */}
-                    <StripSelect
-                        current={runtime()?.permissionMode ?? "default"}
-                        options={MODE_OPTIONS}
-                        onSelect={(v) => void updateRuntime({ permissionMode: v as PermissionMode })}
-                        title="Permission mode — how the agent asks before running tools. Applies on the next turn."
-                        modifier="--mode"
-                        leftColor={PERMISSION_COLORS[runtime()?.permissionMode ?? "default"]}
-                    />
-                    <StripSelect
-                        current={runtime()?.model}
-                        options={getProvider(props.providerId)?.models ?? MODEL_OPTIONS}
-                        onSelect={(v) => void updateRuntime({ model: v as ModelChoice })}
-                        title="Model — which model the agent uses. Applies on the next turn."
-                        modifier="--model"
-                    />
-                    <StripSelect
-                        current={runtime()?.effort}
-                        options={EFFORT_OPTIONS}
-                        onSelect={(v) => void updateRuntime({ effort: v as EffortLevel })}
-                        title="Reasoning effort — how hard the model thinks per turn. Applies on the next turn."
-                        modifier="--effort"
-                        horizontal
+                    <AgentRuntimeDropup
+                        blockId={props.blockId ?? ""}
+                        blockAtom={props.blockAtom ?? (() => undefined)}
+                        providerId={props.providerId ?? ""}
                     />
                 </Show>
             </span>
@@ -337,9 +201,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 <Show when={ctxText()}>
                     <span
                         class={`agent-composer-strip-ctx ${ctxClass()}`}
-                        title={props.contextTokens != null
-                            ? contextTitle(props.contextTokens, props.contextWindow)
-                            : undefined}
+                        title={
+                            props.contextTokens != null
+                                ? contextTitle(props.contextTokens, props.contextWindow)
+                                : undefined
+                        }
                     >
                         {ctxText()}
                     </span>
