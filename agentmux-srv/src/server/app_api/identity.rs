@@ -152,8 +152,16 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     return Err(format!("identity.account.upsert: db: {e}"));
                 }
 
-                // Steps 2+4: replace provider link (unlink old, link new).
-                let _ = id_store.agent_identity_unlink(&def_id, &req.provider);
+                // Step 2/4: (re)point the agent's provider link at this account.
+                // agent_identity_link's own `ON CONFLICT(agent_id, provider) DO
+                // UPDATE` already overwrites whatever account_id was linked
+                // before, so no separate unlink is needed for the success path.
+                // A preceding unlink-then-link was here previously (reagent P1 on
+                // PR #2056): now that def_id resolves correctly, an unlink that
+                // succeeds followed by a link that fails would permanently drop
+                // the agent's existing provider link with no compensation (the
+                // failure branch below only cleans up for is_new accounts) —
+                // removed rather than adding yet another compensating delete.
                 if let Err(e) = id_store.agent_identity_link(&def_id, &account_id, &req.provider) {
                     // Only clean up for new accounts — on the update path the
                     // account still exists in the DB and may be linked to other providers,
