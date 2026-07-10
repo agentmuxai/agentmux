@@ -74,6 +74,15 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             },
         });
 
+        items.push({
+            type: "checkbox",
+            label: "Show Icons Only",
+            checked: iconOnly(),
+            click: () => {
+                toggleIconOnly();
+            },
+        });
+
         const widgetEntries = Object.entries(widgets())
             .filter(([key]) => key.startsWith("defwidget@"))
             .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
@@ -96,16 +105,6 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
                 }),
             });
         }
-
-        items.push({ type: "separator" });
-        items.push({
-            type: "checkbox",
-            label: "Icon Only",
-            checked: iconOnly(),
-            click: () => {
-                toggleIconOnly();
-            },
-        });
 
         return items;
     };
