@@ -151,7 +151,7 @@ No change to `build_mcp_config_from_refs`'s output shape — `config_hash`/`prer
 | Phase | Scope | Depends on | Owner |
 |---|---|---|---|
 | **A** | §4.1 structured config UI + interpolation, §4.4 health probe + `mcp-capabilities.ts`, §5 migration | none — pure additive extension of the shipped Phase 1 primitive | Shipped (#2030) |
-| **B** | §4.6 catalog UI + the Ableton catalog entry + pilot acceptance bar (§6) | Phase A (needs the probe to render the remediation string) | AgentY (2026-07-10) — building on the shipped Phase A probe; TouchDesigner/ComfyUI entries fold in as follow-ons once the Ableton pattern validates, per this section's own recommendation, not a separate track |
+| **B** | §4.6 catalog UI + the Ableton catalog entry + pilot acceptance bar (§6) | Phase A (needs the probe to render the remediation string) | Shipped (#2064, 2026-07-10) — "+ Browse catalog" picker in the Armory MCP Servers tab, pre-fills the add-server form from a static `{name, transport, config, prereqNote, docsUrl}` entry, Ableton Live only per this section's own recommendation. Status pill reuses `mcp.catalog.probe(id)`/`mcp-capabilities.ts` as-is — no new backend RPC. TouchDesigner/ComfyUI entries remain documented follow-ons, not shipped. |
 | **C** | §4.2 secrets-via-Account indirection, §4.3 OAuth (DCR + static fallback) | Phase A; reuses existing Account/OAuth infra, additive | Open |
 | **D** | §4.5 tool introspection/disable, §4.7 config-hash pinning | Phase A; D's approval-gate *enforcement* is explicitly deferred to the future Policy primitive — D here only stores the data it needs | Open |
 
