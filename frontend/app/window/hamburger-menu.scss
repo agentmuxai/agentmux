@@ -28,17 +28,24 @@
     // below the bar's TRUE vertical center. `align-items: end` on both
     // containers means tabs/traffic-lights never notice this — they anchor
     // to the bottom regardless — but anything that wants to look centered
-    // in the whole bar (this icon) needs to shift up by roughly that half-
-    // padding amount. `/ -2` is the geometrically-exact term (confirmed via
+    // in the whole bar (this icon) needs to shift up by that half-padding
+    // amount. This term is exact and platform-independent (same padding-top
+    // in all three window-header.*.scss files) — confirmed via
     // getBoundingClientRect(): header center y=16.5, button center y=19.5
-    // unshifted); the `+ 2px` on top is an empirical optical correction —
-    // mathematically-perfect centering (delta=0) still read as too high to
-    // the eye, and +1px still wasn't enough, so this settles 2px below true
-    // geometric center. Kept as a calc() (not a single hardcoded px) so the
-    // geometric half still self-corrects if `--space-1-5` changes; only the
-    // +2px fudge is a fixed empirical constant.
+    // unshifted, i.e. exactly padding-top/2 = 3px off.
+    --hb-geo-center: calc(var(--space-1-5) / -2);
     position: relative;
-    top: calc(var(--space-1-5) / -2 + 2px);
+    // Windows/Linux (this base rule, left-of-tabs placement): exact
+    // geometric centering (--hb-geo-center alone) still read 2px too high
+    // on a live task dev smoke test, so this adds an empirical +2px optical
+    // correction on top (tuned in two rounds: +1px wasn't enough, +2px
+    // was). macOS's `--right` variant below does NOT add this — its own
+    // separate manual tuning history (#2013 "2px up", #2016 "3px up",
+    // i.e. exactly --hb-geo-center with zero extra fudge) already arrived
+    // at pure geometric center reading correctly there, so don't reapply
+    // a Windows-tuned correction to a platform that was never measured
+    // against it.
+    top: calc(var(--hb-geo-center) + 2px);
     // Left-of-tabs placement (Windows/Linux): symmetric 4px margin on both
     // sides so the whitespace left of the hamburger matches the right (which
     // also clears the leading .tab-separator → icon · 10px · 1px sep · 10px ·
@@ -63,9 +70,11 @@
 
     // macOS: pinned to the far right of the title bar, after the action
     // widgets. Add breathing room so it doesn't sit flush against the
-    // window's right frame. Vertical offset is the shared base rule above.
+    // window's right frame. Vertical offset: pure geometric center, no
+    // extra optical fudge — see the comment on --hb-geo-center above.
     &--right {
         margin-left: 4px;
         margin-right: 8px;
+        top: var(--hb-geo-center);
     }
 }
