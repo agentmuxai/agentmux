@@ -24,7 +24,7 @@
 
 import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
 import { autoUpdate } from "@floating-ui/dom";
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { getProvider, type ProviderModel } from "../providers";
@@ -185,7 +185,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         } else if (e.key === "Escape") {
             e.preventDefault();
             setOpen(false);
-        } else if (e.key.length === 1 && /[a-z0-9]/i.test(e.key)) {
+        } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && /[a-z0-9]/i.test(e.key)) {
             const k = e.key.toLowerCase();
             const idx = build().options.findIndex((o) => o.label.toLowerCase().startsWith(k));
             if (idx >= 0) {
@@ -196,21 +196,26 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     };
 
     const handleClickOutside = (e: MouseEvent) => {
-        if (!open()) return;
         const target = e.target as Node;
         if (referenceEl?.contains(target) || floatingEl?.contains(target)) return;
         setOpen(false);
     };
 
-    onMount(() => {
+    // Both listeners are scoped to the panel's open lifetime via this effect
+    // (not onMount, which would span the trigger's entire mount lifetime —
+    // reagentx-workflow P0 on this PR: a document-wide keydown listener that
+    // outlives `open()` intercepts Enter/Escape/letters everywhere, including
+    // the composer textarea, even while the panel is closed).
+    createEffect(() => {
+        if (!open()) return;
         document.addEventListener("mousedown", handleClickOutside);
         document.addEventListener("keydown", handleKeyDown, true);
+        onCleanup(() => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("keydown", handleKeyDown, true);
+        });
     });
-    onCleanup(() => {
-        document.removeEventListener("mousedown", handleClickOutside);
-        document.removeEventListener("keydown", handleKeyDown, true);
-        cleanupAutoUpdate?.();
-    });
+    onCleanup(() => cleanupAutoUpdate?.());
 
     // Positioning mirrors flyoutmenu.tsx's updatePosition/registerFloating
     // exactly (same primitive, same avoidNativePanes:false rationale — this
