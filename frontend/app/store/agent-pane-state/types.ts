@@ -394,6 +394,19 @@ export type AgentPaneCommand =
      */
     | { type: "ReconcileTurnActive"; at: number; active: boolean }
     /**
+     * Mount-time reconciliation: history replay found a `session_end` stats
+     * payload from before this pane went live (the resumed conversation's
+     * last turn — or, if resume silently failed, whatever short session
+     * replaced it). Seeds `lastContextTokens` so the composer strip's
+     * context-fill bar shows a real number immediately instead of sitting
+     * blank until the first live `TokensIn`. No-ops if a live `TokensIn`
+     * already arrived first (mirrors `ReconcileTurnActive`'s
+     * only-if-still-default guard) — a historical snapshot must never
+     * clobber real-time data. See
+     * docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md.
+     */
+    | { type: "ReconcileContextFromHistory"; tokens: number }
+    /**
      * User pressed send — turn becomes active. Also clears stale
      * sessionStats from the previous turn.
      */
@@ -558,6 +571,11 @@ export type AgentPaneEvent =
      * user-initiated `turn-started`.
      */
     | { type: "turn-active-reconciled-at-mount" }
+    /**
+     * `ReconcileContextFromHistory` seeded `lastContextTokens` from a
+     * historical `session_end` at mount. Surfaced for diagnostics only.
+     */
+    | { type: "context-reconciled-at-mount"; tokens: number }
     | {
           /**
            * A turn finished and the phase transitioned to `Done`. Since

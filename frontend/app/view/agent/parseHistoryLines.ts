@@ -11,7 +11,26 @@
 
 import { createTranslator } from "./providers/translator-factory";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { DocumentNode } from "./types";
+import type { DocumentNode, SessionStats } from "./types";
+
+export interface ParsedHistory {
+    nodes: DocumentNode[];
+    /**
+     * Stats payload of the last `session_end` event seen during replay that
+     * actually carries token usage, or `null` if none was found. Claude's
+     * persistent-mode controller emits a `session_end` after EVERY plain-text
+     * turn as a boundary marker with `stats: {}` (see
+     * ClaudeTranslator.handleAssistantMessage) — the real usage-bearing
+     * `result` event only fires at process teardown, which for a
+     * long-running persistent session may be far earlier in the replayed
+     * window than the last turn boundary. Tracking the chronologically last
+     * `session_end` unconditionally would let an empty boundary marker
+     * clobber real historical stats. Callers use this to seed the composer
+     * strip's context-fill bar at mount (see useAgentStream's `finalizeTurn`
+     * / `TokensIn` for the live-stream equivalent).
+     */
+    lastSessionStats: SessionStats | null;
+}
 
 /**
  * Parse an array of raw NDJSON lines (as stored in the "output" blockfile)
@@ -19,15 +38,17 @@ import type { DocumentNode } from "./types";
  *
  * @param lines        Raw text lines from blockfile:read_range
  * @param outputFormat Provider output format string (e.g. "claude-stream-json")
- * @returns            Ordered array of DocumentNodes, deduped by node id
+ * @returns            Ordered DocumentNodes (deduped by node id) plus the
+ *                      last `session_end` stats payload found, if any.
  */
 export function parseHistoryLines(
     lines: string[],
     outputFormat: string,
-): DocumentNode[] {
+): ParsedHistory {
     const translator = createTranslator(outputFormat);
     const parser = new ClaudeCodeStreamParser();
     const nodes: DocumentNode[] = [];
+    let lastSessionStats: SessionStats | null = null;
     // Same-id events update IN PLACE rather than first-wins.
     // The previous "skip if seen" rule dropped legitimate state
     // transitions during replay — most importantly, a `tool_result`
@@ -58,6 +79,17 @@ export function parseHistoryLines(
         const streamEvents = translator.translate(rawEvent);
 
         for (const event of streamEvents) {
+            if (event.type === "session_end") {
+                // Only overwrite when this session_end actually carries usage —
+                // skip the empty-stats per-turn boundary marker so it can't
+                // clobber a real result's stats seen earlier in the window.
+                if (event.stats
+                    && (typeof event.stats.input_tokens === "number"
+                        || typeof event.stats.output_tokens === "number")) {
+                    lastSessionStats = event.stats;
+                }
+                continue;
+            }
             const node = parser.parseLine(JSON.stringify(event));
             if (!node) continue;
             const existing = indexById.get(node.id);
@@ -73,5 +105,5 @@ export function parseHistoryLines(
         }
     }
 
-    return nodes;
+    return { nodes, lastSessionStats };
 }
