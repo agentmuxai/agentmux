@@ -202,6 +202,16 @@ export const IdentityApi = {
         data: {
             providerId: string;
             intoBundleId?: string;
+            /** Issue #1624 PR-C Part B — bypass the bundle system
+             *  entirely; a successful auth persists a standalone
+             *  IdentityAccount. Mutually exclusive with `intoBundleId`
+             *  (never set both). Wire-additive only for now — not yet
+             *  set by any caller (that's PR 3). */
+            directAccount?: boolean;
+            /** Direct-account reconnect: non-empty to refresh an
+             *  already-linked account's tokens in place. Ignored unless
+             *  `directAccount` is set. */
+            existingAccountId?: string;
             cliPath: string;
             authLoginArgs: string[];
             authCheckArgs: string[];
