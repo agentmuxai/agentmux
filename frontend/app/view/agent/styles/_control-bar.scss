@@ -152,15 +152,11 @@
             animation-iteration-count: infinite;
         }
 
-        // Same precedent applied to the Working-row shimmer: AgentFooter.tsx
-        // still adds .agent-working-shimmer under reduced motion (skips only
-        // the one-shot type-out, per modal.tsx's "brief, non-moving" one-shot
-        // convention) — just slower and reasserting `infinite` for the same
-        // Chromium single-iteration quirk noted above.
-        .agent-working-row-left.agent-working-shimmer {
-            animation-duration: 4.5s;
-            animation-iteration-count: infinite;
-        }
+        // (The Working-row shimmer's reduced-motion slowdown is nested inside
+        // its own rule further down — NOT here. A rule in this block has the
+        // same specificity as the shimmer's `animation:` shorthand but
+        // earlier source order, so the shorthand would always win and the
+        // slowdown would silently never apply.)
     }
 
     // Back-and-forth highlight sweep for .agent-working-shimmer (below).
@@ -236,6 +232,19 @@
                     -webkit-background-clip: text;
                     color: transparent;
                     animation: agent-working-shimmer-sweep 2.4s ease-in-out infinite alternate;
+
+                    // Reduced-motion slowdown — same precedent as the
+                    // marching-ants bar (keep the essential looping "still
+                    // working" signal, just gentler), incl. re-asserting
+                    // `infinite` for Chromium's single-iteration clamp.
+                    // Nested HERE, not in the shared reduced-motion block
+                    // near the top of the file: it must come after the
+                    // `animation:` shorthand above in source order (equal
+                    // specificity), or the shorthand's 2.4s always wins.
+                    @media (prefers-reduced-motion: reduce) {
+                        animation-duration: 4.5s;
+                        animation-iteration-count: infinite;
+                    }
                 }
 
                 // Type-out reveal overlay: opaque white glyphs painted over
