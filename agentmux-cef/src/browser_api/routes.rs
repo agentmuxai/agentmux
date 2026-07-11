@@ -729,19 +729,34 @@ async fn open_cdp_for_block(
     state: &Arc<AppState>,
     block_id: &str,
 ) -> Result<CdpSession, String> {
-    let target = state
-        .browser_api
-        .target_cache
-        .resolve(state, block_id)
-        .await?;
     let debug_port = *state.debug_port.lock();
-    let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{target}");
-    CdpSession::connect(&ws_url).await.map_err(|e| {
-        // On connect failure the cached target may be stale; drop it
-        // so the next call re-probes.
-        state.browser_api.target_cache.forget(block_id);
-        format!("CDP connect: {e}")
-    })
+    // Two attempts: the cached target id goes stale whenever the pane's
+    // CDP target rotates (navigation-driven process swap, etc. — nothing
+    // proactively calls `forget`), and failing the caller's request just
+    // to self-heal the NEXT one made every first call after a navigation
+    // error out. Attempt 1 uses the cache; on connect failure, forget the
+    // stale entry and attempt 2 re-resolves from a fresh `/json` probe.
+    let mut last_err = String::new();
+    for attempt in 0..2 {
+        let target = state
+            .browser_api
+            .target_cache
+            .resolve(state, block_id)
+            .await?;
+        let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{target}");
+        match CdpSession::connect(&ws_url).await {
+            Ok(session) => return Ok(session),
+            Err(e) => {
+                state.browser_api.target_cache.forget(block_id);
+                last_err = format!("CDP connect: {e}");
+                tracing::debug!(
+                    block_id, target, attempt, error = %last_err,
+                    "[browser-api] CDP connect failed — dropped cached target"
+                );
+            }
+        }
+    }
+    Err(last_err)
 }
 
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {

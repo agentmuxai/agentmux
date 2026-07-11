@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { invokeBrowserApi, invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
@@ -154,6 +154,54 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         // host's actual HWND rect. Cheap (two property reads + a Map
         // write).
         registerPaneRect(model.blockId, paneRectCss());
+    };
+
+    // ── Freeze-frame while airspace-hidden (macOS/Linux only) ──────────
+    //
+    // When a DOM overlay (hamburger menu, modal, …) intersects this pane,
+    // the host hides the ENTIRE native pane surface — there is no
+    // SetWindowRgn-style hole punch off Windows — which exposes the bare
+    // placeholder and reads as the pane "going black". Instead, capture the
+    // pane's last rendered frame (CDP `Page.captureScreenshot` via the
+    // browser DOM API; the compositor keeps producing frames even while the
+    // overlay NSWindow is ordered out, verified empirically) and display it
+    // in the placeholder until the overlay clears. The frame is static —
+    // acceptable for menu-open-scale durations.
+    //
+    // Windows is excluded: its clip path punches a precise hole and never
+    // hides the pane, so there is nothing to freeze over.
+    const [freezeSnapshot, setFreezeSnapshot] = createSignal<string | null>(null);
+    // Monotonic guard: bump on every clear so an in-flight capture that
+    // resolves after the menu closed can't resurrect a stale snapshot.
+    let freezeToken = 0;
+    const onOverlayClipChanged = (e: Event) => {
+        if (navigator.userAgent.includes("Windows")) return;
+        const rects =
+            ((e as CustomEvent).detail?.rects as { x: number; y: number; w: number; h: number }[]) ??
+            [];
+        if (!placeholderRef || !paneCreated() || model.closed) return;
+        const r = placeholderRef.getBoundingClientRect();
+        const hit =
+            r.width > 0 &&
+            r.height > 0 &&
+            rects.some(
+                (o) => o.x < r.right && o.x + o.w > r.left && o.y < r.bottom && o.y + o.h > r.top,
+            );
+        if (!hit) {
+            freezeToken++;
+            setFreezeSnapshot(null);
+            return;
+        }
+        // Already frozen — keep the existing frame rather than re-capturing
+        // on every submenu open/close while the same menu session is up.
+        if (freezeSnapshot()) return;
+        const myToken = ++freezeToken;
+        invokeBrowserApi<{ png_base64: string }>("screenshot", { block_id: model.blockId })
+            .then((data) => {
+                if (myToken !== freezeToken || !data?.png_base64) return;
+                setFreezeSnapshot(data.png_base64);
+            })
+            .catch((err) => diag(`[freeze] capture failed: ${err}`));
     };
 
     // Native browser-pane HWND settle on a layout change.
@@ -324,6 +372,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             resizeObserver.observe(placeholderRef);
             positionInterval = setInterval(syncPosition, 200);
         }
+        window.addEventListener("pane-overlay-clip-changed", onOverlayClipChanged);
+        onCleanup(() =>
+            window.removeEventListener("pane-overlay-clip-changed", onOverlayClipChanged),
+        );
         // Subscribe to CEF's HTTP Basic/Digest auth challenges. Lives
         // in the view (not the model) because it needs `useModalLayer()`
         // context, which is a SolidJS hook. Phase α of
@@ -540,6 +592,13 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         <div class="browser-empty-icon">{"\uD83C\uDF10"}</div>
                         <div class="browser-empty-text">Enter a URL above to browse</div>
                     </div>
+                </Show>
+                <Show when={freezeSnapshot()}>
+                    <img
+                        class="browser-freeze-snapshot"
+                        alt=""
+                        src={`data:image/png;base64,${freezeSnapshot()}`}
+                    />
                 </Show>
             </div>
         </div>
