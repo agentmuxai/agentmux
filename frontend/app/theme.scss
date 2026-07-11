@@ -128,6 +128,24 @@
     --zindex-flash-error-container: 550;
     --zindex-app-background: -1;
 
+    // ─── Phantom-token fixes (ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md §2b) ───
+    // Each of these was referenced at its call site as `var(--token,
+    // #fallback)` but never actually DEFINED anywhere — every consumer was
+    // silently pinned to its own local fallback literal forever. That was
+    // invisible today only because every theme is dark and every fallback
+    // happened to already suit a dark surface. Defined here with each
+    // token's established fallback value, so today's rendering is
+    // unchanged, but the token is now real: a future per-theme override
+    // (e.g. a light theme) will actually take effect instead of being
+    // silently ignored by every call site's own hardcoded fallback.
+    --accent-text-color: #fff;  // text/icon color on an --accent-color-filled surface (e.g. active pill states)
+    --button-color: #fff;       // text color on an --accent-color-filled primary button — distinct from --button-text-color below, which is for the brighter green/yellow buttons
+    --error-text-color: #ff8080;
+    --success-text-color: #10b981;
+    --warning-text-color: #d97706;
+    --input-bg-color: var(--form-element-bg-color);  // alias — same concept as the pre-existing form-element token
+    --elevated-bg-color: var(--modal-bg-color);       // alias — same concept as the pre-existing modal token
+
     // z-indexes in xterm.css
     // xterm-helpers: 5
     // xterm-helper-textarea: -5

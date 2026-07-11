@@ -16,5 +16,6 @@ export const THEME_OPTIONS: ReadonlyArray<{ id: string; label: string }> = [
     { id: "catppuccin", label: "Catppuccin" },
     { id: "tokyo-night", label: "Tokyo Night" },
     { id: "gruvbox", label: "Gruvbox" },
+    { id: "light", label: "Light" },
 ];
 
