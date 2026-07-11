@@ -717,9 +717,11 @@ unsafe extern "system" fn win_event_callback(
                             // Pillar 2 Phase 2 (sanitize-then-decide §2.4) —
                             // consume the drain verdict this dispatch just
                             // computed instead of discarding it: the recycle
-                            // close of the last window now flips QuitState and
-                            // runs the Stage-1 drain (posted as a UI task; this
-                            // WINEVENT callback returns first).
+                            // close of the last window flips QuitState and
+                            // runs the Stage-1 drain INLINE (this WINEVENT
+                            // callback is on the UI thread), so the cascade
+                            // has completed before the gate re-run below —
+                            // the ordering the reagent P1 on #2082 required.
                             crate::ui_tasks::consume_request_drain(
                                 state, &out, "wrr_locationchange_recycle_close",
                             );
