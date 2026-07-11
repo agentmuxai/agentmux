@@ -4,14 +4,125 @@
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
+/// RAII guard around the test-spawned srv (SPEC_TEST_SRV_SPAWN_GUARDS_2026_07_11).
+///
+/// Kills and reaps the child on drop — including drop-during-panic-unwind,
+/// which is exactly when an explicit end-of-test `kill()` never runs: a
+/// failed assertion used to leave the srv process (its two listening
+/// sockets, its SQLite store, its shell children) alive indefinitely on the
+/// dev machine / CI runner.
+///
+/// On Windows the child is ALSO assigned to an anonymous kill-on-close Job
+/// Object at spawn time, for two failure modes `Drop` cannot cover:
+/// - **Grandchildren**: srv spawns its own children (live-observed
+///   2026-07-11: a leaked `--crash-monitor` grandchild held a shell
+///   pipeline's inherited stdout handle open for 20+ minutes after `cargo
+///   test` exited). Killing the direct child does not reap them; closing
+///   the job handle kills the whole tree.
+/// - **Hard kill of the test process itself** (CI timeout, Ctrl+C): the OS
+///   closes the job handle with the process, cascading to the tree.
+///
+/// The job is anonymous, created by this test, and can only ever contain
+/// processes this test spawned — upholding isolation invariants I2/I3
+/// (never touch a job/process this code did not create).
+struct SrvGuard {
+    child: std::process::Child,
+    #[cfg(windows)]
+    _job: Option<JobHandle>,
+}
+
+impl Drop for SrvGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait(); // reap — no zombie on unix
+        // Windows: `_job` drops after this, closing the handle → the OS
+        // kills anything left in the tree (grandchildren included).
+    }
+}
+
+impl std::ops::Deref for SrvGuard {
+    type Target = std::process::Child;
+    fn deref(&self) -> &std::process::Child {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for SrvGuard {
+    fn deref_mut(&mut self) -> &mut std::process::Child {
+        &mut self.child
+    }
+}
+
+/// Owned kill-on-close Job Object handle. Same call shapes as the
+/// launcher's production J0 (`agentmux-launcher/src/job_object.rs`), kept
+/// test-local rather than exported across crates — the needed surface is
+/// this small.
+#[cfg(windows)]
+struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+// SAFETY: a job HANDLE is an opaque kernel handle with no documented thread
+// affinity (CloseHandle may be called from any thread) — same justification
+// as the launcher's JobHandle.
+#[cfg(windows)]
+unsafe impl Send for JobHandle {}
+
+#[cfg(windows)]
+fn assign_to_kill_on_close_job(child: &std::process::Child) -> Option<JobHandle> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            eprintln!("[srv-guard] CreateJobObjectW failed — Drop-only cleanup for this child");
+            return None;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            CloseHandle(job);
+            eprintln!("[srv-guard] SetInformationJobObject failed — Drop-only cleanup");
+            return None;
+        }
+        if AssignProcessToJobObject(job, child.as_raw_handle() as _) == 0 {
+            CloseHandle(job);
+            eprintln!("[srv-guard] AssignProcessToJobObject failed — Drop-only cleanup");
+            return None;
+        }
+        Some(JobHandle(job))
+    }
+}
+
 /// Helper: spawn agentmux-srv as a subprocess and parse AGENTMUXSRV-ESTART.
-/// Returns (child, web_addr, ws_addr, auth_key).
-fn spawn_backend() -> (std::process::Child, String, String, String) {
+/// Returns (guard, web_addr, ws_addr, auth_key). The guard owns cleanup —
+/// tests must NOT call `kill()` for cleanup (scope exit / panic unwind does
+/// it, and on Windows the job object reaps the whole tree).
+fn spawn_backend() -> (SrvGuard, String, String, String) {
     let auth_key = "integration-test-key-12345";
 
     let binary = env!("CARGO_BIN_EXE_agentmux-srv");
 
-    let mut child = Command::new(binary)
+    let child = Command::new(binary)
         .env("AGENTMUX_AUTH_KEY", auth_key)
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
@@ -19,7 +130,19 @@ fn spawn_backend() -> (std::process::Child, String, String, String) {
         .spawn()
         .expect("failed to spawn agentmux-srv");
 
-    let stderr = child.stderr.take().unwrap();
+    #[cfg(windows)]
+    let job = assign_to_kill_on_close_job(&child);
+
+    // Guard is constructed IMMEDIATELY after spawn — the ESTART parsing
+    // below can panic (assert/expect), and a panic before the guard exists
+    // would leak the child, which is the exact defect this guard fixes.
+    let mut guard = SrvGuard {
+        child,
+        #[cfg(windows)]
+        _job: job,
+    };
+
+    let stderr = guard.stderr.take().unwrap();
     let reader = BufReader::new(stderr);
 
     let mut web_addr = String::new();
@@ -43,12 +166,15 @@ fn spawn_backend() -> (std::process::Child, String, String, String) {
     assert!(!web_addr.is_empty(), "failed to parse web addr from ESTART");
     assert!(!ws_addr.is_empty(), "failed to parse ws addr from ESTART");
 
-    (child, web_addr, ws_addr, auth_key.to_string())
+    (guard, web_addr, ws_addr, auth_key.to_string())
 }
 
 #[test]
 fn health_returns_200() {
-    let (mut child, web_addr, _ws_addr, _auth_key) = spawn_backend();
+    // No manual cleanup in these tests: SrvGuard kills + reaps on scope
+    // exit — INCLUDING panic unwind on a failed assert, which the old
+    // explicit end-of-test kill() never covered.
+    let (_child, web_addr, _ws_addr, _auth_key) = spawn_backend();
 
     let url = format!("http://{}/", web_addr);
     let resp = reqwest::blocking::get(&url).expect("health request failed");
@@ -56,15 +182,11 @@ fn health_returns_200() {
 
     let body: serde_json::Value = resp.json().unwrap();
     assert_eq!(body["status"], "ok");
-
-    // Clean up
-    drop(child.stdin.take());
-    let _ = child.kill();
 }
 
 #[test]
 fn auth_rejects_missing_key() {
-    let (mut child, web_addr, _ws_addr, _auth_key) = spawn_backend();
+    let (_child, web_addr, _ws_addr, _auth_key) = spawn_backend();
 
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -72,14 +194,11 @@ fn auth_rejects_missing_key() {
         .send()
         .expect("request failed");
     assert_eq!(resp.status(), 401);
-
-    drop(child.stdin.take());
-    let _ = child.kill();
 }
 
 #[test]
 fn auth_accepts_valid_header() {
-    let (mut child, web_addr, _ws_addr, auth_key) = spawn_backend();
+    let (_child, web_addr, _ws_addr, auth_key) = spawn_backend();
 
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -93,9 +212,6 @@ fn auth_accepts_valid_header() {
 
     let body: serde_json::Value = resp.json().unwrap();
     assert!(body["success"].as_bool().unwrap_or(false));
-
-    drop(child.stdin.take());
-    let _ = child.kill();
 }
 
 #[test]
