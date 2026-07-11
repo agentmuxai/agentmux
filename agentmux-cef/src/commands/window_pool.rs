@@ -654,12 +654,43 @@ pub fn demote_srv_cleanup(state: &Arc<AppState>, label: &str) {
                 crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
             }
             None => {
-                let warn = format!(
-                    "demote_srv_cleanup({}): no backend window ID after retries — srv state may orphan",
-                    lbl
-                );
-                crate::client::dlog(&warn);
-                tracing::warn!("{}", warn);
+                // Registration chain came up empty — the early-close race
+                // shape (#2088's registration moved earlier, but a close can
+                // still land before it) or a lost launcher round-trip. Last
+                // resort (SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual
+                // 2): ask srv to resolve the label via the `host:label`
+                // crumb persisted atomically with row creation. Close ONLY
+                // on an unambiguous single match — the crumb is a hint, and
+                // labels can recur across host restarts; a multi-match means
+                // stale rows from a prior life, where guessing could delete
+                // a window the slow-path reproject still owes the user.
+                match crate::client::backend_find_window_by_label(&web_endpoint, &auth_key, &lbl) {
+                    Some(ids) if ids.len() == 1 => {
+                        let window_id = &ids[0];
+                        crate::client::dlog(&format!(
+                            "demote_srv_cleanup({}): resolved via host:label crumb — backend_close_window window_id={}",
+                            lbl, window_id
+                        ));
+                        crate::client::backend_close_window(&web_endpoint, &auth_key, window_id);
+                    }
+                    Some(ids) => {
+                        let warn = format!(
+                            "demote_srv_cleanup({}): no backend window ID after retries, crumb lookup returned {} match(es) — srv state may orphan",
+                            lbl,
+                            ids.len()
+                        );
+                        crate::client::dlog(&warn);
+                        tracing::warn!("{}", warn);
+                    }
+                    None => {
+                        let warn = format!(
+                            "demote_srv_cleanup({}): no backend window ID after retries, crumb lookup unavailable — srv state may orphan",
+                            lbl
+                        );
+                        crate::client::dlog(&warn);
+                        tracing::warn!("{}", warn);
+                    }
+                }
                 crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
             }
         }
