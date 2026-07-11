@@ -1,27 +1,33 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Host-side orphan-instance reconciliation. Spec:
-//! `docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md`.
+//! Host-side orphan-instance reconciliation. Specs:
+//! `docs/specs/SPEC_HOST_ORPHAN_RECONCILIATION_2026_05_05.md` (origin),
+//! `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md` §2.1 (the
+//! Phase-1 restructure this module now implements).
 //!
-//! When the launcher detects that the last user-visible window
-//! has closed but the host is still alive, it emits
-//! `Event::HostShouldQuit`. The host's handler invokes
-//! `reconcile_and_drain` here, which closes any orphan
-//! `window-pool-*` browsers (promoted out of the warm pool, but
-//! the launcher mirror has dropped them — typically because their
-//! HWND was destroyed without the host's `on_before_close` running).
+//! When the launcher detects that the last user-visible window has closed but
+//! the host is still alive, it emits `Event::HostShouldQuit`. The host's
+//! handler invokes `reconcile_and_drain` here.
 //!
-//! Each close funnels back through `client::on_before_close`,
-//! whose Stage 2 hook fires `quit_message_loop()` once
-//! `browser_list` empties — so the reconciler doesn't drive
-//! UI-thread shutdown directly.
+//! **This module is a sanitizer + executor, not a decider.** It probes HWND
+//! liveness, repairs the reducer's `browsers` projection (dead/hostless
+//! zombies are the one direction the projection goes stale — a crashed window
+//! never runs any close flow, so its `TopLevel { is_pool: false }` entry
+//! would block `reconcile_quit` forever), and then asks the reducer for the
+//! drain verdict via `HostCommand::ReconcileQuit` → `request_drain`. The
+//! pre-Phase-1 parallel decision (`ReconcilePlan.begin_drain`, computed from
+//! launcher-shadow membership + a Race-B `freshly_promoted` guard) is gone:
+//! the reducer already models everything it derived — promotion flips
+//! `is_pool:false` synchronously (`reducer/pool.rs`), so a freshly-promoted
+//! window is already counted live by `count_live_user_windows`, and floaters
+//! are excluded BY TYPE (invariant FP-LIFE) rather than depending on what the
+//! launcher mirror happens to contain.
 //!
-//! Threading: CEF Browser/BrowserHost methods (`host()`,
-//! `window_handle()`, `close_browser()`) MUST run on the UI
-//! thread per CEF docs. The IPC reader thread that delivers
-//! `HostShouldQuit` does only state-snapshot + classification
-//! work, then `cef::post_task`s the UI-thread closure.
+//! Threading: CEF Browser/BrowserHost methods (`host()`, `window_handle()`,
+//! `close_browser()`) MUST run on the UI thread per CEF docs. The IPC reader
+//! thread that delivers `HostShouldQuit` does no work of its own; it
+//! `cef::post_task`s the UI-thread closure.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -44,149 +50,121 @@ pub(crate) enum HwndStatus {
     Dead,
 }
 
-/// What the planner decided to do with a single label.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CloseAction {
-    /// Call `host.close_browser(force=1)` — requires live BrowserHost.
-    /// Used for zombies (Dead) and ready warm-pool / unpromoted-pool
-    /// labels in drain mode.
-    CloseBrowser,
-    /// Dispatch `HostCommand::UnregisterBrowser` directly. Used for
-    /// hostless zombies — there's no BrowserHost to call
-    /// `close_browser` on, so we clean `state.browsers` ourselves and
-    /// drive `quit_message_loop` from the orchestrator.
-    UnregisterBrowser,
-}
-
-/// Output of the pure planning step. The orchestrator executes this
-/// against real CEF state. Kept separate so tests can verify
-/// decisions without standing up a CEF runtime.
+/// Output of the pure planning step — a SANITIZE plan, not a decision (the
+/// drain verdict comes from `reconcile_quit` via `HostCommand::ReconcileQuit`
+/// after the sanitizes land). The orchestrator executes this against real CEF
+/// state. Kept separate so tests can verify classification without standing
+/// up a CEF runtime.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct ReconcilePlan {
-    /// Labels to act on, in deterministic order (zombies first, then
-    /// drain-mode pool inventory). Each entry pairs a label with the
-    /// action the orchestrator should take.
-    pub closes: Vec<(String, CloseAction)>,
-    /// Live HWND, not in `pool.queue` — Race B. Diagnostic only;
-    /// these are intentionally NOT in `closes`.
+    /// Dead zombies → `close_browser(force=1)`, in deterministic order.
+    /// Self-sanitizing: CEF's cleanup chain runs `on_before_close`, which
+    /// dispatches `UnregisterBrowser` AND consumes its own `request_drain`
+    /// (PR #1993) — so user-kind zombies that block the verdict at poke time
+    /// still drive the drain when their close resolves (the level-trigger
+    /// completes asynchronously). Empty when a user creation is in flight:
+    /// the close chain itself could race the pending creation (see the
+    /// `plan_pending_creation_blocks_zombie_close` test).
+    pub zombie_closes: Vec<String>,
+    /// Hostless entries whose reducer kind is a live user window
+    /// (`TopLevel { is_pool: false }`) — the stale-projection entries that
+    /// block `reconcile_quit`. Unregistered UNCONDITIONALLY (projection
+    /// repair, correct at any time): there is no `BrowserHost` to close and
+    /// no close flow that will ever repair them.
+    pub hostless_user: Vec<String>,
+    /// Hostless pool-kind entries. They don't block the verdict (not counted
+    /// by `count_live_user_windows`), and unregistering them outside drain
+    /// bypasses `on_pool_window_destroyed` bookkeeping (pool-reducer drift) —
+    /// so their cleanup stays drain-gated, exactly as before Phase 1.
+    pub hostless_pool: Vec<String>,
+    /// Live HWND, not in shadow, not in a pool set — the Race-B telemetry.
+    /// Diagnostic ONLY: the reducer already counts these windows live
+    /// (promotion flips `is_pool:false` synchronously), so they block the
+    /// verdict through the standard count, not through this list.
     pub freshly_promoted: Vec<String>,
-    /// Whether to dispatch `BeginDrain` before executing `closes`.
-    /// Equivalent to `safe_to_drain`.
-    pub begin_drain: bool,
 }
 
-/// Pure planning function. The orchestrator HWND-probes every
-/// non-pane top-level browser in `state.browsers` and feeds that map
-/// here.
+/// Pure planning function. The orchestrator HWND-probes every non-pane
+/// top-level browser in `state.browsers` and feeds that map here.
 ///
-/// `browser_status` keys every non-pane label in `state.browsers` to
-/// its HwndStatus. Includes pool-prefixed labels AND regular
-/// top-level windows (e.g. `main`, `window-N`). Pane labels
-/// (`browser-pane-*`) are NOT in this map — they drain via a
-/// separate cascade and would otherwise pollute classification.
+/// `browser_status` keys every non-pane label in `state.browsers` to its
+/// HwndStatus. Includes pool-prefixed labels AND regular top-level windows
+/// (e.g. `main`, `window-N`). Pane labels (`browser-pane-*`) are NOT in this
+/// map — they drain via a separate cascade and would otherwise pollute
+/// classification.
 ///
-/// `all_browser_labels` is `state.list_browsers()` keyed; used only
-/// for `live_user_count`.
+/// `user_labels` is the set of labels whose reducer kind is
+/// `TopLevel { is_pool: false }` — the authoritative live-user
+/// classification, used to split hostless entries into
+/// unconditional-repair vs drain-gated buckets.
+///
+/// Live entries produce no action at all: promoted windows (in shadow) and
+/// freshly-promoted windows (in neither shadow nor pool sets) are live user
+/// windows the reducer already counts; live pool inventory is Stage 1's job
+/// (`ui_tasks::begin_drain_and_cascade` closes `window-pool-*` /
+/// `floating-pool-*` when the drain verdict fires) — the pre-Phase-1
+/// `drainable` close list duplicated that mechanism and is gone.
 pub(crate) fn plan_reconcile(
     browser_status: &HashMap<String, HwndStatus>,
-    all_browser_labels: &[String],
+    user_labels: &HashSet<String>,
     shadow_keys: &HashSet<String>,
     pool_queue: &HashSet<String>,
     unpromoted_pool: &HashSet<String>,
     pending_creation_in_flight: bool,
 ) -> ReconcilePlan {
-    // Live user count = labels in shadow, not pane-prefixed. Zombies
-    // are absent from shadow (`apply_hwnd_destroyed` prunes
-    // `state.windows`), so no subtraction needed.
-    let live_user_count = all_browser_labels
-        .iter()
-        .filter(|label| {
-            shadow_keys.contains(label.as_str()) && !label.starts_with("browser-pane-")
-        })
-        .count();
-
-    // Classify each non-pane top-level browser. Pool-prefixed and
-    // regular top-levels share the same shape:
-    //   Hostless        → UnregisterBrowser, but ONLY when drain
-    //                     fires (otherwise we'd bypass the pool
-    //                     reducer's per-destroy bookkeeping).
-    //   Dead            → CloseBrowser. on_before_close handles the
-    //                     reducer cleanup.
-    //   Live + shadow   → promoted user window, leave alone.
-    //   Live + pool.queue / pool.unpromoted → drainable pool slot.
-    //   Live + (none of above) → freshly opened/promoted, blocks
-    //                     drain (Race B).
-    let mut dead_zombies: Vec<String> = Vec::new();
-    let mut hostless: Vec<String> = Vec::new();
-    let mut drainable: Vec<String> = Vec::new();
+    let mut zombie_closes: Vec<String> = Vec::new();
+    let mut hostless_user: Vec<String> = Vec::new();
+    let mut hostless_pool: Vec<String> = Vec::new();
     let mut freshly_promoted: Vec<String> = Vec::new();
     for (label, status) in browser_status {
         match status {
-            HwndStatus::Dead => dead_zombies.push(label.clone()),
-            HwndStatus::Hostless => hostless.push(label.clone()),
+            // Dead zombies close regardless of any verdict —
+            // `close_browser(force=1)` drives the host's own cleanup chain
+            // (on_before_close → UnregisterBrowser → request_drain
+            // consumption). BUT if a window creation is pending, that chain
+            // can race the creation: when the zombie is the last live-counted
+            // browser, its close-time `request_drain` fires and Stage-2 quit
+            // could land before the new window registers. Defer zombie reap
+            // until the creation completes; the next `HostShouldQuit`
+            // catches it. (Pre-Phase-1 behavior, preserved.)
+            HwndStatus::Dead => {
+                if !pending_creation_in_flight {
+                    zombie_closes.push(label.clone());
+                }
+            }
+            HwndStatus::Hostless => {
+                if user_labels.contains(label.as_str()) {
+                    hostless_user.push(label.clone());
+                } else {
+                    hostless_pool.push(label.clone());
+                }
+            }
             HwndStatus::Live => {
                 if shadow_keys.contains(label.as_str()) {
-                    // promoted user window
+                    // promoted user window — reducer counts it; leave alone
                 } else if pool_queue.contains(label) || unpromoted_pool.contains(label) {
-                    drainable.push(label.clone());
+                    // warm/spawning pool inventory — Stage 1 closes it if a
+                    // drain fires; no per-entry action here
                 } else {
+                    // Race-B window (promotion echo in flight). Telemetry
+                    // only — the reducer already counts it live.
                     freshly_promoted.push(label.clone());
                 }
             }
         }
     }
 
-    // `pending_creation_in_flight` blocks drain too: a stale
-    // `HostShouldQuit` racing with `open_window_with_kind` (which
-    // enqueues `PendingWindowCreation` BEFORE `post_create_window`
-    // registers the browser) would otherwise close the warm pool
-    // and drive Stage-2 quit before the new window is registered,
-    // dropping it.
-    let safe_to_drain = live_user_count == 0
-        && freshly_promoted.is_empty()
-        && !pending_creation_in_flight;
-
     // Sort for determinism (HashMap iteration order is unspecified).
-    dead_zombies.sort();
-    hostless.sort();
-    drainable.sort();
+    zombie_closes.sort();
+    hostless_user.sort();
+    hostless_pool.sort();
     freshly_promoted.sort();
 
-    let mut closes: Vec<(String, CloseAction)> = Vec::new();
-    // Dead zombies normally close regardless of drain state —
-    // `close_browser(force=1)` triggers the host's own
-    // `on_before_close` cleanup chain. BUT if a window creation is
-    // pending, that cleanup chain itself can race the pending
-    // creation: when the zombie is the last registered browser,
-    // `on_before_close` sees `user_browser_count == 0`, dispatches
-    // `BeginDrain`, and Stage-2 `quit_message_loop` fires before
-    // the new window registers. Defer zombie reap until the
-    // creation completes; the next `HostShouldQuit` will catch it.
-    if !pending_creation_in_flight {
-        for label in dead_zombies {
-            closes.push((label, CloseAction::CloseBrowser));
-        }
-    }
-    if safe_to_drain {
-        // Hostless gets UnregisterBrowser ONLY in drain mode.
-        // Outside drain, dispatching UnregisterBrowser bypasses
-        // `on_pool_window_destroyed` cleanup, leaving pool reducer
-        // state with a stale label that's no longer in `browsers`.
-        // The hostless state is already a CEF lifecycle anomaly;
-        // letting it persist until the next drain is preferable to
-        // creating per-handler-state drift.
-        for label in hostless {
-            closes.push((label, CloseAction::UnregisterBrowser));
-        }
-        for label in drainable {
-            closes.push((label, CloseAction::CloseBrowser));
-        }
-    }
-
     ReconcilePlan {
-        closes,
+        zombie_closes,
+        hostless_user,
+        hostless_pool,
         freshly_promoted,
-        begin_drain: safe_to_drain,
     }
 }
 
@@ -225,21 +203,35 @@ wrap_task! {
     }
 }
 
-/// UI-thread body. CEF Browser methods are safe here.
+/// UI-thread body: **sanitize → decide → execute** (sanitize-then-decide
+/// spec §2.1). CEF Browser methods are safe here.
 ///
-/// Re-snapshot browsers (state may have advanced since the IPC
-/// thread classified candidates — labels that have actually closed
-/// are no longer in the map; new candidates may have appeared, but
-/// we'll catch them on the next `HostShouldQuit`). For each
-/// candidate that's still present, probe its HWND: live → skip
-/// (Race B, freshly promoted), dead → close.
+/// 1. Probe every non-pane top-level browser's HWND (re-snapshotted on the
+///    UI thread — state may have advanced since `HostShouldQuit` fired).
+/// 2. Sanitize the projection: unregister hostless live-user entries
+///    (unconditional repair — nothing else will ever clean them).
+/// 3. Decide: dispatch `ReconcileQuit`; the reducer's `request_drain` is THE
+///    verdict. A stale `HostShouldQuit` racing a live session gets `None`
+///    here (live windows are counted; `QuitState` never flips; pool refill
+///    keeps working) — the same protection the old shadow-count provided,
+///    now from the single authority.
+/// 4. Execute: on `Some`, run the shared Stage-1 executor
+///    (`ui_tasks::begin_drain_and_cascade` — flips `QuitState`, closes pool
+///    inventory), then close dead zombies (their `on_before_close` chain
+///    self-sanitizes and, per PR #1993, consumes its own `request_drain` —
+///    covering the user-kind-zombie case where the poke's verdict was still
+///    `None` because the zombie was counted live), then the drain-gated
+///    hostless-pool cleanup and the documented direct `quit_message_loop`
+///    Stage-2 executions.
 ///
-/// Drain mode is set ONLY if no live user browser remains *after*
-/// removing the zombies we're about to close. A stale
-/// `HostShouldQuit` racing with a live user session must NOT flip
-/// `quit_state` to `Draining`, because there's no transition back
-/// to `Running` and `spawn_pool_window` then refuses to refill the
-/// pool — silently degrading the live session.
+/// Platform note: `classify_hwnd` hard-codes `Live` on macOS/Linux (#1569),
+/// so the zombie/hostless buckets — and every Windows-looking branch below —
+/// are empty there; macOS/Linux quit flows run entirely through
+/// `on_before_close`'s own consumption + Stage-2 gate. The residual mixed
+/// case on Windows (user-kind zombies alongside hostless entries, where
+/// Stage 2's `browser_list` gate can never fire) is bounded by the WRR quit
+/// watchdog (SPEC_WRR_QUIT_FALSE_POSITIVE Step D), which quits on the OS
+/// signal with a loud desync log.
 fn ui_thread_reconcile(state: &Arc<AppState>) {
     let browser_pairs = state.list_browsers();
     let shadow_keys: HashSet<String> = state
@@ -275,37 +267,34 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         .iter()
         .map(|(label, browser)| (label.clone(), classify_hwnd(browser)))
         .collect();
+    // Authoritative live-user classification (BrowserKind, not label prefix)
+    // — splits hostless entries into unconditional-repair vs drain-gated.
+    let user_labels: HashSet<String> = label_to_browser
+        .keys()
+        .filter(|l| state.is_live_top_level_browser(l))
+        .cloned()
+        .collect();
 
-    let all_labels: Vec<String> = browser_pairs.iter().map(|(l, _)| l.clone()).collect();
-    // Only USER-window pending creates block drain. Pool spawns
-    // (`window-pool-*` via `spawn_pool_window`) and pane creates
-    // (`browser-pane-*` via the pane creation path) also enqueue
-    // `PendingWindowCreation`, but they're excluded from user-window
-    // counts everywhere else (live_user_count, Stage-2 quit gate)
-    // and gating drain on them would suppress reconciliation
-    // indefinitely with no later `HostShouldQuit` retry.
+    // Only USER-window pending creates defer the zombie reaps. Pool spawns
+    // (`window-pool-*`), pane creates (`browser-pane-*`), and floating panes
+    // (`floating-*`, which can leak a pending entry on failure — codex P1 on
+    // PR #811) are background; the DRAIN decision itself already accounts for
+    // pending user creations inside `reconcile_quit` (its
+    // `user_creation_in_flight` read mirrors this exact exclusion — see
+    // `reducer/quit.rs::is_background_pending_creation_label`).
     let pending_creation_in_flight = state
         .host_state
         .lock()
         .pending_window_creations
         .iter()
         .any(|p| {
-            // Exclusions:
-            // - `window-pool-` / `browser-pane-` per the comment above.
-            // - `floating-` because floating-pane creation (#810) can
-            //   leak a pending entry on failure paths (e.g. CEF
-            //   `browser_host_create_browser` returning 0); without
-            //   this exclusion, one failed creation would permanently
-            //   block orphan reconciliation. Floating panes manage
-            //   their own lifecycle and don't participate in orphan
-            //   reconciliation today. Codex P1 on PR #811.
             !p.label.starts_with("window-pool-")
                 && !p.label.starts_with("browser-pane-")
                 && !p.label.starts_with("floating-")
         });
     let plan = plan_reconcile(
         &browser_status,
-        &all_labels,
+        &user_labels,
         &shadow_keys,
         &pool_queue,
         &unpromoted_pool,
@@ -321,87 +310,113 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
         );
     }
 
-    if plan.closes.is_empty() {
-        if plan.begin_drain {
-            // Drain requested AND nothing for us to do (state.browsers
-            // is empty). Stage-2 quit may be blocked by stale
-            // `client::browser_list` entries we can't see from here.
-            // Drive quit ourselves. The pending-creation gate is
-            // already enforced by `plan.begin_drain`.
-            tracing::warn!(
-                target: "wrr",
-                "[orphan-reconcile] nothing to close but drain requested — driving quit_message_loop"
-            );
-            quit_message_loop();
-        } else {
-            tracing::info!(
-                target: "wrr",
-                "[orphan-reconcile] nothing to close, drain not requested — host has live work or pending creation"
-            );
-        }
-        return;
+    // ── Sanitize: hostless live-user entries are unconditionally
+    // unregistered. This is pure projection repair — the browser is gone at
+    // the CEF level; only the stale registration remains, and it is exactly
+    // what blocks `reconcile_quit` from ever draining. (Pre-Phase-1 this
+    // cleanup was drain-gated, which was circular once the drain decision
+    // itself read the registration.)
+    let mut any_hostless = false;
+    for (i, label) in plan.hostless_user.iter().enumerate() {
+        drive_unregister(state, i, label);
+        any_hostless = true;
     }
 
-    if plan.begin_drain {
-        state.host_dispatch(crate::reducer::HostCommand::BeginDrain {
-            reason: crate::state::QuitReason::LastWindowClosed,
-        });
+    // ── Decide: the reducer is the single authority. `ReconcileQuit` is a
+    // pure poke — the verdict reflects the sanitizes above (dispatched on
+    // this same thread, so they've landed).
+    let verdict = state
+        .host_dispatch(crate::reducer::HostCommand::ReconcileQuit)
+        .request_drain;
+
+    // ── Execute: Stage 1 FIRST (flips QuitState to Draining, suppressing
+    // pool refill, before any close below can trigger
+    // `on_pool_window_destroyed`), mirroring the pre-Phase-1
+    // BeginDrain-before-closes ordering.
+    if let Some(reason) = verdict.clone() {
+        crate::ui_tasks::begin_drain_and_cascade(state, reason);
     } else {
         tracing::info!(
             target: "wrr",
-            "[orphan-reconcile] skipping BeginDrain — live user windows or freshly-promoted candidates remain"
+            "[orphan-reconcile] no drain verdict — live user windows, pending user creation, or already draining"
         );
     }
 
-    tracing::warn!(
-        target: "wrr",
-        "[orphan-reconcile] executing {} close action(s): {:?}",
-        plan.closes.len(),
-        plan.closes
-    );
-
-    let mut any_hostless = false;
-    for (i, (label, action)) in plan.closes.iter().enumerate() {
-        match action {
-            CloseAction::CloseBrowser => {
-                if let Some(browser) = label_to_browser.get(label).cloned() {
-                    let late_hostless =
-                        drive_close_browser(state, i, label, browser, plan.begin_drain);
-                    if late_hostless {
-                        any_hostless = true;
-                    }
-                } else {
-                    tracing::warn!(
-                        target: "wrr",
-                        "[orphan-reconcile][{}] label={} vanished before close",
-                        i, label
-                    );
-                }
-            }
-            CloseAction::UnregisterBrowser => {
-                drive_unregister(state, i, label);
+    // ── Mechanism: dead zombies close via CEF's own cleanup chain. For
+    // user-kind zombies the poke above answered `None` (they were still
+    // counted live); their `on_before_close` unregisters them and consumes
+    // its own `request_drain` (PR #1993), so the drain still fires — decided
+    // by the same authority, one event later.
+    for (i, label) in plan.zombie_closes.iter().enumerate() {
+        if let Some(browser) = label_to_browser.get(label).cloned() {
+            let late_hostless = drive_close_browser(
+                state,
+                i,
+                label,
+                browser,
+                user_labels.contains(label.as_str()),
+                verdict.is_some(),
+            );
+            if late_hostless {
                 any_hostless = true;
             }
+        } else {
+            tracing::warn!(
+                target: "wrr",
+                "[orphan-reconcile][{}] label={} vanished before close",
+                i, label
+            );
         }
     }
 
-    // Hostless orphans don't get `on_before_close` callbacks. The
-    // host's own Stage-2 quit gates on `client::browser_list.is_empty()`
-    // — but UnregisterBrowser only touches the reducer's `browsers`
-    // map, not CefClient's internal list, so a stale Hostless entry
-    // there permanently blocks Stage 2.
-    //
-    // Drive `quit_message_loop` ourselves whenever drain ran AND any
-    // Hostless cleanup happened. Closables we dispatched alongside
-    // are mid-close at this point; their `on_before_close` may not
-    // run before the loop terminates, but we're shutting down anyway
-    // and OS process exit reclaims their resources. Gated on
-    // `begin_drain` so a stale `HostShouldQuit` racing with a live
-    // session can't terminate it.
-    if any_hostless && plan.begin_drain {
+    if verdict.is_none() {
+        return;
+    }
+
+    // ── Drain-gated cleanup: hostless pool-kind entries. Outside drain,
+    // unregistering them bypasses `on_pool_window_destroyed` bookkeeping and
+    // creates pool-reducer drift; the hostless state is already a CEF
+    // lifecycle anomaly, so letting it persist until a drain-capable
+    // reconcile is preferable (pre-Phase-1 rationale, unchanged).
+    for (i, label) in plan.hostless_pool.iter().enumerate() {
+        drive_unregister(state, i, label);
+        any_hostless = true;
+    }
+
+    // Hostless orphans don't get `on_before_close` callbacks. The host's own
+    // Stage-2 quit gates on `client::browser_list.is_empty()` — but
+    // UnregisterBrowser only touches the reducer's `browsers` map, not
+    // CefClient's internal list, so a stale hostless entry there permanently
+    // blocks Stage 2. Drive `quit_message_loop` ourselves whenever the drain
+    // verdict fired AND any hostless cleanup happened. Zombie closes
+    // dispatched alongside are mid-close at this point; their
+    // `on_before_close` may not run before the loop terminates, but we're
+    // shutting down anyway and OS process exit reclaims their resources.
+    // This (and the nothing-will-pump case below) are the two documented
+    // direct Stage-2 executions of a reducer-made decision — executor work,
+    // not a competing authority (spec §6's grep-gate allowlist).
+    if any_hostless {
         tracing::warn!(
             target: "wrr",
             "[orphan-reconcile] hostless orphans unregistered in drain mode — driving quit_message_loop"
+        );
+        quit_message_loop();
+        return;
+    }
+
+    // Nothing-will-pump case: drain fired but there are no zombie closes in
+    // flight and Stage 1 found no pool inventory to close — no CEF lifecycle
+    // event will ever advance Stage 2 (stale `client::browser_list` entries
+    // we can't see from here may even be blocking it). Drive quit directly.
+    let pool_inventory = state
+        .list_browsers()
+        .iter()
+        .filter(|(l, _)| l.starts_with("window-pool-") || l.starts_with("floating-pool-"))
+        .count();
+    if plan.zombie_closes.is_empty() && pool_inventory == 0 {
+        tracing::warn!(
+            target: "wrr",
+            "[orphan-reconcile] drain verdict with nothing to close and no pool inventory — driving quit_message_loop"
         );
         quit_message_loop();
     }
@@ -411,7 +426,7 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
 /// from the UI thread. Used by the orchestrator to build the input
 /// to `plan_reconcile`.
 fn classify_hwnd(browser: &Browser) -> HwndStatus {
-    let mut b = browser.clone();
+    let b = browser.clone();
     let Some(host) = b.host() else { return HwndStatus::Hostless };
     #[cfg(target_os = "windows")]
     unsafe {
@@ -439,20 +454,21 @@ fn classify_hwnd(browser: &Browser) -> HwndStatus {
     }
 }
 
-/// Execute a `CloseBrowser` action. Already on UI thread.
+/// Execute a zombie close. Already on UI thread.
 /// `host.close_browser(force=1)` works regardless of HWND state and
 /// triggers the host's `on_before_close` callback chain (which
-/// dispatches `UnregisterBrowser` and drives Stage-2 quit naturally).
-/// Returns `true` iff the browser's host had vanished by execute
-/// time and the orchestrator should treat this as a late hostless
-/// transition (relevant for the Stage-2 quit drive — same reasoning
-/// as the planner's Hostless bucket).
+/// dispatches `UnregisterBrowser`, consumes its own `request_drain`,
+/// and drives Stage-2 quit naturally). Returns `true` iff the browser's
+/// host had vanished by execute time AND this late hostless transition
+/// was repaired here (relevant for the caller's Stage-2 quit drive —
+/// same reasoning as the planner's hostless buckets).
 fn drive_close_browser(
     state: &Arc<AppState>,
     idx: usize,
     label: &str,
-    mut browser: Browser,
-    drain_mode: bool,
+    browser: Browser,
+    is_user: bool,
+    drain_active: bool,
 ) -> bool {
     if let Some(host) = browser.host() {
         host.close_browser(1);
@@ -463,14 +479,13 @@ fn drive_close_browser(
         );
         false
     } else {
-        // Race: HWND status was Live/Dead at planning, but
-        // BrowserHost vanished before we got here. Mirror the
-        // planner's Hostless path — but only fall through to
-        // UnregisterBrowser if drain is active (same gating as the
-        // Hostless bucket — outside drain, dispatching
-        // UnregisterBrowser bypasses on_pool_window_destroyed
-        // bookkeeping and creates pool-reducer drift).
-        if drain_mode {
+        // Race: HWND status was Dead at planning, but BrowserHost vanished
+        // before we got here. Mirror the planner's hostless split: live-user
+        // entries are unconditional projection repairs; pool-kind entries
+        // are repaired only under an active drain (outside drain,
+        // UnregisterBrowser bypasses on_pool_window_destroyed bookkeeping
+        // and creates pool-reducer drift).
+        if is_user || drain_active {
             tracing::warn!(
                 target: "wrr",
                 "[orphan-reconcile][{}] browser host=None at execute time label={} — late hostless transition; dispatching UnregisterBrowser",
@@ -483,7 +498,7 @@ fn drive_close_browser(
         } else {
             tracing::warn!(
                 target: "wrr",
-                "[orphan-reconcile][{}] browser host=None at execute time label={} — late hostless transition; deferring UnregisterBrowser (drain not active)",
+                "[orphan-reconcile][{}] browser host=None at execute time label={} — late hostless transition; deferring UnregisterBrowser (pool-kind, drain not active)",
                 idx, label
             );
             false
@@ -491,10 +506,10 @@ fn drive_close_browser(
     }
 }
 
-/// Execute an `UnregisterBrowser` action. Hostless candidates can't
+/// Execute an `UnregisterBrowser` repair. Hostless candidates can't
 /// be `close_browser`'d (no `BrowserHost` to call it on), so we
 /// clean `state.browsers` ourselves. Caller drives `quit_message_loop`
-/// after the loop if any unregister fired.
+/// after the loop if any unregister fired under an active drain.
 fn drive_unregister(state: &Arc<AppState>, idx: usize, label: &str) {
     tracing::warn!(
         target: "wrr",
@@ -518,227 +533,142 @@ mod tests {
         items.iter().map(|s| s.to_string()).collect()
     }
 
-    // ── plan_reconcile integration tests ──────────────────────────
+    // ── plan_reconcile classification tests ───────────────────────
     //
-    // Cover the state cross-product the orchestrator must handle:
+    // Phase 1 (sanitize-then-decide): the planner classifies SANITIZE work
+    // only — the drain decision moved to `reconcile_quit` (see the reducer
+    // truth-table tests in `reducer/tests.rs`, which pin arming, live-count,
+    // pending-creation, and monotonicity behavior). Axes covered here:
     //
-    //   axes: HwndStatus (Live / Dead / Hostless),
-    //         in shadow_window_meta (yes / no),
-    //         in pool.queue (yes / no),
-    //         label prefix (window-pool-* / browser-pane-* / other),
-    //         and the resulting (live_user_count, freshly_promoted)
-    //         derivation that drives `safe_to_drain`.
-    //
-    // Each test names the spec scenario (Race A/B/C/D) it exercises.
+    //   HwndStatus (Live / Dead / Hostless) ×
+    //   reducer user-kind (in user_labels / not) ×
+    //   shadow membership × pool-set membership ×
+    //   pending user creation (defers zombie reaps).
 
     fn map_of(items: &[(&str, HwndStatus)]) -> HashMap<String, HwndStatus> {
         items.iter().map(|(s, st)| (s.to_string(), *st)).collect()
     }
 
     #[test]
-    fn plan_no_browsers_is_empty_drain_true() {
+    fn plan_no_browsers_is_empty() {
         let plan = plan_reconcile(
             &map_of(&[]),
-            &vec_of(&[]),
+            &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert!(plan.closes.is_empty());
-        assert!(plan.freshly_promoted.is_empty());
-        assert!(plan.begin_drain);
+        assert_eq!(plan, ReconcilePlan::default());
     }
 
     #[test]
-    fn plan_single_dead_zombie_drains_and_closes() {
+    fn plan_single_dead_zombie_closes() {
         let label = "window-pool-zombie";
         let plan = plan_reconcile(
             &map_of(&[(label, HwndStatus::Dead)]),
-            &vec_of(&[label]),
+            &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert_eq!(plan.closes, vec![(label.to_string(), CloseAction::CloseBrowser)]);
+        assert_eq!(plan.zombie_closes, vec_of(&[label]));
+        assert!(plan.hostless_user.is_empty());
+        assert!(plan.hostless_pool.is_empty());
         assert!(plan.freshly_promoted.is_empty());
-        assert!(plan.begin_drain);
     }
 
     #[test]
-    fn plan_hostless_zombie_unregisters_and_drains() {
+    fn plan_hostless_pool_kind_is_drain_gated() {
+        // A hostless entry NOT in user_labels (pool-kind) goes to the
+        // drain-gated bucket — outside drain, unregistering it bypasses
+        // on_pool_window_destroyed bookkeeping.
         let label = "window-pool-hostless";
         let plan = plan_reconcile(
             &map_of(&[(label, HwndStatus::Hostless)]),
-            &vec_of(&[label]),
+            &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert_eq!(
-            plan.closes,
-            vec![(label.to_string(), CloseAction::UnregisterBrowser)]
-        );
-        assert!(plan.begin_drain);
+        assert_eq!(plan.hostless_pool, vec_of(&[label]));
+        assert!(plan.hostless_user.is_empty());
     }
 
     #[test]
-    fn plan_freshly_promoted_blocks_drain_and_skips_close() {
-        // Race B: live HWND, NOT in pool.queue, NOT in unpromoted,
-        // NOT in shadow. Pre-echo-promotion. Must NOT be closed AND
-        // must block drain.
+    fn plan_hostless_user_kind_is_unconditional_repair() {
+        // A hostless entry whose reducer kind is a live user window is the
+        // stale projection that blocks reconcile_quit forever — it goes to
+        // the unconditional-repair bucket regardless of anything else.
+        let label = "main";
+        let plan = plan_reconcile(
+            &map_of(&[(label, HwndStatus::Hostless)]),
+            &set_of(&[label]),
+            &set_of(&[]),
+            &set_of(&[]),
+            &set_of(&[]),
+            false,
+        );
+        assert_eq!(plan.hostless_user, vec_of(&[label]));
+        assert!(plan.hostless_pool.is_empty());
+    }
+
+    #[test]
+    fn plan_freshly_promoted_is_diagnostic_only() {
+        // Race B: live HWND, NOT in pool sets, NOT in shadow —
+        // pre-echo-promotion. Diagnostic bucket only; it must not be closed.
+        // Drain-blocking is the reducer's job now: promotion flipped its
+        // kind to is_pool:false at dispatch time (reducer/pool.rs), so
+        // count_live_user_windows counts it and reconcile_quit answers None.
         let label = "window-pool-just-promoted";
         let plan = plan_reconcile(
             &map_of(&[(label, HwndStatus::Live)]),
-            &vec_of(&[label]),
+            &set_of(&[label]), // reducer already counts it as user-kind
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert!(plan.closes.is_empty(), "freshly promoted must not be closed: {:?}", plan.closes);
-        assert_eq!(plan.freshly_promoted, vec![label.to_string()]);
-        assert!(!plan.begin_drain);
+        assert_eq!(plan.freshly_promoted, vec_of(&[label]));
+        assert!(plan.zombie_closes.is_empty());
+        assert!(plan.hostless_user.is_empty());
+        assert!(plan.hostless_pool.is_empty());
     }
 
     #[test]
-    fn plan_ready_warm_pool_drains() {
-        // Race D: live HWND IN pool.queue. Common shutdown path.
-        let label = "window-pool-ready";
-        let plan = plan_reconcile(
-            &map_of(&[(label, HwndStatus::Live)]),
-            &vec_of(&[label]),
-            &set_of(&[]),
-            &set_of(&[label]),
-            &set_of(&[]),
-            false,
-        );
-        assert_eq!(plan.closes, vec![(label.to_string(), CloseAction::CloseBrowser)]);
-        assert!(plan.freshly_promoted.is_empty());
-        assert!(plan.begin_drain);
-    }
-
-    #[test]
-    fn plan_unpromoted_pool_drains() {
-        // Spawning pool slot — live HWND, IN unpromoted_pool.
-        // Drain branch must close it so Stage 2 sees empty browser_list.
-        let label = "window-pool-spawning";
-        let plan = plan_reconcile(
-            &map_of(&[(label, HwndStatus::Live)]),
-            &vec_of(&[label]),
-            &set_of(&[]),
-            &set_of(&[]),
-            &set_of(&[label]),
-            false,
-        );
-        assert_eq!(plan.closes, vec![(label.to_string(), CloseAction::CloseBrowser)]);
-        assert!(plan.begin_drain);
-    }
-
-    #[test]
-    fn plan_live_user_window_blocks_drain() {
-        let user_label = "window-pool-promoted-user";
-        let zombie_label = "window-pool-zombie";
-        let plan = plan_reconcile(
-            &map_of(&[
-                (user_label, HwndStatus::Live),
-                (zombie_label, HwndStatus::Dead),
-            ]),
-            &vec_of(&[user_label, zombie_label]),
-            &set_of(&[user_label]),
-            &set_of(&[]),
-            &set_of(&[]),
-            false,
-        );
-        assert_eq!(
-            plan.closes,
-            vec![(zombie_label.to_string(), CloseAction::CloseBrowser)]
-        );
-        assert!(!plan.begin_drain);
-    }
-
-    #[test]
-    fn plan_zombie_plus_freshly_promoted_skips_drain() {
-        // Zombie always closes; freshly_promoted blocks drain.
-        let zombie = "window-pool-zombie";
-        let promoted = "window-pool-promoted";
-        let plan = plan_reconcile(
-            &map_of(&[
-                (zombie, HwndStatus::Dead),
-                (promoted, HwndStatus::Live),
-            ]),
-            &vec_of(&[zombie, promoted]),
-            &set_of(&[]),
-            &set_of(&[]),
-            &set_of(&[]),
-            false,
-        );
-        assert_eq!(
-            plan.closes,
-            vec![(zombie.to_string(), CloseAction::CloseBrowser)]
-        );
-        assert_eq!(plan.freshly_promoted, vec![promoted.to_string()]);
-        assert!(!plan.begin_drain);
-    }
-
-    #[test]
-    fn plan_zombie_plus_ready_pool_drains_both() {
-        let zombie = "window-pool-zombie";
+    fn plan_live_pool_inventory_produces_no_action() {
+        // Warm (queue) and spawning (unpromoted) pool slots are Stage 1's
+        // job when a drain fires — the planner no longer duplicates that
+        // mechanism with per-entry closes.
         let ready = "window-pool-ready";
+        let spawning = "window-pool-spawning";
         let plan = plan_reconcile(
-            &map_of(&[
-                (zombie, HwndStatus::Dead),
-                (ready, HwndStatus::Live),
-            ]),
-            &vec_of(&[zombie, ready]),
+            &map_of(&[(ready, HwndStatus::Live), (spawning, HwndStatus::Live)]),
+            &set_of(&[]),
             &set_of(&[]),
             &set_of(&[ready]),
-            &set_of(&[]),
+            &set_of(&[spawning]),
             false,
         );
-        let close_labels: Vec<&str> = plan.closes.iter().map(|(l, _)| l.as_str()).collect();
-        assert!(close_labels.contains(&zombie));
-        assert!(close_labels.contains(&ready));
-        assert_eq!(plan.closes.len(), 2);
-        assert!(plan.begin_drain);
+        assert_eq!(plan, ReconcilePlan::default());
     }
 
     #[test]
-    fn plan_promoted_pool_window_in_shadow_is_left_alone() {
+    fn plan_promoted_window_in_shadow_is_left_alone() {
         // A `window-pool-*` label that's in shadow is a promoted user
-        // window (kept its prefix). Live HWND. Must NOT be closed
-        // and DOES count toward live_user_count.
+        // window (kept its prefix). Live HWND. No action, no diagnostic.
         let promoted = "window-pool-active";
         let plan = plan_reconcile(
             &map_of(&[(promoted, HwndStatus::Live)]),
-            &vec_of(&[promoted]),
+            &set_of(&[promoted]),
             &set_of(&[promoted]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert!(plan.closes.is_empty());
-        assert!(plan.freshly_promoted.is_empty());
-        assert!(!plan.begin_drain, "promoted pool window must keep host alive");
-    }
-
-    #[test]
-    fn plan_browser_pane_labels_dont_count_toward_live_user() {
-        let pane = "browser-pane-foo";
-        let zombie = "window-pool-zombie";
-        let plan = plan_reconcile(
-            &map_of(&[(zombie, HwndStatus::Dead)]),
-            &vec_of(&[pane, zombie]),
-            &set_of(&[pane]),
-            &set_of(&[]),
-            &set_of(&[]),
-            false,
-        );
-        assert!(plan.begin_drain);
-        let close_labels: Vec<&str> = plan.closes.iter().map(|(l, _)| l.as_str()).collect();
-        assert!(close_labels.contains(&zombie));
+        assert_eq!(plan, ReconcilePlan::default());
     }
 
     #[test]
@@ -747,236 +677,140 @@ mod tests {
         let z2 = "window-pool-b4e20337180247bdbd7408ddd7754b78";
         let plan = plan_reconcile(
             &map_of(&[(z1, HwndStatus::Dead), (z2, HwndStatus::Dead)]),
-            &vec_of(&[z1, z2]),
+            &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert_eq!(plan.closes.len(), 2);
-        for (label, action) in &plan.closes {
-            assert!(label == z1 || label == z2);
-            assert_eq!(*action, CloseAction::CloseBrowser);
-        }
-        assert!(plan.begin_drain);
+        assert_eq!(plan.zombie_closes, vec_of(&[z1, z2]));
     }
 
     #[test]
-    fn plan_hostless_unpromoted_pool_unregisters_not_closes() {
-        // Hostless takes precedence over pool-state classification:
-        // an unpromoted-pool slot that lost its BrowserHost still
-        // needs UnregisterBrowser, not CloseBrowser.
+    fn plan_hostless_takes_precedence_over_pool_membership() {
+        // Hostless takes precedence over pool-state classification: an
+        // unpromoted-pool slot that lost its BrowserHost needs the
+        // UnregisterBrowser repair (drain-gated bucket), not a close.
         let label = "window-pool-hostless-unpromoted";
         let plan = plan_reconcile(
             &map_of(&[(label, HwndStatus::Hostless)]),
-            &vec_of(&[label]),
+            &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[label]),
             false,
         );
-        assert_eq!(
-            plan.closes,
-            vec![(label.to_string(), CloseAction::UnregisterBrowser)]
-        );
-        assert!(plan.begin_drain);
-    }
-
-    #[test]
-    fn plan_mixed_full_state_space() {
-        // Composite touching every bucket: zombie + hostless +
-        // unpromoted pool + ready pool + freshly_promoted + promoted
-        // user window + pane.
-        let zombie = "window-pool-z";
-        let hostless = "window-pool-h";
-        let unpromoted = "window-pool-u";
-        let ready = "window-pool-r";
-        let fresh = "window-pool-f";
-        let promoted = "window-pool-p";
-        let pane = "browser-pane-x";
-        let plan = plan_reconcile(
-            &map_of(&[
-                (zombie, HwndStatus::Dead),
-                (hostless, HwndStatus::Hostless),
-                (unpromoted, HwndStatus::Live),
-                (ready, HwndStatus::Live),
-                (fresh, HwndStatus::Live),
-                (promoted, HwndStatus::Live),
-                // pane not in pool_browser_status — it's not pool-prefixed
-            ]),
-            &vec_of(&[zombie, hostless, unpromoted, ready, fresh, promoted, pane]),
-            &set_of(&[promoted]),
-            &set_of(&[ready]),
-            &set_of(&[unpromoted]),
-            false,
-        );
-        // freshly_promoted blocks drain → only Dead zombies close.
-        // Hostless is gated on safe_to_drain (outside drain,
-        // dispatching UnregisterBrowser bypasses pool-reducer
-        // bookkeeping; it waits for the next reconcile that can
-        // drain).
-        assert_eq!(plan.freshly_promoted, vec![fresh.to_string()]);
-        assert!(!plan.begin_drain);
-        let actions: HashMap<String, CloseAction> = plan
-            .closes
-            .iter()
-            .map(|(l, a)| (l.clone(), a.clone()))
-            .collect();
-        assert_eq!(actions.get(zombie), Some(&CloseAction::CloseBrowser));
-        assert!(!actions.contains_key(hostless), "hostless waits for drain mode");
-        assert!(!actions.contains_key(unpromoted), "unpromoted spared when drain blocked");
-        assert!(!actions.contains_key(ready), "ready spared when drain blocked");
-        assert!(!actions.contains_key(fresh), "freshly_promoted never closes");
-        assert!(!actions.contains_key(promoted), "promoted user window never closes");
-        assert!(!actions.contains_key(pane), "pane never in plan");
+        assert_eq!(plan.hostless_pool, vec_of(&[label]));
+        assert!(plan.zombie_closes.is_empty());
     }
 
     #[test]
     fn plan_non_pool_zombie_closes_too() {
-        // A regular `main`/`window-X` top-level can crash. The
-        // launcher's apply_hwnd_destroyed emits HostShouldQuit; the
-        // reconciler must reap that zombie too, not just
-        // `window-pool-*` ones.
+        // A regular `main`/`window-X` top-level can crash. The launcher's
+        // apply_hwnd_destroyed emits HostShouldQuit; the planner must reap
+        // that zombie too, not just `window-pool-*` ones.
         let main = "main";
         let plan = plan_reconcile(
             &map_of(&[(main, HwndStatus::Dead)]),
-            &vec_of(&[main]),
+            &set_of(&[main]),
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert_eq!(plan.closes, vec![(main.to_string(), CloseAction::CloseBrowser)]);
-        assert!(plan.begin_drain);
+        assert_eq!(plan.zombie_closes, vec_of(&[main]));
     }
 
     #[test]
-    fn plan_hostless_skipped_when_drain_blocked() {
-        // Hostless cleanup outside drain mode bypasses
-        // on_pool_window_destroyed and creates pool-reducer drift.
-        // When a live user window is present, the hostless entry
-        // must NOT be unregistered — wait for the next reconcile
-        // that can drain.
-        let user = "main";
-        let hostless = "window-pool-hostless";
-        let plan = plan_reconcile(
-            &map_of(&[
-                (user, HwndStatus::Live),
-                (hostless, HwndStatus::Hostless),
-            ]),
-            &vec_of(&[user, hostless]),
-            &set_of(&[user]),
-            &set_of(&[]),
-            &set_of(&[]),
-            false,
-        );
-        assert!(!plan.begin_drain);
-        assert!(plan.closes.is_empty(), "hostless must not close while drain blocked: {:?}", plan.closes);
-    }
-
-    #[test]
-    fn plan_dead_zombie_closes_even_when_drain_blocked() {
-        // Counterpart to the test above: Dead zombies always close,
-        // because close_browser(force=1) drives the host's own
-        // cleanup chain (on_before_close → on_pool_window_destroyed →
-        // UnregisterBrowser). Drain state is irrelevant.
+    fn plan_zombie_closes_even_alongside_live_user_window() {
+        // Dead zombies always plan a close — close_browser(force=1) drives
+        // the host's own cleanup chain, whose request_drain consumption
+        // correctly answers None while the live window remains.
         let user = "main";
         let zombie = "window-pool-zombie";
         let plan = plan_reconcile(
-            &map_of(&[
-                (user, HwndStatus::Live),
-                (zombie, HwndStatus::Dead),
-            ]),
-            &vec_of(&[user, zombie]),
+            &map_of(&[(user, HwndStatus::Live), (zombie, HwndStatus::Dead)]),
+            &set_of(&[user]),
             &set_of(&[user]),
             &set_of(&[]),
             &set_of(&[]),
             false,
         );
-        assert!(!plan.begin_drain);
-        assert_eq!(
-            plan.closes,
-            vec![(zombie.to_string(), CloseAction::CloseBrowser)]
-        );
+        assert_eq!(plan.zombie_closes, vec_of(&[zombie]));
+        assert!(plan.freshly_promoted.is_empty());
     }
 
     #[test]
-    fn plan_mixed_hostless_and_closable_in_drain() {
-        // When a drain plan contains both Hostless AND CloseBrowser
-        // entries, the orchestrator must still drive
-        // quit_message_loop. The closables' on_before_close would
-        // normally satisfy Stage-2 quit, but the Hostless entries
-        // leave stale references in `client::browser_list`
-        // (UnregisterBrowser doesn't touch that), so Stage 2 never
-        // fires. The reconciler drives quit itself.
-        //
-        // Plan-level assertion: both actions are scheduled, drain
-        // fires. The quit_message_loop drive itself is exercised by
-        // the orchestrator and gated on `begin_drain && any_hostless`.
-        let dead = "window-pool-dead";
-        let hostless = "window-pool-hostless";
-        let plan = plan_reconcile(
-            &map_of(&[
-                (dead, HwndStatus::Dead),
-                (hostless, HwndStatus::Hostless),
-            ]),
-            &vec_of(&[dead, hostless]),
-            &set_of(&[]),
-            &set_of(&[]),
-            &set_of(&[]),
-            false,
-        );
-        assert!(plan.begin_drain);
-        let actions: HashMap<String, CloseAction> = plan
-            .closes
-            .iter()
-            .map(|(l, a)| (l.clone(), a.clone()))
-            .collect();
-        assert_eq!(actions.get(dead), Some(&CloseAction::CloseBrowser));
-        assert_eq!(actions.get(hostless), Some(&CloseAction::UnregisterBrowser));
-    }
-
-    #[test]
-    fn plan_pending_window_creation_blocks_drain() {
-        // A stale HostShouldQuit racing with `open_window_with_kind`
-        // can land in the gap between `PendingWindowCreation`
-        // enqueue and `post_create_window` registering the browser.
-        // In that gap the browser doesn't appear in any state, but
-        // a creation is in flight. Drain MUST be deferred — closing
-        // the warm pool here would let Stage-2 quit fire before the
-        // new browser registers, dropping it.
-        let ready = "window-pool-ready";
-        let plan = plan_reconcile(
-            &map_of(&[(ready, HwndStatus::Live)]),
-            &vec_of(&[ready]),
-            &set_of(&[]),
-            &set_of(&[ready]),
-            &set_of(&[]),
-            true, // pending creation in flight
-        );
-        assert!(!plan.begin_drain, "pending creation must block drain");
-        assert!(plan.closes.is_empty(), "ready warm pool must not close while creation pending: {:?}", plan.closes);
-    }
-
-    #[test]
-    fn plan_pending_creation_blocks_zombie_close() {
-        // Dead zombies normally close regardless of drain state, but
-        // when a creation is in flight, even the zombie's
-        // `on_before_close` cleanup chain can race the pending
-        // creation: if the zombie is the last browser, that chain
-        // dispatches `BeginDrain` and quit before the new window
-        // registers. Defer zombie reap until next `HostShouldQuit`.
+    fn plan_pending_creation_defers_zombie_close() {
+        // When a user creation is in flight, even the zombie's
+        // on_before_close cleanup chain can race the pending creation: if
+        // the zombie is the last live-counted browser, its close-time
+        // request_drain fires and Stage-2 quit could land before the new
+        // window registers. Defer zombie reap until the next
+        // HostShouldQuit. (The DRAIN verdict is separately protected inside
+        // reconcile_quit by user_creation_in_flight.)
         let zombie = "window-pool-zombie";
         let plan = plan_reconcile(
             &map_of(&[(zombie, HwndStatus::Dead)]),
-            &vec_of(&[zombie]),
+            &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             &set_of(&[]),
             true,
         );
-        assert!(!plan.begin_drain);
-        assert!(plan.closes.is_empty(), "zombie close must defer when creation pending: {:?}", plan.closes);
+        assert!(plan.zombie_closes.is_empty(), "zombie close must defer when creation pending: {:?}", plan.zombie_closes);
+    }
+
+    #[test]
+    fn plan_pending_creation_does_not_defer_hostless_repair() {
+        // Hostless repair is a pure reducer dispatch — it triggers no close
+        // chain, so it cannot race a pending creation the way zombie closes
+        // can. (The drain verdict itself is still deferred by
+        // reconcile_quit's user_creation_in_flight.)
+        let hostless = "main";
+        let plan = plan_reconcile(
+            &map_of(&[(hostless, HwndStatus::Hostless)]),
+            &set_of(&[hostless]),
+            &set_of(&[]),
+            &set_of(&[]),
+            &set_of(&[]),
+            true,
+        );
+        assert_eq!(plan.hostless_user, vec_of(&[hostless]));
+    }
+
+    #[test]
+    fn plan_mixed_full_state_space() {
+        // Composite touching every bucket: dead zombie + hostless-pool +
+        // hostless-user + unpromoted pool + ready pool + freshly-promoted +
+        // promoted user window.
+        let zombie = "window-pool-z";
+        let hostless_pool = "window-pool-h";
+        let hostless_user = "window-h-user";
+        let unpromoted = "window-pool-u";
+        let ready = "window-pool-r";
+        let fresh = "window-pool-f";
+        let promoted = "window-pool-p";
+        let plan = plan_reconcile(
+            &map_of(&[
+                (zombie, HwndStatus::Dead),
+                (hostless_pool, HwndStatus::Hostless),
+                (hostless_user, HwndStatus::Hostless),
+                (unpromoted, HwndStatus::Live),
+                (ready, HwndStatus::Live),
+                (fresh, HwndStatus::Live),
+                (promoted, HwndStatus::Live),
+            ]),
+            &set_of(&[hostless_user, fresh, promoted]),
+            &set_of(&[promoted]),
+            &set_of(&[ready]),
+            &set_of(&[unpromoted]),
+            false,
+        );
+        assert_eq!(plan.zombie_closes, vec_of(&[zombie]));
+        assert_eq!(plan.hostless_pool, vec_of(&[hostless_pool]));
+        assert_eq!(plan.hostless_user, vec_of(&[hostless_user]));
+        assert_eq!(plan.freshly_promoted, vec_of(&[fresh]));
     }
 
     #[test]
@@ -984,7 +818,7 @@ mod tests {
         let label = "window-pool-zombie";
         let inputs = (
             map_of(&[(label, HwndStatus::Dead)]),
-            vec_of(&[label]),
+            set_of(&[]),
             set_of(&[]),
             set_of(&[]),
             set_of(&[]),
@@ -993,5 +827,4 @@ mod tests {
         let p2 = plan_reconcile(&inputs.0, &inputs.1, &inputs.2, &inputs.3, &inputs.4, false);
         assert_eq!(p1, p2);
     }
-
 }
