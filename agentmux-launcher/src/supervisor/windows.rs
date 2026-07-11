@@ -550,18 +550,23 @@ pub(crate) async fn run_windows(
                         sent_at.elapsed().as_secs()
                     ));
                 }
+                // Fail-fast send (reagent P1, round 2): the default
+                // `send_command` BUFFERS while disconnected and returns Ok,
+                // so a probe sent during a crash-restart gap would sit in
+                // the pending buffer (or expire there — probes carry no
+                // saga_id, so the drop paths can't report the loss) while
+                // its outstanding-probe entry aged into a false "did not
+                // pump" miss. `try_send_command_no_buffer` turns the
+                // disconnected case into an immediate error instead; the
+                // retract below then keeps the telemetry clean. A down
+                // pipe has its own supervision — a failed send is
+                // transport evidence, never liveness evidence.
                 if let Err(e) = host_pipe
-                    .send_command(&agentmux_common::ipc::Command::ProbeUiThread {
+                    .try_send_command_no_buffer(&agentmux_common::ipc::Command::ProbeUiThread {
                         nonce: ui_probe_nonce,
                     })
                     .await
                 {
-                    // A down pipe has its own supervision (reconnect +
-                    // buffer budget); a failed send is NOT UI-thread
-                    // evidence and is logged as transport, not liveness.
-                    // Retract the just-recorded probe (reagent P1): an
-                    // undelivered probe must not age into a false
-                    // "did not pump" miss on the next tick.
                     crate::ui_liveness::retract_probe(ui_probe_nonce);
                     log(&format!(
                         "[ui-liveness] probe send failed (transport, not liveness): {:?}",

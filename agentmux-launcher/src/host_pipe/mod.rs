@@ -83,8 +83,8 @@ pub const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Debug)]
 pub enum HostPipeError {
     /// No host is currently connected and the caller asked to fail
-    /// rather than buffer.
-    #[allow(dead_code)] // reserved for fail-fast callers (CPD-3+)
+    /// rather than buffer (`try_send_command_no_buffer`; first caller is
+    /// the UI-liveness prober, SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1).
     HostNotConnected,
     /// Underlying write to the pipe failed.
     WriteFailed(io::Error),
@@ -363,6 +363,41 @@ impl HostPipe {
         let saga_id = saga_id_of(cmd);
         let frame = HostFrame::Command(cmd.clone());
         self.send_frame(frame, saga_id).await
+    }
+
+    /// Fail-fast variant of `send_command`: when no host writer is
+    /// installed, returns `HostNotConnected` immediately instead of
+    /// buffering (the variant the `HostPipeError` docs reserved for
+    /// exactly this).
+    ///
+    /// For frames where DELAYED delivery is meaningless or misleading —
+    /// the UI-liveness probe (SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1) is
+    /// the first caller: a probe buffered while the host is down would
+    /// either expire silently in the pending buffer (probes carry no
+    /// saga_id, so the drop paths can't even report the loss) or be
+    /// delivered to a FUTURE host, and in both cases the caller's
+    /// outstanding-probe bookkeeping would age into a false "UI thread
+    /// did not pump" miss (reagent P1, PR #2106 round 2 — the routine
+    /// disconnected-send during every crash-restart gap hit this).
+    ///
+    /// Residual race, accepted and bounded: a disconnect landing between
+    /// this check and the delegated write can still buffer the frame —
+    /// that window is hair-width (same lock, adjacent awaits) versus the
+    /// routine seconds-long disconnected spans this closes, and if it ever
+    /// fires the resulting one-tick miss coincides with the pipe
+    /// supervision's own loud disconnect logs for the same instant, so
+    /// the telemetry stays attributable.
+    pub async fn try_send_command_no_buffer(
+        &self,
+        cmd: &Command,
+    ) -> Result<(), HostPipeError> {
+        {
+            let inner = self.inner.lock().await;
+            if inner.writer.is_none() {
+                return Err(HostPipeError::HostNotConnected);
+            }
+        }
+        self.send_command(cmd).await
     }
 
     /// Push an Event down to the host. Called by the per-connection
