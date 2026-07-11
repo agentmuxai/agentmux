@@ -6,7 +6,9 @@ use crate::host_spawn::spawn_host_supervised;
 use crate::logging::log;
 use crate::second_instance::{forward_open_new_window, ForwardError};
 use crate::show_fatal_dialog;
-use crate::supervisor::{HOST_RESTART_BUDGET, HOST_RESTART_WINDOW};
+use crate::supervisor::{
+    HOST_RESTART_BUDGET, HOST_RESTART_WINDOW, SRV_RESTART_BUDGET, SRV_RESTART_WINDOW,
+};
 use crate::{
     config, data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, saga, srv_spawner,
     startup_events, state,
@@ -421,7 +423,11 @@ pub(crate) async fn run_windows(
         srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, job_handle, &startup_sink)
     );
     let (saga_coord, _ipc_handle, host_pipe) = setup_result;
-    let (srv_result, mut srv_child) = match srv_spawn_result {
+    // `mut`: SPEC_SRV_SUPERVISION_RECYCLE — an srv respawn rebinds this to
+    // the new endpoints; the subsequent (deliberate) host restart then picks
+    // them up through the existing `spawn_host_supervised(..., &srv_result,
+    // ...)` call sites with no further plumbing.
+    let (mut srv_result, mut srv_child) = match srv_spawn_result {
         Ok(pair) => pair,
         Err(e) => {
             log(&format!("FATAL: srv spawn failed: {}", e));
@@ -442,7 +448,12 @@ pub(crate) async fn run_windows(
     // of the Child into a launcher-scope binding so tokio can't see
     // it (its take() returns None) and the pipe stays open for the
     // launcher's lifetime. (Smoke test on v0.33.447 caught this.)
-    let _srv_stdin_keepalive = srv_child.stdin.take();
+    // `mut`: SPEC_SRV_SUPERVISION_RECYCLE — an srv respawn must park the NEW
+    // child's stdin here too, or the very next `srv_child.wait()` poll drops
+    // it and the fresh srv shuts down within milliseconds of starting
+    // (live-reproduced 2026-07-11: respawned srv logged "stdin closed,
+    // shutting down" 7ms after binding its listeners).
+    let mut srv_stdin_keepalive = srv_child.stdin.take();
 
     // 4-6. Spawn the host (suspended) → assign to J0 → resume, via
     // spawn_host_supervised(). The splash event is passed on every launch
@@ -508,8 +519,10 @@ pub(crate) async fn run_windows(
     // 7. Supervised wait loop (Phase 1 — host supervision). The host is
     // auto-restarted on abnormal exit, bounded by a crash budget so a
     // deterministic crash can't spin forever (spec §10-A). A clean host
-    // exit (code 0) ends the loop. srv is NOT yet supervised — an srv
-    // exit still terminates the launcher; srv supervision is Phase 2.
+    // exit (code 0) ends the loop. srv IS supervised too (#942 Phase 2,
+    // SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11): an unexpected srv exit
+    // respawns srv and recycles the host through this same restart path,
+    // bounded by its own SRV_RESTART_BUDGET.
     //
     // We don't manually kill the surviving child in the happy path:
     // dropping `job` below triggers KILL_ON_JOB_CLOSE which reaps the
@@ -527,6 +540,15 @@ pub(crate) async fn run_windows(
     let mut restart_splash_seq: u32 = 0;
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
+    // SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11 (#942 Phase 2) — srv crash
+    // budget + the recycle-kill flag. When srv dies unexpectedly, the srv
+    // arm respawns it, rebinds `srv_result`, sets this flag, and kills the
+    // host deliberately; the host arm (next iteration) consumes the flag to
+    // SKIP the deterministic-crash classification (the host didn't fault —
+    // a recycle must not step the retry ladder down to --disable-gpu),
+    // while still counting against the host budget as runaway protection.
+    let mut srv_restarts: Vec<std::time::Instant> = Vec::new();
+    let mut srv_recycle_kill = false;
     // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 Phase 1 — observe-only
     // UI-thread liveness prober. Low rate (60s); the first tick is delayed
     // a full interval so a booting host (whose UI thread isn't pumping yet
@@ -710,10 +732,21 @@ pub(crate) async fn run_windows(
                         // step down to a degraded (--disable-gpu) relaunch so the retry
                         // isn't "the same thing again". Degraded is sticky; the ladder
                         // only steps down.
-                        if last_abnormal_code == Some(code) {
-                            host_degraded = true;
+                        //
+                        // SPEC_SRV_SUPERVISION_RECYCLE — a launcher-inflicted
+                        // recycle kill is NOT a host fault: skip the ladder
+                        // bookkeeping so an srv-driven recycle can never mark
+                        // the host deterministic-crashing or degrade it to
+                        // --disable-gpu. (It still counted against the budget
+                        // above — runaway protection stays.)
+                        if srv_recycle_kill {
+                            srv_recycle_kill = false;
+                        } else {
+                            if last_abnormal_code == Some(code) {
+                                host_degraded = true;
+                            }
+                            last_abnormal_code = Some(code);
                         }
-                        last_abnormal_code = Some(code);
                         log(&format!(
                             "CEF host exited abnormally (code {}) — relaunching (restart {}/{}{})",
                             code,
@@ -758,14 +791,80 @@ pub(crate) async fn run_windows(
                 }
             }
             srv_status = srv_child.wait() => {
-                match srv_status {
-                    Ok(s) => log(&format!(
-                        "srv exited UNEXPECTEDLY (host still running) with code {} — terminating launcher",
-                        s.code().unwrap_or(1)
-                    )),
-                    Err(e) => log(&format!("FATAL: srv wait failed: {}", e)),
+                // SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11 (#942 Phase 2) —
+                // recycle, don't rewire: srv's endpoints only reach the host
+                // via spawn-time env, and the host is DISPOSABLE (Pillar 1
+                // Step 4), so the supervision story is: respawn srv, rebind
+                // the endpoints, deliberately kill the host, and let the
+                // existing host-restart machinery (splash + crash-reproject)
+                // rebuild the session against the new srv. srv's SQLite
+                // state is durable (WAL) — reproject sees everything.
+                let code = match srv_status {
+                    Ok(s) => s.code().unwrap_or(1),
+                    Err(e) => {
+                        log(&format!("FATAL: srv wait failed: {}", e));
+                        break 1;
+                    }
+                };
+                if mem_supervisor::budget_exhausted(
+                    &mut srv_restarts,
+                    std::time::Instant::now(),
+                    SRV_RESTART_WINDOW,
+                    SRV_RESTART_BUDGET,
+                ) {
+                    log(&format!(
+                        "srv exited (code {}); srv restart budget exhausted ({} in {}s) — terminating launcher",
+                        code,
+                        SRV_RESTART_BUDGET,
+                        SRV_RESTART_WINDOW.as_secs()
+                    ));
+                    break 1;
                 }
-                break 1;
+                log(&format!(
+                    "srv exited UNEXPECTEDLY (code {}) — respawning srv + recycling host (restart {}/{})",
+                    code,
+                    srv_restarts.len(),
+                    SRV_RESTART_BUDGET
+                ));
+                match srv_spawner::spawn_srv(
+                    launcher_exe_dir,
+                    &paths,
+                    &srv_pipe_path,
+                    job_handle,
+                    &startup_sink,
+                )
+                .await
+                {
+                    Ok((new_result, new_child)) => {
+                        srv_result = new_result;
+                        srv_child = new_child;
+                        // Park the NEW srv's stdin exactly like cold boot does
+                        // (see `srv_stdin_keepalive`'s comment above): the next
+                        // `srv_child.wait()` poll would otherwise drop it, and
+                        // srv reads stdin-EOF as "parent died" and exits within
+                        // milliseconds — live-reproduced on the first version
+                        // of this arm.
+                        srv_stdin_keepalive = srv_child.stdin.take();
+                        log(&format!(
+                            "srv respawned (pid {}) — new endpoints ws={} web={}; recycling host",
+                            srv_result.pid, srv_result.ws_endpoint, srv_result.web_endpoint
+                        ));
+                        // The running host is wired to the DEAD srv's
+                        // endpoints — every backend connection it holds is
+                        // broken. Kill it deliberately; the host arm's
+                        // supervised restart (next select iteration) spawns
+                        // the replacement against the rebound `srv_result`.
+                        srv_recycle_kill = true;
+                        let _ = host_child.start_kill();
+                    }
+                    Err(e) => {
+                        log(&format!(
+                            "FATAL: srv respawn failed: {} — terminating launcher",
+                            e
+                        ));
+                        break 1;
+                    }
+                }
             }
         }
     };
