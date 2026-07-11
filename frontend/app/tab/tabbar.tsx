@@ -408,21 +408,45 @@ function TabBar(props: TabBarProps): JSX.Element {
         //    spring-switched through (their activeDrag was set by
         //    DroppableTab; TileLayout's own cleanup only covers the SOURCE
         //    tab's model).
+        //
+        //    A stuck activeDrag is a DEAD TAB — the overlay-container sits
+        //    over the entire tile area with pointer-events:auto and eats
+        //    every click — so the cleanup runs from three layers:
+        //    a) pragmatic's monitor onDrop (normal path),
+        //    b) a window dragend listener (pragmatic's dispatch can be
+        //       skipped on Win11 swallowed-drag paths — same rationale as
+        //       TileLayout's own resetDragState safety net),
+        //    c) a capture-phase pointerdown listener: a pointerdown cannot
+        //       happen mid-drag (the button is held), so any pointerdown
+        //       with spring-activated tabs still recorded means the drag
+        //       ended without (a) or (b) firing — clean up before the
+        //       stuck overlay swallows the click's target.
+        const cleanupTileDragState = () => {
+            setHoveredDropTabId(null);
+            clearCrossTabDrop();
+            for (const tabId of dragActivatedTabIds) {
+                getLayoutModelForTabById(tabId)?.activeDrag._set(false);
+            }
+            dragActivatedTabIds.clear();
+        };
         const cleanupTileMonitor = monitorForElements({
             canMonitor: ({ source }) => source.data.type === tileItemType,
-            onDrop: () => {
-                setHoveredDropTabId(null);
-                clearCrossTabDrop();
-                for (const tabId of dragActivatedTabIds) {
-                    getLayoutModelForTabById(tabId)?.activeDrag._set(false);
-                }
-                dragActivatedTabIds.clear();
-            },
+            onDrop: cleanupTileDragState,
         });
+        const onWindowDragEnd = () => {
+            if (dragActivatedTabIds.size > 0) cleanupTileDragState();
+        };
+        const onWindowPointerDown = () => {
+            if (dragActivatedTabIds.size > 0) cleanupTileDragState();
+        };
+        window.addEventListener("dragend", onWindowDragEnd);
+        window.addEventListener("pointerdown", onWindowPointerDown, true);
 
         onCleanup(() => {
             cleanupStripDrop();
             cleanupTileMonitor();
+            window.removeEventListener("dragend", onWindowDragEnd);
+            window.removeEventListener("pointerdown", onWindowPointerDown, true);
         });
     });
 
