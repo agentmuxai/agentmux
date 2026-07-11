@@ -12,6 +12,9 @@
  *   2. No I/O inside the reducer. IPC calls live in window-opacity-store.ts.
  *   3. WindowClosed removes the entry without emitting an IPC event —
  *      the native window is already gone by the time this fires.
+ *
+ * Keyed by window label — covers both main windows and floating panes
+ * (instance-panel-floating-panes.md §3.2).
  */
 
 import type {
@@ -30,13 +33,12 @@ export function update(
         case "SetWindowOpacity": {
             const opacity = Math.max(OPACITY_MIN, Math.min(1.0, command.opacity));
             if (opacity >= 1.0) {
-                const { [command.windowId]: _, ...rest } = state.opacities;
+                const { [command.label]: _, ...rest } = state.opacities;
                 return {
                     state: { opacities: rest },
                     events: [
                         {
                             type: "window-opacity-cleared",
-                            windowId: command.windowId,
                             label: command.label,
                         },
                     ],
@@ -44,12 +46,11 @@ export function update(
             }
             return {
                 state: {
-                    opacities: { ...state.opacities, [command.windowId]: opacity },
+                    opacities: { ...state.opacities, [command.label]: opacity },
                 },
                 events: [
                     {
                         type: "window-opacity-applied",
-                        windowId: command.windowId,
                         label: command.label,
                         opacity,
                     },
@@ -58,10 +59,10 @@ export function update(
         }
 
         case "WindowClosed": {
-            const { [command.windowId]: _, ...rest } = state.opacities;
+            const { [command.label]: _, ...rest } = state.opacities;
             return {
                 state: { opacities: rest },
-                events: [{ type: "window-opacity-entry-removed", windowId: command.windowId }],
+                events: [{ type: "window-opacity-entry-removed", label: command.label }],
             };
         }
 
