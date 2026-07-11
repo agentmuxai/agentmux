@@ -447,6 +447,23 @@ async function initHostNewWindow(): Promise<void> {
         const newWindow = await withTimeout(WindowService.CreateWindow(null, tearOffWsId), RPC_TIMEOUT, "CreateWindow");
         tlog("CreateWindow", t);
 
+        // Register label→window_id with the host NOW, not at the end of
+        // initWave (which also registers — idempotently — after render):
+        // the srv window row exists as of this line, and every host close
+        // path (on_before_close, demote_srv_cleanup) resolves WHICH srv row
+        // to close through this registration. A window closed in the
+        // seconds between CreateWindow and initWave's late registration —
+        // e.g. a tear-off merged straight back — used to orphan its srv
+        // row forever: the close's demote reloads this renderer to the
+        // pool boot URL, so the late registration never arrives, and the
+        // host's bounded registration-race retry waits for an event that
+        // can no longer happen (task #29 round 2, found by the
+        // window-close-baseline E2E suite).
+        {
+            const wlabel = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            getApi().registerBackendWindow(wlabel, newWindow.oid);
+        }
+
         // Get the workspace that was auto-created with the window
         t = performance.now();
         const workspace = await withTimeout(WorkspaceService.GetWorkspace(newWindow.workspaceid), RPC_TIMEOUT, "GetWorkspace");
