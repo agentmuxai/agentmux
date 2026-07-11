@@ -155,7 +155,11 @@ SaaS endpoints); naively keyed by-IP state grows unbounded. Bound it explicitly:
   npm, Anthropic API, etc.) rotates through many IPs for one logical host; keying by IP fragments
   one real "top host" into a dozen table slots and starves the actual top-K of space. Resolve IP
   → hostname, reduce to eTLD+1 (e.g. `objects.githubusercontent.com` → `githubusercontent.com`),
-  and key the Space-Saving table on that string.
+  and key the Space-Saving table on that string. eTLD+1 reduction **requires the Public Suffix
+  List** — naive last-two-labels splitting misgroups every multi-part suffix (`example.co.uk` →
+  `co.uk`; all of `github.io` collapsing into one entry). Use the [`psl`](https://crates.io/crates/psl)
+  crate (compiled-in PSL snapshot, no I/O, `psl::domain_str()`); an unparseable hostname falls
+  back to the full hostname string rather than a guessed suffix.
 - **Reverse DNS is the expensive part — cache and rate-limit it, keep it off the poll thread.**
   Use an async resolver (`hickory-resolver` — no async reverse-DNS/PTR crate is in the workspace
   today; `mdns-sd` in `agentmux-srv/Cargo.toml:45` is mDNS/LAN-discovery only and unrelated) with:
@@ -215,8 +219,11 @@ Follows the existing `SettingsType` pattern (`wconfig/types.rs:192-199`):
 #[serde(rename = "network:tophosts:enabled", default, skip_serializing_if = "is_false")]
 pub network_tophosts_enabled: bool,
 
-#[serde(rename = "network:tophosts:topk", default, skip_serializing_if = "is_zero_i64")]
-pub network_tophosts_topk: i64,
+// Option<i64> + Option::is_none mirrors `telemetry_numpoints` — the existing
+// optional-integer setting pattern (there is no `is_zero_i64` helper in
+// wconfig/types.rs, only f64/f32/i32 variants).
+#[serde(rename = "network:tophosts:topk", default, skip_serializing_if = "Option::is_none")]
+pub network_tophosts_topk: Option<i64>,
 ```
 
 ### Frontend
@@ -260,7 +267,7 @@ handled as an explicit opt-in in this codebase.
 
 | File | Change |
 |------|--------|
-| `agentmux-srv/Cargo.toml` | Add `netstat2`, `hickory-resolver` deps |
+| `agentmux-srv/Cargo.toml` | Add `netstat2`, `hickory-resolver`, `psl` deps |
 | `agentmux-srv/src/backend/net_hosts.rs` | **New** — `HostTracker` (Space-Saving top-K), poll loop |
 | `agentmux-srv/src/backend/wps.rs` | Add `EVENT_NET_HOSTS` constant |
 | `agentmux-srv/src/backend/rpc_types/misc.rs` | Add `HostEntry` / `TopHostsSnapshot` |
