@@ -81,9 +81,16 @@ pub(super) fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
 // opening into an otherwise-empty session; the Register lands in the same
 // lock scope of activity and re-blocks it — do not consume there).
 //
-// NOT YET WIRED (Phase 3): `wrr::win_event::maybe_quit_on_last_user_window`
-// still calls `quit_message_loop()` from its own predicate without requiring
-// `QuitState::Draining` — the last independent quit authority.
+// WIRED (Phase 3): `wrr::win_event::maybe_quit_on_last_user_window` now
+// requires `QuitState::Draining` (a decision this module made and a Phase-2
+// site consumed) before its happy-path `quit_message_loop()` — it is the
+// Windows Stage-2 EXECUTOR of this module's decision, not an authority
+// (parked browsers never fire `on_before_close` on Windows, so the
+// on_before_close Stage-2 gate is structurally unreachable there). The quit
+// watchdog remains the bounded backstop for both desync flavors
+// (registered > 0, or counts-zero-but-never-decided) and is the only
+// remaining direct `quit_message_loop` caller outside the documented
+// Stage-2 executors. `reconcile_quit` is the sole quit decision-maker.
 
 /// Background PENDING-CREATION labels — warm-pool tab refills (`window-pool-`),
 /// browser-pane children (`browser-pane-`), and floating panes (`floating-`, the
