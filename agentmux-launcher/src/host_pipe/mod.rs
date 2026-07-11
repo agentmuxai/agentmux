@@ -397,7 +397,36 @@ impl HostPipe {
                 return Err(HostPipeError::HostNotConnected);
             }
         }
-        self.send_command(cmd).await
+        let res = self.send_command(cmd).await;
+        if res.is_err() {
+            // reagent P1 (PR #2106 round 3): a WRITE failure on an installed
+            // writer — the routine first detection of a dead connection —
+            // takes `send_frame`'s error branch, which pushes the frame into
+            // `pending_buffer` as part of its clear-writer handling even
+            // though it returns Err. That would break this method's contract
+            // via a second path (the stale probe drains to a future host on
+            // reconnect). Enforce the contract post-hoc: scrub any probe
+            // frames the delegated send may have parked. Probe-specific by
+            // design — one outstanding probe exists at a time, so ANY
+            // buffered ProbeUiThread frame is stale; a future non-probe
+            // no-buffer caller extends this per command kind.
+            self.purge_pending_probe_frames().await;
+        }
+        res
+    }
+
+    /// Remove every buffered `ProbeUiThread` frame. See
+    /// `try_send_command_no_buffer`'s error branch for why these can appear
+    /// despite the fail-fast contract, and why any such frame is stale by
+    /// construction.
+    async fn purge_pending_probe_frames(&self) {
+        let mut inner = self.inner.lock().await;
+        inner.pending_buffer.retain(|p| {
+            !matches!(
+                p.frame,
+                HostFrame::Command(Command::ProbeUiThread { .. })
+            )
+        });
     }
 
     /// Push an Event down to the host. Called by the per-connection

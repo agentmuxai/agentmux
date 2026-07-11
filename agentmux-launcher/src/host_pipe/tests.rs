@@ -503,3 +503,28 @@ async fn try_send_no_buffer_delivers_while_connected() {
         frames
     );
 }
+
+#[tokio::test]
+async fn try_send_no_buffer_write_failure_purges_the_rebuffered_probe() {
+    // reagent P1 (PR #2106 round 3): a write failure on an INSTALLED writer
+    // takes send_frame's error branch, which re-buffers the frame as part
+    // of clear-writer handling (proven by write_failure_clears_writer_and_
+    // rebuffers above, pending_len == 1). The no-buffer contract requires
+    // the opposite for probes: Err AND an empty buffer — a stale probe must
+    // never drain into a future host.
+    let (pipe, _) = make_pipe();
+    let (writer, reader) = make_duplex();
+    drop(reader); // writes will fail with BrokenPipe/ConnectionAborted
+    pipe.set_writer(writer).await;
+
+    let result = pipe
+        .try_send_command_no_buffer(&Command::ProbeUiThread { nonce: 11 })
+        .await;
+    assert!(result.is_err(), "probe send must fail when peer dropped");
+    assert!(!pipe.is_connected().await);
+    assert_eq!(
+        pipe.pending_len().await,
+        0,
+        "the rebuffered probe frame must be purged — stale probes never reach a future host"
+    );
+}
