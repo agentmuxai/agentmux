@@ -18,7 +18,9 @@ import { atoms } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
-import { DropDirection } from "./types";
+import { getLayoutModelForTabById } from "./layoutModelHooks";
+import { findNodeByBlockId } from "./layoutNode";
+import { DropDirection, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "./types";
 
 /**
  * Clamp Outer* drop directions to their inner equivalents for CROSS-TAB
@@ -103,6 +105,27 @@ export function redockDraggedPane(opts: {
                 opts.targetBlockId ?? null,
                 opts.direction ?? null,
             );
+            // The backend queues a DeleteNode on the source tab's
+            // pendingbackendactions, but the source frontend's own
+            // debounced persist can race that queue and clobber it (the
+            // documented stale-tree-resurrection issue,
+            // INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION) —
+            // observed in field testing as the pane remaining visible in
+            // BOTH tabs. Remove the source leaf locally right away,
+            // exactly like an in-tab move does (frontend mutates +
+            // persists); the queued backend delete then no-ops on the
+            // already-removed node (idempotent by actionid + missing-node
+            // guard in layoutPersistence).
+            const sourceModel = getLayoutModelForTabById(opts.sourceTabId);
+            const sourceLeaf = sourceModel
+                ? findNodeByBlockId(sourceModel.treeState.rootNode, opts.blockId)
+                : undefined;
+            if (sourceModel && sourceLeaf) {
+                sourceModel.treeReducer({
+                    type: LayoutTreeActionType.DeleteNode,
+                    nodeId: sourceLeaf.id,
+                } as LayoutTreeDeleteNodeAction);
+            }
         } catch (e) {
             Logger.error("dnd", "cross-tab pane redock failed", { error: String(e) });
         }

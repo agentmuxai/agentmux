@@ -310,15 +310,23 @@ instability: one tab went completely non-responsive, and drop landings were
 "glitchy / inaccurate". Diagnosis from the dev instance's logs plus code reading,
 and the fixes shipped in `fix/cross-tab-drag-stability`:
 
-### A1. Hover strobe (new UX, implemented)
+### A1. Hover strobe (new UX, implemented; revised same day)
 
-On the instant a pane hover begins over a tab button, a 3px accent bar riding the
-tab's TOP edge strobes: **10 flashes at 20ms intervals (200ms total), one-shot**.
-Implemented as a `keyed` SolidJS `<Show>` mount (`droppable-tab.tsx`) so each
-hover entry remounts the element and restarts the CSS animation
-(`tab-drop-strobe-flash`, `steps(1, end)`, 10 iterations, `forwards` holding
-opacity:0 after the burst). Complements — not replaces — the existing slower
-`tab-drop-pulse` outline and the 500ms spring-switch dwell.
+On the instant a pane hover begins over a tab button, the tab flashes to its
+**NEGATIVE** (`filter: invert(1)`) and back: **10 flashes at 50ms intervals
+(500ms total), one-shot**, then the slower `tab-drop-pulse` accent outline
+carries the signal for the rest of the hover. Pure CSS on
+`.tile-drop-hover .tab` — the class is re-applied per hover entry, restarting
+the animation. (v1 of this addendum specced a 3px top-edge bar at 20ms×10 =
+200ms; field feedback: invisible — partly the reduced-motion kill-switch below,
+partly too fast — revised to the full-tab invert at 500ms.)
+
+**Reduced-motion respect removed app-wide** (same session, product decision):
+the OS "reduce motion" setting was silently disabling functional motion cues —
+this strobe, the drop pulse, insertion indicators — which carry meaning, not
+decoration. `prefersReducedMotionAtom` is hard `false` (plumbing kept for easy
+revisit), the `respect-reduced-motion` SCSS mixin is a no-op, and all raw
+`@media (prefers-reduced-motion: reduce)` blocks are removed.
 
 ### A2. Stability fixes
 
@@ -350,7 +358,17 @@ opacity:0 after the burst). Complements — not replaces — the existing slower
    `onTreeStateAtomUpdated(true)` forces a re-measure once the tab has real
    bounds.
 
-4. **Stale-tree residue (pre-existing, NOT fixed here).** The session's first
+4. **Source pane lingering after a cross-tab move.** Field-observed: the
+   moved pane appeared at the destination but ALSO remained rendered in the
+   source tab. The backend queues the source-tab DeleteNode via
+   `pendingbackendactions`, but the source frontend's debounced persist can
+   race and clobber that queue (the same resurrection mechanism as item 5).
+   Fix: `redockDraggedPane` now deletes the source leaf locally immediately
+   after the RPC succeeds — the same frontend-mutates-then-persists contract
+   an in-tab move uses — and the queued backend delete no-ops idempotently
+   on the already-removed node.
+
+5. **Stale-tree residue (pre-existing, NOT fixed here).** The session's first
    redock failed cleanly with *"block …57a30 is in tab 80ec…, not e7f1…"* — the
    source tab was rendering a leaf for a block the backend had already moved
    (residue in the persisted dev data dir from the v1 testing session, which
