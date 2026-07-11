@@ -62,6 +62,26 @@ pub enum Command {
     Ping {
         nonce: u64,
     },
+    /// SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 Phase 1 — launcher → host
+    /// (over the host pipe, like the saga `IssueCmd::Host` commands): probe
+    /// whether the host's CEF **UI thread** is actually pumping. The host
+    /// replies with `ReportUiThreadAlive { nonce }` from a posted UI task —
+    /// NEVER from the pipe-reader thread (a wedged host's tokio reader keeps
+    /// answering; only a UI-thread round-trip is liveness evidence). A host
+    /// whose UI thread is hung, or not yet pumping (the known pre-ready
+    /// `post_task` silent drop), simply never replies — silence is the
+    /// signal; there is no host-side timeout.
+    ProbeUiThread {
+        nonce: u64,
+    },
+    /// Reply to `ProbeUiThread`, sent host → launcher via the `Report*`
+    /// path once the probe's posted UI task actually executes. Echoes the
+    /// nonce; the launcher treats ANY receipt as "UI thread pumped after
+    /// the matching probe was sent" (staleness bounded by the probe
+    /// interval, which is all the Phase-2 rule consumes).
+    ReportUiThreadAlive {
+        nonce: u64,
+    },
     /// Graceful disconnect. Server logs and closes the connection.
     /// In B.3+ this becomes `Quit { reason }` with shutdown semantics;
     /// for B.2 it's just a polite goodbye.

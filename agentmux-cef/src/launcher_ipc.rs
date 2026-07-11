@@ -253,6 +253,20 @@ pub async fn connect_to_launcher(
                             tracing::info!("[launcher-ipc] received event: {:?}", event);
                             apply_event_to_shadow(&state_for_reader, &event);
                         }
+                        Ok(HostFrame::Command(Command::ProbeUiThread { nonce })) => {
+                            // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1 — NOT a
+                            // saga command (no saga_id, no idempotency LRU:
+                            // duplicate probes are harmless, replies are
+                            // at-most-once per posted task). The reply MUST
+                            // come from the UI thread — replying from here
+                            // (the tokio reader) would prove nothing about
+                            // the thread the backstop actually cares about.
+                            // If the UI thread isn't pumping (wedged, or the
+                            // pre-ready post_task silent drop), the posted
+                            // task never executes and no reply is sent —
+                            // silence IS the signal.
+                            crate::ui_tasks::post_probe_ui_thread_reply(nonce);
+                        }
                         Ok(HostFrame::Command(cmd)) => {
                             tracing::info!(
                                 "[launcher-ipc] received saga command: {:?}",
@@ -448,6 +462,20 @@ pub async fn connect_to_launcher(
                         Ok(HostFrame::Event(event)) => {
                             tracing::info!("[launcher-ipc] received event: {:?}", event);
                             apply_event_to_shadow(&state_for_reader, &event);
+                        }
+                        Ok(HostFrame::Command(Command::ProbeUiThread { nonce })) => {
+                            // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1 — NOT a
+                            // saga command (no saga_id, no idempotency LRU:
+                            // duplicate probes are harmless, replies are
+                            // at-most-once per posted task). The reply MUST
+                            // come from the UI thread — replying from here
+                            // (the tokio reader) would prove nothing about
+                            // the thread the backstop actually cares about.
+                            // If the UI thread isn't pumping (wedged, or the
+                            // pre-ready post_task silent drop), the posted
+                            // task never executes and no reply is sent —
+                            // silence IS the signal.
+                            crate::ui_tasks::post_probe_ui_thread_reply(nonce);
                         }
                         Ok(HostFrame::Command(cmd)) => {
                             tracing::info!(
@@ -947,6 +975,25 @@ pub fn report_backend_window_id_registered(label: String, window_id: String) {
     if let Err(e) = tx.send(cmd) {
         tracing::warn!(
             "[launcher-ipc] report_backend_window_id_registered: channel closed ({})",
+            e
+        );
+    }
+}
+
+/// SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1 — sync API: answer a
+/// `ProbeUiThread` once its posted UI task actually executes. Called
+/// EXCLUSIVELY from `ProbeUiThreadReplyTask::execute()` on the UI thread —
+/// calling it from anywhere else would forge the exact liveness evidence
+/// the probe exists to collect. No-op if the launcher pipe is absent
+/// (standalone mode has no prober).
+pub fn report_ui_thread_alive(nonce: u64) {
+    let Some(tx) = COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportUiThreadAlive { nonce };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!(
+            "[launcher-ipc] report_ui_thread_alive: channel closed ({})",
             e
         );
     }

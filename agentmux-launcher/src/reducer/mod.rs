@@ -94,6 +94,17 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             let v = state.bump_version();
             vec![Event::Pong { nonce, version: v }]
         }
+        // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1 — UI-liveness telemetry is
+        // recorded at the transport layer (`ipc/server.rs` →
+        // `crate::ui_liveness`), NOT here: it's thread/process telemetry
+        // about the host, not domain state this reducer owns. This arm
+        // exists only for match exhaustiveness — a defensive no-op.
+        Command::ReportUiThreadAlive { .. } => Vec::new(),
+        // The launcher SENDS ProbeUiThread (over the host pipe); receiving
+        // one on its own IPC server is a wrong-direction message — ignore
+        // (the reducer is pure and does not log; the pre-Register table in
+        // ipc/server.rs already names this case for unregistered senders).
+        Command::ProbeUiThread { .. } => Vec::new(),
         Command::Goodbye => connection::handle_goodbye(state, ctx.registered_pid.unwrap_or(0)),
         Command::ReportWindowOpened {
             label,
