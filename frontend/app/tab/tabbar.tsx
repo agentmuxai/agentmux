@@ -111,6 +111,36 @@ function TabBar(props: TabBarProps): JSX.Element {
     const handleSelect = (tabId: string) => {
         if (tabId === activeTabId()) return;
         setActiveTab(tabId);
+        // TEMPORARY field diagnostic (SPEC_PANE_DRAG_TO_TAB addendum A2 —
+        // the dead-source-tab investigation): after the switch settles,
+        // hit-test the center of the content area and log exactly which
+        // element sits on top, plus the layer states we keep suspecting.
+        // Remove once the wedge is root-caused.
+        setTimeout(() => {
+            try {
+                const cx = Math.floor(window.innerWidth / 2);
+                const cy = Math.floor(window.innerHeight / 2);
+                const el = document.elementFromPoint(cx, cy) as HTMLElement | null;
+                const chain: string[] = [];
+                let cur: HTMLElement | null = el;
+                for (let i = 0; cur && i < 5; i++) {
+                    const cls = typeof cur.className === "string" && cur.className ? `.${cur.className.split(" ").slice(0, 3).join(".")}` : "";
+                    chain.push(`${cur.tagName.toLowerCase()}${cls}`);
+                    cur = cur.parentElement;
+                }
+                const model = getLayoutModelForTabById(tabId);
+                const overlayEl = document.querySelector(".overlay-container") as HTMLElement | null;
+                Logger.info("dnd:diag", "post-switch hit-test", {
+                    tabId,
+                    elementAtCenter: chain,
+                    activeDrag: model?.activeDrag() ?? null,
+                    overlayPointerEvents: overlayEl ? getComputedStyle(overlayEl).pointerEvents : "no-overlay-el",
+                    leafCount: model?.leafs()?.length ?? -1,
+                });
+            } catch (e) {
+                Logger.warn("dnd:diag", "post-switch hit-test failed", { error: String(e) });
+            }
+        }, 900);
     };
 
     const handleClose = (tabId: string) => {
