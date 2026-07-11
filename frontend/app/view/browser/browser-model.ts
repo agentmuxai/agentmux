@@ -364,6 +364,7 @@ export class BrowserViewModel implements ViewModel {
             can_go_back?: boolean;
             can_go_forward?: boolean;
             url_only?: boolean;
+            is_loading?: boolean;
         }>("browser-pane-nav-state", (payload) => {
             if (this.closed) {
                 this.diag(`post-close-event-dropped name=browser-pane-nav-state url=${payload.url}`);
@@ -371,7 +372,7 @@ export class BrowserViewModel implements ViewModel {
             }
             if (payload.block_id !== this.blockId) return;
             this.diag(
-                `nav-state recv url=${JSON.stringify(payload.url)} url_only=${!!payload.url_only} can_back=${payload.can_go_back} can_forward=${payload.can_go_forward}`,
+                `nav-state recv url=${JSON.stringify(payload.url)} url_only=${!!payload.url_only} is_loading=${payload.is_loading} can_back=${payload.can_go_back} can_forward=${payload.can_go_forward}`,
             );
             this._dispatch({ type: "UrlConfirmed", url: payload.url }, "nav-state");
             // `url_only` events come from `on_load_end_pane` — they arrive
@@ -395,7 +396,39 @@ export class BrowserViewModel implements ViewModel {
                     "nav-state",
                 );
             }
-            this._dispatch({ type: "LoadFinished" }, "nav-state");
+            // SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.2:
+            // `is_loading` (present only on `on_loading_state_change_pane`
+            // events, never on the `url_only` `on_load_end_pane` ones) is
+            // CEF's real navigation-controller loading state — dispatch the
+            // reducer's TabLoadingChanged, which was built for exactly this
+            // and was never wired up before. This used to unconditionally
+            // dispatch LoadFinished on EVERY nav-state event, including ones
+            // fired at navigation START — clearing `loading` within the same
+            // tick Navigate() had just set it. `on_loading_state_change_pane`
+            // fires on start/commit/back-forward too, so only trust its
+            // `is_loading` value, not "we received an event at all," as the
+            // loading signal.
+            if (payload.is_loading !== undefined) {
+                const activeTabId = bpSnapshot(this.blockId)?.activeTabId;
+                if (activeTabId != null) {
+                    this._dispatch(
+                        {
+                            type: "TabLoadingChanged",
+                            tabId: activeTabId,
+                            loading: payload.is_loading,
+                            canGoBack: payload.can_go_back ?? this.canGoBackAtom(),
+                            canGoForward: payload.can_go_forward ?? this.canGoForwardAtom(),
+                        },
+                        "nav-state",
+                    );
+                }
+            } else {
+                // The url_only (on_load_end) event — main-frame load actually
+                // finished. Kept as a defense-in-depth clear even though
+                // on_loading_state_change_pane's is_loading:false branch
+                // above should already have cleared it.
+                this._dispatch({ type: "LoadFinished" }, "nav-state");
+            }
             // Persist the real URL to block meta so pane restore lands
             // on the last page, not whatever was passed at create time.
             RpcApi.SetMetaCommand(TabRpcClient, {
@@ -510,11 +543,6 @@ export class BrowserViewModel implements ViewModel {
                 this._dispatch({ type: "Navigate", url }, "reload-restore");
             });
         }
-    }
-
-    onLoad(): void {
-        this.diag(`onLoad`);
-        this._dispatch({ type: "LoadFinished" }, "onLoad");
     }
 
     onError(msg: string): void {

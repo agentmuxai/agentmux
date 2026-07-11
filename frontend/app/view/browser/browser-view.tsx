@@ -8,8 +8,15 @@ import { ModalLayer } from "@/element/ModalLayer";
 import { useModalLayer } from "@/element/modal-layer";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { atoms } from "@/store/global";
 import type { BrowserViewModel } from "./browser-model";
 import "./browser-view.scss";
+
+// Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
+// node stays mounted this long after loadingAtom() flips false so the
+// opacity fade actually plays before unmount removes it.
+const LOADING_SPINNER_FADE_MS = 200;
 
 // Compact tag for an Element — used by diag log lines to identify the
 // previous/next active element across focus transitions. Module-scope
@@ -92,6 +99,45 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     // SolidJS signal — must be reactive so <Show when={!paneCreated()}> re-runs
     // when the pane is created and hides the empty-state placeholder.
     const [paneCreated, setPaneCreated] = createSignal(false);
+
+    // Loading-brain overlay (SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md
+    // §4.3). `model.loadingAtom()` is the source of truth; these two signals
+    // exist only to hold the BrainSpinner mounted for the CSS fade-out
+    // duration after loading finishes — BrainSpinner's own contract is "the
+    // caller owns unmounting it after the transition ends" (see its doc
+    // comment), so a plain `<Show when={model.loadingAtom()}>` would yank it
+    // out instantly with no fade.
+    const [spinnerMounted, setSpinnerMounted] = createSignal(false);
+    const [spinnerFading, setSpinnerFading] = createSignal(false);
+    let spinnerFadeTimeout: ReturnType<typeof setTimeout> | null = null;
+    createEffect(() => {
+        if (model.loadingAtom()) {
+            if (spinnerFadeTimeout) {
+                clearTimeout(spinnerFadeTimeout);
+                spinnerFadeTimeout = null;
+            }
+            setSpinnerFading(false);
+            setSpinnerMounted(true);
+            return;
+        }
+        if (!spinnerMounted()) return;
+        // prefersReducedMotion: BrainSpinner shows/hides instantly (no CSS
+        // transition) in that mode, so holding the node mounted for the
+        // normal fade duration would just be a pointless delay — unmount now.
+        if (atoms.prefersReducedMotionAtom()) {
+            setSpinnerMounted(false);
+            return;
+        }
+        setSpinnerFading(true);
+        spinnerFadeTimeout = setTimeout(() => {
+            spinnerFadeTimeout = null;
+            setSpinnerFading(false);
+            setSpinnerMounted(false);
+        }, LOADING_SPINNER_FADE_MS);
+    });
+    onCleanup(() => {
+        if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
+    });
 
     // getBoundingClientRect() returns CSS pixels (device-INdependent); CEF
     // and Win32 SetWindowPos expect physical / device pixels. Multiply by
@@ -209,7 +255,14 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             // Seed the overlay-clip short-circuit registry with the initial
             // rect; subsequent syncPosition ticks keep it current.
             registerPaneRect(model.blockId, paneRectCss());
-            model.onLoad();
+            // NOTE: does NOT call model.onLoad() here anymore. That used to
+            // fire LoadFinished the instant the HWND was CREATED — before
+            // CEF had even started, let alone finished, loading the actual
+            // page — which cleared `loading` within the same tick Navigate()
+            // had just set it true. Real load-finished now comes from the
+            // browser-pane-nav-state listener in browser-model.ts (CEF's
+            // on_loading_state_change/on_load_end). See
+            // docs/specs/SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.2.
         } catch (e) {
             model.onError(`Failed to create browser pane: ${e}`);
         }
@@ -539,6 +592,31 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     <div class="browser-empty">
                         <div class="browser-empty-icon">{"\uD83C\uDF10"}</div>
                         <div class="browser-empty-text">Enter a URL above to browse</div>
+                    </div>
+                </Show>
+
+                {/* `data-pane-overlay`: pane-overlay-auto.ts auto-discovers this
+                    element and punches a matching hole through the native
+                    browser-pane HWND so it's visible above it (the HWND paints
+                    above DOM regardless of CSS z-index \u2014 the "airspace problem",
+                    SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md). No manual overlay
+                    registration needed \u2014 same mechanism modals/menus/tooltips
+                    already use.
+
+                    The fade-out opacity is applied to THIS wrapper (via
+                    is-fading below), not just to BrainSpinner's own internal
+                    fade \u2014 pane-overlay-auto.ts's isOverlayElementVisible()
+                    reads computed opacity on the tagged data-pane-overlay
+                    element itself. Fading only BrainSpinner's inner div would
+                    make it look faded while this outer element stayed at
+                    opacity:1, so the clip hole wouldn't lift until unmount \u2014
+                    losing the "fade and un-punch together" behavior this
+                    design relies on. BrainSpinner's own `fading` prop is
+                    unnecessary here since opacity on this wrapper already
+                    fades everything nested inside it. */}
+                <Show when={spinnerMounted()}>
+                    <div class="browser-loading-overlay" classList={{ "is-fading": spinnerFading() }} data-pane-overlay>
+                        <BrainSpinner />
                     </div>
                 </Show>
             </div>
