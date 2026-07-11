@@ -112,6 +112,18 @@ pub struct HostState {
     /// `AppState.is_quitting: AtomicBool`.
     pub quit_state: QuitState,
 
+    /// H.5 — quit arming (SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md §1.E).
+    /// Monotonic: set by `RegisterBrowser` on the first live user window
+    /// (`TopLevel { is_pool: false }`), never cleared. `should_begin_drain`
+    /// refuses to drain while false — the startup gap between process start and
+    /// main's `on_after_created` has zero registered windows AND zero pending
+    /// creations (main's creation path never enqueues one), so an unarmed
+    /// `reconcile_quit` would otherwise hand `Some(LastWindowClosed)` to any
+    /// quit-relevant dispatch in that window. The reducer-side analog of WRR's
+    /// `HAD_VISIBLE_USER_WINDOW` (armed earlier — registration precedes SHOW —
+    /// which is safe: once registered, the live count itself blocks drain).
+    pub saw_live_user_window: bool,
+
     /// H.6 — top-level window creation runner state (queue, in-flight,
     /// history). Event-driven; no watchdog. **Currently DORMANT** — the
     /// reducer arms (`EnqueueTopLevelWindow`, `TopLevelCallbackFired`,
@@ -174,6 +186,7 @@ impl Default for HostState {
             pool: PoolState::default(),
             pane_pool: PanePoolState::default(),
             quit_state: QuitState::default(),
+            saw_live_user_window: false,
             top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),
@@ -401,6 +414,15 @@ pub enum HostCommand {
     /// Transition Draining → Quit.
     ConfirmDrained,
 
+    /// Pure no-op poke: mutates nothing, but is quit-relevant, so `update`
+    /// recomputes `reconcile_quit` and surfaces it via
+    /// `DispatchOutput::request_drain`. Exists for executors that reach a
+    /// decision point with zero state-changing dispatches to ride (the
+    /// level-trigger needs an edge): `orphan_reconcile`'s
+    /// nothing-to-close-but-maybe-drain arm. NOT a polling mechanism — never
+    /// wire it into hot paths. SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.H.
+    ReconcileQuit,
+
     // ── H.6 — top-level window creation runner ──────────────────────────
 
     /// Caller requests a top-level window. Reducer either:
@@ -570,6 +592,7 @@ impl std::fmt::Debug for HostCommand {
                 .field("reason", reason)
                 .finish(),
             HostCommand::ConfirmDrained => f.write_str("ConfirmDrained"),
+            HostCommand::ReconcileQuit => f.write_str("ReconcileQuit"),
             HostCommand::EnqueueTopLevelWindow { request } => f
                 .debug_struct("EnqueueTopLevelWindow")
                 .field("label", &request.label)
@@ -1049,6 +1072,9 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         // H.5 quit
         HostCommand::BeginDrain { reason } => quit::handle_begin_drain(state, reason),
         HostCommand::ConfirmDrained => quit::handle_confirm_drained(state),
+        // Pure poke — no state change; the quit-relevant recomputation below
+        // does the only work this command exists for.
+        HostCommand::ReconcileQuit => DispatchOutput::default(),
         // H.6 top-level runner
         HostCommand::EnqueueTopLevelWindow { request } => {
             top_level::handle_enqueue_top_level_window(state, request)
