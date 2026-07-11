@@ -525,7 +525,18 @@ export function registerBlockComponentModel(blockId: string, bcm: BlockComponent
     blockComponentModelMap.set(blockId, bcm);
 }
 
-export function unregisterBlockComponentModel(blockId: string) {
+export function unregisterBlockComponentModel(blockId: string, owner?: BlockComponentModel) {
+    // Owner-checked delete (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.4):
+    // every tab stays mounted, so a block can be transiently mounted twice
+    // (e.g. a dangling layout leaf during a cross-tab move). Registration is
+    // last-writer-wins; without this check the FIRST mount's unmount deletes
+    // the SECOND mount's live registration and tears down its atom cache —
+    // leaving the surviving pane unreachable by focus routing (the
+    // "non-responsive tab"). Callers pass the exact bcm they registered; the
+    // delete only proceeds if that bcm still owns the key.
+    if (owner !== undefined && blockComponentModelMap.get(blockId) !== owner) {
+        return;
+    }
     blockComponentModelMap.delete(blockId);
     cleanupBlockAtomCache(blockId);
 }

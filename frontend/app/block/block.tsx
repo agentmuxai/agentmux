@@ -280,6 +280,12 @@ function Block(props: BlockProps): JSX.Element {
     const viewType = createMemo(() => blockData()?.meta?.view);
     const [viewModel, setViewModel] = createSignal<ViewModel>(null);
 
+    // Ownership tracking (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.4):
+    // remember exactly which bcm THIS mount registered and which ViewModels
+    // it created, so cleanup can neither clobber a newer mount's registration
+    // nor dispose a ViewModel it merely adopted from the registry.
+    let registeredBcm: BlockComponentModel | null = null;
+    const createdViewModels: ViewModel[] = [];
     createEffect(() => {
         const view = viewType();
         if (!view) return;
@@ -287,14 +293,24 @@ function Block(props: BlockProps): JSX.Element {
         let vm = bcm?.viewModel;
         if (vm == null || vm.viewType !== view) {
             vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel);
-            registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
+            createdViewModels.push(vm);
+            registeredBcm = { viewModel: vm };
+            registerBlockComponentModel(props.nodeModel.blockId, registeredBcm);
         }
         setViewModel(vm);
     });
 
     onCleanup(() => {
-        unregisterBlockComponentModel(props.nodeModel.blockId);
-        viewModel()?.dispose?.();
+        if (registeredBcm) {
+            unregisterBlockComponentModel(props.nodeModel.blockId, registeredBcm);
+        }
+        // Dispose only ViewModels this mount CREATED and that are not the
+        // registry's live one (a newer mount may have adopted nothing from
+        // us, but never dispose someone else's live vm out from under them).
+        const liveVm = getBlockComponentModel(props.nodeModel.blockId)?.viewModel;
+        for (const vm of createdViewModels) {
+            if (vm !== liveVm) vm?.dispose?.();
+        }
     });
 
     const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
@@ -330,6 +346,12 @@ function SubBlock(props: SubBlockProps): JSX.Element {
     const viewType = createMemo(() => blockData()?.meta?.view);
     const [viewModel, setViewModel] = createSignal<ViewModel>(null);
 
+    // Ownership tracking (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.4):
+    // remember exactly which bcm THIS mount registered and which ViewModels
+    // it created, so cleanup can neither clobber a newer mount's registration
+    // nor dispose a ViewModel it merely adopted from the registry.
+    let registeredBcm: BlockComponentModel | null = null;
+    const createdViewModels: ViewModel[] = [];
     createEffect(() => {
         const view = viewType();
         if (!view) return;
@@ -337,14 +359,24 @@ function SubBlock(props: SubBlockProps): JSX.Element {
         let vm = bcm?.viewModel;
         if (vm == null || vm.viewType !== view) {
             vm = makeViewModel(props.nodeModel.blockId, view, props.nodeModel as any);
-            registerBlockComponentModel(props.nodeModel.blockId, { viewModel: vm });
+            createdViewModels.push(vm);
+            registeredBcm = { viewModel: vm };
+            registerBlockComponentModel(props.nodeModel.blockId, registeredBcm);
         }
         setViewModel(vm);
     });
 
     onCleanup(() => {
-        unregisterBlockComponentModel(props.nodeModel.blockId);
-        viewModel()?.dispose?.();
+        if (registeredBcm) {
+            unregisterBlockComponentModel(props.nodeModel.blockId, registeredBcm);
+        }
+        // Dispose only ViewModels this mount CREATED and that are not the
+        // registry's live one (a newer mount may have adopted nothing from
+        // us, but never dispose someone else's live vm out from under them).
+        const liveVm = getBlockComponentModel(props.nodeModel.blockId)?.viewModel;
+        for (const vm of createdViewModels) {
+            if (vm !== liveVm) vm?.dispose?.();
+        }
     });
 
     const viewTypeStr = createMemo(() => blockData()?.meta?.view);

@@ -44,6 +44,12 @@ export function initializeFromWaveObject(model: LayoutModel) {
     } else {
         model.updateTree();
     }
+
+    // One-shot startup heal: remove dangling leaves persisted by an earlier
+    // session's races once Tab + LayoutState have both settled. Deliberately
+    // a delayed single pass, not a reactive subscription — see the
+    // onBackendUpdate note below and SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5.
+    setTimeout(() => pruneDanglingLeaves(model), 2000);
 }
 
 /**
@@ -65,9 +71,14 @@ export function onBackendUpdate(model: LayoutModel) {
     const pendingActions = waveObj?.pendingbackendactions;
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
-    } else {
-        pruneDanglingLeaves(model);
     }
+    // NOTE deliberately NO prune here (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
+    // §3.5): running it reactively on every Tab/LayoutState change made the
+    // Tab object a tracked dependency and could delete a LEGITIMATE
+    // freshly-created leaf whose block hadn't landed in tab.blockids yet
+    // (the round-4 "drops don't stick" regression). Prune triggers are now:
+    // model init (below), the tab bar's post-drag settle pass, and the
+    // redock failure path.
 }
 
 /**
@@ -84,10 +95,9 @@ export function onBackendUpdate(model: LayoutModel) {
  * never touches leaves whose block is owned (a queued insert for a
  * newly-owned block is unaffected — the leaf simply isn't there yet).
  *
- * Reactivity note: this reads `model.tabAtom()` inside the same effect
- * that drives `onBackendUpdate` (layoutModelHooks), so `Tab` becomes a
- * tracked dependency — a MoveBlock updating `blockids` re-runs the
- * effect and prunes even when the queued layout delete was lost.
+ * Triggers (deliberately sparse — see the round-4 regression note in
+ * onBackendUpdate): one-shot at model init (+2s), the tab bar's
+ * post-drag settle pass, and the redock failure path. NOT reactive.
  */
 export function pruneDanglingLeaves(model: LayoutModel) {
     const rootNode = model.treeState?.rootNode;
@@ -153,7 +163,8 @@ export async function processPendingBackendActions(model: LayoutModel) {
         model.setter(model.localTreeStateAtom, { ...model.treeState });
     });
     model.persistToBackend();
-    pruneDanglingLeaves(model);
+    // No prune here — a just-applied queued INSERT's block may not be in the
+    // frontend's tab.blockids yet (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5).
 }
 
 /**
@@ -352,7 +363,19 @@ export function persistToBackend(model: LayoutModel) {
         waveObj.focusednodeid = model.treeState.focusedNodeId;
         waveObj.magnifiednodeid = model.treeState.magnifiedNodeId;
         waveObj.leaforder = model.treeState.leafOrder;
-        waveObj.pendingbackendactions = model.treeState.pendingBackendActions;
+        // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
+        // the pendingbackendactions queue is BACKEND-owned. Never write our
+        // (often stale) local copy — a debounced persist racing a freshly
+        // queued action used to erase it (the stale-tree resurrection
+        // engine). Instead, carry forward the LIVE queue minus the actions
+        // this model has already processed: ordinary persists preserve
+        // unseen actions verbatim, and post-processing persists still clear
+        // consumed ones.
+        const liveQueue = model.getter(model.waveObjectAtom)?.pendingbackendactions;
+        const unprocessed = liveQueue?.filter(
+            (a) => a.actionid && !model.processedActionIds.has(a.actionid)
+        );
+        waveObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
 
         model.setter(model.waveObjectAtom, waveObj);
         model.persistDebounceTimer = null;
