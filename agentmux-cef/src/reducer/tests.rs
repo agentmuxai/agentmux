@@ -997,26 +997,34 @@ fn is_live_user_window_classifies_by_is_pool_not_label() {
 /// The full decision truth table (CEF-free pure core).
 #[test]
 fn should_begin_drain_truth_table() {
-    // Running + zero user windows + no creation in flight → begin draining.
+    // Armed + Running + zero user windows + no creation in flight → begin draining.
     assert_eq!(
-        should_begin_drain(0, false, &QuitState::Running),
+        should_begin_drain(true, 0, false, &QuitState::Running),
         Some(QuitReason::LastWindowClosed)
     );
     // A live user window blocks drain.
-    assert_eq!(should_begin_drain(1, false, &QuitState::Running), None);
+    assert_eq!(should_begin_drain(true, 1, false, &QuitState::Running), None);
     // §10.2 corner: a user creation in flight blocks drain even at zero
     // registered windows — never quit while the user's "New Window" is loading.
-    assert_eq!(should_begin_drain(0, true, &QuitState::Running), None);
+    assert_eq!(should_begin_drain(true, 0, true, &QuitState::Running), None);
     // Already draining / quit → never re-drains (monotonic with handle_begin_drain).
     assert_eq!(
         should_begin_drain(
+            true,
             0,
             false,
             &QuitState::Draining { reason: QuitReason::LastWindowClosed }
         ),
         None
     );
-    assert_eq!(should_begin_drain(0, false, &QuitState::Quit), None);
+    assert_eq!(should_begin_drain(true, 0, false, &QuitState::Quit), None);
+    // UNARMED (sanitize-then-decide §1.E): the startup gap — no live user
+    // window has ever registered — must never drain, even though every other
+    // input reads "drainable" (main's creation path enqueues no pending entry,
+    // so this exact input combination is live between process start and main's
+    // RegisterBrowser).
+    assert_eq!(should_begin_drain(false, 0, false, &QuitState::Running), None);
+    assert_eq!(should_begin_drain(false, 0, true, &QuitState::Running), None);
 }
 
 /// Only USER-initiated creations block drain; pool/pane background creations don't.
@@ -1045,11 +1053,27 @@ fn user_creation_in_flight_ignores_background_labels() {
     );
 }
 
+/// A fresh (pre-first-window) state must NOT drain: `HostState::default()` is
+/// unarmed. This pins the §1.E fix — before the arming bit, this exact state
+/// (the startup gap) read as drainable, a latent startup-quit for any future
+/// `request_drain` consumer.
+#[test]
+fn reconcile_quit_never_drains_unarmed_fresh_state() {
+    let state = HostState::default();
+    assert_eq!(
+        reconcile_quit(&state),
+        None,
+        "unarmed (pre-first-window) state must never request a drain"
+    );
+}
+
 /// After the last user window deregisters (no browsers, no pending creation),
-/// reconcile drains. (Composed over real `HostState`.)
+/// reconcile drains. (Composed over real `HostState`; armed = a live user
+/// window registered at some point this process, as `RegisterBrowser` does.)
 #[test]
 fn reconcile_quit_drains_when_no_windows_and_no_pending_creation() {
-    let state = HostState::default();
+    let mut state = HostState::default();
+    state.saw_live_user_window = true;
     assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
 }
 
@@ -1059,6 +1083,7 @@ fn reconcile_quit_drains_when_no_windows_and_no_pending_creation() {
 #[test]
 fn reconcile_quit_deferred_while_user_creation_pending() {
     let mut state = HostState::default();
+    state.saw_live_user_window = true;
     update(
         &mut state,
         HostCommand::EnqueuePendingWindowCreation { entry: entry("window-fresh-uuid") },
@@ -1076,6 +1101,7 @@ fn reconcile_quit_deferred_while_user_creation_pending() {
 #[test]
 fn reconcile_quit_drains_despite_pending_pool_refill() {
     let mut state = HostState::default();
+    state.saw_live_user_window = true;
     update(
         &mut state,
         HostCommand::EnqueuePendingWindowCreation { entry: entry("window-pool-refill-1") },
@@ -1087,6 +1113,7 @@ fn reconcile_quit_drains_despite_pending_pool_refill() {
 #[test]
 fn reconcile_quit_noop_once_draining() {
     let mut state = HostState::default();
+    state.saw_live_user_window = true; // isolate the Draining gate from the arming gate
     update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
     assert_eq!(reconcile_quit(&state), None);
 }
@@ -1120,7 +1147,8 @@ fn is_quit_relevant_guard_membership() {
 /// command, and skips it on a quit-irrelevant one even when the state would drain.
 #[test]
 fn update_surfaces_request_drain_only_for_relevant_commands() {
-    let mut state = HostState::default(); // Running, no windows, no pending → drainable
+    let mut state = HostState::default(); // Running, no windows, no pending
+    state.saw_live_user_window = true; // armed → drainable
     let out = update(&mut state, HostCommand::DequeuePendingWindowCreation);
     assert_eq!(
         out.request_drain,
@@ -1135,4 +1163,50 @@ fn update_surfaces_request_drain_only_for_relevant_commands() {
         out2.request_drain, None,
         "quit-irrelevant command must not compute a drain request"
     );
+}
+
+// ── Sanitize-then-decide Phase 0 (SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11) ──
+
+/// `ReconcileQuit` is a pure poke: it mutates nothing (no events, no version
+/// bump) and only surfaces the standing `reconcile_quit` verdict via
+/// `request_drain` — the edge a level-triggered executor rides when it has no
+/// state-changing dispatch of its own (§1.H).
+#[test]
+fn reconcile_quit_poke_surfaces_verdict_without_mutation() {
+    let mut state = HostState::default();
+    state.saw_live_user_window = true;
+    let version_before = state.event_version;
+    let out = update(&mut state, HostCommand::ReconcileQuit);
+    assert_eq!(
+        out.request_drain,
+        Some(QuitReason::LastWindowClosed),
+        "armed drainable state → poke surfaces the drain verdict"
+    );
+    assert!(out.events.is_empty(), "poke must emit no events");
+    assert_eq!(state.event_version, version_before, "poke must not bump version");
+}
+
+/// The poke respects every gate the composed decision has: unarmed and
+/// already-draining states both answer `None`.
+#[test]
+fn reconcile_quit_poke_respects_arming_and_monotonicity() {
+    // Unarmed fresh state (the startup gap) → None.
+    let mut fresh = HostState::default();
+    let out = update(&mut fresh, HostCommand::ReconcileQuit);
+    assert_eq!(out.request_drain, None, "unarmed poke must not drain");
+
+    // Armed but already draining → None (monotonic).
+    let mut draining = HostState::default();
+    draining.saw_live_user_window = true;
+    update(&mut draining, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
+    let out2 = update(&mut draining, HostCommand::ReconcileQuit);
+    assert_eq!(out2.request_drain, None, "poke after BeginDrain must not re-drain");
+}
+
+/// `ReconcileQuit` must never enter the `is_quit_relevant` exclusion list —
+/// surfacing the verdict is its entire purpose.
+#[test]
+fn reconcile_quit_poke_is_quit_relevant() {
+    use super::is_quit_relevant;
+    assert!(is_quit_relevant(&HostCommand::ReconcileQuit));
 }
