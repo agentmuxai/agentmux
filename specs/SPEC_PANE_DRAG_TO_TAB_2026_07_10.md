@@ -368,7 +368,18 @@ revisit), the `respect-reduced-motion` SCSS mixin is a no-op, and all raw
    an in-tab move uses — and the queued backend delete no-ops idempotently
    on the already-removed node.
 
-5. **Stale-tree residue (pre-existing, NOT fixed here).** The session's first
+5. **Stale-tree residue — now healed defensively (round 3).**
+   `pruneDanglingLeaves` (layoutPersistence.ts) removes any leaf whose block
+   is not in the tab's reducer-owned `Tab.blockids`, on every backend update
+   and after pending-action processing; reading `tabAtom()` inside the
+   `onBackendUpdate` effect makes `Tab` a tracked dependency, so a MoveBlock
+   updating `blockids` re-runs the effect and prunes even when the queued
+   layout delete was clobbered. A failed redock also prunes the source tab
+   (the characteristic failure IS "dragged a dangling leaf"). Existing
+   corrupted trees self-heal without a data wipe. Historical context below
+   kept for the record:
+
+   **(original note)** The session's first
    redock failed cleanly with *"block …57a30 is in tab 80ec…, not e7f1…"* — the
    source tab was rendering a leaf for a block the backend had already moved
    (residue in the persisted dev data dir from the v1 testing session, which
