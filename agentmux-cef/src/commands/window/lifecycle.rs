@@ -569,14 +569,15 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     tracing::warn!("[opacity] capture_hwnd_for_label: no available HWND for label={}", label);
 }
 
-/// Pure routing predicate for `close_window_by_label` (task #29 round 2).
-/// A `window-*` label whose browser is registered must close through
-/// `CloseWindowTask` — the only path that runs the CEF-148 demote /
+/// Pure routing predicate for `close_window_by_label` (task #29 round 2)
+/// and the OS-close (WM_CLOSE) routing subclass in `client/wndproc.rs`
+/// (task #30). A `window-*` label whose browser is registered must close
+/// through `CloseWindowTask` — the only path that runs the CEF-148 demote /
 /// imperative-srv-cleanup sequence. Everything else (floaters, labels
 /// whose browser never registered or already unregistered) keeps the
 /// platform fallback. Extracted so the routing decision is directly
 /// unit-testable without constructing CEF browser objects.
-fn should_route_close_through_task(label: &str, has_registered_browser: bool) -> bool {
+pub(crate) fn should_route_close_through_task(label: &str, has_registered_browser: bool) -> bool {
     label.starts_with("window-") && has_registered_browser
 }
 
