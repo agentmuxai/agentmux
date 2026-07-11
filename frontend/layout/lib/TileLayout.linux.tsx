@@ -24,6 +24,7 @@ import { LayoutModel } from "./layoutModel";
 import { useNodeModel, useTileLayout } from "./layoutModelHooks";
 import "./tilelayout.scss";
 import {
+    DropDirection,
     LayoutNode,
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
@@ -32,6 +33,7 @@ import {
 } from "./types";
 import { determineDropDirection } from "./utils";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { clearCrossTabDrop, noteCrossTabDrop, redockDraggedPane, takeCrossTabDropFor } from "./crossTabDrag";
 
 export const tileItemType = "TILE_ITEM";
 
@@ -62,6 +64,17 @@ const DragPreviewHeight = 300;
 // Global drag state — track the node being dragged and current cursor position.
 let globalDragNodeId: string | null = null;
 let globalDragLayoutModel: LayoutModel | null = null;
+// The dragged LayoutNode itself — needed by cross-tab drags, where the
+// TARGET tab's overlay must compute a ghost placeholder for a node that
+// doesn't exist in its own tree (LayoutTreeComputeMoveNodeAction.nodeToMove).
+let globalDragNode: LayoutNode | null = null;
+
+// True when the drag in progress originated in a DIFFERENT tab's layout than
+// `model`'s — i.e. the user spring-switched tabs mid-drag
+// (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md) and is now hovering this tab's panes.
+function isCrossTabDrag(model: LayoutModel): boolean {
+    return globalDragLayoutModel != null && globalDragLayoutModel !== model;
+}
 
 function TileLayoutComponent(props: TileLayoutProps) {
     const layoutModel = useTileLayout(props.tabAtom, props.contents);
@@ -409,15 +422,22 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     preventUnhandled.start();
                     globalDragNodeId = props.node.id;
                     globalDragLayoutModel = props.layoutModel;
+                    globalDragNode = props.node;
+                    clearCrossTabDrop();
                     props.layoutModel.activeDrag._set(true);
                     setIsDragging(true);
-                    setCurrentDragPayload({ kind: "tile", node: props.node });
+                    setCurrentDragPayload({
+                        kind: "tile",
+                        node: props.node,
+                        sourceTabId: props.layoutModel.tabAtom()?.oid,
+                    });
                     getApi().setJsDragActive(true).catch(() => {});
                 },
                 onDrop: () => {
                     preventUnhandled.stop();
                     globalDragNodeId = null;
                     globalDragLayoutModel = null;
+                    globalDragNode = null;
                     props.layoutModel.activeDrag._set(false);
                     setIsDragging(false);
                     getApi().setJsDragActive(false).catch(() => {});
@@ -576,12 +596,29 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             y: Math.max(bestRect.top, Math.min(bestRect.top + bestRect.height, offset.y)),
         };
 
+        const crossTab = isCrossTabDrag(props.layoutModel);
+        const direction = determineDropDirection(bestRect, clampedOffset);
         props.layoutModel.treeReducer({
             type: LayoutTreeActionType.ComputeMove,
             nodeId: bestLeafId,
             nodeToMoveId: dragNodeId,
-            direction: determineDropDirection(bestRect, clampedOffset),
+            direction,
+            // Cross-tab: see OverlayNode.computeDropDirection — preview only.
+            nodeToMove: crossTab ? globalDragNode : undefined,
         } as LayoutTreeComputeMoveNodeAction);
+        if (crossTab) {
+            const blockId = globalDragNode?.data?.blockId;
+            const sourceTabId = globalDragLayoutModel?.tabAtom()?.oid;
+            const targetTabId = props.layoutModel.tabAtom()?.oid;
+            const bestLeaf = props.layoutModel.leafs().find((l) => l.id === bestLeafId);
+            const targetBlockId = bestLeaf?.data?.blockId;
+            if (blockId && sourceTabId && targetTabId && targetBlockId
+                && direction !== undefined && direction !== DropDirection.Center) {
+                noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
+            } else {
+                noteCrossTabDrop(null);
+            }
+        }
     });
 
     onMount(() => {
@@ -597,9 +634,23 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             onDragLeave: () => {
                 props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
             },
-            onDrop: () => {
+            onDrop: ({ location }) => {
+                // Catches drops that landed in a dead spot. Clearing the
+                // payload is critical — without it the cross-window dragend
+                // monitor sees a still-set payload and can misread the
+                // release as a tear-off.
                 setCurrentDragPayload(null);
-                props.layoutModel.onDrop();
+                // Only act when this container is the innermost matched
+                // target — for drops on an inner overlay-node, that node's
+                // own onDrop already handled the commit/redock.
+                if (location.current.dropTargets[0]?.element !== overlayContainerRef) return;
+                const crossTabDrop = takeCrossTabDropFor(props.layoutModel.tabAtom()?.oid);
+                if (crossTabDrop) {
+                    props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                    redockDraggedPane(crossTabDrop);
+                } else {
+                    props.layoutModel.onDrop();
+                }
             },
         });
         onCleanup(cleanup);
@@ -633,19 +684,41 @@ const OverlayNode = (props: OverlayNodeProps) => {
         const dragNodeId = globalDragNodeId;
         if (!dragNodeId || dragNodeId === props.node.id) return;
 
+        const crossTab = isCrossTabDrag(props.layoutModel);
         if (props.layoutModel.displayContainerRef?.current && additionalProps()?.rect) {
             const containerRect = props.layoutModel.displayContainerRef.current.getBoundingClientRect();
             const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
+            const direction = determineDropDirection(additionalProps().rect, offset);
             props.layoutModel.treeReducer({
                 type: LayoutTreeActionType.ComputeMove,
                 nodeId: props.node.id,
                 nodeToMoveId: dragNodeId,
-                direction: determineDropDirection(additionalProps().rect, offset),
+                direction,
+                // Cross-tab: the dragged node isn't in this tree; pass it so
+                // the ghost placeholder can still be computed (preview only —
+                // the drop below routes to redockDraggedPane, never a local commit).
+                nodeToMove: crossTab ? globalDragNode : undefined,
             } as LayoutTreeComputeMoveNodeAction);
+            // Capture the cross-tab drop record NOW (globals are alive during
+            // onDrag) — drop handlers must not read the drag globals, since
+            // the source draggable's own onDrop may null them first.
+            if (crossTab) {
+                const blockId = globalDragNode?.data?.blockId;
+                const sourceTabId = globalDragLayoutModel?.tabAtom()?.oid;
+                const targetTabId = props.layoutModel.tabAtom()?.oid;
+                const targetBlockId = props.node.data?.blockId;
+                if (blockId && sourceTabId && targetTabId && targetBlockId
+                    && direction !== undefined && direction !== DropDirection.Center) {
+                    noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
+                } else {
+                    noteCrossTabDrop(null);
+                }
+            }
         } else {
             props.layoutModel.treeReducer({
                 type: LayoutTreeActionType.ClearPendingAction,
             });
+            if (crossTab) noteCrossTabDrop(null);
         }
     });
 
@@ -662,8 +735,20 @@ const OverlayNode = (props: OverlayNodeProps) => {
                 props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
             },
             onDrop: () => {
+                // Valid in-window drop — clear cross-window payload so dragend monitor skips.
                 setCurrentDragPayload(null);
-                props.layoutModel.onDrop();
+                const crossTabDrop = takeCrossTabDropFor(props.layoutModel.tabAtom()?.oid);
+                if (crossTabDrop) {
+                    // Cross-tab drop: the pending Move references a node from
+                    // ANOTHER tab's tree — committing it locally would insert
+                    // a leaf this tab doesn't own (Tab.blockids unchanged →
+                    // dangling ref). Clear the preview and route through the
+                    // sanctioned redock RPC instead.
+                    props.layoutModel.treeReducer({ type: LayoutTreeActionType.ClearPendingAction });
+                    redockDraggedPane(crossTabDrop);
+                } else {
+                    props.layoutModel.onDrop();
+                }
             },
         });
         onCleanup(cleanup);

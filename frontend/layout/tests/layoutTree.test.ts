@@ -538,3 +538,66 @@ test("splitVertical - sizeFraction wrap branch preserves the target's footprint 
     assert(leaf.size === 32, "target keeps 80% of its original 40");
     assert(newNode.size === 8, "new node gets 20% of the target's original 40");
 });
+
+// ── cross-tab (foreign node) compute — SPEC_PANE_DRAG_TO_TAB_2026_07_10.md ──
+//
+// A pane dragged in from ANOTHER tab's tree isn't findable in this tree;
+// the action carries the node object via `nodeToMove` so a preview Move
+// (ghost placeholder) can still be computed. Center is a swap — undefined
+// for a foreign node.
+
+test("computeMoveNode - foreign nodeToMove override produces a preview Move", () => {
+    const node1 = newLayoutNode(undefined, undefined, undefined, { blockId: "node1" });
+    const node2 = newLayoutNode(undefined, undefined, undefined, { blockId: "node2" });
+    const rootNode = newLayoutNode(undefined, undefined, [node1, node2], undefined);
+    const treeState = newLayoutTreeState(rootNode);
+    // A node from a different tab's tree — NOT present in treeState.
+    const foreignNode = newLayoutNode(undefined, undefined, undefined, { blockId: "foreign-block" });
+
+    const pendingAction = computeMoveNode(treeState, {
+        type: LayoutTreeActionType.ComputeMove,
+        nodeId: node1.id,
+        nodeToMoveId: foreignNode.id,
+        direction: DropDirection.Top,
+        nodeToMove: foreignNode,
+    } as LayoutTreeComputeMoveNodeAction);
+    const moveOp = pendingAction as LayoutTreeMoveNodeAction;
+    assert(moveOp, "foreign nodeToMove should produce a move operation");
+    assert(moveOp.type === LayoutTreeActionType.Move, "should be a Move action");
+    assert(moveOp.node.id === foreignNode.id, "move operation should carry the foreign node");
+});
+
+test("computeMoveNode - foreign node without override still bails safely", () => {
+    const node1 = newLayoutNode(undefined, undefined, undefined, { blockId: "node1" });
+    const rootNode = newLayoutNode(undefined, undefined, [node1], undefined);
+    const treeState = newLayoutTreeState(rootNode);
+    const foreignNode = newLayoutNode(undefined, undefined, undefined, { blockId: "foreign-block" });
+
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    const pendingAction = computeMoveNode(treeState, {
+        type: LayoutTreeActionType.ComputeMove,
+        nodeId: node1.id,
+        nodeToMoveId: foreignNode.id,
+        direction: DropDirection.Top,
+    });
+    console.warn = originalWarn;
+    assert(pendingAction === undefined, "foreign node without nodeToMove should produce no action");
+});
+
+test("computeMoveNode - Center direction with a foreign node is undefined (no cross-tab swap)", () => {
+    const node1 = newLayoutNode(undefined, undefined, undefined, { blockId: "node1" });
+    const node2 = newLayoutNode(undefined, undefined, undefined, { blockId: "node2" });
+    const rootNode = newLayoutNode(undefined, undefined, [node1, node2], undefined);
+    const treeState = newLayoutTreeState(rootNode);
+    const foreignNode = newLayoutNode(undefined, undefined, undefined, { blockId: "foreign-block" });
+
+    const pendingAction = computeMoveNode(treeState, {
+        type: LayoutTreeActionType.ComputeMove,
+        nodeId: node1.id,
+        nodeToMoveId: foreignNode.id,
+        direction: DropDirection.Center,
+        nodeToMove: foreignNode,
+    } as LayoutTreeComputeMoveNodeAction);
+    assert(pendingAction === undefined, "Center + foreign node should produce no action");
+});
