@@ -47,13 +47,15 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
     const [isDragging, setIsDragging] = createSignal(false);
     const [naturalWidth, setNaturalWidth] = createSignal<number | null>(null);
-    // Own window label, fetched once — drives the lone-tab drag policy
-    // below (a standalone torn-off window's single tab must be draggable
-    // to remount it into another window; main's never is).
-    const [windowLabel, setWindowLabel] = createSignal<string | null>(null);
-    onMount(() => {
-        fireAndForget(async () => setWindowLabel(await getApi().getWindowLabel()));
-    });
+    // Own window label — drives the lone-tab drag policy below (a
+    // standalone torn-off window's single tab must be draggable to
+    // remount it into another window; main's never is). Read
+    // SYNCHRONOUSLY from the URL param (the same authoritative source
+    // app-init.ts uses) rather than the async getWindowLabel() IPC: a
+    // freshly torn-off window is exactly the primary use case, and an
+    // async fetch would leave its lone tab undraggable until the
+    // promise resolved. (reagent PR #2086 P2)
+    const windowLabel = new URLSearchParams(window.location.search).get("windowLabel") || "main";
     // Lone-tab drags are a REMOUNT-ONLY gesture (cross-window tab
     // remount, SPEC_CROSS_WINDOW_TAB_REMOUNT §4.3): reordering a single
     // tab is meaningless, and tearing it off would just leave an empty
@@ -84,9 +86,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
 
         const cleanupDraggable = draggable({
             element: tabWrapRef,
-            canDrag: () =>
-                props.allTabCount > 1 ||
-                (windowLabel() != null && windowLabel() !== "main"),
+            canDrag: () => props.allTabCount > 1 || windowLabel !== "main",
             getInitialData: () => ({
                 tabId: props.tabId,
                 workspaceId: props.workspaceId,
@@ -154,9 +154,8 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 // handshake's own hook install supersedes this session.
                 fireAndForget(async () => {
                     try {
-                        const sourceWindowLabel = await getApi().getWindowLabel();
                         await getApi().startTabDragTracking({
-                            sourceWindowLabel,
+                            sourceWindowLabel: windowLabel,
                             tabId: props.tabId,
                             sourceWsId: props.workspaceId,
                             isLastTab: props.allTabCount === 1,

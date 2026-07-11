@@ -724,6 +724,17 @@ fn candidate_label_under_cursor_locked(
         if label == &ctx.dragged_label {
             continue;
         }
+        // TabDrag mode: the source window is NOT a candidate. Its own
+        // pragmatic-dnd reorder owns the strip while the cursor is over
+        // it — emitting tearoff:hover-changed at it on every mouse move
+        // would race that (two writers, differently-timed and
+        // differently-converted, on one insertionPoint signal), and
+        // button-up over the source is owned by the in-window reorder
+        // anyway. TearOff mode keeps the source as a candidate: that's
+        // the cancel-back drop target. (reagent PR #2086 P1)
+        if matches!(ctx.mode, HookMode::TabDrag { .. }) && label == &ctx.source_label {
+            continue;
+        }
         if !is_instance_label(label) {
             continue;
         }
