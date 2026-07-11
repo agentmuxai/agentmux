@@ -419,6 +419,12 @@ pub(crate) fn consume_request_drain(
             site, reason
         );
         begin_drain_and_cascade(state, reason);
+        // Phase 3 — same deterministic-quit re-check as the posted task: a
+        // drain with zero pool inventory produces no further OS window
+        // events. Idempotent (QUIT_INITIATED); callers that re-run the gate
+        // themselves (LOCATIONCHANGE) just hit the guard twice.
+        #[cfg(target_os = "windows")]
+        crate::wrr::win_event::reevaluate_last_window_quit();
         return;
     }
     let mut task = BeginDrainCascadeTask::new(state.clone(), reason.clone());
