@@ -855,9 +855,12 @@ pub fn demote_promoted_pool_window(
 }
 
 /// SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md — close path for `window-*`
-/// windows that CANNOT demote into the pool (beyond `POOL_DEMOTE_CAP`, or a
-/// foreign `window-{uuid}` label the pool handshake's `window-pool-` prefix
-/// gate rejects). The round-5 destroy these closes used to take parks the
+/// windows that CANNOT demote into the pool: beyond `POOL_DEMOTE_CAP`, no
+/// strict HWND, or the reducer rejected the demote. (Foreign `window-{uuid}`
+/// labels are no longer categorically excluded — Residual 1 of
+/// SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11 adopts them through
+/// the same demote gates; this fallback now only sees one when a gate
+/// refuses.) The round-5 destroy these closes used to take parks the
 /// browser anyway (CEF 148 Views, no `on_before_close` — live-verified in the
 /// quit-gate work) with the FULL workspace page still running: xterm WebGL
 /// surfaces (SwiftShader = CPU shared memory = pagefile-backed commit),
