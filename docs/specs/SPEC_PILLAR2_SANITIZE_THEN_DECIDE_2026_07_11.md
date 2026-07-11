@@ -3,7 +3,7 @@
 **Date:** 2026-07-11
 **Type:** Design spec (design-first per program discipline — window/lifecycle code here is
 deadlock-sensitive and has repeatedly punished plausible-looking fixes)
-**Status:** Phases 0–1 planned for immediate implementation; 2–3 staged behind live matrix
+**Status:** IMPLEMENTED & MERGED 2026-07-11 — Phases 0–3 landed as #2080, #2081, #2084 (replacement for auto-closed #2082), #2083; live close matrix passed on the merged code (results: PR #2082/#2083 comments), including a zombie-hang reproduction fixed by the watchdog re-arm (#2083 tip)
 **Builds on:** `SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md` (Stage 2 first slice merged,
 PR #1993), `SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md` (merged, PR #2043),
 `SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md` (§5.1/§10 — `reconcile_quit` itself)
