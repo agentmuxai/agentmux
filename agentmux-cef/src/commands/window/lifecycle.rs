@@ -82,8 +82,10 @@ pub fn close_window(state: &Arc<AppState>, args: &serde_json::Value) -> Result<s
 /// Close a specific window by label. Used by the tear-off Phase 4
 /// merge path: after the candidate window pulls the dragged tab into
 /// its own workspace via MoveTabToWorkspace, the dragged window is
-/// empty and should be destroyed. Posts WM_CLOSE on Win32; uses the
-/// existing UI-thread close task on other platforms.
+/// empty and should be destroyed. `window-*` labels with a registered
+/// browser route through `CloseWindowTask` (same gate as `close_window`
+/// above); everything else posts WM_CLOSE on Win32 / uses the UI-thread
+/// close task on other platforms.
 pub fn close_window_by_label(
     state: &Arc<AppState>,
     args: &serde_json::Value,
@@ -93,6 +95,32 @@ pub fn close_window_by_label(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing label".to_string())?
         .to_string();
+
+    // task #29 round 2 (Client.windowids leak): a `window-*` label with a
+    // registered browser MUST take `CloseWindowTask`, the same routing
+    // `close_window` uses — a raw WM_CLOSE goes back through Views'
+    // wndproc, which on CEF 148 parks the browser (rounds 2–5 evidence,
+    // retro-window-lifecycle-leak-2026-07-04) without ever firing
+    // `on_before_close`, so the imperative srv cleanup
+    // (`demote_srv_cleanup` → CloseWindow → delete_workspace cascade)
+    // never runs: the window's srv window/workspace/tab rows and its
+    // `Client.windowids` entry leak forever, and the window can't be
+    // demoted back into the warm pool either. Live-reproduced on 0.53.0:
+    // closing a promoted pool window through this path left its srv
+    // window_id orphaned (windowids count never returned to baseline)
+    // and a subsequent `close_window` on the same label no-oped because
+    // the browser was already parked.
+    //
+    // Floaters (`floating-*`) deliberately keep the WM_CLOSE path: their
+    // outer-popup wndproc completes on_before_close via the #1957
+    // owned-popup DestroyWindow mechanism (see floating_pane.rs, which
+    // also documents why routing floaters here would be wrong — the
+    // GA_ROOT walk lands on MAIN for them).
+    if should_route_close_through_task(&label, state.get_browser(&label).is_some()) {
+        crate::launcher_ipc::report_window_closed(label.clone());
+        crate::ui_tasks::post_close_window(state, &label);
+        return Ok(serde_json::Value::Null);
+    }
 
     #[cfg(target_os = "windows")]
     unsafe {
@@ -539,4 +567,51 @@ pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
         return;
     }
     tracing::warn!("[opacity] capture_hwnd_for_label: no available HWND for label={}", label);
+}
+
+/// Pure routing predicate for `close_window_by_label` (task #29 round 2).
+/// A `window-*` label whose browser is registered must close through
+/// `CloseWindowTask` — the only path that runs the CEF-148 demote /
+/// imperative-srv-cleanup sequence. Everything else (floaters, labels
+/// whose browser never registered or already unregistered) keeps the
+/// platform fallback. Extracted so the routing decision is directly
+/// unit-testable without constructing CEF browser objects.
+fn should_route_close_through_task(label: &str, has_registered_browser: bool) -> bool {
+    label.starts_with("window-") && has_registered_browser
+}
+
+#[cfg(test)]
+mod close_routing_tests {
+    use super::should_route_close_through_task;
+
+    #[test]
+    fn promoted_pool_window_with_browser_routes_through_task() {
+        assert!(should_route_close_through_task("window-pool-abc123", true));
+    }
+
+    #[test]
+    fn cold_path_window_with_browser_routes_through_task() {
+        assert!(should_route_close_through_task("window-9f8e7d", true));
+    }
+
+    #[test]
+    fn window_label_without_registered_browser_keeps_fallback() {
+        // Browser gone or never registered — CloseWindowTask would no-op on
+        // get_window_on_ui; the HWND fallback is the only close that can work.
+        assert!(!should_route_close_through_task("window-pool-abc123", false));
+    }
+
+    #[test]
+    fn floater_labels_keep_wm_close_path() {
+        // Floaters close via their own outer-popup wndproc (#1957); routing
+        // them through CloseWindowTask would mis-target (GA_ROOT → MAIN).
+        assert!(!should_route_close_through_task("floating-abc123", true));
+        assert!(!should_route_close_through_task("floating-pool-abc123", true));
+    }
+
+    #[test]
+    fn main_and_foreign_labels_keep_fallback() {
+        assert!(!should_route_close_through_task("main", true));
+        assert!(!should_route_close_through_task("browser-pane-xyz", true));
+    }
 }
