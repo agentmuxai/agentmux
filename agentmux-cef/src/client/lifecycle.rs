@@ -249,6 +249,25 @@ impl AgentMuxHandler {
                     unsafe { install_top_level_focus_restore_hook(hwnd); }
                 }
 
+                // OS-close routing (task #30): Alt+F4 / taskbar-close
+                // deliver WM_CLOSE straight to the Views wndproc, which
+                // parks the browser with no srv cleanup — the same defect
+                // class close_window_by_label had (#2087), via the OS
+                // entry point. Reroute WM_CLOSE on every SECONDARY
+                // `window-*` top-level through CloseWindowTask. NOT main:
+                // main's OS-close feeds the tuned WRR last-window quit
+                // sequence (Pillar 2), which owns process shutdown. Not
+                // floaters: their outer-popup wndproc close works (#1957).
+                if is_top_level_window && label.starts_with("window-") {
+                    unsafe {
+                        super::wndproc::install_window_close_routing_hook(
+                            &self.state,
+                            hwnd,
+                            &label,
+                        );
+                    }
+                }
+
                 // Floater cascade hook (issue #1560): replaces the Win32
                 // owned-window z-order/minimize/destroy invariant now that
                 // floaters are unowned WS_POPUP windows. Install on all
