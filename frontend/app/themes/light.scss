@@ -1,0 +1,88 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Light — first light-background theme (all 8 prior themes are dark).
+// See docs/specs/SPEC_LIGHT_THEME_AND_DEPTH_FIXES_2026_07_11.md.
+//
+// Two polarity flips relative to every dark theme's convention, both
+// deliberate:
+//   1. --hover-bg-color / --highlight-bg-color / --button-grey-* / scrollbar
+//      thumbs use BLACK tints, not the dark themes' white tints — a
+//      lightening overlay on an already-light surface is invisible.
+//   2. Terminal ANSI colors are individually darkened/desaturated from the
+//      usual dark-terminal palette (e.g. yellow/cyan/white would have near-
+//      zero contrast against a light terminal background otherwise) —
+//      modeled on established light-terminal-scheme conventions, not a
+//      literal hue-for-hue copy of any dark theme's --term-* values.
+
+[data-theme="light"] {
+    --main-bg-color: #f6f6f7;
+    --panel-bg-color: rgba(0, 0, 0, 0.03);
+    --block-bg-color: rgba(255, 255, 255, 0.6);
+    --block-bg-solid-color: #ffffff;
+    --modal-bg-color: #ffffff;
+
+    --main-text-color: #1f2328;
+    --secondary-text-color: #4b535c;
+    --grey-text-color: #6e7781;
+
+    --accent-color: #2563eb;
+    --accent-color-rgb: 37, 99, 235;
+    --link-color: #0969da;
+
+    --border-color: rgba(0, 0, 0, 0.12);
+    --form-element-border-color: rgba(0, 0, 0, 0.15);
+    --keybinding-border-color: rgba(37, 99, 235, 0.25);
+
+    --hover-bg-color: rgba(0, 0, 0, 0.05);
+    --highlight-bg-color: rgba(0, 0, 0, 0.08);
+
+    --error-color: #d1242f;
+    --warning-color: #9a6700;
+    --success-color: #1a7f37;
+
+    --button-grey-bg: rgba(0, 0, 0, 0.04);
+    --button-grey-hover-bg: rgba(0, 0, 0, 0.08);
+    --button-grey-border-color: rgba(0, 0, 0, 0.15);
+    --button-green-bg: #1a7f37;
+    --button-red-bg: #d1242f;
+    --button-yellow-bg: #9a6700;
+
+    --scrollbar-thumb-color: rgba(0, 0, 0, 0.25);
+    --scrollbar-thumb-hover-color: rgba(0, 0, 0, 0.4);
+
+    --term-background: #ffffff;
+    --term-foreground: #1f2328;
+    --term-black: #1f2328;
+    --term-red: #cf222e;
+    --term-green: #116329;
+    --term-yellow: #9a6700;
+    --term-blue: #0969da;
+    --term-magenta: #8250df;
+    --term-cyan: #1b7c83;
+    --term-white: #6e7781;
+    --term-bright-black: #57606a;
+    --term-bright-red: #a40e26;
+    --term-bright-green: #1a7f37;
+    --term-bright-yellow: #633c01;
+    --term-bright-blue: #218bff;
+    --term-bright-magenta: #a475f9;
+    --term-bright-cyan: #3192aa;
+    --term-bright-white: #8c959f;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}
