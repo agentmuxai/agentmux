@@ -5,9 +5,10 @@
 // links (`db_agent_identity_links`), the table the spawn-time resolver
 // actually reads (agentmux-srv/src/identity/resolver.rs). Replaces the
 // Armory "Identities" rail tab's old full bundle-CRUD UI
-// (`identity-manager.tsx`'s `IdentityManager`), which still fully exists
-// and keeps backing the agent-pane's own `view: "identity"` settings tab —
-// that surface is untouched.
+// (`identity-manager.tsx`'s former `IdentityManager`, deleted as dead
+// code — its two intended mount points never had a live caller). The
+// agent-pane's own `view: "identity"` settings tab is a separate,
+// already-read-only surface (`<BundleSummaryPanel/>`) and is untouched.
 //
 // No create/edit/delete/bind/unbind here — new agent identities are now
 // created from the agent-launch flow directly (issue #1624 PR-C). This
