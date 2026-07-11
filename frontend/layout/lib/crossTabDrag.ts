@@ -19,9 +19,8 @@ import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { getLayoutModelForTabById } from "./layoutModelHooks";
-import { findNodeByBlockId } from "./layoutNode";
 import { pruneDanglingLeaves } from "./layoutPersistence";
-import { DropDirection, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "./types";
+import { DropDirection } from "./types";
 
 /**
  * Clamp Outer* drop directions to their inner equivalents for CROSS-TAB
@@ -106,27 +105,14 @@ export function redockDraggedPane(opts: {
                 opts.targetBlockId ?? null,
                 opts.direction ?? null,
             );
-            // The backend queues a DeleteNode on the source tab's
-            // pendingbackendactions, but the source frontend's own
-            // debounced persist can race that queue and clobber it (the
-            // documented stale-tree-resurrection issue,
-            // INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION) —
-            // observed in field testing as the pane remaining visible in
-            // BOTH tabs. Remove the source leaf locally right away,
-            // exactly like an in-tab move does (frontend mutates +
-            // persists); the queued backend delete then no-ops on the
-            // already-removed node (idempotent by actionid + missing-node
-            // guard in layoutPersistence).
-            const sourceModel = getLayoutModelForTabById(opts.sourceTabId);
-            const sourceLeaf = sourceModel
-                ? findNodeByBlockId(sourceModel.treeState.rootNode, opts.blockId)
-                : undefined;
-            if (sourceModel && sourceLeaf) {
-                sourceModel.treeReducer({
-                    type: LayoutTreeActionType.DeleteNode,
-                    nodeId: sourceLeaf.id,
-                } as LayoutTreeDeleteNodeAction);
-            }
+            // Do NOT delete the source leaf here: this runs at RPC
+            // completion, which can precede the drag's dragend on a slow
+            // frame — and unmounting the drag source before dragend
+            // suppresses the event entirely, wedging pragmatic's teardown
+            // (the dead-source-tab bug). Source-leaf removal is owned by
+            // the queued backend delete plus the end-of-drag prune pass
+            // (tabbar.tsx cleanup → pruneDanglingLeaves), both of which
+            // run only after the gesture has fully settled.
         } catch (e) {
             Logger.error("dnd", "cross-tab pane redock failed", { error: String(e) });
             // The characteristic failure here is "block X is in tab Y,
