@@ -35,6 +35,11 @@ pub(super) fn handle_register_browser(
             registered_at: Instant::now(),
         },
     );
+    // Quit arming (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.E): the first live
+    // user window arms `should_begin_drain`. Monotonic — never cleared.
+    if super::quit::is_live_user_window(&kind) {
+        state.saw_live_user_window = true;
+    }
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserRegistered { label, kind, version: v }],

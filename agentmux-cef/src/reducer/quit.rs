@@ -143,15 +143,25 @@ pub(super) fn user_creation_in_flight(state: &HostState) -> bool {
 }
 
 /// Pure decision: should the host begin draining NOW? `Some(reason)` iff the host
-/// is `Running`, no live user-visible window remains, and no user-initiated
-/// creation is in flight. Safe to call after every transition — once
-/// `Draining`/`Quit` it returns `None` (the transition is monotonic — see
-/// `handle_begin_drain`). CEF-free so the full truth table is unit-testable.
+/// is armed (a live user window has registered at least once this process —
+/// `HostState::saw_live_user_window`, §1.E of the sanitize-then-decide spec),
+/// `Running`, no live user-visible window remains, and no user-initiated
+/// creation is in flight. Unarmed covers the startup gap: main's creation path
+/// enqueues no `PendingWindowCreation`, so before its `RegisterBrowser` lands
+/// both other inputs read "drainable" — without the arming gate, any
+/// quit-relevant dispatch in that window would surface a spurious drain
+/// request. Safe to call after every transition — once `Draining`/`Quit` it
+/// returns `None` (the transition is monotonic — see `handle_begin_drain`).
+/// CEF-free so the full truth table is unit-testable.
 pub(super) fn should_begin_drain(
+    armed: bool,
     live_user_windows: usize,
     user_creation_in_flight: bool,
     quit_state: &QuitState,
 ) -> Option<QuitReason> {
+    if !armed {
+        return None;
+    }
     if !matches!(quit_state, QuitState::Running) {
         return None;
     }
@@ -162,9 +172,10 @@ pub(super) fn should_begin_drain(
 }
 
 /// Level-triggered quit reconciliation over the full `HostState`. Composes the
-/// three reads above. Returns the drain reason iff it is safe to begin draining.
+/// reads above. Returns the drain reason iff it is safe to begin draining.
 pub(super) fn reconcile_quit(state: &HostState) -> Option<QuitReason> {
     should_begin_drain(
+        state.saw_live_user_window,
         count_live_user_windows(state),
         user_creation_in_flight(state),
         &state.quit_state,
