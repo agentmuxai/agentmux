@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal } from "solid-js";
+import { DropDirection } from "@/layout/index";
 
 export const tabItemType = "TAB_ITEM";
 
@@ -30,8 +31,48 @@ export const [insertionPoint, setInsertionPoint] = createSignal<InsertionPoint |
 // Which tab (by id) should play the landing bounce animation.
 export const [bouncingTabId, setBouncingTabId] = createSignal<string | null>(null);
 
+// Which tab (by id), if any, is currently a valid drop target for a
+// pane (tile) being dragged over the tab bar. Drives the `.tile-drop-hover`
+// pulse (see tabbar.scss) — the frontend half of
+// SPEC_PANE_DRAG_TO_TAB_2026_07_10.md's "tab flashes" UX beat.
+export const [hoveredDropTabId, setHoveredDropTabId] = createSignal<string | null>(null);
+
+// Live cursor position (viewport CSS px) while a pane is being dragged over
+// the tab bar. Consumed by TabDropPreview to hit-test against its schematic
+// leaf rects — see tab-drop-preview.tsx. Set alongside hoveredDropTabId in
+// tabbar.tsx's tile monitor; cleared on drop/drag-end.
+export const [hoveredDropClientPos, setHoveredDropClientPos] = createSignal<{ x: number; y: number } | null>(null);
+
+// Resolved drop target within the currently-shown TabDropPreview: which
+// leaf (by blockId) and which side of it the pointer is over. Read at
+// drop-commit time to build the cross-tab move RPC call; null whenever no
+// preview is shown or the pointer isn't over any leaf's schematic rect.
+export type DropGhost = { targetBlockId: string; direction: DropDirection };
+export const [dropGhost, setDropGhost] = createSignal<DropGhost | null>(null);
+
 // Registry of tab wrapper elements, keyed by tabId.
 export const tabWrapperRefs = new Map<string, HTMLDivElement>();
+
+/**
+ * Returns the tabId whose wrapper rect contains (clientX, clientY), or null
+ * if the point isn't over any registered tab. `excludeTabId` is normally the
+ * pane's own current tab — dragging a pane over the tab it's already in is
+ * a no-op, not a valid drop target.
+ */
+export function computeHoveredTab(
+    clientX: number,
+    clientY: number,
+    excludeTabId?: string | null
+): string | null {
+    for (const [tabId, el] of tabWrapperRefs) {
+        if (tabId === excludeTabId) continue;
+        const rect = el.getBoundingClientRect();
+        if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+            return tabId;
+        }
+    }
+    return null;
+}
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
