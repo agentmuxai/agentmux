@@ -1,7 +1,7 @@
 # Spec: Cross-Window Tab Remount (Drag a Tab onto Another Window's Header)
 
 **Date:** 2026-07-11
-**Status:** Draft
+**Status:** Draft (v2 — open questions resolved against the Pillar 2 lifecycle refactor, §9)
 **Repo state:** `main` @ `7642454a`
 **Scope:** Dragging a TAB from window A's tab strip and dropping it onto window B's tab strip ("header part"), remounting the tab — with all its panes, layout, and ordering — into window B at a cursor-accurate position. Pane (tile) drags, touch/pen input, and non-AgentMux drop targets are out of scope.
 
@@ -94,7 +94,11 @@ New branch alongside the `tearoff:merge` handler in `tabbar.tsx`, ~90% shared co
 - **(a) Reuse `RestoreTornOffTab`** for the single-tab case (it exists to bypass the guard and delete the emptied workspace). The frontend picks the RPC by `tabIds().length === 1` at drag start (carried in the hook payload).
 - **(b) Add an `allowLastTab: bool` param to `MoveTabToWorkspace`** that routes through the same saga machinery.
 
-**(a) is recommended** — zero backend changes, the saga already handles workspace deletion best-effort, and semantically "the source workspace ends up empty and gets deleted" is exactly the torn-off-restore contract. The source window closes via the same empty-workspace watcher / `closeWindowByLabel` pattern the merge handler uses today.
+**(a) is recommended** — zero backend changes, the saga already handles workspace deletion best-effort, and semantically "the source workspace ends up empty and gets deleted" is exactly the torn-off-restore contract.
+
+**Closing the source window — be precise about the mechanism** (verified against the Pillar 2 lifecycle refactor, §9): there is **no** host-side "empty-workspace watcher" that closes windows automatically. The existing `tearoff:merge` handler closes the emptied window *explicitly* — `RestoreTornOffTab` (deletes the emptied source workspace) then `getApi().closeWindowByLabel(draggedWindowLabel)` (`tabbar.tsx:559-565`) — and that explicit call is required, not redundant: the host's `orphan_reconcile` has zero visibility into srv workspaces/tab counts and will never reap a live window because its workspace emptied. Copy that exact two-step pattern.
+
+**Precondition: never `closeWindowByLabel("main")`.** If the dragged tab's source is a 1-tab `main` window, closing `main` feeds the host's last-window quit sequence (`CloseWindowTask` scopes its park/demote logic to non-main windows). Simplest rule: when the source is `main` AND it's the last tab, treat the drop as a no-op (or move-and-leave-main-open via option (b)) — decide at implementation time, but don't fall into quitting the app accidentally.
 
 ### 4.4 Hook lifetime + safety
 
@@ -162,3 +166,54 @@ New branch alongside the `tearoff:merge` handler in `tabbar.tsx`, ~90% shared co
 - `agentmux-srv/src/sagas/restore_torn_off_tab.rs`, `agentmux-srv/src/reducer/tab.rs` (`handle_move_tab`) — the move machinery reused as-is.
 - `frontend/app/tab/tabbar.tsx:437-679` — the Phase-4 event handlers the new events slot into.
 - `specs/SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` — the in-window sibling feature (pane→tab); its §7 payload-clearing rules also apply to any new drop consumption added here.
+- `docs/specs/SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md` — the quit/drain lifecycle this spec's window-close path now runs through (§9).
+
+---
+
+## 9. Resolved Questions (2026-07-11, reconciled against the Pillar 2 lifecycle refactor)
+
+Pillar 2 ("sanitize-then-decide", PRs #2080/#2081/#2084/#2083) landed a major rework of
+the host's quit/drain lifecycle while this spec was in review. Verified findings:
+
+**File overlap: nil.** Pillar 2 touches only `client/lifecycle.rs`, `reducer/{quit,browsers}.rs`,
+`ui_tasks/window.rs`, `commands/{orphan_reconcile,window_pool}.rs`, `wrr/win_event.rs`, `state.rs`.
+None of this spec's files (`tabbar.tsx`, `drag.rs`, `tear_off_hook.rs`, `DragOverlay.tsx`) are
+affected. The only shared surface is behavioral, below.
+
+**Q1 — Is closing the emptied source window safe post-Pillar-2? YES.**
+`closeWindowByLabel` is unchanged. Its WM_CLOSE lands in `CloseWindowTask` →
+`unregister_after_parking_close` (`ui_tasks/window.rs:364-385`), which now consumes the
+reducer's drain verdict. In a merge, the target window B is still live, so
+`should_begin_drain` (`reducer/quit.rs:170-186`) returns `None` — no spurious quit, no race.
+The new invariant we *rely on* rather than fear: if a remount ever leaves **zero** live user
+windows, the host now definitively begins Stage-1 drain + WRR Stage-2 quit — correct behavior,
+not a bug. Hence the `main`-window precondition in §4.3.
+
+**Q2 — "start_tear_off_tracking unreachable on the warm-pool path" (ANALYSIS_PANE_TAB_TEAR_SMOKE_2026_06_19): STALE, verified false on Windows.**
+`requestTearOff` calls `tearOffSCMoveHandshake` with `tabId`/`sourceWsId`/`destWsId` on *both*
+the warm-pool and cold paths (`tabbar.tsx:1038-1055`), and `drag.rs:633-644` installs the hook
+whenever those are non-empty. The "unreachable" flag conflated the Windows installer
+(`tear_off_hook.rs:102`) with the `#[cfg(not(windows))]` no-op stub (`tear_off_hook.rs:236`),
+which is legitimately inert off-Windows. §4.4's handover concern stands, but it's a
+*new-code* concern (two installers, one hook slot), not an existing bug.
+
+**Q3 — Does the new `orphan_reconcile` auto-close or resurrect an emptied window? NEITHER.**
+Terminology collision: Pillar 2's `orphan_reconcile` reconciles the host's `browsers`↔HWND
+projection (dead/hostless HWNDs) — it never inspects srv workspaces or tab counts, never
+closes a live window, never adopts one. The explicit `closeWindowByLabel` in the merge
+handler is therefore required and un-raced. This spec's "orphan *workspaces*" (windowless
+srv rows left by `requestTearOff` failures, `tabbar.tsx:1071-1090`) are a separate srv-side
+concern, untouched by Pillar 2; `RestoreTornOffTab`'s atomic move+delete means this feature
+creates no new ones on the happy path and inherits the existing conservative
+leave-the-orphan stance on failure.
+
+**Q4 — Is there now a canonical "close this window, its workspace emptied" primitive we should
+use instead? NO.** `BeginDrain`/`ReconcileQuit` are whole-host quit machinery, not per-window
+closes. `RestoreTornOffTab` + `closeWindowByLabel` (§4.3) remains the sanctioned pattern —
+Pillar 2 makes it *safer* (the close path's drain verdict is now consumed uniformly), not
+different.
+
+One classification note for implementers: a *promoted pool* window keeps its `window-pool-*`
+label forever but IS a live user window (`BrowserKind::TopLevel { is_pool: false }`,
+`reducer/quit.rs:130-132`). Any logic in this feature that reasons about the source/target
+window must classify by browser kind, never by label prefix.
