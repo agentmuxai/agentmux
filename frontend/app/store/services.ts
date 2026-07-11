@@ -105,7 +105,11 @@ class WindowServiceType {
     CloseWindow(windowId: string): Promise<void> {
         return WOS.callBackendService("window", "CloseWindow", Array.from(arguments))
     }
-    CreateWindow(winSize: WinSize, workspaceId: string): Promise<WaveWindow> {
+    // `hostLabel` (optional, SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual 2):
+    // the caller's CEF window label, persisted as a `host:label` meta crumb on
+    // the created Window row so srv-side cleanup can attribute rows without
+    // the host registration chain.
+    CreateWindow(winSize: WinSize, workspaceId: string, hostLabel?: string): Promise<WaveWindow> {
         return WOS.callBackendService("window", "CreateWindow", Array.from(arguments))
     }
     GetWindow(windowId: string): Promise<WaveWindow> {
