@@ -41,9 +41,19 @@ pub fn dispatch_to_renderers(state: &Arc<crate::state::AppState>, event: &Event)
     let code = CefString::from(script.as_str());
     let url = CefString::from("");
 
-    // Phase H.2.b — reducer-aware iteration with fallback.
+    // Phase H.2.b — reducer-aware iteration with fallback. Pool-side skip is
+    // BY TYPE (reducer is_pool flag) so an adopted pool window's foreign
+    // `window-{uuid}` label (SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual
+    // 1) is skipped exactly like a `window-pool-*` one — its parked renderer
+    // shows the pool boot page and has no srv-event consumers. `window-pool-`
+    // stays as a fast-path prefix (covers spawns racing browser
+    // registration); `browser-pane-` is prefix-only as before.
+    let tab_pool_labels = state.pool_side_top_level_labels();
     for (label, browser) in state.list_browsers() {
-        if label.starts_with("window-pool-") || label.starts_with("browser-pane-") {
+        if label.starts_with("window-pool-")
+            || label.starts_with("browser-pane-")
+            || tab_pool_labels.contains(&label)
+        {
             continue;
         }
         if let Some(frame) = browser.main_frame() {

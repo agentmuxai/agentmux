@@ -77,11 +77,15 @@ fn pool_window_views() -> &'static Mutex<HashMap<String, cef::Window>> {
     POOL_WINDOW_VIEWS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Cache a pool window's CEF Views `Window` (called from `on_window_created`,
-/// where the Window is valid). No-op for non-pool labels.
+/// Cache a pool window's CEF Views `Window` (called from `on_window_created`
+/// for fresh spawns, and from `demote_promoted_pool_window` for demotes —
+/// including ADOPTED foreign `window-{uuid}` labels, Residual 1 of
+/// SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11, which is why the
+/// caller-bug guard accepts the broad `window-` prefix rather than
+/// `window-pool-`). No-op for non-window labels.
 #[cfg(target_os = "windows")]
 pub fn cache_pool_window_view(label: &str, window: &cef::Window) {
-    if !label.starts_with("window-pool-") {
+    if !label.starts_with("window-") {
         return;
     }
     pool_window_views()
@@ -934,7 +938,14 @@ pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
 }
 
 pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
-    if !label.starts_with("window-pool-") {
+    // Broad `window-` guard (was `window-pool-`): an ADOPTED foreign
+    // `window-{uuid}` label (Residual 1, SPEC_POOL_ADOPTION_AND_WINDOW_ROW_
+    // CRUMB_2026_07_11) re-sends `pool_window_ready` after its demote reload
+    // and must re-enter the queue like any other demoted window. The REAL
+    // membership gate is the reducer's `handle_pool_ready`, which only moves
+    // labels that are actually in `pool.unpromoted` — a spurious ready signal
+    // from a non-pool-side window is an idempotent no-op there.
+    if !label.starts_with("window-") {
         return;
     }
 
