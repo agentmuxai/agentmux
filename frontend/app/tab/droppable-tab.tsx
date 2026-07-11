@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Logger } from "@/util/logger";
-import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { isWindows } from "@/util/platformutil";
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
@@ -18,9 +18,13 @@ import {
     setInsertionPoint,
     bouncingTabId,
     hoveredDropTabId,
+    setHoveredDropTabId,
     tabWrapperRefs,
+    SPRING_SWITCH_MS,
+    dragActivatedTabIds,
 } from "./tabbar-dnd";
-import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { getLayoutModelForTabById, redockDraggedPane, tileItemType } from "@/layout/index";
 import { getApi } from "@/store/global";
 import { setTabGrabOffset } from "./tab-grab-offset";
 
@@ -145,9 +149,70 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             },
         });
 
+        // Pane (tile) drags over this tab's button — the spring-loaded-tabs
+        // flow (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md): a real drop target
+        // (so the browser shows a move cursor instead of not-allowed), an
+        // immediate blink (.tile-drop-hover pulse via hoveredDropTabId),
+        // and after SPRING_SWITCH_MS of dwell, switch the UI to this tab so
+        // the user can place the pane in its REAL layout (TileLayout's
+        // overlay handles the ghost + drop from there).
+        let springTimer: ReturnType<typeof setTimeout> | null = null;
+        const clearSpring = () => {
+            if (springTimer != null) {
+                clearTimeout(springTimer);
+                springTimer = null;
+            }
+            if (hoveredDropTabId() === props.tabId) setHoveredDropTabId(null);
+        };
+        const cleanupTileDropTarget = dropTargetForElements({
+            element: tabWrapRef,
+            canDrop: ({ source }) => source.data.type === tileItemType,
+            onDragEnter: () => {
+                // Hovering the ACTIVE tab's own button needs no switch (its
+                // layout is already visible below) — no blink, no timer.
+                if (props.tabId === props.activeTabId) return;
+                setHoveredDropTabId(props.tabId);
+                springTimer = setTimeout(() => {
+                    springTimer = null;
+                    setHoveredDropTabId(null);
+                    Logger.info("dnd", "spring-switch to tab mid-drag", { tabId: props.tabId });
+                    // Activate the target overlay BEFORE the switch so the
+                    // very first dragover after the tab becomes visible
+                    // already hits TileLayout's drop targets.
+                    getLayoutModelForTabById(props.tabId)?.activeDrag._set(true);
+                    dragActivatedTabIds.add(props.tabId);
+                    props.onSelect();
+                }, SPRING_SWITCH_MS);
+            },
+            onDragLeave: clearSpring,
+            onDrop: () => {
+                clearSpring();
+                // Drop directly on the tab button (without waiting for the
+                // spring switch): append the pane to that tab. Payload is
+                // read BEFORE clearing; the clear stops CrossWindowDragMonitor
+                // misreading the release as a tear-off.
+                const payload = getCurrentDragPayload();
+                setCurrentDragPayload(null);
+                if (
+                    payload?.kind === "tile" &&
+                    payload.sourceTabId &&
+                    payload.sourceTabId !== props.tabId &&
+                    payload.node.data?.blockId
+                ) {
+                    redockDraggedPane({
+                        blockId: payload.node.data.blockId,
+                        sourceTabId: payload.sourceTabId,
+                        targetTabId: props.tabId,
+                    });
+                }
+            },
+        });
+
         onCleanup(() => {
             tabWrapperRefs.delete(props.tabId);
             cleanupDraggable();
+            cleanupTileDropTarget();
+            clearSpring();
         });
     });
 

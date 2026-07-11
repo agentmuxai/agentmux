@@ -10,7 +10,7 @@ import {
     useDebouncedNodeInnerRect,
 } from "./lib/layoutModelHooks";
 import { newLayoutNode } from "./lib/layoutNode";
-import { computeSchematicRects, schematicLeaves } from "./lib/schematicLayout";
+import { clearCrossTabDrop, redockDraggedPane } from "./lib/crossTabDrag";
 import type {
     ContentRenderer,
     LayoutNode,
@@ -36,7 +36,7 @@ import type {
 import { DropDirection, LayoutTreeActionType, NavigateDirection } from "./lib/types";
 
 export {
-    computeSchematicRects,
+    clearCrossTabDrop,
     deleteLayoutModelForTab,
     DropDirection,
     getLayoutModelForStaticTab,
@@ -45,7 +45,7 @@ export {
     LayoutTreeActionType,
     NavigateDirection,
     newLayoutNode,
-    schematicLeaves,
+    redockDraggedPane,
     tileItemType,
     TileLayout,
     useDebouncedNodeInnerRect,

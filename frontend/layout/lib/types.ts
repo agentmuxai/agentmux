@@ -90,6 +90,16 @@ export interface LayoutTreeComputeMoveNodeAction extends LayoutTreeAction {
     nodeId: string;
     nodeToMoveId: string;
     direction: DropDirection;
+    /**
+     * The node being moved, when it does NOT live in this tree — i.e. a
+     * cross-tab pane drag (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md). Without
+     * this, computeMoveNode's findNode(rootNode, nodeToMoveId) lookup
+     * fails for a foreign node and no pending action (ghost placeholder)
+     * is produced. The computed Move is only ever used as a PREVIEW for
+     * cross-tab drags — the actual move commits via RedockFloatingPane,
+     * never via a local moveNode of the foreign node.
+     */
+    nodeToMove?: LayoutNode;
 }
 
 export interface LayoutTreeMoveNodeAction extends LayoutTreeAction, MoveOperation {

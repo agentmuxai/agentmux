@@ -1,9 +1,55 @@
 # Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop)
 
 **Date:** 2026-07-10
-**Status:** Draft
+**Status:** Draft (v2 — spring-loaded tabs revision, same day)
 **Repo state:** `main` @ `42b95715`
 **Scope:** In-window pane drag onto the tab bar (dropping a tile-layout pane onto a *different tab in the same window*). Cross-window drag (already handled by `DragOverlay`/`CrossWindowDragMonitor`) and touch/pen input are out of scope.
+
+---
+
+## Revision v2 (2026-07-10): spring-loaded tabs replace the schematic popover
+
+The v1 implementation (§4.3–§4.4's schematic preview popover) shipped and failed
+manual testing on two counts:
+
+1. **It relied on `monitorForElements` alone** — a passive observer, not a drop
+   target. With nothing under the cursor accepting the drag, the browser showed
+   the not-allowed (slash-circle) cursor over the entire tab bar, and none of
+   the monitor-driven hover UI fired reliably in CEF.
+2. **A schematic popover is the wrong preview anyway** — the user expectation
+   (matching browser/VS Code spring-loading) is that dwelling on a tab
+   *switches to the real tab*, and placement happens in the real layout.
+
+v2 design (implemented; supersedes §4.1–§4.6 below, kept for history):
+
+- **Per-tab `dropTargetForElements`** (`droppable-tab.tsx`) accepting
+  `tileItemType` — fixes the cursor (a real target → "move" effect) and gives
+  reliable enter/leave callbacks. The strip itself (`tab-bar-scroll`) is also a
+  target so gaps between tabs don't flash the not-allowed cursor, and so any
+  release over the bar clears `currentDragPayload` (the §7 tear-off fix).
+- **Blink then switch**: on enter, the hovered tab pulses (`.tile-drop-hover`,
+  as v1); after `SPRING_SWITCH_MS` (500ms) dwell, the UI switches to that tab
+  (`setActiveTab` via the tab's own `onSelect`) — deliberately longer than the
+  redock ghost's 180ms since switching the visible tab is a bigger action.
+- **Real-layout ghost**: the target tab's own TileLayout overlay handles
+  placement using the existing `ComputeMove` → pending-`Move` → placeholder
+  machinery. One shared-code extension makes this work cross-tab:
+  `LayoutTreeComputeMoveNodeAction.nodeToMove` carries the dragged node object
+  (it isn't findable in the target tree). The overlay is force-activated for
+  the target tab at switch time (`activeDrag._set(true)`, tracked in
+  `dragActivatedTabIds` and reset at drag end by the tab bar's tile monitor).
+- **Drop commit**: cross-tab drops never commit the pending Move locally (the
+  block still belongs to the source tab — a local commit would create a
+  dangling layout ref). Instead the drop routes through
+  `redockDraggedPane` (`layout/lib/crossTabDrag.ts`) → `RedockFloatingPane`,
+  exactly as §4.5 planned. The hovered (leaf, direction) is captured during
+  `onDrag` into a module-level record — drop handlers must not read
+  TileLayout's drag globals, since the source draggable's own `onDrop` may
+  null them first (pragmatic-dnd callback ordering at drop time is not
+  contractual). Dropping straight on a tab button (no dwell) appends.
+- **Removed**: the v1 schematic popover (`tab-drop-preview.tsx/.scss`,
+  `schematicLayout.ts`, `computeHoveredTab`) — superseded by the real-tab
+  preview.
 
 ---
 
