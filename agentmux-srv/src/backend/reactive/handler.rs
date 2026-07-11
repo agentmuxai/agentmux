@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message};
+use super::sanitize::{format_injected_message, is_sensitive_message, sanitize_message, validate_agent_id, wrap_jekt_message, JektTrailer};
 use super::types::*;
 use super::{now_unix_millis, sha256_hex, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
@@ -211,6 +211,7 @@ impl Handler {
                 block_id: None,
                 error: Some("rate limit exceeded".to_string()),
                 timestamp: now,
+                echo: None,
             };
         }
 
@@ -222,6 +223,7 @@ impl Handler {
                 block_id: None,
                 error: Some(format!("invalid agent ID: {}", req.target_agent)),
                 timestamp: now,
+                echo: None,
             };
         }
 
@@ -248,6 +250,7 @@ impl Handler {
                     block_id: None,
                     error: Some(err),
                     timestamp: now,
+                    echo: None,
                 };
             }
         };
@@ -283,6 +286,24 @@ impl Handler {
             delivery_tier,
             &request_id,
             priority,
+            JektTrailer::ReplyHint,
+        );
+
+        // Sender-facing echo of the same message, for the SendMessage tool
+        // result — same content, different trailer (§2.1/§2.2 of
+        // SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md: "Reply: bus:inject to
+        // {self}" would be nonsensical read back in the sender's own pane).
+        // Computed once, moved into whichever of the two success returns
+        // below actually fires — the two are mutually exclusive per call.
+        let echo = wrap_jekt_message(
+            &sanitized,
+            req.source_agent.as_deref(),
+            &req.target_agent,
+            effective_tier,
+            delivery_tier,
+            &request_id,
+            priority,
+            JektTrailer::DeliveredStatus,
         );
 
         // Legacy source-prefix format preserved for PTY controllers that don't
@@ -323,6 +344,7 @@ impl Handler {
                         block_id: Some(block_id),
                         error: None,
                         timestamp: now,
+                        echo: Some(echo),
                     };
                 }
                 Ok(false) => {
@@ -353,6 +375,7 @@ impl Handler {
                         block_id: Some(block_id),
                         error: Some(e),
                         timestamp: now,
+                        echo: None,
                     };
                 }
             }
@@ -378,6 +401,7 @@ impl Handler {
                     block_id: Some(block_id),
                     error: Some(err),
                     timestamp: now,
+                    echo: None,
                 };
             }
         };
@@ -416,6 +440,7 @@ impl Handler {
                 block_id: Some(block_id),
                 error: Some(e),
                 timestamp: now,
+                echo: None,
             };
         }
 
@@ -448,6 +473,7 @@ impl Handler {
             block_id: Some(block_id),
             error: None,
             timestamp: now,
+            echo: Some(echo),
         }
     }
 

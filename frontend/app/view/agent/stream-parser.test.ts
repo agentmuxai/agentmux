@@ -556,6 +556,75 @@ describe("jekt marker detection", () => {
         const node = parser.parseStreamEvent({ type: "user_message", message: "[not a jekt] just talking about brackets" });
         expect(node!.type).toBe("user_message");
     });
+
+    test("strips a Status: trailer the same way a Reply: trailer is stripped", () => {
+        const message =
+            `[JEKT:FROM=agentx TO=agent3 TIER=coord DELIVERY=host TRUST=host-verified MSGID=abc123 PRIORITY=normal TS=1783386012]\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `From: agentx | To: agent3 | ts=1783386012\n` +
+            `Hey, can you review PR #25?\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `Status: delivered\n` +
+            `[/JEKT]`;
+        const node = parser.parseStreamEvent({ type: "user_message", message });
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.type).toBe("jekt_message");
+        expect(jekt.message).toBe("Hey, can you review PR #25?");
+    });
+});
+
+// ── Outgoing jekt echo — SendMessage tool result (SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md) ──
+
+describe("outgoing jekt echo via SendMessage tool result", () => {
+    const jektEcho = (overrides: Partial<{ from: string; to: string }> = {}) => {
+        const f = { from: "agentx", to: "agent3", ...overrides };
+        return `[JEKT:FROM=${f.from} TO=${f.to} TIER=coord DELIVERY=host TRUST=host-verified MSGID=abc123 PRIORITY=normal TS=1783386012]\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `From: ${f.from} | To: ${f.to} | ts=1783386012\n` +
+            `Hey, can you review PR #25?\n` +
+            `────────────────────────────────────────────────────────────\n` +
+            `Status: delivered\n` +
+            `[/JEKT]`;
+    };
+
+    test("a successful SendMessage result carrying a jekt block parses to jekt_message", () => {
+        parser.setAgentId("agentx");
+        const node = parser.parseStreamEvent({
+            type: "tool_result", id: "tool-1", tool: "SendMessage", status: "success", result: jektEcho(),
+        });
+        expect(node!.type).toBe("jekt_message");
+        const jekt = node as import("./types").JektMessageNode;
+        expect(jekt.direction).toBe("outgoing");
+        expect(jekt.message).toBe("Hey, can you review PR #25?");
+    });
+
+    test("the jekt node's id matches the tool_result's id, so it replaces the running tool placeholder in place", () => {
+        const node = parser.parseStreamEvent({
+            type: "tool_result", id: "tool-42", tool: "SendMessage", status: "success", result: jektEcho(),
+        });
+        expect(node!.id).toBe("tool-42");
+    });
+
+    test("a failed SendMessage result is NOT jekt-parsed even if it happens to be jekt-shaped", () => {
+        const node = parser.parseStreamEvent({
+            type: "tool_result", id: "tool-2", tool: "SendMessage", status: "failed", result: jektEcho(),
+        });
+        expect(node!.type).toBe("tool");
+    });
+
+    test("a different tool's result is NOT jekt-parsed even if it happens to be jekt-shaped", () => {
+        const node = parser.parseStreamEvent({
+            type: "tool_result", id: "tool-3", tool: "Bash", status: "success", result: jektEcho(),
+        });
+        expect(node!.type).toBe("tool");
+    });
+
+    test("a SendMessage result that isn't a well-formed jekt block falls back to a plain tool node", () => {
+        const node = parser.parseStreamEvent({
+            type: "tool_result", id: "tool-4", tool: "SendMessage", status: "success", result: "Message sent to Agent1",
+        });
+        expect(node!.type).toBe("tool");
+    });
 });
 
 // ── error_result → AgentErrorNode (P1.3) ────────────────────────────────────

@@ -75,10 +75,12 @@ function parseJektTagFields(tag: string): Record<string, string> {
 /**
  * Strips the presentational scaffolding both jekt-wrapping implementations
  * add around the actual message (divider lines, the "From: X | To: Y | ..."
- * header line, the sensitive-tier warning, the reply hint), leaving just
- * what the sender actually typed/sent. Best-effort: any line that doesn't
- * match a known scaffolding shape is kept, so an unrecognized wrapper
- * variant degrades to showing extra context rather than losing content.
+ * header line, the sensitive-tier warning, the trailer line — "Reply: ..."
+ * on an incoming jekt, "Status: ..." on an outgoing echo, see
+ * SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md §2.2/§2.5), leaving just what the
+ * sender actually typed/sent. Best-effort: any line that doesn't match a
+ * known scaffolding shape is kept, so an unrecognized wrapper variant
+ * degrades to showing extra context rather than losing content.
  */
 function stripJektEnvelope(body: string, tier: JektTier): string {
     const lines = body.split("\n");
@@ -97,7 +99,7 @@ function stripJektEnvelope(body: string, tier: JektTier): string {
         start++;
         if ((lines[start] ?? "") === "") start++;
     }
-    if (/^Reply:/.test(lines[end - 1] ?? "")) end--;
+    if (/^(Reply|Status):/.test(lines[end - 1] ?? "")) end--;
     if (/^─+$/.test(lines[end - 1] ?? "")) end--;
 
     return lines.slice(start, end).join("\n").trim();
@@ -436,6 +438,25 @@ export class ClaudeCodeStreamParser {
         // Remove from pending
         this.pendingToolCalls.delete(event.id);
 
+        // Outgoing jekt echo (SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md §2.4/§2.5):
+        // a successful SendMessage's result now carries the server's
+        // [JEKT:...] echo instead of a bare confirmation string. Gated on
+        // tool name + success status, not just "does the text look like a
+        // jekt block" — no other tool's output should be speculatively
+        // reparsed this way even if it happened to match the shape.
+        if (toolName === "SendMessage" && event.status === "success" && typeof event.result === "string") {
+            // ToolResultEvent carries no timestamp of its own — tryParseJektText
+            // defaults to Date.now(), same as it would for a missing one here.
+            const jekt = this.tryParseJektText(event.result);
+            // id MUST be event.id, not tryParseJektText's freshly-generated
+            // jekt-N id — this method's contract (see the doc comment above)
+            // is that its return value replaces the running placeholder tool
+            // node of the same id; a mismatched id would leave that
+            // placeholder stuck at "running" forever alongside an orphaned
+            // jekt node instead of replacing it in place.
+            if (jekt) return { ...jekt, id: event.id };
+        }
+
         const summary = this.generateToolSummary(
             toolName,
             params,
@@ -534,18 +555,32 @@ export class ClaudeCodeStreamParser {
         };
     }
 
+    /** Thin wrapper over `tryParseJektText` for the incoming (user-message)
+     *  path — see that method for the actual detection/parsing logic. */
+    private tryParseJekt(event: UserMessageEvent): JektMessageNode | null {
+        return this.tryParseJektText(event.message, event.timestamp);
+    }
+
     /**
-     * Detects a `[JEKT:...]...[/JEKT]` marker block occupying the whole
-     * user-message payload and, if found, parses it into a `JektMessageNode`
-     * instead of the plain-text `UserMessageNode` the marker would otherwise
-     * render as. Returns null for anything that isn't a well-formed jekt
-     * block — including malformed/partial markers — so those fall through to
-     * normal plain-text rendering rather than being silently dropped.
+     * Detects a `[JEKT:...]...[/JEKT]` marker block occupying the whole of
+     * `text` and, if found, parses it into a `JektMessageNode`. Returns null
+     * for anything that isn't a well-formed jekt block — including
+     * malformed/partial markers — so those fall through to normal rendering
+     * (plain text for a user message, a generic ToolBlock for a tool result)
+     * rather than being silently dropped.
+     *
+     * Shared by both directions: `userMessageToNode` (incoming — the host
+     * injects a `[JEKT:...]` block as this agent's next input) and
+     * `toolResultToNode` (outgoing — `SendMessage`'s tool result now carries
+     * the server's echo of the same block, see
+     * SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md §2.4/§2.5). Direction is derived
+     * from the FROM/TO fields against `currentAgentId`, not from which
+     * caller invoked this — both call sites hand it raw text.
      *
      * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
      */
-    private tryParseJekt(event: UserMessageEvent): JektMessageNode | null {
-        const match = JEKT_BLOCK_RE.exec(event.message.trim());
+    private tryParseJektText(text: string, timestamp?: number): JektMessageNode | null {
+        const match = JEKT_BLOCK_RE.exec(text.trim());
         if (!match) return null;
 
         const fields = parseJektTagFields(match[1]);
@@ -561,11 +596,8 @@ export class ClaudeCodeStreamParser {
             : "wan";
         const trust: JektTrust = fields.TRUST === "host-verified" ? "host-verified" : "network-claimed";
 
-        // Direction mirrors agentMessageToNode: incoming when this agent is
-        // the declared recipient, outgoing when it's the declared sender
-        // (spec §3.2's outgoing echo — not yet emitted by any producer today,
-        // but handled here so JektBubble is ready when it is). Falls back to
-        // incoming, the only case any current producer emits.
+        // Incoming when this agent is the declared recipient, outgoing when
+        // it's the declared sender. Falls back to incoming.
         const lowerAgentId = this.currentAgentId?.toLowerCase();
         const direction: "incoming" | "outgoing" =
             lowerAgentId && fields.FROM.toLowerCase() === lowerAgentId && fields.TO.toLowerCase() !== lowerAgentId
@@ -578,14 +610,14 @@ export class ClaudeCodeStreamParser {
             from: fields.FROM,
             to: fields.TO,
             message: stripJektEnvelope(match[2], tier),
-            raw: event.message,
+            raw: text,
             tier,
             deliveryTier,
             trust,
             msgId: fields.MSGID || "",
             priority: fields.PRIORITY === "urgent" ? "urgent" : "normal",
             direction,
-            timestamp: event.timestamp || Date.now(),
+            timestamp: timestamp || Date.now(),
         };
     }
 

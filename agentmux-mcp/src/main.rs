@@ -919,7 +919,14 @@ async fn call_tool(
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
             if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                Ok(format!("Message sent to {to}"))
+                // Prefer the server's [JEKT:...] echo (SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md
+                // §2.4) so the sender's own pane renders a JektBubble like the
+                // recipient's does. Falls back to the plain confirmation string
+                // against an older server that doesn't send `echo` yet.
+                match result.get("echo").and_then(|v| v.as_str()) {
+                    Some(echo) => Ok(echo.to_string()),
+                    None => Ok(format!("Message sent to {to}")),
+                }
             } else {
                 let err = result
                     .get("error")

@@ -282,6 +282,33 @@ fn test_handler_inject_agent_not_found() {
 
     assert!(!resp.success);
     assert!(resp.error.unwrap().contains("agent not found"));
+    // SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md §2.6: nothing was ever sent, so
+    // there's nothing to echo back — don't fabricate one for a failure.
+    assert!(resp.echo.is_none());
+}
+
+// -- wrap_jekt_message trailer tests --
+
+#[test]
+fn test_wrap_jekt_message_reply_hint_trailer_unchanged() {
+    let wrapped = wrap_jekt_message(
+        "hi", Some("AgentA"), "AgentB", "coord", "host", "msg-1", "normal",
+        JektTrailer::ReplyHint,
+    );
+    assert!(wrapped.contains("Reply: bus:inject to AgentA"));
+    assert!(!wrapped.contains("Status: delivered"));
+}
+
+#[test]
+fn test_wrap_jekt_message_delivered_status_trailer() {
+    let wrapped = wrap_jekt_message(
+        "hi", Some("AgentA"), "AgentB", "coord", "host", "msg-1", "normal",
+        JektTrailer::DeliveredStatus,
+    );
+    assert!(wrapped.contains("Status: delivered"));
+    // The sender-facing echo must never carry the recipient-facing "reply to
+    // yourself" line — the exact bug this spec's design phase caught.
+    assert!(!wrapped.contains("Reply: bus:inject"));
 }
 
 // `#[tokio::test]` because `Handler::inject_message` internally
@@ -318,6 +345,16 @@ async fn test_handler_inject_success() {
     assert!(resp.success);
     assert_eq!(resp.request_id, "req-1");
     assert_eq!(resp.block_id.as_deref(), Some("block1"));
+
+    // SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md §2.3/§2.5: a successful send
+    // carries a sender-facing echo, using the DeliveredStatus trailer (not
+    // the recipient-facing ReplyHint the injected payload below uses).
+    let echo = resp.echo.clone().expect("echo present on success");
+    assert!(echo.contains("[JEKT:"), "echo carries the JEKT open marker");
+    assert!(echo.contains("[/JEKT]"), "echo carries the JEKT close marker");
+    assert!(echo.contains("hello"), "echo carries the message payload");
+    assert!(echo.contains("Status: delivered"), "echo uses the delivered-status trailer");
+    assert!(!echo.contains("Reply: bus:inject"), "echo must not carry the recipient-facing reply hint");
 
     let calls = sent.lock().unwrap();
     // Production sequence (handler.rs:268-280): clear `\r`, then
@@ -636,6 +673,7 @@ fn test_injection_response_serde() {
         block_id: Some("block-abc".to_string()),
         error: None,
         timestamp: 1700000000000,
+        echo: None,
     };
 
     let json = serde_json::to_string(&resp).unwrap();

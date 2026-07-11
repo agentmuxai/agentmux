@@ -64,6 +64,12 @@ pub struct InjectionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub timestamp: u64,
+    /// Sender-facing echo of the delivered `[JEKT:...]` block — `Some` only
+    /// on success, so `agentmux-mcp`'s `SendMessage` can return it as the
+    /// tool result instead of a bare confirmation string. See
+    /// SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md §2.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub echo: Option<String>,
 }
 
 /// Agent registration record.

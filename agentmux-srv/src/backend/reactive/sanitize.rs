@@ -190,6 +190,20 @@ pub fn is_sensitive_message(msg: &str) -> bool {
         || SENSITIVE_WHOLE_WORD_KEYWORDS.iter().any(|kw| contains_whole_word(&lower, kw))
 }
 
+/// Which trailer line `wrap_jekt_message` appends — the same message content
+/// needs a different closing line depending on whose pane it renders in.
+/// `Reply: bus:inject to {from}` only makes sense for the recipient reading
+/// their own incoming jekt; echoing that exact line back into the sender's
+/// own pane would read as "reply to yourself." See
+/// SPEC_JEKT_OUTGOING_ECHO_2026_07_10.md §2.1/§2.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JektTrailer {
+    /// Recipient-facing (the injected message): "Reply: bus:inject to {from}".
+    ReplyHint,
+    /// Sender-facing (the `SendMessage` tool-result echo): "Status: delivered".
+    DeliveredStatus,
+}
+
 /// Wrap an injected message with a structured `[JEKT:...]` marker block.
 ///
 /// The marker is machine-parseable (first line) and human-readable (the rest).
@@ -202,6 +216,7 @@ pub fn wrap_jekt_message(
     delivery_tier: &str,
     msg_id: &str,
     priority: &str,
+    trailer: JektTrailer,
 ) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts_secs = SystemTime::now()
@@ -222,10 +237,13 @@ pub fn wrap_jekt_message(
         ""
     };
 
-    let reply_hint = format!("Reply: bus:inject to {from}");
+    let trailer_line = match trailer {
+        JektTrailer::ReplyHint => format!("Reply: bus:inject to {from}"),
+        JektTrailer::DeliveredStatus => "Status: delivered".to_string(),
+    };
 
     format!(
-        "{structured_tag}\n────────────────────────────────────────────────────────────\nFrom: {from} | To: {target_agent} | ts={ts_secs}{sensitive_warning}\n{msg}\n────────────────────────────────────────────────────────────\n{reply_hint}\n[/JEKT]"
+        "{structured_tag}\n────────────────────────────────────────────────────────────\nFrom: {from} | To: {target_agent} | ts={ts_secs}{sensitive_warning}\n{msg}\n────────────────────────────────────────────────────────────\n{trailer_line}\n[/JEKT]"
     )
 }
 
