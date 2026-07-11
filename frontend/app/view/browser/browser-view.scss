@@ -107,6 +107,11 @@
     width: auto; /* was 100% — auto lets flex stretch respect margin */
     position: relative;
     margin: var(--space-0-5); /* inset to reveal the 2px pane border drawn by .block-mask */
+    /* Shown whenever the native pane NSWindow is airspace-hidden (a DOM
+       menu/modal overlaps it — macOS hides the whole pane rather than
+       punching a hole; see pane-overlay.ts + browser_panes.rs). Without a
+       background the exposed area reads as a black void. */
+    background: var(--main-bg-color);
 }
 
 .browser-empty {

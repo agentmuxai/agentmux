@@ -1118,8 +1118,35 @@ wrap_task! {
             }
             for (label, controller) in live {
                 use cef::ImplOverlayController;
-                let pb = controller.bounds();
-                let pane_rect = (pb.x, pb.y, pb.width, pb.height);
+                // On macOS, `controller.bounds()` cannot be trusted here — CEF
+                // Views' own set_size/set_position are permanent no-ops on
+                // NativeWidgetMacNSWindow, so bounds() reflects a stale,
+                // wrong-scale (DIP, not physical-px) rect rather than the real
+                // on-screen frame we committed via raw ObjC setFrame:. Using it
+                // made the intersection test silently miss real overlaps —
+                // visible stayed `true` while a DOM menu was drawn on top, so
+                // the pane kept intercepting clicks meant for the DOM even
+                // though it painted correctly underneath. Use the maintained
+                // physical-rect cache instead; see
+                // `AppState::browser_pane_physical_rects`. Fall back to
+                // bounds() if the cache somehow has no entry yet (shouldn't
+                // happen — creation seeds it before any overlay-clip can run).
+                #[cfg(target_os = "macos")]
+                let pane_rect = self
+                    .state
+                    .browser_pane_physical_rects
+                    .lock()
+                    .get(&label)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        let pb = controller.bounds();
+                        (pb.x, pb.y, pb.width, pb.height)
+                    });
+                #[cfg(not(target_os = "macos"))]
+                let pane_rect = {
+                    let pb = controller.bounds();
+                    (pb.x, pb.y, pb.width, pb.height)
+                };
                 // Shared visibility helper consults BOTH the pane's own rect
                 // (zero → hidden because tab inactive) and the latest
                 // overlay-clip rects published in AppState. Resize path uses
@@ -1130,7 +1157,7 @@ wrap_task! {
                     label = %label,
                     window_label = %self.window_label,
                     visible,
-                    pane_x = pb.x, pane_y = pb.y, pane_w = pb.width, pane_h = pb.height,
+                    pane_x = pane_rect.0, pane_y = pane_rect.1, pane_w = pane_rect.2, pane_h = pane_rect.3,
                     overlay_count = self.overlay_rects.len(),
                     "[pane-airspace] views: applied visibility"
                 );

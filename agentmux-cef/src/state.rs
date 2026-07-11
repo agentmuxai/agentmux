@@ -714,6 +714,28 @@ pub struct AppState {
     pub browser_pane_overlays:
         Mutex<std::collections::HashMap<String, (String, cef::OverlayController)>>,
 
+    /// macOS only — last-known REAL on-screen physical-px rect per pane
+    /// label, mirroring whatever was last committed via the raw ObjC
+    /// `setFrame:` path in `creation_views.rs` / `pane_geometry.rs`.
+    ///
+    /// `OverlayController::bounds()` cannot be trusted for this on macOS:
+    /// CEF Views' own `set_size`/`set_position` are permanent no-ops on
+    /// `NativeWidgetMacNSWindow` (see the extensive comments in
+    /// `browser_pane/creation_views.rs`), so `bounds()` reflects a stale,
+    /// DIP-scale value from whatever CEF's internal Views layout last
+    /// computed — NOT the physical-px frame we forced via ObjC. Comparing
+    /// that stale/wrong-scale rect against the overlay-clip rects (which
+    /// ARE genuine physical px, matching `browser-view.tsx`'s
+    /// `Math.round(v * dpr)` convention) silently fails to detect a real
+    /// intersection, so `compute_pane_visible` reports `visible: true`
+    /// even while a DOM menu is drawn directly on top of the pane — the
+    /// menu displays correctly (occlusion isn't needed for painting, the
+    /// DOM already paints over screen pixels) but the pane, still
+    /// receiving events, intercepts clicks meant for the DOM underneath.
+    /// `SetPaneOverlayClipViewsTask` reads from here instead.
+    #[cfg(target_os = "macos")]
+    pub browser_pane_physical_rects: Mutex<std::collections::HashMap<String, (i32, i32, i32, i32)>>,
+
     /// Linux/macOS only — latest overlay-clip rects per window_label.
     ///
     /// `browser_panes_set_overlay_clip` IPC publishes here so that BOTH the
@@ -1269,6 +1291,8 @@ impl Default for AppState {
             windows: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             browser_pane_overlays: Mutex::new(HashMap::new()),
+            #[cfg(target_os = "macos")]
+            browser_pane_physical_rects: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
             pane_overlay_rects: Mutex::new(HashMap::new()),
             #[cfg(not(target_os = "windows"))]
