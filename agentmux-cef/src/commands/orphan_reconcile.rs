@@ -408,10 +408,16 @@ fn ui_thread_reconcile(state: &Arc<AppState>) {
     // flight and Stage 1 found no pool inventory to close — no CEF lifecycle
     // event will ever advance Stage 2 (stale `client::browser_list` entries
     // we can't see from here may even be blocking it). Drive quit directly.
+    // Type-based tab-pool membership (+ prefix for the pane pool) — same
+    // reasoning as Stage 1's sweep: an ADOPTED pool window's foreign label
+    // (SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual 1) would make a
+    // prefix-only count read 0 here and drive quit_message_loop with a live
+    // pool browser still registered.
+    let tab_pool_labels = state.pool_side_top_level_labels();
     let pool_inventory = state
         .list_browsers()
         .iter()
-        .filter(|(l, _)| l.starts_with("window-pool-") || l.starts_with("floating-pool-"))
+        .filter(|(l, _)| tab_pool_labels.contains(l) || l.starts_with("floating-pool-"))
         .count();
     if plan.zombie_closes.is_empty() && pool_inventory == 0 {
         tracing::warn!(
