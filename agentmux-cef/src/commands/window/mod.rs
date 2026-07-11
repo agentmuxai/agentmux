@@ -24,6 +24,10 @@ pub(crate) use lifecycle::{
     capture_hwnd_for_label, find_own_top_level_window, resolve_window_hwnd,
     resolve_window_hwnd_strict,
 };
+// Shared close-routing predicate — also consumed by the OS-close
+// (WM_CLOSE) routing subclass in `client/wndproc.rs` (task #30).
+#[cfg(target_os = "windows")]
+pub(crate) use lifecycle::should_route_close_through_task;
 
 mod motion;
 // Position / drag / redock-hover command handlers, all dispatched by ipc.rs.

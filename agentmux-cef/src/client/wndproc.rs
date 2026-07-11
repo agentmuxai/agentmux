@@ -487,3 +487,164 @@ pub(super) unsafe fn set_window_icon(hwnd: *mut std::ffi::c_void) {
         tracing::warn!("set_window_icon: no icon found in exe resource");
     }
 }
+
+/// Map of top-level HWND -> (original WndProc, window label) for the
+/// OS-close-routing subclass (task #30). Module-level so the `extern
+/// "system"` hook body can reach it. Self-prunes on WM_NCDESTROY
+/// (HWND-reuse safety, same discipline as `FLOATER_CASCADE_ORIGINALS`).
+#[cfg(target_os = "windows")]
+static CLOSE_ROUTING_WNDPROCS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, (isize, String)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Handle to host AppState for the static close-routing wndproc (same
+/// pattern as `wrr/win_event.rs` — the OS calls a fixed-shape `extern
+/// "system" fn`, so AppState has to be reachable through a static).
+/// Set on first `install_window_close_routing_hook` call.
+#[cfg(target_os = "windows")]
+fn close_routing_app_state() -> &'static std::sync::OnceLock<std::sync::Arc<crate::state::AppState>> {
+    static S: std::sync::OnceLock<std::sync::Arc<crate::state::AppState>> = std::sync::OnceLock::new();
+    &S
+}
+
+/// Close-routing hook body — module-level so it can reference the
+/// module-level statics above.
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn close_routing_wndproc(
+    hwnd: *mut std::ffi::c_void,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, DefWindowProcW, WM_CLOSE, WM_NCDESTROY,
+    };
+
+    // task #30 — OS-level closes (Alt+F4, taskbar right-click Close, any
+    // external PostMessage(WM_CLOSE)) deliver WM_CLOSE straight to the
+    // Views wndproc, which on CEF 148 parks the browser (can_close ->
+    // try_close_browser, no on_before_close) with NO srv cleanup — the
+    // same defect class `close_window_by_label` had (#2087), via the OS
+    // entry point. Swallow WM_CLOSE for a routable `window-*` label and
+    // hand the close to `CloseWindowTask` (demote + imperative srv cleanup
+    // + park-and-blank fallbacks) — the exact routing `close_window` /
+    // `close_window_by_label` use. Alt+F4 (WM_SYSCOMMAND/SC_CLOSE) also
+    // funnels here: DefWindowProc turns it into a WM_CLOSE to this same
+    // window, which this arm then sees.
+    //
+    // Not routable (browser gone / never registered) -> pass through to
+    // the original proc, same as those handlers' own fallback: a close
+    // that cannot resolve a browser cannot run the cleanup either way.
+    //
+    // No recursion risk: `CloseWindowTask` completes the close via
+    // `close_browser(1)` + native `DestroyWindow` (WM_DESTROY, never
+    // WM_CLOSE) on the destroy path, and via offscreen parking (no close
+    // message at all) on the demote path.
+    if msg == WM_CLOSE {
+        let label = CLOSE_ROUTING_WNDPROCS
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&(hwnd as usize)).map(|(_, l)| l.clone()));
+        if let (Some(label), Some(state)) = (label, close_routing_app_state().get()) {
+            if crate::commands::window::should_route_close_through_task(
+                &label,
+                state.get_browser(&label).is_some(),
+            ) {
+                tracing::info!(
+                    "[close-routing] WM_CLOSE on HWND {:p} label={} — rerouting through CloseWindowTask",
+                    hwnd, label,
+                );
+                crate::launcher_ipc::report_window_closed(label.clone());
+                crate::ui_tasks::post_close_window(state, &label);
+                return 0; // swallowed — CloseWindowTask owns this close now
+            }
+            tracing::info!(
+                "[close-routing] WM_CLOSE on HWND {:p} label={} not routable (no registered browser) — passing through",
+                hwnd, label,
+            );
+        }
+    }
+
+    let original = CLOSE_ROUTING_WNDPROCS
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&(hwnd as usize)).map(|(o, _)| *o))
+        .unwrap_or(0);
+    let result = if original != 0 {
+        CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
+    } else {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    };
+
+    // Prune AFTER passthrough so the original proc still receives
+    // WM_NCDESTROY. Without this, Windows HWND reuse could make a later
+    // install see already_hooked=true (or worse, a stale LABEL) for a new
+    // window that got the same HWND value.
+    if msg == WM_NCDESTROY {
+        if let Ok(mut m) = CLOSE_ROUTING_WNDPROCS.lock() {
+            m.remove(&(hwnd as usize));
+        }
+    }
+
+    result
+}
+
+/// Subclass a SECONDARY `window-*` top-level so OS-level WM_CLOSE routes
+/// through `CloseWindowTask` instead of CEF Views' park-the-browser path —
+/// see `close_routing_wndproc` for the defect this closes (task #30).
+///
+/// MUST NOT be installed on "main": main's OS-close feeds the tuned WRR
+/// last-window quit sequence (Pillar 2), which owns process shutdown.
+/// The caller gates on the label; this function additionally refuses
+/// non-`window-*` labels as a belt-and-suspenders guard.
+///
+/// Installed from `on_after_created` (UI thread — the thread that owns the
+/// window, per Win32 subclassing rules). Idempotent per HWND. Coexists
+/// with the focus-restore subclass in either order: each hook records and
+/// chains to whatever wndproc it displaced.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn install_window_close_routing_hook(
+    state: &std::sync::Arc<crate::state::AppState>,
+    hwnd: *mut std::ffi::c_void,
+    label: &str,
+) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
+
+    if !label.starts_with("window-") {
+        tracing::warn!(
+            "[close-routing] refusing to install on non-window-* label={} — caller gate broken?",
+            label,
+        );
+        return;
+    }
+    let _ = close_routing_app_state().set(state.clone());
+
+    let already_hooked = CLOSE_ROUTING_WNDPROCS
+        .lock()
+        .ok()
+        .map(|m| m.contains_key(&(hwnd as usize)))
+        .unwrap_or(false);
+    if already_hooked {
+        return;
+    }
+
+    let original = SetWindowLongPtrW(
+        hwnd,
+        GWLP_WNDPROC,
+        close_routing_wndproc as *const () as isize,
+    );
+    if original != 0 {
+        if let Ok(mut m) = CLOSE_ROUTING_WNDPROCS.lock() {
+            m.insert(hwnd as usize, (original, label.to_string()));
+        }
+        tracing::info!(
+            "[close-routing] installed WM_CLOSE routing hook on HWND {:p} label={}",
+            hwnd, label,
+        );
+    } else {
+        tracing::warn!(
+            "[close-routing] SetWindowLongPtrW returned 0 for HWND {:p} label={} — hook not installed",
+            hwnd, label,
+        );
+    }
+}
