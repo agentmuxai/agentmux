@@ -367,9 +367,14 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
         "[close-window] {} close initiated — dispatching UnregisterBrowser (parked browser fires no on_before_close)",
         label
     );
-    state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
+    let out = state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
         label: label.to_string(),
     });
+    // Pillar 2 Phase 2 — this is the dominant Windows close path; when the
+    // unregistration zeroes the live count, the drain cascade fires HERE
+    // (QuitState finally transitions on this path) instead of the quit
+    // resting solely on WRR's OS-signal gate.
+    consume_request_drain(state, &out, "unregister_after_parking_close");
     if label != "main" {
         // Mirror on_before_close's cache eviction (stale entries break
         // WM_CLOSE routing on label reuse). Main keeps its entry — the
@@ -377,6 +382,49 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
         state.window_hwnds.lock().remove(label);
     }
     crate::wrr::win_event::arm_quit_watchdog(state.count_live_user_windows());
+}
+
+/// Pillar 2 Phase 2 (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §2.4) — uniform
+/// consumption of `reconcile_quit`'s decision at a dispatch site. If the
+/// dispatch surfaced a drain verdict, post the Stage-1 executor as a UI task.
+///
+/// Posting (rather than calling `begin_drain_and_cascade` inline) is the
+/// uniformly-safe choice: consumption sites include WINEVENT callbacks
+/// (LOCATIONCHANGE recycle detection) and non-UI command threads (promote
+/// failure cleanup), and a one-loop-turn deferral is harmless — `BeginDrain`
+/// is monotonic/idempotent, so racing consumers (e.g. `on_before_close`'s
+/// inline consumption of the same verdict) are benign; first one wins.
+///
+/// `post_task` can silently drop during teardown (v0.33.492) — but every
+/// consumption site runs while the message loop is healthy by construction
+/// (a drain verdict means nothing has begun tearing down yet; that is the
+/// problem being solved). The entry log below makes any drop visible.
+pub(crate) fn consume_request_drain(
+    state: &Arc<AppState>,
+    out: &crate::reducer::DispatchOutput,
+    site: &str,
+) {
+    let Some(reason) = out.request_drain.clone() else { return };
+    let mut task = BeginDrainCascadeTask::new(state.clone(), reason.clone());
+    let posted = post_task(ThreadId::UI, Some(&mut task));
+    tracing::warn!(
+        target: "wrr",
+        "[drain-consume] site={} reason={:?} — posting begin_drain_and_cascade posted={}",
+        site, reason, posted != 0
+    );
+}
+
+wrap_task! {
+    pub struct BeginDrainCascadeTask {
+        state: Arc<AppState>,
+        reason: crate::state::QuitReason,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            begin_drain_and_cascade(&self.state, self.reason.clone());
+        }
+    }
 }
 
 /// Pillar 2 Stage-1 drain executor (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.G) —
