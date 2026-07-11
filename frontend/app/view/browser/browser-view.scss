@@ -127,3 +127,29 @@
 .browser-empty-text {
     font-size: 14px;
 }
+
+// Loading-brain overlay shown while a real top-level navigation is in
+// flight (SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.3).
+// Fills .browser-placeholder exactly — same box the native browser-pane
+// HWND is sized/positioned against — so the pane-overlay-auto.ts clip
+// rect lines up with it pixel-for-pixel. `is-fading` drives opacity here
+// (not just on BrainSpinner's own inner element) because
+// pane-overlay-auto.ts's visibility check reads computed opacity on this
+// tagged data-pane-overlay element itself.
+.browser-loading-overlay {
+    position: absolute;
+    inset: 0;
+    // --block-bg-color is translucent in every theme (rgba with alpha < 1) —
+    // needs the opaque `r g b` form (no alpha channel) or the native
+    // browser-pane HWND's own blank page bleeds through underneath, same
+    // reasoning as block.scss:364 / tilelayout.scss:152. A translucent brain
+    // would defeat the point of this overlay (fully masking the blank gap).
+    background-color: rgb(from var(--block-bg-color) r g b);
+    opacity: 1;
+
+    &.is-fading {
+        opacity: 0;
+        transition: opacity 200ms ease-out;
+        pointer-events: none;
+    }
+}
