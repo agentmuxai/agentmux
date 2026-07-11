@@ -384,15 +384,6 @@ cef::wrap_task! {
             if QUIT_INITIATED.load(SeqCst) {
                 return;
             }
-            let visible = unsafe { count_visible_user_windows() };
-            if visible != 0 {
-                tracing::info!(
-                    target: "wrr",
-                    "[wrr] quit watchdog: {} window(s) visible again — stand down",
-                    visible
-                );
-                return;
-            }
             let (registered, draining) = {
                 let st = self.state.host_state.lock();
                 (
@@ -400,6 +391,35 @@ cef::wrap_task! {
                     st.quit_state != crate::state::QuitState::Running,
                 )
             };
+            let visible = unsafe { count_visible_user_windows() };
+            if visible != 0 {
+                // Once the reducer has DECIDED to drain and counts zero live
+                // user windows, a clear-and-forget stand-down here is a
+                // permanent-zombie recipe: the drain is monotonic, every
+                // close event has already fired (nothing will re-arm), and
+                // whatever is "visible" cannot be a live user window (a real
+                // minimized/visible user window would still be REGISTERED —
+                // minimize never unregisters). Live-caught 2026-07-11: a
+                // pool refill that landed after Stage 1 sat transiently
+                // visible at the spawn sentinel, the recheck stood down, and
+                // the instance hung as a draining corpse. Re-arm and keep
+                // watching until the OS agrees; each cycle is one 3s sleep.
+                if draining && registered == 0 {
+                    tracing::warn!(
+                        target: "wrr",
+                        "[wrr] quit watchdog: {} window(s) transiently visible while draining with 0 registered — re-arming (post-drain debris, e.g. late pool spawn)",
+                        visible
+                    );
+                    arm_quit_watchdog(registered);
+                    return;
+                }
+                tracing::info!(
+                    target: "wrr",
+                    "[wrr] quit watchdog: {} window(s) visible again — stand down",
+                    visible
+                );
+                return;
+            }
             if QUIT_INITIATED.swap(true, SeqCst) {
                 return;
             }
