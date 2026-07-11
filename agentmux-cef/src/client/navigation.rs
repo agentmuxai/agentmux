@@ -17,11 +17,13 @@ impl AgentMuxHandler {
     /// with history commit when called from `on_load_end`).
     ///
     /// For panes: emit `browser-pane-nav-state` so the frontend address
-    /// bar + back/forward buttons reflect CEF's real history state.
+    /// bar + back/forward buttons reflect CEF's real history state, and
+    /// `is_loading` so the pane can show a loading indicator while a real
+    /// top-level navigation is in flight (SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md).
     pub(crate) fn on_loading_state_change(
         &mut self,
         browser: Option<&mut Browser>,
-        _is_loading: i32,
+        is_loading: i32,
         can_go_back: i32,
         can_go_forward: i32,
     ) {
@@ -32,6 +34,7 @@ impl AgentMuxHandler {
             crate::browser_pane::callbacks::on_loading_state_change_browser_pane(
                 &self.state,
                 b,
+                is_loading != 0,
                 can_go_back != 0,
                 can_go_forward != 0,
             );
