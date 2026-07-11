@@ -439,6 +439,14 @@ wrap_task! {
     impl Task {
         fn execute(&self) {
             begin_drain_and_cascade(&self.state, self.reason.clone());
+            // Phase 3 — re-run the WRR Stage-2 gate now that QuitState has
+            // flipped: a drain with zero pool inventory produces no further
+            // OS window events, so without this re-check the quit would wait
+            // out the watchdog. Idempotent (QUIT_INITIATED); a no-op when
+            // pool closes are still in flight (their own HIDE/LOCATIONCHANGE
+            // events re-run the gate as they land).
+            #[cfg(target_os = "windows")]
+            crate::wrr::win_event::reevaluate_last_window_quit();
         }
     }
 }
