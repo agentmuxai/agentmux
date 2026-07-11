@@ -64,6 +64,10 @@ pub struct InjectionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub timestamp: u64,
+    /// Tier the handler actually applied (after keyword/network escalation).
+    /// Consumed by the sender-echo path so it doesn't re-derive escalation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_tier: Option<String>,
 }
 
 /// Agent registration record.

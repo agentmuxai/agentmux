@@ -375,6 +375,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         blockId: model.blockId,
         model: paneModel,
         outputFormat,
+        // Jekt direction detection during replay: FROM == this agent →
+        // outgoing bubble (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
+        agentName,
         definitionId: agentId,
         onHistoryReady: () => {
             historyReadyFn?.();
@@ -552,6 +555,9 @@ const AgentPresentationView = ({ model, agentId }: { model: AgentViewModel; agen
         // Provider id (lowercase catalog key) attributes completed-turn
         // tokens to the correct row in the status-bar token-usage store.
         provider: providerKey(),
+        // Jekt direction detection on the live stream: FROM == this agent
+        // → outgoing bubble (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
+        agentName: agentName(),
     });
 
     // Mutable ref to the scrollToBottom function exposed by

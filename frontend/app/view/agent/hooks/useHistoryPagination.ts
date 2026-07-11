@@ -60,6 +60,14 @@ export interface UseHistoryPaginationOptions {
      */
     outputFormat: Accessor<string>;
     /**
+     * This pane's agent name (`block.meta.agentName`), threaded to
+     * `parseHistoryLines` → `parser.setAgentId` so replayed jekt markers
+     * resolve direction (FROM == this agent → outgoing bubble). Accessor
+     * because block meta loads asynchronously, same as `outputFormat`.
+     * Optional; missing name falls back to "incoming".
+     */
+    agentName?: Accessor<string>;
+    /**
      * Option E (PR #1007 backend / this PR frontend): agent definition
      * id, used to read the snapshot from the agent-anchored session
      * zone `agent:<definitionId>:current` instead of the per-block
@@ -152,7 +160,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 limit: loadLimit,
             }, { timeout: 15000 });
 
-            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat());
+            const { nodes: newNodes } = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.());
             if (newNodes.length > 0) {
                 // batch() ensures HistoryLoaded's documentAtom write is not a
                 // standalone runUpdates frame that could interleave with a
@@ -282,7 +290,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                             limit: hwm - windowStart,
                         }, { timeout: 30_000 });
                         if (!mounted) return;
-                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
+                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.());
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Hydrate the composer strip's context-fill bar from the
                         // resumed conversation's last known usage instead of
@@ -415,7 +423,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 }, { timeout: 15000 });
                 if (!mounted) return;
 
-                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat());
+                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.());
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
                 }
