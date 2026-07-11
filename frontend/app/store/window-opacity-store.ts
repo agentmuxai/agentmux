@@ -52,12 +52,13 @@ export function dispatchWindowOpacity(command: WindowOpacityCommand): void {
 }
 
 /**
- * Reactive read of the live opacity the store currently holds for a window,
+ * Reactive read of the live opacity the store currently holds for a window
+ * or floating pane (keyed by label — instance-panel-floating-panes.md §3.2),
  * or `undefined` when the store has no entry yet (nothing dispatched for it
  * this session). Read inside a reactive context (e.g. JSX), it re-runs on
  * every `dispatchWindowOpacity` — so a slider's % label tracks the drag.
  */
-export function liveWindowOpacity(windowId: string | undefined): number | undefined {
-    if (!windowId) return undefined;
-    return state().opacities[windowId];
+export function liveWindowOpacity(label: string | undefined): number | undefined {
+    if (!label) return undefined;
+    return state().opacities[label];
 }

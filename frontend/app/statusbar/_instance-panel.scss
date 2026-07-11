@@ -165,7 +165,8 @@
 
 // Floating pane rows — same geometry as .instance-panel-window-row but the
 // leading icon uses secondary colour (panes are not primary windows) and
-// there is no "this" badge or opacity slider.
+// there is no "this" badge. Carries the same inline opacity control as
+// window rows (docs/specs/instance-panel-floating-panes.md §3.2).
 .instance-panel-pane-row {
     display: flex;
     align-items: center;
@@ -209,24 +210,22 @@
     font-style: italic;
 }
 
-// Per-window opacity slider (SPEC_PER_WINDOW_OPACITY_2026-05-14.md §3)
-.instance-panel-opacity-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    padding: 2px var(--space-1-5) var(--space-1);
-    width: 100%;
-}
-
-.instance-panel-opacity-label {
+// Inline per-row opacity control (SPEC_PER_WINDOW_OPACITY_2026-05-14.md §3,
+// condensed onto the name row by instance-panel-floating-panes.md §3.3).
+// Fixed-width slider + value columns so percentages align vertically across
+// window and floating-pane rows; the name column's ellipsis absorbs overflow
+// and the row never wraps to two lines. The "Opacity" text label is dropped
+// at this panel width (320px) — title/aria-label carry the affordance.
+.instance-panel-opacity {
     flex: 0 0 auto;
-    font-size: 11px;
-    color: var(--secondary-text-color, rgb(from var(--main-text-color) r g b / 0.6));
-    width: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
 }
 
 .instance-panel-opacity-slider {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
+    width: 72px;
     height: 4px;
     accent-color: var(--accent-color);
     cursor: default;

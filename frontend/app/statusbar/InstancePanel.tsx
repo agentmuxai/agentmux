@@ -295,6 +295,69 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         performRename(windowId, trimmed);
     };
 
+    // Inline opacity control — shares one row with the window/pane name
+    // (docs/specs/instance-panel-floating-panes.md §3.3). `persistWindowId`
+    // present → window rows persist to `window:opacity` meta on release;
+    // null → floating panes, session-only (a floater has no backing window
+    // object to persist to, and doesn't survive an app restart anyway).
+    // stopPropagation on all three event kinds so a slider drag/keypress
+    // never triggers the row's focus or rename handlers.
+    const OpacityControl = (p: {
+        label: string;
+        persistWindowId: string | null;
+        currentOpacity: () => number;
+    }): JSX.Element => (
+        <span
+            class="instance-panel-opacity"
+            onClick={(e) => e.stopPropagation()}
+            onDblClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+        >
+            <input
+                type="range"
+                class="instance-panel-opacity-slider"
+                min={0.35}
+                max={1.0}
+                step={0.05}
+                value={p.currentOpacity()}
+                title="Opacity"
+                aria-label="Opacity"
+                onInput={(e) => {
+                    const val = parseFloat(e.currentTarget.value);
+                    dispatchWindowOpacity({
+                        type: "SetWindowOpacity",
+                        label: p.label,
+                        opacity: val,
+                        source: "user",
+                    });
+                }}
+                onChange={(e) => {
+                    if (!p.persistWindowId) return; // floater: session-only
+                    const raw = parseFloat(e.currentTarget.value);
+                    const val = Math.round(raw * 100) / 100;
+                    // Set window:transparent alongside window:opacity so
+                    // AppSettingsUpdater applies it correctly on restore.
+                    const fullyOpaque = val >= 1.0;
+                    ObjectService.UpdateObjectMeta(
+                        makeORef("window", p.persistWindowId),
+                        {
+                            "window:opacity": fullyOpaque ? null : val,
+                            "window:transparent": fullyOpaque ? false : true,
+                        } as MetaType,
+                    ).catch((err) =>
+                        console.error("[InstancePanel] opacity persist failed:", err),
+                    );
+                }}
+            />
+            <span class="instance-panel-opacity-value">
+                {/* Live store value tracks the drag tick-by-tick; falls back
+                    to the row's resolved opacity when the store has no entry
+                    yet this session. */}
+                {Math.round((liveWindowOpacity(p.label) ?? p.currentOpacity()) * 100)}%
+            </span>
+        </span>
+    );
+
     // Panel-unmount cleanup:
     //   1. Cancel any pending focus timer so it doesn't fire after
     //      the panel is gone (focus call would still hit a real
@@ -511,60 +574,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 <Show when={isCurrent() && !isEditing()}>
                                     <span class="instance-panel-window-badge">this</span>
                                 </Show>
-                            </div>
-                            <Show when={!!entry.windowId}>
-                                <div
-                                    class="instance-panel-opacity-row"
-                                    onClick={(e) => e.stopPropagation()}
-                                >
-                                    <span class="instance-panel-opacity-label">Opacity</span>
-                                    <input
-                                        type="range"
-                                        class="instance-panel-opacity-slider"
-                                        min={0.35}
-                                        max={1.0}
-                                        step={0.05}
-                                        value={currentOpacity()}
-                                        onInput={(e) => {
-                                            const val = parseFloat(e.currentTarget.value);
-                                            dispatchWindowOpacity({
-                                                type: "SetWindowOpacity",
-                                                windowId: entry.windowId!,
-                                                label: entry.label,
-                                                opacity: val,
-                                                source: "user",
-                                            });
-                                        }}
-                                        onChange={(e) => {
-                                            const raw = parseFloat(e.currentTarget.value);
-                                            const val = Math.round(raw * 100) / 100;
-                                            if (!entry.windowId) return;
-                                            // Set window:transparent alongside window:opacity so
-                                            // AppSettingsUpdater applies it correctly on restore.
-                                            const fullyOpaque = val >= 1.0;
-                                            ObjectService.UpdateObjectMeta(
-                                                makeORef("window", entry.windowId),
-                                                {
-                                                    "window:opacity": fullyOpaque ? null : val,
-                                                    "window:transparent": fullyOpaque ? false : true,
-                                                } as MetaType,
-                                            ).catch((err) =>
-                                                console.error("[InstancePanel] opacity persist failed:", err),
-                                            );
-                                        }}
+                                {/* Inline opacity — name + slider share one row
+                                    (instance-panel-floating-panes.md §3.3). Stays
+                                    visible during rename; its own stopPropagation
+                                    keeps drags from focusing/renaming. */}
+                                <Show when={!!entry.windowId}>
+                                    <OpacityControl
+                                        label={entry.label}
+                                        persistWindowId={entry.windowId}
+                                        currentOpacity={currentOpacity}
                                     />
-                                    <span class="instance-panel-opacity-value">
-                                        {/* Live store value tracks the drag tick-by-tick;
-                                            falls back to the persisted meta when the store
-                                            has no entry yet. The slider <input> and its
-                                            onInput/onChange handlers are deliberately
-                                            untouched — only this label is reactive. */}
-                                        {Math.round(
-                                            (liveWindowOpacity(entry.windowId) ?? currentOpacity()) * 100,
-                                        )}%
-                                    </span>
-                                </div>
-                            </Show>
+                                </Show>
+                            </div>
                             </>
                         );
                     }}
@@ -600,6 +621,16 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                 <span class="instance-panel-pane-name">
                                     {resolveFloatingName(entry, i())}
                                 </span>
+                                {/* Floaters get the same inline opacity control
+                                    as windows (instance-panel-floating-panes.md
+                                    §3.2). Session-only: no backing window object
+                                    to persist to, so persistWindowId is null and
+                                    the resolved value comes from the live store. */}
+                                <OpacityControl
+                                    label={entry.label}
+                                    persistWindowId={null}
+                                    currentOpacity={() => liveWindowOpacity(entry.label) ?? 1.0}
+                                />
                             </div>
                         )}
                     </For>

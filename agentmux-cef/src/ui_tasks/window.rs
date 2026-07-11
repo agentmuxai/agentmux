@@ -668,6 +668,26 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            // Floating panes are raw WS_POPUP HWNDs with no CEF Views
+            // Window — the Views lookup below returns None for them, which
+            // made focus a silent no-op (InstancePanel's floating rows did
+            // nothing on click). Branch to Win32 via the floater registry
+            // first. Spec: docs/specs/instance-panel-floating-panes.md §3.1.
+            #[cfg(target_os = "windows")]
+            if let Some(hwnd) = crate::floating_pane::floater_hwnd_for_label(&self.label) {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+                };
+                unsafe {
+                    // Restore first — SetForegroundWindow on a minimized
+                    // window activates it without un-minimizing.
+                    if IsIconic(hwnd as _) != 0 {
+                        ShowWindow(hwnd as _, SW_RESTORE);
+                    }
+                    SetForegroundWindow(hwnd as _);
+                }
+                return;
+            }
             if let Some(window) = get_window_on_ui(&self.state, &self.label) {
                 window.activate();
             }
