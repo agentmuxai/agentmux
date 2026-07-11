@@ -10,6 +10,7 @@ import {
     useDebouncedNodeInnerRect,
 } from "./lib/layoutModelHooks";
 import { newLayoutNode } from "./lib/layoutNode";
+import { computeSchematicRects, schematicLeaves } from "./lib/schematicLayout";
 import type {
     ContentRenderer,
     LayoutNode,
@@ -35,6 +36,7 @@ import type {
 import { DropDirection, LayoutTreeActionType, NavigateDirection } from "./lib/types";
 
 export {
+    computeSchematicRects,
     deleteLayoutModelForTab,
     DropDirection,
     getLayoutModelForStaticTab,
@@ -43,6 +45,7 @@ export {
     LayoutTreeActionType,
     NavigateDirection,
     newLayoutNode,
+    schematicLeaves,
     tileItemType,
     TileLayout,
     useDebouncedNodeInnerRect,

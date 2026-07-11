@@ -17,6 +17,7 @@ import {
     insertionPoint,
     setInsertionPoint,
     bouncingTabId,
+    hoveredDropTabId,
     tabWrapperRefs,
 } from "./tabbar-dnd";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -55,6 +56,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
     });
 
     const isBouncing = () => bouncingTabId() === props.tabId;
+    const isTileDropHover = () => hoveredDropTabId() === props.tabId;
 
     onMount(() => {
         if (!tabWrapRef) return;
@@ -156,6 +158,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
             class={clsx("tab-drop-wrapper", {
                 "tab-dragging": isDragging(),
                 "tab-bouncing": isBouncing(),
+                "tile-drop-hover": isTileDropHover(),
             })}
             style={{
                 "padding-left": `${gapBefore()}px`,

@@ -5,6 +5,7 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import {
     computeInsertIndex,
     computeNearestTab,
+    computeHoveredTab,
     tabWrapperRefs,
     setGlobalDragTabId,
 } from "./tabbar-dnd";
@@ -235,5 +236,58 @@ describe("computeNearestTab", () => {
         // cursor at 60 — closest to tab-a (mid=50) but it's excluded
         // next closest: tab-b (mid=150, dist=90) over tab-c (mid=250, dist=190)
         expect(computeNearestTab(60, 15)?.tabId).toBe("tab-b");
+    });
+});
+
+// ── computeHoveredTab ─────────────────────────────────────────────────────────
+//
+// Point-in-rect hit test for the pane→tab drag drop target
+// (SPEC_PANE_DRAG_TO_TAB_2026_07_10.md §4.1) — distinct from computeNearestTab
+// (midpoint-distance, used for tab reorder gaps): a pane hovering a tab must
+// land ONLY while literally over that tab's rect, not "nearest" to it.
+
+describe("computeHoveredTab", () => {
+    beforeEach(() => {
+        tabWrapperRefs.clear();
+    });
+
+    afterEach(() => {
+        tabWrapperRefs.clear();
+    });
+
+    test("returns null when no tabs registered", () => {
+        expect(computeHoveredTab(50, 15)).toBeNull();
+    });
+
+    test("returns the tab whose rect contains the point", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100));
+        expect(computeHoveredTab(150, 15)).toBe("tab-b");
+        expect(computeHoveredTab(50, 15)).toBe("tab-a");
+    });
+
+    test("returns null when the point is between/outside all tab rects", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
+        tabWrapperRefs.set("tab-b", makeFakeEl(150, 100));
+        expect(computeHoveredTab(120, 15)).toBeNull();
+        expect(computeHoveredTab(-10, 15)).toBeNull();
+    });
+
+    test("returns null when the point is over a tab's rect vertically but not the excluded tab, and excludes the source tab", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
+        // Hovering squarely over tab-a, but tab-a is the pane's own current
+        // tab — dragging a pane over its own tab is a no-op, not a target.
+        expect(computeHoveredTab(50, 15, "tab-a")).toBeNull();
+    });
+
+    test("does not match when the point is outside the rect's vertical bounds", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100)); // top:0 bottom:30 per makeFakeEl
+        expect(computeHoveredTab(50, 45)).toBeNull();
+    });
+
+    test("excludeTabId still allows matching a different, non-excluded tab", () => {
+        tabWrapperRefs.set("tab-a", makeFakeEl(0, 100));
+        tabWrapperRefs.set("tab-b", makeFakeEl(100, 100));
+        expect(computeHoveredTab(150, 15, "tab-a")).toBe("tab-b");
     });
 });
