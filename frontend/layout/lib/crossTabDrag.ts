@@ -20,6 +20,25 @@ import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { DropDirection } from "./types";
 
+/**
+ * Clamp Outer* drop directions to their inner equivalents for CROSS-TAB
+ * drags. In-tab, Outer* commits a Move that inserts at the grandparent
+ * level (spanning the full cross axis) — and the ghost placeholder
+ * previews exactly that. But a cross-tab drop commits through
+ * RedockFloatingPane → queue_target_layout_split, which can only express
+ * "split THIS leaf" (Outer* becomes a 20% band of the target leaf) — a
+ * visibly different result from what the ghost showed. Clamping to the
+ * inner direction makes preview and commit agree: both are a half-split
+ * of the hovered leaf.
+ */
+export function clampCrossTabDirection(dir: DropDirection | undefined): DropDirection | undefined {
+    if (dir === undefined) return undefined;
+    if (dir >= DropDirection.OuterTop && dir <= DropDirection.OuterLeft) {
+        return (dir - 4) as DropDirection;
+    }
+    return dir;
+}
+
 export type CrossTabDropRecord = {
     blockId: string;
     sourceTabId: string;

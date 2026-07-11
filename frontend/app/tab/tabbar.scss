@@ -142,6 +142,25 @@
             }
         }
 
+        // Attention strobe riding the tab's top edge — 10 flashes at 20ms
+        // (200ms total), one-shot, fired the instant a pane hover begins
+        // (SPEC_PANE_DRAG_TO_TAB v3 addendum §A1). The element is
+        // keyed-remounted per hover entry (droppable-tab.tsx) so the
+        // animation restarts every time; `forwards` holds the final
+        // opacity:0 frame so it vanishes after the burst rather than
+        // freezing visible.
+        .tab-drop-strobe {
+            position: absolute;
+            top: 0;
+            left: 6px;
+            right: 6px;
+            height: 3px;
+            background: var(--accent-color);
+            pointer-events: none;
+            z-index: 2;
+            animation: tab-drop-strobe-flash 20ms steps(1, end) 10 forwards;
+        }
+
         // Tab being dragged — reduce opacity
         &.tab-dragging {
             opacity: 0.35;
@@ -196,4 +215,12 @@
     55%  { transform: scaleX(1.04); }
     80%  { transform: scaleX(0.98); }
     100% { transform: scaleX(1.0);  }
+}
+
+// One strobe cycle: visible for the first half (10ms), dark for the
+// second (10ms) — 10 iterations = 10 distinct flashes over 200ms.
+@keyframes tab-drop-strobe-flash {
+    0%   { opacity: 1; }
+    50%  { opacity: 0; }
+    100% { opacity: 0; }
 }
