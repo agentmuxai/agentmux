@@ -66,17 +66,24 @@ pub(super) fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
 // `count_live_user_windows() == 0` itself — the close-edge path is now a pure
 // executor of this module's decision, not a second decision-maker.
 //
-// NOT YET WIRED: the spec's other "settling" call sites — the pool
-// spawn/promote/destroy completion callbacks in `commands/window_pool.rs`
-// (`PopAndPromoteFrontPoolWindow`/`PanePoolWindow*`/etc.) — still discard their
-// `DispatchOutput.request_drain`. This means the actual regression the spec
-// exists to fix (a concurrent pool refill keeping the close-time count
-// non-zero, with nothing re-evaluating once the refill settles) is NOT yet
-// closed — only the common, non-racing close path is now single-authority.
-// `wrr::win_event::maybe_quit_on_last_user_window` and
-// `commands::orphan_reconcile`'s independent `begin_drain` predicate (§3.3)
-// are also untouched. See the spec's §3.2 "correctness obligation" and §7
-// rollout for the remaining steps.
+// WIRED (Pillar 2, sanitize-then-decide Phases 1–2 —
+// SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md): every dispatch site whose
+// command can flip the verdict to Some now consumes `request_drain` via
+// `ui_tasks::consume_request_drain` (posts the shared Stage-1 executor):
+// `unregister_after_parking_close` (the dominant Windows close path), the WRR
+// LOCATIONCHANGE recycle-close detector, `DemotePoolWindow` (the one close
+// flow that lowers the count without an UnregisterBrowser), and the two
+// failed-promote orphan cleanups. `commands::orphan_reconcile` no longer has
+// an independent `begin_drain` predicate — it sanitizes the browsers
+// projection, then reads this module's verdict via the `ReconcileQuit` poke.
+// Deliberately NON-consuming: `on_after_created`'s Dequeue→Register pair (the
+// gap between them would surface a spurious verdict for a second window
+// opening into an otherwise-empty session; the Register lands in the same
+// lock scope of activity and re-blocks it — do not consume there).
+//
+// NOT YET WIRED (Phase 3): `wrr::win_event::maybe_quit_on_last_user_window`
+// still calls `quit_message_loop()` from its own predicate without requiring
+// `QuitState::Draining` — the last independent quit authority.
 
 /// Background PENDING-CREATION labels — warm-pool tab refills (`window-pool-`),
 /// browser-pane children (`browser-pane-`), and floating panes (`floating-`, the

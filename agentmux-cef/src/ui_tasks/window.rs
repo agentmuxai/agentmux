@@ -367,9 +367,14 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
         "[close-window] {} close initiated — dispatching UnregisterBrowser (parked browser fires no on_before_close)",
         label
     );
-    state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
+    let out = state.host_dispatch(crate::reducer::HostCommand::UnregisterBrowser {
         label: label.to_string(),
     });
+    // Pillar 2 Phase 2 — this is the dominant Windows close path; when the
+    // unregistration zeroes the live count, the drain cascade fires HERE
+    // (QuitState finally transitions on this path) instead of the quit
+    // resting solely on WRR's OS-signal gate.
+    consume_request_drain(state, &out, "unregister_after_parking_close");
     if label != "main" {
         // Mirror on_before_close's cache eviction (stale entries break
         // WM_CLOSE routing on label reuse). Main keeps its entry — the
@@ -377,6 +382,65 @@ pub(crate) fn unregister_after_parking_close(state: &Arc<AppState>, label: &str)
         state.window_hwnds.lock().remove(label);
     }
     crate::wrr::win_event::arm_quit_watchdog(state.count_live_user_windows());
+}
+
+/// Pillar 2 Phase 2 (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §2.4) — uniform
+/// consumption of `reconcile_quit`'s decision at a dispatch site.
+///
+/// On the CEF UI thread the Stage-1 executor runs INLINE, matching the
+/// `on_before_close` pattern: the cascade must complete before the caller's
+/// next statement, because callers (the WRR LOCATIONCHANGE handler in
+/// particular) re-run the last-window quit gate synchronously right after —
+/// a posted cascade would let `quit_message_loop()` win the race and skip
+/// the graceful Stage-1 pool drain entirely (reagent P1 on PR #2082).
+/// WINEVENT callbacks run on the UI thread, so this covers the
+/// parking-close, LOCATIONCHANGE, and demote sites.
+///
+/// Off the UI thread (promote-failure cleanup can run from command/IPC
+/// threads) the executor is posted as a UI task — a one-loop-turn deferral,
+/// harmless there because nothing on those paths quits synchronously.
+/// `BeginDrain` is monotonic/idempotent, so racing consumers (e.g.
+/// `on_before_close`'s own inline consumption) are benign; first one wins.
+///
+/// `post_task` can silently drop during teardown (v0.33.492) — but every
+/// consumption site runs while the message loop is healthy by construction
+/// (a drain verdict means nothing has begun tearing down yet; that is the
+/// problem being solved). The entry logs below make any drop visible.
+pub(crate) fn consume_request_drain(
+    state: &Arc<AppState>,
+    out: &crate::reducer::DispatchOutput,
+    site: &str,
+) {
+    let Some(reason) = out.request_drain.clone() else { return };
+    if currently_on(ThreadId::UI) != 0 {
+        tracing::warn!(
+            target: "wrr",
+            "[drain-consume] site={} reason={:?} — running begin_drain_and_cascade inline (UI thread)",
+            site, reason
+        );
+        begin_drain_and_cascade(state, reason);
+        return;
+    }
+    let mut task = BeginDrainCascadeTask::new(state.clone(), reason.clone());
+    let posted = post_task(ThreadId::UI, Some(&mut task));
+    tracing::warn!(
+        target: "wrr",
+        "[drain-consume] site={} reason={:?} — posting begin_drain_and_cascade posted={}",
+        site, reason, posted != 0
+    );
+}
+
+wrap_task! {
+    pub struct BeginDrainCascadeTask {
+        state: Arc<AppState>,
+        reason: crate::state::QuitReason,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            begin_drain_and_cascade(&self.state, self.reason.clone());
+        }
+    }
 }
 
 /// Pillar 2 Stage-1 drain executor (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.G) —
