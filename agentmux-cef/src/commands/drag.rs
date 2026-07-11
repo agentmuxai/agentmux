@@ -720,6 +720,55 @@ pub fn tear_off_sc_move_handshake(
     }))
 }
 
+/// Install the global mouse hook for an ordinary in-strip tab drag —
+/// the cross-window tab remount gesture
+/// (specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11 §4.1). Called by the
+/// frontend at tab-drag start; the hook self-uninstalls on mouseup/ESC,
+/// with stop_tab_drag_tracking as the dragend belt-and-suspenders.
+/// No-op on non-Windows (the hook layer is win32-only until the
+/// tear-off spec's Phase 7 trackers land).
+pub fn start_tab_drag_tracking(
+    state: &Arc<AppState>,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let source_label = args
+        .get("sourceWindowLabel")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing sourceWindowLabel".to_string())?
+        .to_string();
+    let tab_id = args
+        .get("tabId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing tabId".to_string())?
+        .to_string();
+    let source_ws_id = args
+        .get("sourceWsId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing sourceWsId".to_string())?
+        .to_string();
+    let is_last_tab = args
+        .get("isLastTab")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    crate::commands::tear_off_hook::start_tab_drag_tracking(
+        state.clone(),
+        source_label,
+        tab_id,
+        source_ws_id,
+        is_last_tab,
+    )?;
+    Ok(serde_json::Value::Null)
+}
+
+/// Stop the active tab-drag hook session, if any. Idempotent — also
+/// safe to call after the hook already self-uninstalled on mouseup, or
+/// after a tear-off handshake superseded the session.
+pub fn stop_tab_drag_tracking() -> Result<serde_json::Value, String> {
+    crate::commands::tear_off_hook::stop_active_hook_session();
+    Ok(serde_json::Value::Null)
+}
+
 /// Poll state.browsers for `label` until its host's HWND is non-null
 /// or the deadline elapses. Returns the HWND as a raw pointer.
 /// Releases the browsers mutex between polls so on_after_created can

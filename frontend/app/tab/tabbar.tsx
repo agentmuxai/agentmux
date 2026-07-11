@@ -28,6 +28,8 @@ import {
     bouncingTabId,
     setBouncingTabId,
     computeInsertionPoint,
+    insertionPointToIndex,
+    markTabMerged,
     InsertionPoint,
     tabWrapperRefs,
     setHoveredDropTabId,
@@ -196,7 +198,13 @@ function TabBar(props: TabBarProps): JSX.Element {
             onDrag: ({ source, location }) => {
                 const input = location.current.input;
                 const rect = tabBarScrollRef?.getBoundingClientRect();
-                if (rect && !tearOffFired && input.clientY > rect.bottom + TEAR_PAST_PX) {
+                // tabIds().length > 1: a LONE tab can now be dragged
+                // (remount-only gesture — see DroppableTab.canDrag), but
+                // tearing it off would just trade one single-tab window
+                // for another and strand the empty source. Lone-tab drags
+                // never tear off; their only exit is a cross-window
+                // remount via the host mouse hook.
+                if (rect && !tearOffFired && tabIds().length > 1 && input.clientY > rect.bottom + TEAR_PAST_PX) {
                     tearOffFired = true;
                     const draggedTabId = source.data.tabId as string;
                     const wsId = props.workspace?.oid;
@@ -534,23 +542,10 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 setInsertionPoint(null);
                                 return;
                             }
-                            const ip = computeInsertionPoint(clientX);
-                            const tabs = tabIds();
-                            // Convert insertion point to numeric index. The
-                            // dragged tab isn't in `tabs` (different workspace),
-                            // so no removal-shift adjustment needed (unlike
-                            // executeReorder above).
-                            let insertIdx: number;
-                            if (!ip) {
-                                insertIdx = tabs.length;
-                            } else if (ip.beforeTabId === null) {
-                                insertIdx = 0;
-                            } else if (ip.afterTabId === null) {
-                                insertIdx = tabs.length;
-                            } else {
-                                insertIdx = tabs.indexOf(ip.afterTabId);
-                                if (insertIdx < 0) insertIdx = tabs.length;
-                            }
+                            const insertIdx = insertionPointToIndex(
+                                computeInsertionPoint(clientX),
+                                tabIds(),
+                            );
                             // Tear-off workspaces always carry exactly one
                             // tab, so MoveTabToWorkspace's last-tab guard
                             // would reject this. RestoreTornOffTab bypasses
@@ -582,6 +577,108 @@ function TabBar(props: TabBarProps): JSX.Element {
             trackOrDispose(
                 await listenEvent("tearoff:standalone", (payload) => {
                     Logger.info("dnd", "tearoff:standalone", payload);
+                }),
+            );
+
+            // Cross-window tab remount (SPEC_CROSS_WINDOW_TAB_REMOUNT §4.2):
+            // a tab dragged directly from another window was released over
+            // THIS window (host mouse hook, TabDrag mode). Unlike
+            // tearoff:merge, the tab still lives in its original multi-tab
+            // workspace — no temporary tear-off workspace exists — so the
+            // multi-tab path uses MoveTabToWorkspace (its last-tab guard is
+            // desirable) and only the last-tab path uses RestoreTornOffTab
+            // (which bypasses the guard and deletes the emptied workspace).
+            trackOrDispose(
+                await listenEvent<{
+                    tabId: string;
+                    fromWsId: string;
+                    sourceWindowLabel: string;
+                    isLastTab: boolean;
+                    cursorX: number;
+                    cursorY: number;
+                }>("tabdrag:merge-direct", (payload) => {
+                    setInsertionPoint(null);
+                    fireAndForget(async () => {
+                        try {
+                            const ownWsId = props.workspace?.oid;
+                            if (!ownWsId) {
+                                Logger.warn("dnd", "tabdrag:merge-direct — no own workspace, skipping", payload);
+                                return;
+                            }
+                            if (payload.fromWsId === ownWsId) {
+                                // Shouldn't happen (hook excludes the source
+                                // window), but a same-workspace "move" would
+                                // reorder-to-end; bail defensively.
+                                return;
+                            }
+                            // Strip-area hit test, same as tearoff:merge:
+                            // releasing over this window's CONTENT area is
+                            // not a header drop. The legacy cross-drag
+                            // pipeline (DragOverlay) still handles that
+                            // case as an append-merge, unchanged.
+                            const stripRect = tabBarScrollRef?.getBoundingClientRect();
+                            const clientX = physicalToClientX(payload.cursorX);
+                            const clientY = physicalToClientY(payload.cursorY);
+                            if (
+                                !stripRect ||
+                                clientY < stripRect.top ||
+                                clientY > stripRect.bottom
+                            ) {
+                                Logger.info("dnd", "tabdrag:merge-direct — cursor not over strip, ignoring", payload);
+                                return;
+                            }
+                            const insertIdx = insertionPointToIndex(
+                                computeInsertionPoint(clientX),
+                                tabIds(),
+                            );
+                            // Never close the main window (SPEC §4.3): a
+                            // 1-tab main's last tab stays put rather than
+                            // feeding the last-window quit sequence.
+                            if (payload.isLastTab && payload.sourceWindowLabel === "main") {
+                                Logger.info(
+                                    "dnd",
+                                    "tabdrag:merge-direct — declining last tab of main window",
+                                    payload,
+                                );
+                                return;
+                            }
+                            // Mark BEFORE the awaits — DragOverlay's
+                            // cross-drag-end for the same gesture arrives
+                            // while these RPCs are in flight, and the mark
+                            // is what makes it a no-op.
+                            markTabMerged(payload.tabId);
+                            if (payload.isLastTab) {
+                                await WorkspaceService.RestoreTornOffTab(
+                                    payload.tabId,
+                                    payload.fromWsId,
+                                    ownWsId,
+                                    insertIdx,
+                                );
+                                await getApi().closeWindowByLabel(payload.sourceWindowLabel);
+                            } else {
+                                await WorkspaceService.MoveTabToWorkspace(
+                                    payload.tabId,
+                                    payload.fromWsId,
+                                    ownWsId,
+                                    insertIdx,
+                                );
+                            }
+                            setBouncingTabId(payload.tabId);
+                            setTimeout(() => setBouncingTabId(null), 400);
+                            Logger.info("dnd", "tabdrag:merge-direct complete", {
+                                tabId: payload.tabId,
+                                fromWsId: payload.fromWsId,
+                                ownWsId,
+                                insertIdx,
+                                isLastTab: payload.isLastTab,
+                            });
+                        } catch (e) {
+                            Logger.error("dnd", "tabdrag:merge-direct failed", {
+                                error: String(e),
+                                payload,
+                            });
+                        }
+                    });
                 }),
             );
 

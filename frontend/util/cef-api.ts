@@ -721,6 +721,12 @@ export function buildCefApi(): AppApi {
         closeWindowByLabel: async (label: string) => {
             await invokeCommand("close_window_by_label", { label });
         },
+        startTabDragTracking: async (args) => {
+            await invokeCommand("start_tab_drag_tracking", args);
+        },
+        stopTabDragTracking: async () => {
+            await invokeCommand("stop_tab_drag_tracking");
+        },
 
         // --- Drag cursor & helpers ---
         setDragCursor: async () => {

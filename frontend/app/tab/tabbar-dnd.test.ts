@@ -5,6 +5,9 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import {
     computeInsertIndex,
     computeNearestTab,
+    insertionPointToIndex,
+    markTabMerged,
+    wasTabRecentlyMerged,
     tabWrapperRefs,
     setGlobalDragTabId,
 } from "./tabbar-dnd";
@@ -235,5 +238,57 @@ describe("computeNearestTab", () => {
         // cursor at 60 — closest to tab-a (mid=50) but it's excluded
         // next closest: tab-b (mid=150, dist=90) over tab-c (mid=250, dist=190)
         expect(computeNearestTab(60, 15)?.tabId).toBe("tab-b");
+    });
+});
+
+// ── insertionPointToIndex ─────────────────────────────────────────────────────
+//
+// Cross-window merge/remount index conversion: the incoming tab is NOT in
+// `tabs`, so no removal-shift adjustment (SPEC_CROSS_WINDOW_TAB_REMOUNT §4.2).
+
+describe("insertionPointToIndex", () => {
+    const tabs = ["a", "b", "c"];
+
+    test("null insertion point appends at end", () => {
+        expect(insertionPointToIndex(null, tabs)).toBe(3);
+        expect(insertionPointToIndex(null, [])).toBe(0);
+    });
+
+    test("before the first tab inserts at 0", () => {
+        expect(insertionPointToIndex({ beforeTabId: null, afterTabId: "a" }, tabs)).toBe(0);
+    });
+
+    test("after the last tab appends at end", () => {
+        expect(insertionPointToIndex({ beforeTabId: "c", afterTabId: null }, tabs)).toBe(3);
+    });
+
+    test("between two tabs inserts at the afterTabId position", () => {
+        expect(insertionPointToIndex({ beforeTabId: "a", afterTabId: "b" }, tabs)).toBe(1);
+        expect(insertionPointToIndex({ beforeTabId: "b", afterTabId: "c" }, tabs)).toBe(2);
+    });
+
+    test("unknown afterTabId falls back to append", () => {
+        expect(insertionPointToIndex({ beforeTabId: "a", afterTabId: "ghost" }, tabs)).toBe(3);
+    });
+});
+
+// ── cross-window merge dedup ──────────────────────────────────────────────────
+
+describe("markTabMerged / wasTabRecentlyMerged", () => {
+    test("unmarked tab is not recently merged", () => {
+        expect(wasTabRecentlyMerged("never-marked")).toBe(false);
+    });
+
+    test("marked tab is recently merged within the window", () => {
+        markTabMerged("t1", 1_000_000);
+        expect(wasTabRecentlyMerged("t1", 1_000_100)).toBe(true);
+        expect(wasTabRecentlyMerged("t1", 1_004_999)).toBe(true);
+    });
+
+    test("mark expires after the dedup window and is pruned", () => {
+        markTabMerged("t2", 1_000_000);
+        expect(wasTabRecentlyMerged("t2", 1_006_000)).toBe(false);
+        // Pruned on the expired read — a later in-window read stays false.
+        expect(wasTabRecentlyMerged("t2", 1_000_100)).toBe(false);
     });
 });
