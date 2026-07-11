@@ -15,6 +15,70 @@ use crate::backend::base;
 
 use super::AppState;
 
+/// Echo a successfully-sent jekt into the SENDER's own pane
+/// (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2).
+///
+/// Appends a `{"type":"user",...}` NDJSON line carrying the same
+/// `[JEKT:...]` marker block the receiver got (re-wrapped with identical
+/// fields) to the sender's `output` blockfile — live WPS append (renders
+/// immediately in an open agent view), persisted history
+/// (`parseHistoryLines` rebuilds on reopen), and global transcript mirror.
+/// The frontend's `tryParseJekt` sees FROM == this pane's agent and renders
+/// it as an *outgoing* JektBubble (stream-parser.ts direction detection —
+/// this is the producer that comment says doesn't exist yet).
+///
+/// No-op when the sender isn't a registered agent on this instance (cron,
+/// external callers) or is messaging itself (the incoming marker already
+/// lands in the same pane).
+pub(super) fn echo_jekt_to_sender(
+    state: &AppState,
+    source_agent: Option<&str>,
+    target_agent: &str,
+    message: &str,
+    msgid: &str,
+    effective_tier: Option<&str>,
+    delivery_tier: &str,
+    priority: &str,
+) {
+    let Some(src) = source_agent.filter(|s| !s.is_empty()) else {
+        return;
+    };
+    if src.eq_ignore_ascii_case(target_agent) {
+        return;
+    }
+    let Some(sender_reg) = state.reactive_handler.get_agent(src) else {
+        return;
+    };
+
+    let sanitized = crate::backend::reactive::sanitize::sanitize_message(message);
+    let wrapped = crate::backend::reactive::sanitize::wrap_jekt_message(
+        &sanitized,
+        Some(&sender_reg.agent_id),
+        target_agent,
+        effective_tier.unwrap_or("coord"),
+        delivery_tier,
+        msgid,
+        priority,
+    );
+    let line = serde_json::json!({
+        "type": "user",
+        "message": { "role": "user", "content": wrapped }
+    });
+    let data = format!("{line}\n");
+    let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+        &Some(state.wstore.clone()),
+        &sender_reg.block_id,
+    );
+    crate::backend::blockcontroller::shell::handle_append_block_file(
+        &state.broker,
+        &sender_reg.block_id,
+        crate::backend::agent_session::OUTPUT_FILE,
+        data.as_bytes(),
+        Some(&state.filestore),
+        global_zone.as_deref(),
+    );
+}
+
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Json(req): Json<InjectionRequest>,
@@ -29,6 +93,16 @@ pub(super) async fn handle_reactive_inject(
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
     if resp.success {
+        echo_jekt_to_sender(
+            &state,
+            req.source_agent.as_deref(),
+            &req.target_agent,
+            &req.message,
+            &resp.request_id,
+            resp.effective_tier.as_deref(),
+            req.delivery_tier.as_deref().unwrap_or("host"),
+            req.priority.as_deref().unwrap_or("normal"),
+        );
         return Json(serde_json::to_value(&resp).unwrap_or_default());
     }
 
@@ -58,6 +132,18 @@ pub(super) async fn handle_reactive_inject(
                 match fwd.send().await {
                     Ok(r) if r.status().is_success() => {
                         if let Ok(body) = r.json::<serde_json::Value>().await {
+                            if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
+                                echo_jekt_to_sender(
+                                    &state,
+                                    req.source_agent.as_deref(),
+                                    &req.target_agent,
+                                    &req.message,
+                                    body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
+                                    body.get("effective_tier").and_then(|v| v.as_str()),
+                                    "host",
+                                    req.priority.as_deref().unwrap_or("normal"),
+                                );
+                            }
                             return Json(body);
                         }
                     }
@@ -113,6 +199,16 @@ pub(super) async fn handle_reactive_inject(
                             );
                             state.lan_discovery.evict_agent(&req.target_agent);
                         } else {
+                            echo_jekt_to_sender(
+                                &state,
+                                req.source_agent.as_deref(),
+                                &req.target_agent,
+                                &req.message,
+                                body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
+                                body.get("effective_tier").and_then(|v| v.as_str()),
+                                "lan",
+                                req.priority.as_deref().unwrap_or("normal"),
+                            );
                             return Json(body);
                         }
                     }

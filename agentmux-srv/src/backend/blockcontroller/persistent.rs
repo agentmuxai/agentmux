@@ -381,14 +381,38 @@ impl PersistentSubprocessController {
                 "content": message
             }
         });
+        let json_str = json_msg.to_string();
 
-        let inner = self.inner.lock().unwrap();
-        let tx = inner
-            .stdin_tx
-            .as_ref()
-            .ok_or("persistent process not running")?;
-        tx.try_send(json_msg.to_string())
-            .map_err(|e| format!("stdin send failed: {e}"))
+        {
+            let inner = self.inner.lock().unwrap();
+            let tx = inner
+                .stdin_tx
+                .as_ref()
+                .ok_or("persistent process not running")?;
+            tx.try_send(json_str.clone())
+                .map_err(|e| format!("stdin send failed: {e}"))?;
+        }
+
+        // Persist the injected message to the blockfile WITH a live event —
+        // unlike `send_message`, there is no `agent-message-accepted` pending
+        // echo to pair with (nothing was typed in the UI), so without this the
+        // injection is invisible to the human operator: a silent injection,
+        // which SPEC_JEKT_SECURITY_AND_VISIBILITY §3.1/G1 forbids. The live
+        // blockfile append renders it in the open pane; the persisted line lets
+        // `parseHistoryLines` rebuild the node on reopen.
+        if let Some(ref broker) = self.broker {
+            let global_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+            let line_with_newline = format!("{json_str}\n");
+            super::shell::handle_append_block_file(
+                broker,
+                &self.block_id,
+                crate::backend::agent_session::OUTPUT_FILE,
+                line_with_newline.as_bytes(),
+                self.filestore.as_ref(),
+                global_zone.as_deref(),
+            );
+        }
+        Ok(())
     }
 
     /// Answer a parked AskUserQuestion via the Agent SDK **control protocol**.

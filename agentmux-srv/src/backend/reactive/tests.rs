@@ -636,6 +636,7 @@ fn test_injection_response_serde() {
         block_id: Some("block-abc".to_string()),
         error: None,
         timestamp: 1700000000000,
+        effective_tier: Some("coord".to_string()),
     };
 
     let json = serde_json::to_string(&resp).unwrap();
