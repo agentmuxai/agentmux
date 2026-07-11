@@ -30,6 +30,10 @@ fn spawn_node(script: &str, extra_args: &[&str]) -> tokio::process::Child {
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    // SPEC_TEST_SRV_SPAWN_GUARDS_2026_07_11 §DoD 4 — a panic between spawn
+    // and the test's own wait() must not leak the node child. tokio's
+    // kill_on_drop is the one-line guard for tokio-spawned test subjects.
+    cmd.kill_on_drop(true);
 
     // Match production: suppress console window on Windows
     #[cfg(windows)]
