@@ -4,16 +4,15 @@
 // Identity pane view — the agent-settings `view: "identity"` tab.
 //
 // PR 5 of SPEC_BUNDLE_MANAGEMENT_2026_05_22.md (§5 decision 3) DEMOTED
-// this tab from full CRUD to a read-only summary. Full Identity-bundle
-// management now lives in exactly one place: the hamburger "Identity &
-// Memory" manager (`BundleManagerModal`).
+// this tab from full CRUD to a read-only summary.
 //
-// This file no longer renders `IdentityManagerBody` — it renders the
-// context-free, CRUD-free `<BundleSummaryPanel/>`, which points the user
-// at the app-wide manager. The `IdentityPaneViewModel` is still the
-// registered `viewComponent` ViewModel (BlockRegistry needs one), and
-// the context-free `IdentityManager` (used by the hamburger modal) is
-// untouched — only this agent-settings wrapper changed.
+// This file renders the context-free, CRUD-free `<BundleSummaryPanel/>`.
+// The `IdentityPaneViewModel` is still the registered `viewComponent`
+// ViewModel (BlockRegistry needs one). The full-CRUD `IdentityManager`
+// this tab used to render (`identity-manager.tsx`) was deleted as dead
+// code (issue #1624 PR-C follow-up) — its other intended mount point (a
+// hamburger "Identity & Memory manager") was never actually built; the
+// Armory pane's read-only "Identities" tab shipped instead.
 
 import { type JSX } from "solid-js";
 
