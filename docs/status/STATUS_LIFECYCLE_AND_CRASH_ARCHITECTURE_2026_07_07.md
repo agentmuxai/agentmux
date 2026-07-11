@@ -1,5 +1,26 @@
 # Status — Lifecycle & Crash Architecture Program (as of 2026-07-07)
 
+> **SUPERSEDED (addendum 2026-07-11).** This snapshot predates a week that closed most of what
+> it lists as open. Landed since:
+>
+> - **Pillar 1 Step 4 (crash-reproject) — DONE, all 5 phases** (#2014, #2015, #2017, #2032):
+>   two-tier fast/slow reproject, restoring-session overlay, opt-in E2E suite
+>   (`test/e2e/crash-reproject.e2e.test.ts`). §1's "Step 4 not started" and everything blocked
+>   on it no longer holds. Follow-up hardening: #2048 (startup window storm), #2053 (silent
+>   CloseWindow reducer no-op).
+> - **Pillar 2 (sanitize-then-decide) — DONE, all 4 phases** (#2080, #2081, #2084, #2083):
+>   `reconcile_quit` is the sole quit decision-maker; WRR demoted to the Draining-gated Windows
+>   Stage-2 executor; orphan_reconcile is a sanitizer/executor. §2's "one hard gap left" is closed.
+>   Spec closure: `SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md` + §3.3 rows in
+>   `SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md`.
+> - **`Client.windowids` leak class — CLOSED, all three entry points** (#2087 IPC close path,
+>   #2088 registration race + `test/e2e/window-close-baseline.e2e.test.ts`, #2089 OS-level
+>   WM_CLOSE wndproc routing).
+>
+> Program remaining as of 2026-07-11: crash-reproject bake period (~3–4 weeks of real usage)
+> → Step 6 saga collapse; floater placement read-back check. Everything below is the historical
+> 2026-07-07 picture, kept verbatim.
+
 **Type:** Status snapshot, not a plan — a point-in-time picture of the three-pillar disposability
 program (`docs/architecture/DISCUSSION_LIFECYCLE_AND_CRASH_ARCHITECTURE_2026_06_29.md`).
 **Verify before acting:** every claim below is checked against source or a live test as of this

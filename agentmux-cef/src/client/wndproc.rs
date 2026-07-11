@@ -131,7 +131,7 @@ pub(super) unsafe fn install_frameless_resize_hook(hwnd: *mut std::ffi::c_void) 
     if let Ok(mut map) = ORIGINAL_WNDPROCS.lock() {
         map.insert(hwnd as usize, original);
     }
-    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as isize);
+    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc_hook as *const () as isize);
     tracing::info!("Installed frameless resize hook (WM_NCCALCSIZE + WM_NCHITTEST)");
 }
 
