@@ -146,13 +146,24 @@ wrap_task! {
                 #[cfg(target_os = "windows")]
                 if self.label.starts_with("window-") {
                     crate::commands::window_pool::demote_srv_cleanup(&self.state, &self.label);
-                    if self.label.starts_with("window-pool-")
-                        && crate::commands::window_pool::demote_promoted_pool_window(
-                            &self.state,
-                            &self.label,
-                            &window,
-                        )
-                    {
+                    // Residual 1 (SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11)
+                    // — demote is attempted for EVERY window-* label, not just
+                    // window-pool-*: a cold-path / tear-off `window-{uuid}`
+                    // window is structurally identical to a promoted pool
+                    // window, and adopting it into the warm pool reuses its
+                    // renderer instead of stranding ~100MB in a park-and-blank.
+                    // Safe because pool membership is tracked by the reducer's
+                    // is_pool flag + unpromoted/queue sets, and every quit-path
+                    // pool enumeration is type-based (pool_side_top_level_labels)
+                    // — the label string is not a pool identity anywhere that
+                    // matters post-adoption. Demote's own gates (cap, strict
+                    // HWND, reducer accept) still apply; a refusal falls through
+                    // to park-and-blank exactly as before.
+                    if crate::commands::window_pool::demote_promoted_pool_window(
+                        &self.state,
+                        &self.label,
+                        &window,
+                    ) {
                         return;
                     }
                     // SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md — a non-demotable
@@ -491,11 +502,19 @@ pub(crate) fn begin_drain_and_cascade(state: &Arc<AppState>, reason: crate::stat
     // never empties on macOS/Linux (init_pane_pool spawns one at
     // startup), so Stage 2's is_empty() gate never fires and the
     // host hangs on every quit.
+    // Tab-pool membership BY TYPE (reducer `is_pool` flag), not label prefix:
+    // an ADOPTED pool window (Residual 1, SPEC_POOL_ADOPTION_AND_WINDOW_ROW_
+    // CRUMB_2026_07_11) keeps its foreign `window-{uuid}` label while being
+    // genuinely pool-side — a prefix filter would skip it here, leaving an
+    // unswept browser that blocks Stage 2's `browser_list.is_empty()` gate.
+    // The pane pool stays prefix-matched (`floating-pool-*` — pane-pool
+    // adoption is out of scope).
+    let tab_pool_labels = state.pool_side_top_level_labels();
     let pool_browsers: Vec<cef::Browser> = state
         .list_browsers()
         .into_iter()
         .filter(|(label, _)| {
-            label.starts_with("window-pool-") || label.starts_with("floating-pool-")
+            tab_pool_labels.contains(label) || label.starts_with("floating-pool-")
         })
         .map(|(_, b)| b)
         .collect();
