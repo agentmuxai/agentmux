@@ -269,6 +269,21 @@ declare global {
          *  merge to clean up the dragged window after its tab is moved
          *  into the destination workspace. */
         closeWindowByLabel: (label: string) => Promise<void>;
+        /** Cross-window tab remount (SPEC_CROSS_WINDOW_TAB_REMOUNT §4.1):
+         *  arm the global mouse hook for an ordinary in-strip tab drag.
+         *  On release over another AgentMux window, that window receives
+         *  `tabdrag:merge-direct`. No-op on non-Windows. */
+        startTabDragTracking: (args: {
+            sourceWindowLabel: string;
+            tabId: string;
+            sourceWsId: string;
+            isLastTab: boolean;
+        }) => Promise<void>;
+        /** Belt-and-suspenders hook teardown at dragend — the hook
+         *  self-uninstalls on mouseup/ESC, but a leaked WH_MOUSE_LL hook
+         *  degrades every mouse event on the system, so dragend calls
+         *  this unconditionally. Idempotent. */
+        stopTabDragTracking: () => Promise<void>;
         setDragCursor: () => Promise<void>;
         restoreDragCursor: () => Promise<void>;
         releaseDragCapture: () => Promise<void>;

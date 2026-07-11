@@ -326,6 +326,19 @@ async fn route_command(
         "open_window_at_position" => commands::drag::open_window_at_position(state, args),
         "tear_off_pool_promote" => commands::drag::tear_off_pool_promote(state, args),
         "pool_window_ready" => commands::drag::pool_window_ready(state, args),
+        "start_tab_drag_tracking" => {
+            // spawn_blocking — blocks briefly (~ms) on the hook thread's
+            // install-ready channel, same rationale as
+            // tear_off_sc_move_handshake below.
+            let state_clone = state.clone();
+            let args_clone = args.clone();
+            tokio::task::spawn_blocking(move || {
+                commands::drag::start_tab_drag_tracking(&state_clone, &args_clone)
+            })
+            .await
+            .map_err(|e| format!("start_tab_drag_tracking join error: {}", e))?
+        }
+        "stop_tab_drag_tracking" => commands::drag::stop_tab_drag_tracking(),
         "pane_pool_window_ready" => commands::drag::pane_pool_window_ready(state, args),
         "tear_off_sc_move_handshake" => {
             // Wrap in spawn_blocking — the handler polls state.browsers

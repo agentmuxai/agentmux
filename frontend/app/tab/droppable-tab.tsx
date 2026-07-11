@@ -26,6 +26,7 @@ import {
 import { getCurrentDragPayload, setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { getLayoutModelForTabById, redockDraggedPane, tileItemType } from "@/layout/index";
 import { getApi } from "@/store/global";
+import { fireAndForget } from "@/util/util";
 import { setTabGrabOffset } from "./tab-grab-offset";
 
 export interface DroppableTabProps {
@@ -46,6 +47,22 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
     let tabWrapRef!: HTMLDivElement;
     const [isDragging, setIsDragging] = createSignal(false);
     const [naturalWidth, setNaturalWidth] = createSignal<number | null>(null);
+    // Own window label — drives the lone-tab drag policy below (a
+    // standalone torn-off window's single tab must be draggable to
+    // remount it into another window; main's never is). Read
+    // SYNCHRONOUSLY from the URL param (the same authoritative source
+    // app-init.ts uses) rather than the async getWindowLabel() IPC: a
+    // freshly torn-off window is exactly the primary use case, and an
+    // async fetch would leave its lone tab undraggable until the
+    // promise resolved. (reagent PR #2086 P2)
+    const windowLabel = new URLSearchParams(window.location.search).get("windowLabel") || "main";
+    // Lone-tab drags are a REMOUNT-ONLY gesture (cross-window tab
+    // remount, SPEC_CROSS_WINDOW_TAB_REMOUNT §4.3): reordering a single
+    // tab is meaningless, and tearing it off would just leave an empty
+    // window behind — but dragging it onto ANOTHER window's strip is how
+    // a torn-off standalone window gets remounted. Allowed for every
+    // window except main (whose last tab must never leave, see spec).
+    const isLoneTabDrag = () => props.allTabCount === 1;
 
     // Gap before (left padding) — this tab is the afterTabId of the insertion point
     const gapBefore = createMemo(() => {
@@ -69,7 +86,7 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
 
         const cleanupDraggable = draggable({
             element: tabWrapRef,
-            canDrag: () => props.allTabCount > 1,
+            canDrag: () => props.allTabCount > 1 || windowLabel !== "main",
             getInitialData: () => ({
                 tabId: props.tabId,
                 workspaceId: props.workspaceId,
@@ -119,8 +136,34 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 setGlobalDragTabId(props.tabId);
                 setInsertionPoint(null);
                 setIsDragging(true);
-                setCurrentDragPayload({ kind: "tab", tabId: props.tabId, workspaceId: props.workspaceId });
+                // Lone-tab drags carry NO cross-window payload: the HTML5
+                // pipeline's outcomes for a tab (tear-off to a new window,
+                // append-merge via DragOverlay) are all wrong for a
+                // single-tab window — tear-off would strand an empty
+                // window. The host mouse hook below is the only consumer;
+                // release anywhere but another window's strip is a no-op.
+                if (!isLoneTabDrag()) {
+                    setCurrentDragPayload({ kind: "tab", tabId: props.tabId, workspaceId: props.workspaceId });
+                }
                 getApi().setJsDragActive(true).catch(() => {});
+                // Cross-window tab remount (SPEC_CROSS_WINDOW_TAB_REMOUNT
+                // §4.1): arm the host's global mouse hook for this drag so
+                // a release over another AgentMux window's strip emits
+                // tabdrag:merge-direct to it. No-op off-Windows. If the
+                // drag later crosses the tear-off threshold, the SC_MOVE
+                // handshake's own hook install supersedes this session.
+                fireAndForget(async () => {
+                    try {
+                        await getApi().startTabDragTracking({
+                            sourceWindowLabel: windowLabel,
+                            tabId: props.tabId,
+                            sourceWsId: props.workspaceId,
+                            isLastTab: props.allTabCount === 1,
+                        });
+                    } catch (e) {
+                        Logger.warn("dnd", "startTabDragTracking failed", { error: String(e) });
+                    }
+                });
                 Logger.info("dnd", "tab-drag started", {
                     tabId: props.tabId,
                     workspaceId: props.workspaceId,
@@ -131,6 +174,14 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                 if (!isWindows()) preventUnhandled.stop();
                 setGlobalDragTabId(null);
                 setIsDragging(false);
+                // Belt-and-suspenders hook teardown. Ordinarily the hook
+                // self-uninstalled on the WM_LBUTTONUP that produced this
+                // dragend (LL hooks run before the event reaches the app),
+                // so this is a no-op; it matters for swallowed-dragend
+                // paths. Harmless for a superseding tear-off session too —
+                // that session's own WM_LBUTTONUP already retired it by
+                // the time any dragend fires.
+                fireAndForget(() => getApi().stopTabDragTracking());
                 // Do NOT clear setTabGrabOffset here. pragmatic-dnd's
                 // onDrop fires during the dragend event dispatch, BEFORE
                 // CrossWindowDragMonitor.win32.tsx::handleDragEnd runs.

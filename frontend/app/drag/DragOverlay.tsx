@@ -14,6 +14,7 @@
 import { atoms, getApi } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { deleteLayoutModelForTab } from "@/layout/index";
+import { wasTabRecentlyMerged } from "@/app/tab/tabbar-dnd";
 import { Logger } from "@/util/logger";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -98,6 +99,19 @@ function DragOverlay(): JSX.Element {
                         Logger.error("dnd:overlay", "MoveBlockToTab failed", { error: String(e) });
                     });
                 } else if (data.dragType === "tab" && data.payload.tabId) {
+                    // Cross-window tab remount dedup: if the host mouse
+                    // hook already merged this tab at a strip-accurate
+                    // index (tabdrag:merge-direct, handled in tabbar.tsx),
+                    // this legacy append-merge for the same gesture must
+                    // not run — the backend would reject it anyway (the
+                    // tab already left its claimed source workspace), but
+                    // skipping avoids a guaranteed error log per merge.
+                    if (wasTabRecentlyMerged(data.payload.tabId)) {
+                        Logger.info("dnd:overlay", "cross-window drop: tab already merged via strip drop, skipping", {
+                            tabId: data.payload.tabId,
+                        });
+                        return;
+                    }
                     Logger.info("dnd:overlay", "cross-window drop: moving tab into this window", {
                         tabId: data.payload.tabId,
                         sourceWsId: data.sourceWorkspaceId,
