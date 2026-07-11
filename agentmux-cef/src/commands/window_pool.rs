@@ -761,6 +761,12 @@ pub fn demote_promoted_pool_window(
         ));
         return false;
     }
+    // Pillar 2 Phase 2 (sanitize-then-decide §2.4) — a demote-close is the one
+    // close flow that lowers the live-user count WITHOUT an UnregisterBrowser
+    // (the kind flip excludes the window from the count while the browser
+    // stays registered for pool reuse). When this was the last user window,
+    // the drain verdict fires here.
+    crate::ui_tasks::consume_request_drain(state, &dispatch, "demote_pool_window");
 
     // 3. Park the HWND offscreen + hide, mirroring fresh-spawn state.
     unsafe {
@@ -1431,11 +1437,15 @@ fn cleanup_failed_promote_orphan(state: &Arc<AppState>, label: &str) {
     // inline since CEF won't fire it for this label.
     // Phase H.2.d — legacy `state.browsers.lock().remove` removed;
     // reducer's UnregisterBrowser is sole canonical mutation site.
-    state.host_dispatch(
+    let out = state.host_dispatch(
         crate::reducer::HostCommand::UnregisterBrowser {
             label: label.to_string(),
         },
     );
+    // Pillar 2 Phase 2 — the label was already popped+promoted (user-kind), so
+    // this inline unregister can zero the live count; on_before_close's own
+    // consumption never runs on this path (no CEF close will fire).
+    crate::ui_tasks::consume_request_drain(state, &out, "failed_promote_orphan_cleanup");
     state.window_meta.lock().remove(label);
     crate::launcher_ipc::report_window_closed(label.to_string());
     // Refill (graceful path gets this via on_pool_window_destroyed).
@@ -1522,11 +1532,14 @@ pub fn promote_pool_window(
 /// `close_browser` path — `on_before_close` will not fire. Do its job inline.
 #[cfg(not(target_os = "windows"))]
 fn cleanup_failed_promote_orphan_cross_platform(state: &Arc<AppState>, label: &str) {
-    state.host_dispatch(
+    let out = state.host_dispatch(
         crate::reducer::HostCommand::UnregisterBrowser {
             label: label.to_string(),
         },
     );
+    // Pillar 2 Phase 2 — see the Windows variant: the label was already
+    // popped+promoted (user-kind); no close chain will ever consume this.
+    crate::ui_tasks::consume_request_drain(state, &out, "failed_promote_orphan_cleanup_xplat");
     state.window_meta.lock().remove(label);
     crate::launcher_ipc::report_window_closed(label.to_string());
     spawn_pool_window(state);
