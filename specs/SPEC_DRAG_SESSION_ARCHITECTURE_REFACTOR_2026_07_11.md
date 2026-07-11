@@ -71,6 +71,31 @@ one-line evidence:
 10. **Dead state drift**: `showOverlay` has no writer but is OR'd into the overlay
     transform — a symptom of an over-grown model.
 
+### 2.1 ROOT CAUSE FOUND (post-spec, via the §7 hit-test probe): the placeholder-container click shield
+
+The post-switch hit-test diagnostic identified the actual dead-tab layer in the
+field: **`div.placeholder-container`** — the purely-visual drag-ghost layer — was
+the top element at the tab center on every wedged tab, while `activeDrag` was
+correctly `false` and the overlay-container was correctly `pointer-events: none`.
+
+Mechanism: `overlayTransform` (`layoutModel.ts:441-455`) parks the placeholder
+"offscreen" at `rect.top + 2 × rect.height` of the display container. When a
+cross-tab drag ends, the SOURCE tab is `display:none` (spring-switched away), so
+`getBoundingClientRect()` is all zeros and the parking spot computes to
+**`top: 0` — exactly covering the tab** — and `.placeholder-container` carried
+no `pointer-events: none` (only its children did). The memo's rect read is
+non-reactive, so re-showing the tab never recomputes; the one event that would
+(a new drag's `activeDrag` toggle) is unreachable because the layer covers the
+drag handles. This single defect produced every field symptom across all four
+rounds: dead source tab, drags that won't start from it, healing on reload,
+re-breaking on the next move.
+
+Fixed immediately (same branch): `pointer-events: none` on the container +
+a large constant parking floor. The refactor's P2 (derived overlay state) and
+the general lesson stand: **decorative layers must be input-transparent by
+construction, and "offscreen" must never be computed from a possibly-zero
+live rect.**
+
 Two load-bearing facts from pragmatic-dnd's source that the refactor builds on:
 
 - **Dispatch order at drop is fixed**: source draggable `onDrop` → drop targets
