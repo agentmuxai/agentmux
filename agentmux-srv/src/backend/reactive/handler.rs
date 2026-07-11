@@ -211,6 +211,7 @@ impl Handler {
                 block_id: None,
                 error: Some("rate limit exceeded".to_string()),
                 timestamp: now,
+                effective_tier: None,
             };
         }
 
@@ -222,6 +223,7 @@ impl Handler {
                 block_id: None,
                 error: Some(format!("invalid agent ID: {}", req.target_agent)),
                 timestamp: now,
+                effective_tier: None,
             };
         }
 
@@ -248,6 +250,7 @@ impl Handler {
                     block_id: None,
                     error: Some(err),
                     timestamp: now,
+                    effective_tier: None,
                 };
             }
         };
@@ -323,6 +326,7 @@ impl Handler {
                         block_id: Some(block_id),
                         error: None,
                         timestamp: now,
+                        effective_tier: Some(effective_tier.to_string()),
                     };
                 }
                 Ok(false) => {
@@ -353,6 +357,7 @@ impl Handler {
                         block_id: Some(block_id),
                         error: Some(e),
                         timestamp: now,
+                        effective_tier: Some(effective_tier.to_string()),
                     };
                 }
             }
@@ -378,6 +383,7 @@ impl Handler {
                     block_id: Some(block_id),
                     error: Some(err),
                     timestamp: now,
+                    effective_tier: Some(effective_tier.to_string()),
                 };
             }
         };
@@ -416,6 +422,7 @@ impl Handler {
                 block_id: Some(block_id),
                 error: Some(e),
                 timestamp: now,
+                effective_tier: Some(effective_tier.to_string()),
             };
         }
 
@@ -448,6 +455,7 @@ impl Handler {
             block_id: Some(block_id),
             error: None,
             timestamp: now,
+            effective_tier: Some(effective_tier.to_string()),
         }
     }
 

@@ -38,15 +38,22 @@ export interface ParsedHistory {
  *
  * @param lines        Raw text lines from blockfile:read_range
  * @param outputFormat Provider output format string (e.g. "claude-stream-json")
+ * @param agentName    This pane's agent name (`block.meta.agentName`).
+ *                     Threaded to `parser.setAgentId` so jekt direction
+ *                     detection works during replay — an echoed outgoing jekt
+ *                     (FROM == this agent) must rebuild as an outgoing bubble.
+ *                     Optional; missing name falls back to "incoming".
  * @returns            Ordered DocumentNodes (deduped by node id) plus the
  *                      last `session_end` stats payload found, if any.
  */
 export function parseHistoryLines(
     lines: string[],
     outputFormat: string,
+    agentName?: string,
 ): ParsedHistory {
     const translator = createTranslator(outputFormat);
     const parser = new ClaudeCodeStreamParser();
+    if (agentName) parser.setAgentId(agentName);
     const nodes: DocumentNode[] = [];
     let lastSessionStats: SessionStats | null = null;
     // Same-id events update IN PLACE rather than first-wins.

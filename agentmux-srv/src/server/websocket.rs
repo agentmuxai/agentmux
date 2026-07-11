@@ -427,6 +427,17 @@ async fn handle_incoming_text(
                     };
                     let resp = state.reactive_handler.inject_message(reactive_req);
                     if resp.success {
+                        // Sender-side echo (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2)
+                        super::reactive::echo_jekt_to_sender(
+                            state,
+                            Some(from),
+                            target,
+                            message,
+                            &resp.request_id,
+                            resp.effective_tier.as_deref(),
+                            "host",
+                            incoming.priority.as_deref().unwrap_or("normal"),
+                        );
                         let ack = json!({ "type": "bus:injected", "via": "pty", "block_id": resp.block_id });
                         let msg = serde_json::to_string(&ack).unwrap_or_default();
                         if socket.send(Message::Text(msg.into())).await.is_err() {
@@ -454,6 +465,19 @@ async fn handle_incoming_text(
                     };
                     match state.messagebus.inject(from, target, message, priority) {
                         Ok(msg_id) => {
+                            // Sender-side echo for the messagebus fallback path.
+                            // Tier is unknown here (no ReactiveHandler wrap) — None
+                            // renders as the default "coord".
+                            super::reactive::echo_jekt_to_sender(
+                                state,
+                                Some(from),
+                                target,
+                                message,
+                                &msg_id,
+                                None,
+                                "host",
+                                incoming.priority.as_deref().unwrap_or("normal"),
+                            );
                             let ack = json!({ "type": "bus:injected", "via": "messagebus", "message_id": msg_id });
                             let msg = serde_json::to_string(&ack).unwrap_or_default();
                             if socket.send(Message::Text(msg.into())).await.is_err() {

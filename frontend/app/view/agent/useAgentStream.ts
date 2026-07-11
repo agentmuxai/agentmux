@@ -104,6 +104,15 @@ interface UseAgentStreamOpts {
      * work). Per SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §5.1.
      */
     provider?: string;
+    /**
+     * This pane's agent name (`block.meta.agentName`). Threaded to
+     * `parser.setAgentId` so jekt direction detection works: an echoed
+     * outgoing jekt has FROM == this agent and must render as an outgoing
+     * bubble, not incoming (stream-parser `tryParseJekt`). Optional —
+     * missing name means direction falls back to "incoming", the only
+     * pre-echo behavior. SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2.
+     */
+    agentName?: string;
 }
 
 /**
@@ -118,6 +127,7 @@ export function useAgentStream({
     pendingMessagesAtom,
     enabled,
     provider,
+    agentName,
 }: UseAgentStreamOpts): void {
     // Read-side accessors only — all writes route through dispatchPane.
     // Maintaining this contract is how the agent pane stays 100%
@@ -136,6 +146,7 @@ export function useAgentStream({
     let lineBuffer = "";
     let translator = createTranslator(outputFormat);
     let parser = new ClaudeCodeStreamParser();
+    if (agentName) parser.setAgentId(agentName);
     // nodeIdSet remains for fast in-batch dedup (the reducer also dedups,
     // but checking here avoids enqueuing already-seen nodes into pendingNew).
     let nodeIdSet = new Set<string>();
@@ -397,6 +408,7 @@ export function useAgentStream({
         lineBuffer = "";
         translator = createTranslator(outputFormat);
         parser = new ClaudeCodeStreamParser();
+        if (agentName) parser.setAgentId(agentName);
         nodeIdSet = new Set();
         pendingNew = [];
         pendingUpdates = [];
@@ -670,6 +682,7 @@ export function useAgentStream({
         parser = new ClaudeCodeStreamParser({
             skipIds: () => getNodeIdSet(blockId),
         });
+        if (agentName) parser.setAgentId(agentName);
 
         // Two reducers signaled in lockstep: pane-state owns the streaming
         // metadata (active flag), agent-document owns the session phase
