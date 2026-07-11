@@ -615,8 +615,24 @@ pub(crate) async fn run_windows(
                 // (docs/retro/retro-oom-crash-2026-06-16.md,
                 // SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.B). A genuine
                 // host fault still takes the existing path below, unchanged.
+                //
+                // SPEC_SRV_SUPERVISION_RECYCLE (reagent P1, PR #2107) — a
+                // launcher-inflicted recycle kill is consumed BEFORE
+                // classification and forced onto the Abnormal path: we KNOW
+                // why the host died, so classifying its exit is meaningless
+                // and actively harmful — a recycle landing in a low-commit
+                // moment would otherwise route to the SystemOom branch,
+                // which always relaunches degraded (--disable-gpu) AND never
+                // resets the flag, leaving the NEXT genuine crash silently
+                // mistreated as a recycle.
+                let recycle_kill = std::mem::replace(&mut srv_recycle_kill, false);
                 let commit_free = mem_supervisor::commit_free_mb();
-                match mem_supervisor::classify_host_exit(code, commit_free) {
+                let exit_class = if recycle_kill {
+                    mem_supervisor::HostExitClass::Abnormal
+                } else {
+                    mem_supervisor::classify_host_exit(code, commit_free)
+                };
+                match exit_class {
                     mem_supervisor::HostExitClass::SystemOom => {
                         let now = std::time::Instant::now();
                         if mem_supervisor::budget_exhausted(
@@ -738,10 +754,9 @@ pub(crate) async fn run_windows(
                         // bookkeeping so an srv-driven recycle can never mark
                         // the host deterministic-crashing or degrade it to
                         // --disable-gpu. (It still counted against the budget
-                        // above — runaway protection stays.)
-                        if srv_recycle_kill {
-                            srv_recycle_kill = false;
-                        } else {
+                        // above — runaway protection stays. The flag itself
+                        // was consumed before classification — reagent P1.)
+                        if !recycle_kill {
                             if last_abnormal_code == Some(code) {
                                 host_degraded = true;
                             }
