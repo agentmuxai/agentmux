@@ -305,16 +305,30 @@ unsafe fn count_visible_user_windows() -> usize {
 /// pool-move handler above now also dispatching `UnregisterBrowser` (Step A of the
 /// same spec). Without that companion fix, ANDing `registered` in here would hang the
 /// process open on a recycle-close, regressing #1676.
-fn should_quit_on_last_window(armed: bool, visible: usize, registered: usize) -> bool {
-    armed && visible == 0 && registered == 0
+///
+/// Pillar 2 Phase 3 (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §2.2): also requires
+/// `draining` — the reducer has DECIDED to quit (`QuitState` left `Running`
+/// via `reconcile_quit`'s verdict, consumed at a Phase-2 dispatch site). This
+/// demotes WRR from an independent quit authority to the Stage-2 executor of
+/// a reducer-made decision: on Windows, parked browsers never fire
+/// `on_before_close`, so `client::browser_list` never empties and the
+/// on_before_close Stage-2 gate is structurally unreachable — this function
+/// is the Windows Stage 2. All-zero counts WITHOUT a drain decision now mean
+/// a consumption site was missed: `is_reducer_lagging_os` routes that to the
+/// watchdog (quit-late-with-loud-log) instead of quitting silently on WRR's
+/// own authority.
+fn should_quit_on_last_window(armed: bool, draining: bool, visible: usize, registered: usize) -> bool {
+    armed && draining && visible == 0 && registered == 0
 }
 
-/// Companion pure decision: the state where the OS says every window is gone
-/// but the reducer disagrees. Either a transient (an UnregisterBrowser dispatch
-/// is in flight and will land in milliseconds) or a stuck reducer (a close path
-/// that never dispatched — the failure mode Step D's watchdog exists to bound).
-fn is_reducer_lagging_os(armed: bool, visible: usize, registered: usize) -> bool {
-    armed && visible == 0 && registered > 0
+/// Companion pure decision: the OS says every window is gone but the reducer
+/// hasn't finished agreeing — either its count still shows a live window (an
+/// UnregisterBrowser dispatch in flight, or a close path that never
+/// dispatched), or (Phase 3) the count reads zero but no drain decision was
+/// ever consumed (`!draining` — a missed Phase-2 consumption site). Both
+/// flavors are the failure mode Step D's watchdog exists to bound.
+fn is_reducer_lagging_os(armed: bool, draining: bool, visible: usize, registered: usize) -> bool {
+    armed && visible == 0 && (registered > 0 || !draining)
 }
 
 /// Step D — bounded fallback so a missed `UnregisterBrowser` path degrades to
@@ -370,8 +384,35 @@ cef::wrap_task! {
             if QUIT_INITIATED.load(SeqCst) {
                 return;
             }
+            let (registered, draining) = {
+                let st = self.state.host_state.lock();
+                (
+                    crate::reducer::count_live_user_windows(&st),
+                    st.quit_state != crate::state::QuitState::Running,
+                )
+            };
             let visible = unsafe { count_visible_user_windows() };
             if visible != 0 {
+                // Once the reducer has DECIDED to drain and counts zero live
+                // user windows, a clear-and-forget stand-down here is a
+                // permanent-zombie recipe: the drain is monotonic, every
+                // close event has already fired (nothing will re-arm), and
+                // whatever is "visible" cannot be a live user window (a real
+                // minimized/visible user window would still be REGISTERED —
+                // minimize never unregisters). Live-caught 2026-07-11: a
+                // pool refill that landed after Stage 1 sat transiently
+                // visible at the spawn sentinel, the recheck stood down, and
+                // the instance hung as a draining corpse. Re-arm and keep
+                // watching until the OS agrees; each cycle is one 3s sleep.
+                if draining && registered == 0 {
+                    tracing::warn!(
+                        target: "wrr",
+                        "[wrr] quit watchdog: {} window(s) transiently visible while draining with 0 registered — re-arming (post-drain debris, e.g. late pool spawn)",
+                        visible
+                    );
+                    arm_quit_watchdog(registered);
+                    return;
+                }
                 tracing::info!(
                     target: "wrr",
                     "[wrr] quit watchdog: {} window(s) visible again — stand down",
@@ -379,22 +420,37 @@ cef::wrap_task! {
                 );
                 return;
             }
-            let registered = self.state.count_live_user_windows();
             if QUIT_INITIATED.swap(true, SeqCst) {
                 return;
             }
             // Trusting the OS signal alone (the pre-Step-B behavior). The
-            // registered count logged here is a live bug report: some close
-            // path failed to dispatch UnregisterBrowser — find it.
+            // state logged here is a live bug report: registered > 0 means
+            // some close path failed to dispatch UnregisterBrowser;
+            // !draining means a request_drain consumption site was missed
+            // (Phase 2's sites, or a new close path) — find it.
             tracing::warn!(
                 target: "wrr",
-                "[wrr] quit watchdog fired: 0 visible for {}ms but reducer still counts {} live — quitting on OS signal alone (reducer desync, investigate)",
+                "[wrr] quit watchdog fired: 0 visible for {}ms but reducer disagrees (registered={} draining={}) — quitting on OS signal alone (reducer desync, investigate)",
                 QUIT_WATCHDOG_GRACE.as_millis(),
-                registered
+                registered,
+                draining
             );
             cef::quit_message_loop();
         }
     }
+}
+
+/// Safe re-entry point for non-WINEVENT callers (Pillar 2 Phase 3): the
+/// drain-cascade task re-runs the gate right after `QuitState` flips, so a
+/// drain with zero pool inventory (no further OS events will ever arrive)
+/// quits deterministically instead of waiting out the watchdog. Safe wrapper:
+/// the body only reads OS/window state (`EnumWindows`, class probes) and the
+/// host-state lock — the `unsafe` on the inner fn is Win32 FFI, not a caller
+/// contract beyond "call it on the UI thread", which `wrap_task!` execution
+/// guarantees.
+#[cfg(target_os = "windows")]
+pub(crate) fn reevaluate_last_window_quit() {
+    unsafe { maybe_quit_on_last_user_window() }
 }
 
 /// Called from HIDE/DESTROY of an app-class window. If a user window has ever
@@ -414,10 +470,20 @@ unsafe fn maybe_quit_on_last_user_window() {
     // `HAD_VISIBLE_USER_WINDOW` is set only on EVENT_OBJECT_SHOW, so it stays
     // false until the page actually loads and the host calls ShowWindow — the
     // correct moment to arm the last-window quit.
-    let registered = app_state()
+    let (registered, draining) = app_state()
         .get()
-        .map(|s| s.count_live_user_windows())
-        .unwrap_or(0);
+        .map(|s| {
+            // One lock scope so the count and the drain decision are read
+            // from the same instant (two separate reads could tear).
+            let st = s.host_state.lock();
+            let registered = crate::reducer::count_live_user_windows(&st);
+            // Phase 3: "the reducer decided to quit" = QuitState left Running
+            // (Draining or Quit — both mean a reconcile_quit verdict was
+            // consumed at a Phase-2 dispatch site).
+            let draining = st.quit_state != crate::state::QuitState::Running;
+            (registered, draining)
+        })
+        .unwrap_or((0, false));
     let armed = HAD_VISIBLE_USER_WINDOW.load(SeqCst);
     if !armed {
         return;
@@ -425,11 +491,11 @@ unsafe fn maybe_quit_on_last_user_window() {
     let visible = count_visible_user_windows();
     tracing::debug!(
         target: "wrr-trace",
-        "[wrr] last-window check: registered_user_windows={} os_visible={}",
-        registered, visible
+        "[wrr] last-window check: registered_user_windows={} os_visible={} draining={}",
+        registered, visible, draining
     );
-    if !should_quit_on_last_window(armed, visible, registered) {
-        if is_reducer_lagging_os(armed, visible, registered) {
+    if !should_quit_on_last_window(armed, draining, visible, registered) {
+        if is_reducer_lagging_os(armed, draining, visible, registered) {
             arm_quit_watchdog(registered);
         }
         return;
@@ -439,8 +505,7 @@ unsafe fn maybe_quit_on_last_user_window() {
     }
     tracing::warn!(
         target: "wrr",
-        "[wrr] all user windows hidden/closed (registered={}, 0 visible) — quitting message loop",
-        registered
+        "[wrr] all user windows hidden/closed (registered=0, 0 visible, draining) — quitting message loop (Stage-2 executor)",
     );
     cef::quit_message_loop();
 }
@@ -451,42 +516,59 @@ mod should_quit_tests {
 
     #[test]
     fn not_armed_never_quits() {
-        assert!(!should_quit_on_last_window(false, 0, 0));
+        assert!(!should_quit_on_last_window(false, true, 0, 0));
     }
 
     #[test]
-    fn quits_only_when_both_signals_agree_at_zero() {
-        assert!(should_quit_on_last_window(true, 0, 0));
+    fn quits_only_when_all_three_signals_agree() {
+        // OS zero + reducer zero + reducer DECIDED to drain → Stage-2 quit.
+        assert!(should_quit_on_last_window(true, true, 0, 0));
+    }
+
+    #[test]
+    fn all_zero_without_drain_decision_does_not_quit() {
+        // Phase 3: counts agree but no reconcile_quit verdict was ever
+        // consumed — a missed Phase-2 consumption site. The watchdog handles
+        // it (quit-late-with-loud-log); WRR must not quit on its own
+        // authority.
+        assert!(!should_quit_on_last_window(true, false, 0, 0));
     }
 
     #[test]
     fn os_transient_zero_with_live_registered_window_does_not_quit() {
-        // The false-positive this fix closes: a transient EnumWindows misread
+        // The false-positive #2043 closed: a transient EnumWindows misread
         // (visible == 0) while the reducer still shows a live window.
-        assert!(!should_quit_on_last_window(true, 0, 1));
+        assert!(!should_quit_on_last_window(true, true, 0, 1));
+        assert!(!should_quit_on_last_window(true, false, 0, 1));
     }
 
     #[test]
     fn registered_stale_with_os_confirming_windows_gone_does_not_quit() {
-        assert!(!should_quit_on_last_window(true, 1, 0));
+        assert!(!should_quit_on_last_window(true, true, 1, 0));
     }
 
     #[test]
     fn both_nonzero_does_not_quit() {
-        assert!(!should_quit_on_last_window(true, 2, 1));
+        assert!(!should_quit_on_last_window(true, true, 2, 1));
     }
 
     #[test]
-    fn watchdog_arms_only_when_os_zero_but_reducer_nonzero() {
+    fn watchdog_arms_when_os_zero_but_reducer_lags() {
         use super::is_reducer_lagging_os;
-        // The stuck state (Step D's target): OS says gone, reducer disagrees.
-        assert!(is_reducer_lagging_os(true, 0, 1));
-        // Not armed: clean quit state (should_quit handles it instead)…
-        assert!(!is_reducer_lagging_os(true, 0, 0));
+        // Flavor 1 (Step D's original target): OS says gone, reducer count
+        // disagrees.
+        assert!(is_reducer_lagging_os(true, true, 0, 1));
+        assert!(is_reducer_lagging_os(true, false, 0, 1));
+        // Flavor 2 (Phase 3): counts agree at zero but no drain decision was
+        // consumed — a missed consumption site; bounded by the same watchdog.
+        assert!(is_reducer_lagging_os(true, false, 0, 0));
+        // Clean quit state (should_quit handles it instead)…
+        assert!(!is_reducer_lagging_os(true, true, 0, 0));
         // …windows still visible…
-        assert!(!is_reducer_lagging_os(true, 3, 1));
+        assert!(!is_reducer_lagging_os(true, true, 3, 1));
+        assert!(!is_reducer_lagging_os(true, false, 3, 1));
         // …or before any user window was ever shown (startup).
-        assert!(!is_reducer_lagging_os(false, 0, 1));
+        assert!(!is_reducer_lagging_os(false, false, 0, 1));
     }
 }
 
