@@ -19,7 +19,10 @@ import type { JSX } from "solid-js";
 import type { LayoutNode } from "@/layout/lib/types";
 
 export type DragItemPayload =
-    | { kind: "tile"; node: LayoutNode }
+    // sourceTabId: the tab the tile drag originated in — consumed by the
+    // in-window pane->tab drop path (droppable-tab.tsx) to build the
+    // cross-tab redock call. Optional: cross-window consumers don't use it.
+    | { kind: "tile"; node: LayoutNode; sourceTabId?: string }
     | { kind: "tab"; tabId: string; workspaceId: string };
 
 let _currentDragPayload: DragItemPayload | null = null;

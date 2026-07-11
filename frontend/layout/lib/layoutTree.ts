@@ -72,10 +72,21 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
 
     // TODO: this should not be necessary. The drag layer is having trouble tracking changes to the LayoutNode fields, so I need to grab the node again here to get the latest data.
     const node = findNode(rootNode, nodeId);
-    const nodeToMove = findNode(rootNode, nodeToMoveId);
+    // A cross-tab drag's node lives in ANOTHER tab's tree — findNode fails
+    // for it, so the action carries the node object directly (nodeToMove).
+    // See LayoutTreeComputeMoveNodeAction.nodeToMove.
+    const isForeignNode = computeInsertAction.nodeToMove != null && !findNode(rootNode, nodeToMoveId);
+    const nodeToMove = isForeignNode ? computeInsertAction.nodeToMove : findNode(rootNode, nodeToMoveId);
 
     if (!node || !nodeToMove) {
         console.warn("node or nodeToMove not set", nodeId, nodeToMoveId);
+        return;
+    }
+
+    // Center means "swap the two panes" — meaningless when the dragged pane
+    // isn't in this tree. Bail so no pending action (ghost) is produced; the
+    // drop handler falls back to a plain append for direction-less drops.
+    if (isForeignNode && direction === DropDirection.Center) {
         return;
     }
 
