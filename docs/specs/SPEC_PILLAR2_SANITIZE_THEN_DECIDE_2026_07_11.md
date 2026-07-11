@@ -78,8 +78,9 @@ kept exactly as they are. What gets **deleted** is the parallel decision layered
 ### 1.C — Pending-creation semantics are already identical
 
 `quit.rs::is_background_pending_creation_label` (window-pool-/browser-pane-/floating-)
-mirrors `orphan_reconcile.rs:302-304` exactly — each side's comment cites the other. No
-convergence work needed; a shared-predicate refactor is optional hygiene, not a fix.
+mirrors `orphan_reconcile`'s pending-creation exclusion (in `ui_thread_reconcile`) exactly —
+each side's comment cites the other. No convergence work needed; a shared-predicate refactor
+is optional hygiene, not a fix.
 
 ### 1.D — One real behavioral delta: floaters and the shadow-based count
 
@@ -148,37 +149,49 @@ standard channel.
 
 ### 2.1 — `orphan_reconcile`: plan → sanitize → decide → execute
 
-`plan_reconcile` keeps its classification (Dead/Hostless/Live × shadow/pool-set membership —
-it is good, tested, deterministic) as the **sanitize planner**. Changes:
+`plan_reconcile` keeps its classification (Dead/Hostless/Live × user-kind × shadow/pool-set
+membership) as the **sanitize planner**. Changes:
 
 - `ReconcilePlan.begin_drain` is **deleted**; `live_user_count` and the `freshly_promoted`
   drain-block go with it. `freshly_promoted` remains as a diagnostic list (the log line
-  stays — it is a useful race telemetry) but carries no authority.
+  stays — it is useful race telemetry) but carries no authority.
+- The hostless bucket **splits by reducer kind** (a new `user_labels` planner input, from
+  `state.is_live_top_level_browser`): hostless *live-user* entries are exactly the stale
+  projections that block `reconcile_quit` forever, and repairing them is correct at any
+  time — they are unregistered **unconditionally**, breaking the pre-Phase-1 circularity
+  (cleanup was drain-gated while the drain decision read the very registration being
+  cleaned). Hostless *pool-kind* entries keep the drain-gate (outside drain, unregistering
+  bypasses `on_pool_window_destroyed` bookkeeping — unchanged rationale).
+- The live `drainable` close list is **deleted**: closing warm/spawning pool inventory on
+  drain is Stage 1's job (`begin_drain_and_cascade` closes `window-pool-*` /
+  `floating-pool-*`), and the planner was duplicating that mechanism.
 - The pending-creation flag no longer feeds a local drain predicate; it keeps its one
   *mechanism* role: deferring zombie reaps while a user creation is in flight (the close
-  chain itself could otherwise race the creation — the existing
-  `plan_pending_creation_blocks_zombie_close` behavior, preserved verbatim).
-- Orchestrator flow becomes:
+  chain itself could otherwise race the creation — preserved verbatim).
+- Orchestrator flow (order matters — mirrors the pre-Phase-1
+  BeginDrain-before-closes discipline):
 
 ```
 1. HWND-probe on the UI thread (unchanged)
-2. plan_reconcile → { closes }                       // sanitize plan, no verdict
-3. execute closes (Dead → close_browser(force=1);    // repairs the projection;
-   Hostless → UnregisterBrowser dispatch)            // Hostless still drain-gated, see below
-4. dispatch ReconcileQuit → request_drain            // THE decision, from reconcile_quit
-5. if Some(reason): ui_tasks::begin_drain_and_cascade(state, reason)
-6. hostless-entries special case: if any hostless was unregistered and drain fired,
-   drive quit_message_loop() directly (unchanged — UnregisterBrowser cannot empty
-   client::browser_list, so Stage 2 can never fire for them; this call is Stage-2
-   execution from a posted UI task, the context production has proven for months)
+2. plan_reconcile → { zombie_closes, hostless_user, hostless_pool, freshly_promoted }
+3. sanitize: unregister hostless_user (unconditional projection repair)
+4. decide:   dispatch ReconcileQuit → request_drain     // THE decision; reflects step 3
+5. execute:  if Some → ui_tasks::begin_drain_and_cascade (QuitState flips to Draining
+             HERE, before any close below can trigger a pool refill)
+6. mechanism: zombie_closes via close_browser(force=1) — self-sanitizing; for user-kind
+             zombies the step-4 verdict was still None (they were counted live), and the
+             drain instead fires from their own on_before_close request_drain consumption
+             (PR #1993): same authority, one event later
+7. if drained: unregister hostless_pool, then the two documented direct
+             quit_message_loop() Stage-2 executions: any-hostless (UnregisterBrowser
+             cannot empty client::browser_list, so Stage 2 can never fire) and
+             nothing-will-pump (no zombies in flight, no pool inventory for Stage 1)
 ```
 
-Ordering note: the Hostless→UnregisterBrowser action stays gated on the drain verdict (as
-today) because outside drain it bypasses `on_pool_window_destroyed` bookkeeping and creates
-pool-reducer drift (existing, documented behavior). The gate's *source* changes from
-`plan.begin_drain` to the step-4 verdict; execution order becomes probe → dead-zombie
-closes → ReconcileQuit poke → verdict → (hostless unregisters + cascade) — one extra poke
-after the hostless unregisters is harmless (BeginDrain is monotonic/idempotent).
+Platform containment: `classify_hwnd` hard-codes Live on macOS/Linux (#1569), so the
+zombie/hostless buckets are Windows-only in practice; the residual Windows mixed case
+(user-kind zombies alongside hostless entries, where `browser_list` can never empty) is
+bounded by the #2043 watchdog.
 
 ### 2.2 — WRR: reporter roles unchanged, quit gated on the reducer's decision
 

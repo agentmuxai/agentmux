@@ -1470,7 +1470,11 @@ impl AppState {
     /// as closed when the user dismisses it. This is the case that a naïve
     /// `starts_with("window-pool-")` prefix filter would have suppressed,
     /// causing a stale window count (reagentx P1 on PR #1827).
-    #[cfg(target_os = "windows")]
+    ///
+    /// Cross-platform since Pillar 2 Phase 1: the body is a pure reducer read
+    /// (no Win32); the historical `cfg(windows)` gate existed only because
+    /// its sole caller was WRR. `orphan_reconcile`'s sanitize planner now
+    /// calls it on every platform (reagent P0 on PR #2081).
     pub fn is_live_top_level_browser(&self, label: &str) -> bool {
         self.host_state
             .lock()
