@@ -39,6 +39,7 @@ mod reducer;
 mod saga;
 mod second_instance;
 mod supervisor;
+mod ui_liveness;
 #[cfg(target_os = "windows")]
 mod splash;
 #[cfg(target_os = "macos")]

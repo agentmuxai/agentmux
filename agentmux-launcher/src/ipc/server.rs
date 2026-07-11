@@ -566,6 +566,24 @@ where
         // `LAUNCHER_START_INSTANT` is a once-init `Instant`; the
         // first request seeds it, subsequent ones read its delta.
         let now_ms = launcher_start_ms();
+        // SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1 — record UI-liveness
+        // telemetry at the transport layer, before the reducer (whose arm
+        // for this variant is a deliberate no-op: this is host-thread
+        // telemetry, not domain state). Latency logged only for a
+        // nonce-matched reply; any reply updates `last_alive`.
+        if let Command::ReportUiThreadAlive { nonce } = &cmd {
+            match crate::ui_liveness::record_alive(*nonce) {
+                Some(rtt) => crate::logging::log(&format!(
+                    "[ui-liveness] UI thread alive — probe nonce={} rtt={}ms",
+                    nonce,
+                    rtt.as_millis()
+                )),
+                None => crate::logging::log(&format!(
+                    "[ui-liveness] UI thread alive — unmatched/late reply nonce={}",
+                    nonce
+                )),
+            }
+        }
         let events = {
             let mut state = ctx.state.lock().await;
             let rctx = reducer::Ctx {
@@ -767,6 +785,15 @@ async fn enforce_register_first(
     let (msg, fatal) = match cmd {
         Command::Register { .. } => return None,
         Command::Ping { .. } => ("Ping before Register".to_string(), false),
+        // Liveness telemetry arriving pre-Register is harmless timing skew
+        // (host answered a probe before its Register round-trip completed);
+        // non-fatal, same treatment as Ping.
+        Command::ReportUiThreadAlive { .. } => {
+            ("ReportUiThreadAlive before Register".to_string(), false)
+        }
+        Command::ProbeUiThread { .. } => {
+            ("ProbeUiThread before Register (wrong direction)".to_string(), false)
+        }
         Command::Goodbye => ("Goodbye before Register".to_string(), true),
         Command::ReportWindowOpened { .. } => {
             ("ReportWindowOpened before Register".to_string(), true)

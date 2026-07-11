@@ -1760,3 +1760,32 @@ unsafe fn find_main_render_widget(
     EnumChildWindows(root, Some(cb), &mut finder as *mut _ as isize);
     if finder.found.is_null() { None } else { Some(finder.found) }
 }
+
+// ── SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 Phase 1 — UI-thread probe ───
+
+wrap_task! {
+    pub struct ProbeUiThreadReplyTask {
+        nonce: u64,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Executing at all IS the liveness evidence: this task only runs
+            // when CEF's UI thread pumps its queue. The reply is sent from
+            // here — the UI thread — per `report_ui_thread_alive`'s contract;
+            // replying from any other thread would forge the signal.
+            crate::launcher_ipc::report_ui_thread_alive(self.nonce);
+        }
+    }
+}
+
+/// SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1 — post the probe reply task.
+/// Called from the launcher-ipc reader on `ProbeUiThread`. If the UI thread
+/// is wedged — or not yet pumping (the known pre-ready `post_task` silent
+/// drop) — the task never executes and no reply is ever sent; the
+/// launcher's prober reads that silence as the signal. Deliberately no
+/// fallback reply path.
+pub fn post_probe_ui_thread_reply(nonce: u64) {
+    let mut task = ProbeUiThreadReplyTask::new(nonce);
+    post_task(ThreadId::UI, Some(&mut task));
+}

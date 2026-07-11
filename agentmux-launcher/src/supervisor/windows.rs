@@ -401,7 +401,9 @@ pub(crate) async fn run_windows(
         );
         log(&format!("IPC server started on {}", pipe_path));
 
-        (saga_coord, ipc_handle)
+        // `host_pipe` is also returned to the supervisor loop for the
+        // UI-liveness prober (SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1).
+        (saga_coord, ipc_handle, host_pipe)
     };
 
     // 3b. Spawn srv. Host needs srv's endpoints to skip its own
@@ -418,7 +420,7 @@ pub(crate) async fn run_windows(
         launcher_setup,
         srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, job_handle, &startup_sink)
     );
-    let (saga_coord, _ipc_handle) = setup_result;
+    let (saga_coord, _ipc_handle, host_pipe) = setup_result;
     let (srv_result, mut srv_child) = match srv_spawn_result {
         Ok(pair) => pair,
         Err(e) => {
@@ -525,8 +527,44 @@ pub(crate) async fn run_windows(
     let mut restart_splash_seq: u32 = 0;
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
+    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 Phase 1 — observe-only
+    // UI-thread liveness prober. Low rate (60s); the first tick is delayed
+    // a full interval so a booting host (whose UI thread isn't pumping yet
+    // — the known pre-ready `post_task` silent drop) isn't logged as a
+    // false miss. Phase 2's armed teardown rule will consume
+    // `ui_liveness::last_alive()`; nothing here acts on the result.
+    let mut ui_probe_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(60),
+    );
+    ui_probe_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut ui_probe_nonce: u64 = 0;
     let exit_code = loop {
         tokio::select! {
+            _ = ui_probe_interval.tick() => {
+                ui_probe_nonce += 1;
+                if let Some((missed, sent_at)) = crate::ui_liveness::record_probe_sent(ui_probe_nonce) {
+                    log(&format!(
+                        "[ui-liveness] probe nonce={} unanswered after {}s — UI thread did not pump in that window",
+                        missed,
+                        sent_at.elapsed().as_secs()
+                    ));
+                }
+                if let Err(e) = host_pipe
+                    .send_command(&agentmux_common::ipc::Command::ProbeUiThread {
+                        nonce: ui_probe_nonce,
+                    })
+                    .await
+                {
+                    // A down pipe has its own supervision (reconnect +
+                    // buffer budget); a failed send is NOT UI-thread
+                    // evidence and is logged as transport, not liveness.
+                    log(&format!(
+                        "[ui-liveness] probe send failed (transport, not liveness): {:?}",
+                        e
+                    ));
+                }
+            }
             host_status = host_child.wait() => {
                 let code = match host_status {
                     Ok(s) => s.code().unwrap_or(1),
