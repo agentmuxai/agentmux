@@ -139,7 +139,12 @@
 .browser-loading-overlay {
     position: absolute;
     inset: 0;
-    background: var(--block-bg-color);
+    // --block-bg-color is translucent in every theme (rgba with alpha < 1) —
+    // needs the opaque `r g b` form (no alpha channel) or the native
+    // browser-pane HWND's own blank page bleeds through underneath, same
+    // reasoning as block.scss:364 / tilelayout.scss:152. A translucent brain
+    // would defeat the point of this overlay (fully masking the blank gap).
+    background-color: rgb(from var(--block-bg-color) r g b);
     opacity: 1;
 
     &.is-fading {
