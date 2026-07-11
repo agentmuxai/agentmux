@@ -711,8 +711,19 @@ unsafe extern "system" fn win_event_callback(
                             // never learns this window is gone and stays stuck non-zero forever.
                             // Idempotent: `handle_unregister_browser` no-ops on an
                             // already-removed/unknown label.
-                            state.host_dispatch(
+                            let out = state.host_dispatch(
                                 crate::reducer::HostCommand::UnregisterBrowser { label },
+                            );
+                            // Pillar 2 Phase 2 (sanitize-then-decide §2.4) —
+                            // consume the drain verdict this dispatch just
+                            // computed instead of discarding it: the recycle
+                            // close of the last window flips QuitState and
+                            // runs the Stage-1 drain INLINE (this WINEVENT
+                            // callback is on the UI thread), so the cascade
+                            // has completed before the gate re-run below —
+                            // the ordering the reagent P1 on #2082 required.
+                            crate::ui_tasks::consume_request_drain(
+                                state, &out, "wrr_locationchange_recycle_close",
                             );
                             // Re-evaluate the quit gate NOW: this LOCATIONCHANGE may be
                             // the last event this window ever fires (HIDE preceded the
