@@ -149,11 +149,21 @@ returns once not `Running` (`quit.rs:15`), and `BeginDrain` is documented idempo
   independently rather than deferring to `reconcile_quit`/`request_drain`) — it only prevents WRR
   from firing when the reducer disagrees. Full retirement of the parallel authority (this section's
   original scope) remains open.
-- **`commands::orphan_reconcile`** — not started. Its `plan.begin_drain` computation
-  (`orphan_reconcile.rs:189,345`) is still independent of `reconcile_quit`; per the research done
-  2026-07-07 it also carries a "Race B" (`freshly_promoted`) guard with no `HostState` equivalent —
-  merging it away needs either a new `HostState` field or a two-phase "sanitize state.browsers, then
-  trust reconcile_quit" design, not a direct swap either.
+
+  **RESOLVED 2026-07-11 — full retirement landed.** SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md
+  Phases 2-3 (PRs #2084, #2083): every count-lowering dispatch site consumes request_drain (the
+  parking-close path flips QuitState on main-window close — the channel this section said was
+  missing), and should_quit_on_last_window now requires QuitState::Draining, demoting WRR to the
+  Windows Stage-2 executor of reconcile_quit decisions. The quit watchdog (re-arming while
+  draining-with-zero-registered) is the bounded backstop. Live close matrix on the merged code:
+  PR #2082/#2083 comments.
+- **`commands::orphan_reconcile`** — **RESOLVED 2026-07-11** (PR #2081): the two-phase "sanitize
+  state.browsers, then trust reconcile_quit" design shipped — `begin_drain`/`live_user_count`/Race-B
+  authority deleted; the planner classifies sanitize work only and the verdict comes from the
+  `ReconcileQuit` poke. (Race B turned out to be already modeled by the reducer: promotion flips
+  `is_pool:false` synchronously — see SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md §1.A.)
+  Originally: not started; its independent `plan.begin_drain` carried a "Race B"
+  (`freshly_promoted`) guard with no `HostState` equivalent.
 
 ## 4. Exact code changes
 
