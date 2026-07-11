@@ -57,15 +57,6 @@ export function takeCrossTabDropFor(targetTabId: string | undefined): CrossTabDr
 }
 
 /**
- * True when the drag currently hovering `targetTabId`'s overlay was captured
- * as a cross-tab drag — used by drop handlers to decide between committing a
- * local move and routing to the redock RPC.
- */
-export function hasCrossTabDropFor(targetTabId: string | undefined): boolean {
-    return crossTabDrop != null && targetTabId != null && crossTabDrop.targetTabId === targetTabId;
-}
-
-/**
  * Commit a cross-tab pane move. Fire-and-forget: the layout updates arrive
  * via each tab's pendingbackendactions, so there is nothing to await here.
  */
