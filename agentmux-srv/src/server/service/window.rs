@@ -23,6 +23,36 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
                 Err(e) => WebReturnType::error(e.to_string()),
             }
         }
+        // SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11 Residual 2 —
+        // resolve Window rows by the `host:label` meta crumb written at
+        // CreateWindow time. Returns ALL matching window ids (labels can
+        // recur across host restarts — the crumb is a hint, not an
+        // identity); the caller decides what a multi-match means for its
+        // use case. An empty array is a normal answer (row predates the
+        // crumb, or the label never created a row).
+        "FindWindowByLabel" => {
+            let label: String = match service::get_arg(args, 0) {
+                Ok(v) => v,
+                Err(e) => return WebReturnType::error(e),
+            };
+            if label.is_empty() {
+                return WebReturnType::error("FindWindowByLabel: empty label".to_string());
+            }
+            match store.get_all::<Window>() {
+                Ok(wins) => {
+                    let ids: Vec<String> = wins
+                        .into_iter()
+                        .filter(|w| {
+                            w.meta.get("host:label").and_then(|v| v.as_str())
+                                == Some(label.as_str())
+                        })
+                        .map(|w| w.oid)
+                        .collect();
+                    WebReturnType::success(serde_json::json!(ids))
+                }
+                Err(e) => WebReturnType::error(e.to_string()),
+            }
+        }
         // Phase E.5.8 — CreateWindow migrated through the reducer.
         // Two paths: (1) empty workspace_id → CreateWorkspace +
         // CreateTab + CreateWindow as a multi-step dispatch (mirrors
@@ -294,9 +324,45 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
                     let _ = store.update(&mut win);
                 }
             }
+            // SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11 Residual 2 —
+            // persist the caller's host window label as a meta crumb,
+            // atomically with row creation (optional arg 2; old callers send
+            // two args and skip this). The crumb exists so cleanup paths can
+            // resolve label → window row WITHOUT the host-side registration
+            // chain (`register_backend_window` → launcher shadow), which is
+            // exactly what's missing in the early-close race shape (#2088)
+            // and after a host crash. It is a HINT, not an identity — labels
+            // recur across host restarts — so consumers must treat a miss or
+            // duplicate as "fall back to current behavior," never delete on
+            // crumb evidence alone. Non-fatal on failure: an unattributed
+            // row is the pre-crumb status quo.
+            let host_label: String = service::get_arg(args, 2).unwrap_or_default();
+            let crumb_events = if host_label.is_empty() {
+                Vec::new()
+            } else {
+                let evs = dispatch_to_reducer(
+                    state,
+                    agentmux_common::ipc::Command::UpdateWindowMeta {
+                        window_id: window_id.clone(),
+                        meta_patch: serde_json::json!({ "host:label": host_label }),
+                    },
+                )
+                .await;
+                for ev in &evs {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                        tracing::warn!(
+                            window_id = %window_id,
+                            error = %e,
+                            "CreateWindow: host:label crumb write failed — row stays unattributed"
+                        );
+                    }
+                }
+                evs
+            };
             // Publish all events from this multi-step (workspace + tab + window).
             let mut all_events = fresh_workspace_events;
             all_events.extend(win_events);
+            all_events.extend(crumb_events);
             publish_events(state, &all_events);
             // Return the Window struct (matches the prior RPC contract).
             match store.must_get::<Window>(&window_id) {
@@ -1143,5 +1209,119 @@ mod close_window_divergence_tests {
         let state = test_state();
         let ret = handle_window_service(&state, &close_call("no-such-window")).await;
         assert!(ret.success, "idempotent CloseWindow failed: {:?}", ret.error);
+    }
+}
+
+#[cfg(test)]
+mod window_label_crumb_tests {
+    use super::handle_window_service;
+    use crate::backend::obj::Window;
+    use crate::backend::service::WebCallType;
+    use crate::server::tests::test_state;
+
+    fn create_call(workspace_id: &str, label: Option<&str>) -> WebCallType {
+        let mut args = vec![
+            serde_json::Value::Null,
+            serde_json::Value::String(workspace_id.to_string()),
+        ];
+        if let Some(l) = label {
+            args.push(serde_json::Value::String(l.to_string()));
+        }
+        WebCallType {
+            service: "window".to_string(),
+            method: "CreateWindow".to_string(),
+            uicontext: None,
+            args,
+        }
+    }
+
+    fn find_call(label: &str) -> WebCallType {
+        WebCallType {
+            service: "window".to_string(),
+            method: "FindWindowByLabel".to_string(),
+            uicontext: None,
+            args: vec![serde_json::Value::String(label.to_string())],
+        }
+    }
+
+    /// The crumb round-trip this exists for: CreateWindow with a label arg
+    /// persists `host:label` on the row, and FindWindowByLabel resolves it
+    /// back to exactly that window id — no host-side registration involved.
+    #[tokio::test]
+    async fn crumb_written_at_create_and_resolvable_by_label() {
+        let state = test_state();
+        let ret = handle_window_service(
+            &state,
+            &create_call("", Some("window-pool-crumbtest1")),
+        )
+        .await;
+        assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+        let created_id = ret
+            .data
+            .as_ref()
+            .and_then(|d| d.get("oid"))
+            .and_then(|v| v.as_str())
+            .expect("CreateWindow returns the Window with oid")
+            .to_string();
+
+        // The crumb is on the persisted row itself.
+        let row = state
+            .wstore
+            .must_get::<Window>(&created_id)
+            .expect("created window row exists");
+        assert_eq!(
+            row.meta.get("host:label").and_then(|v| v.as_str()),
+            Some("window-pool-crumbtest1"),
+            "host:label crumb missing from the Window row meta"
+        );
+
+        // And resolvable through the read RPC.
+        let found = handle_window_service(&state, &find_call("window-pool-crumbtest1")).await;
+        assert!(found.success, "FindWindowByLabel failed: {:?}", found.error);
+        let ids: Vec<String> =
+            serde_json::from_value(found.data.expect("find returns ids")).unwrap();
+        assert_eq!(ids, vec![created_id]);
+    }
+
+    /// Old two-arg callers keep working and write no crumb — the arg is
+    /// genuinely optional, not silently defaulted to something matchable.
+    #[tokio::test]
+    async fn two_arg_create_window_writes_no_crumb() {
+        let state = test_state();
+        let ret = handle_window_service(&state, &create_call("", None)).await;
+        assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+        let created_id = ret
+            .data
+            .as_ref()
+            .and_then(|d| d.get("oid"))
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+        let row = state.wstore.must_get::<Window>(&created_id).unwrap();
+        assert!(
+            !row.meta.contains_key("host:label"),
+            "two-arg CreateWindow must not invent a crumb"
+        );
+    }
+
+    /// A label nothing ever created is a normal empty answer, not an error
+    /// (rows predating the crumb look exactly like this to consumers).
+    #[tokio::test]
+    async fn unknown_label_returns_empty_not_error() {
+        let state = test_state();
+        let found = handle_window_service(&state, &find_call("window-never-existed")).await;
+        assert!(found.success);
+        let ids: Vec<String> =
+            serde_json::from_value(found.data.expect("find returns ids")).unwrap();
+        assert!(ids.is_empty());
+    }
+
+    /// Empty label is a caller bug — reject loudly rather than matching
+    /// every crumbless row's absent key semantics ambiguously.
+    #[tokio::test]
+    async fn empty_label_is_an_error() {
+        let state = test_state();
+        let found = handle_window_service(&state, &find_call("")).await;
+        assert!(!found.success);
     }
 }

@@ -57,10 +57,18 @@ direct child access compiling.
 Panic-unwind runs `Drop`, so a failed assertion now reaps the srv. This covers
 every failure mode except the harness process itself being hard-killed.
 
-### Phase 2 — Windows Job Object (hard-kill coverage, optional)
+### Phase 2 — Windows Job Object (hard-kill + grandchild coverage, REQUIRED)
 
-`Drop` cannot cover `cargo test` itself being terminated (Ctrl+C on some
-shells, CI timeout SIGKILL, OOM-kill of the runner). On Windows, assigning the
+Upgraded from optional to required by live evidence (2026-07-11, same day):
+a full `cargo test -p agentmux-srv` run leaked an srv **`--crash-monitor`
+grandchild** (spawned by the test's srv, not by `spawn_backend` directly),
+which then held an inherited stdout pipe open and hung the calling shell
+pipeline for 20+ minutes after cargo itself had exited. A `Drop` guard on
+the direct child cannot reap grandchildren; a kill-on-close Job Object
+captures the whole tree.
+
+`Drop` also cannot cover `cargo test` itself being terminated (Ctrl+C on
+some shells, CI timeout SIGKILL, OOM-kill of the runner). On Windows, assigning the
 child to a kill-on-close Job Object makes the OS reap it when the test process
 dies, unconditionally:
 

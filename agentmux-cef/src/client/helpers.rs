@@ -448,6 +448,68 @@ pub(crate) fn backend_get_client_window_ids(web_endpoint: &str, auth_key: &str) 
     )
 }
 
+/// SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11 Residual 2 — resolve
+/// srv Window rows by the `host:label` meta crumb persisted at CreateWindow
+/// time. Returns ALL matching window ids (the crumb is a hint, not an
+/// identity — labels can recur across host restarts); `None` on transport
+/// failure, `Some(vec![])` on a clean no-match. Same wire shape / blocking
+/// thread contract as `backend_get_client_window_ids` above.
+pub(crate) fn backend_find_window_by_label(
+    web_endpoint: &str,
+    auth_key: &str,
+    label: &str,
+) -> Option<Vec<String>> {
+    use std::io::Write;
+
+    let addr = parse_web_endpoint(web_endpoint, "backend_find_window_by_label")?;
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "FindWindowByLabel",
+        "args": [label],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
+        .map_err(|e| tracing::warn!(error = %e, "[backend_find_window_by_label] connect failed"))
+        .ok()?;
+    stream.set_write_timeout(Some(timeout)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| tracing::warn!(error = %e, "[backend_find_window_by_label] write failed"))
+        .ok()?;
+
+    use std::io::Read;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).ok()?;
+
+    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
+    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return None;
+    }
+    let ids = parsed.get("data")?.as_array()?;
+    Some(
+        ids.iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
 /// SPEC_PILLAR1_STEP4 Phase 3 — read one window's persisted `kind` /
 /// `parent_window_id` (Step 3's fields) for the slow-path reproject driver.
 /// Same shape/thread contract as `backend_get_client_window_ids` above.

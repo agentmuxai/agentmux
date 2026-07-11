@@ -77,6 +77,9 @@ pub(crate) use helpers::backend_set_window_topology;
 // SPEC_PILLAR1_STEP4 Phase 3 — slow-path reproject reads, used by
 // `commands/window/creation.rs::reproject_from_srv`.
 pub(crate) use helpers::{backend_get_client_window_ids, backend_get_window_topology};
+// SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual 2 — crumb-based label
+// resolution for `demote_srv_cleanup`'s no-registration fallback.
+pub(crate) use helpers::backend_find_window_by_label;
 pub(crate) use lifecycle::{
     retry_backend_window_id_lookup, BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
     BACKEND_WINDOW_ID_RETRY_DELAY,

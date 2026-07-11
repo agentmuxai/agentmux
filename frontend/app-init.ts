@@ -314,6 +314,12 @@ async function initInstanceTracking(): Promise<void> {
  * client/window/workspace/tab data from backend, verifying objects exist,
  * and creating missing ones if needed.
  */
+/** This renderer's CEF window label — `windowLabel` from the boot URL, or
+ *  "main" (the main window's URL carries no label param). */
+function currentWindowLabel(): string {
+    return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+}
+
 async function initHostWave(): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
@@ -333,7 +339,7 @@ async function initHostWave(): Promise<void> {
         // If no windows exist, create one
         if (!windowId) {
             t = performance.now();
-            const newWindow = await withTimeout(WindowService.CreateWindow(null, ""), RPC_TIMEOUT, "CreateWindow");
+            const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
             tlog("CreateWindow (no windows)", t);
             windowId = newWindow.oid;
         }
@@ -345,7 +351,7 @@ async function initHostWave(): Promise<void> {
 
         if (!windowData) {
             t = performance.now();
-            windowData = await withTimeout(WindowService.CreateWindow(null, ""), RPC_TIMEOUT, "CreateWindow");
+            windowData = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
             tlog("CreateWindow (fallback)", t);
             windowId = windowData.oid;
         }
@@ -359,7 +365,7 @@ async function initHostWave(): Promise<void> {
             // Workspace missing → recreate entire window
             t = performance.now();
             await withTimeout(WindowService.CloseWindow(windowData.oid), RPC_TIMEOUT, "CloseWindow");
-            windowData = await withTimeout(WindowService.CreateWindow(null, ""), RPC_TIMEOUT, "CreateWindow");
+            windowData = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
             workspace = await withTimeout(WorkspaceService.GetWorkspace(windowData.workspaceid), RPC_TIMEOUT, "GetWorkspace");
             tlog("Recreate window+workspace", t);
         }
@@ -444,7 +450,7 @@ async function initHostNewWindow(): Promise<void> {
         }
 
         t = performance.now();
-        const newWindow = await withTimeout(WindowService.CreateWindow(null, tearOffWsId), RPC_TIMEOUT, "CreateWindow");
+        const newWindow = await withTimeout(WindowService.CreateWindow(null, tearOffWsId, currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
         tlog("CreateWindow", t);
 
         // Register label→window_id with the host NOW, not at the end of
@@ -460,7 +466,7 @@ async function initHostNewWindow(): Promise<void> {
         // can no longer happen (task #29 round 2, found by the
         // window-close-baseline E2E suite).
         {
-            const wlabel = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+            const wlabel = currentWindowLabel();
             getApi().registerBackendWindow(wlabel, newWindow.oid);
         }
 
@@ -1068,7 +1074,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     // The CEF host handles cleanup at the right time (after the browser commits to
     // closing), keeping shells grouped under the CEF process in Task Manager.
     {
-        const wlabel = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+        const wlabel = currentWindowLabel();
         const wid = initOpts.windowId;
         console.log(`[wave] registerBackendWindow decision: wlabel=${wlabel} wid=${wid ?? "(falsy)"}`);
         if (wid) {
