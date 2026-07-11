@@ -20,6 +20,7 @@ import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
 import { getLayoutModelForTabById } from "./layoutModelHooks";
 import { findNodeByBlockId } from "./layoutNode";
+import { pruneDanglingLeaves } from "./layoutPersistence";
 import { DropDirection, LayoutTreeActionType, LayoutTreeDeleteNodeAction } from "./types";
 
 /**
@@ -128,6 +129,14 @@ export function redockDraggedPane(opts: {
             }
         } catch (e) {
             Logger.error("dnd", "cross-tab pane redock failed", { error: String(e) });
+            // The characteristic failure here is "block X is in tab Y,
+            // not <sourceTabId>" — i.e. the user dragged a DANGLING leaf
+            // (the source tab rendering a block another tab owns, left
+            // by an earlier lost delete). The move correctly didn't
+            // happen; prune the ghost so the source tab heals instead of
+            // keeping a broken double-mounted pane.
+            const sourceModel = getLayoutModelForTabById(opts.sourceTabId);
+            if (sourceModel) pruneDanglingLeaves(sourceModel);
         }
     });
 }
