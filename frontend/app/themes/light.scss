@@ -36,10 +36,21 @@
 
     --hover-bg-color: rgba(0, 0, 0, 0.05);
     --highlight-bg-color: rgba(0, 0, 0, 0.08);
+    --input-bg-color: rgba(0, 0, 0, 0.06);
 
     --error-color: #d1242f;
     --warning-color: #9a6700;
     --success-color: #1a7f37;
+
+    // theme.scss's :root defaults for these (#ff8080/#10b981/#d97706) are
+    // tuned to read as light, saturated TEXT on a dark panel — on this
+    // theme's white/near-white surfaces they fail contrast (reagent P1 on
+    // PR #2104). Reuse this theme's own already-contrast-checked semantic
+    // colors instead, matching the pattern --accent-text-color/--button-color
+    // already establish (theme-appropriate contrast color, not a fixed hex).
+    --error-text-color: var(--error-color);
+    --success-text-color: var(--success-color);
+    --warning-text-color: var(--warning-color);
 
     --button-grey-bg: rgba(0, 0, 0, 0.04);
     --button-grey-hover-bg: rgba(0, 0, 0, 0.08);

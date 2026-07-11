@@ -143,8 +143,15 @@
     --error-text-color: #ff8080;
     --success-text-color: #10b981;
     --warning-text-color: #d97706;
-    --input-bg-color: var(--form-element-bg-color);  // alias — same concept as the pre-existing form-element token
-    --elevated-bg-color: var(--modal-bg-color);       // alias — same concept as the pre-existing modal token
+    // Own literal, NOT an alias to --form-element-bg-color: that resolves to
+    // --main-bg-color, which is rgba(..., var(--window-opacity)) — coupling
+    // an editable field's background to the user's window-transparency
+    // setting would make editor-view.scss's inline inputs see-through at
+    // low opacity (reagent P1 on PR #2104). rgba(0,0,0,0.2) matches the
+    // majority (2 of 4) of the call sites' own prior fallbacks and has no
+    // dependency on an unrelated setting.
+    --input-bg-color: rgba(0, 0, 0, 0.2);
+    --elevated-bg-color: var(--modal-bg-color);  // alias — same concept as the pre-existing modal token, itself a plain per-theme literal (no window-opacity coupling)
 
     // z-indexes in xterm.css
     // xterm-helpers: 5
