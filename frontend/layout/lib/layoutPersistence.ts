@@ -3,7 +3,7 @@
 
 import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
-import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
+import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import {
     LayoutTreeActionType,
@@ -64,7 +64,54 @@ export function onBackendUpdate(model: LayoutModel) {
     const pendingActions = waveObj?.pendingbackendactions;
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
+    } else {
+        pruneDanglingLeaves(model);
     }
+}
+
+/**
+ * Remove leaves whose block is NOT in the tab's `blockids` — dangling
+ * references left behind when a frontend's debounced persist clobbers a
+ * queued backend layout action (the stale-tree resurrection issue,
+ * INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08).
+ * A dangling leaf renders a block owned by ANOTHER tab; since every tab
+ * stays mounted, the same block mounts twice and the block-component
+ * registry breaks — observed as a fully non-responsive tab.
+ *
+ * Ownership (`Tab.blockids`) is reducer-owned truth, so pruning against
+ * it is always safe: this only ever REMOVES leaves for disowned blocks,
+ * never touches leaves whose block is owned (a queued insert for a
+ * newly-owned block is unaffected — the leaf simply isn't there yet).
+ *
+ * Reactivity note: this reads `model.tabAtom()` inside the same effect
+ * that drives `onBackendUpdate` (layoutModelHooks), so `Tab` becomes a
+ * tracked dependency — a MoveBlock updating `blockids` re-runs the
+ * effect and prunes even when the queued layout delete was lost.
+ */
+export function pruneDanglingLeaves(model: LayoutModel) {
+    const rootNode = model.treeState?.rootNode;
+    const tab = model.tabAtom?.();
+    if (!rootNode || !tab?.blockids) return;
+    const owned = new Set(tab.blockids);
+    const danglingIds: string[] = [];
+    walkNodes(rootNode, (node) => {
+        if (!node.children?.length && node.data?.blockId && !owned.has(node.data.blockId)) {
+            danglingIds.push(node.id);
+        }
+    });
+    if (!danglingIds.length) return;
+    console.warn("[layout] pruning dangling leaves (blocks not owned by this tab):", danglingIds);
+    for (const nodeId of danglingIds) {
+        model.treeReducer(
+            { type: LayoutTreeActionType.DeleteNode, nodeId } as LayoutTreeDeleteNodeAction,
+            false,
+        );
+    }
+    batch(() => {
+        model.updateTree();
+        model.setter(model.localTreeStateAtom, { ...model.treeState });
+    });
+    model.persistToBackend();
 }
 
 /**
@@ -95,6 +142,7 @@ export async function processPendingBackendActions(model: LayoutModel) {
         model.setter(model.localTreeStateAtom, { ...model.treeState });
     });
     model.persistToBackend();
+    pruneDanglingLeaves(model);
 }
 
 /**
