@@ -126,7 +126,13 @@ export const [termRendererAtom, setTermRendererAtom] = createSignal<"webgl" | "d
 export const reducedMotionSetting = createMemo(() => settingsAtom()?.["window:reducedmotion"]);
 export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] = createSignal(false);
 
-export const prefersReducedMotionAtom = createMemo(() => reducedMotionSetting() || reducedMotionSystemPreference());
+// Reduced-motion respect is removed app-wide (product decision,
+// 2026-07-11): OS-level "reduce motion"/disabled-animations settings were
+// silently killing functional motion cues (drag strobes, drop pulses,
+// insertion indicators) that carry meaning rather than decoration. The
+// setting plumbing above is kept so the decision is easy to revisit, but
+// the atom every consumer reads is hard false.
+export const prefersReducedMotionAtom = createMemo(() => false);
 
 export type { BackendStatusState, BackendDeathInfo } from "./backendStatus";
 export { backendStatusAtom, setBackendStatusAtom, backendDeathInfoAtom, setBackendDeathInfoAtom };

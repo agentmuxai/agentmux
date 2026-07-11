@@ -132,33 +132,22 @@
         // replaces this with a dedicated indicator element.
         transition: padding-left 100ms ease-out, padding-right 100ms ease-out, opacity 0.15s ease;
 
-        // Pane dragged over a tab — highlight with accent border
+        // Pane dragged over a tab — attention strobe then steady pulse
+        // (SPEC_PANE_DRAG_TO_TAB v3 addendum §A1, revised): the instant a
+        // pane hover begins, the tab flashes to its NEGATIVE (filter:
+        // invert) and back 10 times at 50ms intervals (500ms total,
+        // one-shot — the class is re-applied per hover entry, restarting
+        // the animation), then the slower accent-outline pulse carries the
+        // "valid drop target" signal for the rest of the hover.
         &.tile-drop-hover {
             .tab {
                 outline: 2px solid var(--accent-color);
                 outline-offset: -2px;
                 border-radius: 0;
-                animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+                animation:
+                    tab-drop-invert-strobe 50ms steps(1, end) 10,
+                    tab-drop-pulse 0.8s ease-in-out infinite alternate;
             }
-        }
-
-        // Attention strobe riding the tab's top edge — 10 flashes at 20ms
-        // (200ms total), one-shot, fired the instant a pane hover begins
-        // (SPEC_PANE_DRAG_TO_TAB v3 addendum §A1). The element is
-        // keyed-remounted per hover entry (droppable-tab.tsx) so the
-        // animation restarts every time; `forwards` holds the final
-        // opacity:0 frame so it vanishes after the burst rather than
-        // freezing visible.
-        .tab-drop-strobe {
-            position: absolute;
-            top: 0;
-            left: 6px;
-            right: 6px;
-            height: 3px;
-            background: var(--accent-color);
-            pointer-events: none;
-            z-index: 2;
-            animation: tab-drop-strobe-flash 20ms steps(1, end) 10 forwards;
         }
 
         // Tab being dragged — reduce opacity
@@ -217,10 +206,11 @@
     100% { transform: scaleX(1.0);  }
 }
 
-// One strobe cycle: visible for the first half (10ms), dark for the
-// second (10ms) — 10 iterations = 10 distinct flashes over 200ms.
-@keyframes tab-drop-strobe-flash {
-    0%   { opacity: 1; }
-    50%  { opacity: 0; }
-    100% { opacity: 0; }
+// One strobe cycle: the tab's negative for the first half (25ms), normal
+// for the second (25ms) — 10 iterations = 10 distinct invert flashes over
+// 500ms.
+@keyframes tab-drop-invert-strobe {
+    0%   { filter: invert(1); }
+    50%  { filter: invert(0); }
+    100% { filter: invert(0); }
 }
