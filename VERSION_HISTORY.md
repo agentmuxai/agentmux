@@ -1,5 +1,14 @@
 # AgentMux Version History
 
+## 0.53.0 — 2026-07-10
+
+- fix(agent): resume the real session on pane reopen and hydrate stats bar from history
+- fix(tabbar): pane drag over tab bar no longer mis-fires as a tear-off, adds tab-hover highlight
+- feat(tabbar): drag a pane onto a different tab, with a live schematic preview and ghost placement
+- chore(identity): delete dead IdentityManager bundle-CRUD UI
+- feat(jekt): incoming jekts visible on persistent agents + outgoing sender echo (§3.2)
+
+
 ## 0.52.4 — 2026-07-10
 
 - fix(identity): App API link-table ops resolve the S1 slug to the definition id; failed upsert no longer orphans the account row
