@@ -559,6 +559,10 @@ pub(crate) async fn run_windows(
                     // A down pipe has its own supervision (reconnect +
                     // buffer budget); a failed send is NOT UI-thread
                     // evidence and is logged as transport, not liveness.
+                    // Retract the just-recorded probe (reagent P1): an
+                    // undelivered probe must not age into a false
+                    // "did not pump" miss on the next tick.
+                    crate::ui_liveness::retract_probe(ui_probe_nonce);
                     log(&format!(
                         "[ui-liveness] probe send failed (transport, not liveness): {:?}",
                         e
