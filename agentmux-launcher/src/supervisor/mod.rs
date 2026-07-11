@@ -14,6 +14,17 @@
 pub(crate) const HOST_RESTART_BUDGET: usize = 3;
 pub(crate) const HOST_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11 (#942 Phase 2) — srv gets its
+/// own crash budget: an unexpected srv exit respawns srv and recycles the
+/// host through the existing supervised-restart path (crash-reproject
+/// restores the session), at most this many times per window. A wider
+/// window than the host's: each srv recycle also costs a host restart, so
+/// a crash-looping srv burns both budgets and gives up loudly either way.
+#[cfg(target_os = "windows")]
+pub(crate) const SRV_RESTART_BUDGET: usize = 3;
+#[cfg(target_os = "windows")]
+pub(crate) const SRV_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
