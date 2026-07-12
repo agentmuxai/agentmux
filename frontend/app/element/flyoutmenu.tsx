@@ -9,6 +9,7 @@ import clsx from "clsx";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
+import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import {
     assertMenuInPaintableArea,
     computeMenuPosition,
@@ -177,89 +178,160 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                 ref={(el) => { referenceEl = el; }}
                 class="menu-anchor"
                 data-drag-region="false"
+                onPointerDown={() => {
+                    // Pre-warm pane freeze-frames ~100ms before the click
+                    // completes and the menu opens: browser panes capture
+                    // their snapshot now, so the airspace hide (which waits
+                    // for the frame to be painted) releases almost
+                    // immediately when the menu's overlay rect registers.
+                    // See the freeze-frame block in browser-view.tsx.
+                    if (!isOpen()) {
+                        window.dispatchEvent(new CustomEvent("pane-freeze-prewarm"));
+                    }
+                }}
                 onClick={() => onOpenChangeMenu(!isOpen())}
             >
                 {props.children}
             </div>
             <Show when={isOpen()}>
                 <Portal>
-                    <div
-                        class={clsx("menu", props.className, { "menu--mirrored": props.mirrored })}
-                        ref={registerFloating}
+                    <MenuBody
+                        className={props.className}
+                        mirrored={props.mirrored}
                         style={floatingStyle()}
-                        data-pane-overlay
-                    >
-                        <For each={props.items}>
-                            {(item, index) => {
-                                const key = `${index()}`;
-                                const isActive = () => hoveredItems().includes(key);
-
-                                const menuItemProps = {
-                                    class: clsx("menu-item", { active: isActive() }),
-                                    onMouseEnter: (event: MouseEvent) =>
-                                        handleMouseEnterItem(event, null, index(), item),
-                                    onClick: (e: MouseEvent) => handleOnClick(e, item),
-                                };
-
-                                if (item.divider) {
-                                    return <div class="menu-divider" aria-hidden="true" />;
-                                }
-
-                                const renderedItem = props.renderMenuItem ? (
-                                    props.renderMenuItem(item, menuItemProps)
-                                ) : (
-                                    <div {...menuItemProps}>
-                                        <Show
-                                            when={item.checked === undefined}
-                                            fallback={
-                                                <i
-                                                    class={clsx(
-                                                        "fa-solid fa-fw menu-item-icon menu-item-check",
-                                                        { "fa-check": item.checked === true },
-                                                    )}
-                                                />
-                                            }
-                                        >
-                                            <Show when={item.icon}>
-                                                <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
-                                            </Show>
-                                        </Show>
-                                        <span class="label">{item.label}</span>
-                                        <Show when={item.shortcut && !item.subItems}>
-                                            <span class="menu-item-shortcut">{item.shortcut}</span>
-                                        </Show>
-                                        <Show when={item.subItems}>
-                                            <i class="fa-sharp fa-solid fa-chevron-right" />
-                                        </Show>
-                                    </div>
-                                );
-
-                                return (
-                                    <>
-                                        {renderedItem}
-                                        <Show when={visibleSubMenus()[key]?.visible && item.subItems}>
-                                            <SubMenu
-                                                subItems={item.subItems!}
-                                                parentKey={key}
-                                                subMenuPosition={subMenuPosition()}
-                                                setSubMenuPosition={setSubMenuPosition}
-                                                visibleSubMenus={visibleSubMenus()}
-                                                hoveredItems={hoveredItems()}
-                                                handleMouseEnterItem={handleMouseEnterItem}
-                                                handleOnClick={handleOnClick}
-                                                renderMenu={props.renderMenu}
-                                                renderMenuItem={props.renderMenuItem}
-                                                mirrored={props.mirrored}
-                                            />
-                                        </Show>
-                                    </>
-                                );
-                            }}
-                        </For>
-                    </div>
+                        registerFloating={registerFloating}
+                        items={props.items}
+                        hoveredItems={hoveredItems()}
+                        visibleSubMenus={visibleSubMenus()}
+                        subMenuPosition={subMenuPosition()}
+                        setSubMenuPosition={setSubMenuPosition}
+                        handleMouseEnterItem={handleMouseEnterItem}
+                        handleOnClick={handleOnClick}
+                        renderMenu={props.renderMenu}
+                        renderMenuItem={props.renderMenuItem}
+                    />
                 </Portal>
             </Show>
         </>
+    );
+};
+
+type MenuBodyProps = {
+    className?: string;
+    mirrored?: boolean;
+    style: string;
+    registerFloating: (el: HTMLElement) => void;
+    items: MenuItem[];
+    hoveredItems: string[];
+    visibleSubMenus: { [key: string]: any };
+    subMenuPosition: SubMenuPositionMap;
+    setSubMenuPosition: (
+        updater: (prev: SubMenuPositionMap) => SubMenuPositionMap,
+    ) => void;
+    handleMouseEnterItem: (
+        event: MouseEvent,
+        parentKey: string | null,
+        index: number,
+        item: MenuItem
+    ) => void;
+    handleOnClick: (e: MouseEvent, item: MenuItem) => void;
+    renderMenu?: (subMenu: JSX.Element, props: any) => JSX.Element;
+    renderMenuItem?: (item: MenuItem, props: any) => JSX.Element;
+};
+
+/**
+ * Split out from FlyoutMenu's render (rather than inlined under <Show>) so
+ * `usePaneOverlay` mounts fresh on every open — mirrors SubMenu below.
+ * `data-pane-overlay` alone isn't enough here: the auto-discovery service
+ * that watches for it is gated to Windows only (pane-overlay-auto.ts), so
+ * on macOS/Linux this explicit hook call is what actually clips the
+ * native browser pane behind the menu (same belt-and-suspenders pattern
+ * as MoreDropdown in action-widgets.tsx).
+ */
+const MenuBody = (props: MenuBodyProps): JSX.Element => {
+    let menuEl: HTMLDivElement | undefined;
+    usePaneOverlay(() => menuEl);
+
+    const registerFloating = (el: HTMLDivElement) => {
+        menuEl = el;
+        props.registerFloating(el);
+    };
+
+    return (
+        <div
+            class={clsx("menu", props.className, { "menu--mirrored": props.mirrored })}
+            ref={registerFloating}
+            style={props.style}
+            data-pane-overlay
+        >
+            <For each={props.items}>
+                {(item, index) => {
+                    const key = `${index()}`;
+                    const isActive = () => props.hoveredItems.includes(key);
+
+                    const menuItemProps = {
+                        class: clsx("menu-item", { active: isActive() }),
+                        onMouseEnter: (event: MouseEvent) =>
+                            props.handleMouseEnterItem(event, null, index(), item),
+                        onClick: (e: MouseEvent) => props.handleOnClick(e, item),
+                    };
+
+                    if (item.divider) {
+                        return <div class="menu-divider" aria-hidden="true" />;
+                    }
+
+                    const renderedItem = props.renderMenuItem ? (
+                        props.renderMenuItem(item, menuItemProps)
+                    ) : (
+                        <div {...menuItemProps}>
+                            <Show
+                                when={item.checked === undefined}
+                                fallback={
+                                    <i
+                                        class={clsx(
+                                            "fa-solid fa-fw menu-item-icon menu-item-check",
+                                            { "fa-check": item.checked === true },
+                                        )}
+                                    />
+                                }
+                            >
+                                <Show when={item.icon}>
+                                    <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                </Show>
+                            </Show>
+                            <span class="label">{item.label}</span>
+                            <Show when={item.shortcut && !item.subItems}>
+                                <span class="menu-item-shortcut">{item.shortcut}</span>
+                            </Show>
+                            <Show when={item.subItems}>
+                                <i class="fa-sharp fa-solid fa-chevron-right" />
+                            </Show>
+                        </div>
+                    );
+
+                    return (
+                        <>
+                            {renderedItem}
+                            <Show when={props.visibleSubMenus[key]?.visible && item.subItems}>
+                                <SubMenu
+                                    subItems={item.subItems!}
+                                    parentKey={key}
+                                    subMenuPosition={props.subMenuPosition}
+                                    setSubMenuPosition={props.setSubMenuPosition}
+                                    visibleSubMenus={props.visibleSubMenus}
+                                    hoveredItems={props.hoveredItems}
+                                    handleMouseEnterItem={props.handleMouseEnterItem}
+                                    handleOnClick={props.handleOnClick}
+                                    renderMenu={props.renderMenu}
+                                    renderMenuItem={props.renderMenuItem}
+                                    mirrored={props.mirrored}
+                                />
+                            </Show>
+                        </>
+                    );
+                }}
+            </For>
+        </div>
     );
 };
 
@@ -298,8 +370,15 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
     // on scroll/resize (the old one-shot `flipped` flag never re-evaluated).
     const [subStyle, setSubStyle] = createSignal("position:fixed;left:0px;top:0px");
     let cleanupAutoUpdate: (() => void) | null = null;
+    let subMenuEl: HTMLDivElement | undefined;
+
+    // Same rationale as MenuBody above — the submenu also carries
+    // `data-pane-overlay`, but macOS/Linux auto-discovery is gated off, so
+    // it needs this explicit call to actually occlude the browser pane.
+    usePaneOverlay(() => subMenuEl);
 
     const registerSubMenu = (el: HTMLDivElement) => {
+        subMenuEl = el;
         requestAnimationFrame(() => {
             const pos = position();
             if (!pos || !(el instanceof Element)) return;

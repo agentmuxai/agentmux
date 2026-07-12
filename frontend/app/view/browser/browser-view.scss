@@ -107,6 +107,23 @@
     width: auto; /* was 100% — auto lets flex stretch respect margin */
     position: relative;
     margin: var(--space-0-5); /* inset to reveal the 2px pane border drawn by .block-mask */
+    /* Shown whenever the native pane NSWindow is airspace-hidden (a DOM
+       menu/modal overlaps it — macOS hides the whole pane rather than
+       punching a hole; see pane-overlay.ts + browser_panes.rs). Without a
+       background the exposed area reads as a black void. */
+    background: var(--main-bg-color);
+}
+
+/* Last rendered frame of the native pane, shown while the pane surface is
+   airspace-hidden under a DOM overlay (macOS/Linux whole-pane hide — see
+   the freeze-frame block in browser-view.tsx). Geometry comes inline from
+   freezeStyle() — aligned to the native pane's DPR-rounded physical rect,
+   not this placeholder's fractional CSS box, so the live→snapshot swap
+   doesn't shift content by a subpixel. */
+.browser-freeze-snapshot {
+    position: absolute;
+    object-fit: fill;
+    pointer-events: none;
 }
 
 .browser-empty {
