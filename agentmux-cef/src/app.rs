@@ -75,18 +75,48 @@ wrap_window_delegate! {
                 window.set_bounds(Some(&Rect { x, y, width: w, height: h }));
             }
 
-            // Windows: hide pool windows from the taskbar at creation time.
-            // CefWindow::GetWindowHandle() is reliable here; BrowserHost::
-            // window_handle() (used in register_pool_window / on_after_created)
-            // can return null after the page loads — see window_pool.rs
-            // POOL_HWND_CACHE comment for the diagnosed CEF behaviour.
-            // This early call also pre-populates the HWND cache so
-            // promote_pool_window works even when on_after_created's
-            // BrowserHost lookup returns null.
+            // Windows: bind (label, HWND) into state.window_hwnds right here,
+            // at Views window-creation time — CefWindow::GetWindowHandle() is
+            // reliable at this exact synchronous callback (BrowserHost::
+            // window_handle(), used by capture_hwnd_for_label's fast path,
+            // frequently returns null in CEF Views mode and can go null again
+            // after the page loads — see window_pool.rs POOL_HWND_CACHE
+            // comment for the diagnosed CEF behaviour).
+            //
+            // This closes the crash-reproject HWND cross-wire race
+            // (docs/retro/retro-reproject-drag-hwnd-crosswire-2026-07-12.md):
+            // capture_hwnd_for_label's EnumWindows fallback picks "whichever
+            // of our own visible-but-unclaimed HWNDs comes first," which is
+            // only safe if windows are created one at a time — reproject's
+            // rapid back-to-back CreateWindowTask posts violate that, and two
+            // windows' fallbacks can cross-wire which label owns which HWND
+            // (a mis-binding that then latches permanently, since it passes
+            // the cache's own IsWindow liveness check on every later read).
+            // The CEF UI thread runs on_window_created for one window fully
+            // to completion before the next queued CreateWindowTask begins,
+            // so binding here — before either window's renderer has even
+            // started loading, let alone signalled "ready" — is race-free by
+            // construction. Mirrors the same pattern already proven for
+            // floating panes (floating_pane.rs's CreateFloatingWindowTask
+            // inserts into window_hwnds immediately after CreateWindowExW,
+            // before the browser is embedded).
+            //
+            // capture_hwnd_for_label's own "already registered" guard means
+            // it now becomes a no-op for every window that goes through this
+            // path; its EnumWindows fallback remains only as a defensive
+            // last resort for any exotic caller that doesn't carry a
+            // window_registration.
             #[cfg(target_os = "windows")]
-            if let Some((_, label)) = self.window_registration.as_ref() {
+            if let Some((state, label)) = self.window_registration.as_ref() {
+                let raw_hwnd = window.window_handle().0 as *mut std::ffi::c_void;
+                if !raw_hwnd.is_null() {
+                    state.window_hwnds.lock().insert(label.clone(), raw_hwnd as isize);
+                }
+
+                // Pool windows additionally need the taskbar-hiding /
+                // promote-time bookkeeping below — unrelated to the
+                // window_hwnds bind above, kept as its own branch.
                 if label.starts_with("window-pool-") {
-                    let raw_hwnd = window.window_handle().0 as *mut std::ffi::c_void;
                     if !raw_hwnd.is_null() {
                         crate::commands::window_pool::init_pool_window_hwnd(label, raw_hwnd);
                     }
