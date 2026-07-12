@@ -17,6 +17,7 @@
 
 import clsx from "clsx";
 import { For, Show, type JSX } from "solid-js";
+import { makeIconClass } from "@/util/util";
 import "./PaneRow.scss";
 
 /** Status accent — drives the 3px left-border colour (and dim for terminal). */
@@ -30,8 +31,13 @@ export type PaneRowAccent =
     | "neutral";
 
 export interface PaneRowAction {
-    /** Single-glyph button label (e.g. "■" stop, "×" dismiss, "⌫" close). */
-    glyph: string;
+    /** Single-glyph button label (e.g. "■" stop, "×" dismiss, "⌫" close).
+     *  Ignored when `icon` is set. */
+    glyph?: string;
+    /** FontAwesome icon key (e.g. "vault") — takes precedence over `glyph`
+     *  when set, for actions that need to visually match an icon used
+     *  elsewhere (e.g. the widget bar) rather than an emoji approximation. */
+    icon?: string;
     /** Optional text rendered after the glyph (e.g. "Retry now", "Login Again").
      *  Turns the icon button into a labelled button for action-heavy rows like
      *  the failure-recovery row. */
@@ -99,7 +105,12 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                             // stopPropagation so an action never also fires onActivate.
                             onClick={(e) => { e.stopPropagation(); action.onClick(); }}
                         >
-                            <span aria-hidden="true">{action.glyph}</span>
+                            <Show
+                                when={action.icon}
+                                fallback={<span aria-hidden="true">{action.glyph}</span>}
+                            >
+                                {(icon) => <i class={makeIconClass(icon(), true)} aria-hidden="true" />}
+                            </Show>
                             <Show when={action.label}>
                                 <span class="pane-row-action-text">{action.label}</span>
                             </Show>

@@ -166,9 +166,13 @@ function getViewIconElem(viewIconUnion: string | IconButtonDecl, blockData: Bloc
 }
 
 function OptMinimizeButton(props: { minimized: boolean; toggleMinimize: () => void }): JSX.Element {
+    // OS-window minimize convention (a horizontal bar), matching the sibling
+    // OptMagnifyButton's window-maximize/window-restore pairing just below —
+    // the previous chevron-up/chevron-down pair read as a dropdown toggle
+    // rather than a minimize control.
     const decl = createMemo<IconButtonDecl>(() => ({
         elemtype: "iconbutton",
-        icon: props.minimized ? "chevron-up" : "chevron-down",
+        icon: props.minimized ? "window-restore" : "window-minimize",
         title: props.minimized ? "Restore" : "Minimize",
         click: props.toggleMinimize,
     }));
