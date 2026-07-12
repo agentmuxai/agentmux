@@ -16,8 +16,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::{broadcast, Mutex};
 
 use super::{
-    make_shared_writer, BoxedWriter, HostFrame, HostPipe, SharedWriter, DISCONNECT_TIMEOUT,
-    PENDING_BUFFER_CAP,
+    make_shared_writer, BoxedWriter, HostFrame, HostPipe, HostPipeError, SharedWriter,
+    DISCONNECT_TIMEOUT, PENDING_BUFFER_CAP,
 };
 
 // ---- harness ---------------------------------------------------------------
@@ -456,4 +456,75 @@ async fn send_event_for_session_rejects_stale_session() {
         }
         other => panic!("unexpected frame on writer2: {:?}", other),
     }
+}
+
+// ---- fail-fast (no-buffer) sends -----------------------------------------
+// SPEC_LAUNCHER_TEARDOWN_BACKSTOP Phase 1: the UI-liveness prober must never
+// have its probe buffered while the host is down — a buffered probe either
+// expires unreported (no saga_id) or reaches a FUTURE host, and either way
+// the prober's outstanding-nonce bookkeeping would age into a false
+// "UI thread did not pump" miss (reagent P1, PR #2106 round 2).
+
+#[tokio::test]
+async fn try_send_no_buffer_fails_fast_and_buffers_nothing_while_disconnected() {
+    let (pipe, _) = make_pipe();
+    assert!(!pipe.is_connected().await);
+
+    let res = pipe
+        .try_send_command_no_buffer(&Command::ProbeUiThread { nonce: 7 })
+        .await;
+    assert!(
+        matches!(res, Err(HostPipeError::HostNotConnected)),
+        "disconnected fail-fast send must error, got {:?}",
+        res
+    );
+    assert_eq!(
+        pipe.pending_len().await,
+        0,
+        "fail-fast send must not leave a frame in the pending buffer"
+    );
+}
+
+#[tokio::test]
+async fn try_send_no_buffer_delivers_while_connected() {
+    let (pipe, _) = make_pipe();
+    let (writer, reader) = make_duplex();
+    pipe.set_writer(writer).await;
+
+    pipe.try_send_command_no_buffer(&Command::ProbeUiThread { nonce: 9 })
+        .await
+        .expect("connected fail-fast send must succeed");
+    assert_eq!(pipe.pending_len().await, 0);
+
+    let frames = read_n_frames(reader, 1).await;
+    assert!(
+        matches!(frames.as_slice(), [HostFrame::Command(Command::ProbeUiThread { nonce: 9 })]),
+        "probe must arrive on the wire, got {:?}",
+        frames
+    );
+}
+
+#[tokio::test]
+async fn try_send_no_buffer_write_failure_purges_the_rebuffered_probe() {
+    // reagent P1 (PR #2106 round 3): a write failure on an INSTALLED writer
+    // takes send_frame's error branch, which re-buffers the frame as part
+    // of clear-writer handling (proven by write_failure_clears_writer_and_
+    // rebuffers above, pending_len == 1). The no-buffer contract requires
+    // the opposite for probes: Err AND an empty buffer — a stale probe must
+    // never drain into a future host.
+    let (pipe, _) = make_pipe();
+    let (writer, reader) = make_duplex();
+    drop(reader); // writes will fail with BrokenPipe/ConnectionAborted
+    pipe.set_writer(writer).await;
+
+    let result = pipe
+        .try_send_command_no_buffer(&Command::ProbeUiThread { nonce: 11 })
+        .await;
+    assert!(result.is_err(), "probe send must fail when peer dropped");
+    assert!(!pipe.is_connected().await);
+    assert_eq!(
+        pipe.pending_len().await,
+        0,
+        "the rebuffered probe frame must be purged — stale probes never reach a future host"
+    );
 }

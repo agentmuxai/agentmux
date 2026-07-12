@@ -27,7 +27,14 @@ import {
 } from "./types";
 import { determineDropDirection } from "./utils";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
-import { clearCrossTabDrop, noteCrossTabDrop, redockDraggedPane, takeCrossTabDropFor } from "./crossTabDrag";
+import { setTileDragInFlight } from "./dragInFlight";
+import {
+    clampCrossTabDirection,
+    clearCrossTabDrop,
+    noteCrossTabDrop,
+    redockDraggedPane,
+    takeCrossTabDropFor,
+} from "./crossTabDrag";
 
 export const tileItemType = "TILE_ITEM";
 
@@ -140,6 +147,7 @@ function TileLayoutComponent(props: TileLayoutProps) {
             if (globalDragLayoutModel?.activeDrag()) {
                 globalDragNodeId = null;
                 globalDragNode = null;
+                setTileDragInFlight(false);
                 globalDragLayoutModel.activeDrag._set(false);
                 globalDragLayoutModel = null;
             }
@@ -513,6 +521,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     globalDragNodeId = props.node.id;
                     globalDragLayoutModel = props.layoutModel;
                     globalDragNode = props.node;
+                    setTileDragInFlight(true);
                     clearCrossTabDrop();
                     props.layoutModel.activeDrag._set(true);
                     setIsDragging(true);
@@ -526,6 +535,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     globalDragNodeId = null;
                     globalDragLayoutModel = null;
                     globalDragNode = null;
+                    setTileDragInFlight(false);
                     props.layoutModel.activeDrag._set(false);
                     setIsDragging(false);
                     // Do NOT clear currentDragPayload here — fires for ALL drops including
@@ -712,7 +722,9 @@ const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         };
 
         const crossTab = isCrossTabDrag(props.layoutModel);
-        const direction = determineDropDirection(bestRect, clampedOffset);
+        const rawDirection = determineDropDirection(bestRect, clampedOffset);
+        // Cross-tab Outer* clamp — see clampCrossTabDirection.
+        const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
         props.layoutModel.treeReducer({
             type: LayoutTreeActionType.ComputeMove,
             nodeId: bestLeafId,
@@ -810,7 +822,11 @@ const OverlayNode = (props: OverlayNodeProps) => {
         if (props.layoutModel.displayContainerRef?.current && additionalProps()?.rect) {
             const containerRect = props.layoutModel.displayContainerRef.current.getBoundingClientRect();
             const offset = { x: clientX - containerRect.x, y: clientY - containerRect.y };
-            const direction = determineDropDirection(additionalProps().rect, offset);
+            const rawDirection = determineDropDirection(additionalProps().rect, offset);
+            // Cross-tab: Outer* directions are clamped to their inner
+            // equivalents so the ghost matches the committed split — see
+            // clampCrossTabDirection in crossTabDrag.ts.
+            const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
             props.layoutModel.treeReducer({
                 type: LayoutTreeActionType.ComputeMove,
                 nodeId: props.node.id,

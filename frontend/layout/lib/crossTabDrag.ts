@@ -18,7 +18,28 @@ import { atoms } from "@/store/global";
 import { WorkspaceService } from "@/app/store/services";
 import { Logger } from "@/util/logger";
 import { fireAndForget } from "@/util/util";
+import { getLayoutModelForTabById } from "./layoutModelHooks";
+import { pruneDanglingLeaves } from "./layoutPersistence";
 import { DropDirection } from "./types";
+
+/**
+ * Clamp Outer* drop directions to their inner equivalents for CROSS-TAB
+ * drags. In-tab, Outer* commits a Move that inserts at the grandparent
+ * level (spanning the full cross axis) — and the ghost placeholder
+ * previews exactly that. But a cross-tab drop commits through
+ * RedockFloatingPane → queue_target_layout_split, which can only express
+ * "split THIS leaf" (Outer* becomes a 20% band of the target leaf) — a
+ * visibly different result from what the ghost showed. Clamping to the
+ * inner direction makes preview and commit agree: both are a half-split
+ * of the hovered leaf.
+ */
+export function clampCrossTabDirection(dir: DropDirection | undefined): DropDirection | undefined {
+    if (dir === undefined) return undefined;
+    if (dir >= DropDirection.OuterTop && dir <= DropDirection.OuterLeft) {
+        return (dir - 4) as DropDirection;
+    }
+    return dir;
+}
 
 export type CrossTabDropRecord = {
     blockId: string;
@@ -84,8 +105,24 @@ export function redockDraggedPane(opts: {
                 opts.targetBlockId ?? null,
                 opts.direction ?? null,
             );
+            // Do NOT delete the source leaf here: this runs at RPC
+            // completion, which can precede the drag's dragend on a slow
+            // frame — and unmounting the drag source before dragend
+            // suppresses the event entirely, wedging pragmatic's teardown
+            // (the dead-source-tab bug). Source-leaf removal is owned by
+            // the queued backend delete plus the end-of-drag prune pass
+            // (tabbar.tsx cleanup → pruneDanglingLeaves), both of which
+            // run only after the gesture has fully settled.
         } catch (e) {
             Logger.error("dnd", "cross-tab pane redock failed", { error: String(e) });
+            // The characteristic failure here is "block X is in tab Y,
+            // not <sourceTabId>" — i.e. the user dragged a DANGLING leaf
+            // (the source tab rendering a block another tab owns, left
+            // by an earlier lost delete). The move correctly didn't
+            // happen; prune the ghost so the source tab heals instead of
+            // keeping a broken double-mounted pane.
+            const sourceModel = getLayoutModelForTabById(opts.sourceTabId);
+            if (sourceModel) pruneDanglingLeaves(sourceModel);
         }
     });
 }

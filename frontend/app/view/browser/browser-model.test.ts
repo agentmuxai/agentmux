@@ -41,9 +41,20 @@ vi.mock("@/app/store/wos", () => ({
     getObjectValue: () => ({}),
 }));
 
-import { invokeCommand } from "@/app/platform/ipc";
+import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { BrowserViewModel } from "./browser-model";
+
+/** Retrieves the handler the model registered for a given event name via
+ *  `listenEvent(name, handler)`, so tests can invoke it directly with a
+ *  synthetic payload instead of needing a real IPC round-trip. */
+function capturedHandler(eventName: string): (payload: any) => void {
+    const call = vi
+        .mocked(listenEvent)
+        .mock.calls.find(([name]) => name === eventName);
+    if (!call) throw new Error(`no listenEvent registration found for "${eventName}"`);
+    return call[1] as (payload: any) => void;
+}
 
 function makeVM() {
     // BlockNodeModel is used only by blockAtom construction — a minimal
@@ -55,6 +66,16 @@ function makeVM() {
     // here to keep the assertions readable.
     vi.clearAllMocks();
     return vm;
+}
+
+/** Same as `makeVM()`, but captures the nav-state handler BEFORE clearing
+ *  mock history (`makeVM`'s clear would wipe `listenEvent`'s recorded
+ *  calls, taking the handler reference with it). */
+function makeVMWithNavStateHandler() {
+    const vm = new BrowserViewModel("test-block-id", {} as never);
+    const navStateHandler = capturedHandler("browser-pane-nav-state");
+    vi.clearAllMocks();
+    return { vm, navStateHandler };
 }
 
 describe("BrowserViewModel lifecycle gating", () => {
@@ -157,5 +178,82 @@ describe("BrowserViewModel lifecycle gating", () => {
         vm.dispose();
         vm.dispose();
         expect(vm.closed).toBe(true);
+    });
+});
+
+// SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.2: the
+// browser-pane-nav-state listener used to unconditionally dispatch
+// LoadFinished on every event (including ones fired at navigation START,
+// not just completion), so `loadingAtom` cleared within the same tick
+// Navigate() set it. These tests pin the fixed behavior — is_loading now
+// drives an accurate TabLoadingChanged dispatch.
+describe("BrowserViewModel nav-state loading wiring", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it("loadingAtom starts true after construction (the ctor's initial navigate())", () => {
+        const { vm } = makeVMWithNavStateHandler();
+        expect(vm.loadingAtom()).toBe(true);
+    });
+
+    it("an on_loading_state_change event with is_loading:true does NOT clear loadingAtom (the exact prior bug)", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://example.com",
+            is_loading: true,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        expect(vm.loadingAtom()).toBe(true);
+    });
+
+    it("an on_loading_state_change event with is_loading:false clears loadingAtom", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://example.com",
+            is_loading: false,
+            can_go_back: true,
+            can_go_forward: false,
+        });
+        expect(vm.loadingAtom()).toBe(false);
+        expect(vm.canGoBackAtom()).toBe(true);
+    });
+
+    it("the url_only (on_load_end) event — no is_loading field — also clears loadingAtom", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://example.com",
+            url_only: true,
+        });
+        expect(vm.loadingAtom()).toBe(false);
+    });
+
+    it("re-navigating after load-finished sets loadingAtom true again, and a subsequent is_loading:false clears it", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        navStateHandler({ block_id: "test-block-id", url: "https://a.com", is_loading: false, can_go_back: false, can_go_forward: false });
+        expect(vm.loadingAtom()).toBe(false);
+
+        vm.navigate("https://b.com");
+        expect(vm.loadingAtom()).toBe(true);
+
+        navStateHandler({ block_id: "test-block-id", url: "https://b.com", is_loading: false, can_go_back: true, can_go_forward: false });
+        expect(vm.loadingAtom()).toBe(false);
+    });
+
+    it("a nav-state event for a different block_id is ignored", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        expect(vm.loadingAtom()).toBe(true);
+        navStateHandler({
+            block_id: "some-other-block-id",
+            url: "https://example.com",
+            is_loading: false,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        expect(vm.loadingAtom()).toBe(true);
     });
 });

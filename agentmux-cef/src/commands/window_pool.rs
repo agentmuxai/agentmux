@@ -77,11 +77,15 @@ fn pool_window_views() -> &'static Mutex<HashMap<String, cef::Window>> {
     POOL_WINDOW_VIEWS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Cache a pool window's CEF Views `Window` (called from `on_window_created`,
-/// where the Window is valid). No-op for non-pool labels.
+/// Cache a pool window's CEF Views `Window` (called from `on_window_created`
+/// for fresh spawns, and from `demote_promoted_pool_window` for demotes —
+/// including ADOPTED foreign `window-{uuid}` labels, Residual 1 of
+/// SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11, which is why the
+/// caller-bug guard accepts the broad `window-` prefix rather than
+/// `window-pool-`). No-op for non-window labels.
 #[cfg(target_os = "windows")]
 pub fn cache_pool_window_view(label: &str, window: &cef::Window) {
-    if !label.starts_with("window-pool-") {
+    if !label.starts_with("window-") {
         return;
     }
     pool_window_views()
@@ -654,12 +658,43 @@ pub fn demote_srv_cleanup(state: &Arc<AppState>, label: &str) {
                 crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
             }
             None => {
-                let warn = format!(
-                    "demote_srv_cleanup({}): no backend window ID after retries — srv state may orphan",
-                    lbl
-                );
-                crate::client::dlog(&warn);
-                tracing::warn!("{}", warn);
+                // Registration chain came up empty — the early-close race
+                // shape (#2088's registration moved earlier, but a close can
+                // still land before it) or a lost launcher round-trip. Last
+                // resort (SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual
+                // 2): ask srv to resolve the label via the `host:label`
+                // crumb persisted atomically with row creation. Close ONLY
+                // on an unambiguous single match — the crumb is a hint, and
+                // labels can recur across host restarts; a multi-match means
+                // stale rows from a prior life, where guessing could delete
+                // a window the slow-path reproject still owes the user.
+                match crate::client::backend_find_window_by_label(&web_endpoint, &auth_key, &lbl) {
+                    Some(ids) if ids.len() == 1 => {
+                        let window_id = &ids[0];
+                        crate::client::dlog(&format!(
+                            "demote_srv_cleanup({}): resolved via host:label crumb — backend_close_window window_id={}",
+                            lbl, window_id
+                        ));
+                        crate::client::backend_close_window(&web_endpoint, &auth_key, window_id);
+                    }
+                    Some(ids) => {
+                        let warn = format!(
+                            "demote_srv_cleanup({}): no backend window ID after retries, crumb lookup returned {} match(es) — srv state may orphan",
+                            lbl,
+                            ids.len()
+                        );
+                        crate::client::dlog(&warn);
+                        tracing::warn!("{}", warn);
+                    }
+                    None => {
+                        let warn = format!(
+                            "demote_srv_cleanup({}): no backend window ID after retries, crumb lookup unavailable — srv state may orphan",
+                            lbl
+                        );
+                        crate::client::dlog(&warn);
+                        tracing::warn!("{}", warn);
+                    }
+                }
                 crate::launcher_ipc::report_backend_window_id_unregistered(lbl);
             }
         }
@@ -820,9 +855,12 @@ pub fn demote_promoted_pool_window(
 }
 
 /// SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md — close path for `window-*`
-/// windows that CANNOT demote into the pool (beyond `POOL_DEMOTE_CAP`, or a
-/// foreign `window-{uuid}` label the pool handshake's `window-pool-` prefix
-/// gate rejects). The round-5 destroy these closes used to take parks the
+/// windows that CANNOT demote into the pool: beyond `POOL_DEMOTE_CAP`, no
+/// strict HWND, or the reducer rejected the demote. (Foreign `window-{uuid}`
+/// labels are no longer categorically excluded — Residual 1 of
+/// SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11 adopts them through
+/// the same demote gates; this fallback now only sees one when a gate
+/// refuses.) The round-5 destroy these closes used to take parks the
 /// browser anyway (CEF 148 Views, no `on_before_close` — live-verified in the
 /// quit-gate work) with the FULL workspace page still running: xterm WebGL
 /// surfaces (SwiftShader = CPU shared memory = pagefile-backed commit),
@@ -903,7 +941,14 @@ pub fn park_and_blank_window(state: &Arc<AppState>, label: &str) -> bool {
 }
 
 pub fn mark_pool_window_renderer_ready(state: &Arc<AppState>, label: &str) {
-    if !label.starts_with("window-pool-") {
+    // Broad `window-` guard (was `window-pool-`): an ADOPTED foreign
+    // `window-{uuid}` label (Residual 1, SPEC_POOL_ADOPTION_AND_WINDOW_ROW_
+    // CRUMB_2026_07_11) re-sends `pool_window_ready` after its demote reload
+    // and must re-enter the queue like any other demoted window. The REAL
+    // membership gate is the reducer's `handle_pool_ready`, which only moves
+    // labels that are actually in `pool.unpromoted` — a spurious ready signal
+    // from a non-pool-side window is an idempotent no-op there.
+    if !label.starts_with("window-") {
         return;
     }
 

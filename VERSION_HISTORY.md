@@ -1,5 +1,30 @@
 # AgentMux Version History
 
+## 0.53.2 — 2026-07-11
+
+- fix(tabbar): cross-tab drag stability (stuck-overlay cleanup, ghost/landing clamp, geometry refresh) + hover strobe
+- fix(instance-panel): floating panes focus on click + inline opacity controls
+- feat(pool): adopt foreign window-{uuid} labels into the warm pool on close (renderer reuse instead of park-and-blank)
+- fix(browser): show the loading brain instead of a blank pane while a page loads
+- feat(launcher): observe-only UI-thread liveness probe (teardown backstop Phase 1)
+- feat(launcher): srv supervision via host recycle — an srv crash no longer kills the session
+
+
+## 0.53.1 — 2026-07-11
+
+- fix(tabbar): pane drag-to-tab reworked as spring-loaded tabs (real drop targets, switch-on-dwell, in-layout ghost)
+- refactor(lifecycle): quit arming bit, ReconcileQuit poke, drain-executor extraction (Pillar 2 sanitize-then-decide Phase 0)
+- refactor(lifecycle): orphan_reconcile becomes sanitize-then-decide — drain verdict moves to reconcile_quit
+- fix(lifecycle): consume the drain verdict at every count-lowering dispatch site (Pillar 2 Phase 2)
+- refactor(lifecycle): WRR quit demoted to Draining-gated Stage-2 executor (Pillar 2 Phase 3)
+- fix(window): close_window_by_label routes window-* closes through CloseWindowTask so srv window rows are cleaned up
+- fix(frontend): register backend window id right after CreateWindow, closing the early-close srv-row orphan race
+- fix(window): route OS-level WM_CLOSE (Alt+F4/taskbar) on secondary windows through CloseWindowTask
+- feat(tabbar): drag a tab onto another window's header to remount it there
+- feat(srv): persist host window label as a meta crumb + crumb-based cleanup fallback
+- test(srv): RAII + Job Object guards for integration-test srv spawns (no more leaked children on test failure)
+
+
 ## 0.53.0 — 2026-07-10
 
 - fix(agent): resume the real session on pane reopen and hydrate stats bar from history

@@ -230,9 +230,22 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                     // Activate the target overlay BEFORE the switch so the
                     // very first dragover after the tab becomes visible
                     // already hits TileLayout's drop targets.
-                    getLayoutModelForTabById(props.tabId)?.activeDrag._set(true);
+                    const model = getLayoutModelForTabById(props.tabId);
+                    model?.activeDrag._set(true);
                     dragActivatedTabIds.add(props.tabId);
                     props.onSelect();
+                    // The tab was display:none until the switch — its
+                    // layout rects (additionalProps/overlay transforms)
+                    // were computed against a zero-size container, so the
+                    // first hover/drop hit-tests would use garbage
+                    // geometry. Force a tree re-measure once the tab has
+                    // real bounds (double rAF: display flip applies on the
+                    // next frame; measure the one after).
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            fireAndForget(async () => model?.onTreeStateAtomUpdated(true));
+                        });
+                    });
                 }, SPRING_SWITCH_MS);
             },
             onDragLeave: clearSpring,

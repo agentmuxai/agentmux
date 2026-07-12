@@ -173,11 +173,6 @@
         }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-        .agent-document-streaming-buffer[data-animate] .agent-document-row {
-            transition: none;
-        }
-    }
 
     // === Status Log (terminal-style) ===
     .agent-history-loading {

@@ -438,14 +438,14 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         // (see the post-event-state guarantee above), so the read sees
         // post-event tree state.
         //
-        // The remaining tree events (Insert/Delete/Move/Swap/Resize/
-        // Replace/Split*) are still persisted via wcore-direct in their
-        // RPC handlers — they DON'T yet appear in `apply_event_to_wstore`.
-        // If the bridge broadcast LayoutState for those, the read could
-        // race ahead of the wcore-direct write. They remain covered by
-        // their handlers' existing `success_with_updates(...)` response
-        // broadcasts (Codex P2 on PR #861) until their persistence
-        // migrates here in a later phase.
+        // The remaining tree events ARE persisted by the subscriber now
+        // (SPEC_864 phases 2-5, #1970-#1981 — wcore-direct layout writes
+        // are retired; this comment predated that migration). They are
+        // still deliberately NOT bridged, but for a different reason than
+        // the original wcore-direct race: see the srv-IPC-path caveat on
+        // the granular-events note below. They remain covered by their
+        // handlers' existing `success_with_updates(...)` response
+        // broadcasts (Codex P2 on PR #861).
         Event::FocusedNodeChanged { tab_id, .. }
         | Event::MagnifiedNodeChanged { tab_id, .. } => {
             emit_layout_for_tab(&wstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;

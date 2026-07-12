@@ -245,10 +245,15 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 /// history state changes — navigation start, navigation commit, and after
 /// back/forward. `can_go_back` / `can_go_forward` are provided as direct
 /// parameters (not queried after the fact), so they're guaranteed to reflect
-/// the real committed state rather than the pre-commit race window.
+/// the real committed state rather than the pre-commit race window. Same for
+/// `is_loading` — CEF's actual navigation-controller loading state, forwarded
+/// verbatim so the frontend's loading indicator reflects real top-level
+/// navigations only, not client-side (SPA) route changes, which don't invoke
+/// this callback. See SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.1.
 pub fn on_loading_state_change_browser_pane(
     state: &Arc<AppState>,
     browser: &Browser,
+    is_loading: bool,
     can_go_back: bool,
     can_go_forward: bool,
 ) {
@@ -261,8 +266,8 @@ pub fn on_loading_state_change_browser_pane(
         };
         let block_id_short: String = block_id.chars().take(7).collect();
         tracing::info!(
-            "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=false can_back={} can_forward={}",
-            block_id_short, url, can_go_back, can_go_forward,
+            "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=false is_loading={} can_back={} can_forward={}",
+            block_id_short, url, is_loading, can_go_back, can_go_forward,
         );
         crate::events::emit_event_from_state(
             state,
@@ -272,6 +277,7 @@ pub fn on_loading_state_change_browser_pane(
                 "url": url,
                 "can_go_back": can_go_back,
                 "can_go_forward": can_go_forward,
+                "is_loading": is_loading,
             }),
         );
     } else {

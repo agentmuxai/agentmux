@@ -1,7 +1,7 @@
 # Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop)
 
 **Date:** 2026-07-10
-**Status:** Draft (v2 — spring-loaded tabs revision, same day)
+**Status:** Draft (v3 — field-testing addendum 2026-07-11, see end of file)
 **Repo state:** `main` @ `42b95715`
 **Scope:** In-window pane drag onto the tab bar (dropping a tile-layout pane onto a *different tab in the same window*). Cross-window drag (already handled by `DragOverlay`/`CrossWindowDragMonitor`) and touch/pen input are out of scope.
 
@@ -300,3 +300,138 @@ This spec's new tab-bar drop target (§4.1) must call `event.preventDefault()`-e
 - `frontend/app/tab/tabbar.tsx`, `tabbar-dnd.ts`, `droppable-tab.tsx` — existing tab-reorder drag to extend.
 - `frontend/app-init.ts:113-273` (`installFloatingRedockHoverListener`) — direction/ghost-rect vocabulary to reuse in §4.4.
 - `agentmux-srv/src/sagas/redock_floating_pane.rs`, `agentmux-srv/src/server/service/layout_helpers.rs`, `workspace.rs:1151-1230` — backend pattern this spec's new RPC should mirror.
+
+---
+
+## Addendum v3 (2026-07-11): field-testing fixes, strobe indicator, and the tab-reorder bug
+
+First real-usage session (two tabs, repeated pane moves back and forth) surfaced
+instability: one tab went completely non-responsive, and drop landings were
+"glitchy / inaccurate". Diagnosis from the dev instance's logs plus code reading,
+and the fixes shipped in `fix/cross-tab-drag-stability`:
+
+### A1. Hover strobe (new UX, implemented; revised same day)
+
+On the instant a pane hover begins over a tab button, the tab flashes to its
+**NEGATIVE** (`filter: invert(1)`) and back: **10 flashes at 50ms intervals
+(500ms total), one-shot**, then the slower `tab-drop-pulse` accent outline
+carries the signal for the rest of the hover. Pure CSS on
+`.tile-drop-hover .tab` — the class is re-applied per hover entry, restarting
+the animation. (v1 of this addendum specced a 3px top-edge bar at 20ms×10 =
+200ms; field feedback: invisible — partly the reduced-motion kill-switch below,
+partly too fast — revised to the full-tab invert at 500ms.)
+
+**Reduced-motion respect removed app-wide** (same session, product decision):
+the OS "reduce motion" setting was silently disabling functional motion cues —
+this strobe, the drop pulse, insertion indicators — which carry meaning, not
+decoration. `prefersReducedMotionAtom` is hard `false` (plumbing kept for easy
+revisit), the `respect-reduced-motion` SCSS mixin is a no-op, and all raw
+`@media (prefers-reduced-motion: reduce)` blocks are removed.
+
+### A2. Stability fixes
+
+1. **Dead tab (stuck overlay).** A spring switch force-sets the target tab's
+   `LayoutModel.activeDrag`, which flips its overlay-container to
+   `pointer-events: auto` over the whole tile area. Cleanup previously had one
+   layer (the tab bar's pragmatic tile monitor `onDrop`); if that dispatch is
+   missed (Win11 swallowed-dragend class of paths — the same reason TileLayout
+   has its own window-dragend `resetDragState` net), the overlay stays up and
+   the tab eats every click: **completely non-responsive**. Cleanup now runs
+   from three layers: monitor `onDrop`, a window `dragend` listener, and a
+   capture-phase `pointerdown` listener (a pointerdown cannot happen mid-drag,
+   so any pointerdown with spring-activated tabs still recorded means the drag
+   ended unobserved — clean up before the click hits the stuck overlay).
+
+2. **Ghost/landing mismatch on Outer directions.** All observed drops resolved
+   `direction: 7` (OuterLeft). In-tab, Outer* commits a Move inserting at the
+   grandparent level — and the ghost previews that. Cross-tab commits go through
+   `queue_target_layout_split`, where Outer* means "20% band of the target
+   leaf" — a visibly different landing than the preview. Fix:
+   `clampCrossTabDirection` maps Outer*→inner for cross-tab drags at BOTH the
+   ComputeMove (ghost) and drop-record sites, so preview and commit agree
+   (half-split of the hovered leaf).
+
+3. **Stale geometry right after the spring switch.** The target tab's layout
+   rects were computed while it was `display:none` (zero-size container), so
+   the first hover/drop hit-tests after the switch used garbage geometry —
+   the "glitchy landing". Fix: after `setActiveTab`, a double-rAF
+   `onTreeStateAtomUpdated(true)` forces a re-measure once the tab has real
+   bounds.
+
+4. **Source pane lingering after a cross-tab move.** Field-observed: the
+   moved pane appeared at the destination but ALSO remained rendered in the
+   source tab. The backend queues the source-tab DeleteNode via
+   `pendingbackendactions`, but the source frontend's debounced persist can
+   race and clobber that queue (the same resurrection mechanism as item 5).
+   Fix: `redockDraggedPane` now deletes the source leaf locally immediately
+   after the RPC succeeds — the same frontend-mutates-then-persists contract
+   an in-tab move uses — and the queued backend delete no-ops idempotently
+   on the already-removed node.
+
+5. **Stale-tree residue — now healed defensively (round 3).**
+   `pruneDanglingLeaves` (layoutPersistence.ts) removes any leaf whose block
+   is not in the tab's reducer-owned `Tab.blockids`, on every backend update
+   and after pending-action processing; reading `tabAtom()` inside the
+   `onBackendUpdate` effect makes `Tab` a tracked dependency, so a MoveBlock
+   updating `blockids` re-runs the effect and prunes even when the queued
+   layout delete was clobbered. A failed redock also prunes the source tab
+   (the characteristic failure IS "dragged a dangling leaf"). Existing
+   corrupted trees self-heal without a data wipe. Historical context below
+   kept for the record:
+
+   **(original note)** The session's first
+   redock failed cleanly with *"block …57a30 is in tab 80ec…, not e7f1…"* — the
+   source tab was rendering a leaf for a block the backend had already moved
+   (residue in the persisted dev data dir from the v1 testing session, which
+   fired blind append-redocks at the RPC level even though its hover UI never
+   showed). A dangling leaf also double-mounts the block (all tabs stay
+   mounted), clobbering the block-component registry — a second candidate for
+   the dead-tab symptom. This is the known
+   `INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08` issue;
+   wiping the dev channel's data dir (`~/.agentmux/dev/main/<hash>/data`)
+   clears the corrupted layout state for testing. A defensive
+   prune-dangling-leaves pass on tab load is the proper fix and stays with
+   that investigation, not this spec.
+
+### A3. Tab reorder positioning bug (OPEN — debug plan)
+
+Reported: dragging a TAB within the strip shows a bounce-like animation but the
+order never changes. Log evidence is stark and narrows this a lot:
+
+- **Zero `tab-drag started`** lines (logged unconditionally in
+  `DroppableTab.draggable.onDragStart`) in the entire dev-instance session —
+  the drag never starts as a pragmatic drag at all.
+- **Zero `ReorderTab` RPCs** in every srv log back through 2026-07-10 —
+  i.e. in-strip reorder has not successfully executed for at least two days,
+  predating the remount work. This is NOT a regression from the
+  cross-window-remount changes (whose tab-drag code paths all sit behind that
+  never-firing `onDragStart`).
+
+Since `onDragStart` never fires, the failure is at drag *initiation*:
+prioritized suspects, in test order —
+
+1. **`onGenerateDragPreview` throwing.** It runs before `onDragStart`
+   (pragmatic dispatch order) and does DOM measurement + `setTabGrabOffset`;
+   an exception here kills the gesture silently. Wrap in try/catch + log.
+2. **The native drag never starting** — check whether `dragstart` even fires
+   on `.tab-drop-wrapper` (add a temporary capture listener). If not: something
+   is intercepting `mousedown`/`pointerdown` before the browser's drag
+   threshold — candidates: the title-bar JS window-drag path
+   (`useWindowDrag` / `isInDragRegion` walking up from the tab despite
+   `data-drag-region="false"`), or a full-surface overlay (the active-tab
+   color-line portal is `pointer-events: none`, but verify the pane-overlay /
+   `data-pane-overlay` airspace punching isn't leaving an invisible native
+   hole over the strip).
+3. **The `Tab` component swallowing the gesture** — it has its own
+   `onDragStart={() => {}}` prop and click/dblclick handling; verify nothing
+   inside calls `preventDefault()` on `dragstart`/`mousedown`.
+4. Once initiation works, re-verify the drop half: `computeInsertionPoint`'s
+   gap math against the content-aware tab widths
+   (`SPEC_TAB_CONTENT_AWARE_SIZING`) — the bounce-without-reorder symptom
+   would ALSO appear if `executeReorder`'s `ReorderTab` RPC failed silently,
+   but the absence of `tab-drag started` rules that ordering out for now.
+
+The "bounce" the user sees cannot be `tab-bouncing` (only set on successful
+reorder/merge paths, none of which logged) — most likely it's the OS drag-image
+snap-back animation of a rejected native drag, which is consistent with the
+drag never being accepted by any drop target.

@@ -860,6 +860,39 @@ fn pool_demote_already_pool_side_is_rejected() {
     assert_eq!(state.pool.queue.len(), 1, "no duplicate insertion");
 }
 
+/// Residual 1 (SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11) — pool
+/// ADOPTION: a foreign `window-{uuid}` label that never entered the pool via
+/// a spawn (cold-path or tear-off window, minted when the pool was empty)
+/// runs the exact same demote → ready → promote cycle as a `window-pool-*`
+/// label. Pool membership is the `unpromoted`/`queue` sets + the is_pool
+/// flag, never the label string — this test is the reducer-level contract
+/// for that.
+#[test]
+fn pool_adoption_foreign_label_full_cycle() {
+    let mut state = HostState::default();
+
+    // A label the pool has never seen — no spawn, no prior promote.
+    let out = update(&mut state, HostCommand::DemotePoolWindow { label: "window-abc123".into() });
+    assert!(out.pool_demote_accepted, "adoption of a foreign window-* label must be accepted");
+    assert!(state.pool.unpromoted.contains("window-abc123"));
+
+    // The demote reload boots the renderer in pool mode; its ready signal
+    // moves the adopted label into the serving queue like any other.
+    update(&mut state, HostCommand::PoolWindowReady { label: "window-abc123".into() });
+    assert!(!state.pool.unpromoted.contains("window-abc123"));
+    assert_eq!(state.pool.queue.len(), 1);
+
+    // And it serves the next promote.
+    let out = update(&mut state, HostCommand::PopAndPromoteFrontPoolWindow);
+    assert_eq!(out.promoted_pool_label.as_deref(), Some("window-abc123"));
+
+    // Double-adopt of the same label while pool-side stays rejected
+    // (idempotency contract unchanged by adoption).
+    update(&mut state, HostCommand::DemotePoolWindow { label: "window-abc123".into() });
+    let out = update(&mut state, HostCommand::DemotePoolWindow { label: "window-abc123".into() });
+    assert!(!out.pool_demote_accepted);
+}
+
 /// Demote does NOT touch the respawn semaphore — a demote mid-spawn must
 /// not let a second spawn start.
 #[test]

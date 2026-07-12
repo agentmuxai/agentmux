@@ -19,6 +19,8 @@ import { makeORef, getObjectValue, getWaveObjectAtom } from "../store/wos";
 import { ConfirmModal } from "@/element/modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { clearCrossTabDrop, deleteLayoutModelForTab, getLayoutModelForTabById, tileItemType } from "@/layout/index";
+import { setTileDragInFlight } from "@/layout/lib/dragInFlight";
+import { pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
 import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { DroppableTab } from "./droppable-tab";
 import {
@@ -408,21 +410,76 @@ function TabBar(props: TabBarProps): JSX.Element {
         //    spring-switched through (their activeDrag was set by
         //    DroppableTab; TileLayout's own cleanup only covers the SOURCE
         //    tab's model).
+        //
+        //    A stuck activeDrag is a DEAD TAB — the overlay-container sits
+        //    over the entire tile area with pointer-events:auto and eats
+        //    every click — so the cleanup runs from three layers:
+        //    a) pragmatic's monitor onDrop (normal path),
+        //    b) a window dragend listener (pragmatic's dispatch can be
+        //       skipped on Win11 swallowed-drag paths — same rationale as
+        //       TileLayout's own resetDragState safety net),
+        //    c) a capture-phase pointerdown listener: a pointerdown cannot
+        //       happen mid-drag (the button is held), so any pointerdown
+        //       with spring-activated tabs still recorded means the drag
+        //       ended without (a) or (b) firing — clean up before the
+        //       stuck overlay swallows the click's target.
+        const cleanupTileDragState = () => {
+            setHoveredDropTabId(null);
+            clearCrossTabDrop();
+            setTileDragInFlight(false);
+            // Reset EVERY tab's overlay, not just the spring-activated
+            // set: the SOURCE tab's activeDrag is normally reset by its
+            // own draggable's onDrop, but that dispatch is skipped
+            // whenever dragend is suppressed (swallowed-drag paths,
+            // source unmounted early, …) — and a stuck overlay is a dead
+            // tab. Safe here because this only runs at end-of-drag.
+            for (const tabId of tabIds()) {
+                getLayoutModelForTabById(tabId)?.activeDrag._set(false);
+            }
+            dragActivatedTabIds.clear();
+            // Deferred dangling-leaf prune: mid-drag pruning is gated off
+            // (see pruneDanglingLeaves), so the source tab's disowned
+            // leaf is removed HERE, after the gesture and the move RPC's
+            // Tab updates have settled. 250ms comfortably covers the
+            // observed 20-40ms RPC round-trip.
+            setTimeout(() => {
+                for (const tabId of tabIds()) {
+                    const model = getLayoutModelForTabById(tabId);
+                    if (model) pruneDanglingLeaves(model);
+                }
+            }, 250);
+        };
         const cleanupTileMonitor = monitorForElements({
             canMonitor: ({ source }) => source.data.type === tileItemType,
-            onDrop: () => {
-                setHoveredDropTabId(null);
-                clearCrossTabDrop();
-                for (const tabId of dragActivatedTabIds) {
-                    getLayoutModelForTabById(tabId)?.activeDrag._set(false);
-                }
-                dragActivatedTabIds.clear();
-            },
+            onDrop: cleanupTileDragState,
         });
+        const onWindowDragEnd = () => {
+            if (dragActivatedTabIds.size > 0) cleanupTileDragState();
+        };
+        const onWindowPointerDown = () => {
+            if (dragActivatedTabIds.size > 0) {
+                // Reaching this net means the drag ended UNOBSERVED (no
+                // monitor onDrop, no window dragend) — log loudly with
+                // each tab's overlay state so field diags can pinpoint
+                // what wedged. (SPEC_PANE_DRAG_TO_TAB addendum A2.)
+                Logger.warn("dnd", "pointerdown net fired — drag ended unobserved", {
+                    activated: [...dragActivatedTabIds],
+                    overlays: tabIds().map((id) => ({
+                        tabId: id,
+                        activeDrag: getLayoutModelForTabById(id)?.activeDrag() ?? null,
+                    })),
+                });
+                cleanupTileDragState();
+            }
+        };
+        window.addEventListener("dragend", onWindowDragEnd);
+        window.addEventListener("pointerdown", onWindowPointerDown, true);
 
         onCleanup(() => {
             cleanupStripDrop();
             cleanupTileMonitor();
+            window.removeEventListener("dragend", onWindowDragEnd);
+            window.removeEventListener("pointerdown", onWindowPointerDown, true);
         });
     });
 

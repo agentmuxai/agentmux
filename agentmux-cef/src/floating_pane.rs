@@ -108,6 +108,21 @@ pub(crate) fn floater_debug_snapshot() -> Vec<(String, isize)> {
         .unwrap_or_default()
 }
 
+/// Resolve a floater's HWND by its window label ("floating-<uuid>").
+///
+/// Floaters are raw `WS_POPUP` HWNDs with the CEF browser embedded as a
+/// child — they have no CEF Views `Window`, so any label-addressed window
+/// operation (focus, opacity) must branch to Win32 via this lookup instead
+/// of `get_window_on_ui` (whose `browser_view.window()` returns None for
+/// floaters and silently no-ops). Spec:
+/// docs/specs/instance-panel-floating-panes.md §2.
+pub(crate) fn floater_hwnd_for_label(label: &str) -> Option<isize> {
+    ACTIVE_FLOATER_HWNDS
+        .lock()
+        .ok()
+        .and_then(|m| m.get(label).map(|(fh, _)| *fh))
+}
+
 /// Return the Win32 window-class name for floating panes, suffixed with
 /// the launcher-supplied `AGENTMUX_IPC_HASH` (= `hash(data_dir, version)`)
 /// so that two parallel AgentMux instances register distinct class atoms

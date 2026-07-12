@@ -132,32 +132,6 @@
         to   { transform: translateX(calc(11.314px / var(--agent-pane-zoom, 1))); }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-        // Keep the marching ants - this is a small (3px), looping, essential
-        // "agent is working" indicator, not large/parallax motion. Just slow
-        // the march so it's gentle when the OS asks for reduced motion, rather
-        // than swapping to a different effect (an opacity breathe reads as a
-        // glow/"aurora", and `animation: none` freezes the stripe = looks
-        // stuck). CEF maps reduced-motion to the Windows "Animation effects"
-        // toggle (SPI_GETCLIENTAREAANIMATION), so machines with it off land
-        // here. On macOS, "Reduce Motion" in System Settings → Accessibility
-        // → Display triggers this branch.
-        // IMPORTANT: also explicitly set animation-iteration-count: infinite.
-        // Chromium internally limits `infinite` animations to a single
-        // iteration when prefers-reduced-motion fires, so without this override
-        // the ants march once (~1.5s), then freeze — the bug reported on macOS
-        // with Reduce Motion on and on Windows with Animation effects off.
-        .agent-pane-progress-bar--active::before {
-            animation-duration: 1.5s;
-            animation-iteration-count: infinite;
-        }
-
-        // (The Working-row shimmer's reduced-motion slowdown is nested inside
-        // its own rule further down — NOT here. A rule in this block has the
-        // same specificity as the shimmer's `animation:` shorthand but
-        // earlier source order, so the shorthand would always win and the
-        // slowdown would silently never apply.)
-    }
 
     // Back-and-forth highlight sweep for .agent-working-shimmer (below).
     // `alternate` on the animation shorthand does the direction-reversal;
@@ -241,10 +215,6 @@
                     // near the top of the file: it must come after the
                     // `animation:` shorthand above in source order (equal
                     // specificity), or the shorthand's 2.4s always wins.
-                    @media (prefers-reduced-motion: reduce) {
-                        animation-duration: 4.5s;
-                        animation-iteration-count: infinite;
-                    }
                 }
 
                 // Type-out reveal overlay: opaque white glyphs painted over

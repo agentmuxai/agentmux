@@ -1457,6 +1457,28 @@ impl AppState {
         crate::reducer::count_live_user_windows(&self.host_state.lock())
     }
 
+    /// Labels of registered TAB-pool-side top-level browsers — decided
+    /// PURELY BY TYPE (`BrowserKind::TopLevel { is_pool: true }`), never by
+    /// label prefix, the same doctrine as `count_live_user_windows` above.
+    /// SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11 Residual 1: an
+    /// ADOPTED pool window keeps its foreign `window-{uuid}` label while
+    /// being genuinely pool-side, so any pool enumeration still filtering on
+    /// the `window-pool-` prefix (the pre-adoption shortcut) silently skips
+    /// it — in the quit-drain sweeps that meant Stage 2 could hang on an
+    /// unswept adopted browser. Does NOT include the pane pool
+    /// (`floating-pool-*`, `BrowserKind::Floater`) — pane-pool adoption is
+    /// out of scope; callers that sweep both compose this with the
+    /// `floating-pool-` prefix as before. Single host_state lock.
+    pub fn pool_side_top_level_labels(&self) -> std::collections::HashSet<String> {
+        self.host_state
+            .lock()
+            .browsers
+            .iter()
+            .filter(|(_, h)| matches!(h.kind, BrowserKind::TopLevel { is_pool: true }))
+            .map(|(l, _)| l.clone())
+            .collect()
+    }
+
     /// Reverse lookup: find the label whose cached HWND matches `hwnd`.
     /// Used by the win-event HIDE handler to map an OS-level window hide to a
     /// logical `report_window_closed` call, covering close paths (Alt+F4,
