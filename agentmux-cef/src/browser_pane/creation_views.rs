@@ -440,6 +440,23 @@ pub fn create_browser_pane_view(
         .lock()
         .insert(label.clone(), (rect.x, rect.y, rect.width, rect.height));
 
+    // Seed the wnum map NOW (SetPaneBoundsViewsTask re-writes the confirmed
+    // value later). Without this, the map is empty until the deferred bounds
+    // task runs (up to 5 retries), and a menu opened over the pane in that
+    // window makes `apply_pane_overlay_hole_mask` fail its wnum lookup →
+    // falls back to whole-pane hide with no freeze compensation (reagent P1
+    // on #2098 — reintroduced the "pane blanks under menu" for the
+    // post-creation race). The pre-hide ObjC scan above already resolved the
+    // overlay's windowNumber synchronously; 0 (scan missed) stays unseeded
+    // and the bounds task's highest-wnum fallback fills it in.
+    #[cfg(target_os = "macos")]
+    if overlay_wnum > 0 {
+        state
+            .browser_pane_overlay_wnums
+            .lock()
+            .insert(label.clone(), overlay_wnum);
+    }
+
     // 10. Deferred bounds + show: re-apply set_size / set_position / layout() / set_visible(1)
     //     on the next UI event-loop tick. On macOS the overlay's native NSView is
     //     created asynchronously during add_overlay_view; the first-tick sizing
