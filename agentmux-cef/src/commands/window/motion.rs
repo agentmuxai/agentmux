@@ -392,7 +392,9 @@ pub fn resolve_window_at_cursor(
                             // uses for this HWND.
                             //
                             // window_hwnds maps this HWND to a `window-pool-*`
-                            // label (inserted at promote). Two different windows
+                            // label (inserted at Views window-creation time,
+                            // in on_window_created — before promote, and
+                            // never rewritten by promote itself). Two different windows
                             // wear a pool label, and they need OPPOSITE answers:
                             //
                             //  - A genuine promoted SECONDARY keeps its pool label
