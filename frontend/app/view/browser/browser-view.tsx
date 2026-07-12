@@ -240,7 +240,16 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         });
         return p;
     };
+    // Linux ONLY. Windows punches a SetWindowRgn hole (pane never hides —
+    // nothing to freeze over), and macOS now punches a CALayer hole mask
+    // (ui_tasks/pane_hole_mask.rs) — the pane stays LIVE there, so freezing
+    // is not just useless but actively harmful: the capture forces a
+    // compositor frame on the pane (the visible "jerk"), and the
+    // paint-before-hide wait defers the clip IPC, delaying the mask (the
+    // "menu paints in two parts"). Only Linux still whole-pane-hides and
+    // needs the freeze-frame compensation.
     const freezeGatesOpen = (): boolean =>
+        navigator.userAgent.includes("Linux") &&
         !navigator.userAgent.includes("Windows") &&
         !!placeholderRef &&
         paneCreated() &&

@@ -168,11 +168,21 @@ pub fn apply_pane_overlay_hole_mask(
 
         // 2. Click-through prerequisite: transparent window pixels only pass
         //    events through when the window is non-opaque with a clear
-        //    background. Idempotent; applied on every call.
-        set_bool(overlay_win, sel_set_opaque, 0);
-        let ns_color_cls = objc_getClass(b"NSColor\0".as_ptr() as _);
-        let clear_color = get_id(ns_color_cls, sel_clear_color);
-        set_id(overlay_win, sel_set_bg, clear_color);
+        //    background. Applied ONCE per window — re-setting these forces
+        //    the window server to recomposite the whole window, which showed
+        //    as a flicker on every menu open when this ran unconditionally.
+        {
+            use std::sync::Mutex;
+            static PREPARED: Mutex<Option<std::collections::HashSet<isize>>> = Mutex::new(None);
+            let mut guard = PREPARED.lock().unwrap_or_else(|p| p.into_inner());
+            let prepared = guard.get_or_insert_with(Default::default);
+            if prepared.insert(overlay_wnum) {
+                set_bool(overlay_win, sel_set_opaque, 0);
+                let ns_color_cls = objc_getClass(b"NSColor\0".as_ptr() as _);
+                let clear_color = get_id(ns_color_cls, sel_clear_color);
+                set_id(overlay_win, sel_set_bg, clear_color);
+            }
+        }
 
         if holes.is_empty() {
             // Clear the mask — full pane visible again.
