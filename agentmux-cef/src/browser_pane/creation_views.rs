@@ -482,6 +482,17 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     // pane's current physical on-screen rect.
     #[cfg(target_os = "macos")]
     state.browser_pane_physical_rects.lock().insert(label.to_string(), pane_rect);
+    // macOS visibility is rect-only: overlays no longer hide the pane there —
+    // the hole-punch mask (ui_tasks/pane_hole_mask.rs, applied by
+    // SetPaneOverlayClipViewsTask) handles overlay occlusion while the pane
+    // stays visible. Consulting overlay state here (as compute_pane_visible
+    // does) would wrongly hide the whole pane on a resize that happens while
+    // a menu is open. Known spike gap: a resize/move under a STATIC open
+    // menu leaves the mask holes at their old pane-relative offset until the
+    // next overlay-clip dispatch.
+    #[cfg(target_os = "macos")]
+    let visible = pane_rect.2 > 0 && pane_rect.3 > 0;
+    #[cfg(not(target_os = "macos"))]
     let visible = crate::browser_panes::compute_pane_visible(state, &window_label, pane_rect);
 
     // On macOS, CEF's SetSize/SetPosition are permanent no-ops on NativeWidgetMacNSWindow,
