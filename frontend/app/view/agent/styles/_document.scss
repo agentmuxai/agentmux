@@ -87,11 +87,6 @@
         // rows lose their layout context and tables break.
         width: 100%;
 
-        &:focus {
-            outline: 1px solid var(--accent-color);
-            outline-offset: -1px;
-        }
-
         // Force tables to constrain their layout to the row width.
         // Spec: SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md
         //       §"Tables and rich content"
@@ -134,11 +129,6 @@
         content-visibility: auto;
         contain-intrinsic-size: auto 80px;
         contain: layout style;
-
-        &:focus {
-            outline: 1px solid var(--accent-color);
-            outline-offset: -1px;
-        }
     }
 
     // === New-message enter animation ===
