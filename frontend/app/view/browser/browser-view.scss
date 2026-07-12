@@ -116,13 +116,12 @@
 
 /* Last rendered frame of the native pane, shown while the pane surface is
    airspace-hidden under a DOM overlay (macOS/Linux whole-pane hide — see
-   the freeze-frame block in browser-view.tsx). Fills the placeholder,
-   which is the exact rect the native surface occupied. */
+   the freeze-frame block in browser-view.tsx). Geometry comes inline from
+   freezeStyle() — aligned to the native pane's DPR-rounded physical rect,
+   not this placeholder's fractional CSS box, so the live→snapshot swap
+   doesn't shift content by a subpixel. */
 .browser-freeze-snapshot {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
     object-fit: fill;
     pointer-events: none;
 }

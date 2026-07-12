@@ -267,8 +267,9 @@ pub async fn eval(
     }))
 }
 
-/// `POST /agentmux/browser/screenshot` — capture a PNG of the pane's
-/// rendered viewport. Uses CDP `Page.captureScreenshot`.
+/// `POST /agentmux/browser/screenshot` — capture the pane's rendered
+/// viewport (PNG by default, JPEG on request). Uses CDP
+/// `Page.captureScreenshot`.
 pub async fn screenshot(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -286,14 +287,19 @@ pub async fn screenshot(
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
 
+    let format = match req.format.as_deref() {
+        Some("jpeg") => "jpeg",
+        _ => "png",
+    };
+    let mut params = json!({
+        "format": format,
+        "fromSurface": true,
+    });
+    if format == "jpeg" {
+        params["quality"] = json!(req.quality.unwrap_or(80).min(100));
+    }
     let cap = match cdp
-        .call(
-            "Page.captureScreenshot",
-            json!({
-                "format": "png",
-                "fromSurface": true,
-            }),
-        )
+        .call("Page.captureScreenshot", params)
         .await
     {
         Ok(v) => v,

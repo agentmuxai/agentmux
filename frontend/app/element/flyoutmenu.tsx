@@ -178,6 +178,17 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
                 ref={(el) => { referenceEl = el; }}
                 class="menu-anchor"
                 data-drag-region="false"
+                onPointerDown={() => {
+                    // Pre-warm pane freeze-frames ~100ms before the click
+                    // completes and the menu opens: browser panes capture
+                    // their snapshot now, so the airspace hide (which waits
+                    // for the frame to be painted) releases almost
+                    // immediately when the menu's overlay rect registers.
+                    // See the freeze-frame block in browser-view.tsx.
+                    if (!isOpen()) {
+                        window.dispatchEvent(new CustomEvent("pane-freeze-prewarm"));
+                    }
+                }}
                 onClick={() => onOpenChangeMenu(!isOpen())}
             >
                 {props.children}

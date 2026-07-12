@@ -170,12 +170,97 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     //
     // Windows is excluded: its clip path punches a precise hole and never
     // hides the pane, so there is nothing to freeze over.
+    // Full data URL of the held frame (null = no frame).
     const [freezeSnapshot, setFreezeSnapshot] = createSignal<string | null>(null);
-    // Monotonic guard: bump on every clear so an in-flight capture that
-    // resolves after the menu closed can't resurrect a stale snapshot.
+    // Inline geometry for the <img> — aligned to the native pane's
+    // DPR-rounded physical rect, not the placeholder's fractional CSS box;
+    // a ≤0.5px mismatch shifts content at the live→snapshot swap (visible
+    // as a small jerk).
+    const [freezeStyle, setFreezeStyle] = createSignal<JSX.CSSProperties>({});
+    // Monotonic guard: bumped when a clear fires or a new capture starts,
+    // so a stale in-flight capture can't resurrect an outdated snapshot.
     let freezeToken = 0;
+    // The one in-flight capture, if any — a clip hit that lands while a
+    // prewarm capture is still running must wait on IT, not start a
+    // second capture from scratch (which would forfeit the prewarm head
+    // start entirely).
+    let freezeInflight: Promise<void> | null = null;
+    let freezeClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelFreezeClear = () => {
+        if (freezeClearTimer) {
+            clearTimeout(freezeClearTimer);
+            freezeClearTimer = null;
+        }
+    };
+    const scheduleFreezeClear = (ms: number) => {
+        cancelFreezeClear();
+        freezeClearTimer = setTimeout(() => {
+            freezeClearTimer = null;
+            freezeToken++;
+            setFreezeSnapshot(null);
+        }, ms);
+    };
+    const captureFreezeFrame = (): Promise<void> => {
+        const myToken = ++freezeToken;
+        // JPEG q80, not PNG: encode is 3-5x faster in the renderer and the
+        // payload much smaller. Capture latency directly gates how long
+        // flushClip defers the airspace hide, which in turn is how long
+        // the menu's over-pane portion stays covered by the live pane.
+        const p = invokeBrowserApi<{ png_base64: string }>("screenshot", {
+            block_id: model.blockId,
+            format: "jpeg",
+            quality: 80,
+        })
+            .then(
+                (data) =>
+                    new Promise<void>((resolve) => {
+                        if (myToken !== freezeToken || !data?.png_base64) return resolve();
+                        const pr = paneRect();
+                        const dpr = window.devicePixelRatio || 1;
+                        const box = placeholderRef!.getBoundingClientRect();
+                        setFreezeStyle({
+                            left: `${pr.x / dpr - box.x}px`,
+                            top: `${pr.y / dpr - box.y}px`,
+                            width: `${pr.width / dpr}px`,
+                            height: `${pr.height / dpr}px`,
+                        });
+                        setFreezeSnapshot(`data:image/jpeg;base64,${data.png_base64}`);
+                        // Resolve one frame later so the <img> has actually
+                        // painted before flushClip releases the hide IPC —
+                        // that paint-before-hide ordering is the whole
+                        // anti-flash mechanism.
+                        requestAnimationFrame(() => resolve());
+                    }),
+            )
+            .catch((err) => diag(`[freeze] capture failed: ${err}`));
+        freezeInflight = p;
+        void p.finally(() => {
+            if (freezeInflight === p) freezeInflight = null;
+        });
+        return p;
+    };
+    const freezeGatesOpen = (): boolean =>
+        !navigator.userAgent.includes("Windows") &&
+        !!placeholderRef &&
+        paneCreated() &&
+        !model.closed;
+    // Pre-warm: fired on pointer-down of menu anchors (see FlyoutMenu),
+    // ~100ms before the click completes and the menu opens. By the time
+    // the clip hit arrives the frame is usually already held (or at least
+    // in flight), so the hide releases within a frame or two and the menu
+    // paints in one piece instead of two.
+    const onFreezePrewarm = () => {
+        if (!freezeGatesOpen()) return;
+        cancelFreezeClear();
+        if (!freezeSnapshot() && !freezeInflight) void captureFreezeFrame();
+        // Auto-drop if no overlay actually lands on this pane — a held
+        // frame from an abandoned gesture must not survive to display
+        // stale content minutes later.
+        scheduleFreezeClear(4000);
+    };
     const onOverlayClipChanged = (e: Event) => {
-        if (navigator.userAgent.includes("Windows")) return;
+        if (!freezeGatesOpen()) return;
         const detail = (e as CustomEvent).detail as
             | {
                   rects?: { x: number; y: number; w: number; h: number }[];
@@ -183,8 +268,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
               }
             | undefined;
         const rects = detail?.rects ?? [];
-        if (!placeholderRef || !paneCreated() || model.closed) return;
-        const r = placeholderRef.getBoundingClientRect();
+        const r = placeholderRef!.getBoundingClientRect();
         const hit =
             r.width > 0 &&
             r.height > 0 &&
@@ -195,43 +279,20 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             // Deferred clear: the reshow IPC needs a roundtrip, and once the
             // native pane is visible again it draws OVER the DOM anyway, so a
             // lingering snapshot is invisible — while dropping it instantly
-            // would expose the bare placeholder for the reshow gap. The token
-            // also cancels the clear if the menu reopens within the window,
-            // in which case the still-held frame displays with zero latency.
-            const myToken = ++freezeToken;
-            setTimeout(() => {
-                if (myToken === freezeToken) setFreezeSnapshot(null);
-            }, 250);
+            // would expose the bare placeholder for the reshow gap. A reopen
+            // within the window cancels this and reuses the held frame.
+            scheduleFreezeClear(250);
             return;
         }
-        // Already frozen (or a reopen landed inside the deferred-clear
-        // window) — keep the held frame rather than re-capturing on every
-        // submenu open/close while the same menu session is up.
-        if (freezeSnapshot()) {
-            freezeToken++;
-            return;
-        }
-        const myToken = ++freezeToken;
-        const ready = invokeBrowserApi<{ png_base64: string }>("screenshot", {
-            block_id: model.blockId,
-        })
-            .then(
-                (data) =>
-                    new Promise<void>((resolve) => {
-                        if (myToken !== freezeToken || !data?.png_base64) return resolve();
-                        setFreezeSnapshot(data.png_base64);
-                        // Resolve one frame later so the <img> has actually
-                        // painted before flushClip releases the hide IPC —
-                        // that paint-before-hide ordering is the whole
-                        // anti-flash mechanism.
-                        requestAnimationFrame(() => resolve());
-                    }),
-            )
-            .catch((err) => diag(`[freeze] capture failed: ${err}`));
+        cancelFreezeClear();
+        // Already frozen (held frame from a prewarm or a fast reopen) —
+        // keep it; nothing to wait for.
+        if (freezeSnapshot()) return;
         // Ask flushClip to hold the hide until the frame is painted (it
-        // caps the wait, so a slow capture degrades to the old
-        // hide-then-snapshot behavior rather than blocking the menu).
-        detail?.wait?.(ready);
+        // caps the wait, so a slow capture degrades to hide-then-snapshot
+        // rather than blocking the menu). Reuse an in-flight prewarm
+        // capture when one exists.
+        detail?.wait?.(freezeInflight ?? captureFreezeFrame());
     };
 
     // Native browser-pane HWND settle on a layout change.
@@ -403,9 +464,12 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             positionInterval = setInterval(syncPosition, 200);
         }
         window.addEventListener("pane-overlay-clip-changed", onOverlayClipChanged);
-        onCleanup(() =>
-            window.removeEventListener("pane-overlay-clip-changed", onOverlayClipChanged),
-        );
+        window.addEventListener("pane-freeze-prewarm", onFreezePrewarm);
+        onCleanup(() => {
+            window.removeEventListener("pane-overlay-clip-changed", onOverlayClipChanged);
+            window.removeEventListener("pane-freeze-prewarm", onFreezePrewarm);
+            cancelFreezeClear();
+        });
         // Subscribe to CEF's HTTP Basic/Digest auth challenges. Lives
         // in the view (not the model) because it needs `useModalLayer()`
         // context, which is a SolidJS hook. Phase α of
@@ -627,7 +691,8 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     <img
                         class="browser-freeze-snapshot"
                         alt=""
-                        src={`data:image/png;base64,${freezeSnapshot()}`}
+                        src={freezeSnapshot()!}
+                        style={freezeStyle()}
                     />
                 </Show>
             </div>
