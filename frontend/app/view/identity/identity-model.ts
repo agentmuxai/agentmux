@@ -29,7 +29,7 @@ export interface SecretRef {
     value?: string; // plaintext_dev only
     // keychain only — pointer into the OS secret store. The plaintext is
     // never carried here; resolved backend-side at spawn. See
-    // specs/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+    // specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
     service?: string;
     account?: string;
 }

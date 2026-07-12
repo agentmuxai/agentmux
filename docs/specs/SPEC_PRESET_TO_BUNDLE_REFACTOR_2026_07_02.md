@@ -68,7 +68,7 @@ The proposal's "one real refactor" (§3.3, §7). Today: `instance → identity_b
 ### 3.1 Resolver change (the core)
 
 - `agentmux-srv/src/identity/resolver.rs` — change spawn resolution to read the agent's **directly-bound accounts** (+ accounts referenced by any included Bundle) instead of walking `identity_bundle → bindings`. Enforce "one account per provider" at resolution; a conflict is a surfaced validation error (not a silent pick).
-- Reconcile with `specs/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md` (an Account already carries its own `OAuthConfigDir`, so there's no bundle to provision — log in → Account → bind).
+- Reconcile with `specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md` (an Account already carries its own `OAuthConfigDir`, so there's no bundle to provision — log in → Account → bind).
 
 ### 3.2 Deprecate the identity-bundle App API + UI
 
@@ -151,7 +151,7 @@ Drop the `preset.*` command aliases and any `db_memory_bundles` read-alias once 
 ## Docs to update (across the phases)
 
 - **`CLAUDE.md`** line 29 (`db_memory_bundles, not yet globalized`) → `db_bundles`; line 171 ("Backend names stay `db_memory_bundles` / `bundle_memory_*`") → rewrite to the new names + note "preset" retired in favor of "Bundle". Update the "Not widgets" **Presets** row → **Bundles**.
-- `docs/specs/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md` — reconcile with the composable model (or supersede).
+- `docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md` — reconcile with the composable model (or supersede).
 - Leave historical specs (`SPEC_TRUST_CENTER_*`, older bundle specs) as record.
 
 ## Interaction with the Armory rename (`SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`)

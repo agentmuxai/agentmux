@@ -1,5 +1,7 @@
 # Armory Feature Status — Post-Refactor Audit
 
+> **Archived 2026-07-12.** Superseded — its "gaps still open" finding is stale; PR #2023 (2026-07-08) resolved the remaining catalog gaps it flagged. Consolidated tracking: issue #2024.
+
 **Date:** 2026-07-07
 **Baseline:** `agentmux` `origin/main` @ `43f32ceb` (v0.51.0)
 **Method:** repo history (`git log --grep`), GitHub issues/PRs/discussions (`gh`), and direct source verification of every claim below — no assumption taken from spec/issue prose alone.

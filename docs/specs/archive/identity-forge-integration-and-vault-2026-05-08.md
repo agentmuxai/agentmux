@@ -1,5 +1,7 @@
 # Agent Composition — Identity + Memory + Vault (PR-F / PR-G)
 
+> **Archived 2026-07-12.** Stale — describes the pre-Armory "Forge" two-dropdown Identity/Memory model; that architecture no longer exists. Consolidated tracking: issue #2024.
+
 **Date:** 2026-05-08
 **Author:** AgentA-asaf
 **Issue:** #678 (continued from Phase 1 + Phase 2)

@@ -1,9 +1,11 @@
 # Explainer: The Composable Agent Model & the Agent Pane's Two Icons
 
+> **Archived 2026-07-12.** Historical — all §7 decisions resolved and shipped (single `id-card` "Agent setup" icon, six-primitive model). Still a good plain-language read for the target architecture's rationale. Consolidated tracking: issue #2024.
+
 **Date:** 2026-07-02
 **Author:** Agent1
 **Purpose:** Explain the composable agent model (what replaces "preset") in plain terms, connect it to what a user actually touches, and record the **agent-pane header decision**: replace the two icons (brain/Memory + id-card/Identity) with a **single `id-card` icon** opening a unified per-agent management modal (Accounts · Memory · MCP · Skills · Briefs · Bundle). See §4.
-**Companion docs:** `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the merged decision), `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (the implementation phases), `docs/specs/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (the umbrella rename).
+**Companion docs:** `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` (the merged decision), `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (the implementation phases), `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (the umbrella rename).
 
 ---
 

@@ -1,5 +1,7 @@
 # SPEC: Trust Center — Unified Memory · Identity · Accounts Hub
 
+> **Archived 2026-07-12.** Historical — describes the original Trust Center pane exactly as it shipped. The pane was renamed Armory (see `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`) and the account/identity model has since moved to direct links (`docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md`). Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-15
 **Status:** Draft — design / plan
 **Author:** Smark
@@ -405,4 +407,4 @@ Per account row, show **which identity bundles bind it**. Query the existing `db
 - Hamburger menu: `frontend/app/window/hamburger-menu.tsx`
 - Singleton modal pattern (to mirror): `frontend/app/modals/bundle-manager-modal.tsx`
 - Block registry: `frontend/app/block/block.tsx:47-61`
-- Prior specs: `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`, `docs/specs/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`
+- Prior specs: `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`, `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`

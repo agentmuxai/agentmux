@@ -100,7 +100,7 @@ See also:
 |---|---|
 | [SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) | Pre-launch OAuth flow |
 | [SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) | Auth state machine |
-| [SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22](SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md) | Identity bundles for multi-account |
+| [SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22](archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md) | Identity bundles for multi-account (archived — see issue #2024) |
 | [SPEC_PROVIDER_PINNED_AUTH_2026_06_05](SPEC_PROVIDER_PINNED_AUTH_2026_06_05.md) | Per-provider pinned credentials |
 
 ## Providers
@@ -135,7 +135,7 @@ See also:
 | [SPEC_MSIX_PACKAGING_2026_05_30](SPEC_MSIX_PACKAGING_2026_05_30.md) | Windows MSIX packaging |
 | [SPEC_MACOS_PACKAGING_2026_05_30](SPEC_MACOS_PACKAGING_2026_05_30.md) | macOS packaging + signing |
 | [SPEC_LOCAL_BUILD_VERSIONING_2026_05_28](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | Local-build version stamps |
-| [SPEC_BUNDLE_MANAGEMENT_2026_05_22](SPEC_BUNDLE_MANAGEMENT_2026_05_22.md) | Bundle lifecycle management |
+| [SPEC_BUNDLE_MANAGEMENT_2026_05_22](archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md) | Bundle lifecycle management (archived — see issue #2024) |
 | [SPEC_PORTABLE_SOURCE_MAPS_2026_06_01](SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md) | Source-map shipping in portable builds |
 
 ## Platform-specific

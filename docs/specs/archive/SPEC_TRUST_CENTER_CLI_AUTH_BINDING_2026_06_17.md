@@ -1,5 +1,7 @@
 # SPEC: Trust Center ↔ CLI-OAuth two-way binding
 
+> **Archived 2026-07-12.** Historical — shipped as specced. Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-17
 **Status:** Draft — implementation (folded into the PR)
 **Scope:** Trust Center Accounts (`frontend/app/view/accounts/**`, `frontend/app/view/identity/identity-model.ts`)

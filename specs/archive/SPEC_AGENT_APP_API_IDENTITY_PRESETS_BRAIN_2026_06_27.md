@@ -1,5 +1,7 @@
 # SPEC: Agent App API — Identity, Presets & Memories Namespaces
 
+> **Archived 2026-07-12.** Historical — `identity.*`/`preset.*`/`memory.*` App API shipped as specced (`preset.*` later renamed `bundle.*`). Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-27  
 **Status:** Draft — open questions resolved  
 **Author:** AgentX  

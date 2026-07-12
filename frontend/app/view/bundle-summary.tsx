@@ -3,7 +3,7 @@
 //
 // BundleSummaryPanel — the read-only summary surface that the
 // agent-settings Identity / Memory tabs now render (PR 5 of
-// docs/specs/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md, §5 decision 3).
+// docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md, §5 decision 3).
 //
 // Before this PR the `view: "identity"` / `view: "memory"` panes
 // rendered the full-CRUD `IdentityManagerBody` / `MemoryManagerBody`.

@@ -277,7 +277,7 @@ declare global {
         accounts?: string;
         /**
          * Forked-from definition id, or empty string for root definitions.
-         * Added in v6. See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+         * Added in v6. See specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
          */
         parent_id?: string;
         /**

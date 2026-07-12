@@ -55,7 +55,7 @@ pub enum SecretRef {
     /// the path stays stable across refreshes. Used by oauth-class
     /// providers; the resolver (PR B) dispatches to a config-dir
     /// env-var injection mode rather than the api-key env-var path.
-    /// See `docs/specs/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`.
+    /// See `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`.
     OAuthConfigDir {
         /// Absolute path to the per-bundle, per-provider config
         /// directory — e.g. `~/.agentmux/shared/identities/<id>/claude/`,
@@ -69,7 +69,7 @@ pub enum SecretRef {
     /// the DB — only this pointer. Written by the Armory key flow
     /// after a successful live validation; resolved to the real value at
     /// agent spawn time via `crate::identity::secret_store`. See
-    /// specs/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+    /// specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
     Keychain {
         /// Keychain service string — always `"agentmux"`.
         service: String,

@@ -1,5 +1,7 @@
 # Memory & Identity Architecture — Simplified Design
 
+> **Archived 2026-07-12.** Superseded by `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` and `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` — its proposed "Presets" naming and identity-bundle options were both resolved differently. Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-19  
 **Status:** Proposal  
 **Author:** Design review after PR #1581 (Trust Center accounts UI) + PRs #1584–#1588 (agent pane modals + native memory backend)
