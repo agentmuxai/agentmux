@@ -277,13 +277,22 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
               }
             | undefined;
         const rects = detail?.rects ?? [];
-        const r = placeholderRef!.getBoundingClientRect();
+        // Hit-test over the SAME rect the host's hide decision uses:
+        // paneRect() (which insets floating-* windows by the edge-resize
+        // border) back-converted to CSS px — NOT the raw placeholder box.
+        // With the raw box, a menu overlapping only the floater's border
+        // strip would freeze a pane the host never hides (reagent P1 on
+        // PR #2098).
+        const pr = paneRect();
+        const dpr = window.devicePixelRatio || 1;
+        const left = pr.x / dpr;
+        const top = pr.y / dpr;
+        const right = (pr.x + pr.width) / dpr;
+        const bottom = (pr.y + pr.height) / dpr;
         const hit =
-            r.width > 0 &&
-            r.height > 0 &&
-            rects.some(
-                (o) => o.x < r.right && o.x + o.w > r.left && o.y < r.bottom && o.y + o.h > r.top,
-            );
+            pr.width > 0 &&
+            pr.height > 0 &&
+            rects.some((o) => o.x < right && o.x + o.w > left && o.y < bottom && o.y + o.h > top);
         if (!hit) {
             // Deferred clear: the reshow IPC needs a roundtrip, and once the
             // native pane is visible again it draws OVER the DOM anyway, so a
