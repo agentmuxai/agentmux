@@ -19,6 +19,9 @@ type SysStats = {
     diskWrite: number;
     netSent: number;
     netRecv: number;
+    pagefileVolumeFreeGb: number | null;
+    pagefileVolumeFreePct: number | null;
+    pagefileSystemManaged: boolean;
 };
 
 function formatMemBytes(gb: number): string {
@@ -46,6 +49,25 @@ function commitColor(used: number, total: number): string {
     const ratio = used / total;
     if (ratio > 0.95) return "var(--error-color)";
     if (ratio > 0.85) return "var(--warning-color)";
+    return "var(--secondary-text-color)";
+}
+
+// SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 — the commit gauge above
+// only sees the SYMPTOM (commit near limit); it's blind to the CAUSE this
+// spec found: a system-managed page file wants to auto-grow toward
+// min(3×RAM, ⅛ volume) but silently can't if the volume it lives on is low
+// on free space, pinning the commit ceiling below what every other gauge
+// assumes. Thresholds match the spec's own numbers: <15% free is its
+// documented "crash risk" line; <8% is the free-space level the spec's
+// source incident actually crashed at (20.1 GB / 446 GB ≈ 4.5%, but 8% is
+// used here as a slightly less alarmist error line — the spec's own
+// worked example put "safe again" at ≥60-80 GB free on a ~450 GB volume,
+// i.e. ~13-18%, so 15%/8% brackets warning vs. already-in-the-danger-zone).
+// A FIXED-size page file isn't gated by free disk this way — never colored.
+function pagefileDiskColor(freePct: number | null, systemManaged: boolean): string {
+    if (freePct == null || !systemManaged) return "var(--secondary-text-color)";
+    if (freePct < 8) return "var(--error-color)";
+    if (freePct < 15) return "var(--warning-color)";
     return "var(--secondary-text-color)";
 }
 
@@ -108,6 +130,9 @@ const SystemStats = (): JSX.Element => {
                     diskWrite: vals["disk:write"] ?? 0,
                     netSent: vals["net:bytessent"] ?? 0,
                     netRecv: vals["net:bytesrecv"] ?? 0,
+                    pagefileVolumeFreeGb: vals["disk:pagefile_volume:free_gb"] ?? null,
+                    pagefileVolumeFreePct: vals["disk:pagefile_volume:free_pct"] ?? null,
+                    pagefileSystemManaged: (vals["disk:pagefile_system_managed"] ?? 0) > 0,
                 });
             },
         });
@@ -168,6 +193,27 @@ const SystemStats = (): JSX.Element => {
                             aria-label="Commit charge"
                         >
                             PF {formatMemBytes(s().commitUsed)}/{formatMemBytes(s().commitTotal)}
+                        </span>
+                    </Show>
+                    {/* SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 §5.2 P0 — surfaces the
+                        CAUSE the PF gauge above can't see: a system-managed page file
+                        that wants to grow but can't because its volume is low on free
+                        space. Only rendered once the backend has a reading (Windows-only
+                        gauge; absent elsewhere). */}
+                    <Show when={s().pagefileVolumeFreePct != null}>
+                        <span class="stat-separator">|</span>
+                        <span
+                            class="stat-mono stat-pagefile-disk"
+                            style={{ color: pagefileDiskColor(s().pagefileVolumeFreePct, s().pagefileSystemManaged) }}
+                            data-tip={
+                                (s().pagefileSystemManaged
+                                    ? "Free space on the page-file volume. Low free space can silently cap how large Windows lets the page file (and therefore the commit limit above) grow. "
+                                    : "Free space on the page-file volume. The page file here is a fixed size, so this isn't a growth-ceiling risk. ") +
+                                (s().pagefileVolumeFreeGb != null ? `${formatMemBytes(s().pagefileVolumeFreeGb!)} free.` : "")
+                            }
+                            aria-label="Page-file volume free disk space"
+                        >
+                            Disk {Math.round(s().pagefileVolumeFreePct!)}%
                         </span>
                     </Show>
                     {/* Network indicator stays mounted even at 0/0 so the user

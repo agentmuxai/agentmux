@@ -122,6 +122,10 @@
         min-width: 16ch; // fits "PF 99.9G/99.9G"
     }
 
+    .stat-pagefile-disk {
+        min-width: 8ch; // fits "Disk 99%"
+    }
+
     .stat-disk {
         min-width: 12ch; // fits "R999M W999M"
     }
