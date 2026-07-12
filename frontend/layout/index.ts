@@ -11,6 +11,7 @@ import {
 } from "./lib/layoutModelHooks";
 import { newLayoutNode } from "./lib/layoutNode";
 import { clearCrossTabDrop, redockDraggedPane } from "./lib/crossTabDrag";
+import { markBlockRecentlyCreated } from "./lib/layoutPersistence";
 import type {
     ContentRenderer,
     LayoutNode,
@@ -43,6 +44,7 @@ export {
     getLayoutModelForTabById,
     LayoutModel,
     LayoutTreeActionType,
+    markBlockRecentlyCreated,
     NavigateDirection,
     newLayoutNode,
     redockDraggedPane,

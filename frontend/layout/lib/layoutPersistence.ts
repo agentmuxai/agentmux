@@ -81,6 +81,34 @@ export function onBackendUpdate(model: LayoutModel) {
     // redock failure path.
 }
 
+// Age-gate registry (review finding on SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
+// PR #2105, P1): createBlock/createBlockSplitHorizontally/createBlockSplit-
+// Vertically (global.ts) insert the new leaf into the local tree
+// SYNCHRONOUSLY via treeReducer, but the block's membership in
+// `tab.blockids` only lands later via an async WaveObject push. Any prune
+// trigger that fires inside that window would see the fresh leaf as
+// "disowned" and delete + persist the deletion — a real, distinct path to
+// the same class of bug pruneDanglingLeaves exists to fix. Call sites for
+// those three functions mark the new block here; pruning skips anything
+// marked within the last RECENT_BLOCK_GRACE_MS.
+const RECENT_BLOCK_GRACE_MS = 3000;
+const recentlyCreatedBlocks = new Map<string, number>();
+
+/** Call immediately after locally inserting a new block's leaf via treeReducer. */
+export function markBlockRecentlyCreated(blockId: string, now: number = Date.now()): void {
+    recentlyCreatedBlocks.set(blockId, now);
+}
+
+function isRecentlyCreated(blockId: string, now: number): boolean {
+    const at = recentlyCreatedBlocks.get(blockId);
+    if (at === undefined) return false;
+    if (now - at > RECENT_BLOCK_GRACE_MS) {
+        recentlyCreatedBlocks.delete(blockId);
+        return false;
+    }
+    return true;
+}
+
 /**
  * Remove leaves whose block is NOT in the tab's `blockids` — dangling
  * references left behind when a frontend's debounced persist clobbers a
@@ -91,9 +119,13 @@ export function onBackendUpdate(model: LayoutModel) {
  * registry breaks — observed as a fully non-responsive tab.
  *
  * Ownership (`Tab.blockids`) is reducer-owned truth, so pruning against
- * it is always safe: this only ever REMOVES leaves for disowned blocks,
- * never touches leaves whose block is owned (a queued insert for a
- * newly-owned block is unaffected — the leaf simply isn't there yet).
+ * it is always safe FOR AN ALREADY-SETTLED leaf: this only ever REMOVES
+ * leaves for disowned blocks. But a block just created via
+ * createBlock/createBlockSplitHorizontally/createBlockSplitVertically is
+ * inserted into the LOCAL tree before its `tab.blockids` membership
+ * round-trips through the backend — such a leaf is age-gated via
+ * `markBlockRecentlyCreated` so this function never deletes it out from
+ * under the user (the round-4-class regression this review caught).
  *
  * Triggers (deliberately sparse — see the round-4 regression note in
  * onBackendUpdate): one-shot at model init (+2s), the tab bar's
@@ -113,10 +145,16 @@ export function pruneDanglingLeaves(model: LayoutModel) {
     // already cleared at drop time) spans the full gesture; the tab bar's
     // end-of-drag cleanup re-runs the prune once the drag has settled.
     if (isTileDragInFlight()) return;
+    const now = Date.now();
     const owned = new Set(tab.blockids);
     const danglingIds: string[] = [];
     walkNodes(rootNode, (node) => {
-        if (!node.children?.length && node.data?.blockId && !owned.has(node.data.blockId)) {
+        if (
+            !node.children?.length &&
+            node.data?.blockId &&
+            !owned.has(node.data.blockId) &&
+            !isRecentlyCreated(node.data.blockId, now)
+        ) {
             danglingIds.push(node.id);
         }
     });

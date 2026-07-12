@@ -10,7 +10,7 @@ import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { findNodeByBlockId, newLayoutNode } from "@/layout/lib/layoutNode";
 import { LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
-import { processPendingBackendActions, pruneDanglingLeaves } from "@/layout/lib/layoutPersistence";
+import { processPendingBackendActions, pruneDanglingLeaves, markBlockRecentlyCreated } from "@/layout/lib/layoutPersistence";
 import type { SignalAtom } from "@/util/util";
 
 // -- Mock store (mirrors layoutModel.test.ts) ----------------------------------
@@ -419,5 +419,55 @@ describe("pruneDanglingLeaves", () => {
         pruneDanglingLeaves(model);
         expect(findBlock(model, "existing")).toBeTruthy();
         expect(findBlock(model, "moved-block")).toBeTruthy();
+    });
+
+    // Review finding on PR #2105 (P1): createBlock/createBlockSplit* insert the
+    // new leaf into the local tree BEFORE tab.blockids catches up. A leaf for a
+    // block marked via markBlockRecentlyCreated must survive a prune that runs
+    // in that window, and must become prunable again once the mark expires.
+    it("does not prune a leaf for a block marked recently created", () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        const freshLeaf = newLayoutNode(undefined, undefined, undefined, { blockId: "fresh-not-yet-owned" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: freshLeaf,
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        markBlockRecentlyCreated("fresh-not-yet-owned", 1_000_000);
+
+        const originalNow = Date.now;
+        Date.now = () => 1_000_500; // 500ms later — well inside the 3s grace window
+        try {
+            pruneDanglingLeaves(model);
+        } finally {
+            Date.now = originalNow;
+        }
+
+        expect(findBlock(model, "fresh-not-yet-owned")).toBeTruthy();
+        expect(findBlock(model, "existing")).toBeTruthy();
+    });
+
+    it("prunes a leaf once its recently-created mark has expired", () => {
+        const model = createLayoutModel();
+        const staleLeaf = newLayoutNode(undefined, undefined, undefined, { blockId: "was-fresh-now-stale" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: staleLeaf,
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        markBlockRecentlyCreated("was-fresh-now-stale", 1_000_000);
+
+        const originalNow = Date.now;
+        Date.now = () => 1_010_000; // 10s later — past the 3s grace window
+        try {
+            pruneDanglingLeaves(model);
+        } finally {
+            Date.now = originalNow;
+        }
+
+        expect(findBlock(model, "was-fresh-now-stale")).toBeFalsy();
     });
 });

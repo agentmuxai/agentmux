@@ -11,6 +11,7 @@ import {
     getLayoutModelForStaticTab,
     LayoutTreeActionType,
     LayoutTreeInsertNodeAction,
+    markBlockRecentlyCreated,
     newLayoutNode,
 } from "@/layout/index";
 import {
@@ -411,6 +412,7 @@ export async function createBlockSplitHorizontally(
         position,
         focused: true,
     };
+    markBlockRecentlyCreated(newBlockId);
     layoutModel.treeReducer(splitAction);
     return newBlockId;
 }
@@ -432,6 +434,7 @@ export async function createBlockSplitVertically(
         position,
         focused: true,
     };
+    markBlockRecentlyCreated(newBlockId);
     layoutModel.treeReducer(splitAction);
     return newBlockId;
 }
@@ -450,6 +453,7 @@ export async function createBlock(blockDef: BlockDef, magnified = false, ephemer
         magnified,
         focused: true,
     };
+    markBlockRecentlyCreated(blockId);
     layoutModel.treeReducer(insertNodeAction);
     return blockId;
 }
