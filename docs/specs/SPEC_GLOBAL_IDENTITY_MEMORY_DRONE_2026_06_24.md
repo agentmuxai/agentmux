@@ -5,7 +5,7 @@
 **Supercedes:** `SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md` (Draft; agent-definition portion already shipped via #1387–#1396)  
 **Related:**
 - `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` — the agent-persistence ship that set the pattern
-- `docs/specs/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`
+- `docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`
 - `agentmux-srv/src/registry/paths.rs` — `resolve_global_shared_root()` and sibling resolvers
 - `agentmux-srv/src/backend/storage/migrations.rs` — current `objects.db` schema
 

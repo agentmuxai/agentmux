@@ -156,7 +156,7 @@ pub const COMMAND_DELETE_IDENTITY_ACCOUNT: &str = "deleteidentityaccount";
 /// key. The plaintext goes to the OS keychain; the DB keeps only a
 /// `SecretRef::Keychain` pointer + masked tail + metadata. Used for both new
 /// accounts and replacing a key on an existing one (via `accountId`).
-/// See specs/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+/// See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
 pub const COMMAND_ACCOUNT_KEY_VERIFY: &str = "account.key.verify";
 /// Armory service OAuth (scaffold — activates once client ids are
 /// provisioned or supplied as BYO). See SPEC_TRUST_CENTER_2026_06_15.md §4.2.

@@ -1,5 +1,7 @@
 # SPEC: Per-Agent Identity Provisioning (separate Claude account per agent)
 
+> **Archived 2026-07-12.** Superseded by `docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md` — the identity-bundle provisioning approach here was replaced by direct Account-to-Agent links. Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-30
 **Status:** Draft — design for the "close the code gap first" path
 **Author:** AgentX

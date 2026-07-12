@@ -1,5 +1,7 @@
 # SPEC — OAuth credentials as first-class identity-bundle members
 
+> **Archived 2026-07-12.** Historical — the `SecretRef::OAuthConfigDir` mechanism it specs shipped and is still live today. Consolidated tracking: issue #2024.
+
 **Date:** 2026-05-22
 **Author:** AgentA
 **Status:** Draft

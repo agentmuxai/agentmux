@@ -1,5 +1,7 @@
 # Spec: OAuth credentials in identity bundles
 
+> **Archived 2026-07-12.** Superseded by `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` — issue #824's own triage found this version wasn't implemented as written; the shipped mechanism matches the newer doc instead. Consolidated tracking: issue #2024.
+
 **Status:** Spec (no implementation yet)
 **Owner:** AgentA
 **Date:** 2026-05-13

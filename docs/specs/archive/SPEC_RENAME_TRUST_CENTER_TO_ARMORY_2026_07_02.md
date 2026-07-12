@@ -1,5 +1,7 @@
 # Spec: Rename "Trust Center" → "Armory" (full migration)
 
+> **Archived 2026-07-12.** Historical — the rename shipped exactly as specced (PR #1917). Consolidated tracking: issue #2024.
+
 **Date:** 2026-07-02
 **Decision:** Name is **Armory** (chosen over Loadout). See `SPEC_TRUST_CENTER_RENAME_2026_07_02.md` for the rationale.
 **Type:** User-facing rename + view-key migration. Behavior-preserving.

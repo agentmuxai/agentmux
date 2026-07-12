@@ -4,7 +4,7 @@
 **Author:** Agent1
 **Status:** Proposal
 **Related:** `agentmux-srv/src/server/app_api/mcp.rs`, `agentmux-srv/src/backend/storage/mcp_servers.rs`, `agentmux-srv/src/backend/agent_config.rs`, `frontend/app/view/mcp/`, `frontend/app/view/agent/agent-mcp-model.ts`, `frontend/app/store/toolchain-capabilities.ts`, `frontend/app/view/accounts/oauth-catalog.ts`
-**Governing context:** `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (MCP Server is a first-class composable-model primitive as of Phase 1, PR #1877), `docs/specs/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` (Armory IA, deferred **Policy** primitive), `docs/specs/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (Armory umbrella)
+**Governing context:** `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` (MCP Server is a first-class composable-model primitive as of Phase 1, PR #1877), `docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` (Armory IA, deferred **Policy** primitive), `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (Armory umbrella)
 
 ---
 
