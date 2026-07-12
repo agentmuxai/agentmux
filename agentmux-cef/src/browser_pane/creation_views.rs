@@ -430,6 +430,33 @@ pub fn create_browser_pane_view(
         "[browser-pane] views: OverlayController stashed in state.browser_pane_overlays"
     );
 
+    // Seed the physical-rect cache with the creation-time rect — see the
+    // doc comment on `AppState::browser_pane_physical_rects` for why this
+    // (not `controller.bounds()`) is the airspace-hide path's source of
+    // truth for this pane's on-screen rect on macOS.
+    #[cfg(target_os = "macos")]
+    state
+        .browser_pane_physical_rects
+        .lock()
+        .insert(label.clone(), (rect.x, rect.y, rect.width, rect.height));
+
+    // Seed the wnum map NOW (SetPaneBoundsViewsTask re-writes the confirmed
+    // value later). Without this, the map is empty until the deferred bounds
+    // task runs (up to 5 retries), and a menu opened over the pane in that
+    // window makes `apply_pane_overlay_hole_mask` fail its wnum lookup →
+    // falls back to whole-pane hide with no freeze compensation (reagent P1
+    // on #2098 — reintroduced the "pane blanks under menu" for the
+    // post-creation race). The pre-hide ObjC scan above already resolved the
+    // overlay's windowNumber synchronously; 0 (scan missed) stays unseeded
+    // and the bounds task's highest-wnum fallback fills it in.
+    #[cfg(target_os = "macos")]
+    if overlay_wnum > 0 {
+        state
+            .browser_pane_overlay_wnums
+            .lock()
+            .insert(label.clone(), overlay_wnum);
+    }
+
     // 10. Deferred bounds + show: re-apply set_size / set_position / layout() / set_visible(1)
     //     on the next UI event-loop tick. On macOS the overlay's native NSView is
     //     created asynchronously during add_overlay_view; the first-tick sizing
@@ -467,6 +494,22 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
         return;
     };
     let pane_rect = (rect.x, rect.y, rect.width, rect.height);
+    // Keep the airspace path's rect source (see `AppState::browser_pane_physical_rects`)
+    // fresh on every resize — this is the only place non-Windows learns the
+    // pane's current physical on-screen rect.
+    #[cfg(target_os = "macos")]
+    state.browser_pane_physical_rects.lock().insert(label.to_string(), pane_rect);
+    // macOS visibility is rect-only: overlays no longer hide the pane there —
+    // the hole-punch mask (ui_tasks/pane_hole_mask.rs, applied by
+    // SetPaneOverlayClipViewsTask) handles overlay occlusion while the pane
+    // stays visible. Consulting overlay state here (as compute_pane_visible
+    // does) would wrongly hide the whole pane on a resize that happens while
+    // a menu is open. Known spike gap: a resize/move under a STATIC open
+    // menu leaves the mask holes at their old pane-relative offset until the
+    // next overlay-clip dispatch.
+    #[cfg(target_os = "macos")]
+    let visible = pane_rect.2 > 0 && pane_rect.3 > 0;
+    #[cfg(not(target_os = "macos"))]
     let visible = crate::browser_panes::compute_pane_visible(state, &window_label, pane_rect);
 
     // On macOS, CEF's SetSize/SetPosition are permanent no-ops on NativeWidgetMacNSWindow,
@@ -475,6 +518,10 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     // NSWindow setFrame: path instead — same as the creation task.
     #[cfg(target_os = "macos")]
     if visible {
+        tracing::debug!(
+            label = %label, window_label = %window_label,
+            "[browser-pane] resize_browser_pane_view: visible=true, scheduling SetPaneBoundsViewsTask (will unconditionally set_visible(1) on execute)"
+        );
         let overlay_wnum = state.browser_pane_overlay_wnums
             .try_lock()
             .and_then(|m| m.get(label).copied())
@@ -497,6 +544,10 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
     #[cfg(target_os = "macos")]
     {
         controller.set_visible(0);
+        tracing::debug!(
+            label = %label, window_label = %window_label,
+            "[browser-pane] resize_browser_pane_view: set_visible(0) (not visible)"
+        );
         return;
     }
 
@@ -556,6 +607,8 @@ pub fn resize_browser_pane_view(state: &Arc<AppState>, label: &str, rect: Rect) 
 /// Must run on the CEF UI thread.
 pub fn detach_browser_pane_view(state: &Arc<AppState>, label: &str) {
     let entry = state.browser_pane_overlays.lock().remove(label);
+    #[cfg(target_os = "macos")]
+    state.browser_pane_physical_rects.lock().remove(label);
     let Some((window_label, controller)) = entry else {
         tracing::debug!(
             label = %label,

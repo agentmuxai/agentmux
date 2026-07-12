@@ -171,6 +171,10 @@ wrap_task! {
                 // passes have completed.
                 if self.retry == 0 {
                     controller.set_visible(1);
+                    tracing::debug!(
+                        label = %self.label, window_label = %self.window_label,
+                        "[browser-pane] SetPaneBoundsViewsTask: unconditional set_visible(1) (retry=0)"
+                    );
                 }
 
                 // Step 2: rescan [NSApp windows] to find the overlay and main window.

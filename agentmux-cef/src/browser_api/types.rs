@@ -113,12 +113,21 @@ pub struct EvalData {
 #[derive(Debug, Deserialize)]
 pub struct ScreenshotReq {
     pub block_id: String,
+    /// "png" (default) or "jpeg". JPEG encodes 3-5x faster in the
+    /// renderer and produces a much smaller payload — the pane
+    /// freeze-frame uses it because capture latency directly gates how
+    /// long the airspace hide is deferred (pane-overlay.ts).
+    #[serde(default)]
+    pub format: Option<String>,
+    /// JPEG quality 0-100 (default 80). Ignored for PNG.
+    #[serde(default)]
+    pub quality: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ScreenshotData {
-    /// Base64-encoded PNG bytes — same format CDP's
-    /// `Page.captureScreenshot` returns.
+    /// Base64-encoded image bytes in the requested format. Field name
+    /// kept from the PNG-only era for wire compatibility.
     pub png_base64: String,
 }
 

@@ -120,6 +120,42 @@ export async function invokeCommand<T = any>(cmd: string, args?: Record<string, 
 }
 
 /**
+ * Call a browser DOM API route (`/agentmux/browser/<path>`) on the host.
+ *
+ * Same server and bearer token as `/ipc`, different envelope: routes
+ * respond `{ ok: true, data }` / `{ ok: false, error }` (SPEC_BROWSER_DOM_API
+ * §5.1) rather than `/ipc`'s `{ success, data, error }`. No retry loop —
+ * callers of these routes (e.g. the pane freeze-frame) are best-effort
+ * and prefer failing fast over stalling.
+ */
+export async function invokeBrowserApi<T = any>(
+    path: string,
+    body: Record<string, any>,
+): Promise<T> {
+    const port = window.__AGENTMUX_IPC_PORT__;
+    const token = window.__AGENTMUX_IPC_TOKEN__;
+    if (!port || !token) {
+        throw new Error("IPC credentials not yet injected by CEF host");
+    }
+    const resp = await fetch(`http://127.0.0.1:${port}/agentmux/browser/${path}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        throw new Error(`browser API HTTP error: ${resp.status} ${resp.statusText}`);
+    }
+    const parsed = await resp.json();
+    if (parsed.ok) {
+        return parsed.data as T;
+    }
+    throw new Error(parsed.error ?? "browser API error");
+}
+
+/**
  * Listen for events from the host.
  *
  * In CEF: listens for CustomEvents dispatched by the Rust host.

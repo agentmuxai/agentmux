@@ -997,7 +997,9 @@ fn rects_intersect(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
 ///   `display:none` placeholder when the tab is inactive → reports 0×0).
 /// - It does not intersect any registered overlay-clip rect for its window
 ///   (e.g. a hamburger menu, tooltip, modal popover).
-#[cfg(not(target_os = "windows"))]
+// Linux-only since the macOS hole-punch mask (ui_tasks/pane_hole_mask.rs):
+// macOS paths use rect-only visibility and mask overlays instead of hiding.
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 pub fn compute_pane_visible(
     state: &Arc<AppState>,
     window_label: &str,
@@ -1118,22 +1120,104 @@ wrap_task! {
             }
             for (label, controller) in live {
                 use cef::ImplOverlayController;
-                let pb = controller.bounds();
-                let pane_rect = (pb.x, pb.y, pb.width, pb.height);
-                // Shared visibility helper consults BOTH the pane's own rect
-                // (zero → hidden because tab inactive) and the latest
-                // overlay-clip rects published in AppState. Resize path uses
-                // the same helper so both decisions converge.
-                let visible = compute_pane_visible(&self.state, &self.window_label, pane_rect);
-                controller.set_visible(if visible { 1 } else { 0 });
-                tracing::debug!(
-                    label = %label,
-                    window_label = %self.window_label,
-                    visible,
-                    pane_x = pb.x, pane_y = pb.y, pane_w = pb.width, pane_h = pb.height,
-                    overlay_count = self.overlay_rects.len(),
-                    "[pane-airspace] views: applied visibility"
-                );
+                // On macOS, `controller.bounds()` cannot be trusted here — CEF
+                // Views' own set_size/set_position are permanent no-ops on
+                // NativeWidgetMacNSWindow, so bounds() reflects a stale,
+                // wrong-scale (DIP, not physical-px) rect rather than the real
+                // on-screen frame we committed via raw ObjC setFrame:. Using it
+                // made the intersection test silently miss real overlaps —
+                // visible stayed `true` while a DOM menu was drawn on top, so
+                // the pane kept intercepting clicks meant for the DOM even
+                // though it painted correctly underneath. Use the maintained
+                // physical-rect cache instead; see
+                // `AppState::browser_pane_physical_rects`. Fall back to
+                // bounds() if the cache somehow has no entry yet (shouldn't
+                // happen — creation seeds it before any overlay-clip can run).
+                #[cfg(target_os = "macos")]
+                {
+                    let pane_rect = self
+                        .state
+                        .browser_pane_physical_rects
+                        .lock()
+                        .get(&label)
+                        .copied()
+                        .unwrap_or_else(|| {
+                            let pb = controller.bounds();
+                            (pb.x, pb.y, pb.width, pb.height)
+                        });
+                    let (px, py, pw, ph) = pane_rect;
+                    if pw <= 0 || ph <= 0 {
+                        // Tab inactive (placeholder collapsed) — keep hidden.
+                        controller.set_visible(0);
+                        continue;
+                    }
+                    // Hole punch (Windows SetWindowRgn parity): mask out the
+                    // overlay∩pane rects instead of hiding the whole pane. The
+                    // pane stays LIVE and visible around the holes; the DOM
+                    // overlay shows through them, and transparent pixels
+                    // click-through to the main window. Whole-pane hide (and
+                    // the frontend freeze-frame that compensated for it) only
+                    // remains as the fallback when the overlay NSWindow can't
+                    // be found. See ui_tasks/pane_hole_mask.rs.
+                    let holes: Vec<(i32, i32, i32, i32)> = self
+                        .overlay_rects
+                        .iter()
+                        .filter(|or| rects_intersect(**or, pane_rect))
+                        .map(|&(ox, oy, ow, oh)| {
+                            let hx = ox.max(px);
+                            let hy = oy.max(py);
+                            let hr = (ox + ow).min(px + pw);
+                            let hb = (oy + oh).min(py + ph);
+                            (hx, hy, hr - hx, hb - hy)
+                        })
+                        .collect();
+                    let wnum = self
+                        .state
+                        .browser_pane_overlay_wnums
+                        .lock()
+                        .get(&label)
+                        .copied()
+                        .unwrap_or(0);
+                    let masked = crate::ui_tasks::pane_hole_mask::apply_pane_overlay_hole_mask(
+                        wnum, pane_rect, &holes,
+                    );
+                    if masked {
+                        controller.set_visible(1);
+                    } else {
+                        // Fallback: window lookup failed — old whole-pane hide.
+                        let visible = holes.is_empty();
+                        controller.set_visible(if visible { 1 } else { 0 });
+                    }
+                    tracing::debug!(
+                        label = %label,
+                        window_label = %self.window_label,
+                        masked, hole_count = holes.len(),
+                        pane_x = px, pane_y = py, pane_w = pw, pane_h = ph,
+                        overlay_count = self.overlay_rects.len(),
+                        "[pane-airspace] views: applied hole mask"
+                    );
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let pane_rect = {
+                        let pb = controller.bounds();
+                        (pb.x, pb.y, pb.width, pb.height)
+                    };
+                    // Shared visibility helper consults BOTH the pane's own rect
+                    // (zero → hidden because tab inactive) and the latest
+                    // overlay-clip rects published in AppState. Resize path uses
+                    // the same helper so both decisions converge.
+                    let visible = compute_pane_visible(&self.state, &self.window_label, pane_rect);
+                    controller.set_visible(if visible { 1 } else { 0 });
+                    tracing::debug!(
+                        label = %label,
+                        window_label = %self.window_label,
+                        visible,
+                        pane_x = pane_rect.0, pane_y = pane_rect.1, pane_w = pane_rect.2, pane_h = pane_rect.3,
+                        overlay_count = self.overlay_rects.len(),
+                        "[pane-airspace] views: applied visibility"
+                    );
+                }
             }
         }
     }
