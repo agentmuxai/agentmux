@@ -101,7 +101,10 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
         disabled: view.retrying, onClick: on.retry,
     };
     const trustCenter: PaneRowAction = {
-        glyph: "⚙", label: "Armory → Accounts", title: "Open Armory → Accounts", onClick: on.trustCenter,
+        // Same "vault" FontAwesome icon as the widget bar's Armory entry
+        // (agentmux-srv/src/config/widgets.json) and the hamburger menu's
+        // Armory item, instead of a generic gear emoji.
+        icon: "vault", label: "Armory → Accounts", title: "Open Armory → Accounts", onClick: on.trustCenter,
     };
 
     const actions: PaneRowAction[] = [];
@@ -128,7 +131,10 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             actions.push({ ...trustCenter, label: "Armory (switch / upgrade)", primary: true });
             break;
         case "spawn_failure":
-            actions.push({ ...trustCenter, glyph: "🧩", label: "Provider setup", title: "Fix the provider install", primary: true });
+            // Clear `icon` — this isn't an Armory action, so it must NOT
+            // inherit trustCenter's vault icon (icon takes precedence over
+            // glyph in PaneRow's render).
+            actions.push({ ...trustCenter, icon: undefined, glyph: "🧩", label: "Provider setup", title: "Fix the provider install", primary: true });
             break;
         case "rate_limited":
         case "overloaded":
