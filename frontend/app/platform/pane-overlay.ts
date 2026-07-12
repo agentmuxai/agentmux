@@ -64,6 +64,14 @@ function currentWindowLabel(): string {
 // global.
 let clipScheduled = false;
 let lastDispatchedKey = "";
+// Serializes async flushes: a flush may await pane freeze-frames before
+// dispatching the hide IPC (see flushClip), and a second rAF-scheduled
+// flush during that window must not overtake it — out-of-order clip IPCs
+// would let a stale hide clobber a newer clear.
+let flushChain: Promise<void> = Promise.resolve();
+// Upper bound on how long a pending hide waits for pane freeze-frames.
+// A slow or failed capture may only DELAY the hide, never block it.
+const FREEZE_WAIT_CAP_MS = 300;
 
 function rectsKey(rects: readonly OverlayRect[]): string {
     if (rects.length === 0) return "";
@@ -80,11 +88,11 @@ function sendClip(): void {
     // settled state instead of the in-flight one.
     requestAnimationFrame(() => {
         clipScheduled = false;
-        flushClip();
+        flushChain = flushChain.then(() => flushClip()).catch(() => {});
     });
 }
 
-function flushClip(): void {
+async function flushClip(): Promise<void> {
     const rects: OverlayRect[] = [];
     for (const r of overlayRects.values()) rects.push(r);
     for (const r of autoOverlayRects.values()) {
@@ -161,9 +169,6 @@ function flushClip(): void {
     if (sendKey === lastDispatchedKey) return;
     lastDispatchedKey = sendKey;
     const window_label = currentWindowLabel();
-    invokeCommand("browser_panes_set_overlay_clip", { rects: rectsToSend, window_label }).catch(
-        () => {},
-    );
     // Mirror every dispatched clip to the DOM (CSS px, pre-DPR — matching
     // getBoundingClientRect space) so pane views can react locally. On
     // macOS/Linux the host responds to an intersecting clip by hiding the
@@ -172,10 +177,32 @@ function flushClip(): void {
     // freeze-frame of the pane instead of a blank surface. Shares the
     // dedup gates above, so it fires exactly when the host's clip state
     // actually changes.
+    //
+    // ORDER MATTERS: the event fires BEFORE the hide IPC, and handlers may
+    // register readiness promises via `detail.wait(promise)`. When hiding
+    // (intersects), we await those (capped at FREEZE_WAIT_CAP_MS) so each
+    // pane's freeze-frame is painted UNDER the still-visible native pane
+    // before the hide lands — the swap from live pixels to the identical
+    // snapshot is then seamless instead of flashing the bare placeholder
+    // for the length of a screenshot roundtrip. When clearing, no handler
+    // registers a wait and the IPC dispatches immediately.
+    const waits: Promise<unknown>[] = [];
     window.dispatchEvent(
         new CustomEvent("pane-overlay-clip-changed", {
-            detail: { rects: intersects ? rects.slice() : [] },
+            detail: {
+                rects: intersects ? rects.slice() : [],
+                wait: (p: Promise<unknown>) => waits.push(p),
+            },
         }),
+    );
+    if (intersects && waits.length > 0) {
+        await Promise.race([
+            Promise.all(waits).catch(() => {}),
+            new Promise((resolve) => setTimeout(resolve, FREEZE_WAIT_CAP_MS)),
+        ]);
+    }
+    invokeCommand("browser_panes_set_overlay_clip", { rects: rectsToSend, window_label }).catch(
+        () => {},
     );
 }
 

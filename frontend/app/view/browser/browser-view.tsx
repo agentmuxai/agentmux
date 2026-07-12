@@ -176,9 +176,13 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     let freezeToken = 0;
     const onOverlayClipChanged = (e: Event) => {
         if (navigator.userAgent.includes("Windows")) return;
-        const rects =
-            ((e as CustomEvent).detail?.rects as { x: number; y: number; w: number; h: number }[]) ??
-            [];
+        const detail = (e as CustomEvent).detail as
+            | {
+                  rects?: { x: number; y: number; w: number; h: number }[];
+                  wait?: (p: Promise<unknown>) => void;
+              }
+            | undefined;
+        const rects = detail?.rects ?? [];
         if (!placeholderRef || !paneCreated() || model.closed) return;
         const r = placeholderRef.getBoundingClientRect();
         const hit =
@@ -188,20 +192,46 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 (o) => o.x < r.right && o.x + o.w > r.left && o.y < r.bottom && o.y + o.h > r.top,
             );
         if (!hit) {
-            freezeToken++;
-            setFreezeSnapshot(null);
+            // Deferred clear: the reshow IPC needs a roundtrip, and once the
+            // native pane is visible again it draws OVER the DOM anyway, so a
+            // lingering snapshot is invisible — while dropping it instantly
+            // would expose the bare placeholder for the reshow gap. The token
+            // also cancels the clear if the menu reopens within the window,
+            // in which case the still-held frame displays with zero latency.
+            const myToken = ++freezeToken;
+            setTimeout(() => {
+                if (myToken === freezeToken) setFreezeSnapshot(null);
+            }, 250);
             return;
         }
-        // Already frozen — keep the existing frame rather than re-capturing
-        // on every submenu open/close while the same menu session is up.
-        if (freezeSnapshot()) return;
+        // Already frozen (or a reopen landed inside the deferred-clear
+        // window) — keep the held frame rather than re-capturing on every
+        // submenu open/close while the same menu session is up.
+        if (freezeSnapshot()) {
+            freezeToken++;
+            return;
+        }
         const myToken = ++freezeToken;
-        invokeBrowserApi<{ png_base64: string }>("screenshot", { block_id: model.blockId })
-            .then((data) => {
-                if (myToken !== freezeToken || !data?.png_base64) return;
-                setFreezeSnapshot(data.png_base64);
-            })
+        const ready = invokeBrowserApi<{ png_base64: string }>("screenshot", {
+            block_id: model.blockId,
+        })
+            .then(
+                (data) =>
+                    new Promise<void>((resolve) => {
+                        if (myToken !== freezeToken || !data?.png_base64) return resolve();
+                        setFreezeSnapshot(data.png_base64);
+                        // Resolve one frame later so the <img> has actually
+                        // painted before flushClip releases the hide IPC —
+                        // that paint-before-hide ordering is the whole
+                        // anti-flash mechanism.
+                        requestAnimationFrame(() => resolve());
+                    }),
+            )
             .catch((err) => diag(`[freeze] capture failed: ${err}`));
+        // Ask flushClip to hold the hide until the frame is painted (it
+        // caps the wait, so a slow capture degrades to the old
+        // hide-then-snapshot behavior rather than blocking the menu).
+        detail?.wait?.(ready);
     };
 
     // Native browser-pane HWND settle on a layout change.
