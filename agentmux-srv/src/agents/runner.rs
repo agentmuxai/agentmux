@@ -69,12 +69,25 @@ pub enum AgentError {
 }
 
 /// Minimum free system commit (GB) required to admit a new agent spawn. Below
-/// this, launching another `claude.exe` (~0.5–0.7 GB private commit plus tooling
-/// overhead) risks pushing the system commit charge to its limit, where a failed
-/// allocation aborts the CEF host (Chromium OOM). Conservative floor; tune from
-/// measured per-agent `PrivateUsage`. Overridable via
-/// `AGENTMUX_AGENT_COMMIT_RESERVE_GB` (e.g. 0 disables the gate on a host with a
-/// huge page file; higher on a constrained box).
+/// this, launching another `claude.exe` risks pushing the system commit charge
+/// to its limit, where a failed allocation aborts the CEF host (Chromium OOM).
+///
+/// SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29's original P0 called for
+/// re-deriving this reserve from real per-agent `PrivateUsage`, not
+/// `VirtualMemorySize64` — the 6/26 estimate (`SPEC_MEMORY_ANALYSIS_2026_06_26`)
+/// had mistakenly attributed ~10.5 GB of commit to each `claude.exe`, read off
+/// `VirtualMemorySize64` (reserved address space, not commit charge). That
+/// number was never wired into this constant — this file has measured
+/// `2.0 GB` since Pillar 3 shipped (#1853) — but the measurement trail behind
+/// it is worth stating explicitly now that it exists:
+/// `SPEC_MEMORY_COMMIT_ATTRIBUTION_CORRECTION_2026_07_02.md` re-measured a
+/// live `claude.exe`'s actual `PrivateUsage` (Windows' real per-process commit
+/// counter) at ~1.05 GB, corroborated independently by
+/// Resource-Exhaustion-Detector telemetry (0.49–0.67 GB) in the 6/29 spec.
+/// `2.0` GB is ~2x that per-agent figure, a reasonable safety margin for one
+/// additional spawn — no VirtualMemorySize64-derived inflation to correct.
+/// Overridable via `AGENTMUX_AGENT_COMMIT_RESERVE_GB` (e.g. 0 disables the
+/// gate on a host with a huge page file; higher on a constrained box).
 const DEFAULT_AGENT_COMMIT_RESERVE_GB: f64 = 2.0;
 
 fn agent_commit_reserve_gb() -> f64 {
