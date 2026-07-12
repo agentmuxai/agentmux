@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.53.2 — 2026-07-11
+
+- fix(tabbar): cross-tab drag stability (stuck-overlay cleanup, ghost/landing clamp, geometry refresh) + hover strobe
+- fix(instance-panel): floating panes focus on click + inline opacity controls
+- feat(pool): adopt foreign window-{uuid} labels into the warm pool on close (renderer reuse instead of park-and-blank)
+- fix(browser): show the loading brain instead of a blank pane while a page loads
+- feat(launcher): observe-only UI-thread liveness probe (teardown backstop Phase 1)
+- feat(launcher): srv supervision via host recycle — an srv crash no longer kills the session
+
+
 ## 0.53.1 — 2026-07-11
 
 - fix(tabbar): pane drag-to-tab reworked as spring-loaded tabs (real drop targets, switch-on-dwell, in-layout ghost)
