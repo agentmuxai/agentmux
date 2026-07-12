@@ -1155,14 +1155,17 @@ pub fn promote_pool_window(
     // Register the promoted window's outer top-level HWND under its label in the
     // chrome-resolution cache (`window_hwnds`) so the new window's title-bar
     // DRAG / CLOSE / MINIMIZE / MAXIMIZE act on THIS window. Pool windows
-    // otherwise never land in `window_hwnds`: `capture_hwnd_for_label` reads
-    // `host.window_handle()`, which is null for pool windows
-    // (SPEC_POOL_WINDOW_HWND_NULL), so `resolve_window_hwnd` fell back to
-    // `find_own_top_level_window()` (the MAIN window) — which is why dragging the
-    // new window's header moved the original, and close/maximize would hit the
-    // wrong window. `raw_hwnd` is the CefWindow top-level handle (already the
-    // outer HWND), so store it directly; this also overwrites any stale entry
-    // pointing at the off-screen pre-promote pool window.
+    // already land in `window_hwnds` at Views window-creation time
+    // (`AgentMuxWindowDelegate::on_window_created`, widened in the
+    // reproject-drag-hwnd-crosswire fix to cover every registered label,
+    // not just non-pool ones) — this insert is a defensive re-affirmation,
+    // not the sole source of truth it once was. It still matters: it's what
+    // keeps this path correct if that entry was ever evicted between
+    // creation and promote (e.g. a stale-HWND eviction from
+    // `resolve_window_hwnd`'s `IsWindow` liveness check), and it overwrites
+    // any leftover entry pointing at the off-screen pre-promote pool window.
+    // `raw_hwnd` is the CefWindow top-level handle (already the outer HWND),
+    // so store it directly.
     state
         .window_hwnds
         .lock()
