@@ -1188,7 +1188,7 @@ wrap_task! {
                         let visible = holes.is_empty();
                         controller.set_visible(if visible { 1 } else { 0 });
                     }
-                    tracing::info!(
+                    tracing::debug!(
                         label = %label,
                         window_label = %self.window_label,
                         masked, hole_count = holes.len(),

@@ -188,7 +188,7 @@ pub fn apply_pane_overlay_hole_mask(
             // Clear the mask — full pane visible again.
             set_ptr(layer, sel_set_mask, std::ptr::null_mut());
             call_void(overlay_win, sel_invalidate_shadow);
-            tracing::info!(overlay_wnum, "[pane-hole-mask] mask cleared");
+            tracing::debug!(overlay_wnum, "[pane-hole-mask] mask cleared");
             return true;
         }
 
@@ -238,7 +238,7 @@ pub fn apply_pane_overlay_hole_mask(
         CGPathRelease(path); // setPath: copies/retains the path
         set_id(layer, sel_set_mask, mask_layer);
         call_void(overlay_win, sel_invalidate_shadow);
-        tracing::info!(
+        tracing::debug!(
             overlay_wnum,
             hole_count = holes.len(),
             "[pane-hole-mask] mask applied"
