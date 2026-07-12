@@ -3,7 +3,8 @@
 
 import { batch } from "solid-js";
 import { fireAndForget } from "@/util/util";
-import { findNodeByBlockId, newLayoutNode } from "./layoutNode";
+import { isTileDragInFlight } from "./dragInFlight";
+import { findNodeByBlockId, newLayoutNode, walkNodes } from "./layoutNode";
 import { rebuildMinimizedSet } from "./layoutMinimize";
 import {
     LayoutTreeActionType,
@@ -43,6 +44,12 @@ export function initializeFromWaveObject(model: LayoutModel) {
     } else {
         model.updateTree();
     }
+
+    // One-shot startup heal: remove dangling leaves persisted by an earlier
+    // session's races once Tab + LayoutState have both settled. Deliberately
+    // a delayed single pass, not a reactive subscription — see the
+    // onBackendUpdate note below and SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5.
+    setTimeout(() => pruneDanglingLeaves(model), 2000);
 }
 
 /**
@@ -65,6 +72,105 @@ export function onBackendUpdate(model: LayoutModel) {
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
     }
+    // NOTE deliberately NO prune here (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
+    // §3.5): running it reactively on every Tab/LayoutState change made the
+    // Tab object a tracked dependency and could delete a LEGITIMATE
+    // freshly-created leaf whose block hadn't landed in tab.blockids yet
+    // (the round-4 "drops don't stick" regression). Prune triggers are now:
+    // model init (below), the tab bar's post-drag settle pass, and the
+    // redock failure path.
+}
+
+// Age-gate registry (review finding on SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR
+// PR #2105, P1): createBlock/createBlockSplitHorizontally/createBlockSplit-
+// Vertically (global.ts) insert the new leaf into the local tree
+// SYNCHRONOUSLY via treeReducer, but the block's membership in
+// `tab.blockids` only lands later via an async WaveObject push. Any prune
+// trigger that fires inside that window would see the fresh leaf as
+// "disowned" and delete + persist the deletion — a real, distinct path to
+// the same class of bug pruneDanglingLeaves exists to fix. Call sites for
+// those three functions mark the new block here; pruning skips anything
+// marked within the last RECENT_BLOCK_GRACE_MS.
+const RECENT_BLOCK_GRACE_MS = 3000;
+const recentlyCreatedBlocks = new Map<string, number>();
+
+/** Call immediately after locally inserting a new block's leaf via treeReducer. */
+export function markBlockRecentlyCreated(blockId: string, now: number = Date.now()): void {
+    recentlyCreatedBlocks.set(blockId, now);
+}
+
+function isRecentlyCreated(blockId: string, now: number): boolean {
+    const at = recentlyCreatedBlocks.get(blockId);
+    if (at === undefined) return false;
+    if (now - at > RECENT_BLOCK_GRACE_MS) {
+        recentlyCreatedBlocks.delete(blockId);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Remove leaves whose block is NOT in the tab's `blockids` — dangling
+ * references left behind when a frontend's debounced persist clobbers a
+ * queued backend layout action (the stale-tree resurrection issue,
+ * INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08).
+ * A dangling leaf renders a block owned by ANOTHER tab; since every tab
+ * stays mounted, the same block mounts twice and the block-component
+ * registry breaks — observed as a fully non-responsive tab.
+ *
+ * Ownership (`Tab.blockids`) is reducer-owned truth, so pruning against
+ * it is always safe FOR AN ALREADY-SETTLED leaf: this only ever REMOVES
+ * leaves for disowned blocks. But a block just created via
+ * createBlock/createBlockSplitHorizontally/createBlockSplitVertically is
+ * inserted into the LOCAL tree before its `tab.blockids` membership
+ * round-trips through the backend — such a leaf is age-gated via
+ * `markBlockRecentlyCreated` so this function never deletes it out from
+ * under the user (the round-4-class regression this review caught).
+ *
+ * Triggers (deliberately sparse — see the round-4 regression note in
+ * onBackendUpdate): one-shot at model init (+2s), the tab bar's
+ * post-drag settle pass, and the redock failure path. NOT reactive.
+ */
+export function pruneDanglingLeaves(model: LayoutModel) {
+    const rootNode = model.treeState?.rootNode;
+    const tab = model.tabAtom?.();
+    if (!rootNode || !tab?.blockids) return;
+    // Never prune while a pane drag is in flight: MoveBlock's Tab update
+    // can reach this window BEFORE the drag's dragend dispatches (observed
+    // 2ms apart in field logs), and deleting the drag-source leaf mid-drag
+    // unmounts the source element — Chromium then never fires dragend on
+    // it, pragmatic's teardown chain (activeDrag reset and monitor onDrop)
+    // is skipped, and the source tab's overlay wedges at
+    // pointer-events:auto. The flag (NOT currentDragPayload, which is
+    // already cleared at drop time) spans the full gesture; the tab bar's
+    // end-of-drag cleanup re-runs the prune once the drag has settled.
+    if (isTileDragInFlight()) return;
+    const now = Date.now();
+    const owned = new Set(tab.blockids);
+    const danglingIds: string[] = [];
+    walkNodes(rootNode, (node) => {
+        if (
+            !node.children?.length &&
+            node.data?.blockId &&
+            !owned.has(node.data.blockId) &&
+            !isRecentlyCreated(node.data.blockId, now)
+        ) {
+            danglingIds.push(node.id);
+        }
+    });
+    if (!danglingIds.length) return;
+    console.warn("[layout] pruning dangling leaves (blocks not owned by this tab):", danglingIds);
+    for (const nodeId of danglingIds) {
+        model.treeReducer(
+            { type: LayoutTreeActionType.DeleteNode, nodeId } as LayoutTreeDeleteNodeAction,
+            false,
+        );
+    }
+    batch(() => {
+        model.updateTree();
+        model.setter(model.localTreeStateAtom, { ...model.treeState });
+    });
+    model.persistToBackend();
 }
 
 /**
@@ -95,6 +201,8 @@ export async function processPendingBackendActions(model: LayoutModel) {
         model.setter(model.localTreeStateAtom, { ...model.treeState });
     });
     model.persistToBackend();
+    // No prune here — a just-applied queued INSERT's block may not be in the
+    // frontend's tab.blockids yet (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.5).
 }
 
 /**
@@ -293,7 +401,19 @@ export function persistToBackend(model: LayoutModel) {
         waveObj.focusednodeid = model.treeState.focusedNodeId;
         waveObj.magnifiednodeid = model.treeState.magnifiedNodeId;
         waveObj.leaforder = model.treeState.leafOrder;
-        waveObj.pendingbackendactions = model.treeState.pendingBackendActions;
+        // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
+        // the pendingbackendactions queue is BACKEND-owned. Never write our
+        // (often stale) local copy — a debounced persist racing a freshly
+        // queued action used to erase it (the stale-tree resurrection
+        // engine). Instead, carry forward the LIVE queue minus the actions
+        // this model has already processed: ordinary persists preserve
+        // unseen actions verbatim, and post-processing persists still clear
+        // consumed ones.
+        const liveQueue = model.getter(model.waveObjectAtom)?.pendingbackendactions;
+        const unprocessed = liveQueue?.filter(
+            (a) => a.actionid && !model.processedActionIds.has(a.actionid)
+        );
+        waveObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
 
         model.setter(model.waveObjectAtom, waveObj);
         model.persistDebounceTimer = null;

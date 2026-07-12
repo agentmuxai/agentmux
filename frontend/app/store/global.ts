@@ -11,6 +11,7 @@ import {
     getLayoutModelForStaticTab,
     LayoutTreeActionType,
     LayoutTreeInsertNodeAction,
+    markBlockRecentlyCreated,
     newLayoutNode,
 } from "@/layout/index";
 import {
@@ -126,7 +127,13 @@ export const [termRendererAtom, setTermRendererAtom] = createSignal<"webgl" | "d
 export const reducedMotionSetting = createMemo(() => settingsAtom()?.["window:reducedmotion"]);
 export const [reducedMotionSystemPreference, setReducedMotionSystemPreference] = createSignal(false);
 
-export const prefersReducedMotionAtom = createMemo(() => reducedMotionSetting() || reducedMotionSystemPreference());
+// Reduced-motion respect is removed app-wide (product decision,
+// 2026-07-11): OS-level "reduce motion"/disabled-animations settings were
+// silently killing functional motion cues (drag strobes, drop pulses,
+// insertion indicators) that carry meaning rather than decoration. The
+// setting plumbing above is kept so the decision is easy to revisit, but
+// the atom every consumer reads is hard false.
+export const prefersReducedMotionAtom = createMemo(() => false);
 
 export type { BackendStatusState, BackendDeathInfo } from "./backendStatus";
 export { backendStatusAtom, setBackendStatusAtom, backendDeathInfoAtom, setBackendDeathInfoAtom };
@@ -396,6 +403,7 @@ export async function createBlockSplitHorizontally(
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
+    markBlockRecentlyCreated(newBlockId);
     const targetNodeId = layoutModel.getNodeByBlockId(targetBlockId)?.id;
     if (targetNodeId == null) throw new Error(`targetNodeId not found for blockId: ${targetBlockId}`);
     const splitAction: LayoutTreeSplitHorizontalAction = {
@@ -417,6 +425,7 @@ export async function createBlockSplitVertically(
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
+    markBlockRecentlyCreated(newBlockId);
     const targetNodeId = layoutModel.getNodeByBlockId(targetBlockId)?.id;
     if (targetNodeId == null) throw new Error(`targetNodeId not found for blockId: ${targetBlockId}`);
     const splitAction: LayoutTreeSplitVerticalAction = {
@@ -434,6 +443,10 @@ export async function createBlock(blockDef: BlockDef, magnified = false, ephemer
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts);
+    // Mark BEFORE branching — the ephemeral path (below) also inserts this
+    // block into the local tree (via addEphemeralNodeToLayout, later) ahead
+    // of tab.blockids catching up, same race as the non-ephemeral path.
+    markBlockRecentlyCreated(blockId);
     if (ephemeral) {
         layoutModel.newEphemeralNode(blockId);
         return blockId;
@@ -452,6 +465,7 @@ export async function replaceBlock(blockId: string, blockDef: BlockDef, focus: b
     const layoutModel = getLayoutModelForStaticTab();
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const newBlockId = await ObjectService.CreateBlock(blockDef, rtOpts);
+    markBlockRecentlyCreated(newBlockId);
     setTimeout(() => {
         fireAndForget(() => ObjectService.DeleteBlock(blockId));
     }, 300);
@@ -519,7 +533,18 @@ export function registerBlockComponentModel(blockId: string, bcm: BlockComponent
     blockComponentModelMap.set(blockId, bcm);
 }
 
-export function unregisterBlockComponentModel(blockId: string) {
+export function unregisterBlockComponentModel(blockId: string, owner?: BlockComponentModel) {
+    // Owner-checked delete (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.4):
+    // every tab stays mounted, so a block can be transiently mounted twice
+    // (e.g. a dangling layout leaf during a cross-tab move). Registration is
+    // last-writer-wins; without this check the FIRST mount's unmount deletes
+    // the SECOND mount's live registration and tears down its atom cache —
+    // leaving the surviving pane unreachable by focus routing (the
+    // "non-responsive tab"). Callers pass the exact bcm they registered; the
+    // delete only proceeds if that bcm still owns the key.
+    if (owner !== undefined && blockComponentModelMap.get(blockId) !== owner) {
+        return;
+    }
     blockComponentModelMap.delete(blockId);
     cleanupBlockAtomCache(blockId);
 }

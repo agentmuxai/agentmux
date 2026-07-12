@@ -120,10 +120,13 @@
     @media (max-width: calc(#{$w} - 1px)) { @content; }
 }
 
-/// Respect user's `prefers-reduced-motion` setting. Wrap any non-
-/// essential animation in this so motion-sensitive users opt out.
+/// Reduced-motion respect removed app-wide (2026-07-11 product
+/// decision — OS "reduce motion" was killing functional motion cues
+/// like drag strobes and drop indicators). The mixin is kept as a
+/// no-op so call sites compile and the decision is easy to revisit;
+/// the wrapped @content is intentionally never emitted.
 @mixin respect-reduced-motion {
-    @media (prefers-reduced-motion: reduce) {
+    @if false {
         @content;
     }
 }

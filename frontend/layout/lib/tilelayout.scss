@@ -28,6 +28,11 @@
 
     .placeholder-container {
         z-index: var(--zindex-layout-placeholder-container);
+        // The placeholder is purely visual (its children already carry
+        // pointer-events: none) — the CONTAINER must be too. Without this,
+        // any transform bug that leaves it on-screen turns it into a
+        // full-tab click shield (the dead-source-tab incident).
+        pointer-events: none;
     }
 
     .overlay-container {

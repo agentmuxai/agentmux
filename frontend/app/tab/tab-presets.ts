@@ -3,7 +3,7 @@
 
 import { fullConfigAtom, WOS } from "@/app/store/global";
 import { ObjectService } from "@/app/store/services";
-import { getLayoutModelForTabById } from "@/layout/index";
+import { getLayoutModelForTabById, markBlockRecentlyCreated } from "@/layout/index";
 import {
     LayoutTreeActionType,
     type LayoutTreeInsertNodeAction,
@@ -161,6 +161,10 @@ async function createBlockOnModel(
 ): Promise<string> {
     const rtOpts: RuntimeOpts = { termsize: { rows: 25, cols: 80 } };
     const blockId = await ObjectService.CreateBlock(blockDef, rtOpts, expectedTabId);
+    // Same age-gate as global.ts's createBlock/createBlockSplit* — this
+    // path also inserts the fresh block into the local tree ahead of
+    // tab.blockids catching up (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR).
+    markBlockRecentlyCreated(blockId);
 
     if (splitTargetId === null) {
         const action: LayoutTreeInsertNodeAction = {

@@ -442,7 +442,19 @@ export class LayoutModel {
                 const showOverlay = this.showOverlay();
                 if (this.displayContainerRef.current) {
                     const displayBoundingRect = this.displayContainerRef.current.getBoundingClientRect();
-                    const newOverlayOffset = displayBoundingRect.top + 2 * displayBoundingRect.height;
+                    // Park with a LARGE constant floor, never purely
+                    // height-derived: when this memo recomputes while the tab
+                    // is hidden (display:none — e.g. a spring-switched
+                    // cross-tab drag ending in another tab), the rect is all
+                    // zeros and a height-derived offset of 0 parks the
+                    // placeholder-container exactly ON TOP of the tab, where
+                    // it eats every click until the next activeDrag toggle —
+                    // the "dead source tab" of the 2026-07-11 field sessions
+                    // (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR).
+                    const newOverlayOffset = Math.max(
+                        100000,
+                        displayBoundingRect.top + 2 * displayBoundingRect.height
+                    );
                     const newTransform = setTransform(
                         {
                             top: activeDrag || showOverlay ? 0 : newOverlayOffset,
