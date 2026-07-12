@@ -470,22 +470,30 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
         // /proc reads; block_in_place signals the Tokio runtime to keep
         // other tasks (including terminal echo) running on other threads
         // while this thread is occupied — preventing 1Hz echo starvation.
+        //
+        // `get_pagefile_volume_data`'s `GetDiskFreeSpaceExW` call (reagent
+        // P1, PR #2109) is a synchronous Win32 disk I/O syscall — the exact
+        // hazard this block exists to isolate, unlike `get_commit_data`'s
+        // `GlobalMemoryStatusEx` (pure in-memory, no filesystem driver
+        // involved) — so its result is computed here too, alongside the
+        // other blocking OS reads, not in the async section below.
+        let mut pagefile_values = HashMap::new();
         tokio::task::block_in_place(|| {
             sys.refresh_cpu_usage();
             sys.refresh_memory();
             networks.refresh(true);
             disks.refresh(true);
+            get_pagefile_volume_data(&mut pagefile_values);
         });
 
         let now_instant = Instant::now();
         let elapsed_secs = now_instant.duration_since(last_tick).as_secs_f64();
         last_tick = now_instant;
 
-        let mut values = HashMap::new();
+        let mut values = pagefile_values;
         get_cpu_data(&sys, &mut values);
         get_mem_data(&sys, &mut values);
         get_commit_data(&mut values);
-        get_pagefile_volume_data(&mut values);
         net_state.get_net_data(&networks, &mut values);
         get_disk_data(&disks, elapsed_secs, &mut values);
 
