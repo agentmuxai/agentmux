@@ -5,7 +5,7 @@ import { Logger } from "@/util/logger";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { isWindows } from "@/util/platformutil";
-import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import clsx from "clsx";
 import { Tab } from "./tab";
@@ -297,14 +297,6 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
                     : {}),
             } as JSX.CSSProperties}
         >
-            <Show when={isTileDropHover()} keyed>
-                {/* Attention strobe: 10 flashes at 20ms (200ms total),
-                    riding the tab's top edge, fired the instant a pane
-                    hover begins (SPEC_PANE_DRAG_TO_TAB v3 addendum §A1).
-                    `keyed` remounts the element per hover entry so the
-                    one-shot CSS animation restarts every time. */}
-                <div class="tab-drop-strobe" aria-hidden="true" />
-            </Show>
             <Tab
                 id={props.tabId}
                 active={props.isActive}

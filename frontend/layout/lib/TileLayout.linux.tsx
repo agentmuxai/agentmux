@@ -33,6 +33,7 @@ import {
 } from "./types";
 import { determineDropDirection } from "./utils";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
+import { setTileDragInFlight } from "./dragInFlight";
 import {
     clampCrossTabDirection,
     clearCrossTabDrop,
@@ -429,6 +430,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     globalDragNodeId = props.node.id;
                     globalDragLayoutModel = props.layoutModel;
                     globalDragNode = props.node;
+                    setTileDragInFlight(true);
                     clearCrossTabDrop();
                     props.layoutModel.activeDrag._set(true);
                     setIsDragging(true);
@@ -444,6 +446,7 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     globalDragNodeId = null;
                     globalDragLayoutModel = null;
                     globalDragNode = null;
+                    setTileDragInFlight(false);
                     props.layoutModel.activeDrag._set(false);
                     setIsDragging(false);
                     getApi().setJsDragActive(false).catch(() => {});
