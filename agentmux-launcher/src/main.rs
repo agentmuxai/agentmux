@@ -35,6 +35,7 @@ mod ipc;
 mod job_object;
 mod logging;
 mod mem_supervisor;
+mod other_instances;
 mod reducer;
 mod saga;
 mod second_instance;
