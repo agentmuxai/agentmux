@@ -1637,40 +1637,6 @@ impl Store {
         Ok(rows > 0)
     }
 
-    /// Back-fill `db_agent_instances.identity_id` for legacy rows that
-    /// have either the empty string (post-v7 default before the launch
-    /// modal required Identity) or the literal `"blank"` sentinel
-    /// (pre-v8 placeholder for "use ambient creds"). Both shapes map
-    /// to "no Identity bundle assigned" and the OAuth-bundles startup
-    /// migration (PR E, spec §5) routes them to the newly-seeded
-    /// Default bundle so the resolver can inject env vars from the
-    /// captured ambient credentials at the next spawn.
-    ///
-    /// Returns the number of rows touched. Caller must verify that
-    /// `new_identity_id` is a real `db_identity_bundles.id` — this
-    /// method does NOT enforce FK validity (the column has no FK
-    /// constraint per the v7 migration). Mis-use would orphan the
-    /// rows to a non-existent bundle; the OAuth-bundles migration
-    /// guards against this by only calling here when it just upserted
-    /// the bundle row.
-    pub fn instance_backfill_identity_id(
-        &self,
-        new_identity_id: &str,
-    ) -> Result<usize, StoreError> {
-        let rows = {
-            let conn = self.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE db_agent_instances
-                 SET identity_id = ?1
-                 WHERE identity_id = '' OR identity_id = 'blank'",
-                params![new_identity_id],
-            )?
-        };
-        // Backfill the same identity_id on db_agents user-clone rows.
-        self.agents_dual_write_backfill_identity(new_identity_id)?;
-        Ok(rows)
-    }
-
     /// Resolve the agent bindings tied to a block.
     ///
     /// Resolve through `block.meta.agentId` (or legacy

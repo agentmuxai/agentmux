@@ -550,23 +550,6 @@ impl Store {
         Ok(())
     }
 
-    /// Mirror `instance_backfill_identity_id` into `db_agents`. Same
-    /// filter (empty or `"blank"` identity_id) restricted to user-clone
-    /// rows.
-    pub(crate) fn agents_dual_write_backfill_identity(
-        &self,
-        new_identity_id: &str,
-    ) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE db_agents
-             SET identity_id = ?1
-             WHERE is_template = 0 AND (identity_id = '' OR identity_id = 'blank')",
-            params![new_identity_id],
-        )?;
-        Ok(())
-    }
-
     /// Reagent P1 round 4 on #1013 — fold-aware projection key lookup.
     /// Resolves "for an instance with this id, which `db_agents` row
     /// represents it post-create?". Returns `Some((key, is_folded))`:
