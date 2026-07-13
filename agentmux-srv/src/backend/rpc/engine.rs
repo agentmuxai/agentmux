@@ -452,7 +452,12 @@ impl WshRpcEngine {
             let handler_elapsed = handler_start.elapsed();
             let total_elapsed = request_start.elapsed();
 
-            tracing::info!(
+            // debug, not info: fires on every websocket RPC call, of any kind
+            // — ~27% of an unrotated 406 MB launcher-log mirror on a real
+            // machine (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 P1). Default
+            // production filter is info, so this is now suppressed unless
+            // RUST_LOG=debug is set; still there for perf debugging on demand.
+            tracing::debug!(
                 "[rpc-perf] command={} dispatch={:.2}ms handler={:.2}ms total={:.2}ms",
                 command,
                 dispatch_elapsed.as_secs_f64() * 1000.0,

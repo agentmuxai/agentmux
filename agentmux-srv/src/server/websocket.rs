@@ -664,7 +664,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     serde_json::from_value(data).map_err(|e| format!("setmeta: {e}"))?;
                 let oref_str = cmd.oref.to_string();
                 let meta_keys: Vec<&String> = cmd.meta.keys().collect();
-                tracing::info!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
+                // debug, not info: fires on every metadata write (zoom, title,
+                // view-state edits); at info this became a meaningful slice of
+                // an unrotated launcher-log mirror (SPEC_WIN10_PAGEFILE_OOM_
+                // CRASH_2026_06_29 P1). Default production filter is info, so
+                // this is now suppressed unless RUST_LOG=debug is set.
+                tracing::debug!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
                 update_object_meta(&wstore, &oref_str, &cmd.meta)?;
                 // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): the
                 // frontend writes term:zoom via this WebSocket path, not the HTTP
