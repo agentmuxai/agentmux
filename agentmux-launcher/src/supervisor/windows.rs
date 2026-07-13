@@ -10,8 +10,8 @@ use crate::supervisor::{
     HOST_RESTART_BUDGET, HOST_RESTART_WINDOW, SRV_RESTART_BUDGET, SRV_RESTART_WINDOW,
 };
 use crate::{
-    config, data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, saga, srv_spawner,
-    startup_events, state,
+    config, data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, other_instances, saga,
+    srv_spawner, startup_events, state,
 };
 
 /// SPEC_PILLAR1_STEP4 Phase 4 — re-arm the pre-splash for a crash-restart.
@@ -226,6 +226,27 @@ pub(crate) async fn run_windows(
             std::process::exit(2);
         }
     };
+
+    // Task #35 (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md P1) — read-only
+    // detection of other, OLDER AgentMux instances still running (the
+    // scenario that stacks multiple CEF processes' memory/commit-charge
+    // overhead across an upgrade). We only reach this point once we've WON
+    // the single-instance pipe bind above, so we know we're not about to
+    // exit as a forwarded second instance. Detection + logging ONLY — no
+    // prompt, no dialog, no IPC to the other instance beyond the liveness
+    // probe itself; see `other_instances.rs` doc comment for why the
+    // cross-instance-quit half is deliberately out of scope. Spawned as a
+    // detached task so a slow/failed directory walk can never delay this
+    // instance's own startup.
+    {
+        let channels_root = paths.common.home_dir.join("channels");
+        let own_channel = paths.common.channel.clone();
+        let own_version = version.to_string();
+        tokio::spawn(async move {
+            other_instances::log_older_running_instances(&channels_root, &own_channel, &own_version);
+        });
+    }
+
     // Startup telemetry bus: events flow from each startup stage to the splash.
     let (startup_sink, startup_rx) = startup_events::StartupEventSink::new();
 
