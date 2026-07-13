@@ -75,6 +75,14 @@ function viewsEqual(a: LayoutView, b: LayoutView): boolean {
     if (a.window.startIndex !== b.window.startIndex) return false;
     if (a.window.endIndex !== b.window.endIndex) return false;
     if (a.rows.length !== b.rows.length) return false;
+    // reagent (PR #2127): on a scroll-only dispatch whose window happens not
+    // to move (common during smooth/momentum scrolling — scrollTop changes
+    // every RAF tick, the visible index range often doesn't), `a.rows`/
+    // `b.rows` are the SAME cached array reference (see `cachedRows` in
+    // `dispatch()` above) — the elementwise walk below is redundant work on
+    // exactly the long-conversation scroll path task #39 targeted. Short-
+    // circuit on reference equality before paying for it.
+    if (a.rows === b.rows) return true;
     for (let i = 0; i < a.rows.length; i++) {
         const ra = a.rows[i];
         const rb = b.rows[i];
