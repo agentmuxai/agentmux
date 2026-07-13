@@ -4,7 +4,7 @@
 **Status:** Draft
 **Author:** AgentX
 **Related:** `agentmux-mcp/src/main.rs`, `agentmux-srv/src/server/app_api.rs`, `agentmux-srv/src/server/mod.rs` (REST router), `agentmux-srv/src/server/websocket.rs`, `agentmux-srv/src/backend/rpc_types.rs`
-**Predecessor:** [`SPEC_AGENT_APP_API_IDENTITY_PRESETS_BRAIN_2026_06_27.md`](./archive/SPEC_AGENT_APP_API_IDENTITY_PRESETS_BRAIN_2026_06_27.md) (shipped the `identity.*` / `preset.*` / `memory.*` RPC handlers)
+**Predecessor:** [`specs/archive/SPEC_AGENT_APP_API_IDENTITY_PRESETS_BRAIN_2026_06_27.md`](./archive/SPEC_AGENT_APP_API_IDENTITY_PRESETS_BRAIN_2026_06_27.md) (shipped the `identity.*` / `preset.*` / `memory.*` RPC handlers)
 
 ---
 

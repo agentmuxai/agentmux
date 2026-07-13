@@ -4,7 +4,7 @@
 **Status:** Proposal — for discussion (naming + IA decisions needed)
 **Author:** AgentX
 **Driver:** "I'd like a cleaner model… break out skills and MCP into the Trust Center… should we call them bundles? preset bundles? would a preset be a one-stop shop?"
-**Related:** CLAUDE.md "Not widgets" (Identity / Presets); `db_memory_bundles`, `db_identity_bundles`; the per-agent identity provisioning work (`SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`); the agent App API identity/preset/memory handlers.
+**Related:** CLAUDE.md "Not widgets" (Identity / Presets); `db_memory_bundles`, `db_identity_bundles`; the per-agent identity provisioning work (`specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`); the agent App API identity/preset/memory handlers.
 
 ---
 
@@ -114,7 +114,7 @@ Bundle concept exists, the identity-bundle layer is **redundant**:
   object**.
 
 This also **simplifies the in-flight provisioning spec**
-(`SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`): an Account already carries
+(`specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`): an Account already carries
 its own `OAuthConfigDir`, so there is no bundle to provision — log in → get an
 Account → bind it. The resolver change (instance → account directly, instead of
 instance → bundle → binding → account) is the one real refactor; flag it there.
@@ -245,7 +245,7 @@ workspace.
 - **Resolver change:** spawn resolution moves from `instance → identity_bundle →
   binding → account` to `instance/bundle → account` directly (one account per
   provider, enforced at resolve). Reconcile with
-  `SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`.
+  `specs/archive/SPEC_PER_AGENT_IDENTITY_PROVISIONING_2026_06_30.md`.
 - **Compatibility:** keep "preset" / `db_memory_bundles` as a read alias for one
   release; new writes go to Bundles.
 - **App API:** add `mcp.*`, `skill.*`, and `account.*` agent commands paralleling

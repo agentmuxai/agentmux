@@ -3,7 +3,7 @@
 **Date:** 2026-05-14
 **Author:** AgentA
 **Status:** Draft
-**Companion to:** [`SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — that spec covers *where* OAuth tokens are stored and how they refresh. This spec covers *when in the user flow* OAuth happens and how it binds to the agent.
+**Companion to:** [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — that spec covers *where* OAuth tokens are stored and how they refresh. This spec covers *when in the user flow* OAuth happens and how it binds to the agent.
 
 ---
 
@@ -525,7 +525,7 @@ PRs A–C ship the user-visible feature. D–F harden + clean up.
 
 ## 14. References
 
-- Companion spec: [`SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — token storage + refresh
+- Companion spec: [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — token storage + refresh
 - v7 schema: [PR #746](https://github.com/agentmuxai/agentmux/pull/746) — Identity bundles + Memory
 - Identity pane: [PR #750](https://github.com/agentmuxai/agentmux/pull/750)
 - Launch modal current state: `frontend/app/view/launcher/launcher.tsx`, `frontend/app/view/agent/flows/launch-flow.ts`

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-24  
 **Status:** Proposed  
-**Supercedes:** `SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md` (Draft; agent-definition portion already shipped via #1387–#1396)  
+**Supercedes:** `docs/specs/archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md` (Draft; agent-definition portion already shipped via #1387–#1396)  
 **Related:**
 - `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` — the agent-persistence ship that set the pattern
 - `docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`
@@ -137,7 +137,7 @@ Each version runs its own `agentmux-srv`. They can't share a WPS broker. Use **S
 - On version increment, re-read changed tables and emit the existing WPS events (`identitybundlebindings:changed`, `bundles:changed`, etc.) to this version's renderer.
 - Cost: one SQLite read/sec per running instance. Acceptable.
 
-This is the same approach proposed in `SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md §2.4`.
+This is the same approach proposed in `docs/specs/archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md §2.4`.
 
 ---
 

@@ -64,7 +64,7 @@ Interpolation: support `${env:NAME}` inside `command`/`args`/`env`/`url`/`header
 
 ### 4.2 Secrets via the existing Account primitive, not new plaintext storage
 
-Rather than inventing a parallel secrets store, let an MCP server's `env`/`headers` values reference an **Account** (already a first-class primitive with its own encrypted-at-rest credential handling per `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`) by id: `${account:<id>:token}`. This reuses infrastructure instead of building a second vault, and matches the composable-model philosophy ("reference, don't copy" — `EXPLAINER_COMPOSABLE_MODEL…md` §2).
+Rather than inventing a parallel secrets store, let an MCP server's `env`/`headers` values reference an **Account** (already a first-class primitive with its own encrypted-at-rest credential handling per `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`) by id: `${account:<id>:token}`. This reuses infrastructure instead of building a second vault, and matches the composable-model philosophy ("reference, don't copy" — `EXPLAINER_COMPOSABLE_MODEL…md` §2).
 
 ### 4.3 OAuth for remote (`http`) MCP servers
 
@@ -90,7 +90,7 @@ This is the piece the Ableton pilot is written to prove out end-to-end (§6).
 1. **Read-only display** in the Armory (what does this server actually offer) and in the per-agent MCP tab (what will this agent be able to call) — parity with Cursor's "MCP Tools" panel and Claude's per-connector tool list.
 2. **Per-tool enable/disable**, stored as a new `disabled_tools: string[]` field on the agent↔server bind row (`db_agent_mcp_ref`) — an agent can bind a server but suppress specific tools, same granularity Claude Desktop offers per connector.
 
-Full per-call **approval prompting** (Cursor's "click Run tool to proceed" / Claude's permission dialog) is **out of scope for this spec's Phase A–C** — it is correctly the deferred **Policy** primitive's job (`EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` §7 item 2: "hooks + `.claude/settings.json` permissions... deferred to a later phase"). This spec only prepares the ground: `disabled_tools` and the introspected tool list are exactly the inputs a future Policy primitive needs, so they should land now even though enforcement lands later.
+Full per-call **approval prompting** (Cursor's "click Run tool to proceed" / Claude's permission dialog) is **out of scope for this spec's Phase A–C** — it is correctly the deferred **Policy** primitive's job (`docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md` §7 item 2: "hooks + `.claude/settings.json` permissions... deferred to a later phase"). This spec only prepares the ground: `disabled_tools` and the introspected tool list are exactly the inputs a future Policy primitive needs, so they should land now even though enforcement lands later.
 
 ### 4.6 Catalog / one-click install
 
