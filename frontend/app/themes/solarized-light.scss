@@ -1,0 +1,93 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Solarized Light — Ethan Schoonover's Solarized palette, light mode.
+// One of the most widely-ported terminal/editor color schemes; the base
+// tones (base01-base3) and the 8 accent hues are its well-known published
+// values. The --term-* table below is Solarized's own canonical 16-color
+// ANSI mapping (base03/base02/base2/base3 for black/bright-black/white/
+// bright-white, the 8 accents for the rest) — unlike this file's UI tokens,
+// that exact mapping is Solarized's defining, unchanged-for-over-a-decade
+// signature, so it's reproduced verbatim rather than derived.
+// See docs/specs/SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md.
+
+[data-theme="solarized-light"] {
+    --main-bg-color: #fdf6e3;
+    --panel-bg-color: rgba(88, 110, 117, 0.05);
+    --block-bg-color: rgba(255, 255, 255, 0.5);
+    --block-bg-solid-color: #fdf6e3;
+    --modal-bg-color: #eee8d5;
+
+    --main-text-color: #657b83;
+    --secondary-text-color: #839496;
+    --grey-text-color: #93a1a1;
+
+    --accent-color: #268bd2;
+    --accent-color-rgb: 38, 139, 210;
+    --link-color: #268bd2;
+
+    --border-color: rgba(101, 123, 131, 0.16);
+    --form-element-border-color: rgba(101, 123, 131, 0.2);
+    --keybinding-border-color: rgba(38, 139, 210, 0.28);
+
+    --hover-bg-color: rgba(38, 139, 210, 0.07);
+    --highlight-bg-color: rgba(38, 139, 210, 0.14);
+    --input-bg-color: rgba(101, 123, 131, 0.09);
+
+    --tab-strip-bg: rgba(101, 123, 131, 0.045);
+    --status-bar-bg: rgba(101, 123, 131, 0.09);
+
+    --error-color: #dc322f;
+    --warning-color: #b58900;
+    --success-color: #859900;
+
+    --error-text-color: var(--error-color);
+    --success-text-color: var(--success-color);
+    --warning-text-color: var(--warning-color);
+
+    --button-grey-bg: rgba(101, 123, 131, 0.06);
+    --button-grey-hover-bg: rgba(38, 139, 210, 0.1);
+    --button-grey-border-color: rgba(101, 123, 131, 0.2);
+    --button-green-bg: #859900;
+    --button-red-bg: #dc322f;
+    --button-yellow-bg: #b58900;
+
+    --scrollbar-thumb-color: rgba(101, 123, 131, 0.28);
+    --scrollbar-thumb-hover-color: rgba(101, 123, 131, 0.45);
+
+    // Solarized's canonical ANSI 16-color table (verbatim — see header).
+    --term-background: #fdf6e3;
+    --term-foreground: #657b83;
+    --term-black: #073642;
+    --term-red: #dc322f;
+    --term-green: #859900;
+    --term-yellow: #b58900;
+    --term-blue: #268bd2;
+    --term-magenta: #d33682;
+    --term-cyan: #2aa198;
+    --term-white: #eee8d5;
+    --term-bright-black: #002b36;
+    --term-bright-red: #cb4b16;
+    --term-bright-green: #586e75;
+    --term-bright-yellow: #657b83;
+    --term-bright-blue: #839496;
+    --term-bright-magenta: #6c71c4;
+    --term-bright-cyan: #93a1a1;
+    --term-bright-white: #fdf6e3;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}

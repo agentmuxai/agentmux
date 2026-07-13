@@ -22,7 +22,7 @@
     flex-shrink: 0;
     font-size: 11px;
     zoom: var(--zoomfactor);
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--status-bar-bg);
     border-top: 1px solid var(--border-color);
     color: var(--secondary-text-color);
     user-select: none;
