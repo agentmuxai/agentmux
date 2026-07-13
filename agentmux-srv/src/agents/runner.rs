@@ -13,10 +13,16 @@
 //! Headless and one-shot by design — the drone Agent block's
 //! contract is "send task, wait for done, return result." The
 //! interactive agent pane has its own PTY-based controller in
-//! `blockcontroller/shell.rs`; that path is NOT routed through
-//! this runner (see `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`
-//! §4.2 — what's shared is the translator + event shape, not the
-//! spawn function).
+//! `blockcontroller/shell/lifecycle.rs`; that path is NOT routed
+//! through this runner's spawn (see
+//! `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` §4.2 — what's
+//! shared is the translator + event shape, not the spawn function).
+//! It DOES reuse this module's commit-aware admission gate
+//! (`admit_spawn` / `agent_commit_reserve_gb`, `pub(crate)`) — see
+//! `blockcontroller::shell::lifecycle::ShellController::start`,
+//! which calls them right before spawning a `claude`/`codex`/
+//! `gemini`/`qwen` interactive pane, mirroring this file's
+//! `run_agent` gate.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -90,7 +96,7 @@ pub enum AgentError {
 /// gate on a host with a huge page file; higher on a constrained box).
 const DEFAULT_AGENT_COMMIT_RESERVE_GB: f64 = 2.0;
 
-fn agent_commit_reserve_gb() -> f64 {
+pub(crate) fn agent_commit_reserve_gb() -> f64 {
     std::env::var("AGENTMUX_AGENT_COMMIT_RESERVE_GB")
         .ok()
         .and_then(|s| s.parse::<f64>().ok())
@@ -102,7 +108,7 @@ fn agent_commit_reserve_gb() -> f64 {
 /// agent? `None` available (non-Windows, or the read failed) ⇒ admit — there's no
 /// cheap commit limit to enforce. Strict `<` so a value exactly at the reserve is
 /// admitted. CEF-free / OS-free so it is fully unit-testable.
-fn admit_spawn(avail_commit_gb: Option<f64>, reserve_gb: f64) -> Result<(), AgentError> {
+pub(crate) fn admit_spawn(avail_commit_gb: Option<f64>, reserve_gb: f64) -> Result<(), AgentError> {
     match avail_commit_gb {
         Some(avail) if avail < reserve_gb => {
             Err(AgentError::CommitPressure { avail_gb: avail, reserve_gb })

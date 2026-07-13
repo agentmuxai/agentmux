@@ -323,8 +323,12 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             log("agent", "previous turn complete — send a message to continue");
         }
     } catch (err: any) {
-        log("controller", `resync failed: ${err?.message ?? String(err)}`, "warn");
-        log("agent", "ready — type a message below to start");
+        // Don't follow a real resync failure with the generic "ready" message —
+        // that previously masked every resync error (including the commit-
+        // pressure admission gate's "memory full" refusal) with a misleading
+        // all-clear a line later. Surface the actual failure at "error" so it's
+        // the last, most visible line in the panel.
+        log("controller", `resync failed: ${err?.message ?? String(err)}`, "error");
     }
 
     return "success";
