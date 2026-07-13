@@ -18,7 +18,7 @@
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
+import { pushNotification, setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
 import {
     EditorPaneEvent,
     EditorTab,
@@ -694,6 +694,25 @@ export class EditorViewModel implements ViewModel {
 
     // ── File tree mutations ─────────────────────────────────────────────
 
+    /** Log + surface a file-tree mutation failure as a toast. Every RPC in this
+     *  section previously only console.error'd on failure — from the user's
+     *  perspective a rejected rename/create/delete looked exactly like a
+     *  no-op (the inline input just closes, nothing else happens, no
+     *  explanation). This is the one place all four converge so the fix
+     *  can't be forgotten on the next handler added here. */
+    private reportFileOpError(action: string, e: unknown): void {
+        const message = e instanceof Error ? e.message : String(e);
+        console.error(`[editor] ${action} failed: ${message}`);
+        pushNotification({
+            icon: "fa-triangle-exclamation",
+            title: `${action} failed`,
+            message,
+            timestamp: new Date().toISOString(),
+            type: "error",
+            expiration: Date.now() + 8000,
+        });
+    }
+
     /** Rename a file/folder. Updates open tabs (including children for dirs) and refreshes the tree. */
     async renameFile(path: string, newName: string): Promise<void> {
         try {
@@ -726,7 +745,7 @@ export class EditorViewModel implements ViewModel {
             const parentPath = path.replace(/[/\\][^/\\]*$/, "") || path;
             void this.treeModel.refreshPath(parentPath);
         } catch (e: unknown) {
-            console.error(`[editor] rename failed: ${e instanceof Error ? e.message : String(e)}`);
+            this.reportFileOpError("Rename", e);
         }
     }
 
@@ -758,7 +777,7 @@ export class EditorViewModel implements ViewModel {
                 const entryName = path.split(/[/\\]/).pop() ?? "";
                 this.treeModel.removeEntryOptimistic(parentPath, entryName);
             } catch (e: unknown) {
-                console.error(`[editor] delete failed: ${e instanceof Error ? e.message : String(e)}`);
+                this.reportFileOpError("Delete", e);
             }
         };
 
@@ -777,7 +796,7 @@ export class EditorViewModel implements ViewModel {
             this.treeModel.addEntryOptimistic(parentPath, { name, is_dir: false, is_symlink: false });
             await this.openFilePreview(result.file_path);
         } catch (e: unknown) {
-            console.error(`[editor] create file failed: ${e instanceof Error ? e.message : String(e)}`);
+            this.reportFileOpError("Create file", e);
             throw e;
         }
     }
@@ -788,7 +807,7 @@ export class EditorViewModel implements ViewModel {
             await RpcApi.CreateEditorDirCommand(TabRpcClient, { parent_path: parentPath, name });
             this.treeModel.addEntryOptimistic(parentPath, { name, is_dir: true, is_symlink: false });
         } catch (e: unknown) {
-            console.error(`[editor] create dir failed: ${e instanceof Error ? e.message : String(e)}`);
+            this.reportFileOpError("Create folder", e);
             throw e;
         }
     }
