@@ -16,6 +16,7 @@ pub mod docsite;
 pub mod eventbus;
 pub mod agent_seed;
 pub mod history;
+pub mod skill_seed;
 pub mod lan_discovery;
 pub mod lsp;
 pub mod messagebus;
