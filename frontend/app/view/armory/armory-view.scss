@@ -86,15 +86,13 @@
     }
 }
 
-// Modifier classes give the identity and memory panes their own container
-// context so their child elements can respond to pane-width queries.
-// (The .identity-pane and .memory-view roots are descendants of these
-// containers and can therefore be targeted by @container queries on them.)
-.bundle-manager-pane--identity {
-    container-type: inline-size;
-    container-name: identity-pane;
-}
-
+// Modifier class gives the memory (Bundles) pane its own container
+// context so its child elements can respond to pane-width queries.
+// (The .memory-view root is a descendant of this container and can
+// therefore be targeted by @container queries on it. The former
+// `.bundle-manager-pane--identity` modifier for the Armory "Identities"
+// tab was removed along with that tab — see
+// docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md §1.)
 .bundle-manager-pane--memories {
     container-type: inline-size;
     container-name: memory-pane;

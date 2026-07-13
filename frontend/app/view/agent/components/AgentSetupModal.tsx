@@ -50,7 +50,7 @@ export const AgentSetupModal = (props: AgentSetupModalProps): JSX.Element => {
     // no backend primitive yet; Bundle has its own Armory tab already).
     const tabs: SetupTabDef[] = [
         { id: "accounts", label: "Accounts" },
-        { id: "memory", label: "Memory" },
+        { id: "memory", label: "Memories" },
         { id: "mcp", label: "MCP Servers" },
         { id: "skills", label: "Skills" },
     ];

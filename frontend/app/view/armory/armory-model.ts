@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-export type ArmorySection = "accounts" | "identities" | "brain" | "memories" | "mcp" | "skills";
+export type ArmorySection = "accounts" | "brain" | "skills" | "mcp" | "memories";
 
 export class ArmoryViewModel implements ViewModel {
     viewType = "armory";
