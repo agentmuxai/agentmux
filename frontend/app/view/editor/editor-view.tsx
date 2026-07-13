@@ -603,6 +603,8 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         }
         return [
             { type: "action", label: "Open", onSelect: () => void model.openFile(path) },
+            { type: "action", label: "Open to the Side", onSelect: () => void model.openToTheSide(path) },
+            { type: "action", label: "Open in New Tab", onSelect: () => void model.openInNewTab(path) },
             { type: "separator" },
             { type: "action", label: "Copy Path", onSelect: () => void copyToClipboard(path) },
             { type: "action", label: "Copy Relative Path", onSelect: () => {

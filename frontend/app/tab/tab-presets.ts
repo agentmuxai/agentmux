@@ -73,7 +73,15 @@ function resolveBlockDef(widgetKey: WidgetKey): BlockDef | null {
 // The new tab's WaveObj + LayoutState propagate via subscription after
 // CreateTab returns. Poll briefly for the layout model to be ready
 // rather than racing against the WaveObj queue.
-async function waitForLayoutModel(tabId: string, timeoutMs = 2000): Promise<any | null> {
+//
+// Exported: any caller that creates a block in a freshly-created tab via
+// a raw pane.open (bypassing applyTabPreset's own createBlockOnModel path)
+// needs this same wait first — the backend can create+layout the block
+// successfully with zero errors while the frontend's reactive layout
+// subscription for that tab still isn't wired up yet, so the block never
+// renders. See EditorViewModel.openInNewTab in
+// frontend/view/editor/editor-model.ts.
+export async function waitForLayoutModel(tabId: string, timeoutMs = 2000): Promise<any | null> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
         const tab = WOS.getObjectValue(WOS.makeORef("tab", tabId));
@@ -152,7 +160,21 @@ async function applyNode(
 // to ObjectService.CreateBlock so the server routes it correctly
 // regardless of which tab is currently active (the user can click
 // freely during preset application without scrambling the layout).
-async function createBlockOnModel(
+//
+// Exported: this is the client-side layout-tree mutation path (direct
+// ObjectService.CreateBlock + layoutModel.treeReducer), NOT the backend
+// pane.open RPC's server-driven layout-queue path. The two are NOT
+// equivalent for a brand-new tab — confirmed live: pane.open against a
+// freshly created tab_id succeeds server-side with zero errors ("block
+// created + layout updated" in the srv log) and STILL never renders,
+// because the tab's client-side layoutModel — even once
+// waitForLayoutModel() confirms the object exists — isn't yet
+// subscribed to receive the backend's layout:update WaveObj broadcast
+// for that specific brand-new tab. Going through treeReducer() directly
+// sidesteps that gap entirely (same reactive path applyTabPreset already
+// relies on). See EditorViewModel.openInNewTab in
+// frontend/view/editor/editor-model.ts.
+export async function createBlockOnModel(
     expectedTabId: string,
     layoutModel: any,
     blockDef: BlockDef,
