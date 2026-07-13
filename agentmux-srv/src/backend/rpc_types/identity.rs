@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Identity / account / bundle / binding command payloads (v6 + v7).
+//! Identity / account / agent-identity-link command payloads (v6 + v7).
 //! See specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
 //! Strings use snake_case for cross-language parity with wstore.
 
