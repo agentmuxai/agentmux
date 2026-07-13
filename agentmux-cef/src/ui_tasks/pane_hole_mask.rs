@@ -207,12 +207,6 @@ pub fn apply_pane_overlay_hole_mask(
             tracing::debug!(overlay_wnum, "[pane-hole-mask] mask cleared");
             return true;
         }
-        // Non-empty holes: this window no longer gets ANY mouse events —
-        // AppKit routes them to whatever's behind it instead (the main
-        // window, where the DOM overlay actually lives). See the module
-        // doc comment for why this is window-wide rather than per-hole.
-        set_bool(overlay_win, sel_set_ignores_mouse, 1);
-
         // 3. Build the even-odd path: full bounds + one rect per hole.
         //    Layer coords are points, origin bottom-left (non-flipped view),
         //    while pane/hole rects are physical px with origin top-left.
@@ -258,6 +252,15 @@ pub fn apply_pane_overlay_hole_mask(
         set_ptr(mask_layer, sel_set_path, path);
         CGPathRelease(path); // setPath: copies/retains the path
         set_id(layer, sel_set_mask, mask_layer);
+        // Only NOW, after the mask is actually applied — setting this earlier
+        // (e.g. right after the holes.is_empty() check) would leave the
+        // window permanently click-inert with no visual hole if the
+        // CAShapeLayer allocation above ever failed (reagent P2 on #2130).
+        // AppKit routes every event for this window to whatever's behind it
+        // instead (the main window, where the DOM overlay actually lives).
+        // See the module doc comment for why this is window-wide rather
+        // than per-hole.
+        set_bool(overlay_win, sel_set_ignores_mouse, 1);
         call_void(overlay_win, sel_invalidate_shadow);
         tracing::debug!(
             overlay_wnum,
