@@ -84,6 +84,16 @@ pub fn seed_starter_skills_if_empty(wstore: &Arc<Store>) {
 /// the catalog is already populated — callers (namely
 /// `seed_starter_skills_if_empty`) own that gate. Exposed separately so
 /// tests can exercise idempotency directly.
+///
+/// All-or-nothing: `skill_upsert_unique_global` commits each insert in its
+/// own transaction (it isn't `StoreTx`-composable — see its own doc
+/// comment), so a mid-loop failure can't be rolled back by the database
+/// itself. If any insert fails, this compensates by deleting every skill
+/// already inserted in THIS call before returning the error — otherwise
+/// the catalog would be left non-empty-but-incomplete, and the
+/// empty-catalog gate in `seed_starter_skills_if_empty` would treat that
+/// partial state as "already seeded," permanently stranding it with no
+/// retry path (reagent P2, PR #2141 round 1).
 fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport, StoreError> {
     let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON)
         .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
@@ -93,7 +103,7 @@ fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport, StoreErro
         .unwrap_or_default()
         .as_millis() as i64;
 
-    let mut created = 0usize;
+    let mut inserted_ids: Vec<String> = Vec::with_capacity(manifest.len());
     for entry in &manifest {
         let skill = Skill {
             id: Uuid::new_v4().to_string(),
@@ -106,11 +116,20 @@ fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport, StoreErro
             created_at: now,
             updated_at: now,
         };
-        wstore.skill_upsert_unique_global(&skill)?;
-        created += 1;
+        if let Err(e) = wstore.skill_upsert_unique_global(&skill) {
+            for id in &inserted_ids {
+                if let Err(cleanup_err) = wstore.skill_delete(id) {
+                    tracing::error!(
+                        "skill seed: cleanup after partial failure could not remove {id}: {cleanup_err}"
+                    );
+                }
+            }
+            return Err(e);
+        }
+        inserted_ids.push(skill.id);
     }
 
-    Ok(SkillSeedReport { created })
+    Ok(SkillSeedReport { created: inserted_ids.len() })
 }
 
 #[cfg(test)]
@@ -179,15 +198,18 @@ mod tests {
     }
 
     #[test]
-    fn deleting_all_seeded_skills_does_not_trigger_reseed() {
+    fn deleting_all_seeded_skills_then_calling_again_does_reseed() {
         // Per the design: an empty-catalog gate can't distinguish "never
         // seeded" from "seeded then the user deleted everything on
-        // purpose" — and that's intentional. This test documents the
-        // consequence directly: once seeded-then-cleared, the catalog
-        // looks identical to fresh, so a second call *would* reseed if
-        // invoked again. The one-time nature is enforced by the call site
-        // (startup only), not by this function's own state — this test
-        // exists to make that behavior explicit rather than assumed.
+        // purpose" — that's intentional (see the module doc comment). This
+        // test verifies the actual consequence, not just the intermediate
+        // state: once seeded-then-cleared, the catalog looks identical to
+        // fresh, so a second call to `seed_starter_skills_if_empty` DOES
+        // reseed. In production this never happens — the call site is
+        // startup-only — but this proves the function-level behavior the
+        // module comment claims, rather than asserting only the emptiness
+        // in between and leaving the "would reseed" half unverified
+        // (reagent P2, PR #2141 round 1).
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         seed_starter_skills_if_empty(&wstore);
         assert_eq!(wstore.skill_list_global().unwrap().len(), 6);
@@ -196,5 +218,57 @@ mod tests {
             wstore.skill_delete(&item.skill.id).unwrap();
         }
         assert!(wstore.skill_list_global().unwrap().is_empty());
+
+        seed_starter_skills_if_empty(&wstore);
+        assert_eq!(
+            wstore.skill_list_global().unwrap().len(),
+            6,
+            "an empty catalog is indistinguishable from fresh, so calling the gated entry point again reseeds"
+        );
+    }
+
+    #[test]
+    fn a_failed_insert_rolls_back_the_ones_already_seeded_this_call() {
+        // Reagent P2 (PR #2141 round 1): skill_upsert_unique_global commits
+        // each insert in its own transaction, so a mid-loop failure can't
+        // be rolled back by the database. Simulate that failure mode by
+        // pre-inserting a global skill whose NAME collides with one of the
+        // starter skills (skill_upsert_unique_global rejects duplicate
+        // names) — this forces seed_starter_skills to fail partway through
+        // the manifest, and the catalog must end up back at exactly the
+        // one pre-existing skill, not a stranded partial starter set.
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
+        // "Test-Driven Development" is the second entry in the manifest —
+        // colliding on it guarantees at least one successful insert
+        // (Systematic Debugging) precedes the failure, so the rollback
+        // path actually has something to clean up.
+        let colliding = Skill {
+            id: "pre-existing-collision".to_string(),
+            name: "Test-Driven Development".to_string(),
+            trigger: "already-here".to_string(),
+            skill_type: "prompt".to_string(),
+            description: "Pre-existing skill that collides with a starter skill's name.".to_string(),
+            content: "n/a".to_string(),
+            is_global: true,
+            created_at: now,
+            updated_at: now,
+        };
+        wstore.skill_upsert_unique_global(&colliding).unwrap();
+
+        let result = seed_starter_skills(&wstore);
+        assert!(result.is_err(), "seeding must fail when a name collides");
+
+        let after = wstore.skill_list_global().unwrap();
+        assert_eq!(
+            after.len(),
+            1,
+            "a failed seed must roll back every skill it inserted this call, leaving only the pre-existing one"
+        );
+        assert_eq!(after[0].skill.id, "pre-existing-collision");
     }
 }
