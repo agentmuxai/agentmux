@@ -4,7 +4,13 @@
 // Dracula — purple-forward dark, vibrant palette
 
 [data-theme="dracula"] {
-    --main-bg-color: #282a36;
+    // Alpha-aware (matches theme.scss's :root default) so body's
+    // background — and anything else using this token — stays
+    // translucent when window:transparent/window:blur is on. Reagent P1
+    // on PR #2138: a plain opaque hex here broke transparency for every
+    // named theme once body switched from a hardcoded translucent
+    // literal to reading this token directly.
+    --main-bg-color: rgba(40, 42, 54, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(33, 34, 44, 0.6);
     --block-bg-color: rgba(24, 25, 32, 0.7);
     --block-bg-solid-color: #1e1f29;

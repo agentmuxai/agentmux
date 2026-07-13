@@ -4,7 +4,8 @@
 // Monokai — warm dark, vivid pink/green/yellow palette
 
 [data-theme="monokai"] {
-    --main-bg-color: #272822;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(39, 40, 34, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(36, 37, 31, 0.6);
     --block-bg-color: rgba(26, 27, 22, 0.7);
     --block-bg-solid-color: #1a1b16;
