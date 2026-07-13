@@ -175,15 +175,6 @@ pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 /// the m0013/m0014 backfill migrations.
 pub const COMMAND_LIST_ALL_AGENT_IDENTITIES: &str = "listallagentidentities";
 
-// Identity bundles (v7 — named credential bundles)
-pub const COMMAND_LIST_IDENTITY_BUNDLES: &str = "listidentitybundles";
-pub const COMMAND_GET_IDENTITY_BUNDLE: &str = "getidentitybundle";
-pub const COMMAND_UPSERT_IDENTITY_BUNDLE: &str = "upsertidentitybundle";
-pub const COMMAND_DELETE_IDENTITY_BUNDLE: &str = "deleteidentitybundle";
-pub const COMMAND_BIND_IDENTITY_ACCOUNT: &str = "bindidentityaccount";
-pub const COMMAND_UNBIND_IDENTITY_ACCOUNT: &str = "unbindidentityaccount";
-pub const COMMAND_LIST_IDENTITY_BINDINGS: &str = "listidentitybindings";
-
 // Memory bundles (v7 — agent personality / capability stack)
 pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";

@@ -663,9 +663,7 @@ pub use super::history::AgentHistory;
 pub use super::skills::AgentSkill;
 
 // Identity system types.
-pub use super::identities::{
-    AgentIdentityLink, Identity, IdentityAccount, IdentityBinding, SecretRef,
-};
+pub use super::identities::{AgentIdentityLink, IdentityAccount, SecretRef};
 
 
 

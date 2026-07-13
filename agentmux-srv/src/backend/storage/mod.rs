@@ -29,7 +29,7 @@ pub use cron::CronJob;
 pub use error::StoreError;
 #[allow(unused_imports)]
 pub use history::AgentHistory;
-pub use identities::{AgentIdentityLink, Identity, IdentityAccount, IdentityBinding, SecretRef};
+pub use identities::{AgentIdentityLink, IdentityAccount, SecretRef};
 pub use mcp_servers::McpServer;
 pub use memory_bundles::{format_global_brain_block, Memory};
 pub use skills::{AgentSkill, Skill};

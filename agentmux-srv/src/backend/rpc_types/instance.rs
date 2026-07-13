@@ -26,9 +26,14 @@ pub struct CommandCreateAgentInstanceData {
     pub block_id: String,
     #[serde(default)]
     pub parent_instance_id: String,
-    /// FK to db_identity_bundles. Empty = blank singleton (no env-var
-    /// injection; agent inherits ambient creds). Set by the launch
-    /// modal's Identity dropdown.
+    /// Legacy Identity-bundle id column — `db_identity_bundles` was
+    /// dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
+    /// The launch modal now writes an account_id here instead (see
+    /// agent-model.ts), and this value is used only for opaque
+    /// same-value filtering (`listrecentsessions`/`listnamedagents`'
+    /// `identity_id` param) — display names and credential resolution
+    /// both go through `db_agent_identity_links`/`db_accounts` now.
+    /// Empty = ambient creds (no env-var injection).
     #[serde(default)]
     pub identity_id: String,
     /// FK to db_bundles. Empty = blank singleton. Set by the launch
@@ -67,8 +72,9 @@ pub struct CommandListNamedAgentsData {
 
 /// One row of the launch modal's "Continue agent" dropdown. Joins
 /// `db_agent_instances` with `db_agent_definitions` (for the definition's
-/// display name + provider) and `db_identity_bundles` / `db_bundles`
-/// (for bundle names) so the frontend renders without further lookups.
+/// display name + provider), `db_agent_identity_links`/`db_accounts`
+/// (for the identity display name), and `db_bundles` (for memory bundle
+/// names) so the frontend renders without further lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamedAgentRow {
     pub instance_id: String,
