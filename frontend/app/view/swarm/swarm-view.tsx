@@ -402,10 +402,21 @@ function SubagentRow({
         }
     };
 
+    // Row/group dimming must track the same effective status as the chip
+    // (reagent P2 on #2134) — otherwise a client-side "interrupted" backstop
+    // shows the new chip/dot but the row stays full-opacity, since only a
+    // backend-confirmed sub.status === "abandoned" would dim it directly.
+    const dimVariant = createMemo(() => {
+        const displayStatus = subagentDisplayStatus(sub, parentAgentStatus);
+        if (displayStatus === "interrupted") return "abandoned";
+        if (displayStatus === "idle") return "completed";
+        return "active";
+    });
+
     return (
-        <div class={`swarm-subagent-group swarm-subagent-group--${sub.status}`}>
+        <div class={`swarm-subagent-group swarm-subagent-group--${dimVariant()}`}>
             <div
-                class={`swarm-subagent-row swarm-subagent-row--${sub.status}`}
+                class={`swarm-subagent-row swarm-subagent-row--${dimVariant()}`}
                 onClick={handleToggle}
                 title={displayLabel()}
             >
