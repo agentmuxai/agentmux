@@ -223,6 +223,12 @@
     &--completed {
         opacity: 0.85;
     }
+    // Interrupted (crashed/killed/cut off by a restart), not simply
+    // finished — same dimming as --completed since it's equally terminal,
+    // but the status chip's label/dot carries the actual distinction.
+    &--abandoned {
+        opacity: 0.85;
+    }
 }
 
 .swarm-subagent-row {
@@ -240,6 +246,9 @@
     }
 
     &--completed {
+        opacity: 0.55;
+    }
+    &--abandoned {
         opacity: 0.55;
     }
 
@@ -429,6 +438,15 @@
     &--disconnected {
         background: var(--secondary-text-color);
         opacity: 0.25;
+    }
+    // A subagent that got cut off (crashed/killed/interrupted by a
+    // restart, or a client-side inference that its parent's turn already
+    // ended — see subagentDisplayStatus) rather than genuinely finishing.
+    // Distinct from both --working (no pulse — nothing is happening) and
+    // --error (this isn't necessarily a failure, just incomplete).
+    &--interrupted {
+        background: var(--warning-color, #f5a623);
+        opacity: 0.5;
     }
     // Distinct from --idle: this block has no registered TurnPhase in this
     // renderer (unmounted pane / other workspace) — we genuinely don't know
