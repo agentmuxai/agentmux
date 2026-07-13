@@ -304,7 +304,7 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 | 14 | Rewrite BUILD.md wrong claims (WebView2, NSIS→Inno, React→SolidJS, Node 24, `--fresh`, log paths → point at muxlog) |
 | 15 | Regenerate widget tables in CLAUDE.md + README.md from `widgets.json` (17 widgets, 4 pinned); fix Settings, `AGENTMUX_DEV` bullet, `task test` |
 | 16 | Refresh `docs/README.md` (drop `docs-internal/` ghost, add 12 missing dirs, state the real specs policy: root `specs/` frozen, new specs → `docs/specs/`); regenerate `docs/specs/INDEX.md` (script it from filename dates + Status headers) |
-| 17 | Supersession banners: `SPEC_BACKEND_LIFECYCLE.md`, `SPEC_TRUST_CENTER_2026_06_15.md`, `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR`, `openclaw-agent-runtime.md`, `single-instance-new-window.md`; as-of banner on `ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL` |
+| 17 | Supersession banners: `SPEC_BACKEND_LIFECYCLE.md`, `specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`, `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR`, `openclaw-agent-runtime.md`, `single-instance-new-window.md`; as-of banner on `ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL` |
 | 18 | Re-stamp the 5 implemented-but-"Draft" specs; adopt closed Status vocabulary (`draft/approved/implemented/living/historical/superseded`) + `Superseded-by:` convention for new docs |
 | 19 | VERSION_HISTORY.md tail cleanup (line 1817 stray, line 2443 bump-cli instructions); merge `docs/retros/`→`docs/retro/`, fold singleton dirs |
 

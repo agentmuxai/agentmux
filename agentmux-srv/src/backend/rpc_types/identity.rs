@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Identity / account / bundle / binding command payloads (v6 + v7).
-//! See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+//! See specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
 //! Strings use snake_case for cross-language parity with wstore.
 
 use serde::{Deserialize, Serialize};

@@ -1,5 +1,7 @@
 # SPEC: Trust Center Centered Modals + Identity/Memory Seed
 
+> **Archived 2026-07-12.** Historical — modal-centering refactor + one-time credential/memory seed script, both complete. Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-19  
 **Author:** AgentA  
 **Status:** Draft

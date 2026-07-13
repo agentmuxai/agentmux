@@ -446,7 +446,7 @@ From the user's exact ask, plus the standard spec criteria:
 ## 14. References
 
 - Parent: [`SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) — UX + backend RPCs
-- Companion: [`SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — token persistence/refresh
+- Companion: [`docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md`](archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md) — token persistence/refresh
 - Diagnostic: [`OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md`](OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md) — root cause of the dispatch re-fire bug
 - Resume notes: [`OAUTH_RESUME_AFTER_REBOOT_2026_05_14.md`](OAUTH_RESUME_AFTER_REBOOT_2026_05_14.md) — what's uncommitted on disk
 - Reducer roadmap: master reducer-stack status doc (slice #11 = workflow-run-state; new slice #12 candidate for this work, or we extend the existing PR B-1 slice in place)

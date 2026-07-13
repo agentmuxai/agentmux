@@ -219,7 +219,7 @@ pub enum ResolverError {
 
 /// What kind of credential a provider uses, and how
 /// `inject_identity_env` puts it into the agent's env at spawn time.
-/// Per `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.3.
+/// Per `specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.3.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderClass {
     /// **API-key class.** The binding's `SecretRef` resolves to a

@@ -1,5 +1,7 @@
 # Spec: Toolchain Manager + Trust Center → Widget Panes + In-Use Registry
 
+> **Archived 2026-07-12.** Historical — the Trust Center → pane migration it describes shipped. Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-25
 **Status:** Draft
 **Scope:** Frontend widget registration, ViewModel scaffolding, modal-to-pane migration,

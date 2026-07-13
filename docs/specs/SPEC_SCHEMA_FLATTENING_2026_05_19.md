@@ -9,7 +9,7 @@
   schema; v11 is not reverted, it is collapsed along with v1–v10.
 **Companion docs:**
 - [`AUDIT_SQLITE_SYSTEMS_2026_05_19.md`](./AUDIT_SQLITE_SYSTEMS_2026_05_19.md) — the file inventory this spec builds on.
-- [`SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md`](./SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md) — proposes a 5th file; unaffected by this spec.
+- [`docs/specs/archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md`](./archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md) — proposes a 5th file; unaffected by this spec.
 
 ---
 

@@ -12,7 +12,7 @@ SPDX-License-Identifier: Apache-2.0
 - **Related:**
   - `SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md` — classification (Phase 1/2, shipped #1353+#1464)
   - `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` — recovery banner UI (in progress)
-  - `SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md` — re-auth flow
+  - `docs/specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md` — re-auth flow
 
 ---
 

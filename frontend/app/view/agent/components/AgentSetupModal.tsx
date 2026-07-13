@@ -16,7 +16,7 @@
  * all yet (tracked separately); Bundle already has its own Armory tab.
  *
  * Spec: SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md §3.2b +
- *       EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md §4.
+ *       docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md §4.
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";

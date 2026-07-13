@@ -1,5 +1,7 @@
 # Armory Feature Status — Post-Refactor Audit
 
+> **Archived 2026-07-12.** Superseded — its "gaps still open" finding is stale; PR #2023 (2026-07-08) resolved the remaining catalog gaps it flagged. Consolidated tracking: issue #2024.
+
 **Date:** 2026-07-07
 **Baseline:** `agentmux` `origin/main` @ `43f32ceb` (v0.51.0)
 **Method:** repo history (`git log --grep`), GitHub issues/PRs/discussions (`gh`), and direct source verification of every claim below — no assumption taken from spec/issue prose alone.
@@ -11,7 +13,7 @@
 
 Armory is the rename of the old **Trust Center** nav tab, expanded to be the catalog surface for three previously-inline primitives — MCP servers, Skills, and Presets (renamed **Bundle**) — pulled out of per-agent inline config into standalone, shareable, globally-bindable records. Two overlapping efforts landed in the same window (2026-07-02 → 07-04):
 
-1. **Trust Center → Armory rename** (UI + docs) — `specs/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`
+1. **Trust Center → Armory rename** (UI + docs) — `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`
 2. **Preset → Bundle rename** (App API + UI) — `specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`
 3. **MCP/Skills as first-class primitives** — `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`, executed as a **7-PR plan (A1–A7)** that only ever existed as prose inside PR descriptions, never promoted to a tracked doc until #1960 (see below).
 

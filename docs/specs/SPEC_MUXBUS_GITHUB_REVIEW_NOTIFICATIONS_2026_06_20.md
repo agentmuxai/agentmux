@@ -255,7 +255,7 @@ Actions: `approved`, `changes_requested`, `commented`, `dismissed`.
 
 ## 8. Trust center — not a blocker
 
-The Trust Center redesign (`SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`) is
+The Trust Center redesign (`docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md`) is
 **not required** for this MVP. The accounts gallery tile and `AgentMuxConnectPanel`
 already exist and work correctly once `VITE_MUXBUS_CLIENT_ID` is set (M1).
 
