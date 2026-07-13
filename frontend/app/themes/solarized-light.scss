@@ -18,7 +18,12 @@
     --block-bg-solid-color: #fdf6e3;
     --modal-bg-color: #eee8d5;
 
-    --main-text-color: #657b83;
+    // Darkened from Solarized's canonical base00 (#657b83, still used
+    // verbatim below for --term-foreground) — base00 measures only
+    // ~4.1:1 against --main-bg-color, right at the edge of WCAG AA for
+    // UI body text. This token is app-chrome-only, so it doesn't affect
+    // the terminal's authentic Solarized rendering.
+    --main-text-color: #46555b;
     --secondary-text-color: #839496;
     --grey-text-color: #93a1a1;
 
