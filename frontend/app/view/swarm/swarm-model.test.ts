@@ -339,19 +339,47 @@ describe("stabilizeGroupIdentity", () => {
         stabilizeGroupIdentity(cache, nameChildren);
         expect(cache.size).toBe(2);
         expect(cache.has("wf:shared-id")).toBe(true);
-        expect(cache.has("name:shared-id")).toBe(true);
+        expect(cache.has("name:block-1:shared-id")).toBe(true);
+    });
+
+    it("keeps same-named NameGroups from two different agent blocks as distinct cache entries (reagent P1 on #2123)", () => {
+        // groupIdentityCache/expandedIds are shared across the WHOLE tree
+        // (buildTree() calls groupSubagentsByWorkflow once per block, into
+        // one cache) — a Haiku-generated name like "Code Reviewer" can
+        // plausibly repeat across two unrelated agent panes. Without
+        // parentBlockId in the key, block A's and block B's same-named
+        // groups would stomp each other's identity/expand state.
+        const cache = new Map<string, WorkflowGroup | NameGroup>();
+        const blockAChildren = groupSubagentsByWorkflow([
+            mk({ agent_id: "a1", parent_block_id: "block-A", workflow_id: null, display_name: "Code Reviewer" }),
+            mk({ agent_id: "a2", parent_block_id: "block-A", workflow_id: null, display_name: "Code Reviewer" }),
+        ]);
+        const blockBChildren = groupSubagentsByWorkflow([
+            mk({ agent_id: "b1", parent_block_id: "block-B", workflow_id: null, display_name: "Code Reviewer" }),
+            mk({ agent_id: "b2", parent_block_id: "block-B", workflow_id: null, display_name: "Code Reviewer" }),
+        ]);
+        const stabilizedA = stabilizeGroupIdentity(cache, blockAChildren);
+        const stabilizedB = stabilizeGroupIdentity(cache, blockBChildren);
+        expect(cache.size).toBe(2);
+        expect(stabilizedA[0]).not.toBe(stabilizedB[0]);
+        if (isNameGroup(stabilizedA[0]) && isNameGroup(stabilizedB[0])) {
+            expect(stabilizedA[0].subagents.map((s) => s.agent_id)).toEqual(["a1", "a2"]);
+            expect(stabilizedB[0].subagents.map((s) => s.agent_id)).toEqual(["b1", "b2"]);
+        } else {
+            throw new Error("expected two name groups");
+        }
     });
 });
 
 describe("groupCacheKey", () => {
-    it("namespaces a WorkflowGroup key with 'wf:' and a NameGroup key with 'name:'", () => {
+    it("namespaces a WorkflowGroup key with 'wf:' and a NameGroup key with 'name:<parentBlockId>:'", () => {
         const [wf] = groupSubagentsByWorkflow([mk({ agent_id: "a1", workflow_id: "wf_1" })]).filter(isWorkflowGroup);
         const [ng] = groupSubagentsByWorkflow([
             mk({ agent_id: "a1", workflow_id: null, display_name: "N" }),
             mk({ agent_id: "a2", workflow_id: null, display_name: "N" }),
         ]).filter(isNameGroup);
         expect(groupCacheKey(wf)).toBe("wf:wf_1");
-        expect(groupCacheKey(ng)).toBe("name:N");
+        expect(groupCacheKey(ng)).toBe("name:block-1:N");
     });
 });
 
@@ -386,9 +414,9 @@ describe("pruneGroupIdentityCache", () => {
         stabilizeGroupIdentity(cache, groupB);
         expect(cache.size).toBe(2);
 
-        pruneGroupIdentityCache(cache, new Set(["name:A"]));
+        pruneGroupIdentityCache(cache, new Set(["name:block-1:A"]));
         expect(cache.size).toBe(1);
-        expect(cache.has("name:A")).toBe(true);
-        expect(cache.has("name:B")).toBe(false);
+        expect(cache.has("name:block-1:A")).toBe(true);
+        expect(cache.has("name:block-1:B")).toBe(false);
     });
 });

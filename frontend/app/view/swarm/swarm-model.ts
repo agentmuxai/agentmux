@@ -93,6 +93,17 @@ export interface NameGroup {
      *  a name exists (display_name is null before subagent.GenerateName
      *  resolves), so ungrouped/unnamed subagents never form a NameGroup. */
     name: string;
+    /** Every member's shared parent_block_id — groupSubagentsByWorkflow is
+     *  always called with an already block-filtered subagent list (see
+     *  buildTree()), so this is uniform across the group. Required for
+     *  groupCacheKey: unlike WorkflowGroup's backend-unique workflowId, a
+     *  Haiku-generated display_name can plausibly repeat across two
+     *  unrelated agent panes (e.g. "Code Reviewer" in both), and
+     *  groupIdentityCache/expandedIds are shared across the WHOLE tree —
+     *  without this, two different blocks' same-named groups would stomp
+     *  each other's cached identity and expand/collapse state. Reagent P1
+     *  on PR #2123. */
+    parentBlockId: string;
     subagents: ActiveSubagent[];
     activeCount: number;
     totalCount: number;
@@ -181,6 +192,9 @@ export function groupSubagentsByWorkflow(subagents: ActiveSubagent[]): SwarmChil
         nameGroups.push({
             kind: "nameGroup" as const,
             name,
+            // Uniform across the group — groupSubagentsByWorkflow is always
+            // called with an already block-filtered list (buildTree()).
+            parentBlockId: sorted[0].parent_block_id,
             subagents: sorted,
             activeCount,
             totalCount: sorted.length,
@@ -247,9 +261,18 @@ function shallowEqualGroupContent(a: WorkflowGroup | NameGroup, b: WorkflowGroup
 }
 
 /** Namespaced cache key so a `WorkflowGroup`'s `workflowId` and a
- *  `NameGroup`'s `name` can never collide in the shared identity cache. */
+ *  `NameGroup`'s `name` can never collide in the shared identity cache.
+ *  `NameGroup` additionally scopes by `parentBlockId`: a `workflowId` is
+ *  backend-unique so a bare name would never collide there, but a
+ *  Haiku-generated `display_name` (e.g. "Code Reviewer") can plausibly
+ *  repeat across two unrelated agent panes, and `groupIdentityCache`/
+ *  `expandedIds` are shared across the WHOLE tree (every block) — without
+ *  the block scope, two blocks' same-named groups would stomp each other's
+ *  cached identity and expand/collapse state. Reagent P1 on PR #2123. */
 export function groupCacheKey(child: WorkflowGroup | NameGroup): string {
-    return isWorkflowGroup(child) ? `wf:${child.workflowId}` : `name:${child.name}`;
+    return isWorkflowGroup(child)
+        ? `wf:${child.workflowId}`
+        : `name:${child.parentBlockId}:${child.name}`;
 }
 
 /**
