@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { DocumentNode, ToolLogChunk, ToolNode } from "../../view/agent/types";
+import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode } from "../../view/agent/types";
 import { update } from "./reducer";
-import { initialState, TRUNCATE_GRACE_MS } from "./types";
+import { AgentDocumentState, initialState, TRUNCATE_GRACE_MS } from "./types";
 
 const md = (id: string, content = id): DocumentNode => ({
     type: "markdown",
@@ -34,16 +34,31 @@ const chunk = (
     ...overrides,
 });
 
+const shell = (id: string, overrides: Partial<ShellNode> = {}): ShellNode => ({
+    type: "shell",
+    id,
+    cmd: "echo hi",
+    title: "echo hi",
+    status: "running",
+    spawnedAt: 0,
+    log: { chunks: [], open: true },
+    ...overrides,
+});
+
 /**
- * Build a state with `nodes` AND a matching `nodeIdSet`. Required since
- * issue #728 gap 4 made `nodeIdSet` part of `AgentDocumentState` — bare
- * `{ ...initialState(), nodes: [...] }` would leave the index empty
- * and break dedup invariants.
+ * Build a state with `nodes` AND matching `nodeIdSet` / `nodeIndexById`.
+ * Required since issue #728 gap 4 made `nodeIdSet` part of
+ * `AgentDocumentState` (bare `{ ...initialState(), nodes: [...] }` would
+ * leave the index empty and break dedup invariants), and task #39 added
+ * `nodeIndexById` as the O(1) position index `ToolChunkAppend` /
+ * `ShellChunkAppend` / `ShellStatusUpdate` / `StreamFlush` rely on instead
+ * of scanning `nodes` — same requirement, same reason.
  */
-const seed = (nodes: DocumentNode[]) => ({
+const seed = (nodes: DocumentNode[]): AgentDocumentState => ({
     ...initialState(),
     nodes,
     nodeIdSet: new Set(nodes.map((n) => n.id)),
+    nodeIndexById: new Map(nodes.map((n, i) => [n.id, i])),
 });
 
 describe("agent document reducer", () => {
@@ -1093,6 +1108,149 @@ describe("agent document reducer", () => {
             const oldTool = r.state.nodes.find((n) => n.id === "old-tool") as ToolNode;
             expect(oldTool.status).toBe("canceled");
             expect(r.events.some((e: any) => e.type === "orphans-scrubbed")).toBe(true);
+        });
+    });
+
+    describe("nodeIndexById invariant (task #39)", () => {
+        // The reducer keeps an id->index map in lockstep with `nodes` so
+        // ToolChunkAppend/ShellChunkAppend/ShellStatusUpdate/StreamFlush can
+        // resolve a target in O(1) instead of scanning the whole array on
+        // every streamed chunk. These tests pin the map's correctness across
+        // every command that touches it — a drift here would silently make
+        // chunk-append start dropping/misrouting chunks instead of erroring.
+
+        it("StreamFlush keeps nodeIndexById in sync with appended node positions", () => {
+            const r = update(initialState(), {
+                type: "StreamFlush",
+                newNodes: [md("a"), md("b"), md("c")],
+                updatedNodes: [],
+            });
+            expect(r.state.nodeIndexById.get("a")).toBe(0);
+            expect(r.state.nodeIndexById.get("b")).toBe(1);
+            expect(r.state.nodeIndexById.get("c")).toBe(2);
+            for (const [id, idx] of r.state.nodeIndexById) {
+                expect(r.state.nodes[idx]?.id).toBe(id);
+            }
+        });
+
+        it("StreamFlush collision (in-place update) does not change the index", () => {
+            const s0 = update(initialState(), {
+                type: "StreamFlush",
+                newNodes: [md("a"), md("b")],
+                updatedNodes: [],
+            }).state;
+            const r = update(s0, {
+                type: "StreamFlush",
+                newNodes: [md("a", "v2")], // collides with "a" → in-place update, not append
+                updatedNodes: [],
+            });
+            expect(r.state.nodeIndexById.get("a")).toBe(0);
+            expect(r.state.nodeIndexById.get("b")).toBe(1);
+            expect((r.state.nodes[0] as DocumentNode & { content: string }).content).toBe("v2");
+        });
+
+        it("HistoryLoaded shifts existing indices by the prepended page length", () => {
+            const s0 = seed([md("live-1"), md("live-2")]);
+            const r = update(s0, {
+                type: "HistoryLoaded",
+                nodes: [md("h1"), md("h2"), md("h3")],
+            });
+            expect(r.state.nodeIndexById.get("h1")).toBe(0);
+            expect(r.state.nodeIndexById.get("h2")).toBe(1);
+            expect(r.state.nodeIndexById.get("h3")).toBe(2);
+            expect(r.state.nodeIndexById.get("live-1")).toBe(3);
+            expect(r.state.nodeIndexById.get("live-2")).toBe(4);
+            for (const [id, idx] of r.state.nodeIndexById) {
+                expect(r.state.nodes[idx]?.id).toBe(id);
+            }
+        });
+
+        it("HistoryRestored (snapshot) shifts existing indices the same way", () => {
+            const s0 = seed([md("live-1")]);
+            const r = update(s0, {
+                type: "HistoryRestored",
+                nodes: [md("snap-1"), md("snap-2")],
+                fromSnapshot: true,
+            });
+            expect(r.state.nodeIndexById.get("snap-1")).toBe(0);
+            expect(r.state.nodeIndexById.get("snap-2")).toBe(1);
+            expect(r.state.nodeIndexById.get("live-1")).toBe(2);
+        });
+
+        it("UserClear and StreamTruncate reset nodeIndexById to empty", () => {
+            const s0 = update(initialState(), {
+                type: "StreamFlush",
+                newNodes: [md("a")],
+                updatedNodes: [],
+            }).state;
+            expect(update(s0, { type: "UserClear" }).state.nodeIndexById.size).toBe(0);
+            expect(
+                update(s0, { type: "StreamTruncate", reason: "fileop" }).state.nodeIndexById.size,
+            ).toBe(0);
+        });
+
+        it("ToolChunkAppend resolves the target via the index (O(1) path) and leaves siblings' indices untouched", () => {
+            const s0 = seed([md("before"), tool("t1"), md("after")]);
+            const r = update(s0, {
+                type: "ToolChunkAppend",
+                toolId: "t1",
+                chunk: chunk("hello"),
+            });
+            expect((r.state.nodes[1] as ToolNode).log?.chunks.map((c) => c.content)).toEqual([
+                "hello",
+            ]);
+            // Index map unchanged — only content at index 1 was replaced.
+            expect(r.state.nodeIndexById).toBe(s0.nodeIndexById);
+        });
+
+        it("ToolChunkAppend still drops a chunk whose id maps to a non-tool node", () => {
+            const s0 = seed([md("m1")]);
+            const r = update(s0, {
+                type: "ToolChunkAppend",
+                toolId: "m1",
+                chunk: chunk("x"),
+            });
+            expect(r.state).toBe(s0);
+            expect(r.events).toEqual([
+                { type: "tool-chunk-dropped", toolId: "m1", reason: "node-not-tool" },
+            ]);
+        });
+
+        it("ShellNodeCreate appends and records the new index", () => {
+            const s0 = seed([md("a")]);
+            const r = update(s0, { type: "ShellNodeCreate", node: shell("sh1") });
+            expect(r.state.nodeIndexById.get("sh1")).toBe(1);
+            expect(r.state.nodes[1]?.id).toBe("sh1");
+        });
+
+        it("ShellChunkAppend resolves via the index and drops for an unknown id", () => {
+            const s0 = seed([shell("sh1")]);
+            const r = update(s0, {
+                type: "ShellChunkAppend",
+                shellId: "sh1",
+                chunk: chunk("out"),
+            });
+            expect((r.state.nodes[0] as ShellNode).log.chunks.map((c) => c.content)).toEqual([
+                "out",
+            ]);
+            const dropped = update(s0, {
+                type: "ShellChunkAppend",
+                shellId: "nope",
+                chunk: chunk("out"),
+            });
+            expect(dropped.state).toBe(s0);
+        });
+
+        it("ShellStatusUpdate resolves via the index", () => {
+            const s0 = seed([shell("sh1")]);
+            const r = update(s0, {
+                type: "ShellStatusUpdate",
+                shellId: "sh1",
+                status: "exited-ok",
+                exitCode: 0,
+                exitedAt: 123,
+            });
+            expect((r.state.nodes[0] as ShellNode).status).toBe("exited-ok");
         });
     });
 });

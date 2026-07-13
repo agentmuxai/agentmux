@@ -218,6 +218,18 @@ export function update(
                     ],
                 };
             }
+            // `fresh` prepends onto `state.nodes`, so every existing index
+            // shifts by `fresh.length` and the new nodes take 0..fresh.length-1.
+            // This is an O(existing-index-size) rebuild — unlike StreamFlush's
+            // per-chunk hot path, HistoryLoaded fires only on paginated
+            // older-history loads, and the merge below is already O(n) work.
+            const nextIndexById = new Map<string, number>();
+            for (const [id, idx] of state.nodeIndexById) {
+                nextIndexById.set(id, idx + fresh.length);
+            }
+            for (let i = 0; i < fresh.length; i++) {
+                nextIndexById.set(fresh[i].id, i);
+            }
             // Scrub orphans in the freshly-loaded replay. Same reason
             // as HistoryRestored: the legacy/NDJSON fallback path
             // (useHistoryPagination, no-snapshot path) can replay a
@@ -259,6 +271,7 @@ export function update(
                     ...state,
                     nodes: [...scrubbedFresh, ...state.nodes],
                     nodeIdSet: nextIdSet,
+                    nodeIndexById: nextIndexById,
                 },
                 events: loadEvents,
             };
@@ -309,6 +322,15 @@ export function update(
             const scrubResult = scrubOrphanedInProgress(fresh, nowMs);
             const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
             const mergedNodes = [...scrubbedFresh, ...state.nodes];
+            // Same prepend-shift as HistoryLoaded above — `fresh` lands at
+            // the front, so every existing index moves by `fresh.length`.
+            const nextIndexById = new Map<string, number>();
+            for (const [id, idx] of state.nodeIndexById) {
+                nextIndexById.set(id, idx + fresh.length);
+            }
+            for (let i = 0; i < fresh.length; i++) {
+                nextIndexById.set(fresh[i].id, i);
+            }
             const restoreEvents: ReducerResult["events"] = [
                 {
                     type: "history-restored",
@@ -328,6 +350,7 @@ export function update(
                     ...state,
                     nodes: mergedNodes,
                     nodeIdSet: nextIdSet,
+                    nodeIndexById: nextIndexById,
                     sessionPhase: "active",
                 },
                 events: restoreEvents,
@@ -338,10 +361,18 @@ export function update(
             const noWork = command.newNodes.length === 0 && command.updatedNodes.length === 0;
             if (noWork) return { state, events: [] };
 
-            const indexById = new Map<string, number>();
-            for (let i = 0; i < state.nodes.length; i++) {
-                indexById.set(state.nodes[i].id, i);
-            }
+            // Reuse the incrementally-maintained id->index map instead of
+            // rebuilding it by scanning the full `nodes` array on every
+            // flush — this ran on EVERY streamed chunk (several times per
+            // RAF frame during active streaming) and was O(total document
+            // length) regardless of how much actually changed. task #39.
+            // Cloned lazily, only if this flush appends a node (the only
+            // case that adds an entry).
+            let indexById = state.nodeIndexById;
+            const ensureIndexClone = () => {
+                if (indexById === state.nodeIndexById) indexById = new Map(state.nodeIndexById);
+                return indexById;
+            };
             // Lazy-clone: only allocate a new array if something changes.
             let next: DocumentNode[] | null = null;
             const ensureClone = () => {
@@ -379,7 +410,7 @@ export function update(
                 }
                 const arr = ensureClone();
                 arr.push(n);
-                indexById.set(n.id, arr.length - 1);
+                ensureIndexClone().set(n.id, arr.length - 1);
                 if (!nextIdSet) nextIdSet = new Set(state.nodeIdSet);
                 nextIdSet.add(n.id);
                 appendedNew++;
@@ -414,6 +445,7 @@ export function update(
                     ...state,
                     nodes: next,
                     nodeIdSet: nextIdSet ?? state.nodeIdSet,
+                    nodeIndexById: indexById,
                 },
                 events: [
                     {
@@ -501,7 +533,12 @@ export function update(
                 return { state, events: [] };
             }
             return {
-                state: { ...state, nodes: [], nodeIdSet: new Set<string>() },
+                state: {
+                    ...state,
+                    nodes: [],
+                    nodeIdSet: new Set<string>(),
+                    nodeIndexById: new Map<string, number>(),
+                },
                 events: [
                     { type: "truncate-applied", reason: command.reason, clearedCount: cleared },
                 ],
@@ -514,14 +551,21 @@ export function update(
             }
             const nextSet = new Set(state.nodeIdSet);
             nextSet.add(command.node.id);
+            const nextIndexById = new Map(state.nodeIndexById);
+            nextIndexById.set(command.node.id, state.nodes.length);
             return {
-                state: { ...state, nodes: [...state.nodes, command.node], nodeIdSet: nextSet },
+                state: {
+                    ...state,
+                    nodes: [...state.nodes, command.node],
+                    nodeIdSet: nextSet,
+                    nodeIndexById: nextIndexById,
+                },
                 events: [{ type: "stream-flushed", appendedNew: 1, collidedAndUpdated: 0, updateApplied: 0, updateDropped: 0 }],
             };
         }
 
         case "ShellChunkAppend": {
-            const idx = state.nodes.findIndex((n) => n.type === "shell" && n.id === command.shellId);
+            const idx = findNodeIndex(state, command.shellId, "shell");
             if (idx === -1) return { state, events: [] };
             const shell = state.nodes[idx] as ShellNode;
             const existingChunks = shell.log.chunks;
@@ -536,7 +580,7 @@ export function update(
         }
 
         case "ShellStatusUpdate": {
-            const idx = state.nodes.findIndex((n) => n.type === "shell" && n.id === command.shellId);
+            const idx = findNodeIndex(state, command.shellId, "shell");
             if (idx === -1) return { state, events: [] };
             const shell = state.nodes[idx] as ShellNode;
             const nextNodes = state.nodes.slice();
@@ -556,7 +600,12 @@ export function update(
                 state:
                     cleared === 0
                         ? state
-                        : { ...state, nodes: [], nodeIdSet: new Set<string>() },
+                        : {
+                              ...state,
+                              nodes: [],
+                              nodeIdSet: new Set<string>(),
+                              nodeIndexById: new Map<string, number>(),
+                          },
                 events: [{ type: "user-cleared", clearedCount: cleared }],
             };
         }
@@ -610,28 +659,41 @@ function shouldSuppressTruncate(
 }
 
 /**
+ * Locate the index of a node by id + expected type via the reducer's
+ * incrementally-maintained `nodeIndexById` — O(1) instead of the O(n) linear
+ * scan this used to be (`state.nodes.findIndex(...)`), which ran on every
+ * single streamed chunk. task #39. Returns -1 if the id is unknown or the
+ * matching node isn't of `expectedType`.
+ */
+function findNodeIndex(
+    state: AgentDocumentState,
+    id: string,
+    expectedType: DocumentNode["type"],
+): number {
+    const idx = state.nodeIndexById.get(id);
+    if (idx == null) return -1;
+    const node = state.nodes[idx];
+    return node != null && node.id === id && node.type === expectedType ? idx : -1;
+}
+
+/**
  * Locate the index of a ToolNode by id, or -1 if either the id is
  * unknown or the matching node is not a tool. The two failure modes
- * map to distinct audit-event reasons.
+ * map to distinct audit-event reasons. O(1) via `nodeIndexById` — see
+ * `findNodeIndex`.
  */
 function findToolIndex(state: AgentDocumentState, toolId: string): number {
-    if (!state.nodeIdSet.has(toolId)) return -1;
-    for (let i = 0; i < state.nodes.length; i++) {
-        if (state.nodes[i].id === toolId) {
-            return state.nodes[i].type === "tool" ? i : -1;
-        }
-    }
-    return -1;
+    return findNodeIndex(state, toolId, "tool");
 }
 
 function nodeReasonFor(
     state: AgentDocumentState,
     toolId: string,
 ): "unknown-tool-id" | "node-not-tool" {
-    if (!state.nodeIdSet.has(toolId)) return "unknown-tool-id";
-    for (const n of state.nodes) {
-        if (n.id === toolId && n.type !== "tool") return "node-not-tool";
-    }
+    const idx = state.nodeIndexById.get(toolId);
+    if (idx == null) return "unknown-tool-id";
+    const node = state.nodes[idx];
+    if (node != null && node.id === toolId && node.type !== "tool") return "node-not-tool";
     return "unknown-tool-id";
 }
 

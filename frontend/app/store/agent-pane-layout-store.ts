@@ -20,9 +20,11 @@
  */
 
 import { type CommandSource, recordDispatch } from "./command-source";
+import { markDispatch } from "../view/agent/virtualization/perf-probe";
 import {
     computeLayoutView,
     update,
+    windowRangeOf,
     type LayoutView,
     type RowPosition,
     type WindowRange,
@@ -54,6 +56,14 @@ interface Slot {
      *  (e.g. an off-flow measurement: writing the non-current expansion slot
      *  changes the `heights` map ref but not any position). codex P2 on #1236. */
     lastView: LayoutView | null;
+    /** Cached prefix-sum positions + total from the last position recompute
+     *  (`positionInputsChanged` was true, or this is the pane's first
+     *  dispatch). Reused as-is across scroll-only dispatches — see
+     *  `windowInputsChanged` — so a pure scroll/viewport/overscan change
+     *  re-derives just the window (O(log n)) instead of rebuilding the whole
+     *  prefix sum (O(n)). `null` only before the first recompute. */
+    cachedRows: RowPosition[] | null;
+    cachedTotalSize: number;
 }
 
 const slots = new Map<string, Slot>();
@@ -65,6 +75,14 @@ function viewsEqual(a: LayoutView, b: LayoutView): boolean {
     if (a.window.startIndex !== b.window.startIndex) return false;
     if (a.window.endIndex !== b.window.endIndex) return false;
     if (a.rows.length !== b.rows.length) return false;
+    // reagent (PR #2127): on a scroll-only dispatch whose window happens not
+    // to move (common during smooth/momentum scrolling — scrollTop changes
+    // every RAF tick, the visible index range often doesn't), `a.rows`/
+    // `b.rows` are the SAME cached array reference (see `cachedRows` in
+    // `dispatch()` above) — the elementwise walk below is redundant work on
+    // exactly the long-conversation scroll path task #39 targeted. Short-
+    // circuit on reference equality before paying for it.
+    if (a.rows === b.rows) return true;
     for (let i = 0; i < a.rows.length; i++) {
         const ra = a.rows[i];
         const rb = b.rows[i];
@@ -75,10 +93,14 @@ function viewsEqual(a: LayoutView, b: LayoutView): boolean {
     return true;
 }
 
-/** Fields whose change requires recomputing the projected layout view.
- *  `zoom` is deliberately excluded (INV-2). All of these are replaced by a
- *  fresh reference on change, so referential inequality is exact. */
-function layoutInputsChanged(
+/** Fields whose change moves row POSITIONS (the prefix-sum `positions()`
+ *  array itself) — order, heights/estimates, or the leading scrollMargin
+ *  offset that every row's `start` is measured from. A change here requires
+ *  a full O(n) recompute; there's no way to patch the prefix sum locally
+ *  without re-walking everything after the first changed row. All of these
+ *  are replaced by a fresh reference on change, so referential inequality is
+ *  exact. */
+function positionInputsChanged(
     a: AgentPaneLayoutState,
     b: AgentPaneLayoutState,
 ): boolean {
@@ -87,9 +109,24 @@ function layoutInputsChanged(
         a.expansion !== b.expansion ||
         a.heights !== b.heights ||
         a.estimates !== b.estimates ||
+        a.scrollMarginPx !== b.scrollMarginPx
+    );
+}
+
+/** Fields whose change moves only the visible WINDOW over an otherwise
+ *  unchanged `positions()` array — scroll offset, viewport size, overscan
+ *  padding. None of these can change any row's start/height, so when only
+ *  these change (and `positionInputsChanged` is false), the store reuses the
+ *  last-computed positions array and re-derives the window via the O(log n)
+ *  `windowRangeOf` binary search instead of re-walking the whole prefix sum.
+ *  This is the fix for the scroll-triggered O(n) rebuild (task #39). */
+function windowInputsChanged(
+    a: AgentPaneLayoutState,
+    b: AgentPaneLayoutState,
+): boolean {
+    return (
         a.scrollTop !== b.scrollTop ||
         a.viewportPx !== b.viewportPx ||
-        a.scrollMarginPx !== b.scrollMarginPx ||
         a.overscan !== b.overscan
     );
 }
@@ -103,7 +140,13 @@ export function registerPane(
     blockId: string,
     proj: AgentPaneLayoutProjections,
 ): void {
-    slots.set(blockId, { state: initialState(), proj, lastView: null });
+    slots.set(blockId, {
+        state: initialState(),
+        proj,
+        lastView: null,
+        cachedRows: null,
+        cachedTotalSize: 0,
+    });
 }
 
 export function unregisterPane(blockId: string): void {
@@ -126,15 +169,44 @@ export function dispatch(
         );
     }
 
+    // Perf probe (task #40): times the FULL dispatch — reducer + the
+    // positions/window recompute below — the exact layer the original
+    // virtualization probe never measured (it only timed row DOM mount).
+    // No-op outside dev (see markDispatch / isProbingEnabled).
+    const stopDispatchTiming = markDispatch("layout");
+
     const prev = slot.state;
     const result = update(prev, command);
     slot.state = result.state;
 
-    if (layoutInputsChanged(prev, slot.state)) {
-        // The ref-level gate above is cheap but coarse: an off-flow measurement
-        // changes the `heights` ref without moving any position. Recompute the
-        // view and project only if it actually differs (codex P2 on #1236).
-        const view = computeLayoutView(slot.state);
+    const positionsChanged = positionInputsChanged(prev, slot.state);
+    const windowChanged = windowInputsChanged(prev, slot.state);
+    if (positionsChanged || windowChanged) {
+        let view: LayoutView;
+        if (positionsChanged || slot.cachedRows === null) {
+            // Data actually moved (or this is the pane's first recompute) —
+            // full O(n) prefix-sum rebuild. The ref-level gate above is cheap
+            // but coarse: an off-flow measurement changes the `heights` ref
+            // without moving any position. Project only if the resulting view
+            // actually differs (codex P2 on #1236).
+            view = computeLayoutView(slot.state);
+            slot.cachedRows = view.rows;
+            slot.cachedTotalSize = view.totalSize;
+        } else {
+            // Scroll-only update (scrollTop/viewportPx/overscan changed,
+            // nothing that moves a row). Positions are provably unchanged, so
+            // reuse the cached prefix-sum array and re-derive just the window
+            // via the existing O(log n) binary search instead of re-walking
+            // the whole historical positions array on every scroll event
+            // (task #39).
+            const window = windowRangeOf(
+                slot.cachedRows,
+                slot.state.scrollTop,
+                slot.state.viewportPx,
+                slot.state.overscan,
+            );
+            view = { rows: slot.cachedRows, totalSize: slot.cachedTotalSize, window };
+        }
         if (slot.lastView === null || !viewsEqual(view, slot.lastView)) {
             slot.lastView = view;
             slot.proj.layout(view);
@@ -153,6 +225,7 @@ export function dispatch(
         at: Date.now(),
     });
 
+    stopDispatchTiming();
     return result.events;
 }
 
