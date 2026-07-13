@@ -9,7 +9,8 @@
 // See docs/specs/SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md.
 
 [data-theme="gruvbox-light"] {
-    --main-bg-color: #fbf1c7;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(251, 241, 199, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(60, 56, 54, 0.05);
     --block-bg-color: rgba(255, 255, 255, 0.45);
     --block-bg-solid-color: #f9f5d7;

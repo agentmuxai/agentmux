@@ -4,7 +4,8 @@
 // Catppuccin Mocha — soft pastel dark, warm mauve accent
 
 [data-theme="catppuccin"] {
-    --main-bg-color: #1e1e2e;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(30, 30, 46, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(24, 24, 37, 0.6);
     --block-bg-color: rgba(17, 17, 27, 0.7);
     --block-bg-solid-color: #11111b;
