@@ -19,8 +19,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRef {
-    /// FK to `db_identity_bundles.id`. Empty = blank singleton (ambient
-    /// creds, no env-var injection at spawn).
+    /// Legacy Identity-bundle id — `db_identity_bundles` was dropped in
+    /// Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md, so this
+    /// field is now vestigial (never read at spawn; credential resolution
+    /// is `db_agent_identity_links`-only). Empty = blank singleton
+    /// (ambient creds, no env-var injection at spawn).
     #[serde(default)]
     pub identity_id: String,
     /// FK to `db_bundles.id`. Empty = blank singleton (vanilla CLI,

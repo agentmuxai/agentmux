@@ -210,7 +210,7 @@
         "display:pinned": false,
         "icon": "vault",
         "label": "Armory",
-        "description": "Manage accounts, identities, brain, and presets",
+        "description": "Manage accounts, memories, skills, MCP servers, and bundles",
         "blockdef": {
             "meta": {
                 "view": "armory"

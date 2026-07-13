@@ -8,15 +8,19 @@
 //
 //   1. The `view: "identity"` agent-settings pane demoted to a
 //      read-only `<BundleSummaryPanel/>` back in
-//      SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5.
+//      specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5.
 //   2. The "hamburger Identity & Memory manager" (`BundleManagerModal`)
 //      referenced in that pane's comment was never actually built —
-//      the Armory pane shipped instead, and its "Identities" tab
-//      mounts the read-only `<AgentIdentitiesPanel/>`
-//      (`agent-identities-panel.tsx`), not this file.
+//      the Armory pane's now-removed "Identities" tab
+//      (`AgentIdentitiesPanel`, `agent-identities-panel.tsx`) shipped
+//      instead, not this file.
 //
-// `statusBadge()` is the one export `<AgentIdentitiesPanel/>` still
-// reuses, so it stays.
+// `statusBadge()` is the one export that survives: Armory Phase 5
+// (docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md
+// §1) removed both the Armory "Identities" tab and `AgentIdentitiesPanel`,
+// and moved its per-agent account table into
+// `agent-identity-links-panel.tsx` (rendered by the agent pane's own
+// `view: "identity"` tab), which still reuses `statusBadge()`.
 
 /**
  * Map an oauth-class binding's account status to the small status-badge

@@ -650,6 +650,12 @@ async fn main() {
     // Auto-seed agent definitions on first launch (or empty DB)
     backend::agent_seed::auto_seed_on_startup(&wstore);
 
+    // Seed the global Skills catalog (db_skills) with a curated starter set
+    // on fresh install. One-time, idempotent: only runs if the catalog is
+    // currently empty. See backend::skill_seed for the empty-catalog
+    // rationale (also covers "seeded then user deleted everything").
+    backend::skill_seed::seed_starter_skills_if_empty(&wstore);
+
     // Gap-repair: backfill definitions written after the Phase 3a marker
     // but before Phase 3b dual-write (they exist in db_agent_definitions
     // but not in db_agents, making them invisible to Phase 3b readers).

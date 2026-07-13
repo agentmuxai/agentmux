@@ -1,8 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Identity accounts + bundles, Armory key/OAuth flows, agent-identity
-// links, and the pre-launch OAuth / install / prereq flows. Split from the
+// Identity accounts, Armory key/OAuth flows, agent-identity links, and
+// the pre-launch OAuth / install / prereq flows. Split from the
 // original rpc-api.ts.
 
 import { RpcClient } from "../rpc-client";
@@ -46,7 +46,7 @@ export const IdentityApi = {
     // Armory: optionally validate (validate=true → single user-initiated
     // outbound probe) then store an API key in the OS keychain. The plaintext
     // is never returned; on success the response carries only the masked tail +
-    // non-secret metadata. See SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+    // non-secret metadata. See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
     AccountKeyVerifyCommand(
         client: RpcClient,
         data: {
@@ -135,78 +135,19 @@ export const IdentityApi = {
         return client.rpcCall("listallagentidentities", data, opts);
     },
 
-    // ────────────────────────────────────────────────────────────────────
-    // v7 — Identity bundles
-    // ────────────────────────────────────────────────────────────────────
-
-    ListIdentityBundlesCommand(
-        client: RpcClient,
-        data: Record<string, never> = {},
-        opts?: RpcOpts,
-    ): Promise<IdentityBundle[]> {
-        return client.rpcCall("listidentitybundles", data, opts);
-    },
-
-    GetIdentityBundleCommand(
-        client: RpcClient,
-        data: { id: string },
-        opts?: RpcOpts,
-    ): Promise<IdentityBundle> {
-        return client.rpcCall("getidentitybundle", data, opts);
-    },
-
-    UpsertIdentityBundleCommand(
-        client: RpcClient,
-        data: Partial<IdentityBundle>,
-        opts?: RpcOpts,
-    ): Promise<IdentityBundle> {
-        return client.rpcCall("upsertidentitybundle", data, opts);
-    },
-
-    DeleteIdentityBundleCommand(
-        client: RpcClient,
-        data: { id: string },
-        opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
-        return client.rpcCall("deleteidentitybundle", data, opts);
-    },
-
-    BindIdentityAccountCommand(
-        client: RpcClient,
-        data: { identity_id: string; provider: string; account_id: string },
-        opts?: RpcOpts,
-    ): Promise<void> {
-        return client.rpcCall("bindidentityaccount", data, opts);
-    },
-
-    UnbindIdentityAccountCommand(
-        client: RpcClient,
-        data: { identity_id: string; provider: string },
-        opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
-        return client.rpcCall("unbindidentityaccount", data, opts);
-    },
-
-    ListIdentityBindingsCommand(
-        client: RpcClient,
-        data: { identity_id: string },
-        opts?: RpcOpts,
-    ): Promise<IdentityBinding[]> {
-        return client.rpcCall("listidentitybindings", data, opts);
-    },
-
     // ── Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
 
     AuthStartCommand(
         client: RpcClient,
         data: {
             providerId: string;
+            /** Vestigial — bundle mode was retired in Phase 4c of
+             *  SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the
+             *  wire shape only; never set by `AuthFlowController`. */
             intoBundleId?: string;
-            /** Issue #1624 PR-C Part B — bypass the bundle system
-             *  entirely; a successful auth persists a standalone
-             *  IdentityAccount. Mutually exclusive with `intoBundleId`
-             *  (never set both). Wire-additive only for now — not yet
-             *  set by any caller (that's PR 3). */
+            /** Always sent as `true` by `AuthFlowController` (the sole
+             *  caller) — a successful auth persists a standalone
+             *  IdentityAccount. */
             directAccount?: boolean;
             /** Direct-account reconnect: non-empty to refresh an
              *  already-linked account's tokens in place. Ignored unless

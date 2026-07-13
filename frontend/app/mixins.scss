@@ -177,15 +177,27 @@
 /// participate in spec-defined pixel snapping (Patrick Brosset 2024)
 /// while a child <div> does not. Slot/line widths MUST share parity
 /// (both even or both odd) so the line centers on a device pixel.
+///
+/// The slot itself is run through `snap-chrome()` before being used as
+/// the flex-basis. Border-snapping only covers the `border-right` line;
+/// the slot's flex-basis and centering margins were still raw
+/// `--zoomfactor`-multiplied lengths, so at a non-integer zoom each
+/// separator's slot could independently round to a different device
+/// pixel, producing the "gap looks different between different tab
+/// pairs" symptom. Snapping the slot up front makes every slot land on
+/// the same sub-pixel decision. See RETRO_SUBPIXEL_RENDERING_RESEARCH_2026_04_26 §1.3/§4.2.
 @mixin v-separator($slot, $line, $color) {
-    flex: 0 0 #{$slot};
+    $slot-snapped: snap-chrome($slot);
+    flex: 0 0 #{$slot-snapped};
     display: block;
     border-right: #{$line} solid $color;
     // The slot is `border-box`, so the border occupies the rightmost
     // `line` px of the slot. To recenter the border in the gap, pull
     // the slot LEFT by half the leftover space (negative margin-left)
     // and push the next sibling RIGHT by the same amount (positive
-    // margin-right). Net visual gap stays exactly `slot` px.
-    margin-left:  calc((#{$line} - #{$slot}) / 2);
-    margin-right: calc((#{$slot} - #{$line}) / 2);
+    // margin-right). Net visual gap stays exactly `slot` px. Uses the
+    // snapped slot width so the centering math matches what actually
+    // got laid out.
+    margin-left:  calc((#{$line} - #{$slot-snapped}) / 2);
+    margin-right: calc((#{$slot-snapped} - #{$line}) / 2);
 }

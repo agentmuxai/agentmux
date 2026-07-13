@@ -13,18 +13,31 @@
 //! This module instead punches a REAL hole: a `CAShapeLayer` with an
 //! even-odd path (full content bounds + one rect per overlay intersection)
 //! is set as the pane contentView layer's mask. Pixels inside the holes
-//! composite as fully transparent, so:
-//!   * the DOM overlay painted at the same screen position shows through
-//!     (the pane around it stays LIVE — no freeze, no flash, no jerk), and
-//!   * the window server's per-pixel hit testing routes clicks through the
-//!     transparent region to the main window below — this requires the
-//!     window to be non-opaque with a clear background, which
-//!     `prepare_window_for_click_through` sets (idempotent).
+//! composite as fully transparent, so the DOM overlay painted at the same
+//! screen position shows through — the pane around it stays LIVE, no
+//! freeze, no flash, no jerk.
 //!
-//! Empirical status: rendering hole is CALayer-guaranteed; click-through
-//! relies on the window server sampling the composited alpha (the standard
-//! shaped-window behavior). `invalidateShadow` after every mask change
-//! nudges the server to recompute the window shape.
+//! CALayer masking is rendering-only — it does NOT affect AppKit hit
+//! testing. The empirical spike assumed the window server would sample
+//! composited alpha for per-pixel click routing the way it does on
+//! Windows (`SetWindowRgn`); it doesn't. macOS routes every click and
+//! mouse-moved event to whichever `NSWindow` is topmost at that screen
+//! point, full stop, regardless of what's rendered there — confirmed live
+//! (menu renders correctly over the hole, but both click and hover are a
+//! no-op: the still-topmost pane window swallows the event before the DOM
+//! menu underneath ever sees it).
+//!
+//! Fix: toggle the WHOLE overlay window's `ignoresMouseEvents` in lockstep
+//! with the mask — `YES` whenever any hole is active (routes every event
+//! for this window to whatever's behind it, i.e. the main window with the
+//! DOM overlay, letting it click/hover normally), `NO` when the mask
+//! clears (restores normal pane interactivity). This is coarser than true
+//! per-pixel click-through (the live, non-overlapped part of the SAME pane
+//! also stops accepting clicks while any hole is open elsewhere on it) —
+//! accepted trade-off over the alternative (continuous mouse-position
+//! polling against the hole rects via a native timer) for the actual
+//! common case: a DOM menu open over a pane is not something the user is
+//! simultaneously trying to click through elsewhere on that same pane.
 //!
 //! Must run on the CEF UI thread (= AppKit main thread).
 
@@ -109,6 +122,7 @@ pub fn apply_pane_overlay_hole_mask(
         let sel_set_opaque = sel_registerName(b"setOpaque:\0".as_ptr() as _);
         let sel_set_bg = sel_registerName(b"setBackgroundColor:\0".as_ptr() as _);
         let sel_clear_color = sel_registerName(b"clearColor\0".as_ptr() as _);
+        let sel_set_ignores_mouse = sel_registerName(b"setIgnoresMouseEvents:\0".as_ptr() as _);
 
         let get_id: extern "C" fn(Id, Sel) -> Id =
             std::mem::transmute(objc_msgSend as *const std::ffi::c_void);
@@ -185,13 +199,14 @@ pub fn apply_pane_overlay_hole_mask(
         }
 
         if holes.is_empty() {
-            // Clear the mask — full pane visible again.
+            // Clear the mask — full pane visible again. Re-engage mouse
+            // events for the whole window now that nothing overlaps it.
             set_ptr(layer, sel_set_mask, std::ptr::null_mut());
+            set_bool(overlay_win, sel_set_ignores_mouse, 0);
             call_void(overlay_win, sel_invalidate_shadow);
             tracing::debug!(overlay_wnum, "[pane-hole-mask] mask cleared");
             return true;
         }
-
         // 3. Build the even-odd path: full bounds + one rect per hole.
         //    Layer coords are points, origin bottom-left (non-flipped view),
         //    while pane/hole rects are physical px with origin top-left.
@@ -237,6 +252,15 @@ pub fn apply_pane_overlay_hole_mask(
         set_ptr(mask_layer, sel_set_path, path);
         CGPathRelease(path); // setPath: copies/retains the path
         set_id(layer, sel_set_mask, mask_layer);
+        // Only NOW, after the mask is actually applied — setting this earlier
+        // (e.g. right after the holes.is_empty() check) would leave the
+        // window permanently click-inert with no visual hole if the
+        // CAShapeLayer allocation above ever failed (reagent P2 on #2130).
+        // AppKit routes every event for this window to whatever's behind it
+        // instead (the main window, where the DOM overlay actually lives).
+        // See the module doc comment for why this is window-wide rather
+        // than per-hole.
+        set_bool(overlay_win, sel_set_ignores_mouse, 1);
         call_void(overlay_win, sel_invalidate_shadow);
         tracing::debug!(
             overlay_wnum,

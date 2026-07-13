@@ -19,7 +19,6 @@ impl Migration for M0011SharedStoreBackfill {
             .map_err(|e| MigrationError(format!("shared_store_backfill: open shared: {}", e)))?;
 
         let skip_accts       = !shared.identity_list(None).map_err(|e| e.to_string()).map_err(MigrationError)?.is_empty();
-        let skip_id_bundles  = !shared.bundle_identity_list().map_err(|e| e.to_string()).map_err(MigrationError)?.iter().all(|b| b.id == "blank");
         let skip_mem_bundles = !shared.bundle_memory_list().map_err(|e| e.to_string()).map_err(MigrationError)?.iter().all(|b| b.id == "blank");
         let skip_drones      = !shared.drone_list().map_err(|e| e.to_string()).map_err(MigrationError)?.is_empty();
         let skip_links       = !shared.agent_identity_list_all().map_err(|e| e.to_string()).map_err(MigrationError)?.is_empty();
@@ -53,17 +52,10 @@ impl Migration for M0011SharedStoreBackfill {
             }
         }
 
-        // Pass 2: bundles, presets, drones, links
-        if !skip_id_bundles {
-            for src in &sibling_stores {
-                for bundle in src.bundle_identity_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
-                    if shared.bundle_identity_upsert(bundle).is_err() { continue; }
-                    for b in src.bundle_identity_bindings(&bundle.id).unwrap_or_default() {
-                        let _ = shared.bundle_identity_bind(&b.identity_id, &b.provider, &b.account_id);
-                    }
-                }
-            }
-        }
+        // Pass 2: memory bundles, drones, links. (Identity bundles were
+        // dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md
+        // — db_identity_bundles/db_identity_bindings no longer exist, so
+        // this pass no longer backfills them.)
         if !skip_mem_bundles {
             for src in &sibling_stores {
                 for mem in src.bundle_memory_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {

@@ -42,7 +42,6 @@ vi.mock("@/app/store/rpc-api", () => {
         AgentDefHideCommand: vi.fn().mockResolvedValue({ ok: true }),
         AgentDefUnhideCommand: vi.fn().mockResolvedValue({ ok: true }),
         AgentDefListHiddenTemplatesCommand: vi.fn().mockResolvedValue([]),
-        ListIdentityBundlesCommand: vi.fn().mockResolvedValue([]),
         ListMemoriesCommand: vi.fn().mockResolvedValue([]),
     };
     return { RpcApi };

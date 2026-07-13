@@ -277,7 +277,7 @@ declare global {
         accounts?: string;
         /**
          * Forked-from definition id, or empty string for root definitions.
-         * Added in v6. See specs/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+         * Added in v6. See specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
          */
         parent_id?: string;
         /**
@@ -319,7 +319,7 @@ declare global {
         | { backend: "secrets_manager"; sm_path: string; sm_json_path?: string }
         | { backend: "plaintext_dev"; plaintext_dev: string }
         // Armory API keys: pointer into the OS keychain. Plaintext is
-        // never carried here. See SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+        // never carried here. See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
         | { backend: "keychain"; service: string; account: string };
 
     type IdentityAccount = {
@@ -342,28 +342,7 @@ declare global {
         provider: string;
     };
 
-    // ── v7 — Identity bundles + Memory bundles ────────────────────────
-
-    /** A named credential bundle. Aggregates accounts (one per provider)
-     *  via IdentityBinding rows. The blank singleton (id = "blank",
-     *  is_blank = true) is always present and undeletable; it represents
-     *  "use ambient credentials" in the launch dropdown. */
-    type IdentityBundle = {
-        id: string;
-        name: string;
-        description?: string;
-        is_blank?: boolean;
-        created_at: number;
-        updated_at: number;
-    };
-
-    /** Junction row binding an account to an Identity bundle for a given
-     *  provider. Each (identity_id, provider) pair has at most one account. */
-    type IdentityBinding = {
-        identity_id: string;
-        provider: string;
-        account_id: string;
-    };
+    // ── v7 — Memory bundles ────────────────────────────────────────────
 
     /** A Memory bundle — the agent's personality and capability stack:
      *  provider/CLI choice, model, system instructions, context files,
@@ -524,7 +503,11 @@ declare global {
         started_at: number;
         ended_at?: number;
         created_at: number;
-        /** v7/v11 — FK to db_identity_bundles. Empty string = blank singleton. */
+        /** v7/v11 — legacy Identity-bundle id; db_identity_bundles was
+         *  dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
+         *  Vestigial opaque pass-through now — credential resolution and
+         *  display names both go through db_agent_identity_links/db_accounts.
+         *  Empty string = ambient creds. */
         identity_id?: string;
         /** v7/v11 — FK to db_bundles. Empty string = blank singleton. */
         memory_id?: string;

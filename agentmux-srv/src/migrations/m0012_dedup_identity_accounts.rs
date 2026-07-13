@@ -10,10 +10,13 @@
 //! per channel launch rather than one row per credential.
 //!
 //! Strategy: group accounts by (provider, secret_ref JSON). For each group of
-//! duplicates, keep whichever account is currently referenced by a bundle
-//! binding (or the oldest by created_at if none is bound). Reroute any bundle
-//! bindings and agent identity links that reference a dupe to the canonical,
+//! duplicates, keep whichever account is currently referenced by a direct
+//! agent identity link (or the oldest by created_at if none is linked).
+//! Reroute any agent identity links that reference a dupe to the canonical,
 //! then delete the dupes — the CASCADE FK handles any remaining joins.
+//! (Identity bundle bindings were rerouted here too, prior to Phase 4c of
+//! SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md dropping
+//! db_identity_bundles/db_identity_bindings.)
 
 use std::collections::{HashMap, HashSet};
 
@@ -52,23 +55,15 @@ impl Migration for M0012DedupIdentityAccounts {
             return Ok(());
         }
 
-        // Gather bundle bindings and agent links before mutating.
-        let bundles = shared.bundle_identity_list()
-            .map_err(|e| MigrationError(format!("dedup_identity: list bundles: {}", e)))?;
-
-        let mut all_bindings: Vec<(String, String, String)> = Vec::new(); // (bundle_id, provider, account_id)
-        for bundle in &bundles {
-            let bindings = shared.bundle_identity_bindings(&bundle.id)
-                .map_err(|e| MigrationError(format!("dedup_identity: bindings for {}: {}", bundle.id, e)))?;
-            for b in bindings {
-                all_bindings.push((bundle.id.clone(), b.provider, b.account_id));
-            }
-        }
-
+        // Gather agent links before mutating. (Identity bundle bindings
+        // were gathered and rebound here too, prior to Phase 4c of
+        // SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md dropping
+        // db_identity_bundles/db_identity_bindings — there's no longer
+        // anything to rebind on that axis.)
         let agent_links = shared.agent_identity_list_all()
             .map_err(|e| MigrationError(format!("dedup_identity: list agent links: {}", e)))?;
 
-        let bound_ids: HashSet<&str> = all_bindings.iter().map(|(_, _, id)| id.as_str()).collect();
+        let bound_ids: HashSet<&str> = agent_links.iter().map(|l| l.account_id.as_str()).collect();
 
         let mut deleted = 0usize;
 
@@ -87,16 +82,6 @@ impl Migration for M0012DedupIdentityAccounts {
 
             let canonical_id = &sorted[0].id;
             let dupe_ids: HashSet<&str> = sorted[1..].iter().map(|a| a.id.as_str()).collect();
-
-            // Rebind any bundle bindings that reference a dupe.
-            for (bundle_id, binding_provider, account_id) in &all_bindings {
-                if binding_provider == provider && dupe_ids.contains(account_id.as_str()) {
-                    shared.bundle_identity_bind(bundle_id, provider, canonical_id)
-                        .map_err(|e| MigrationError(format!(
-                            "dedup_identity: rebind bundle {} provider {}: {}", bundle_id, provider, e
-                        )))?;
-                }
-            }
 
             // Relink any agent identity links that reference a dupe.
             for link in &agent_links {

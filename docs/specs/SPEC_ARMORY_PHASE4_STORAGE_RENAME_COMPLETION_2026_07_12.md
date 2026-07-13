@@ -96,7 +96,23 @@ A second gotcha: the additive-column `ALTER TABLE db_memory_bundles ADD COLUMN �
 
 Landed in Phase 4a: `LEGACY_TABLE_RENAMES` + `LEGACY_INDEX_DROPS` entries for both tables, both `CREATE TABLE` blocks (objects.db + shared store.db) renamed with FK updates, `OBJECT_SCHEMA_VERSION` 10→11 and `SHARED_STORE_SCHEMA_VERSION` 2→3, all query strings in `identities.rs`/`memory_bundles.rs` retargeted, and doc-comment references updated across 9 other Rust files + 4 frontend files + `CLAUDE.md`. Verified via `cargo test -p agentmux-srv` (1476 unit + 4 integration + 7 subprocess tests, all passing) and `tsc --noEmit`.
 
-## 9. References
+## 9. Phase 4b/4c implementation note — the m0015 plan didn't survive contact (2026-07-12)
+
+Landed in one PR (Phase 4b + 4c combined, per the §7 sequencing note that 4c should follow 4b directly): all three §4 drop-blockers cleared, and both tables dropped.
+
+**§8 item 3's resolution ("run m0015 unconditionally") turned out to be unimplementable as stated**, discovered while writing it. The migration boot sequence (traced against `main.rs`/`migrations/runner.rs`) is: `count_pending_migrations` opens `Store`/`Store::open_shared` first (which unconditionally runs schema setup, including any `DEAD_TABLE_DROPS` entry) — a full four lines *before* `run_pending_migrations` even starts iterating the registry. Schema setup always wins that race. A `DROP TABLE` added to `DEAD_TABLE_DROPS` would delete the table before a same-boot `m0015` ever got to read it; a hand-rolled `DROP TABLE` *inside* `m0015`'s own `up()` (the alternative) has no precedent anywhere in this migration framework and would need a new raw-SQL Store surface plus multi-database handling (both `objects.db` and shared `store.db`) that the existing `bundle_identity_bindings`-based backfill never had to do.
+
+Given `m0013`/`m0014` are independently confirmed **already applied** on every real install this repo has (§6), the actual insurance value of a redundant `m0015` re-run was near-zero, and its implementation cost/risk (novel raw-SQL-drop-inside-migration mechanism) wasn't justified. Shipped instead:
+
+- **No new `m0015`.** `m0013`/`m0014` stay registered (Global migrations can never be un-registered without breaking `db_migrations` tracking for already-applied installs) but their bodies are now documented no-ops — the tables they read from don't exist post-drop, and their historical job (backfill `db_agent_identity_links`) is long done.
+- **`m0011`/`m0012` gracefully degraded**, not gutted — they still run real logic (shared-store seeding, account dedup) but no longer touch the two retired tables; a genuinely fresh install hitting them post-drop no longer hard-fails via `?` on a "no such table" error (`m0011`'s `bundle_identity_list()` call previously had zero error handling — an unrelated correctness bug fixed as a byproduct here).
+- **The drop itself uses the established `DEAD_TABLE_DROPS` mechanism** (unconditional, idempotent, applies uniformly to `objects.db` and shared `store.db`), the same pattern every prior "retire this table" case in `migrations.rs` already uses — no new mechanism introduced.
+
+Also landed: deleted `identity/migration.rs` (the "seed a Default OAuth bundle from ambient credentials" module) — zero remaining consumers once bundle tables are gone, since credential resolution and `listrecentsessions`/`listnamedagents` display-name resolution are both `db_agent_identity_links`-only now. `m0008_default_bundle.rs` (the migration that called into it) gutted to a no-op alongside it, same rationale as `m0011`-`m0014`.
+
+Verified via `cargo test -p agentmux-srv` (1456 unit + 4 integration + 7 subprocess tests, all passing) and `tsc --noEmit`/`vitest run` (1688 frontend tests passing).
+
+## 10. References
 
 - `agentmux-srv/src/backend/storage/migrations.rs` — current schema, all 4 tables' `CREATE TABLE` blocks (lines cited per-table above).
 - `agentmux-srv/src/identity/resolver.rs:450-510` — `resolve_bindings_for_instance`, the verified sole credential-resolution path (direct links only).

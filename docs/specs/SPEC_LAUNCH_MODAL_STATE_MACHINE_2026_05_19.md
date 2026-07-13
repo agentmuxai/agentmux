@@ -10,7 +10,7 @@
 - `frontend/app/store/browser-pane-state/` (reference reducer slice — pattern to follow)
 - `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md`
 - `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`
-- `docs/specs/identity-forge-integration-and-vault-2026-05-08.md`
+- `docs/specs/archive/identity-forge-integration-and-vault-2026-05-08.md`
 
 ---
 
