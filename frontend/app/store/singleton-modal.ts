@@ -3,7 +3,7 @@
 
 /**
  * Singleton-modal coordination layer — PR 3 of
- * docs/specs/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md (§3 "Singleton — one
+ * docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md (§3 "Singleton — one
  * manager across the whole app").
  *
  * Problem this solves

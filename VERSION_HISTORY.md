@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.53.3 — 2026-07-13
+
+- fix(pane): flyout menus over browser panes on macOS — deterministic occlusion, click routing, and freeze-frame instead of black-out
+- fix(tabbar): invert strobe at 500ms, remove reduced-motion respect app-wide, source pane no longer lingers after cross-tab move
+- feat(theme): add a light theme + fix phantom tokens, context menu, and pane title bar theming
+- fix(layout): drag stabilization — registry owner-check, prune de-fang, persistence Phase A
+- feat(sysinfo): track pagefile-volume free disk + warn when a system-managed page file can't grow
+- fix(ui): pane minimize icon uses horizontal-bar convention, Armory action uses vault icon
+- fix(agent): remove noisy blue focus outline on conversation rows
+- fix(window): bind label->HWND at Views creation time, close reproject drag cross-wire
+- fix(launcher): rotate/cap agentmux-launcher.log, demote 5 high-volume INFO log sites to debug
+- fix(launcher): detect and log other running AgentMux versions on startup
+- fix(srv): extend commit-aware admission gate to the interactive agent pane spawn path
+- fix(editor): file-tree rename/create/delete silently failed outside $HOME
+- fix(storage): rename db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles (Armory Phase 4a)
+- feat(swarm): group loose subagents sharing the same generated name
+- fix(agent): disable native spellcheck on the conversation composer
+- feat(editor): file-tree Open to the Side / Open in New Tab
+- fix(agent-pane): stop O(n) rebuilds on scroll and streamed chunks in agent-pane conversation rendering
+- fix(tabs): active-tab color line stops at the tab strip, not the window edge
+- feat(theme): light theme reaches header/status-bar chrome + add Catppuccin Latte, Solarized Light, Gruvbox Light
+- feat(srv): subagent Abandoned status + reopen-time liveness reconciliation
+- chore(agent-pane): add scroll/stream dispatch bench suite and perf-probe dispatch timing (task #40)
+- feat(identity): Armory Phase 4b/4c — retire Identity bundle layer, drop db_identity_bundles/db_identity_bindings
+- fix(swarm): debounce subagent list refresh instead of batching backend broadcasts
+- feat(swarm): three-way subagent status (active/completed/abandoned) with interrupted chip and client-side downgrade guard
+- fix(tabs): snap tab-separator slot width to device pixel under fractional zoom
+
 ## 0.53.2 — 2026-07-11
 
 - fix(tabbar): cross-tab drag stability (stuck-overlay cleanup, ghost/landing clamp, geometry refresh) + hover strobe

@@ -4,7 +4,8 @@
 // Nord — arctic blue-grey, calm and readable
 
 [data-theme="nord"] {
-    --main-bg-color: #2e3440;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(46, 52, 64, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(39, 44, 54, 0.6);
     --block-bg-color: rgba(30, 34, 42, 0.7);
     --block-bg-solid-color: #1e222a;

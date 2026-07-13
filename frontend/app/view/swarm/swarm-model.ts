@@ -20,7 +20,14 @@ export interface ActiveSubagent {
     parent_agent: string;
     parent_block_id: string;
     session_id: string;
-    status: "active" | "completed";
+    /** `"abandoned"` (SubagentStatus::Abandoned, Rust) — the parent block's
+     *  turn ended without a Result line ever appearing for this subagent
+     *  (crashed, killed, or interrupted by an app/srv restart). Distinct
+     *  from `"completed"`: it didn't finish, it was cut off. Set by the
+     *  backend's `reconcile_stale_subagents`, currently only on pane
+     *  reopen/backfill — see
+     *  docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md. */
+    status: "active" | "completed" | "abandoned";
     /** Unix ms when this subagent was first observed — set once, immutable.
      *  Distinct from `last_event_at`, which advances on every journal read. */
     spawned_at: number;
@@ -327,7 +334,7 @@ export function pruneGroupIdentityCache(cache: Map<string, WorkflowGroup | NameG
 export interface SubagentDetail {
     eventsAtom: Accessor<SubagentEvent[]>;
     infoAtom: Accessor<ActiveSubagent | null>;
-    statusAtom: Accessor<"active" | "completed" | "loading">;
+    statusAtom: Accessor<"active" | "completed" | "abandoned" | "loading">;
     dispose: () => void;
 }
 
@@ -346,7 +353,7 @@ export interface SubagentDetail {
 export function createSubagentDetail(subagentId: string): SubagentDetail {
     const [events, setEvents] = createSignal<SubagentEvent[]>([]);
     const [info, setInfo] = createSignal<ActiveSubagent | null>(null);
-    const [status, setStatus] = createSignal<"active" | "completed" | "loading">("loading");
+    const [status, setStatus] = createSignal<"active" | "completed" | "abandoned" | "loading">("loading");
 
     const unsubs: (() => void)[] = [];
 
@@ -504,6 +511,16 @@ export class SwarmViewModel implements ViewModel {
     // Per-block controllerstatus unsubs — cleaned up when block list refreshes
     private blockUnsubs: (() => void)[] = [];
 
+    // Backend broadcasts one subagent:spawned/subagent:completed event per
+    // subagent file (see subagent_watcher.rs's process_jsonl_change) — a
+    // backfill scan on pane reopen can fire dozens of these in a burst.
+    // Debounce the resulting loadSubagents() RPC here instead of batching the
+    // broadcasts themselves, since useSubagentEvents.ts (a different consumer
+    // of the same events) needs one event per subagent to populate its
+    // per-agent document nodes.
+    private loadSubagentsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+    private static readonly LOAD_SUBAGENTS_DEBOUNCE_MS = 150;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -512,13 +529,13 @@ export class SwarmViewModel implements ViewModel {
 
         const unsubSpawned = waveEventSubscribe({
             eventType: "subagent:spawned",
-            handler: () => void this.loadSubagents(),
+            handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubSpawned) this.unsubs.push(unsubSpawned);
 
         const unsubCompleted = waveEventSubscribe({
             eventType: "subagent:completed",
-            handler: () => void this.loadSubagents(),
+            handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
 
@@ -602,6 +619,19 @@ export class SwarmViewModel implements ViewModel {
         } catch {
             // silently ignore
         }
+    };
+
+    // Coalesces a burst of subagent:spawned/subagent:completed events (e.g. a
+    // backfill scan on pane reopen) into a single loadSubagents() call fired
+    // after the burst settles, instead of one RPC per event.
+    scheduleLoadSubagents = (): void => {
+        if (this.loadSubagentsDebounceTimer !== undefined) {
+            clearTimeout(this.loadSubagentsDebounceTimer);
+        }
+        this.loadSubagentsDebounceTimer = setTimeout(() => {
+            this.loadSubagentsDebounceTimer = undefined;
+            void this.loadSubagents();
+        }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
     };
 
     // ── Row expand/collapse (workflow groups + subagent detail) ──────────
@@ -735,6 +765,10 @@ export class SwarmViewModel implements ViewModel {
         for (const unsub of [...this.unsubs, ...this.blockUnsubs]) unsub();
         this.unsubs = [];
         this.blockUnsubs = [];
+        if (this.loadSubagentsDebounceTimer !== undefined) {
+            clearTimeout(this.loadSubagentsDebounceTimer);
+            this.loadSubagentsDebounceTimer = undefined;
+        }
         for (const detail of this.detailCache.values()) detail.dispose();
         this.detailCache.clear();
         this.groupIdentityCache.clear();

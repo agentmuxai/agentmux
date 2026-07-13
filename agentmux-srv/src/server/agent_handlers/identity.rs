@@ -24,7 +24,7 @@ use crate::backend::rpc_types::{
     CommandListAgentIdentitiesData,
 };
 use crate::backend::storage::store::{
-    AgentInstance, IdentityAccount, SecretRef,
+    AgentIdentityLink, AgentInstance, IdentityAccount, SecretRef,
 };
 
 use super::super::AppState;
@@ -191,7 +191,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Armory: validate (optional) + securely store an API key.
     // The plaintext goes to the OS keychain; the DB row keeps only the
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
-    // See specs/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+    // See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
     let wstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
@@ -544,19 +544,58 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     cmd.limit.min(1000)
                 };
-                // Resolve bundle names once per response. With ≤200
-                // rows and typical bundle counts in the low dozens,
-                // a linear lookup on cached lists beats per-row
+                // Resolve names once per response. With ≤200 rows and
+                // typical account/bundle counts in the low dozens, a
+                // linear lookup on cached lists beats per-row
                 // round-trips through the store.
                 let defs = wstore
                     .agent_def_list()
                     .map_err(|e| format!("listnamedagents: agent_def_list: {e}"))?;
-                let identities = id_store
-                    .bundle_identity_list()
-                    .map_err(|e| format!("listnamedagents: bundle_identity_list: {e}"))?;
                 let memories = id_store
                     .bundle_memory_list()
                     .map_err(|e| format!("listnamedagents: bundle_memory_list: {e}"))?;
+
+                // Identity display names resolve off the direct
+                // agent<->account links (db_agent_identity_links /
+                // db_accounts) now, not the retired bundle tables — see
+                // SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md
+                // §4 item 2. Bulk-fetched once and grouped by
+                // definition_id rather than queried per-row.
+                let agent_identity_links = id_store
+                    .agent_identity_list_all()
+                    .map_err(|e| format!("listnamedagents: agent_identity_links: {e}"))?;
+                let accounts = id_store
+                    .identity_list(None)
+                    .map_err(|e| format!("listnamedagents: accounts: {e}"))?;
+                let accounts_by_id: std::collections::HashMap<&str, &IdentityAccount> =
+                    accounts.iter().map(|a| (a.id.as_str(), a)).collect();
+                let mut links_by_agent: std::collections::HashMap<&str, Vec<&AgentIdentityLink>> =
+                    std::collections::HashMap::new();
+                for link in &agent_identity_links {
+                    links_by_agent
+                        .entry(link.agent_id.as_str())
+                        .or_default()
+                        .push(link);
+                }
+                let resolve_identity_name = |definition_id: &str| -> String {
+                    match links_by_agent.get(definition_id) {
+                        Some(links) if !links.is_empty() => {
+                            let mut names: Vec<String> = links
+                                .iter()
+                                .map(|link| {
+                                    accounts_by_id
+                                        .get(link.account_id.as_str())
+                                        .map(|a| a.name.clone())
+                                        .unwrap_or_else(|| "(missing account)".to_string())
+                                })
+                                .collect();
+                            names.sort();
+                            names.dedup();
+                            names.join(", ")
+                        }
+                        _ => "(ambient creds)".to_string(),
+                    }
+                };
 
                 // PR B — read from the cross-version registry when
                 // it's available. Falls back to SQLite when the
@@ -615,15 +654,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let identity_id_str =
                                     d.identity_id.clone().unwrap_or_default();
                                 let memory_id_str = d.memory_id.clone().unwrap_or_default();
-                                let identity_name = if identity_id_str.is_empty() {
-                                    "(ambient creds)".to_string()
-                                } else {
-                                    identities
-                                        .iter()
-                                        .find(|i| i.id == identity_id_str)
-                                        .map(|i| i.name.clone())
-                                        .unwrap_or_else(|| "(missing identity)".to_string())
-                                };
+                                let identity_name = resolve_identity_name(&d.definition_id);
                                 let memory_name = if memory_id_str.is_empty() {
                                     "(vanilla CLI)".to_string()
                                 } else {
@@ -714,15 +745,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .into_iter()
                             .map(|inst| {
                                 let def = defs.iter().find(|d| d.id == inst.definition_id);
-                                let identity_name = if inst.identity_id.is_empty() {
-                                    "(ambient creds)".to_string()
-                                } else {
-                                    identities
-                                        .iter()
-                                        .find(|i| i.id == inst.identity_id)
-                                        .map(|i| i.name.clone())
-                                        .unwrap_or_else(|| "(missing identity)".to_string())
-                                };
+                                let identity_name = resolve_identity_name(&inst.definition_id);
                                 let memory_name = if inst.memory_id.is_empty() {
                                     "(vanilla CLI)".to_string()
                                 } else {

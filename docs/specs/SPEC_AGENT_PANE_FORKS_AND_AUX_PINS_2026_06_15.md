@@ -4,7 +4,7 @@
 **Status:** Draft — architecture + best-practices (no code landed)
 **Scope:** Agent pane (`frontend/app/view/agent/**`), block/layout model, agent runtime
 **Related:** `SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md` (the top dock that just
-shipped), `SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md` (AgentInstance + fork),
+shipped), `specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md` (AgentInstance + fork),
 `SPEC_AGENT_COMPOSER_SLIM_STATUS_2026_05_26.md`, `SPEC_ASK_USER_QUESTION_2026_06_15.md`
 (validation-gate discipline reused here)
 

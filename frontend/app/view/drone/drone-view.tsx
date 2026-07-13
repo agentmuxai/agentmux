@@ -786,8 +786,12 @@ const VariablesEditor = (p: {
 // ── AgentRef editor ───────────────────────────────────────────────────
 //
 // PR 3 of Phase 1.5 (closes #835). Replaces the prior single
-// `forge_agent_id` text field with separate identity / memory /
-// instance-name pickers backed by the launch-modal RPCs.
+// `forge_agent_id` text field with Memory / instance-name pickers backed
+// by the launch-modal RPCs. The Identity picker that originally shipped
+// here was removed in Phase 4b of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md
+// — the drone runner never read `agent_ref.identityId` for credential
+// injection, so the control was already inert; `identityId` is still
+// carried in `AgentRefShape`/`readAgentRef` below but has no picker UI.
 
 interface AgentRefShape {
     identityId: string;
@@ -823,9 +827,6 @@ const AgentRefEditor = (p: {
     node: FlowNode;
     update: (patch: Record<string, unknown>) => void;
 }): JSX.Element => {
-    const [identities] = createResource(() =>
-        RpcApi.ListIdentityBundlesCommand(TabRpcClient, {}).catch(() => [] as IdentityBundle[]),
-    );
     const [memories] = createResource(() =>
         RpcApi.ListMemoriesCommand(TabRpcClient, {}).catch(() => [] as Memory[]),
     );
@@ -835,18 +836,6 @@ const AgentRefEditor = (p: {
 
     return (
         <>
-            <NodeField label="Identity">
-                <select
-                    class="drone-input nodrag"
-                    value={ref().identityId}
-                    onChange={(e) => setRef({ identityId: e.currentTarget.value })}
-                >
-                    <option value="">— blank —</option>
-                    <For each={(identities() ?? []).filter((b) => !b.is_blank)}>
-                        {(bundle) => <option value={bundle.id}>{bundle.name}</option>}
-                    </For>
-                </select>
-            </NodeField>
             <NodeField label="Memory">
                 <select
                     class="drone-input nodrag"

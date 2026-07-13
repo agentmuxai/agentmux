@@ -34,7 +34,11 @@ pub struct NamedAgentRecordV1 {
     pub instance_id: String,
     pub instance_name: String,
     pub definition_id: String,
-    /// FK to `db_identity_bundles.id`. None = unbound (= ambient creds).
+    /// Legacy Identity-bundle id — `db_identity_bundles` was dropped in
+    /// Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md, so this
+    /// field is now vestigial (opaque pass-through only; credential
+    /// resolution is `db_agent_identity_links`-only). None = unbound
+    /// (= ambient creds).
     pub identity_id: Option<String>,
     /// FK to `db_bundles.id`. None = unbound (= vanilla CLI).
     pub memory_id: Option<String>,

@@ -551,7 +551,7 @@ export class AgentViewModel implements ViewModel {
             // launch (the agent already started). Stash the instance id
             // into block meta so downstream code (status updates,
             // bus targeting, lineage) can reference it. See
-            // SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 5.
+            // specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md §Phase 5.
             try {
                 const inst = await RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
                     definition_id: agent.id,

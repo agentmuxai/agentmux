@@ -101,12 +101,13 @@ impl Migration for M0000Bootstrap {
             stamp_channel("0007_agents_consolidate");
         }
 
-        // NOTE: 0008_default_bundle is intentionally NOT stamped here.
-        // run_default_bundle_migration is idempotent (checks existing bindings
-        // before writing), so re-running it on users who already have a Default
-        // bundle is a no-op. Omitting the stamp avoids a race where bootstrap
-        // stamps m0008 before it actually runs (the runner creates objects.db
-        // before m0000, making any objects_db.exists() proxy unreliable).
+        // NOTE: 0008_default_bundle is intentionally NOT stamped here. Its
+        // body is now a documented no-op (Phase 4c of
+        // SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md deleted the
+        // identity::migration module it used to call into, since
+        // db_identity_bundles/db_identity_bindings were dropped), so leaving
+        // it unstamped is harmless either way — the runner just marks it
+        // applied via the normal m0008 registry pass instead.
 
         // ── Global: transcript backfill ──────────────────────────────────────
         if let Some(transcripts_dir) = resolve_shared_transcripts_dir() {
