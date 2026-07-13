@@ -101,4 +101,63 @@ describe("agent-pane-layout store", () => {
         unregisterPane(BID);
         expect(snapshot(BID)).toBeNull();
     });
+
+    describe("scroll-only updates reuse the cached prefix sum (task #39)", () => {
+        it("a scroll-only dispatch does NOT recompute positions — same `rows` array reference", () => {
+            const { layout } = mkPane();
+            dispatch(BID, { type: "NodesChanged", orderedIds: ["a", "b", "c"] });
+            dispatch(BID, { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 40 });
+            const afterData = layout.mock.calls.at(-1)![0];
+
+            dispatch(BID, { type: "Scrolled", scrollTop: 10, viewportPx: 200 });
+            const afterScroll = layout.mock.calls.at(-1)![0];
+
+            // `computeLayoutView`/`positions()` allocate a fresh `rows` array
+            // on every REAL recompute (documented on `positions()`), so
+            // referential equality here proves the scroll-only dispatch
+            // reused the cached prefix sum instead of rebuilding it — the
+            // O(n)-per-scroll-event bug this fixes.
+            expect(afterScroll.rows).toBe(afterData.rows);
+            expect(afterScroll.totalSize).toBe(afterData.totalSize);
+            // The window itself must still be recomputed (that's the whole
+            // point of a scroll) — just via the cheap O(log n) path.
+            expect(afterScroll.window).not.toBe(afterData.window);
+        });
+
+        it("a data-changing dispatch after a scroll-only one still rebuilds `rows`", () => {
+            const { layout } = mkPane();
+            dispatch(BID, { type: "NodesChanged", orderedIds: ["a", "b", "c"] });
+            dispatch(BID, { type: "Scrolled", scrollTop: 10, viewportPx: 200 });
+            const afterScroll = layout.mock.calls.at(-1)![0];
+
+            dispatch(BID, { type: "RowMeasured", nodeId: "b", state: "collapsed", cssPx: 55 });
+            const afterMeasure = layout.mock.calls.at(-1)![0];
+
+            expect(afterMeasure.rows).not.toBe(afterScroll.rows);
+            expect(afterMeasure.rows[1].height).toBe(55);
+        });
+
+        it("the reused-positions window is still correct (not stale) after scrolling", () => {
+            const { layout } = mkPane();
+            const ids = Array.from({ length: 20 }, (_, i) => `n${i}`);
+            dispatch(BID, { type: "NodesChanged", orderedIds: ids });
+            for (const id of ids) {
+                dispatch(BID, { type: "RowMeasured", nodeId: id, state: "collapsed", cssPx: 20 });
+            }
+            // Rows are 20px each (0..400 total). viewportPx=40 shows 2 rows;
+            // scrollTop=200 puts rows n10/n11 in view, padded by the default
+            // overscan (5) on each side.
+            dispatch(BID, { type: "Scrolled", scrollTop: 200, viewportPx: 40 });
+            const view = layout.mock.calls.at(-1)![0];
+            expect(view.window).toEqual({ startIndex: 5, endIndex: 16 });
+
+            // Scroll again (still no data change) — window must track the
+            // NEW scrollTop, not the stale cached one.
+            dispatch(BID, { type: "Scrolled", scrollTop: 0, viewportPx: 40 });
+            const view2 = layout.mock.calls.at(-1)![0];
+            expect(view2.window).toEqual({ startIndex: 0, endIndex: 6 });
+            // Positions array itself is still the same cached reference.
+            expect(view2.rows).toBe(view.rows);
+        });
+    });
 });
