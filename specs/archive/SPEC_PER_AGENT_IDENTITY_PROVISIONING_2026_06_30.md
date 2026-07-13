@@ -6,7 +6,7 @@
 **Status:** Draft — design for the "close the code gap first" path
 **Author:** AgentX
 **Decisions (from product owner, 2026-06-30):** separate Anthropic **account per agent** (own login, own rate-limit pool, own billing); **pilot AgentX first**; **close the code gap** before rolling out.
-**Related:** `agentmux-srv/src/identity/resolver.rs`, `identity/auth_session.rs`, `identity/migration.rs`, `backend/storage/identities.rs`, `server/agent_handlers.rs`, `backend/providers.rs`; specs `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`, `SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md`, `docs/specs/agentmux-isolated-auth.md`.
+**Related:** `agentmux-srv/src/identity/resolver.rs`, `identity/auth_session.rs`, `identity/migration.rs`, `backend/storage/identities.rs`, `server/agent_handlers.rs`, `backend/providers.rs`; specs `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`, `specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md`, `docs/specs/agentmux-isolated-auth.md`.
 
 ---
 

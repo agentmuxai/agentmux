@@ -5,7 +5,7 @@
 **Date:** 2026-06-17
 **Status:** Draft — implementation (folded into the PR)
 **Scope:** Trust Center Accounts (`frontend/app/view/accounts/**`, `frontend/app/view/identity/identity-model.ts`)
-**Related:** `SPEC_TRUST_CENTER_2026_06_15.md` (the hub), `identity/migration.rs` (Default-bundle ambient discovery), `identity/resolver.rs::probe_oauth_status`
+**Related:** `specs/archive/SPEC_TRUST_CENTER_2026_06_15.md` (the hub), `identity/migration.rs` (Default-bundle ambient discovery), `identity/resolver.rs::probe_oauth_status`
 
 ---
 
