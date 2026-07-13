@@ -871,22 +871,24 @@ function TabBar(props: TabBarProps): JSX.Element {
     // The line is rendered as a sibling of .tab-bar-scroll (both children of
     // .tab-bar), NOT as a child inside it — .tab-bar-scroll is the horizontal
     // SCROLL container (overflow-x: auto), and an absolutely-positioned
-    // descendant of a scroll container moves with its scrollLeft. That was a
-    // bug the first time around (the line was meant to trace the whole tab
-    // strip's boundary, which shouldn't move when scrolled — reagentx review
-    // on #1979 caught it). It's the opposite requirement now: the line's
-    // left edge is the SELECTED TAB's own left edge, which legitimately does
-    // move as the strip scrolls (the tab's rendered position in the viewport
-    // changes), so re-measuring on scroll (below) is intentional this time,
-    // not a regression of that old bug.
+    // descendant of a scroll container moves with its scrollLeft, which
+    // would double-count scroll offset against this line's own
+    // getBoundingClientRect()-based measurements (a bug reagentx review on
+    // #1979 caught). Rendering outside that subtree and re-measuring on
+    // scroll (below) instead means the line always reflects wherever the
+    // strip's boundaries currently sit on screen — correct whether the
+    // strip is scrolled or not, and consistent for both edges.
     //
-    // left is measured from the active tab's own wrapper element
-    // (tabWrapperRefs, populated by DroppableTab — see tabbar-dnd.ts), not
-    // any container edge, so the line starts exactly where the selected tab
-    // starts regardless of which tab that is or how far the strip is
-    // scrolled. Falls back to leaving the previous values in place if the
-    // ref isn't available yet (e.g. a render race right after a tab is
-    // created) rather than flashing to some other position.
+    // left/right are measured from the first and last tabs' own wrapper
+    // elements (tabWrapperRefs, populated by DroppableTab — see
+    // tabbar-dnd.ts) and .tab-bar-fill respectively, not any container
+    // edge, so the line spans the FULL tab strip — every tab, not just from
+    // the selected tab onward — regardless of which tab is selected or how
+    // far the strip is scrolled. (Only the line's COLOR follows the
+    // selected tab, via activeTabColor() below.) Falls back to leaving the
+    // previous values in place if a ref isn't available yet (e.g. a render
+    // race right after a tab is created) rather than flashing to some other
+    // position.
     // Viewport-absolute px (not relative to any container) — the line can
     // still sit near .tab-bar-scroll's right edge while that container is
     // mid-horizontal-scroll, and .tab-bar has `overflow: hidden`, so it's
@@ -906,9 +908,17 @@ function TabBar(props: TabBarProps): JSX.Element {
     const [lineReady, setLineReady] = createSignal(false);
     const measureLine = (): boolean => {
         if (!tabBarRef) return false;
-        const activeTabEl = tabWrapperRefs.get(activeTabId());
-        if (!activeTabEl) return false;
-        const left = activeTabEl.getBoundingClientRect().left;
+        // Left edge spans the FULL tab strip — the FIRST tab's own left
+        // edge, not just from the selected tab rightward. Matches the right
+        // edge's "stop exactly at the tabs' own boundary" symmetrically
+        // (previously left ran from the active tab while right ran to the
+        // strip's end, an asymmetric span). The active tab only decides the
+        // line's COLOR (activeTabColor(), a data read below — independent
+        // of any DOM ref), not its extent, so activeTabEl's rect is no
+        // longer needed here.
+        const firstTabEl = tabWrapperRefs.get(tabIds()[0]);
+        if (!firstTabEl) return false;
+        const left = firstTabEl.getBoundingClientRect().left;
         setLineLeft(left);
         setLineBottom(window.innerHeight - tabBarRef.getBoundingClientRect().bottom);
 
@@ -931,20 +941,19 @@ function TabBar(props: TabBarProps): JSX.Element {
         setLineWidth(right - left);
         return true;
     };
-    // Re-measure whenever the selected tab (or the tab order — a reorder
-    // drag can shift the active tab's position without changing which tab
-    // is active) changes.
+    // Re-measure whenever the selected tab (its color drives the line, even
+    // though its position no longer does) or the tab order (a reorder drag,
+    // or a tab added/removed at either end, shifts the strip's own
+    // boundaries) changes.
     //
-    // Creating a new tab auto-selects it, but its DroppableTab hasn't
-    // necessarily mounted (and registered itself in tabWrapperRefs — see
-    // tabbar-dnd.ts) by the time this effect's dependencies update: without
-    // retrying, `measureLine` bailed and left the PREVIOUS tab's left/width
-    // in place, so the line rendered at the old tab's position — appearing
-    // to run from the wrong (usually further left/right, depending on
-    // where the new tab landed) starting point instead of stopping at the
-    // new tab's actual left edge. Retry across a few animation frames until
-    // the new tab's ref shows up, hiding the line meanwhile (lineReady)
-    // rather than showing it at that stale, wrong position.
+    // A newly-added tab's DroppableTab hasn't necessarily mounted (and
+    // registered itself in tabWrapperRefs — see tabbar-dnd.ts) by the time
+    // this effect's dependencies update — most notably when it lands at
+    // index 0 and `tabIds()[0]` now points at a ref that doesn't exist yet.
+    // Without retrying, `measureLine` bailed and left the PREVIOUS
+    // left/width in place, so the line rendered at a stale position. Retry
+    // across a few animation frames until the ref shows up, hiding the line
+    // meanwhile (lineReady) rather than showing it at that stale position.
     //
     // Precise tracking mid-drag-reorder (the 100ms gap-padding transition
     // in tabbar.scss) is intentionally out of scope here — this settles
