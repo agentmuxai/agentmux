@@ -608,7 +608,20 @@ impl SubagentWatcher {
 
         let mut sessions = self.sessions.lock().unwrap();
         let Some(session) = sessions.get_mut(session_id) else { return };
+        // A session's subagent map can hold entries from a DIFFERENT block —
+        // the watcher dedupes purely by agent_id (see watch_agent's doc
+        // comment), so two blocks that both ran the same underlying Claude
+        // session id (e.g. one reattached to a session another block also
+        // touched) can have subagents from both mixed into one
+        // `SessionWatch`. We only have a confirmed-idle read for THIS one
+        // `parent_block_id` — a sibling block's subagent could easily still
+        // be genuinely active, so only reconcile entries this block itself
+        // owns (mirrors unwatch_agent's own parent-scoped filter). Reagent
+        // P1 on PR #2131.
         for state in session.subagents.values_mut() {
+            if state.info.parent_block_id != parent_block_id {
+                continue;
+            }
             if state.info.status == SubagentStatus::Active {
                 state.info.status = SubagentStatus::Abandoned;
             }
@@ -2102,6 +2115,40 @@ mod tests {
 
         let info = watcher.get_info("sub-a").expect("sub-a should still exist");
         assert_eq!(info.status, SubagentStatus::Completed, "a subagent that genuinely finished must stay Completed, not be downgraded");
+    }
+
+    #[test]
+    fn reconcile_stale_subagents_never_touches_a_sibling_blocks_subagent_in_the_same_session() {
+        // Two blocks can both have subagents recorded under the same
+        // session_id (the watcher dedupes purely by agent_id — see
+        // watch_agent's doc comment). reconcile_stale_subagents only has a
+        // confirmed-idle read for the ONE block it was called with; a
+        // sibling block sharing that session_id could still be genuinely
+        // active, so its subagent must be left alone. Reagent P1 on #2131.
+        let idle_block = format!("recon-sibling-idle-{}", now_millis());
+        let active_block = format!("recon-sibling-active-{}", now_millis());
+        register_stub_controller(&idle_block, false);
+        register_stub_controller(&active_block, true);
+
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            let mut owned = fixture_state("parent-1", "sub-owned", "s1");
+            owned.info.parent_block_id = idle_block.clone();
+            let mut sibling = fixture_state("parent-2", "sub-sibling", "s1");
+            sibling.info.parent_block_id = active_block.clone();
+            s1.subagents.insert("sub-owned".to_string(), owned);
+            s1.subagents.insert("sub-sibling".to_string(), sibling);
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        watcher.reconcile_stale_subagents(&idle_block, "s1");
+
+        let owned_info = watcher.get_info("sub-owned").expect("sub-owned should still exist");
+        assert_eq!(owned_info.status, SubagentStatus::Abandoned, "this block's own subagent should still be reconciled");
+        let sibling_info = watcher.get_info("sub-sibling").expect("sub-sibling should still exist");
+        assert_eq!(sibling_info.status, SubagentStatus::Active, "a sibling block's subagent must never be reconciled by an unrelated block's idle read");
     }
 
     /// End-to-end: a subagent JSONL with no terminal `result` line, backfilled
