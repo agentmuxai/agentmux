@@ -62,7 +62,7 @@
     }
 
     &.context-active {
-        background: var(--hoverbg-color, rgba(255, 255, 255, 0.08));
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
     }
 
     &.dragging {
@@ -102,8 +102,11 @@
 
     &:hover,
     &.open {
-        background: var(--hoverbg-color, rgba(255, 255, 255, 0.08));
-        color: white;
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+        // Was a hardcoded `white` — invisible against a light theme's
+        // hover background. Matches the icon-hover treatment above
+        // (line 20) for the same "this control is active" state.
+        color: var(--widget-icon-hover-color);
     }
 
     i {

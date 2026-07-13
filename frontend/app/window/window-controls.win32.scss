@@ -55,7 +55,14 @@
     --win-caption-hover-bg: rgba(255, 255, 255, 0.13);
     --win-caption-press-bg: rgba(255, 255, 255, 0.09);
 
-    @media (prefers-color-scheme: light) {
+    // Was `@media (prefers-color-scheme: light)` — the OS-level dark/light
+    // setting, which is a different signal from AgentMux's own theme
+    // switcher (`data-theme`/`data-theme-polarity`, set in app.tsx). If the
+    // OS was in dark mode but the user picked a light AgentMux theme (or
+    // vice versa), the caption buttons used the wrong tint. Gate on the
+    // app's own polarity marker instead — covers every light theme, not
+    // just this one condition.
+    [data-theme-polarity="light"] & {
         --win-caption-hover-bg: rgba(0, 0, 0, 0.09);
         --win-caption-press-bg: rgba(0, 0, 0, 0.065);
     }

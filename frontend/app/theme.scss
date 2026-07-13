@@ -83,6 +83,17 @@
     // recessed tab-strip behind it.
     --workspace-surface: var(--block-bg-color);
     --tab-strip-bg: rgba(255, 255, 255, 0.03);
+    // The bottom status bar's own recessed strip — same concept as
+    // --tab-strip-bg (Layer A) but a separate token: StatusBar.scss used to
+    // hardcode this as a bare `rgba(0, 0, 0, 0.35)` literal, which is why it
+    // stayed dark under every theme including Light (a hardcoded literal
+    // doesn't participate in the theme system at all — unlike --tab-strip-bg,
+    // which WAS a real token but simply had no light.scss override, letting
+    // it fall through to this file's white-tint default and go invisible on
+    // a light surface). This value is the exact literal it replaces, so
+    // every existing dark theme is visually unchanged; only Light (and any
+    // other light-polarity theme) needs its own override.
+    --status-bar-bg: rgba(0, 0, 0, 0.35);
     --block-border-radius: 0;
 
     --keybinding-color: #e0e0e0;
