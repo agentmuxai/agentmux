@@ -4,7 +4,8 @@
 // Gruvbox Dark — retro warm dark, earthy yellows and greens
 
 [data-theme="gruvbox"] {
-    --main-bg-color: #282828;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(40, 40, 40, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(32, 32, 32, 0.6);
     --block-bg-color: rgba(20, 20, 20, 0.7);
     --block-bg-solid-color: #1d2021;

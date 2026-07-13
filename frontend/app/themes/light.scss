@@ -16,13 +16,14 @@
 //      literal hue-for-hue copy of any dark theme's --term-* values.
 
 [data-theme="light"] {
-    --main-bg-color: #f6f6f7;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(246, 246, 247, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(0, 0, 0, 0.03);
     --block-bg-color: rgba(255, 255, 255, 0.6);
     --block-bg-solid-color: #ffffff;
     --modal-bg-color: #ffffff;
 
-    --main-text-color: #1f2328;
+    --main-text-color: #0d0f11;
     --secondary-text-color: #4b535c;
     --grey-text-color: #6e7781;
 
@@ -83,7 +84,7 @@
     --scrollbar-thumb-hover-color: rgba(0, 0, 0, 0.4);
 
     --term-background: #ffffff;
-    --term-foreground: #1f2328;
+    --term-foreground: #0d0f11;
     --term-black: #1f2328;
     --term-red: #cf222e;
     --term-green: #116329;
