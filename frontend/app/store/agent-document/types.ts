@@ -27,6 +27,18 @@ export interface AgentDocumentState {
      * from this set rather than rebuilt. Issue #728 gap 4.
      */
     nodeIdSet: Set<string>;
+    /**
+     * id -> current index in `nodes`, kept in lockstep with `nodes`
+     * (same lifecycle as `nodeIdSet`). Lets `StreamFlush` resolve
+     * collisions/updates and `ToolChunkAppend` / `ShellChunkAppend` /
+     * `ShellStatusUpdate` locate their target node in O(1) instead of
+     * scanning the full array on every streamed chunk — task #39. Any
+     * command that reorders or prepends `nodes` (`HistoryLoaded`,
+     * `HistoryRestored`) must rebuild this map to match; a command that
+     * only mutates node CONTENT in place (scrub, truncate-status flips)
+     * leaves indices untouched and can pass the same map through.
+     */
+    nodeIndexById: Map<string, number>;
 }
 
 export const initialState = (): AgentDocumentState => ({
@@ -34,6 +46,7 @@ export const initialState = (): AgentDocumentState => ({
     sessionPhase: "loading-history",
     sessionStartedAt: null,
     nodeIdSet: new Set<string>(),
+    nodeIndexById: new Map<string, number>(),
 });
 
 /** Optional knobs the dispatcher can pass through to the reducer. */

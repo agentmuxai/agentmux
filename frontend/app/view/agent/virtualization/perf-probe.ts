@@ -42,6 +42,17 @@ export interface LayoutShiftSample {
     timestamp: number;
 }
 
+/**
+ * Which store's `dispatch()` a timing sample came from. `layout` is
+ * `agent-pane-layout-store.ts` (row positions/window); `document` is
+ * `agent-document-store.ts` (the message list — StreamFlush/chunk
+ * appends). Task #39/#40: this is the exact blind spot the original
+ * virtualization perf probe never covered — it measured row MOUNT
+ * cost, not the reducer/store DISPATCH cost underneath, which is what
+ * was actually growing with conversation length.
+ */
+export type DispatchKind = "layout" | "document";
+
 /** Threshold above which an estimator is considered a miss. */
 export const ESTIMATOR_MISS_THRESHOLD = 0.30;
 
@@ -68,10 +79,18 @@ class AgentPerfStore {
     private kindMissCount = new Map<NodeKind, { misses: number; total: number }>();
     /** Layout-shift events scoped to agent pane. */
     private layoutShifts: LayoutShiftSample[] = [];
+    /** Per-kind store `dispatch()` duration (ms) — layout vs document
+     *  store. p50/p95/max surface in HUD, same shape as `rowMountAgg`. */
+    private dispatchAgg = new KeyedAggregator(SAMPLE_RING_SIZE);
 
     recordRowMount(kind: NodeKind, durationMs: number): void {
         if (!isProbingEnabled()) return;
         this.rowMountAgg.record(kind, durationMs);
+    }
+
+    recordDispatchTiming(kind: DispatchKind, durationMs: number): void {
+        if (!isProbingEnabled()) return;
+        this.dispatchAgg.record(kind, durationMs);
     }
 
     recordEstimatorMeasurement(kind: NodeKind, estimated: number, actual: number): void {
@@ -116,6 +135,7 @@ class AgentPerfStore {
             estimatorMissRateByKind: missRates,
             recentEstimatorMisses: [...this.estimatorMisses],
             recentLayoutShifts: [...this.layoutShifts],
+            dispatchByKind: this.dispatchAgg.snapshot() as Map<DispatchKind, QuantileSnapshot>,
         };
     }
 
@@ -125,6 +145,7 @@ class AgentPerfStore {
         this.estimatorMisses = [];
         this.kindMissCount.clear();
         this.layoutShifts = [];
+        this.dispatchAgg = new KeyedAggregator(SAMPLE_RING_SIZE);
     }
 }
 
@@ -133,6 +154,8 @@ export interface AgentPerfSnapshot {
     estimatorMissRateByKind: ReadonlyMap<NodeKind, number>;
     recentEstimatorMisses: readonly EstimatorMissSample[];
     recentLayoutShifts: readonly LayoutShiftSample[];
+    /** Store `dispatch()` duration (ms), keyed by `layout`/`document`. */
+    dispatchByKind: ReadonlyMap<DispatchKind, QuantileSnapshot>;
 }
 
 const EMPTY_SNAPSHOT: AgentPerfSnapshot = {
@@ -140,6 +163,7 @@ const EMPTY_SNAPSHOT: AgentPerfSnapshot = {
     estimatorMissRateByKind: new Map(),
     recentEstimatorMisses: [],
     recentLayoutShifts: [],
+    dispatchByKind: new Map(),
 };
 
 export const agentPerfStore = new AgentPerfStore();
@@ -200,6 +224,25 @@ export function markRowMount(kind: NodeKind): () => void {
     const start = performance.now();
     return () => {
         agentPerfStore.recordRowMount(kind, performance.now() - start);
+    };
+}
+
+/**
+ * Time a store `dispatch()` call. Returns a function the caller invokes
+ * once the dispatch (reducer + projection) has fully settled — same
+ * start/stop shape as `markRowMount`, applied to the layer underneath
+ * the DOM: `agent-pane-layout-store.ts` and `agent-document-store.ts`
+ * call this around their `dispatch()` bodies so the HUD can show the
+ * cost this task's fix (task #39) targeted, which the row-mount probe
+ * above never covered.
+ *
+ * Production: returns a no-op.
+ */
+export function markDispatch(kind: DispatchKind): () => void {
+    if (!isProbingEnabled()) return NOOP;
+    const start = performance.now();
+    return () => {
+        agentPerfStore.recordDispatchTiming(kind, performance.now() - start);
     };
 }
 
