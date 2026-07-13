@@ -1268,6 +1268,16 @@ fn persist_oauth_direct_account(
 /// parameters so the wire request shape and the 4 call sites don't need
 /// touching. `dir` is the account's own isolation dir, resolved once at
 /// spawn time by `compute_and_ensure_*_dir` in the `auth.start` handler.
+///
+/// Guards on `account_id` being non-empty before persisting: `auth.start`
+/// only populates a real account_id when `direct_account` is true (via
+/// `compute_and_ensure_account_dir`, which always mints/reuses a real id);
+/// when `direct_account` is false (the wire default, still reachable by
+/// any caller other than the one production frontend path), `account_id`
+/// is `""`. Without this guard an empty id would flow into
+/// `persist_oauth_direct_account`'s `identity_upsert`, whose
+/// `ON CONFLICT(id) DO UPDATE` would silently overwrite/corrupt any prior
+/// row that happened to have `id=""`. Reagent P1.
 #[allow(clippy::too_many_arguments)]
 fn persist_oauth_success(
     wstore: &Arc<Store>,
@@ -1279,6 +1289,9 @@ fn persist_oauth_success(
     dir: Option<&str>,
     session_id: &str,
 ) -> (String, Option<String>) {
+    if account_id.is_empty() {
+        return (String::new(), None);
+    }
     let persisted = persist_oauth_direct_account(wstore, broker, account_id, provider_id, dir, session_id);
     (String::new(), persisted)
 }
@@ -1566,5 +1579,33 @@ mod tests {
         assert_eq!(bundle_id, "", "bundle id is always empty now");
         assert_eq!(account_id, Some("acc-1".to_string()));
         assert!(wstore.identity_get("acc-1").unwrap().is_some());
+    }
+
+    #[test]
+    fn persist_oauth_success_skips_persistence_when_account_id_is_empty() {
+        // Reagent P1: `auth.start` sets account_id = "" whenever
+        // `direct_account` is false (the wire default) — a caller other
+        // than the one production frontend path (which always sends
+        // `directAccount: true`) can still reach this. Without the
+        // empty-id guard, persist_oauth_direct_account's identity_upsert
+        // would silently write/overwrite a db_accounts row with id="".
+        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let (bundle_id, account_id) = persist_oauth_success(
+            &wstore,
+            &broker,
+            false,
+            "",
+            None,
+            "claude",
+            Some("/some/dir"),
+            "sess-empty",
+        );
+        assert_eq!(bundle_id, "");
+        assert_eq!(account_id, None, "empty account_id must not be persisted");
+        assert!(
+            wstore.identity_get("").unwrap().is_none(),
+            "no row with id=\"\" should ever be written"
+        );
     }
 }
