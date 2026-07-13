@@ -64,8 +64,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut memory: Memory = serde_json::from_value(data)
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 // Guard on BOTH client-supplied is_blank AND id == "blank".
-                // Same bypass as upsertidentitybundle — see that comment.
-                // (reagent P1, 2026-05-08).
+                // Without the id check a caller could send
+                // {id:"blank", is_blank:false, name:"evil"} and the
+                // ON CONFLICT(id) DO UPDATE path would rename/re-describe
+                // the seeded singleton. (reagent P1, 2026-05-08).
                 if memory.is_blank || memory.id == "blank" {
                     return Err("upsertmemory: cannot mutate the blank singleton".to_string());
                 }
