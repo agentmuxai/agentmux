@@ -22,6 +22,15 @@ fn scratch_session_token() -> &'static str {
     SCRATCH_SESSION_TOKEN.get_or_init(|| uuid::Uuid::new_v4().to_string())
 }
 
+/// True for the filesystem root itself (`/` on Unix, a bare drive root like
+/// `C:\` on Windows) — the one path the editor's file-tree mutation handlers
+/// (rename/delete) refuse to touch regardless of how permissive the rest of
+/// their path policy is. A canonicalized path has no `parent()` iff it's a
+/// root.
+fn is_filesystem_root(path: &std::path::Path) -> bool {
+    path.parent().is_none()
+}
+
 /// Enumerate drives/mounts to surface as editor file-tree roots alongside
 /// $HOME (via the `geteditorroots` RPC). On **macOS** this returns nothing, so
 /// the file-tree's roots are limited to $HOME — `/`, `/Volumes`, and external
@@ -480,11 +489,17 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("renameeditorfile: {e}"))?;
                 let expanded = expand_home_dir_safe(&cmd.old_path);
                 let old_path = expanded.as_path();
-                let home = dirs::home_dir().ok_or("renameeditorfile: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("renameeditorfile: home: {e}"))?;
                 let canonical_old = old_path.canonicalize().map_err(|e| format!("renameeditorfile: {e}"))?;
-                if !canonical_old.starts_with(&canonical_home) || canonical_old == canonical_home {
-                    return Err("renameeditorfile: path outside or is the home directory".to_string());
+                // Path policy matches readeditorfile/writeeditorfile (no home-only
+                // restriction — the file tree lets users browse and open/save any
+                // path the OS permits; SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
+                // §Path Safety calls for the same policy here, but this handler
+                // was originally home-only, which silently rejected rename for
+                // any file outside $HOME — reported as "rename is a no-op").
+                // The one guard read/write don't need: never rename the
+                // filesystem root itself.
+                if is_filesystem_root(&canonical_old) {
+                    return Err("renameeditorfile: refusing to rename the filesystem root".to_string());
                 }
                 if cmd.new_name.contains('/') || cmd.new_name.contains('\\') || cmd.new_name.contains('\0') || cmd.new_name == ".." || cmd.new_name == "." || cmd.new_name.is_empty() {
                     return Err("renameeditorfile: new_name must be a plain filename".to_string());
@@ -513,12 +528,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("createeditorfile: {e}"))?;
                 let expanded = expand_home_dir_safe(&cmd.parent_path);
                 let parent = expanded.as_path();
-                let home = dirs::home_dir().ok_or("createeditorfile: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("createeditorfile: home: {e}"))?;
+                // Path policy matches readeditorfile/writeeditorfile — see the
+                // comment in the renameeditorfile handler above.
                 let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditorfile: {e}"))?;
-                if !canonical_parent.starts_with(&canonical_home) {
-                    return Err("createeditorfile: path outside home directory".to_string());
-                }
                 if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
                     return Err("createeditorfile: name must be a plain filename".to_string());
                 }
@@ -543,12 +555,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("createeditordir: {e}"))?;
                 let expanded = expand_home_dir_safe(&cmd.parent_path);
                 let parent = expanded.as_path();
-                let home = dirs::home_dir().ok_or("createeditordir: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("createeditordir: home: {e}"))?;
+                // Path policy matches readeditorfile/writeeditorfile — see the
+                // comment in the renameeditorfile handler above.
                 let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditordir: {e}"))?;
-                if !canonical_parent.starts_with(&canonical_home) {
-                    return Err("createeditordir: path outside home directory".to_string());
-                }
                 if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
                     return Err("createeditordir: name must be a plain name".to_string());
                 }
@@ -573,11 +582,12 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("deleteeditorfile: {e}"))?;
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let path = expanded.as_path();
-                let home = dirs::home_dir().ok_or("deleteeditorfile: cannot determine home")?;
-                let canonical_home = home.canonicalize().map_err(|e| format!("deleteeditorfile: home: {e}"))?;
                 let canonical = path.canonicalize().map_err(|e| format!("deleteeditorfile: {e}"))?;
-                if !canonical.starts_with(&canonical_home) || canonical == canonical_home {
-                    return Err("deleteeditorfile: path outside or is the home directory".to_string());
+                // Path policy matches readeditorfile/writeeditorfile — see the
+                // comment in the renameeditorfile handler above. The one guard
+                // read/write don't need: never delete the filesystem root.
+                if is_filesystem_root(&canonical) {
+                    return Err("deleteeditorfile: refusing to delete the filesystem root".to_string());
                 }
                 // Use symlink_metadata (not metadata) to detect symlinks without following them.
                 // Deleting via `canonical` would delete the symlink TARGET; we always remove the
