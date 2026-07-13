@@ -4,7 +4,8 @@
 // Tokyo Night — deep blue-purple city aesthetic
 
 [data-theme="tokyo-night"] {
-    --main-bg-color: #1a1b2e;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(26, 27, 46, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(22, 23, 40, 0.6);
     --block-bg-color: rgba(14, 15, 26, 0.7);
     --block-bg-solid-color: #0e0f1a;

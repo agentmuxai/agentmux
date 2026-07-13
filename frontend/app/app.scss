@@ -18,12 +18,14 @@ body {
     font: var(--base-font);
     overflow: hidden;
     // Was a hardcoded rgba(34, 34, 34, var(--window-opacity)) literal —
-    // the same value as --main-bg-color's dark-theme default, but frozen
-    // in place rather than reading the token, so every light theme's
-    // header/status-bar/etc still composited their translucent tints over
-    // a solid dark body underneath. --main-bg-color is already
-    // alpha-aware via --window-opacity (theme.scss), so this is a
-    // drop-in swap, not a behavior change for the dark themes.
+    // the same value as --main-bg-color's :root default, but frozen in
+    // place rather than reading the token, so every named theme's
+    // header/status-bar/etc still composited their translucent tints
+    // over a solid, wrong-hued body underneath. Every named theme's
+    // --main-bg-color override is now also alpha-aware (PR #2138 reagent
+    // P1 — they were plain opaque hex, which broke window:transparent/
+    // window:blur for any non-default theme once body started reading
+    // this token instead of its own hardcoded translucent literal).
     background: var(--main-bg-color);
     -webkit-font-smoothing: auto;
     backface-visibility: hidden;

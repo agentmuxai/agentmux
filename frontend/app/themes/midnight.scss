@@ -4,7 +4,8 @@
 // Midnight — deep navy dark, electric blue accent
 
 [data-theme="midnight"] {
-    --main-bg-color: rgb(10, 12, 22);
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(10, 12, 22, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(8, 10, 20, 0.6);
     --block-bg-color: rgba(4, 6, 14, 0.7);
     --block-bg-solid-color: rgb(4, 6, 14);
