@@ -36,7 +36,14 @@
 
     --hover-bg-color: rgba(0, 0, 0, 0.05);
     --highlight-bg-color: rgba(0, 0, 0, 0.08);
-    --input-bg-color: rgba(0, 0, 0, 0.06);
+    // Solid, not alpha (mirrors theme.scss's dark-default fix for the same
+    // reagent P1 on PR #2104 — see that file's comment for the full
+    // rationale). A shade darker than both --main-bg-color (#f6f6f7) and
+    // --modal-bg-color (#ffffff) so the field reads as a distinct box on
+    // every surface it's used on (editor inline inputs, identity/memory
+    // modal form fields), rather than depending on what's rendered behind
+    // it. Approximates the prior 6%-black-over-white tint, now fixed.
+    --input-bg-color: #eceef0;
 
     --error-color: #d1242f;
     --warning-color: #9a6700;

@@ -147,10 +147,21 @@
     // --main-bg-color, which is rgba(..., var(--window-opacity)) — coupling
     // an editable field's background to the user's window-transparency
     // setting would make editor-view.scss's inline inputs see-through at
-    // low opacity (reagent P1 on PR #2104). rgba(0,0,0,0.2) matches the
-    // majority (2 of 4) of the call sites' own prior fallbacks and has no
-    // dependency on an unrelated setting.
-    --input-bg-color: rgba(0, 0, 0, 0.2);
+    // low opacity (reagent P1 on PR #2104).
+    // SOLID, not alpha (reagent P1 round 2 on PR #2104): an rgba(0,0,0,0.2)
+    // tint reads fine against editor-view.scss's own #1e1e2e fallback
+    // assumption, but once the token is DEFINED it overrides that fallback
+    // everywhere `var(--input-bg-color, ...)` is used — including the two
+    // inline replace-row-label inputs (file-tree rename, Ctrl+S save-as),
+    // which sit directly on dark row/tab surfaces. A 20%-black tint over an
+    // already-dark surface barely darkens it at all, so those inputs lost
+    // their crisp box and bled into the row instead of reading as an
+    // editable field. A solid color has no such surface-dependence. This
+    // exact hex is editor-view.scss's own original fallback literal, so the
+    // editor's two sites are visually unchanged; it also renders as a
+    // reasonable "sunken field" a shade darker than --modal-bg-color
+    // (#232323) for the panel-form call sites (identity-pane, memory-view).
+    --input-bg-color: #1e1e2e;
     --elevated-bg-color: var(--modal-bg-color);  // alias — same concept as the pre-existing modal token, itself a plain per-theme literal (no window-opacity coupling)
 
     // z-indexes in xterm.css
