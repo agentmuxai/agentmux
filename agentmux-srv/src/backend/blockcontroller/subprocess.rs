@@ -613,7 +613,17 @@ impl SubprocessController {
                         // Publish the NDJSON line as a WPS blockfile event on the "output" subject
                         // and write-through to FileStore for persistent history (Phase 1.3).
                         if let Some(ref broker) = broker_read {
-                            tracing::info!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
+                            // debug, not info: fires on every NDJSON line, and
+                            // logs the FULL line content (not just length like
+                            // persistent.rs's sibling) — a real contributor
+                            // (~6%) to an unrotated 406 MB launcher-log mirror
+                            // on a real machine (SPEC_WIN10_PAGEFILE_OOM_CRASH_
+                            // 2026_06_29 P1). muxlog.mjs already treats this
+                            // exact line as noise-to-drop-by-default when
+                            // tailing, independent corroboration. Default
+                            // production filter is info, so this is now
+                            // suppressed unless RUST_LOG=debug is set.
+                            tracing::debug!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
                             // Include the newline so the frontend line splitter works correctly
                             let line_with_newline = format!("{}\n", trimmed);
                             super::shell::handle_append_block_file(

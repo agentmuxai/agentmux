@@ -884,7 +884,14 @@ impl PersistentSubprocessController {
 
                 // Publish line as WPS blockfile event and write-through to FileStore
                 // for persistent history (Phase 1.3).
-                tracing::info!(
+                //
+                // debug, not info: fires on EVERY output line a streaming agent
+                // produces — the single largest contributor (~27%) to an
+                // unrotated 406 MB launcher-log mirror on a real machine
+                // (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 P1). Default
+                // production filter is info, so this is now suppressed unless
+                // RUST_LOG=debug is set.
+                tracing::debug!(
                     block_id = %block_id_read,
                     line_len = line.len(),
                     "persistent stdout → blockfile"
