@@ -146,7 +146,7 @@ const DEAD_TABLE_DROPS: &[&str] = &[
 ///    tables found (protects dev databases created before the flatten;
 ///    see the spec §3/§7) and drops the dead workflow/sentinel tables.
 /// 2. The flat `CREATE TABLE IF NOT EXISTS` batch — the canonical schema.
-/// 3. Seeds the blank Identity / Memory singleton rows.
+/// 3. Seeds the blank Memory singleton row.
 ///
 /// A database stuck at a pre-v11 intermediate schema cannot be fully
 /// adopted (its tables predate later columns). The adopt step still
@@ -613,10 +613,10 @@ fn adopt_legacy_table_names(conn: &Connection) -> Result<(), StoreError> {
 /// Initialize (or re-validate) the `~/.agentmux/shared/store.db` schema.
 ///
 /// Contains only the durable user content that must survive across
-/// channels/versions: identity accounts, identity bundles, identity bindings,
-/// agent→account links, memory bundles, drone definitions, and muxbus
-/// credentials. Session state (`db_block`, `db_tab`, etc.) and drone run
-/// history stay in the per-channel `objects.db`.
+/// channels/versions: identity accounts, agent→account links, memory
+/// bundles, drone definitions, and muxbus credentials. Session state
+/// (`db_block`, `db_tab`, etc.) and drone run history stay in the
+/// per-channel `objects.db`.
 ///
 /// `db_agent_identity_links` drops the FK to `db_agent_definitions` here
 /// (cross-DB FK enforcement is impossible in SQLite); application code
