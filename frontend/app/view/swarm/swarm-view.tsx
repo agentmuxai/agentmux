@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowGroup, SubagentDetail, SubagentEvent } from "./swarm-model";
-import { isWorkflowGroup } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowGroup, NameGroup, SubagentDetail, SubagentEvent } from "./swarm-model";
+import { isWorkflowGroup, isNameGroup, groupCacheKey } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -257,6 +257,8 @@ function AgentRow({
                 <For each={node.subagents}>
                     {(child) => isWorkflowGroup(child)
                         ? <WorkflowGroupRow group={child} model={model} />
+                        : isNameGroup(child)
+                        ? <NameGroupRow group={child} model={model} />
                         : <SubagentRow sub={child} model={model} />}
                 </For>
             </div>
@@ -277,6 +279,43 @@ function WorkflowGroupRow({ group, model }: { group: WorkflowGroup; model: Swarm
             <div
                 class="swarm-workflow-header"
                 onClick={() => model.toggleExpanded(group.workflowId)}
+                title={group.name}
+            >
+                <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
+                <span class="swarm-workflow-name">{group.name}</span>
+                <span class="swarm-workflow-count">
+                    {group.status === "active" ? `${group.activeCount}/${group.totalCount} active` : `${group.totalCount} retired`}
+                </span>
+                <span class={`swarm-workflow-status-badge swarm-workflow-status-badge--${group.status}`}>
+                    {group.status === "active" ? "Active" : "Retired"}
+                </span>
+            </div>
+            <Show when={expanded()}>
+                <div class="swarm-workflow-members">
+                    <For each={group.subagents}>
+                        {(sub) => <SubagentRow sub={sub} model={model} />}
+                    </For>
+                </div>
+            </Show>
+        </div>
+    );
+}
+
+// ── Name group row (loose subagents sharing one display_name) ──────────
+
+function NameGroupRow({ group, model }: { group: NameGroup; model: SwarmViewModel }): JSX.Element {
+    // Same expand-state-on-the-ViewModel rationale as WorkflowGroupRow —
+    // reuses groupCacheKey's "name:<name>" namespacing so this can never
+    // collide with a WorkflowGroupRow's workflowId or a SubagentRow's
+    // agent_id in the shared expandedIds set.
+    const key = groupCacheKey(group);
+    const expanded = createMemo(() => model.isExpanded(key));
+
+    return (
+        <div class={`swarm-workflow-group swarm-workflow-group--${group.status}`}>
+            <div
+                class="swarm-workflow-header"
+                onClick={() => model.toggleExpanded(key)}
                 title={group.name}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-workflow-expand-icon`} />
