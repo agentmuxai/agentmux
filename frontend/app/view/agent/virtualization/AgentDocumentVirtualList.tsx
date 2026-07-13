@@ -118,6 +118,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     let virtualContainerRef: HTMLDivElement | undefined;
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
+    // RAF-coalesced scroll handling (task #39): native `scroll` events can
+    // fire dozens of times per drag/wheel gesture; without coalescing, each
+    // one dispatches a layout `Scrolled` command and re-derives the window.
+    // Mirrors the `scheduleFlush`/`flushRafId` idiom useAgentStream.ts uses to
+    // batch stream chunks into one dispatch per animation frame — same
+    // "guard with a nullable rAF handle" pattern, applied to scroll here.
+    // `handleScrollNow` reads scrollRef's LIVE values (not anything captured
+    // from the event), so it's safe to defer to the next frame: whichever
+    // scroll position is current when the frame runs is the one applied.
+    let scrollRafId: number | null = null;
 
     // Sticky frontier id — set once when the document first crosses
     // STREAMING_BUFFER_SIZE; advanced whenever the buffer exceeds the
@@ -489,7 +499,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     };
 
-    const handleScroll = (): void => {
+    const handleScrollNow = (): void => {
         if (!scrollRef) return;
         const { scrollTop, scrollHeight, clientHeight } = scrollRef;
 
@@ -620,6 +630,23 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             });
         }
     };
+
+    // Coalesce native `scroll` events to at most one `handleScrollNow` call
+    // per animation frame. `onScroll` below wires this, not `handleScrollNow`
+    // directly.
+    const handleScroll = (): void => {
+        if (scrollRafId != null) return;
+        scrollRafId = requestAnimationFrame(() => {
+            scrollRafId = null;
+            handleScrollNow();
+        });
+    };
+    onCleanup(() => {
+        if (scrollRafId != null) {
+            cancelAnimationFrame(scrollRafId);
+            scrollRafId = null;
+        }
+    });
 
     // ── Phase 3 Step 3+4: render from the slice + a standalone measure RO ──
     // Rows render from the slice's prefix-sum positions (computeLayoutView →
