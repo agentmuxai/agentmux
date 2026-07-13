@@ -28,7 +28,6 @@
 - feat(swarm): three-way subagent status (active/completed/abandoned) with interrupted chip and client-side downgrade guard
 - fix(tabs): snap tab-separator slot width to device pixel under fractional zoom
 
-
 ## 0.53.2 — 2026-07-11
 
 - fix(tabbar): cross-tab drag stability (stuck-overlay cleanup, ghost/landing clamp, geometry refresh) + hover strobe
