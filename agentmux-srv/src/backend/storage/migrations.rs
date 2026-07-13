@@ -26,7 +26,10 @@ use super::error::StoreError;
 ///   v1 — initial: identity accounts/bundles/bindings/links, memory
 ///         bundles, drone definitions, muxbus credentials
 ///   v2 — db_cron_jobs: persistent scheduled injection jobs
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 2;
+///   v3 — Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md: rename
+///        db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
+///        (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 3;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -54,7 +57,10 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 2;
 ///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref:
 ///        standalone MCP Server and Skill primitives with per-agent ref tables
 ///        (v1 composable model, SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md).
-pub const OBJECT_SCHEMA_VERSION: i64 = 10;
+///   v11 — Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md: rename
+///        db_identity_accounts -> db_accounts, db_memory_bundles -> db_bundles
+///        (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
+pub const OBJECT_SCHEMA_VERSION: i64 = 11;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -83,6 +89,14 @@ const LEGACY_TABLE_RENAMES: &[(&str, &str)] = &[
     ("db_forge_agent_identities", "db_agent_identity_links"),
     ("db_identities", "db_identity_bundles"),
     ("db_memories", "db_memory_bundles"),
+    // Phase 4 of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md — the
+    // "bundle" naming collision fix (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
+    // Order matters: this entry runs AFTER the `db_memories` rename above
+    // in the same pass, so a database old enough to still have `db_memories`
+    // chains straight through to `db_bundles` in one migration run instead
+    // of stopping at the intermediate name.
+    ("db_identity_accounts", "db_accounts"),
+    ("db_memory_bundles", "db_bundles"),
 ];
 
 /// Legacy index names that must be dropped after their table is renamed —
@@ -95,6 +109,13 @@ const LEGACY_INDEX_DROPS: &[&str] = &[
     "idx_forge_agent_identities_account",
     "idx_identities_is_blank",
     "idx_memories_is_blank",
+    // Phase 4 rename (see LEGACY_TABLE_RENAMES above) — objects.db names,
+    // then the shared store.db names (`idx_ss_*` prefix, see
+    // run_shared_store_schema).
+    "idx_identity_accounts_provider",
+    "idx_memory_bundles_is_blank",
+    "idx_ss_identity_accounts_provider",
+    "idx_ss_memory_bundles_is_blank",
 ];
 
 /// Tables retained by the old chain only for a downgrade path the flatten
@@ -202,7 +223,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_agent_history_agent_date
             ON db_agent_history(agent_id, session_date);
 
-        CREATE TABLE IF NOT EXISTS db_identity_accounts (
+        CREATE TABLE IF NOT EXISTS db_accounts (
             id           TEXT PRIMARY KEY,
             name         TEXT NOT NULL,
             provider     TEXT NOT NULL,
@@ -214,8 +235,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at   INTEGER NOT NULL DEFAULT 0,
             updated_at   INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_identity_accounts_provider
-            ON db_identity_accounts(provider);
+        CREATE INDEX IF NOT EXISTS idx_accounts_provider
+            ON db_accounts(provider);
 
         CREATE TABLE IF NOT EXISTS db_agent_identity_links (
             agent_id   TEXT NOT NULL,
@@ -223,7 +244,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             provider   TEXT NOT NULL,
             PRIMARY KEY (agent_id, provider),
             FOREIGN KEY (agent_id)   REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
-            FOREIGN KEY (account_id) REFERENCES db_identity_accounts(id) ON DELETE CASCADE
+            FOREIGN KEY (account_id) REFERENCES db_accounts(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_agent_identity_links_account
             ON db_agent_identity_links(account_id);
@@ -244,13 +265,13 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             provider    TEXT NOT NULL,
             account_id  TEXT NOT NULL,
             PRIMARY KEY (identity_id, provider),
-            FOREIGN KEY (identity_id) REFERENCES db_identity_bundles(id)  ON DELETE CASCADE,
-            FOREIGN KEY (account_id)  REFERENCES db_identity_accounts(id) ON DELETE CASCADE
+            FOREIGN KEY (identity_id) REFERENCES db_identity_bundles(id) ON DELETE CASCADE,
+            FOREIGN KEY (account_id)  REFERENCES db_accounts(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_identity_bindings_account
             ON db_identity_bindings(account_id);
 
-        CREATE TABLE IF NOT EXISTS db_memory_bundles (
+        CREATE TABLE IF NOT EXISTS db_bundles (
             id            TEXT PRIMARY KEY,
             name          TEXT NOT NULL UNIQUE,
             description   TEXT NOT NULL DEFAULT '',
@@ -266,8 +287,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at    INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_memory_bundles_is_blank
-            ON db_memory_bundles(is_blank);
+        CREATE INDEX IF NOT EXISTS idx_bundles_is_blank
+            ON db_bundles(is_blank);
 
         CREATE TABLE IF NOT EXISTS db_agent_instances (
             id                 TEXT PRIMARY KEY,
@@ -502,8 +523,12 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agents ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE db_agents ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE db_memory_bundles ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE db_memory_bundles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+        // NOTE: targets db_bundles, not db_memory_bundles — adopt_legacy_table_names
+        // (called at the top of this function) has already renamed the table
+        // by the time this runs, on every DB that goes through the Phase 4
+        // rename. See SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md.
+        "ALTER TABLE db_bundles ADD COLUMN is_global INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_bundles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -522,7 +547,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'No credentials — use ambient', 1, 0, 0);
 
-         INSERT OR IGNORE INTO db_memory_bundles
+         INSERT OR IGNORE INTO db_bundles
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
@@ -616,8 +641,14 @@ fn adopt_legacy_table_names(conn: &Connection) -> Result<(), StoreError> {
 ///
 /// Idempotent — safe to call on every startup.
 pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
+    // Rename any legacy table names (including the Phase 4 accounts/bundles
+    // rename — LEGACY_TABLE_RENAMES entries that don't apply to this
+    // connection's tables are safely skipped) before the idempotent
+    // CREATE TABLE IF NOT EXISTS batch below, same as run_object_schema.
+    adopt_legacy_table_names(conn)?;
+
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS db_identity_accounts (
+        "CREATE TABLE IF NOT EXISTS db_accounts (
             id           TEXT PRIMARY KEY,
             name         TEXT NOT NULL,
             provider     TEXT NOT NULL,
@@ -629,15 +660,15 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at   INTEGER NOT NULL DEFAULT 0,
             updated_at   INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_ss_identity_accounts_provider
-            ON db_identity_accounts(provider);
+        CREATE INDEX IF NOT EXISTS idx_ss_accounts_provider
+            ON db_accounts(provider);
 
         CREATE TABLE IF NOT EXISTS db_agent_identity_links (
             agent_id   TEXT NOT NULL,
             account_id TEXT NOT NULL,
             provider   TEXT NOT NULL,
             PRIMARY KEY (agent_id, provider),
-            FOREIGN KEY (account_id) REFERENCES db_identity_accounts(id) ON DELETE CASCADE
+            FOREIGN KEY (account_id) REFERENCES db_accounts(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_ss_agent_identity_links_account
             ON db_agent_identity_links(account_id);
@@ -658,13 +689,13 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             provider    TEXT NOT NULL,
             account_id  TEXT NOT NULL,
             PRIMARY KEY (identity_id, provider),
-            FOREIGN KEY (identity_id) REFERENCES db_identity_bundles(id)  ON DELETE CASCADE,
-            FOREIGN KEY (account_id)  REFERENCES db_identity_accounts(id) ON DELETE CASCADE
+            FOREIGN KEY (identity_id) REFERENCES db_identity_bundles(id) ON DELETE CASCADE,
+            FOREIGN KEY (account_id)  REFERENCES db_accounts(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_ss_identity_bindings_account
             ON db_identity_bindings(account_id);
 
-        CREATE TABLE IF NOT EXISTS db_memory_bundles (
+        CREATE TABLE IF NOT EXISTS db_bundles (
             id            TEXT PRIMARY KEY,
             name          TEXT NOT NULL UNIQUE,
             description   TEXT NOT NULL DEFAULT '',
@@ -680,8 +711,8 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at    INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_ss_memory_bundles_is_blank
-            ON db_memory_bundles(is_blank);
+        CREATE INDEX IF NOT EXISTS idx_ss_bundles_is_blank
+            ON db_bundles(is_blank);
 
         CREATE TABLE IF NOT EXISTS db_drone_definitions (
             id          TEXT PRIMARY KEY,
@@ -738,7 +769,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'No credentials — use ambient', 1, 0, 0);
 
-         INSERT OR IGNORE INTO db_memory_bundles
+         INSERT OR IGNORE INTO db_bundles
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
@@ -895,11 +926,11 @@ mod tests {
         "db_agent_content",
         "db_agent_skills",
         "db_agent_history",
-        "db_identity_accounts",
+        "db_accounts",
         "db_agent_identity_links",
         "db_identity_bundles",
         "db_identity_bindings",
-        "db_memory_bundles",
+        "db_bundles",
         "db_agent_instances",
         "db_agents",
         "db_drone_definitions",
@@ -942,10 +973,10 @@ mod tests {
             "idx_agent_definitions_slug",
             "idx_agent_history_agent_date",
             "idx_agent_identity_links_account",
-            "idx_identity_accounts_provider",
+            "idx_accounts_provider",
             "idx_identity_bundles_is_blank",
             "idx_identity_bindings_account",
-            "idx_memory_bundles_is_blank",
+            "idx_bundles_is_blank",
             "idx_agent_instances_definition",
             "idx_agent_instances_name_recent",
             "idx_agents_is_template",
@@ -968,7 +999,7 @@ mod tests {
         assert_eq!(id_blank, 1, "blank Identity singleton should be seeded");
         let mem_blank: i64 = conn
             .query_row(
-                "SELECT count(*) FROM db_memory_bundles WHERE id='blank' AND is_blank=1",
+                "SELECT count(*) FROM db_bundles WHERE id='blank' AND is_blank=1",
                 [],
                 |row| row.get(0),
             )

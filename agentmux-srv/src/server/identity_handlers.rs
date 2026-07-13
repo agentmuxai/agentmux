@@ -1255,7 +1255,7 @@ fn persist_oauth_binding_or_synthetic(
     // for this (bundle, provider) and reuse its `account_id` so the
     // upsert UPDATES the prior IdentityAccount in place instead of
     // creating a fresh UUID + orphaning the old row in
-    // `db_identity_accounts`. Fresh UUID only on first bind. codex
+    // `db_accounts`. Fresh UUID only on first bind. codex
     // P2 follow-up on #981.
     let account_id = wstore
         .bundle_identity_bindings(bundle_id)
