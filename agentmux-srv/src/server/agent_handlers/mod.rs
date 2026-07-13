@@ -259,7 +259,7 @@ mod recent_sessions_tests {
     // backend correctness gate for the AgentPicker's Recent Sessions
     // surface (cascade follow-up 2026-05-23).
     use crate::backend::storage::store::{
-        AgentDefinition, AgentInstance, Identity, InstanceStatus, Memory, Store,
+        AgentDefinition, AgentInstance, IdentityAccount, InstanceStatus, Memory, SecretRef, Store,
     };
     use crate::backend::rpc::engine::WshRpcEngine;
     use crate::server::AppState;
@@ -359,8 +359,9 @@ mod recent_sessions_tests {
             ),
         };
 
-        // Seed: 1 SEEDED definition (template), 1 identity bundle, 1
-        // memory bundle. Phase 3b note: seeded as a template so that
+        // Seed: 1 SEEDED definition (template), 1 account + direct
+        // identity link, 1 memory bundle. Phase 3b note: seeded as a
+        // template so that
         // each instance projection in `db_agents` lands on its own row
         // (`is_template = 0`, `id = inst.id`, `parent_template_id =
         // def.id`) rather than folding into the def-projection and
@@ -400,15 +401,25 @@ mod recent_sessions_tests {
         };
         let mut def_mut = def.clone();
         wstore.agent_def_insert(&mut def_mut).unwrap();
-        let identity = Identity {
-            id: "id-work".to_string(),
+        // Identity display name resolves via the direct agent<->account
+        // link (db_agent_identity_links/db_accounts) now, not a bundle —
+        // see agent_handlers::session's listrecentsessions.
+        let account = IdentityAccount {
+            id: "acct-work".to_string(),
             name: "Work".to_string(),
-            description: String::new(),
-            is_blank: false,
+            provider: "github".to_string(),
+            kind: "pat".to_string(),
+            display_name: String::new(),
+            secret_ref: SecretRef::Env { env_var: "GITHUB_TOKEN".to_string() },
+            context: serde_json::json!({}),
+            status: "unknown".to_string(),
             created_at: 0,
             updated_at: 0,
         };
-        wstore.bundle_identity_upsert(&identity).unwrap();
+        wstore.identity_upsert(&account).unwrap();
+        wstore
+            .agent_identity_link("def-claude", "acct-work", "github")
+            .unwrap();
         let memory = Memory {
             id: "mem-notes".to_string(),
             name: "Notes".to_string(),
@@ -431,7 +442,7 @@ mod recent_sessions_tests {
         //   - blk-recent: has snapshot, more recent activity
         //   - blk-older:  has snapshot, older activity
         //   - blk-none:   no snapshot at all (legacy / pre-persistence row)
-        // All three use the same identity bundle so the filter test
+        // All three share the same identity_id value so the filter test
         // can also exercise it without re-seeding.
         for (id, block, started) in [
             ("inst-recent", "blk-recent", 1_700_000_100_000_i64),

@@ -10,8 +10,9 @@
 //! 1. Looks up the active instance for the spawning block.
 //! 2. Reads its `identity_id`. Empty / "blank" / not-found → noop
 //!    (the agent inherits ambient credentials).
-//! 3. Reads the bindings for that Identity bundle.
-//! 4. For each binding: looks up the Account row, resolves its
+//! 3. Reads the direct `db_agent_identity_links` rows for the instance's
+//!    definition.
+//! 4. For each link: looks up the Account row, resolves its
 //!    `SecretRef` to a plaintext value, looks up the provider →
 //!    env-var matrix, and merges those env vars into the spawn
 //!    `env_vars` HashMap.
@@ -31,7 +32,6 @@
 pub mod auth_patterns;
 pub mod auth_session;
 pub mod key_validator;
-pub mod migration;
 pub mod oauth_client;
 pub mod resolver;
 pub mod secret_store;

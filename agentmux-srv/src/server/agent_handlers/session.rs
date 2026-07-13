@@ -19,7 +19,7 @@ use crate::backend::rpc_types::{
     CommandAgentSessionArchiveData, AgentSessionArchiveResult,
     CommandAgentSessionListArchivesData, AgentArchiveRow,
 };
-use crate::backend::storage::store::AgentInstance;
+use crate::backend::storage::store::{AgentIdentityLink, AgentInstance, IdentityAccount};
 
 use super::super::AppState;
 use super::read_session_preview;
@@ -204,9 +204,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let defs = wstore
                     .agent_def_list()
                     .map_err(|e| format!("listrecentsessions: defs: {e}"))?;
-                let identities = id_store
-                    .bundle_identity_list()
-                    .map_err(|e| format!("listrecentsessions: identities: {e}"))?;
+                // Identity display names resolve off the direct
+                // agent<->account links now (db_agent_identity_links /
+                // db_accounts), not the retired bundle tables — see
+                // SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md
+                // §4 item 1. Bulk-fetched once and grouped by definition_id
+                // rather than queried per-row.
+                let agent_identity_links = id_store
+                    .agent_identity_list_all()
+                    .map_err(|e| format!("listrecentsessions: agent_identity_links: {e}"))?;
+                let accounts = id_store
+                    .identity_list(None)
+                    .map_err(|e| format!("listrecentsessions: accounts: {e}"))?;
+                let accounts_by_id: std::collections::HashMap<&str, &IdentityAccount> =
+                    accounts.iter().map(|a| (a.id.as_str(), a)).collect();
+                let mut links_by_agent: std::collections::HashMap<&str, Vec<&AgentIdentityLink>> =
+                    std::collections::HashMap::new();
+                for link in &agent_identity_links {
+                    links_by_agent
+                        .entry(link.agent_id.as_str())
+                        .or_default()
+                        .push(link);
+                }
                 let memories = id_store
                     .bundle_memory_list()
                     .map_err(|e| format!("listrecentsessions: memories: {e}"))?;
@@ -218,14 +237,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut rows: Vec<RecentSessionRow> = Vec::with_capacity(instances.len());
                 for inst in instances {
                     let def = defs.iter().find(|d| d.id == inst.definition_id);
-                    let identity_name = if inst.identity_id.is_empty() {
-                        "(ambient creds)".to_string()
-                    } else {
-                        identities
-                            .iter()
-                            .find(|i| i.id == inst.identity_id)
-                            .map(|i| i.name.clone())
-                            .unwrap_or_else(|| "(missing identity)".to_string())
+                    let identity_name = match links_by_agent.get(inst.definition_id.as_str()) {
+                        Some(links) if !links.is_empty() => {
+                            let mut names: Vec<String> = links
+                                .iter()
+                                .map(|link| {
+                                    accounts_by_id
+                                        .get(link.account_id.as_str())
+                                        .map(|a| a.name.clone())
+                                        .unwrap_or_else(|| "(missing account)".to_string())
+                                })
+                                .collect();
+                            names.sort();
+                            names.dedup();
+                            names.join(", ")
+                        }
+                        _ => "(ambient creds)".to_string(),
                     };
                     let memory_name = if inst.memory_id.is_empty() {
                         "(vanilla CLI)".to_string()
