@@ -235,14 +235,22 @@ pub(crate) async fn run_windows(
     // exit as a forwarded second instance. Detection + logging ONLY — no
     // prompt, no dialog, no IPC to the other instance beyond the liveness
     // probe itself; see `other_instances.rs` doc comment for why the
-    // cross-instance-quit half is deliberately out of scope. Spawned as a
-    // detached task so a slow/failed directory walk can never delay this
-    // instance's own startup.
+    // cross-instance-quit half is deliberately out of scope.
+    //
+    // reagent (PR #2117 round 1): the body is synchronous I/O (`fs::read_dir`,
+    // named-pipe connect probes) with no `.await` anywhere in it — running it
+    // under plain `tokio::spawn` occupies a multi-thread runtime worker
+    // instead of yielding it, worse than usual here since `channels/local-*`
+    // dirs are documented to accumulate unpruned (CLAUDE.md), so a dev
+    // machine can have many stale siblings to walk/probe. `spawn_blocking`
+    // runs it on the blocking-task pool instead, alongside every other
+    // synchronous-I/O task in this codebase, so it can never starve the
+    // async worker pool the IPC accept loop / host supervision share.
     {
         let channels_root = paths.common.home_dir.join("channels");
         let own_channel = paths.common.channel.clone();
         let own_version = version.to_string();
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             other_instances::log_older_running_instances(&channels_root, &own_channel, &own_version);
         });
     }
