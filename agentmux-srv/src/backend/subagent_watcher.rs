@@ -117,16 +117,6 @@ struct SessionWatch {
     subagents: HashMap<String, SubagentState>,
 }
 
-/// Accumulates whether a backfill scan (`scan_session_subagents`) discovered
-/// any new subagent or observed any completion, so the caller can emit ONE
-/// broadcast after the whole scan instead of one per file. See
-/// `scan_subagents_dir`'s doc comment.
-#[derive(Default)]
-struct ScanBatch {
-    any_spawned: bool,
-    any_completed: bool,
-}
-
 /// Cap on `SubagentState.events` — without it, a long-running subagent (or a
 /// long-lived srv process accumulating many subagents) grows this Vec
 /// unboundedly; `info.event_count` still tracks the true total separately
@@ -392,7 +382,6 @@ impl SubagentWatcher {
                             &parent_agent,
                             &parent_block_id,
                             &changed_path,
-                            None,
                         );
                     }
                 }
@@ -571,81 +560,21 @@ impl SubagentWatcher {
             let session_dir = entry.path().join(session_id);
             let subagents_dir = session_dir.join("subagents");
             if subagents_dir.is_dir() {
-                let mut batch = ScanBatch::default();
-                self.scan_subagents_dir(parent_agent, parent_block_id, &subagents_dir, &mut batch);
-                self.broadcast_scan_batch(parent_agent, parent_block_id, session_id, &batch);
+                self.scan_subagents_dir(parent_agent, parent_block_id, &subagents_dir);
                 return; // session ids are unique — no need to keep scanning
             }
         }
     }
 
-    /// Emit at most one `subagent:spawned` and one `subagent:completed`
-    /// broadcast summarizing a whole backfill scan — see
-    /// `scan_subagents_dir`'s doc comment for why per-file broadcasts are
-    /// suppressed during the scan in the first place. The frontend's
-    /// `loadSubagents()` handlers for both event types just trigger a full
-    /// `subagent.ListActive` re-fetch regardless of payload content (see
-    /// `swarm-model.ts`), so a single summary event per type is exactly as
-    /// effective as N individual ones for that purpose — the field values
-    /// here (`sessionId` aside) are not otherwise consumed.
-    fn broadcast_scan_batch(&self, parent_agent: &str, parent_block_id: &str, session_id: &str, batch: &ScanBatch) {
-        if batch.any_spawned {
-            let spawned_event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "subagent:spawned",
-                        "data": {
-                            "parentAgent": parent_agent,
-                            "parentBlockId": parent_block_id,
-                            "sessionId": session_id,
-                        }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&spawned_event);
-        }
-        if batch.any_completed {
-            let completed_event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "subagent:completed",
-                        "data": {
-                            "parentAgent": parent_agent,
-                            "parentBlockId": parent_block_id,
-                        }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&completed_event);
-        }
-    }
-
     /// Process agent-*.jsonl directly in `dir`, plus workflow runs under
     /// `dir/workflows/<wf>/` (member agent files + journal).
-    ///
-    /// `batch`: `Some` on the backfill/reopen path (see `scan_session_subagents`)
-    /// — `process_jsonl_change` accumulates into it instead of broadcasting
-    /// `subagent:spawned`/`subagent:completed` per file, so a session with
-    /// dozens of historical subagents doesn't fire dozens of individual
-    /// events (each independently triggering the frontend's `loadSubagents()`
-    /// RPC round-trip — see
-    /// docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md §6.4).
-    /// `None` on the live fs-notify path (`watch_agent`) — a live spawn is
-    /// genuinely one-at-a-time, not a backfill flood, so it keeps
-    /// broadcasting immediately as before.
-    fn scan_subagents_dir(&self, parent_agent: &str, parent_block_id: &str, dir: &Path, batch: &mut ScanBatch) {
+    fn scan_subagents_dir(&self, parent_agent: &str, parent_block_id: &str, dir: &Path) {
         if let Ok(files) = std::fs::read_dir(dir) {
             for file in files.flatten() {
                 let path = file.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with("agent-") && name.ends_with(".jsonl") {
-                        self.process_jsonl_change(parent_agent, parent_block_id, &path, Some(batch));
+                        self.process_jsonl_change(parent_agent, parent_block_id, &path);
                     }
                 }
             }
@@ -660,7 +589,7 @@ impl SubagentWatcher {
                             Some(name)
                                 if name.starts_with("agent-") && name.ends_with(".jsonl") =>
                             {
-                                self.process_jsonl_change(parent_agent, parent_block_id, &path, Some(batch));
+                                self.process_jsonl_change(parent_agent, parent_block_id, &path);
                             }
                             Some("journal.jsonl") => {
                                 self.process_journal_change(parent_agent, parent_block_id, &path);
@@ -674,14 +603,8 @@ impl SubagentWatcher {
     }
 
     /// Process a changed/new JSONL subagent file. Reads new lines, updates state,
-    /// and broadcasts events via EventBus — unless `batch` is `Some`, in which
-    /// case a would-be `subagent:spawned`/`subagent:completed` broadcast is
-    /// recorded into it instead (see `scan_subagents_dir`'s doc comment).
-    /// `subagent:activity` always broadcasts immediately either way — it's not
-    /// one of the two events the frontend's `loadSubagents()` RPC listens for
-    /// (only `spawned`/`completed` are), so it isn't part of the backfill
-    /// flood this batching targets.
-    fn process_jsonl_change(&self, parent_agent: &str, parent_block_id: &str, jsonl_path: &Path, mut batch: Option<&mut ScanBatch>) {
+    /// and broadcasts events via EventBus.
+    fn process_jsonl_change(&self, parent_agent: &str, parent_block_id: &str, jsonl_path: &Path) {
         // Extract agent ID from filename: agent-<id>.jsonl
         let agent_id = match jsonl_path
             .file_stem()
@@ -803,30 +726,26 @@ impl SubagentWatcher {
         // Mutex released here — broadcast outside the lock
 
         if is_new {
-            if let Some(b) = batch.as_deref_mut() {
-                b.any_spawned = true;
-            } else {
-                let spawned_event = WSEventType {
-                    eventtype: WS_EVENT_RPC.to_string(),
-                    oref: String::new(),
-                    data: Some(json!({
-                        "command": "eventrecv",
+            let spawned_event = WSEventType {
+                eventtype: WS_EVENT_RPC.to_string(),
+                oref: String::new(),
+                data: Some(json!({
+                    "command": "eventrecv",
+                    "data": {
+                        "event": "subagent:spawned",
                         "data": {
-                            "event": "subagent:spawned",
-                            "data": {
-                                "agentId": info_snapshot.agent_id,
-                                "slug": info_snapshot.slug,
-                                "parentAgent": parent_agent,
-                                "parentBlockId": parent_block_id,
-                                "sessionId": session_id,
-                                "model": info_snapshot.model,
-                                "workflowId": info_snapshot.workflow_id,
-                            }
+                            "agentId": info_snapshot.agent_id,
+                            "slug": info_snapshot.slug,
+                            "parentAgent": parent_agent,
+                            "parentBlockId": parent_block_id,
+                            "sessionId": session_id,
+                            "model": info_snapshot.model,
+                            "workflowId": info_snapshot.workflow_id,
                         }
-                    })),
-                };
-                self.event_bus.broadcast_event(&spawned_event);
-            }
+                    }
+                })),
+            };
+            self.event_bus.broadcast_event(&spawned_event);
             tracing::info!(
                 agent_id = %agent_id,
                 slug = %info_snapshot.slug,
@@ -859,28 +778,24 @@ impl SubagentWatcher {
         }
 
         if completed {
-            if let Some(b) = batch.as_deref_mut() {
-                b.any_completed = true;
-            } else {
-                let completed_event = WSEventType {
-                    eventtype: WS_EVENT_RPC.to_string(),
-                    oref: String::new(),
-                    data: Some(json!({
-                        "command": "eventrecv",
+            let completed_event = WSEventType {
+                eventtype: WS_EVENT_RPC.to_string(),
+                oref: String::new(),
+                data: Some(json!({
+                    "command": "eventrecv",
+                    "data": {
+                        "event": "subagent:completed",
                         "data": {
-                            "event": "subagent:completed",
-                            "data": {
-                                "agentId": agent_id,
-                                "parentAgent": parent_agent,
-                                "parentBlockId": parent_block_id,
-                                "totalEvents": info_snapshot.event_count,
-                                "workflowId": info_snapshot.workflow_id,
-                            }
+                            "agentId": agent_id,
+                            "parentAgent": parent_agent,
+                            "parentBlockId": parent_block_id,
+                            "totalEvents": info_snapshot.event_count,
+                            "workflowId": info_snapshot.workflow_id,
                         }
-                    })),
-                };
-                self.event_bus.broadcast_event(&completed_event);
-            }
+                    }
+                })),
+            };
+            self.event_bus.broadcast_event(&completed_event);
             tracing::info!(
                 agent_id = %agent_id,
                 total_events = info_snapshot.event_count,
@@ -1608,13 +1523,6 @@ mod tests {
 
     #[test]
     fn read_task_prompt_extracts_plain_string_content_from_first_line() {
-        // Pre-existing flake (also fixed on agentx/subagent-abandoned-status,
-        // #2131): these 3 sibling tests all shared one directory keyed on
-        // std::process::id() (constant for the whole test binary, not
-        // per-test) — under parallel execution, one test's teardown could
-        // race another's still-in-progress write/read. now_millis() gives
-        // each test its own directory, matching the convention used
-        // elsewhere in this file.
         let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
         std::fs::create_dir_all(&dir).unwrap();
         let jsonl_path = dir.join("agent-prompt-string.jsonl");
@@ -1746,7 +1654,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, None);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
 
         {
             let sessions = watcher.sessions.lock().unwrap();
@@ -1774,7 +1682,7 @@ mod tests {
         .unwrap();
 
         let watcher = fixture_watcher();
-        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, None);
+        watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path);
 
         {
             let sessions = watcher.sessions.lock().unwrap();
@@ -1974,87 +1882,6 @@ mod tests {
         assert_eq!(active.len(), 1, "only the target session's subagent should be backfilled");
         assert_eq!(active[0].agent_id, "wanted");
         assert_eq!(active[0].session_id, target_session);
-
-        std::fs::remove_dir_all(&config_dir).ok();
-    }
-
-    // ── Backfill-scan broadcast batching ────────────────────────────────
-
-    #[test]
-    fn scan_subagents_dir_accumulates_spawns_into_the_batch_instead_of_broadcasting_per_file() {
-        let dir = std::env::temp_dir().join(format!("amx-batch-spawn-test-{}", now_millis()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("agent-a.jsonl"), "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n").unwrap();
-        std::fs::write(dir.join("agent-b.jsonl"), "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n").unwrap();
-
-        let watcher = fixture_watcher();
-        let mut batch = ScanBatch::default();
-        watcher.scan_subagents_dir("parent-1", "block-1", &dir, &mut batch);
-
-        assert!(batch.any_spawned, "two newly-discovered files should set any_spawned");
-        assert!(!batch.any_completed, "neither file has a result line");
-        // State tracking itself is unaffected by batching — both subagents
-        // are still recorded, batching only suppresses the per-file broadcast.
-        assert_eq!(watcher.list_active().len(), 2);
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn scan_subagents_dir_accumulates_completions_into_the_batch() {
-        let dir = std::env::temp_dir().join(format!("amx-batch-complete-test-{}", now_millis()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("agent-a.jsonl"), "{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
-
-        let watcher = fixture_watcher();
-        let mut batch = ScanBatch::default();
-        watcher.scan_subagents_dir("parent-1", "block-1", &dir, &mut batch);
-
-        assert!(batch.any_spawned, "a newly-discovered file also sets any_spawned");
-        assert!(batch.any_completed, "a file whose last line is a result event should set any_completed");
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn scan_subagents_dir_sets_neither_flag_when_the_directory_is_empty() {
-        let dir = std::env::temp_dir().join(format!("amx-batch-empty-test-{}", now_millis()));
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let watcher = fixture_watcher();
-        let mut batch = ScanBatch::default();
-        watcher.scan_subagents_dir("parent-1", "block-1", &dir, &mut batch);
-
-        assert!(!batch.any_spawned);
-        assert!(!batch.any_completed);
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn scan_session_subagents_tracks_every_file_correctly_even_though_broadcasts_are_batched() {
-        // Functional regression check: batching the broadcasts must not
-        // affect what actually gets tracked. A multi-file backfill scan
-        // (mixing a completed and a still-open subagent) should produce the
-        // exact same list_active() result batching or not.
-        let config_dir = std::env::temp_dir()
-            .join(format!("amx-batch-scan-multi-test-{}", now_millis()));
-        let session_id = "sess-multi";
-        let target_dir = config_dir.join("projects").join("ws-enc").join(session_id).join("subagents");
-        std::fs::create_dir_all(&target_dir).unwrap();
-        std::fs::write(target_dir.join("agent-done.jsonl"), "{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
-        std::fs::write(target_dir.join("agent-mid.jsonl"), "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n").unwrap();
-
-        let watcher = fixture_watcher();
-        watcher.scan_session_subagents("parent-1", "block-1", &config_dir, session_id);
-
-        let mut active = watcher.list_active();
-        active.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
-        assert_eq!(active.len(), 2);
-        assert_eq!(active[0].agent_id, "done");
-        assert_eq!(active[0].status, SubagentStatus::Completed);
-        assert_eq!(active[1].agent_id, "mid");
-        assert_eq!(active[1].status, SubagentStatus::Active);
 
         std::fs::remove_dir_all(&config_dir).ok();
     }
