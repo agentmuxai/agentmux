@@ -14,7 +14,8 @@
 // its own accent (Mauve) instead of plain white.
 
 [data-theme="catppuccin-latte"] {
-    --main-bg-color: #eff1f5;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(239, 241, 245, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(76, 79, 105, 0.04);
     --block-bg-color: rgba(255, 255, 255, 0.6);
     --block-bg-solid-color: #ffffff;

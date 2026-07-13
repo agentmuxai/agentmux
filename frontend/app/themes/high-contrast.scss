@@ -4,7 +4,8 @@
 // High Contrast — pure black, white text, cyan accent. WCAG AA compliant.
 
 [data-theme="high-contrast"] {
-    --main-bg-color: #000000;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(0, 0, 0, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(0, 0, 0, 0.9);
     --block-bg-color: #000000;
     --block-bg-solid-color: #000000;
