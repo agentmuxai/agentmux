@@ -66,6 +66,14 @@ pub struct SubagentInfo {
 pub enum SubagentStatus {
     Active,
     Completed,
+    /// The parent block's turn ended without a `Result` line ever appearing
+    /// for this subagent — it crashed, was killed, or was interrupted by an
+    /// app/srv restart mid-task. Distinct from `Completed`: the subagent
+    /// didn't finish, it was cut off. Set only by
+    /// `reconcile_stale_subagents`, never by `process_jsonl_change`'s
+    /// normal event processing. See
+    /// docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md.
+    Abandoned,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -561,7 +569,48 @@ impl SubagentWatcher {
             let subagents_dir = session_dir.join("subagents");
             if subagents_dir.is_dir() {
                 self.scan_subagents_dir(parent_agent, parent_block_id, &subagents_dir);
+                self.reconcile_stale_subagents(parent_block_id, session_id);
                 return; // session ids are unique — no need to keep scanning
+            }
+        }
+    }
+
+    /// After a full session backfill scan, downgrade any subagent that's
+    /// still `Active` to `Abandoned` if its parent block's turn is not
+    /// currently active. A subagent runs inside its parent's own CLI
+    /// process — a Task-tool call is synchronous within the parent's turn —
+    /// so once the parent's turn has ended, any subagent file lacking a
+    /// terminal `Result` line was interrupted (crashed, killed, or the
+    /// app/srv restarted mid-task), not still running. This call site is
+    /// reached from `scan_session_subagents`, itself only invoked when a
+    /// block re-registers with a pre-existing session id (`reactive.rs`) —
+    /// i.e. a freshly-spawned controller whose turn genuinely hasn't
+    /// started yet, so every subagent found on disk predates this process
+    /// and is unambiguously history, not in-flight.
+    ///
+    /// Only reconciles on a *confirmed-idle* read (`Some(false)`) —
+    /// `unwrap_or(true)` treats "no controller registered yet" or any
+    /// other uncertainty as "assume active, don't touch it," matching the
+    /// same conservative bias `ReconcileTurnActive` uses on the frontend
+    /// (only ever promote/correct on positive evidence, never guess).
+    /// Scoped to the reopen/backfill path only — see
+    /// docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md
+    /// Open Question 1 for why real-time (mid-session) reconciliation is a
+    /// deliberate fast-follow, not this pass.
+    fn reconcile_stale_subagents(&self, parent_block_id: &str, session_id: &str) {
+        let parent_turn_active =
+            crate::backend::blockcontroller::get_block_controller_status(parent_block_id)
+                .map(|s| s.turn_active)
+                .unwrap_or(true);
+        if parent_turn_active {
+            return;
+        }
+
+        let mut sessions = self.sessions.lock().unwrap();
+        let Some(session) = sessions.get_mut(session_id) else { return };
+        for state in session.subagents.values_mut() {
+            if state.info.status == SubagentStatus::Active {
+                state.info.status = SubagentStatus::Abandoned;
             }
         }
     }
@@ -1523,7 +1572,15 @@ mod tests {
 
     #[test]
     fn read_task_prompt_extracts_plain_string_content_from_first_line() {
-        let dir = std::env::temp_dir().join(format!("amx-test-{}", std::process::id()));
+        // Pre-existing bug fixed in passing: this and its two sibling tests
+        // below all shared one directory keyed on std::process::id() (constant
+        // for the whole test binary, not per-test) — under parallel test
+        // execution, one test's std::fs::remove_dir_all teardown could race
+        // another's still-in-progress create_dir_all/write/read, producing
+        // flaky failures unrelated to what each test actually exercises.
+        // now_millis() (already used elsewhere in this file for the same
+        // per-test-uniqueness purpose) gives each test its own directory.
+        let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
         std::fs::create_dir_all(&dir).unwrap();
         let jsonl_path = dir.join("agent-prompt-string.jsonl");
         std::fs::write(
@@ -1541,7 +1598,7 @@ mod tests {
 
     #[test]
     fn read_task_prompt_extracts_joined_text_blocks_from_content_array() {
-        let dir = std::env::temp_dir().join(format!("amx-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
         std::fs::create_dir_all(&dir).unwrap();
         let jsonl_path = dir.join("agent-prompt-array.jsonl");
         std::fs::write(
@@ -1558,7 +1615,7 @@ mod tests {
 
     #[test]
     fn read_task_prompt_returns_none_when_first_line_is_not_a_user_record() {
-        let dir = std::env::temp_dir().join(format!("amx-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("amx-test-{}", now_millis()));
         std::fs::create_dir_all(&dir).unwrap();
         let jsonl_path = dir.join("agent-prompt-none.jsonl");
         std::fs::write(
@@ -1906,6 +1963,180 @@ mod tests {
         watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
 
         assert!(watcher.list_active().is_empty(), "unknown session id must not fall back to scanning everything");
+
+        std::fs::remove_dir_all(&config_dir).ok();
+    }
+
+    // ── reconcile_stale_subagents ─────────────────────────────────────────
+    //
+    // A stub `Controller` so these tests can control what
+    // `get_block_controller_status` reports without spinning up a real
+    // subprocess. `CONTROLLER_REGISTRY` is process-global (shared across
+    // every test in this binary) — each test below registers its stub
+    // under a unique, per-test block id (never a literal shared with any
+    // other test) so parallel test execution can't cross-contaminate.
+
+    struct StubController {
+        block_id: String,
+        turn_active: bool,
+    }
+
+    impl crate::backend::blockcontroller::Controller for StubController {
+        fn start(&self, _: crate::backend::obj::MetaMapType, _: Option<serde_json::Value>, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn stop(&self, _: bool, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn get_runtime_status(&self) -> crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+            crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+                blockid: self.block_id.clone(),
+                turn_active: self.turn_active,
+                ..Default::default()
+            }
+        }
+        fn send_input(&self, _: crate::backend::blockcontroller::BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+            Ok(())
+        }
+        fn controller_type(&self) -> &str {
+            "stub"
+        }
+        fn block_id(&self) -> &str {
+            &self.block_id
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn register_stub_controller(block_id: &str, turn_active: bool) {
+        crate::backend::blockcontroller::register_controller(
+            block_id,
+            Arc::new(StubController { block_id: block_id.to_string(), turn_active }),
+        );
+    }
+
+    #[test]
+    fn reconcile_stale_subagents_downgrades_active_to_abandoned_when_parent_turn_is_confirmed_idle() {
+        let block_id = format!("recon-idle-{}", now_millis());
+        register_stub_controller(&block_id, false);
+
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            let mut state = fixture_state("parent-1", "sub-a", "s1");
+            state.info.parent_block_id = block_id.clone();
+            s1.subagents.insert("sub-a".to_string(), state);
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        watcher.reconcile_stale_subagents(&block_id, "s1");
+
+        let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+        assert_eq!(info.status, SubagentStatus::Abandoned);
+    }
+
+    #[test]
+    fn reconcile_stale_subagents_leaves_active_alone_when_parent_turn_is_active() {
+        let block_id = format!("recon-active-{}", now_millis());
+        register_stub_controller(&block_id, true);
+
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            let mut state = fixture_state("parent-1", "sub-a", "s1");
+            state.info.parent_block_id = block_id.clone();
+            s1.subagents.insert("sub-a".to_string(), state);
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        watcher.reconcile_stale_subagents(&block_id, "s1");
+
+        let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+        assert_eq!(info.status, SubagentStatus::Active, "a genuinely active parent turn must never be reconciled away");
+    }
+
+    #[test]
+    fn reconcile_stale_subagents_leaves_active_alone_when_no_controller_is_registered() {
+        // No register_stub_controller call — block id is guaranteed unique
+        // (per-test suffix) so get_block_controller_status returns None.
+        // unwrap_or(true) means "uncertain" defaults to "assume active,
+        // don't touch it" — the same conservative bias as ReconcileTurnActive.
+        let block_id = format!("recon-unregistered-{}", now_millis());
+
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            let mut state = fixture_state("parent-1", "sub-a", "s1");
+            state.info.parent_block_id = block_id.clone();
+            s1.subagents.insert("sub-a".to_string(), state);
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        watcher.reconcile_stale_subagents(&block_id, "s1");
+
+        let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+        assert_eq!(info.status, SubagentStatus::Active);
+    }
+
+    #[test]
+    fn reconcile_stale_subagents_never_downgrades_an_already_completed_subagent() {
+        let block_id = format!("recon-completed-{}", now_millis());
+        register_stub_controller(&block_id, false);
+
+        let watcher = fixture_watcher();
+        {
+            let mut sessions = watcher.sessions.lock().unwrap();
+            let mut s1 = SessionWatch { subagents: HashMap::new() };
+            let mut state = fixture_state("parent-1", "sub-a", "s1");
+            state.info.parent_block_id = block_id.clone();
+            state.info.status = SubagentStatus::Completed;
+            s1.subagents.insert("sub-a".to_string(), state);
+            sessions.insert("s1".to_string(), s1);
+        }
+
+        watcher.reconcile_stale_subagents(&block_id, "s1");
+
+        let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+        assert_eq!(info.status, SubagentStatus::Completed, "a subagent that genuinely finished must stay Completed, not be downgraded");
+    }
+
+    /// End-to-end: a subagent JSONL with no terminal `result` line, backfilled
+    /// via a real `scan_session_subagents` call while the parent's turn is
+    /// confirmed idle, comes out `Abandoned` — not `Active` forever. This is
+    /// the exact user-reported symptom (SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md).
+    #[test]
+    fn scan_session_subagents_reconciles_an_unterminated_file_to_abandoned_when_parent_turn_is_idle() {
+        let block_id = format!("recon-scan-{}", now_millis());
+        register_stub_controller(&block_id, false);
+
+        let config_dir = std::env::temp_dir()
+            .join(format!("amx-scan-reconcile-test-{}", now_millis()));
+        let session_id = "target-session-uuid";
+        let target_dir = config_dir
+            .join("projects")
+            .join("ws-enc")
+            .join(session_id)
+            .join("subagents");
+        std::fs::create_dir_all(&target_dir).unwrap();
+        // No "type":"result" line — this subagent never got a terminal event,
+        // simulating a crash/kill/interrupted-by-restart.
+        std::fs::write(
+            target_dir.join("agent-crashed.jsonl"),
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working...\"}]}}\n",
+        )
+        .unwrap();
+
+        let watcher = fixture_watcher();
+        watcher.scan_session_subagents("parent-1", &block_id, &config_dir, session_id);
+
+        let active = watcher.list_active();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].agent_id, "crashed");
+        assert_eq!(active[0].status, SubagentStatus::Abandoned);
 
         std::fs::remove_dir_all(&config_dir).ok();
     }
