@@ -378,7 +378,7 @@ export class IdentityViewModel implements ViewModel {
     // provider "claude" — the Claude CLI's `~/.claude` login) surfaces under
     // its brand tile ("anthropic"). Display-only: the account's stored
     // `provider` is unchanged, so spawn-time env injection is unaffected.
-    // See SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
+    // See specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
         const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];

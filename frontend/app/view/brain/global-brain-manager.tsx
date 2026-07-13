@@ -9,7 +9,7 @@
 // launch.
 //
 // Context-free: owns its own GlobalBrainViewModel and drives off the
-// bundle_* RPCs. Spec: SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
+// bundle_* RPCs. Spec: specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { GlobalBrainViewModel, NEW_SECTION_ID } from "./global-brain-model";
