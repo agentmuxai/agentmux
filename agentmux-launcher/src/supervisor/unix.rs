@@ -168,13 +168,19 @@ pub(crate) async fn run_unix(
     // detection of other, OLDER AgentMux instances still running. Mirrors
     // the Windows call site: we only reach this point once we've WON the
     // single-instance socket bind above. Detection + logging ONLY — see
-    // `other_instances.rs` doc comment. Spawned detached so it can never
-    // delay this instance's own startup.
+    // `other_instances.rs` doc comment.
+    //
+    // reagent (PR #2117 round 1): synchronous I/O (fs::read_dir, socket
+    // connect probes), no `.await` in the body — spawn_blocking instead of
+    // plain tokio::spawn so it runs on the blocking-task pool and can never
+    // occupy/starve an async worker the IPC accept loop or host supervision
+    // needs, especially given channels/local-* dirs are documented to
+    // accumulate unpruned (more siblings to walk/probe over time).
     {
         let channels_root = paths.common.home_dir.join("channels");
         let own_channel = paths.common.channel.clone();
         let own_version = version.to_string();
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             other_instances::log_older_running_instances(&channels_root, &own_channel, &own_version);
         });
     }
