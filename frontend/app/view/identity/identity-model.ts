@@ -141,7 +141,7 @@ export const KIND_LABELS: Record<AccountKind, string> = {
 // ── Storage (DB-backed via RPC, in-memory cache) ─────────────────────────────
 //
 // As of v0.33.30x (PR #479 + this PR) accounts live in the SQLite
-// `db_identity_accounts` table on the sidecar, not in localStorage. This
+// `db_accounts` table on the sidecar, not in localStorage. This
 // module keeps an in-memory cache so synchronous callers (e.g. agent
 // startup payload assembly) can stay synchronous.
 //

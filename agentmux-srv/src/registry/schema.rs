@@ -36,7 +36,7 @@ pub struct NamedAgentRecordV1 {
     pub definition_id: String,
     /// FK to `db_identity_bundles.id`. None = unbound (= ambient creds).
     pub identity_id: Option<String>,
-    /// FK to `db_memory_bundles.id`. None = unbound (= vanilla CLI).
+    /// FK to `db_bundles.id`. None = unbound (= vanilla CLI).
     pub memory_id: Option<String>,
     /// Provider CLI session id for `--resume` (e.g. a Claude Code session
     /// uuid). `None` = no session wired yet (fresh stub / legacy record).
