@@ -503,7 +503,11 @@ declare global {
         started_at: number;
         ended_at?: number;
         created_at: number;
-        /** v7/v11 — FK to db_identity_bundles. Empty string = blank singleton. */
+        /** v7/v11 — legacy Identity-bundle id; db_identity_bundles was
+         *  dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
+         *  Vestigial opaque pass-through now — credential resolution and
+         *  display names both go through db_agent_identity_links/db_accounts.
+         *  Empty string = ambient creds. */
         identity_id?: string;
         /** v7/v11 — FK to db_bundles. Empty string = blank singleton. */
         memory_id?: string;
