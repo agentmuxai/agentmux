@@ -6,7 +6,7 @@
 //! (`<HOME>/.<auth_dir_name>/.credentials.json` for each oauth-class
 //! provider).
 //!
-//! Per `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §5 (OAuth Bundles PR E):
+//! Per `specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §5 (OAuth Bundles PR E):
 //! when a user upgrades from a pre-bundle build that wrote OAuth tokens
 //! to the legacy ambient location (e.g. Claude Code's `~/.claude/`),
 //! AgentMux should auto-detect those credentials and bind them into a
