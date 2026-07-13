@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.53.4 — 2026-07-13
+
+- fix(pane): hole-punch mask click-through — CALayer masking doesn't affect AppKit hit testing
+- fix(tabs): active-tab color line spans the full tab strip, not just from the selected tab
+- fix(theme): body background used a hardcoded dark literal instead of --main-bg-color, so light themes never fully reached the window chrome
+- feat(armory): fold Identities tab into agent-pane Identity, rename Memory to Memories, reorder Armory rail
+- feat(srv): seed a starter Skills catalog on fresh install
+- fix(theme): darken primary text color across all 4 light themes for readability
+
+
 ## 0.53.3 — 2026-07-13
 
 - fix(pane): flyout menus over browser panes on macOS — deterministic occlusion, click routing, and freeze-frame instead of black-out
