@@ -47,6 +47,27 @@ pub struct SkillSeedReport {
     pub created: usize,
 }
 
+/// True if any global skill whose name matches a starter-skill's name
+/// already exists — i.e. this channel already effectively has the starter
+/// set (or a name collision with it), whether from a prior run of this
+/// migration, the retired pre-migration startup-seed path (#2141, shipped
+/// before this migration existed — every channel that has already booted
+/// once has these names present), or the user coincidentally naming their
+/// own skill the same thing.
+///
+/// The caller (`migrations::m0015_seed_starter_skills`) uses this to skip
+/// seeding entirely rather than attempting an insert that would collide on
+/// `skill_upsert_unique_global`'s name-uniqueness check and permanently
+/// fail the migration on every subsequent boot (reagent P1, PR #2144).
+pub(crate) fn any_starter_skill_name_exists(wstore: &Arc<Store>) -> Result<bool, StoreError> {
+    let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON)
+        .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
+    let existing = wstore.skill_list_global()?;
+    Ok(manifest
+        .iter()
+        .any(|entry| existing.iter().any(|item| item.skill.name == entry.name)))
+}
+
 /// Parse the embedded manifest and insert every entry as a global skill via
 /// the validated `skill_upsert_unique_global` path. Does NOT check whether
 /// the catalog is already populated — the caller
