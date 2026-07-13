@@ -10,10 +10,13 @@
 //! per channel launch rather than one row per credential.
 //!
 //! Strategy: group accounts by (provider, secret_ref JSON). For each group of
-//! duplicates, keep whichever account is currently referenced by a bundle
-//! binding (or the oldest by created_at if none is bound). Reroute any bundle
-//! bindings and agent identity links that reference a dupe to the canonical,
+//! duplicates, keep whichever account is currently referenced by a direct
+//! agent identity link (or the oldest by created_at if none is linked).
+//! Reroute any agent identity links that reference a dupe to the canonical,
 //! then delete the dupes — the CASCADE FK handles any remaining joins.
+//! (Identity bundle bindings were rerouted here too, prior to Phase 4c of
+//! SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md dropping
+//! db_identity_bundles/db_identity_bindings.)
 
 use std::collections::{HashMap, HashSet};
 
