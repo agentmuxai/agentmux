@@ -181,6 +181,48 @@ impl Controller for ShellController {
             })
             .or_else(|| std::env::var("WAVEMUX_AGENT_ID").ok());
 
+        // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
+        // Computed here (before spawn) rather than after so the commit-aware admission
+        // gate below can use it; also reused post-spawn to set `inner.is_agent_pane`.
+        let is_agent = agent_id_for_jekt.is_some()
+            || cmd_str.to_lowercase().contains("claude")
+            || cmd_str.to_lowercase().contains("codex")
+            || cmd_str.to_lowercase().contains("gemini")
+            || cmd_str.to_lowercase().contains("qwen");
+
+        // Pillar 3 — commit-aware admission control, extended to the interactive
+        // agent pane. The drone Agent block's one-shot spawn (`agents::runner::
+        // run_agent`) already refuses to start another `claude.exe` when system
+        // commit headroom is below the reserve, to avoid tipping the box into a
+        // Chromium OOM abort (0xE0000008). That gate covered only the drone path;
+        // this interactive PTY spawn is the OTHER (likely more common) place a
+        // fresh agent CLI process gets started, and previously had no protection
+        // at all. Reuse the same pure decision + reserve lookup here, gated on
+        // `is_agent` so plain shell/cmd panes are unaffected — only a new
+        // claude/codex/gemini/qwen process is refused under commit pressure.
+        // See SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md, PR #1853.
+        if is_agent {
+            if let Err(e) = crate::agents::runner::admit_spawn(
+                crate::backend::sysinfo::available_commit_gb(),
+                crate::agents::runner::agent_commit_reserve_gb(),
+            ) {
+                tracing::warn!(
+                    block_id = %self.block_id,
+                    cmd = %cmd_str,
+                    error = %e,
+                    "admission gate: refusing interactive agent spawn under commit pressure"
+                );
+                let mut inner = self.inner.lock().unwrap();
+                Self::set_status(&mut inner, STATUS_DONE);
+                inner.proc_exit_code = -1;
+                inner.input_tx = None;
+                self.unlock_run();
+                return Err(format!(
+                    "memory full — not enough memory to start a new agent right now, free up memory and try again ({e})"
+                ));
+            }
+        }
+
         let mut cmd = if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
@@ -411,13 +453,6 @@ impl Controller for ShellController {
             format!("failed to spawn command: {e}")
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
-
-        // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
-        let is_agent = agent_id_for_jekt.is_some()
-            || cmd_str.to_lowercase().contains("claude")
-            || cmd_str.to_lowercase().contains("codex")
-            || cmd_str.to_lowercase().contains("gemini")
-            || cmd_str.to_lowercase().contains("qwen");
 
         // Register PID and record spawn metadata.
         let spawn_ts_ms = SystemTime::now()
