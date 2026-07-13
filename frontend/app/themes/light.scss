@@ -46,6 +46,18 @@
     // tuned for transient/interactive states, not a static field boundary.
     --input-bg-color: rgba(0, 0, 0, 0.06);
 
+    // Header (tab strip) and status bar recessed-chrome strips — both were
+    // missing here (SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md):
+    // --tab-strip-bg's :root default is a WHITE tint (lightens a dark
+    // surface) and was invisible over this theme's already-light chrome;
+    // --status-bar-bg didn't exist as a token at all until this fix — the
+    // status bar was a hardcoded literal that never reached the theme
+    // system. Same polarity flip as --hover-bg-color/--input-bg-color
+    // above: black tints darken regardless of theme, so they're the
+    // correct direction for every light-family theme's recessed strips.
+    --tab-strip-bg: rgba(0, 0, 0, 0.03);
+    --status-bar-bg: rgba(0, 0, 0, 0.06);
+
     --error-color: #d1242f;
     --warning-color: #9a6700;
     --success-color: #1a7f37;
