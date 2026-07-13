@@ -23,6 +23,10 @@ function subagentStatusToActivity(s: ActiveSubagent["status"]): ActivityStatus {
     switch (s) {
         case "active": return "running";
         case "completed": return "done";
+        // Terminated without a Result line (parent turn ended early) — same
+        // bucket as a shell's manual "stopped", not "error" (no failure
+        // signal, just cut off). See SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION.
+        case "abandoned": return "stopped";
     }
 }
 
@@ -36,10 +40,12 @@ export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
         title: s.display_name || s.slug || s.agent_id,
         status: subagentStatusToActivity(s.status),
         startedAt: s.spawned_at,
-        // last_event_at at the moment a subagent completes is its own
-        // result event's timestamp — the closest thing to an "ended at"
-        // ActiveSubagent exposes (there is no dedicated field).
-        endedAt: s.status === "completed" ? s.last_event_at : undefined,
+        // last_event_at at the moment a subagent completes (or is reconciled
+        // to abandoned) is the closest thing to an "ended at" ActiveSubagent
+        // exposes (there is no dedicated field). Both are terminal — leaving
+        // abandoned out would tick the elapsed timer forever and never let
+        // D4 retention (RETENTION_MS.stopped) auto-dismiss the row.
+        endedAt: s.status === "completed" || s.status === "abandoned" ? s.last_event_at : undefined,
         canStop: false,
         subagent: s,
     };

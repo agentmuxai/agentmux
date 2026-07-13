@@ -160,7 +160,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
 
 // ── Status derived from TurnPhase ────────────────────────────────────────
 
-type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected" | "unknown";
+export type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected" | "unknown" | "interrupted";
 
 function phaseToDisplayStatus(blockId: string, fallback: "running" | "idle"): AgentDisplayStatus {
     const phaseAccessor = getBlockTurnPhase(blockId);
@@ -191,6 +191,27 @@ function phaseToDisplayStatus(blockId: string, fallback: "running" | "idle"): Ag
         case "Disconnected":  return "disconnected";
         default:              return "idle";
     }
+}
+
+/**
+ * A subagent runs inside its parent agent's own CLI process — a Task-tool
+ * call is synchronous within the parent's turn — so it cannot genuinely
+ * still be active once the parent's own turn has ended. The backend already
+ * reconciles this (SubagentStatus::Abandoned), but currently only at pane
+ * reopen (see docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md
+ * Open Question 1) — this is a client-side backstop using the exact same
+ * signal (`parentAgentStatus`, fed by GetControllerStatus/controllerstatus,
+ * the same turn_active the backend's reconcile_stale_subagents reads) for
+ * the mid-session gap until real-time backend reconciliation ships. Purely
+ * a DISPLAY decision — never mutates the underlying ActiveSubagent, so
+ * grouping (activeCount/retired) keeps reading the real backend status.
+ */
+export function subagentDisplayStatus(sub: ActiveSubagent, parentAgentStatus: "running" | "idle"): AgentDisplayStatus {
+    if (sub.status === "abandoned") return "interrupted";
+    if (sub.status === "active") {
+        return parentAgentStatus === "idle" ? "interrupted" : "working";
+    }
+    return "idle"; // completed
 }
 
 // ── Agent root row ───────────────────────────────────────────────────────
@@ -256,10 +277,10 @@ function AgentRow({
             <div class="swarm-children">
                 <For each={node.subagents}>
                     {(child) => isWorkflowGroup(child)
-                        ? <WorkflowGroupRow group={child} model={model} />
+                        ? <WorkflowGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
                         : isNameGroup(child)
-                        ? <NameGroupRow group={child} model={model} />
-                        : <SubagentRow sub={child} model={model} />}
+                        ? <NameGroupRow group={child} model={model} parentAgentStatus={node.agentStatus} />
+                        : <SubagentRow sub={child} model={model} parentAgentStatus={node.agentStatus} />}
                 </For>
             </div>
         </div>
@@ -268,7 +289,15 @@ function AgentRow({
 
 // ── Workflow group row (collapsed by default) ───────────────────────────
 
-function WorkflowGroupRow({ group, model }: { group: WorkflowGroup; model: SwarmViewModel }): JSX.Element {
+function WorkflowGroupRow({
+    group,
+    model,
+    parentAgentStatus,
+}: {
+    group: WorkflowGroup;
+    model: SwarmViewModel;
+    parentAgentStatus: "running" | "idle";
+}): JSX.Element {
     // Expand state lives on the ViewModel, not a local signal — see
     // SwarmViewModel._expandedIds for why a local signal here silently
     // collapses on unrelated tree refreshes.
@@ -293,7 +322,7 @@ function WorkflowGroupRow({ group, model }: { group: WorkflowGroup; model: Swarm
             <Show when={expanded()}>
                 <div class="swarm-workflow-members">
                     <For each={group.subagents}>
-                        {(sub) => <SubagentRow sub={sub} model={model} />}
+                        {(sub) => <SubagentRow sub={sub} model={model} parentAgentStatus={parentAgentStatus} />}
                     </For>
                 </div>
             </Show>
@@ -303,7 +332,15 @@ function WorkflowGroupRow({ group, model }: { group: WorkflowGroup; model: Swarm
 
 // ── Name group row (loose subagents sharing one display_name) ──────────
 
-function NameGroupRow({ group, model }: { group: NameGroup; model: SwarmViewModel }): JSX.Element {
+function NameGroupRow({
+    group,
+    model,
+    parentAgentStatus,
+}: {
+    group: NameGroup;
+    model: SwarmViewModel;
+    parentAgentStatus: "running" | "idle";
+}): JSX.Element {
     // Same expand-state-on-the-ViewModel rationale as WorkflowGroupRow —
     // reuses groupCacheKey's "name:<name>" namespacing so this can never
     // collide with a WorkflowGroupRow's workflowId or a SubagentRow's
@@ -330,7 +367,7 @@ function NameGroupRow({ group, model }: { group: NameGroup; model: SwarmViewMode
             <Show when={expanded()}>
                 <div class="swarm-workflow-members">
                     <For each={group.subagents}>
-                        {(sub) => <SubagentRow sub={sub} model={model} />}
+                        {(sub) => <SubagentRow sub={sub} model={model} parentAgentStatus={parentAgentStatus} />}
                     </For>
                 </div>
             </Show>
@@ -340,7 +377,15 @@ function NameGroupRow({ group, model }: { group: NameGroup; model: SwarmViewMode
 
 // ── Subagent child row ───────────────────────────────────────────────────
 
-function SubagentRow({ sub, model }: { sub: ActiveSubagent; model: SwarmViewModel }): JSX.Element {
+function SubagentRow({
+    sub,
+    model,
+    parentAgentStatus,
+}: {
+    sub: ActiveSubagent;
+    model: SwarmViewModel;
+    parentAgentStatus: "running" | "idle";
+}): JSX.Element {
     const expanded = createMemo(() => model.isExpanded(sub.agent_id));
     const displayLabel = createMemo(() => sub.display_name || sub.slug || sub.agent_id.substring(0, 7));
 
@@ -357,16 +402,27 @@ function SubagentRow({ sub, model }: { sub: ActiveSubagent; model: SwarmViewMode
         }
     };
 
+    // Row/group dimming must track the same effective status as the chip
+    // (reagent P2 on #2134) — otherwise a client-side "interrupted" backstop
+    // shows the new chip/dot but the row stays full-opacity, since only a
+    // backend-confirmed sub.status === "abandoned" would dim it directly.
+    const dimVariant = createMemo(() => {
+        const displayStatus = subagentDisplayStatus(sub, parentAgentStatus);
+        if (displayStatus === "interrupted") return "abandoned";
+        if (displayStatus === "idle") return "completed";
+        return "active";
+    });
+
     return (
-        <div class={`swarm-subagent-group swarm-subagent-group--${sub.status}`}>
+        <div class={`swarm-subagent-group swarm-subagent-group--${dimVariant()}`}>
             <div
-                class={`swarm-subagent-row swarm-subagent-row--${sub.status}`}
+                class={`swarm-subagent-row swarm-subagent-row--${dimVariant()}`}
                 onClick={handleToggle}
                 title={displayLabel()}
             >
                 <i class={`fa-solid fa-${expanded() ? "chevron-down" : "chevron-right"} swarm-subagent-expand-icon`} />
                 <span class="swarm-subagent-slug">{displayLabel()}</span>
-                <AgentStatusChip status={sub.status === "active" ? "working" : "idle"} />
+                <AgentStatusChip status={subagentDisplayStatus(sub, parentAgentStatus)} />
             </div>
             <Show when={expanded()}>
                 <SubagentDetailPane sub={sub} detail={model.getSubagentDetail(sub.agent_id)} />
@@ -471,6 +527,7 @@ const STATUS_LABEL: Record<AgentDisplayStatus, string> = {
     error:        "error",
     disconnected: "offline",
     unknown:      "unknown",
+    interrupted:  "interrupted",
 };
 
 function AgentStatusChip({ status }: { status: AgentDisplayStatus }): JSX.Element {

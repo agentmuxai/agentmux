@@ -108,6 +108,25 @@ describe("groupSubagentsByWorkflow", () => {
         }
     });
 
+    it("treats an abandoned member the same as a completed one for grouping purposes (both terminal)", () => {
+        // SubagentStatus::Abandoned (SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md)
+        // — a subagent whose parent turn ended without a Result line. Like
+        // "completed", it must NOT count toward activeCount and must let the
+        // group retire.
+        const result = groupSubagentsByWorkflow([
+            mk({ agent_id: "a1", workflow_id: "wf_1", status: "completed" }),
+            mk({ agent_id: "a2", workflow_id: "wf_1", status: "abandoned" }),
+        ]);
+        const group = result[0];
+        if (isWorkflowGroup(group)) {
+            expect(group.status).toBe("retired");
+            expect(group.activeCount).toBe(0);
+            expect(group.totalCount).toBe(2);
+        } else {
+            throw new Error("expected a workflow group");
+        }
+    });
+
     it("derives the group name from the first member with a non-empty slug", () => {
         const result = groupSubagentsByWorkflow([
             mk({ agent_id: "a1", workflow_id: "wf_1", slug: "", last_event_at: 200 }),
@@ -211,6 +230,20 @@ describe("groupSubagentsByWorkflow", () => {
             const group = result[0];
             if (isNameGroup(group)) {
                 expect(group.status).toBe("retired");
+            } else {
+                throw new Error("expected a name group");
+            }
+        });
+
+        it("treats an abandoned NameGroup member the same as a completed one (both terminal)", () => {
+            const result = groupSubagentsByWorkflow([
+                mk({ agent_id: "a1", workflow_id: null, display_name: "N", status: "completed" }),
+                mk({ agent_id: "a2", workflow_id: null, display_name: "N", status: "abandoned" }),
+            ]);
+            const group = result[0];
+            if (isNameGroup(group)) {
+                expect(group.status).toBe("retired");
+                expect(group.activeCount).toBe(0);
             } else {
                 throw new Error("expected a name group");
             }

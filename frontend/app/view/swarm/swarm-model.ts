@@ -20,7 +20,14 @@ export interface ActiveSubagent {
     parent_agent: string;
     parent_block_id: string;
     session_id: string;
-    status: "active" | "completed";
+    /** `"abandoned"` (SubagentStatus::Abandoned, Rust) — the parent block's
+     *  turn ended without a Result line ever appearing for this subagent
+     *  (crashed, killed, or interrupted by an app/srv restart). Distinct
+     *  from `"completed"`: it didn't finish, it was cut off. Set by the
+     *  backend's `reconcile_stale_subagents`, currently only on pane
+     *  reopen/backfill — see
+     *  docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md. */
+    status: "active" | "completed" | "abandoned";
     /** Unix ms when this subagent was first observed — set once, immutable.
      *  Distinct from `last_event_at`, which advances on every journal read. */
     spawned_at: number;
@@ -327,7 +334,7 @@ export function pruneGroupIdentityCache(cache: Map<string, WorkflowGroup | NameG
 export interface SubagentDetail {
     eventsAtom: Accessor<SubagentEvent[]>;
     infoAtom: Accessor<ActiveSubagent | null>;
-    statusAtom: Accessor<"active" | "completed" | "loading">;
+    statusAtom: Accessor<"active" | "completed" | "abandoned" | "loading">;
     dispose: () => void;
 }
 
@@ -346,7 +353,7 @@ export interface SubagentDetail {
 export function createSubagentDetail(subagentId: string): SubagentDetail {
     const [events, setEvents] = createSignal<SubagentEvent[]>([]);
     const [info, setInfo] = createSignal<ActiveSubagent | null>(null);
-    const [status, setStatus] = createSignal<"active" | "completed" | "loading">("loading");
+    const [status, setStatus] = createSignal<"active" | "completed" | "abandoned" | "loading">("loading");
 
     const unsubs: (() => void)[] = [];
 
