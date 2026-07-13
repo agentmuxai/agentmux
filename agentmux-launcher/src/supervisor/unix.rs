@@ -7,8 +7,8 @@ use crate::second_instance::bind_socket_with_recovery;
 use crate::show_fatal_dialog;
 use crate::supervisor::{HOST_RESTART_BUDGET, HOST_RESTART_WINDOW};
 use crate::{
-    config, data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, saga, srv_spawner,
-    startup_events, state,
+    config, data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, other_instances, saga,
+    srv_spawner, startup_events, state,
 };
 
 /// Await the next delivery of a Unix signal, or never resolve if the
@@ -163,6 +163,27 @@ pub(crate) async fn run_unix(
     // never a recomputed hash. SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md.
     #[cfg(target_os = "macos")]
     crate::splash_mac::set_reopen_target(paths.data_dir.clone(), dir_hash.clone());
+
+    // Task #35 (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md P1) — read-only
+    // detection of other, OLDER AgentMux instances still running. Mirrors
+    // the Windows call site: we only reach this point once we've WON the
+    // single-instance socket bind above. Detection + logging ONLY — see
+    // `other_instances.rs` doc comment.
+    //
+    // reagent (PR #2117 round 1): synchronous I/O (fs::read_dir, socket
+    // connect probes), no `.await` in the body — spawn_blocking instead of
+    // plain tokio::spawn so it runs on the blocking-task pool and can never
+    // occupy/starve an async worker the IPC accept loop or host supervision
+    // needs, especially given channels/local-* dirs are documented to
+    // accumulate unpruned (more siblings to walk/probe over time).
+    {
+        let channels_root = paths.common.home_dir.join("channels");
+        let own_channel = paths.common.channel.clone();
+        let own_version = version.to_string();
+        tokio::task::spawn_blocking(move || {
+            other_instances::log_older_running_instances(&channels_root, &own_channel, &own_version);
+        });
+    }
 
     // Broadcast bus for reducer-emitted events. Same capacity (1024)
     // and rationale as the Windows path.
