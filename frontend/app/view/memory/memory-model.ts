@@ -3,7 +3,7 @@
 
 // Presets pane — first-class management of presets (memory bundles).
 // User-facing name is "Presets"; the type/table stay `Memory` /
-// `db_memory_bundles` (SPEC_MEMORY_IDENTITY_ARCH §4.1).
+// `db_bundles` (SPEC_MEMORY_IDENTITY_ARCH §4.1).
 //
 // A preset is the agent's provider-agnostic capability stack:
 // system instructions, context files, MCP servers, skills. Provider/model
@@ -47,7 +47,7 @@ export interface MemoryDraft {
 /** Empty draft for the "+ New Preset" flow.
  *
  *  All JSON-array fields default to `"[]"` (not `""`). The backend's
- *  `db_memory_bundles.skills` column is JSON-encoded; a literal `""` would
+ *  `db_bundles.skills` column is JSON-encoded; a literal `""` would
  *  trip downstream `JSON.parse(skills)` readers. Reagent P1 on
  *  PR #747 (2026-05-08). */
 export function emptyDraft(): MemoryDraft {

@@ -53,7 +53,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Interagent comms** — `SendMessage` routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
 - **Swarm** — A live two-level agent/subagent tree. Watch delegation chains and every subagent's activity in one view.
 - **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.), keychain-backed, assigned per agent at launch. Survive renames; swappable without restart.
-- **Reusable presets** — Capture an agent's provider, model, instructions, MCP servers, skills, and environment once and relaunch it as that agent. (Backend: `db_memory_bundles`; surfaced as Presets in the UI.)
+- **Reusable presets** — Capture an agent's provider, model, instructions, MCP servers, skills, and environment once and relaunch it as that agent. (Backend: `db_bundles`; surfaced as Presets in the UI.)
 - **Native memory** — Agents read and write their own memory files (`agent:memory:*`). Deeper cross-session memory is actively in development.
 - **One-shot CLIs, AgentMux owns state** — Most provider CLIs are invoked per turn (Subprocess/ACP controllers); Claude Code runs as a persistent stream. Either way AgentMux holds the durable session state, so a 150–350MB Rust core stays flat over long sessions (no GC pauses, no heap growth).
 - **Reducer stack** — A multi-layer reducer architecture (launcher / host / sidecar / frontend) with structured event logs, so "what mutated this state?" has one place to look.

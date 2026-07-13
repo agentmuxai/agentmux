@@ -15,7 +15,7 @@
 //
 // AgentMux Cloud is also surfaced here as a "virtual first-class account": it
 // is a single app-wide session (the `muxbus.*` singleton), NOT a pluralizable
-// IdentityAccount, so it is not stored in `db_identity_accounts`. Instead this
+// IdentityAccount, so it is not stored in `db_accounts`. Instead this
 // tab projects the live `muxbus.status` into the gallery tile count and a
 // read-only connected row, and drives connect/disconnect through the shared
 // `useMuxBusStatus` controller. Scoped to this tab only — the per-agent

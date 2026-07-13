@@ -5,7 +5,7 @@
 //! tie them to agents.
 //!
 //! Layered model:
-//! - **`IdentityAccount`** (`db_identity_accounts`): a single credential
+//! - **`IdentityAccount`** (`db_accounts`): a single credential
 //!   pointer (provider + kind + secret_ref).
 //! - **`Identity`** (`db_identity_bundles`): a named bundle that
 //!   contains zero or more accounts via the `db_identity_bindings`
@@ -29,7 +29,7 @@ use super::error::StoreError;
 use super::store::Store;
 
 /// Provider-specific credential reference. Stored as JSON in
-/// `db_identity_accounts.secret_ref`. `backend` is the discriminator.
+/// `db_accounts.secret_ref`. `backend` is the discriminator.
 /// The actual secret value is NEVER stored in the DB — only how to
 /// look it up at launch time (env var, secrets-manager path, etc.).
 /// `PlaintextDev` exists for local dev convenience and must never be
@@ -179,7 +179,7 @@ impl Store {
                 let mut stmt = conn.prepare(
                     "SELECT id, name, provider, kind, display_name, secret_ref, context,
                             status, created_at, updated_at
-                     FROM db_identity_accounts
+                     FROM db_accounts
                      WHERE provider = ?1
                      ORDER BY updated_at DESC",
                 )?;
@@ -192,7 +192,7 @@ impl Store {
                 let mut stmt = conn.prepare(
                     "SELECT id, name, provider, kind, display_name, secret_ref, context,
                             status, created_at, updated_at
-                     FROM db_identity_accounts
+                     FROM db_accounts
                      ORDER BY updated_at DESC",
                 )?;
                 let iter = stmt.query_map([], map_row)?;
@@ -209,7 +209,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, provider, kind, display_name, secret_ref, context,
                     status, created_at, updated_at
-             FROM db_identity_accounts WHERE id = ?1",
+             FROM db_accounts WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
             let secret_ref_json: String = row.get(5)?;
@@ -249,7 +249,7 @@ impl Store {
         let secret_ref_json = serde_json::to_string(&account.secret_ref)?;
         let context_json = serde_json::to_string(&account.context)?;
         conn.execute(
-            "INSERT INTO db_identity_accounts
+            "INSERT INTO db_accounts
                 (id, name, provider, kind, display_name, secret_ref, context,
                  status, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
@@ -280,7 +280,7 @@ impl Store {
 
     pub fn identity_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let rows = conn.execute("DELETE FROM db_identity_accounts WHERE id = ?1", params![id])?;
+        let rows = conn.execute("DELETE FROM db_accounts WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
 
