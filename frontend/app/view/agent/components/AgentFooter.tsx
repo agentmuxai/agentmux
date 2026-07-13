@@ -795,6 +795,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                     ref={textareaRef}
                     class={`agent-input${isBangCmd() ? " bang-command" : ""}`}
                     placeholder={placeholder()}
+                    spellcheck={false}
                     onKeyDown={handleKeyDown}
                     onInput={handleInput}
                     onCompositionStart={() => {
