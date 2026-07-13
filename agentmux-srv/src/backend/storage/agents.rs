@@ -231,9 +231,12 @@ pub struct AgentInstance {
     #[serde(default)]
     pub ended_at: i64,
     pub created_at: i64,
-    /// FK to `db_identity_bundles.id`. Empty string means "use the blank
-    /// singleton" (= ambient creds, no env-var injection). Set at
-    /// instantiation via the launch modal's Identity dropdown.
+    /// Legacy Identity-bundle id column — `db_identity_bundles` was
+    /// dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
+    /// The launch modal now writes an account_id here instead; credential
+    /// resolution and display names both go through
+    /// `db_agent_identity_links`/`db_accounts`. Empty string means
+    /// "ambient creds, no env-var injection."
     #[serde(default)]
     pub identity_id: String,
     /// FK to `db_bundles.id`. Empty string means "use the blank

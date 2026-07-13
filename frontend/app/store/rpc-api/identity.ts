@@ -135,66 +135,6 @@ export const IdentityApi = {
         return client.rpcCall("listallagentidentities", data, opts);
     },
 
-    // ────────────────────────────────────────────────────────────────────
-    // v7 — Identity bundles
-    // ────────────────────────────────────────────────────────────────────
-
-    ListIdentityBundlesCommand(
-        client: RpcClient,
-        data: Record<string, never> = {},
-        opts?: RpcOpts,
-    ): Promise<IdentityBundle[]> {
-        return client.rpcCall("listidentitybundles", data, opts);
-    },
-
-    GetIdentityBundleCommand(
-        client: RpcClient,
-        data: { id: string },
-        opts?: RpcOpts,
-    ): Promise<IdentityBundle> {
-        return client.rpcCall("getidentitybundle", data, opts);
-    },
-
-    UpsertIdentityBundleCommand(
-        client: RpcClient,
-        data: Partial<IdentityBundle>,
-        opts?: RpcOpts,
-    ): Promise<IdentityBundle> {
-        return client.rpcCall("upsertidentitybundle", data, opts);
-    },
-
-    DeleteIdentityBundleCommand(
-        client: RpcClient,
-        data: { id: string },
-        opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
-        return client.rpcCall("deleteidentitybundle", data, opts);
-    },
-
-    BindIdentityAccountCommand(
-        client: RpcClient,
-        data: { identity_id: string; provider: string; account_id: string },
-        opts?: RpcOpts,
-    ): Promise<void> {
-        return client.rpcCall("bindidentityaccount", data, opts);
-    },
-
-    UnbindIdentityAccountCommand(
-        client: RpcClient,
-        data: { identity_id: string; provider: string },
-        opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
-        return client.rpcCall("unbindidentityaccount", data, opts);
-    },
-
-    ListIdentityBindingsCommand(
-        client: RpcClient,
-        data: { identity_id: string },
-        opts?: RpcOpts,
-    ): Promise<IdentityBinding[]> {
-        return client.rpcCall("listidentitybindings", data, opts);
-    },
-
     // ── Pre-launch OAuth (spec: SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md)
 
     AuthStartCommand(

@@ -823,9 +823,6 @@ const AgentRefEditor = (p: {
     node: FlowNode;
     update: (patch: Record<string, unknown>) => void;
 }): JSX.Element => {
-    const [identities] = createResource(() =>
-        RpcApi.ListIdentityBundlesCommand(TabRpcClient, {}).catch(() => [] as IdentityBundle[]),
-    );
     const [memories] = createResource(() =>
         RpcApi.ListMemoriesCommand(TabRpcClient, {}).catch(() => [] as Memory[]),
     );
@@ -835,18 +832,6 @@ const AgentRefEditor = (p: {
 
     return (
         <>
-            <NodeField label="Identity">
-                <select
-                    class="drone-input nodrag"
-                    value={ref().identityId}
-                    onChange={(e) => setRef({ identityId: e.currentTarget.value })}
-                >
-                    <option value="">— blank —</option>
-                    <For each={(identities() ?? []).filter((b) => !b.is_blank)}>
-                        {(bundle) => <option value={bundle.id}>{bundle.name}</option>}
-                    </For>
-                </select>
-            </NodeField>
             <NodeField label="Memory">
                 <select
                     class="drone-input nodrag"

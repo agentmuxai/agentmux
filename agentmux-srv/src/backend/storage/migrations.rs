@@ -80,14 +80,13 @@ const WSTORE_OTYPES: &[&str] = &[
 /// Legacy `objects.db` table names retired by the de-forge rename, paired
 /// with their replacement. `adopt_legacy_table_names` renames any of these
 /// it finds — the single surviving piece of the old migration chain (it
-/// also subsumes the v11 `db_identities`/`db_memories` rename).
+/// also subsumes the v11 `db_memories` rename).
 const LEGACY_TABLE_RENAMES: &[(&str, &str)] = &[
     ("db_forge_agents", "db_agent_definitions"),
     ("db_forge_content", "db_agent_content"),
     ("db_forge_skills", "db_agent_skills"),
     ("db_forge_history", "db_agent_history"),
     ("db_forge_agent_identities", "db_agent_identity_links"),
-    ("db_identities", "db_identity_bundles"),
     ("db_memories", "db_memory_bundles"),
     // Phase 4 of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md — the
     // "bundle" naming collision fix (SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md).
@@ -107,7 +106,6 @@ const LEGACY_INDEX_DROPS: &[&str] = &[
     "idx_forge_agents_slug",
     "idx_forge_history_agent_date",
     "idx_forge_agent_identities_account",
-    "idx_identities_is_blank",
     "idx_memories_is_blank",
     // Phase 4 rename (see LEGACY_TABLE_RENAMES above) — objects.db names,
     // then the shared store.db names (`idx_ss_*` prefix, see
@@ -122,11 +120,22 @@ const LEGACY_INDEX_DROPS: &[&str] = &[
 /// abandons. Dropped from any legacy DB by the adopt step; never created
 /// by the flat schema. `db_workflow_*` data was already copied into
 /// `db_drone_*` by the old v10 migration, so dropping loses nothing.
+///
+/// `db_identities` (the pre-v11 name), `db_identity_bundles`, and
+/// `db_identity_bindings` were dropped outright rather than renamed
+/// forward in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md —
+/// `db_agent_identity_links`/`db_accounts` is the sole credential-
+/// resolution path (`identity/resolver.rs::resolve_bindings_for_instance`),
+/// confirmed via the already-applied `m0013`/`m0014` backfill migrations
+/// (see SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md §6/§8a).
 const DEAD_TABLE_DROPS: &[&str] = &[
     "db_workflow_definitions",
     "db_workflow_runs",
     "db_v10_migrated_legacy_defs",
     "db_v10_migrated_legacy_runs",
+    "db_identities",
+    "db_identity_bundles",
+    "db_identity_bindings",
 ];
 
 /// Initialize (or re-validate) the full `objects.db` schema.
@@ -248,28 +257,6 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_agent_identity_links_account
             ON db_agent_identity_links(account_id);
-
-        CREATE TABLE IF NOT EXISTS db_identity_bundles (
-            id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL UNIQUE,
-            description TEXT NOT NULL DEFAULT '',
-            is_blank    INTEGER NOT NULL DEFAULT 0,
-            created_at  INTEGER NOT NULL DEFAULT 0,
-            updated_at  INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_identity_bundles_is_blank
-            ON db_identity_bundles(is_blank);
-
-        CREATE TABLE IF NOT EXISTS db_identity_bindings (
-            identity_id TEXT NOT NULL,
-            provider    TEXT NOT NULL,
-            account_id  TEXT NOT NULL,
-            PRIMARY KEY (identity_id, provider),
-            FOREIGN KEY (identity_id) REFERENCES db_identity_bundles(id) ON DELETE CASCADE,
-            FOREIGN KEY (account_id)  REFERENCES db_accounts(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_identity_bindings_account
-            ON db_identity_bindings(account_id);
 
         CREATE TABLE IF NOT EXISTS db_bundles (
             id            TEXT PRIMARY KEY,
@@ -538,16 +525,12 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         }
     }
 
-    // ---- Seed blank Identity / Memory singletons ----
-    // The launch UI renders these as the default option in its Identity /
-    // Memory dropdowns. Fixed ids so tests + dev seed data can hard-code
+    // ---- Seed blank Memory singleton ----
+    // The launch UI renders this as the default option in its Memory
+    // dropdown. Fixed id so tests + dev seed data can hard-code
     // references.
     conn.execute_batch(
-        "INSERT OR IGNORE INTO db_identity_bundles
-            (id, name, description, is_blank, created_at, updated_at)
-         VALUES ('blank', '__blank__', 'No credentials — use ambient', 1, 0, 0);
-
-         INSERT OR IGNORE INTO db_bundles
+        "INSERT OR IGNORE INTO db_bundles
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
@@ -673,28 +656,6 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_ss_agent_identity_links_account
             ON db_agent_identity_links(account_id);
 
-        CREATE TABLE IF NOT EXISTS db_identity_bundles (
-            id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL UNIQUE,
-            description TEXT NOT NULL DEFAULT '',
-            is_blank    INTEGER NOT NULL DEFAULT 0,
-            created_at  INTEGER NOT NULL DEFAULT 0,
-            updated_at  INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_ss_identity_bundles_is_blank
-            ON db_identity_bundles(is_blank);
-
-        CREATE TABLE IF NOT EXISTS db_identity_bindings (
-            identity_id TEXT NOT NULL,
-            provider    TEXT NOT NULL,
-            account_id  TEXT NOT NULL,
-            PRIMARY KEY (identity_id, provider),
-            FOREIGN KEY (identity_id) REFERENCES db_identity_bundles(id) ON DELETE CASCADE,
-            FOREIGN KEY (account_id)  REFERENCES db_accounts(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_ss_identity_bindings_account
-            ON db_identity_bindings(account_id);
-
         CREATE TABLE IF NOT EXISTS db_bundles (
             id            TEXT PRIMARY KEY,
             name          TEXT NOT NULL UNIQUE,
@@ -762,14 +723,10 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             ON db_cron_jobs(enabled);",
     )?;
 
-    // Seed the blank Identity / Memory singletons — same fixed ids as objects.db
-    // so cross-version reads never see a missing blank row.
+    // Seed the blank Memory singleton — same fixed id as objects.db so
+    // cross-version reads never see a missing blank row.
     conn.execute_batch(
-        "INSERT OR IGNORE INTO db_identity_bundles
-            (id, name, description, is_blank, created_at, updated_at)
-         VALUES ('blank', '__blank__', 'No credentials — use ambient', 1, 0, 0);
-
-         INSERT OR IGNORE INTO db_bundles
+        "INSERT OR IGNORE INTO db_bundles
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
@@ -928,8 +885,6 @@ mod tests {
         "db_agent_history",
         "db_accounts",
         "db_agent_identity_links",
-        "db_identity_bundles",
-        "db_identity_bindings",
         "db_bundles",
         "db_agent_instances",
         "db_agents",
@@ -974,8 +929,6 @@ mod tests {
             "idx_agent_history_agent_date",
             "idx_agent_identity_links_account",
             "idx_accounts_provider",
-            "idx_identity_bundles_is_blank",
-            "idx_identity_bindings_account",
             "idx_bundles_is_blank",
             "idx_agent_instances_definition",
             "idx_agent_instances_name_recent",
@@ -988,15 +941,7 @@ mod tests {
             assert!(index_exists(&conn, idx), "{idx} should exist");
         }
 
-        // Blank singletons seeded.
-        let id_blank: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM db_identity_bundles WHERE id='blank' AND is_blank=1",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(id_blank, 1, "blank Identity singleton should be seeded");
+        // Blank singleton seeded.
         let mem_blank: i64 = conn
             .query_row(
                 "SELECT count(*) FROM db_bundles WHERE id='blank' AND is_blank=1",
@@ -1014,11 +959,15 @@ mod tests {
         run_object_schema(&conn).unwrap();
         run_object_schema(&conn).unwrap(); // second pass must not error
 
-        // Singletons stay unique.
-        let id_count: i64 = conn
-            .query_row("SELECT count(*) FROM db_identity_bundles", [], |r| r.get(0))
+        // Singleton stays unique.
+        let mem_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM db_bundles WHERE id='blank'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(id_count, 1);
+        assert_eq!(mem_count, 1);
     }
 
     #[test]
