@@ -354,7 +354,7 @@ pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
 /// 2. Read its `identity_id`. Empty / "blank" → no injection (the
 ///    user picked the blank singleton at launch, meaning "use ambient
 ///    creds").
-/// 3. Read the `db_identity_bindings` rows for that identity_id.
+/// 3. Read the `db_agent_identity_links` rows for the instance's definition.
 /// 4. For each binding: fetch the account, resolve its `SecretRef`,
 ///    look up the provider's env-var matrix, write each var into
 ///    `env_vars`. Any per-binding failure is logged and skipped —
