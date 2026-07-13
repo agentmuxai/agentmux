@@ -596,7 +596,13 @@ impl SubagentWatcher {
                 // parent_block_ids" (a subagent's parent_block_id is fixed at
                 // first discovery, see process_jsonl_change; a mismatch here is
                 // the mechanism a NAME/grouping-dedup bug would leave a trail in).
-                tracing::debug!(
+                //
+                // reagent (PR #2143 round 1): info!, not debug! — the default
+                // production EnvFilter (agentmux-srv/src/main.rs, "agentmuxsrv=
+                // info,info") drops debug-level lines unless RUST_LOG=debug is
+                // already set, which would make this diagnostic invisible in a
+                // normally-running srv, defeating the point of adding it.
+                tracing::info!(
                     agent = %parent_agent,
                     parent_block_id = %parent_block_id,
                     session_id = %session_id,
@@ -638,7 +644,11 @@ impl SubagentWatcher {
                 .map(|s| s.turn_active)
                 .unwrap_or(true);
         if parent_turn_active {
-            tracing::debug!(
+            // reagent (PR #2143 round 1): info!, not debug! — see the note on
+            // the backfill log above; the default production filter drops
+            // debug-level lines, which would make this and the pass-summary
+            // log below invisible in a normally-running srv.
+            tracing::info!(
                 parent_block_id = %parent_block_id,
                 session_id = %session_id,
                 "reconcile_stale_subagents: parent turn active (or unknown) — nothing to reconcile"
@@ -682,7 +692,7 @@ impl SubagentWatcher {
             }
         }
         if reconciled > 0 {
-            tracing::debug!(
+            tracing::info!(
                 parent_block_id = %parent_block_id,
                 session_id = %session_id,
                 reconciled,
@@ -791,7 +801,12 @@ impl SubagentWatcher {
             // under — log it so it's visible without needing to reproduce.
             if let Some(existing) = session.subagents.get(&agent_id) {
                 if existing.info.parent_block_id != parent_block_id {
-                    tracing::debug!(
+                    // reagent (PR #2143 round 1, P1): info!, not debug! — this
+                    // is the single most likely diagnostic trail for the
+                    // duplication bug this PR exists to help find; at debug!
+                    // it would be silently dropped by the default production
+                    // filter and never actually appear when it matters.
+                    tracing::info!(
                         agent_id = %agent_id,
                         session_id = %session_id,
                         existing_parent_block_id = %existing.info.parent_block_id,
