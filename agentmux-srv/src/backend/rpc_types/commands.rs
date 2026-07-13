@@ -159,7 +159,7 @@ pub const COMMAND_DELETE_IDENTITY_ACCOUNT: &str = "deleteidentityaccount";
 /// See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
 pub const COMMAND_ACCOUNT_KEY_VERIFY: &str = "account.key.verify";
 /// Armory service OAuth (scaffold — activates once client ids are
-/// provisioned or supplied as BYO). See SPEC_TRUST_CENTER_2026_06_15.md §4.2.
+/// provisioned or supplied as BYO). See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2.
 pub const COMMAND_ACCOUNT_OAUTH_START: &str = "account.oauth.start";
 pub const COMMAND_ACCOUNT_OAUTH_POLL: &str = "account.oauth.poll";
 pub const COMMAND_ACCOUNT_OAUTH_CANCEL: &str = "account.oauth.cancel";

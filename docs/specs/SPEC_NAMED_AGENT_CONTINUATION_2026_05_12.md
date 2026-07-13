@@ -237,7 +237,7 @@ Phase 0+1+2 land together (the migration is useless without the UX, the UX is us
 
 ## 12. Cross-references
 
-- v7 Identity schema: [`SPEC_IDENTITY_FORGE_INTEGRATION_AND_VAULT_2026_05_08.md`](identity-forge-integration-and-vault-2026-05-08.md) (link path may need adjusting)
+- v7 Identity schema: [`SPEC_IDENTITY_FORGE_INTEGRATION_AND_VAULT_2026_05_08.md`](archive/identity-forge-integration-and-vault-2026-05-08.md) (link path may need adjusting)
 - Launch modal rearchitecture: `docs/specs/launch-modal-rearchitecture-2026-05-01.md`
 - `db_agent_instances` schema: `agentmux-srv/src/backend/storage/migrations.rs:410-424`
 - Launch entry: `agentmux-srv/src/server/app_api.rs::launch_forge_agent`
