@@ -148,20 +148,20 @@
     // an editable field's background to the user's window-transparency
     // setting would make editor-view.scss's inline inputs see-through at
     // low opacity (reagent P1 on PR #2104).
-    // SOLID, not alpha (reagent P1 round 2 on PR #2104): an rgba(0,0,0,0.2)
-    // tint reads fine against editor-view.scss's own #1e1e2e fallback
-    // assumption, but once the token is DEFINED it overrides that fallback
-    // everywhere `var(--input-bg-color, ...)` is used — including the two
-    // inline replace-row-label inputs (file-tree rename, Ctrl+S save-as),
-    // which sit directly on dark row/tab surfaces. A 20%-black tint over an
-    // already-dark surface barely darkens it at all, so those inputs lost
-    // their crisp box and bled into the row instead of reading as an
-    // editable field. A solid color has no such surface-dependence. This
-    // exact hex is editor-view.scss's own original fallback literal, so the
-    // editor's two sites are visually unchanged; it also renders as a
-    // reasonable "sunken field" a shade darker than --modal-bg-color
-    // (#232323) for the panel-form call sites (identity-pane, memory-view).
-    --input-bg-color: #1e1e2e;
+    // WHITE tint, not black (reagent P1 rounds 2 & 3 on PR #2104): a black
+    // tint (rgba(0,0,0,*)) barely darkens an already-dark surface, so the
+    // two inline replace-row-label inputs (file-tree rename, Ctrl+S
+    // save-as) lost their crisp box and bled into the row. A hardcoded
+    // SOLID hex fixed that but broke the other 7 dark-family themes
+    // (nord/gruvbox/monokai/high-contrast/midnight/dracula/tokyo-night),
+    // which all inherit this :root value verbatim and got an off-palette
+    // fixed color instead of something derived from their own surface.
+    // A WHITE tint solves both: it LIGHTENS whatever it's over instead of
+    // darkening toward invisibility (same reasoning already established
+    // for --hover-bg-color/--highlight-bg-color above, both white tints on
+    // this dark-family default), so it reads as a distinct box on every
+    // dark theme's own palette without needing a per-theme override.
+    --input-bg-color: rgba(255, 255, 255, 0.08);
     --elevated-bg-color: var(--modal-bg-color);  // alias — same concept as the pre-existing modal token, itself a plain per-theme literal (no window-opacity coupling)
 
     // z-indexes in xterm.css
