@@ -20,7 +20,10 @@
     --block-bg-solid-color: #ffffff;
     --modal-bg-color: #ffffff;
 
-    --main-text-color: #4c4f69;
+    // Darkened from Catppuccin's published "Text" (#4c4f69) — the
+    // canonical value read as too light for comfortable body-text
+    // reading in-app; still the same hue family, just more ink.
+    --main-text-color: #37394b;
     --secondary-text-color: #5c5f77;
     --grey-text-color: #8c8fa1;
 
@@ -58,7 +61,7 @@
     --scrollbar-thumb-hover-color: rgba(76, 79, 105, 0.4);
 
     --term-background: #eff1f5;
-    --term-foreground: #4c4f69;
+    --term-foreground: #37394b;
     --term-black: #5c5f77;
     --term-red: #d20f39;
     --term-green: #40a02b;
