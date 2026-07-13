@@ -1,9 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// Tokenized against the same theme system every other surface uses
+// (ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md §2c) —
+// previously hand-painted to literal Catppuccin Mocha hex values, so the
+// menu stayed a small dark-purple box regardless of the active theme. Every
+// token used here is an unconditional `:root` default (theme.scss) — no
+// hex fallback needed, unlike a phantom token that might never resolve.
 .ctx-menu {
-    background: #1e1e2e;
-    border: 1px solid #313244;
+    background: var(--modal-bg-color);
+    border: 1px solid var(--border-color);
     border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
     min-width: 180px;
@@ -11,12 +17,12 @@
     padding: 4px 0;
     user-select: none;
     font-size: 13px;
-    color: #cdd6f4;
+    color: var(--main-text-color);
 }
 
 .ctx-menu-sep {
     height: 1px;
-    background: #313244;
+    background: var(--border-color);
     margin: 4px 0;
 }
 
@@ -30,7 +36,7 @@
 
     &:hover:not(.ctx-menu-item--disabled),
     &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {
-        background: #313244;
+        background: var(--hover-bg-color);
     }
 
     &.ctx-menu-item--disabled {
@@ -39,11 +45,11 @@
     }
 
     &.ctx-menu-item--danger {
-        color: #f38ba8;
+        color: var(--error-color);
 
         &:hover:not(.ctx-menu-item--disabled),
         &.ctx-menu-item--focused:not(.ctx-menu-item--disabled) {
-            background: rgba(243, 139, 168, 0.15);
+            background: color-mix(in srgb, var(--error-color) 15%, transparent);
         }
     }
 }
@@ -57,6 +63,6 @@
 
 .ctx-menu-shortcut {
     font-size: 11px;
-    color: #6c7086;
+    color: var(--grey-text-color);
     flex-shrink: 0;
 }
