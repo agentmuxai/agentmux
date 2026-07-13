@@ -319,7 +319,7 @@ declare global {
         | { backend: "secrets_manager"; sm_path: string; sm_json_path?: string }
         | { backend: "plaintext_dev"; plaintext_dev: string }
         // Armory API keys: pointer into the OS keychain. Plaintext is
-        // never carried here. See SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+        // never carried here. See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
         | { backend: "keychain"; service: string; account: string };
 
     type IdentityAccount = {

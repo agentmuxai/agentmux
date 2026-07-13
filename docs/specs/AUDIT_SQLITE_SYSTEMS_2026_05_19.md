@@ -3,7 +3,7 @@
 **Status:** Reference document, current as of `main` 2026-05-19
 **Author:** AgentA
 **Companion specs:**
-- [`SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md`](./SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md) — proposes moving durable content to `~/.agentmux/shared/`. Read this audit first; the spec assumes its inventory.
+- [`SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md`](./archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md) — proposes moving durable content to `~/.agentmux/shared/`. Read this audit first; the spec assumes its inventory.
 - agentmux-docs internals: [`data-layout.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/data-layout.md), [`persistence.md`](https://github.com/agentmuxai/agentmux-docs/blob/main/src/content/docs/internals/persistence.md). Both are partially stale (see §10).
 
 ---
