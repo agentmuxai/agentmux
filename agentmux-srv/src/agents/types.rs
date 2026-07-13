@@ -23,7 +23,7 @@ pub struct AgentRef {
     /// creds, no env-var injection at spawn).
     #[serde(default)]
     pub identity_id: String,
-    /// FK to `db_memory_bundles.id`. Empty = blank singleton (vanilla CLI,
+    /// FK to `db_bundles.id`. Empty = blank singleton (vanilla CLI,
     /// no system instructions injected).
     #[serde(default)]
     pub memory_id: String,

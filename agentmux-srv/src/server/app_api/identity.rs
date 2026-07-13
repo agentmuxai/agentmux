@@ -166,7 +166,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     // Only clean up for new accounts — on the update path the
                     // account still exists in the DB and may be linked to other providers,
                     // so deleting the keychain secret would destroy a valid credential.
-                    // Delete the just-upserted db_identity_accounts row too, not only the
+                    // Delete the just-upserted db_accounts row too, not only the
                     // keychain secret: without it a failed link left an orphaned,
                     // unlinked account row behind (agent3's report on #1624 PR-C).
                     if is_new {

@@ -526,7 +526,7 @@ declare global {
         created_at: number;
         /** v7/v11 — FK to db_identity_bundles. Empty string = blank singleton. */
         identity_id?: string;
-        /** v7/v11 — FK to db_memory_bundles. Empty string = blank singleton. */
+        /** v7/v11 — FK to db_bundles. Empty string = blank singleton. */
         memory_id?: string;
         /** v8 — user-chosen instance name (AGENTMUX_AGENT_ID). */
         instance_name?: string;
