@@ -8,8 +8,16 @@
     gap: var(--space-1-5);
     height: 33px;
     padding: 0 var(--space-2);
-    background-color: rgba(0, 0, 0, 0.6);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    // A darkened cap on the pane's OWN backing color (not a flat black
+    // overlay) — mixing from --block-bg-solid-color, which every theme
+    // already defines, matches the default/dark theme exactly (rgb(0,0,0) @
+    // 60% ≈ the old rgba(0,0,0,0.6)) while staying correct for every other
+    // theme, including a future light one, with zero titlebar-specific
+    // per-theme work. Previously a hardcoded rgba(0,0,0,...) that would
+    // render as an opaque black bar on a light pane body.
+    // (ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md §2c)
+    background-color: color-mix(in srgb, var(--block-bg-solid-color) 60%, transparent);
+    border-bottom: 1px solid var(--border-color);
     font-size: 12px;
     font-weight: 500;
     color: var(--secondary-text-color);
@@ -17,11 +25,11 @@
     transition: background-color 0.15s ease;
 
     &.is-hovered {
-        background-color: rgba(0, 0, 0, 0.7);
+        background-color: color-mix(in srgb, var(--block-bg-solid-color) 70%, transparent);
     }
 
     &.is-editing {
-        background-color: rgba(0, 0, 0, 0.8);
+        background-color: color-mix(in srgb, var(--block-bg-solid-color) 80%, transparent);
     }
 
     .pane-title-icon {
@@ -52,7 +60,10 @@
 
     .pane-title-input {
         flex: 1;
-        background: rgba(255, 255, 255, 0.05);
+        // --hover-bg-color is already a per-theme-correct highlight tint
+        // (light overlay on dark themes, will need to flip polarity in a
+        // future light theme's own token value — not this file's concern).
+        background: color-mix(in srgb, var(--hover-bg-color) 50%, transparent);
         border: 1px solid var(--accent-color);
         border-radius: 0;
         padding: var(--space-0-5) var(--space-1-5);
@@ -67,7 +78,7 @@
         }
 
         &:focus {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--hover-bg-color);
             border-color: var(--accent-color);
         }
     }
