@@ -3,7 +3,7 @@
 > **Archived 2026-07-12.** Historical — the rename shipped exactly as specced (PR #1917). Consolidated tracking: issue #2024.
 
 **Date:** 2026-07-02
-**Decision:** Name is **Armory** (chosen over Loadout). See `SPEC_TRUST_CENTER_RENAME_2026_07_02.md` for the rationale.
+**Decision:** Name is **Armory** (chosen over Loadout). See `docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md` for the rationale.
 **Type:** User-facing rename + view-key migration. Behavior-preserving.
 **Precedent to follow:** the earlier Drone pane rename — same shape (renamed a first-class pane, migrated the persisted `view` key via a block-dispatch shim, renamed the widget). Mirror that approach.
 
