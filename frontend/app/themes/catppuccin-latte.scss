@@ -1,0 +1,94 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Catppuccin Latte — the official light flavor of Catppuccin (pairs with
+// the existing dark "Catppuccin" theme, which is the Mocha flavor). Soft
+// pastel light, warm mauve/blue accent. Colors are Catppuccin's published
+// palette (Base/Mantle/Crust, Text/Subtext, and the named accent hues).
+// See docs/specs/SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md.
+//
+// Same light-polarity conventions as themes/light.scss (black tints for
+// hover/highlight/input-bg, not white — see that file's header comment)
+// but tinted with this theme's own accent (Blue) rather than plain black,
+// mirroring how the dark Catppuccin theme tints its hover/highlight with
+// its own accent (Mauve) instead of plain white.
+
+[data-theme="catppuccin-latte"] {
+    --main-bg-color: #eff1f5;
+    --panel-bg-color: rgba(76, 79, 105, 0.04);
+    --block-bg-color: rgba(255, 255, 255, 0.6);
+    --block-bg-solid-color: #ffffff;
+    --modal-bg-color: #ffffff;
+
+    --main-text-color: #4c4f69;
+    --secondary-text-color: #5c5f77;
+    --grey-text-color: #8c8fa1;
+
+    --accent-color: #1e66f5;
+    --accent-color-rgb: 30, 102, 245;
+    --link-color: #1e66f5;
+
+    --border-color: rgba(76, 79, 105, 0.14);
+    --form-element-border-color: rgba(76, 79, 105, 0.18);
+    --keybinding-border-color: rgba(30, 102, 245, 0.28);
+
+    --hover-bg-color: rgba(30, 102, 245, 0.06);
+    --highlight-bg-color: rgba(30, 102, 245, 0.12);
+    --input-bg-color: rgba(76, 79, 105, 0.07);
+
+    --tab-strip-bg: rgba(76, 79, 105, 0.035);
+    --status-bar-bg: rgba(76, 79, 105, 0.07);
+
+    --error-color: #d20f39;
+    --warning-color: #df8e1d;
+    --success-color: #40a02b;
+
+    --error-text-color: var(--error-color);
+    --success-text-color: var(--success-color);
+    --warning-text-color: var(--warning-color);
+
+    --button-grey-bg: rgba(76, 79, 105, 0.05);
+    --button-grey-hover-bg: rgba(30, 102, 245, 0.09);
+    --button-grey-border-color: rgba(76, 79, 105, 0.18);
+    --button-green-bg: #40a02b;
+    --button-red-bg: #d20f39;
+    --button-yellow-bg: #df8e1d;
+
+    --scrollbar-thumb-color: rgba(76, 79, 105, 0.25);
+    --scrollbar-thumb-hover-color: rgba(76, 79, 105, 0.4);
+
+    --term-background: #eff1f5;
+    --term-foreground: #4c4f69;
+    --term-black: #5c5f77;
+    --term-red: #d20f39;
+    --term-green: #40a02b;
+    --term-yellow: #df8e1d;
+    --term-blue: #1e66f5;
+    --term-magenta: #ea76cb;
+    --term-cyan: #179299;
+    --term-white: #acb0be;
+    --term-bright-black: #6c6f85;
+    --term-bright-red: #e64553;
+    --term-bright-green: #40a02b;
+    --term-bright-yellow: #df8e1d;
+    --term-bright-blue: #1e66f5;
+    --term-bright-magenta: #8839ef;
+    --term-bright-cyan: #179299;
+    --term-bright-white: #bcc0cc;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}

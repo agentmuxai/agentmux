@@ -154,8 +154,8 @@
         },
         "window:theme": {
           "type": "string",
-          "enum": ["default", "midnight", "high-contrast", "monokai", "nord", "dracula", "catppuccin", "tokyo-night", "gruvbox", "light"],
-          "description": "UI color theme. Options: default (dark grey + blue), midnight (deep navy), high-contrast (black + cyan), monokai (warm dark + green), nord (arctic blue-grey), dracula (purple dark), catppuccin (pastel dark + mauve), tokyo-night (blue-purple), gruvbox (retro warm + yellow), light (white + blue)"
+          "enum": ["default", "midnight", "high-contrast", "monokai", "nord", "dracula", "catppuccin", "tokyo-night", "gruvbox", "light", "catppuccin-latte", "solarized-light", "gruvbox-light"],
+          "description": "UI color theme. Options: default (dark grey + blue), midnight (deep navy), high-contrast (black + cyan), monokai (warm dark + green), nord (arctic blue-grey), dracula (purple dark), catppuccin (pastel dark + mauve), tokyo-night (blue-purple), gruvbox (retro warm + yellow), light (white + blue), catppuccin-latte (pastel light + blue), solarized-light (cream + cyan/blue), gruvbox-light (retro warm cream + orange)"
         },
         "telemetry:*": {
           "type": "boolean"

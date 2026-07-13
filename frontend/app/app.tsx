@@ -9,6 +9,7 @@ import "./diag/replace-child-diagnostic";
 import { Workspace } from "@/app/workspace/workspace";
 import { FloatingPaneWorkspace } from "@/app/workspace/floating-pane-workspace";
 import { ContextMenuModel } from "@/store/contextmenu";
+import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getApi, getSettingsPrefixAtom, isDev, openLink, removeFlashError, flashErrors } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
 import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom.platform";
@@ -194,6 +195,13 @@ function AppSettingsUpdater() {
             document.documentElement.setAttribute("data-theme", theme);
         } else {
             document.documentElement.removeAttribute("data-theme");
+        }
+        // Generic light/dark polarity marker, independent of which specific
+        // theme is active — see LIGHT_THEME_IDS for why this exists.
+        if (theme && LIGHT_THEME_IDS.has(theme)) {
+            document.documentElement.setAttribute("data-theme-polarity", "light");
+        } else {
+            document.documentElement.removeAttribute("data-theme-polarity");
         }
     });
     return null;
