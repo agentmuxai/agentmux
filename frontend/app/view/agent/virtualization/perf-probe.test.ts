@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
     agentPerfStore,
     ESTIMATOR_MISS_THRESHOLD,
+    markDispatch,
     markRowMount,
 } from "./perf-probe";
 
@@ -120,11 +121,35 @@ describe("agentPerfStore", () => {
         });
     });
 
+    describe("recordDispatchTiming", () => {
+        // task #40 — the store-dispatch timing probe, added to close the
+        // blind spot from the original investigation: row-mount timing
+        // never measured the reducer/store cost underneath the DOM.
+        it("aggregates per-kind dispatch durations into a snapshot", () => {
+            agentPerfStore.recordDispatchTiming("layout", 1);
+            agentPerfStore.recordDispatchTiming("layout", 3);
+            agentPerfStore.recordDispatchTiming("document", 2);
+
+            const snap = agentPerfStore.snapshot();
+            expect(snap.dispatchByKind.get("layout")!.count).toBe(2);
+            expect(snap.dispatchByKind.get("document")!.count).toBe(1);
+        });
+
+        it("keeps layout and document timings independent", () => {
+            for (let i = 0; i < 5; i++) agentPerfStore.recordDispatchTiming("layout", 1);
+            for (let i = 0; i < 3; i++) agentPerfStore.recordDispatchTiming("document", 1);
+            const snap = agentPerfStore.snapshot();
+            expect(snap.dispatchByKind.get("layout")!.count).toBe(5);
+            expect(snap.dispatchByKind.get("document")!.count).toBe(3);
+        });
+    });
+
     describe("reset", () => {
         it("clears all recorded data", () => {
             agentPerfStore.recordRowMount("markdown", 5);
             agentPerfStore.recordEstimatorMeasurement("tool", 100, 200);
             agentPerfStore.recordLayoutShift(0.05);
+            agentPerfStore.recordDispatchTiming("layout", 4);
 
             agentPerfStore.reset();
 
@@ -133,6 +158,7 @@ describe("agentPerfStore", () => {
             expect(snap.recentEstimatorMisses).toHaveLength(0);
             expect(snap.recentLayoutShifts).toHaveLength(0);
             expect(snap.estimatorMissRateByKind.size).toBe(0);
+            expect(snap.dispatchByKind.size).toBe(0);
         });
     });
 });
@@ -159,5 +185,30 @@ describe("markRowMount", () => {
         const snap = agentPerfStore.snapshot();
         expect(snap.rowMountByKind.get("agent_message")!.count).toBe(2);
         expect(snap.rowMountByKind.get("tool")!.count).toBe(1);
+    });
+});
+
+describe("markDispatch", () => {
+    beforeEach(() => agentPerfStore.reset());
+
+    it("returns a closer that records duration on call", async () => {
+        const close = markDispatch("layout");
+        await new Promise<void>((r) => setTimeout(r, 5));
+        close();
+        const snap = agentPerfStore.snapshot();
+        const q = snap.dispatchByKind.get("layout");
+        expect(q).toBeDefined();
+        expect(q!.count).toBe(1);
+        // Should be at least 5ms (with timer slop, allow 2ms floor).
+        expect(q!.max).toBeGreaterThanOrEqual(2);
+    });
+
+    it("multiple calls accumulate independently per kind", () => {
+        markDispatch("layout")();
+        markDispatch("layout")();
+        markDispatch("document")();
+        const snap = agentPerfStore.snapshot();
+        expect(snap.dispatchByKind.get("layout")!.count).toBe(2);
+        expect(snap.dispatchByKind.get("document")!.count).toBe(1);
     });
 });

@@ -83,6 +83,17 @@
     // recessed tab-strip behind it.
     --workspace-surface: var(--block-bg-color);
     --tab-strip-bg: rgba(255, 255, 255, 0.03);
+    // The bottom status bar's own recessed strip — same concept as
+    // --tab-strip-bg (Layer A) but a separate token: StatusBar.scss used to
+    // hardcode this as a bare `rgba(0, 0, 0, 0.35)` literal, which is why it
+    // stayed dark under every theme including Light (a hardcoded literal
+    // doesn't participate in the theme system at all — unlike --tab-strip-bg,
+    // which WAS a real token but simply had no light.scss override, letting
+    // it fall through to this file's white-tint default and go invisible on
+    // a light surface). This value is the exact literal it replaces, so
+    // every existing dark theme is visually unchanged; only Light (and any
+    // other light-polarity theme) needs its own override.
+    --status-bar-bg: rgba(0, 0, 0, 0.35);
     --block-border-radius: 0;
 
     --keybinding-color: #e0e0e0;
@@ -127,6 +138,42 @@
     --zindex-layout-magnify-container: 20;
     --zindex-flash-error-container: 550;
     --zindex-app-background: -1;
+
+    // ─── Phantom-token fixes (ANALYSIS_THEME_SYSTEM_LIGHT_THEME_AND_DEPTH_GAPS_2026_07_07.md §2b) ───
+    // Each of these was referenced at its call site as `var(--token,
+    // #fallback)` but never actually DEFINED anywhere — every consumer was
+    // silently pinned to its own local fallback literal forever. That was
+    // invisible today only because every theme is dark and every fallback
+    // happened to already suit a dark surface. Defined here with each
+    // token's established fallback value, so today's rendering is
+    // unchanged, but the token is now real: a future per-theme override
+    // (e.g. a light theme) will actually take effect instead of being
+    // silently ignored by every call site's own hardcoded fallback.
+    --accent-text-color: #fff;  // text/icon color on an --accent-color-filled surface (e.g. active pill states)
+    --button-color: #fff;       // text color on an --accent-color-filled primary button — distinct from --button-text-color below, which is for the brighter green/yellow buttons
+    --error-text-color: #ff8080;
+    --success-text-color: #10b981;
+    --warning-text-color: #d97706;
+    // Own literal, NOT an alias to --form-element-bg-color: that resolves to
+    // --main-bg-color, which is rgba(..., var(--window-opacity)) — coupling
+    // an editable field's background to the user's window-transparency
+    // setting would make editor-view.scss's inline inputs see-through at
+    // low opacity (reagent P1 on PR #2104).
+    // WHITE tint, not black (reagent P1 rounds 2 & 3 on PR #2104): a black
+    // tint (rgba(0,0,0,*)) barely darkens an already-dark surface, so the
+    // two inline replace-row-label inputs (file-tree rename, Ctrl+S
+    // save-as) lost their crisp box and bled into the row. A hardcoded
+    // SOLID hex fixed that but broke the other 7 dark-family themes
+    // (nord/gruvbox/monokai/high-contrast/midnight/dracula/tokyo-night),
+    // which all inherit this :root value verbatim and got an off-palette
+    // fixed color instead of something derived from their own surface.
+    // A WHITE tint solves both: it LIGHTENS whatever it's over instead of
+    // darkening toward invisibility (same reasoning already established
+    // for --hover-bg-color/--highlight-bg-color above, both white tints on
+    // this dark-family default), so it reads as a distinct box on every
+    // dark theme's own palette without needing a per-theme override.
+    --input-bg-color: rgba(255, 255, 255, 0.08);
+    --elevated-bg-color: var(--modal-bg-color);  // alias — same concept as the pre-existing modal token, itself a plain per-theme literal (no window-opacity coupling)
 
     // z-indexes in xterm.css
     // xterm-helpers: 5

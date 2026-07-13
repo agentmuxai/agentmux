@@ -1,0 +1,89 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Gruvbox Light — the official light variant of Gruvbox (pairs with the
+// existing dark "Gruvbox" theme). Retro warm cream background; uses
+// Gruvbox's own "faded" accent set, which is the palette's documented
+// choice for light backgrounds (its "neutral/bright" set — used by the
+// dark Gruvbox theme here — is tuned for dark backgrounds instead).
+// See docs/specs/SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md.
+
+[data-theme="gruvbox-light"] {
+    --main-bg-color: #fbf1c7;
+    --panel-bg-color: rgba(60, 56, 54, 0.05);
+    --block-bg-color: rgba(255, 255, 255, 0.45);
+    --block-bg-solid-color: #f9f5d7;
+    --modal-bg-color: #ebdbb2;
+
+    --main-text-color: #3c3836;
+    --secondary-text-color: #504945;
+    --grey-text-color: #928374;
+
+    --accent-color: #af3a03;
+    --accent-color-rgb: 175, 58, 3;
+    --link-color: #076678;
+
+    --border-color: rgba(60, 56, 54, 0.16);
+    --form-element-border-color: rgba(60, 56, 54, 0.2);
+    --keybinding-border-color: rgba(175, 58, 3, 0.28);
+
+    --hover-bg-color: rgba(175, 58, 3, 0.07);
+    --highlight-bg-color: rgba(175, 58, 3, 0.14);
+    --input-bg-color: rgba(60, 56, 54, 0.08);
+
+    --tab-strip-bg: rgba(60, 56, 54, 0.04);
+    --status-bar-bg: rgba(60, 56, 54, 0.08);
+
+    --error-color: #9d0006;
+    --warning-color: #b57614;
+    --success-color: #79740e;
+
+    --error-text-color: var(--error-color);
+    --success-text-color: var(--success-color);
+    --warning-text-color: var(--warning-color);
+
+    --button-grey-bg: rgba(60, 56, 54, 0.05);
+    --button-grey-hover-bg: rgba(175, 58, 3, 0.1);
+    --button-grey-border-color: rgba(60, 56, 54, 0.2);
+    --button-green-bg: #79740e;
+    --button-red-bg: #9d0006;
+    --button-yellow-bg: #b57614;
+
+    --scrollbar-thumb-color: rgba(60, 56, 54, 0.28);
+    --scrollbar-thumb-hover-color: rgba(60, 56, 54, 0.45);
+
+    --term-background: #fbf1c7;
+    --term-foreground: #3c3836;
+    --term-black: #504945;
+    --term-red: #9d0006;
+    --term-green: #79740e;
+    --term-yellow: #b57614;
+    --term-blue: #076678;
+    --term-magenta: #8f3f71;
+    --term-cyan: #427b58;
+    --term-white: #a89984;
+    --term-bright-black: #665c54;
+    --term-bright-red: #af3a03;
+    --term-bright-green: #928374;
+    --term-bright-yellow: #7c6f64;
+    --term-bright-blue: #427b58;
+    --term-bright-magenta: #af3a03;
+    --term-bright-cyan: #076678;
+    --term-bright-white: #282828;
+
+    // Tailwind @theme token sync — keeps utility classes (text-foreground, bg-accent-400, etc.) in theme
+    --color-background: var(--main-bg-color);
+    --color-foreground: var(--main-text-color);
+    --color-primary: var(--main-text-color);
+    --color-muted-foreground: var(--secondary-text-color);
+    --color-secondary: var(--secondary-text-color);
+    --color-muted: var(--grey-text-color);
+    --color-accent-400: var(--accent-color);
+    --color-error: var(--error-color);
+    --color-warning: var(--warning-color);
+    --color-success: var(--success-color);
+    --color-panel: var(--panel-bg-color);
+    --color-hover: var(--hover-bg-color);
+    --color-border: var(--border-color);
+    --color-modalbg: var(--modal-bg-color);
+}

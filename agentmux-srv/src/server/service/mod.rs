@@ -64,7 +64,12 @@ pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> We
     let service_start = std::time::Instant::now();
     let result = dispatch_service(state, call).await;
     let elapsed = service_start.elapsed();
-    tracing::info!(
+    // debug, not info: fires on every HTTP /agentmux/service call — a
+    // meaningful slice (~10%+) of an unrotated 406 MB launcher-log mirror on
+    // a real machine (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29 P1). Default
+    // production filter is info, so this is now suppressed unless
+    // RUST_LOG=debug is set; still there for perf debugging on demand.
+    tracing::debug!(
         "[http-perf] {}.{}: {:.2}ms",
         call.service,
         call.method,

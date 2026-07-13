@@ -236,7 +236,7 @@ pub struct AgentInstance {
     /// instantiation via the launch modal's Identity dropdown.
     #[serde(default)]
     pub identity_id: String,
-    /// FK to `db_memory_bundles.id`. Empty string means "use the blank
+    /// FK to `db_bundles.id`. Empty string means "use the blank
     /// singleton" (= vanilla CLI, no instructions). Set at
     /// instantiation via the launch modal's Memory dropdown.
     #[serde(default)]

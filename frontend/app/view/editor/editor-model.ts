@@ -18,7 +18,7 @@
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { pushNotification, useBlockAtom } from "@/app/store/global";
+import { pushNotification, setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
 import {
     EditorPaneEvent,
     EditorTab,
@@ -32,6 +32,8 @@ import {
 } from "@/app/store/editor-pane-state-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { WorkspaceService } from "@/app/store/services";
+import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
@@ -831,6 +833,89 @@ export class EditorViewModel implements ViewModel {
             }, {});
         } catch {
             // pane.open might not be registered yet — fail silently.
+        }
+    }
+
+    /** Open a file in a new editor pane, split right of the current one.
+     *  Same pane.open mechanism as openInTerminal above, just view:"editor" +
+     *  file instead of view:"term" + cwd. See
+     *  docs/specs/SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12.md. */
+    async openToTheSide(filePath: string): Promise<void> {
+        try {
+            await TabRpcClient.rpcCall("pane.open", {
+                view: "editor",
+                file: filePath,
+                split_direction: "right",
+                split_reference_block_id: this.blockId,
+            }, {});
+        } catch {
+            // pane.open might not be registered yet — fail silently, same as openInTerminal.
+        }
+    }
+
+    /** Open a file in a new editor pane inside a brand-new, otherwise-empty
+     *  app tab. Deliberately bypasses createTab() in store/global.ts, which
+     *  always layers on the agent/sysinfo/swarm default preset — wrong here,
+     *  the user asked for THIS file, not a fresh default workspace.
+     *
+     *  Three things every other CreateTab caller in this codebase gets for
+     *  free via applyTabPreset() (tab-presets.ts), which this method can't
+     *  call directly since it always adds the default widget set — so each
+     *  is replicated individually here:
+     *
+     *  1. waitForLayoutModel(tabId) before touching the new tab at all. The
+     *     tab's WaveObj + LayoutState propagate via subscription some time
+     *     after CreateTab returns, not synchronously with it.
+     *  2. createBlockOnModel(...) — NOT the pane.open RPC used for
+     *     openToTheSide above. Confirmed live: pane.open against a freshly
+     *     created tab_id succeeds server-side with zero errors ("block
+     *     created + layout updated" in the srv log) and the block STILL
+     *     never renders — the tab's client-side layoutModel, even once
+     *     waitForLayoutModel() confirms the object exists, isn't yet
+     *     subscribed to receive the backend's layout:update broadcast for
+     *     that specific brand-new tab. createBlockOnModel goes through
+     *     ObjectService.CreateBlock + layoutModel.treeReducer(...) directly
+     *     — the same client-side path applyTabPreset uses for every preset
+     *     widget — which sidesteps the gap entirely. The constructed
+     *     BlockDef mirrors exactly what the backend's build_pane_meta
+     *     (agentmux-srv/src/server/app_api/pane.rs) would have produced for
+     *     `pane.open { view: "editor", file }` on the openToTheSide path.
+     *  3. Explicit setActiveTab() AFTER the block exists. CreateTab's own
+     *     `activate` arg looks like it should switch focus to the new tab,
+     *     but the reducer only auto-activates a workspace's very FIRST tab
+     *     ever (see create_tab_second_tab_does_not_steal_active in
+     *     reducer.rs) — `activate` is accepted by the RPC and silently
+     *     dropped before it reaches the reducer for every tab after the
+     *     first. This looks like a latent bug in createTab()'s own
+     *     hamburger/titlebar "New Tab" action too (same activate=true, same
+     *     silent no-op past the first tab) — out of scope here, flagging
+     *     for a separate fix. Called last so the destination tab already
+     *     has its content when the switch's reveal-gate opens — avoids a
+     *     flash of an empty tab. */
+    async openInNewTab(filePath: string): Promise<void> {
+        const ws = workspace();
+        if (!ws) return;
+        try {
+            const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
+            const layoutModel = await waitForLayoutModel(tabId);
+            if (!layoutModel) return; // Tab never propagated — nothing safe to do.
+            const isMarkdown = filePath.toLowerCase().endsWith(".md");
+            await createBlockOnModel(
+                tabId,
+                layoutModel,
+                {
+                    meta: {
+                        view: "editor",
+                        file: filePath,
+                        ...(isMarkdown ? { "editor:tree_expanded": false, "editor:source_hidden": true } : {}),
+                    },
+                },
+                null,
+                null,
+            );
+            await setActiveTab(tabId);
+        } catch {
+            // Fail silently, consistent with the file tree's other pane.open callers.
         }
     }
 

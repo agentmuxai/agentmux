@@ -28,7 +28,7 @@
 //! 3. The IdentityAccount uuid is reused on the re-bind path
 //!    (`bundle_identity_bindings` lookup), matching the
 //!    `persist_oauth_binding_or_synthetic` pattern from PR C, so a
-//!    second run doesn't orphan rows in `db_identity_accounts`.
+//!    second run doesn't orphan rows in `db_accounts`.
 //! 4. Back-fill only runs when the Default bundle exists OR was created
 //!    this run — so a fresh install with no ambient creds never
 //!    rewrites `identity_id` to a non-existent FK.

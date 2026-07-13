@@ -16,6 +16,7 @@
  */
 
 import type { DocumentNode } from "../view/agent/types";
+import { markDispatch } from "../view/agent/virtualization/perf-probe";
 import { update } from "./agent-document/reducer";
 import {
     AgentDocumentCommand,
@@ -124,6 +125,11 @@ export function dispatch(
             `[agent-document-store] dispatch for unregistered pane ${blockId.slice(0, 7)} (cmd=${command.type}). registerPane must be called synchronously in the component body.`,
         );
     }
+    // Perf probe (task #40): times the FULL dispatch — reducer + the
+    // setter push below — the exact layer the original virtualization
+    // probe never measured (it only timed row DOM mount). No-op outside
+    // dev (see markDispatch / isProbingEnabled).
+    const stopDispatchTiming = markDispatch("document");
     const result = update(slot.state, command, Date.now(), opts);
     const prevNodes = slot.state.nodes;
     slot.state = result.state;
@@ -154,6 +160,7 @@ export function dispatch(
         source,
         at: Date.now(),
     });
+    stopDispatchTiming();
     return result.events;
 }
 

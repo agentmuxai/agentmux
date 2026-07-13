@@ -92,7 +92,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, sort_order, created_at, updated_at
-             FROM db_memory_bundles
+             FROM db_bundles
              ORDER BY is_blank ASC, is_global DESC, updated_at DESC",
         )?;
         let iter = stmt.query_map([], map_memory_row)?;
@@ -112,7 +112,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, sort_order, created_at, updated_at
-             FROM db_memory_bundles
+             FROM db_bundles
              WHERE is_global = 1
              ORDER BY sort_order ASC, name ASC",
         )?;
@@ -129,7 +129,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, sort_order, created_at, updated_at
-             FROM db_memory_bundles WHERE id = ?1",
+             FROM db_bundles WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], map_memory_row);
         match result {
@@ -146,7 +146,7 @@ impl Store {
             // it is owned by `bundle_memory_reorder`, so editing a bundle
             // through the regular Memory form never disturbs its position in
             // the global brain.
-            "INSERT INTO db_memory_bundles
+            "INSERT INTO db_bundles
                 (id, name, description, is_blank, is_global, provider, model, instructions,
                  context_files, mcp_servers, skills, sort_order, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
@@ -197,7 +197,7 @@ impl Store {
             ));
         }
         let conn = self.conn.lock().unwrap();
-        let rows = conn.execute("DELETE FROM db_memory_bundles WHERE id = ?1", params![id])?;
+        let rows = conn.execute("DELETE FROM db_bundles WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
 
@@ -213,7 +213,7 @@ impl Store {
         let mut updated = 0usize;
         {
             let mut stmt =
-                tx.prepare("UPDATE db_memory_bundles SET sort_order = ?1 WHERE id = ?2")?;
+                tx.prepare("UPDATE db_bundles SET sort_order = ?1 WHERE id = ?2")?;
             for (idx, id) in ordered_ids.iter().enumerate() {
                 updated += stmt.execute(params![idx as i64, id])?;
             }
