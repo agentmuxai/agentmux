@@ -4,7 +4,6 @@
 import { createSignal, For, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
-import { AgentIdentitiesPanel } from "@/app/view/identity/agent-identities-panel";
 import { MemoryManager } from "@/app/view/memory/memory-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
@@ -14,12 +13,11 @@ import type { ArmorySection, ArmoryViewModel } from "./armory-model";
 import "./armory-view.scss";
 
 const RAIL: { id: ArmorySection; label: string; icon: string }[] = [
-    { id: "accounts",   label: "Accounts",   icon: "key" },
-    { id: "identities", label: "Identities", icon: "id-card" },
-    { id: "brain",      label: "Memory",     icon: "brain" },
-    { id: "memories",   label: "Bundles",    icon: "layer-group" },
-    { id: "mcp",        label: "MCP Servers", icon: "plug" },
-    { id: "skills",     label: "Skills",      icon: "wand-magic-sparkles" },
+    { id: "accounts", label: "Accounts",    icon: "key" },
+    { id: "brain",    label: "Memories",    icon: "brain" },
+    { id: "skills",   label: "Skills",      icon: "wand-magic-sparkles" },
+    { id: "mcp",      label: "MCP Servers", icon: "plug" },
+    { id: "memories", label: "Bundles",     icon: "layer-group" },
 ];
 
 export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
@@ -51,26 +49,23 @@ export function ArmoryView(_props: ViewComponentProps<ArmoryViewModel>): JSX.Ele
                 </nav>
                 <div class="bundle-manager-section">
                     {/*
-                     * All six managers stay mounted — toggling is instant and
+                     * All five managers stay mounted — toggling is instant and
                      * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
                         <AccountsManager />
                     </div>
-                    <div class="bundle-manager-pane bundle-manager-pane--identity" classList={{ "is-hidden": section() !== "identities" }}>
-                        <AgentIdentitiesPanel />
-                    </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "brain" }}>
                         <GlobalBrainManager />
                     </div>
-                    <div class="bundle-manager-pane bundle-manager-pane--memories" classList={{ "is-hidden": section() !== "memories" }}>
-                        <MemoryManager />
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "skills" }}>
+                        <SkillManager />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "mcp" }}>
                         <McpManager />
                     </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "skills" }}>
-                        <SkillManager />
+                    <div class="bundle-manager-pane bundle-manager-pane--memories" classList={{ "is-hidden": section() !== "memories" }}>
+                        <MemoryManager />
                     </div>
                 </div>
                 <nav class="bundle-manager-tab-bar" aria-label="Armory section">
