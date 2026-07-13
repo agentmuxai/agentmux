@@ -14,13 +14,17 @@
 // its own accent (Mauve) instead of plain white.
 
 [data-theme="catppuccin-latte"] {
-    --main-bg-color: #eff1f5;
+    // Alpha-aware — see dracula.scss's comment (PR #2138 reagent P1).
+    --main-bg-color: rgba(239, 241, 245, var(--window-opacity, 0.45));
     --panel-bg-color: rgba(76, 79, 105, 0.04);
     --block-bg-color: rgba(255, 255, 255, 0.6);
     --block-bg-solid-color: #ffffff;
     --modal-bg-color: #ffffff;
 
-    --main-text-color: #4c4f69;
+    // Darkened from Catppuccin's published "Text" (#4c4f69) — the
+    // canonical value read as too light for comfortable body-text
+    // reading in-app; still the same hue family, just more ink.
+    --main-text-color: #37394b;
     --secondary-text-color: #5c5f77;
     --grey-text-color: #8c8fa1;
 
@@ -58,7 +62,7 @@
     --scrollbar-thumb-hover-color: rgba(76, 79, 105, 0.4);
 
     --term-background: #eff1f5;
-    --term-foreground: #4c4f69;
+    --term-foreground: #37394b;
     --term-black: #5c5f77;
     --term-red: #d20f39;
     --term-green: #40a02b;
