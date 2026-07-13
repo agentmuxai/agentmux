@@ -4,8 +4,10 @@
 /**
  * Agent-pane perf section for the diag panel — Phase 3 of the
  * virtualization redesign. Polls `agentPerfStore.snapshot()` at 1 Hz
- * and renders per-kind row mount times, estimator-miss rates, and
- * recent layout shifts.
+ * and renders per-kind row mount times, estimator-miss rates, recent
+ * layout shifts, and (task #40) layout/document store DISPATCH times —
+ * the reducer/store cost underneath the DOM that the original probe
+ * never covered.
  *
  * No-op in production: snapshot returns empty when probing is
  * disabled, so the section renders nothing.
@@ -28,6 +30,7 @@ const EMPTY_SNAPSHOT: AgentPerfSnapshot = {
     estimatorMissRateByKind: new Map(),
     recentEstimatorMisses: [],
     recentLayoutShifts: [],
+    dispatchByKind: new Map(),
 };
 
 function formatMs(n: number | undefined): string {
@@ -67,7 +70,8 @@ export function AgentPanePerfSection(): JSX.Element {
         const s = snapshot();
         return s.rowMountByKind.size > 0
             || s.recentEstimatorMisses.length > 0
-            || s.recentLayoutShifts.length > 0;
+            || s.recentLayoutShifts.length > 0
+            || s.dispatchByKind.size > 0;
     };
 
     return (
@@ -138,6 +142,48 @@ export function AgentPanePerfSection(): JSX.Element {
                         <div style={{ color: "#666", "font-size": "9px", "margin-top": "2px" }}>
                             est-miss = pct measured outside ±{formatPct(ESTIMATOR_MISS_THRESHOLD)} of estimate
                         </div>
+                    </div>
+                </Show>
+
+                {/* Store dispatch durations (task #40) — the reducer/store cost
+                    underneath the DOM, not the row-mount cost above. "layout"
+                    is agent-pane-layout-store.ts (row positions/window),
+                    "document" is agent-document-store.ts (the message list). */}
+                <Show when={snapshot().dispatchByKind.size > 0}>
+                    <div style={{ "margin-bottom": "6px" }}>
+                        <div style={{ color: "#aaa", "font-size": "10px", "margin-bottom": "2px" }}>
+                            Store dispatch duration (last 64 per kind)
+                        </div>
+                        <table style={{ "font-size": "10px", "border-collapse": "collapse", width: "100%" }}>
+                            <thead>
+                                <tr style={{ color: "#888" }}>
+                                    <th style={{ "text-align": "left", padding: "1px 4px" }}>kind</th>
+                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>p50</th>
+                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>max</th>
+                                    <th style={{ "text-align": "right", padding: "1px 4px" }}>n</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <For each={[...snapshot().dispatchByKind.entries()].sort(
+                                    ([, a], [, b]) => (b.max ?? 0) - (a.max ?? 0),
+                                )}>
+                                    {([kind, q]) => (
+                                        <tr>
+                                            <td style={{ padding: "1px 4px" }}>{kind}</td>
+                                            <td style={{ padding: "1px 4px", "text-align": "right" }}>
+                                                {formatMs(q.p50)}
+                                            </td>
+                                            <td style={{ padding: "1px 4px", "text-align": "right" }}>
+                                                {formatMs(q.max)}
+                                            </td>
+                                            <td style={{ padding: "1px 4px", "text-align": "right", color: "#888" }}>
+                                                {q.count}
+                                            </td>
+                                        </tr>
+                                    )}
+                                </For>
+                            </tbody>
+                        </table>
                     </div>
                 </Show>
 

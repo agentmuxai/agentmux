@@ -20,6 +20,7 @@
  */
 
 import { type CommandSource, recordDispatch } from "./command-source";
+import { markDispatch } from "../view/agent/virtualization/perf-probe";
 import {
     computeLayoutView,
     update,
@@ -160,6 +161,12 @@ export function dispatch(
         );
     }
 
+    // Perf probe (task #40): times the FULL dispatch — reducer + the
+    // positions/window recompute below — the exact layer the original
+    // virtualization probe never measured (it only timed row DOM mount).
+    // No-op outside dev (see markDispatch / isProbingEnabled).
+    const stopDispatchTiming = markDispatch("layout");
+
     const prev = slot.state;
     const result = update(prev, command);
     slot.state = result.state;
@@ -210,6 +217,7 @@ export function dispatch(
         at: Date.now(),
     });
 
+    stopDispatchTiming();
     return result.events;
 }
 
