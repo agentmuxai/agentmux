@@ -17,7 +17,14 @@ body {
     color: var(--main-text-color);
     font: var(--base-font);
     overflow: hidden;
-    background: rgba(34, 34, 34, var(--window-opacity));
+    // Was a hardcoded rgba(34, 34, 34, var(--window-opacity)) literal —
+    // the same value as --main-bg-color's dark-theme default, but frozen
+    // in place rather than reading the token, so every light theme's
+    // header/status-bar/etc still composited their translucent tints over
+    // a solid dark body underneath. --main-bg-color is already
+    // alpha-aware via --window-opacity (theme.scss), so this is a
+    // drop-in swap, not a behavior change for the dark themes.
+    background: var(--main-bg-color);
     -webkit-font-smoothing: auto;
     backface-visibility: hidden;
     transform: translateZ(0);
