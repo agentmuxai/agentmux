@@ -95,6 +95,7 @@ function TabBar(props: TabBarProps): JSX.Element {
     const activeTabId = atoms.activeTabId;
     let tabBarRef!: HTMLDivElement;
     let tabBarScrollRef!: HTMLDivElement;
+    let tabBarFillRef!: HTMLDivElement;
     // Latches once per drag — the tear-off handshake should only run a
     // single time even if the user keeps moving past the threshold.
     let tearOffFired = false;
@@ -886,15 +887,15 @@ function TabBar(props: TabBarProps): JSX.Element {
     // scrolled. Falls back to leaving the previous values in place if the
     // ref isn't available yet (e.g. a render race right after a tab is
     // created) rather than flashing to some other position.
-    // Viewport-absolute px (not relative to any container) — the line's
-    // right edge extends past .tab-bar's own box (into .system-status's
-    // territory), and .tab-bar has `overflow: hidden`, so it's rendered via
-    // a <Portal> to document.body (position: fixed) rather than as a normal
-    // .tab-bar child, to escape that clipping. getBoundingClientRect() is
-    // already viewport-relative and already post-zoom (`.window-header`
-    // applies `zoom` uniformly to everything inside it), so these values
-    // are usable directly by a fixed-position element outside that
-    // zoomed/clipped subtree with no extra conversion.
+    // Viewport-absolute px (not relative to any container) — the line can
+    // still sit near .tab-bar-scroll's right edge while that container is
+    // mid-horizontal-scroll, and .tab-bar has `overflow: hidden`, so it's
+    // rendered via a <Portal> to document.body (position: fixed) rather
+    // than as a normal .tab-bar child, to escape that clipping.
+    // getBoundingClientRect() is already viewport-relative and already
+    // post-zoom (`.window-header` applies `zoom` uniformly to everything
+    // inside it), so these values are usable directly by a fixed-position
+    // element outside that zoomed/clipped subtree with no extra conversion.
     const [lineLeft, setLineLeft] = createSignal(0);
     const [lineWidth, setLineWidth] = createSignal(0);
     const [lineBottom, setLineBottom] = createSignal(0);
@@ -911,13 +912,23 @@ function TabBar(props: TabBarProps): JSX.Element {
         setLineLeft(left);
         setLineBottom(window.innerHeight - tabBarRef.getBoundingClientRect().bottom);
 
-        // Right edge runs all the way to the viewport's right edge — past
-        // the header widgets (.system-status/ActionWidgets) AND the window
-        // control buttons (win32/linux: .window-action-buttons; macOS's
-        // traffic lights are on the left, so nothing there either way).
-        // Live preview against stopping before the window controls; this
-        // was the version picked.
-        setLineWidth(window.innerWidth - left);
+        // Right edge stops where the actual tabs stop, not the viewport
+        // edge. `.tab-bar-fill` is the flex-filler <div> rendered as the
+        // last child of .tab-bar-scroll, immediately after the last tab
+        // with no separator in between — its own left edge is therefore,
+        // by construction, flush with the last tab's right edge regardless
+        // of tab count, tab widths (content-aware sizing — SPEC_TAB_CONTENT_AWARE_SIZING_2026-06-14.md),
+        // or scroll position. Falls back to the viewport edge only if the
+        // ref genuinely isn't available (shouldn't happen — .tab-bar-fill
+        // is always rendered — but matches the fallback style already used
+        // elsewhere in this file rather than silently producing NaN).
+        // Reverses an earlier deliberate choice (commit d1e990d9) to run
+        // the line all the way to the viewport edge, under the header
+        // widgets and window controls — see
+        // specs/SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13.md
+        // for why that's being narrowed to the tab strip's own boundary.
+        const right = tabBarFillRef?.getBoundingClientRect().left ?? window.innerWidth;
+        setLineWidth(right - left);
         return true;
     };
     // Re-measure whenever the selected tab (or the tab order — a reorder
@@ -970,6 +981,7 @@ function TabBar(props: TabBarProps): JSX.Element {
             ro.observe(tabBarScrollRef);
             tabBarScrollRef.addEventListener("scroll", measureLine);
         }
+        if (tabBarFillRef) ro.observe(tabBarFillRef);
         window.addEventListener("resize", measureLine);
         onCleanup(() => {
             ro.disconnect();
@@ -1032,12 +1044,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                     "false", so a click here starts a window drag. Moving it outside
                     the scroll (as a sibling) left a dead zone — the empty interior
                     of the scroll container looked draggable but wasn't. */}
-                <div class="tab-bar-fill" data-drag-region="true" />
+                <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true" />
             </div>
             <Show when={activeTabColor() && lineReady()}>
-                {/* Portal to escape .tab-bar's `overflow: hidden` — the line's
-                    right edge extends past .tab-bar's own box, through the
-                    header widgets, to the window control buttons. */}
+                {/* Portal to escape .tab-bar's `overflow: hidden` and
+                    .tab-bar-scroll's `overflow-x: auto` clipping/scroll —
+                    needed even though the line now stops at the tab strip's
+                    own right edge (.tab-bar-fill), since a scrolled-near-the-
+                    end tab strip can still position that edge past what's
+                    currently visible. */}
                 <Portal mount={document.body}>
                 <div
                     class="active-tab-color-line"
