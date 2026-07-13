@@ -31,7 +31,7 @@ impl Migration for M0013AgentDirectBindings {
     fn id(&self) -> &'static str { "0013_agent_direct_bindings" }
     fn scope(&self) -> MigrationScope { MigrationScope::Global }
     fn description(&self) -> &'static str {
-        "Backfill direct agent↔account links from existing bundle bindings"
+        "Retired no-op — historically backfilled direct agent↔account links from existing bundle bindings"
     }
 
     fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> {

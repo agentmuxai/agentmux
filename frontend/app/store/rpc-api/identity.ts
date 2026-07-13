@@ -1,8 +1,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Identity accounts + bundles, Armory key/OAuth flows, agent-identity
-// links, and the pre-launch OAuth / install / prereq flows. Split from the
+// Identity accounts, Armory key/OAuth flows, agent-identity links, and
+// the pre-launch OAuth / install / prereq flows. Split from the
 // original rpc-api.ts.
 
 import { RpcClient } from "../rpc-client";
@@ -141,12 +141,13 @@ export const IdentityApi = {
         client: RpcClient,
         data: {
             providerId: string;
+            /** Vestigial — bundle mode was retired in Phase 4c of
+             *  SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the
+             *  wire shape only; never set by `AuthFlowController`. */
             intoBundleId?: string;
-            /** Issue #1624 PR-C Part B — bypass the bundle system
-             *  entirely; a successful auth persists a standalone
-             *  IdentityAccount. Mutually exclusive with `intoBundleId`
-             *  (never set both). Wire-additive only for now — not yet
-             *  set by any caller (that's PR 3). */
+            /** Always sent as `true` by `AuthFlowController` (the sole
+             *  caller) — a successful auth persists a standalone
+             *  IdentityAccount. */
             directAccount?: boolean;
             /** Direct-account reconnect: non-empty to refresh an
              *  already-linked account's tokens in place. Ignored unless

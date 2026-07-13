@@ -103,8 +103,9 @@ pub struct CommandHideNamedAgentData {
 
 /// Request for `listrecentsessions` — powers the AgentPicker's "Recent
 /// sessions" surface (cascade follow-up, 2026-05-23). Optional
-/// `identity_id` filter narrows the results to sessions that used the
-/// given identity bundle (matches `db_agent_instances.identity_id`).
+/// `identity_id` filter narrows the results to sessions with a matching
+/// `db_agent_instances.identity_id` value (opaque same-value filter —
+/// display names resolve separately via `db_agent_identity_links`).
 /// `limit` defaults to 20 (capped at 100); rows are sorted by the
 /// most-recent activity timestamp (filestore `output.state.json` modts
 /// when available, otherwise instance `started_at`).

@@ -42,16 +42,17 @@ pub const COMMAND_AUTH_SUBMIT_API_KEY: &str = "auth.submitapikey";
 #[serde(rename_all = "camelCase")]
 struct StartProviderAuthReq {
     provider_id: String,
-    /// Optional — when set, a successful auth adds an account to the
-    /// existing bundle. When None, a fresh bundle is created.
+    /// Vestigial — bundle mode (a successful auth adding an account to
+    /// an Identity bundle) was retired in Phase 4c of
+    /// SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the wire
+    /// shape only; `direct_account` is always true in practice.
     #[serde(default)]
     into_bundle_id: Option<String>,
-    /// Issue #1624 PR-C Part B — bypass the legacy bundle system
-    /// entirely. When true, a successful auth persists a standalone
-    /// `IdentityAccount` with no bundle involved; `into_bundle_id` is
-    /// ignored (and expected to be absent — the frontend never sets
-    /// both). The actual agent<->account link is written later, once
-    /// the agent exists, by the launch-flow reconcile.
+    /// Always `true` in practice — `AuthFlowController` (the sole
+    /// frontend caller) hardcodes `directAccount: true`. A successful
+    /// auth persists a standalone `IdentityAccount`; the actual
+    /// agent<->account link is written later, once the agent exists, by
+    /// the launch-flow reconcile.
     #[serde(default)]
     direct_account: bool,
     /// Direct-account reconnect: non-empty to refresh an already-
@@ -150,31 +151,23 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     direct_account = req.direct_account,
                     "auth.start"
                 );
-                // OAuth Bundles PR C invariant — when an OAuth flow runs
-                // against a bundle, the CLI's OAuth tokens land INSIDE the
-                // bundle's per-provider config dir, NOT ambient at
-                // `~/.claude/`. Compute the dir from the registry
-                // (single source of truth — `auth_dir_name` per provider)
-                // and the per-bundle root from `DataPaths::identity_dir`.
-                // Mirror the dir into `auth_env` under the provider's
-                // `auth_config_dir_env_var` (e.g. `CLAUDE_CONFIG_DIR`).
-                // This overrides whatever the frontend computed via the
-                // legacy ambient `ensureAuthDir` path so a bundle-bound
-                // launch never accidentally writes to the global dir.
+                // `direct_account` is the only path actually exercised
+                // (`AuthFlowController` hardcodes `directAccount: true`) —
+                // mints/reuses an account id and resolves its own
+                // isolation dir, mirroring the dir into `auth_env` under
+                // the provider's `auth_config_dir_env_var` (e.g.
+                // `CLAUDE_CONFIG_DIR`), overriding whatever the frontend
+                // computed via the legacy ambient `ensureAuthDir` path.
                 //
-                // When `into_bundle_id` is empty (ambient launch — no
-                // bundle context), keep the legacy `auth_env` exactly so
-                // the existing ambient flow keeps working.
+                // The `into_bundle_id`/`compute_and_ensure_bundle_dir`
+                // branch below is vestigial — bundle mode was retired in
+                // Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md
+                // — kept only so this wire shape and its call sites don't
+                // need touching.
                 //
                 // Errors (path resolve, mkdir) log + fall back to the
-                // legacy env — never abort `auth.start` over a per-bundle
-                // dir issue. Mirrors the `inject_identity_env` pattern.
-                //
-                // Issue #1624 PR-C Part B: `direct_account` takes an
-                // entirely separate branch — mints/reuses an account id
-                // and resolves its OWN isolation dir, bypassing the
-                // bundle system completely. The two modes are mutually
-                // exclusive; the frontend never sets both.
+                // legacy env — never abort `auth.start` over a dir issue.
+                // Mirrors the `inject_identity_env` pattern.
                 let mut auth_env = req.auth_env;
                 let (account_id, bundle_dir) = if req.direct_account {
                     let (account_id, dir) = compute_and_ensure_account_dir(
@@ -482,7 +475,7 @@ fn spawn_auth_cli(
         // already transitioned — without this guard the drain's
         // persist + post-exit's persist both ran on every successful
         // OAuth, producing orphan IdentityAccount rows (each `Uuid::new_v4`)
-        // and duplicate `identitybundlebindings:changed:<id>` publishes.
+        // and duplicate `identityaccounts:changed` publishes.
         // Reagent P1 on #981.
         let success_transitioned = Arc::new(AtomicBool::new(false));
         let success_transitioned_drain = Arc::clone(&success_transitioned);
@@ -509,14 +502,11 @@ fn spawn_auth_cli(
                     )
                     .await
                     {
-                        // Persist the OAuthConfigDir account — into the
-                        // bundle (legacy path) or standalone (issue #1624
-                        // PR-C Part B direct-account path). When
-                        // `into_bundle_id`/`bundle_dir` (bundle mode) or
-                        // `bundle_dir` (direct-account mode, reused as the
-                        // account's own dir) failed to resolve at spawn,
-                        // persist_oauth_success skips persistence and the
-                        // session still succeeds.
+                        // Persist the standalone OAuthConfigDir account
+                        // (always direct-account mode now). If `bundle_dir`
+                        // (the account's own isolation dir) failed to
+                        // resolve at spawn, persist_oauth_success skips
+                        // persistence and the session still succeeds.
                         let (bundle_id, account_id) = persist_oauth_success(
                             &wstore_stdout,
                             &broker_stdout,
@@ -626,11 +616,10 @@ fn spawn_auth_cli(
 /// finish_failure → detach. Stdout+stderr are merged on the PTY side;
 /// `record_line` doesn't care which stream a line came from.
 ///
-/// Same OAuth-success invariant as the pipes path — when
-/// `into_bundle_id` and `bundle_dir` are both set and `confirm_authenticated`
-/// returns true, persists `SecretRef::OAuthConfigDir` + binding before
-/// `finish_success`. Same `direct_account`/`account_id` bypass as the
-/// pipes path too — see `spawn_auth_cli`'s doc comment.
+/// Same OAuth-success invariant as the pipes path — once `bundle_dir`
+/// (the account's own isolation dir) resolves and `confirm_authenticated`
+/// returns true, persists a standalone `SecretRef::OAuthConfigDir`
+/// account before `finish_success` — see `spawn_auth_cli`'s doc comment.
 #[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli_pty(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,

@@ -32,9 +32,9 @@ impl Migration for M0014AgentDirectBindingsRerun {
     fn id(&self) -> &'static str { "0014_agent_direct_bindings_rerun" }
     fn scope(&self) -> MigrationScope { MigrationScope::Global }
     fn description(&self) -> &'static str {
-        "Re-run the direct agent<->account link backfill (latest instance per \
-         definition only) for instances launched after m0013's one-time run \
-         but before the launch-flow write-through"
+        "Retired no-op — historically re-ran the direct agent<->account link \
+         backfill (latest instance per definition only) for instances launched \
+         after m0013's one-time run but before the launch-flow write-through"
     }
 
     fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> {

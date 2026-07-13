@@ -786,8 +786,12 @@ const VariablesEditor = (p: {
 // ── AgentRef editor ───────────────────────────────────────────────────
 //
 // PR 3 of Phase 1.5 (closes #835). Replaces the prior single
-// `forge_agent_id` text field with separate identity / memory /
-// instance-name pickers backed by the launch-modal RPCs.
+// `forge_agent_id` text field with Memory / instance-name pickers backed
+// by the launch-modal RPCs. The Identity picker that originally shipped
+// here was removed in Phase 4b of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md
+// — the drone runner never read `agent_ref.identityId` for credential
+// injection, so the control was already inert; `identityId` is still
+// carried in `AgentRefShape`/`readAgentRef` below but has no picker UI.
 
 interface AgentRefShape {
     identityId: string;
