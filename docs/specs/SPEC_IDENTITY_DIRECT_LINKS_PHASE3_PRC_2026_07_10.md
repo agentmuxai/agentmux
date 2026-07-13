@@ -15,7 +15,7 @@ What's left, per #1624's 2026-07-03 resolution comment, is **PR-C**: stop the tw
 1. The Armory "Identities" tab (full `db_identity_bundles`/`db_identity_bindings` CRUD UI).
 2. `AgentLaunchModal`'s "+ New identity" button and OAuth Connect flow — discovered mid-investigation to be the *actual* creation UI for new agent identities (the write-through reconcile only works because it reads back the bundle's bindings after the fact; it was never an independent write path). Scope was expanded accordingly.
 
-**Explicit non-goals for this phase:** `resolver.rs`, the m0013/m0014 migrations, and every `bundle_*` RPC handler are untouched — this is a frontend-write-surface migration, not a backend API deletion. The agent-pane's own `view: "identity"` settings tab (cog → settings → Identity) already renders a read-only `<BundleSummaryPanel/>` (SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5) and is unaffected.
+**Explicit non-goals for this phase:** `resolver.rs`, the m0013/m0014 migrations, and every `bundle_*` RPC handler are untouched — this is a frontend-write-surface migration, not a backend API deletion. The agent-pane's own `view: "identity"` settings tab (cog → settings → Identity) already renders a read-only `<BundleSummaryPanel/>` (docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5) and is unaffected.
 
 **Relationship to §3.4's longer-term decision**: `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` §3.4 resolves that "Identity" should ultimately fold into the **Accounts** tab entirely (no standalone Identities concept at all). This phase does **not** do that — it implements the interim step #1624 itself specifies ("Identities tab → derived view"), which keeps a distinct, read-only Identities view rather than folding it away. The full Accounts-fold is out of scope here and remains open (tracked loosely under issue #2024).
 
@@ -37,7 +37,7 @@ New files: `frontend/app/view/identity/agent-identities-model.ts` (pure join log
 
 **Dropped for v1**: the "Reconnect" action (re-running OAuth on an expired token in place). It needs PR 2's direct-account OAuth primitive to wire against; adding it now against the bundle-based OAuth flow would be throwaway work. Fast-follow once PR 2 lands.
 
-**Discovered dead code, deliberately left alone**: `identity-manager.tsx`'s `IdentityManagerBody`/`IdentityManager` (the full bundle-CRUD component this PR replaces at its only mount point) turns out to have **no remaining consumer anywhere** after this change — the agent-pane settings tab was already demoted to `<BundleSummaryPanel/>` in an earlier PR (SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5), and Armory was the last live mount. Left in place rather than deleted, to keep this PR's diff scoped to what it set out to do; flagged here as a candidate for a follow-up cleanup PR.
+**Discovered dead code, deliberately left alone**: `identity-manager.tsx`'s `IdentityManagerBody`/`IdentityManager` (the full bundle-CRUD component this PR replaces at its only mount point) turns out to have **no remaining consumer anywhere** after this change — the agent-pane settings tab was already demoted to `<BundleSummaryPanel/>` in an earlier PR (docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5), and Armory was the last live mount. Left in place rather than deleted, to keep this PR's diff scoped to what it set out to do; flagged here as a candidate for a follow-up cleanup PR.
 
 ## PR 2 — Backend OAuth-direct-account primitive
 

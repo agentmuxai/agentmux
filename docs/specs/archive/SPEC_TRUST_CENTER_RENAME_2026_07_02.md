@@ -1,5 +1,7 @@
 # Spec: Rename "Trust Center"
 
+> **Archived 2026-07-12.** Superseded by `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` — this was the naming brainstorm; the linked doc is the resolved implementation spec. Consolidated tracking: issue #2024.
+
 **Date:** 2026-07-02
 **Status:** Proposal — brainstorm + rename plan for review
 **Author:** Agent1

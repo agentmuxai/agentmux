@@ -1,8 +1,10 @@
 # Trust Center — Global Brain
 
+> **Archived 2026-07-12.** Historical — shipped as specced (marked Implemented 2026-06-20). Consolidated tracking: issue #2024.
+
 **Date:** 2026-06-19  
 **Status:** Implemented (2026-06-20) — Option A (sort_order column); Brain tab added alongside the existing Accounts / Identities / Memories rail.  
-**Relates to:** `SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md`, `SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md`
+**Relates to:** `docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md`, `SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md`
 
 ---
 

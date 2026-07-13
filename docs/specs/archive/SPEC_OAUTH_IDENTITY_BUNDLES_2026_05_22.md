@@ -1,11 +1,13 @@
 # SPEC — OAuth credentials as first-class identity-bundle members
 
+> **Archived 2026-07-12.** Historical — the `SecretRef::OAuthConfigDir` mechanism it specs shipped and is still live today. Consolidated tracking: issue #2024.
+
 **Date:** 2026-05-22
 **Author:** AgentA
 **Status:** Draft
 **Scope:** `agentmux-srv` identity/resolver + storage, agentmux-cef OAuth flow controller, launch modal.
 **Related:**
-`SPEC_BUNDLE_MANAGEMENT_2026_05_22.md` (bundle CRUD, just shipped),
+`docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md` (bundle CRUD, just shipped),
 `SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` (the OAuth flow),
 `SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md` (the modal reducer),
 `docs/analysis/LAUNCH_MODAL_CONTINUE_LOST_2026_05_22.md` (`continueOfId` bug — orthogonal),

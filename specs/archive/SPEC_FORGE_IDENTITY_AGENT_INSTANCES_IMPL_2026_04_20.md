@@ -1,5 +1,7 @@
 # Implementation Spec: Forge + Identity + Agent Instances
 
+> **Archived 2026-07-12.** Stale — builds `db_forge_agent_identities`, which exists in current source only as the legacy side of a rename pair (now `db_agent_identity_links`, see `migrations.rs`). The Forge system this describes is gone. Consolidated tracking: issue #2024.
+
 **Date:** 2026-04-20
 **Status:** Draft (implementation-ready)
 **Companion:** `SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md` (design / motivation)

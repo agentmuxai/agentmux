@@ -1,5 +1,7 @@
 # SPEC: Cross-Version Sharing — Identity / Memory / Forge Definitions
 
+> **Archived 2026-07-12.** Superseded by `docs/specs/SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md` (still current, not archived) — that doc's own header states it supersedes this file. Consolidated tracking: issue #2024.
+
 **Status:** Draft
 **Date:** 2026-05-19
 **Author:** AgentA

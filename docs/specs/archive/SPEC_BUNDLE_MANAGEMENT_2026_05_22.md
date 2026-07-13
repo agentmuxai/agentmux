@@ -1,5 +1,7 @@
 # SPEC — Identity & Memory bundle management
 
+> **Archived 2026-07-12.** Superseded — designed the pre-rename "Identity & Memory" hamburger modal, explicitly renamed by `specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`. Consolidated tracking: issue #2024.
+
 **Status:** Draft / for review
 **Date:** 2026-05-22
 **Author:** AgentA
