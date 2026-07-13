@@ -347,7 +347,7 @@ impl DataPaths {
     /// credential directories. Lives under `shared_dir` so it's
     /// account-wide and version-independent: upgrading agentmux does
     /// not move a user's bundle credentials. Per
-    /// `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.1.
+    /// `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.1.
     pub fn identities_dir(&self) -> PathBuf {
         self.shared_dir.join("identities")
     }
