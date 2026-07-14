@@ -9,6 +9,72 @@ use cef::*;
 
 use super::AgentMuxHandler;
 
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
+#[cfg(target_os = "linux")]
+use crate::state::AppState;
+
+/// Linux startup white-flash fix (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md).
+///
+/// Bound on how long the real window + native splash can stay hidden/up
+/// waiting for the frontend's first-paint signal before we show anyway. Chosen
+/// generously relative to the one-shot `MAX_GATE_MS` (800ms) reveal-gate
+/// pattern in `frontend/app/store/tab-reveal.ts` — this gate covers a coarser
+/// event (compositor's first frame) than that one (post-mount settle), so a
+/// slower budget avoids false-triggering on a merely-slow-but-healthy start.
+#[cfg(target_os = "linux")]
+const PAINT_GATE_SAFETY_TIMEOUT_MS: i64 = 1500;
+
+/// Reveal (show + focus the real window, dismiss the native splash) once —
+/// whichever of the real `report_first_paint` IPC signal or the safety-net
+/// timeout fires first wins; the other becomes a no-op via the
+/// `linux_paint_gate_pending` membership check. Must run on the CEF UI thread.
+#[cfg(target_os = "linux")]
+pub(crate) fn reveal_gated_window(state: &Arc<AppState>, label: &str) {
+    {
+        let mut pending = state.linux_paint_gate_pending.lock();
+        if !pending.remove(label) {
+            // Already revealed by the other path, or never armed (e.g. a pool
+            // window — those don't go through this gate at all).
+            return;
+        }
+    }
+    if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
+        if !path.is_empty() {
+            let _ = std::fs::write(&path, b"ready");
+        }
+    }
+    let Some(mut browser) = state.get_browser(label) else { return };
+    if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
+        if let Some(window) = bv.window() {
+            if window.is_visible() == 0 {
+                window.show();
+                if let Some(host) = browser.host() {
+                    host.set_focus(1);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+wrap_task! {
+    struct PaintGateRevealTask { state: Arc<AppState>, label: String }
+    impl Task { fn execute(&self) {
+        reveal_gated_window(&self.state, &self.label);
+    }}
+}
+
+/// Called off the UI thread (IPC handler for `report_first_paint`) once the
+/// frontend's double-`requestAnimationFrame` confirms the compositor actually
+/// presented a frame. Posts to the UI thread to reveal the window if
+/// `on_load_end` deferred it.
+#[cfg(target_os = "linux")]
+pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
+    let mut task = PaintGateRevealTask::new(state, label);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 impl AgentMuxHandler {
     /// CEF fires this whenever the browser's loading/history state changes
     /// (navigation started, navigation committed, back/forward enabled).
@@ -107,13 +173,21 @@ impl AgentMuxHandler {
             }
         }
 
-        // macOS/Linux analogue of the Win32 splash signal: the launcher owns the
-        // native splash (see agentmux-launcher/src/splash_mac.rs and splash_linux/)
-        // and passes a ready-file path via AGENTMUX_SPLASH_READY_FILE. Creating the
-        // file is the cross-process "first frame painted" signal the launcher polls
-        // for before tearing the splash down. Fire-and-forget; absent var => no
-        // launcher splash (e.g. dev:standalone), so this is a no-op.
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        // macOS analogue of the Win32 splash signal: the launcher owns the native
+        // splash (see agentmux-launcher/src/splash_mac.rs) and passes a ready-file
+        // path via AGENTMUX_SPLASH_READY_FILE. Creating the file is the
+        // cross-process "first frame painted" signal the launcher polls for before
+        // tearing the splash down. Fire-and-forget; absent var => no launcher
+        // splash (e.g. dev:standalone), so this is a no-op.
+        //
+        // Linux does NOT write it here. `on_load_end` fires per-browser on
+        // main-frame load-complete, including hidden pool-window prewarms — on
+        // Linux that could dismiss the splash before the real (visible) window
+        // has painted anything (the white-flash bug this gate fixes). Linux
+        // writes the ready-file from `reveal_gated_window` instead, gated on the
+        // same first-paint confirmation that unblocks the real window's show()
+        // below. See docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+        #[cfg(target_os = "macos")]
         {
             if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
                 if !path.is_empty() {
@@ -142,10 +216,45 @@ impl AgentMuxHandler {
             if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
                 if let Some(window) = bv.window() {
                     if window.is_visible() == 0 {
-                        window.show();
-                        if let Some(ref mut b) = browser_cloned {
-                            if let Some(host) = b.host() {
-                                host.set_focus(1);
+                        // Linux: defer the actual show()/focus (and the splash
+                        // dismiss above) until the frontend confirms a real
+                        // compositor paint, instead of doing it here on mere
+                        // load-complete — see reveal_gated_window and
+                        // docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+                        // Falls back to the old immediate-show behavior if the
+                        // window label can't be resolved (can't gate safely on
+                        // an unknown label).
+                        #[cfg(target_os = "linux")]
+                        let gate_label = browser_label.clone();
+                        #[cfg(target_os = "linux")]
+                        let gated = gate_label.is_some();
+                        #[cfg(target_os = "linux")]
+                        if let Some(label) = gate_label {
+                            self.state.linux_paint_gate_pending.lock().insert(label.clone());
+                            let mut timeout_task =
+                                PaintGateRevealTask::new(self.state.clone(), label);
+                            post_delayed_task(
+                                ThreadId::UI,
+                                Some(&mut timeout_task),
+                                PAINT_GATE_SAFETY_TIMEOUT_MS,
+                            );
+                        }
+                        #[cfg(target_os = "linux")]
+                        if !gated {
+                            window.show();
+                            if let Some(ref mut b) = browser_cloned {
+                                if let Some(host) = b.host() {
+                                    host.set_focus(1);
+                                }
+                            }
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            window.show();
+                            if let Some(ref mut b) = browser_cloned {
+                                if let Some(host) = b.host() {
+                                    host.set_focus(1);
+                                }
                             }
                         }
                     }
