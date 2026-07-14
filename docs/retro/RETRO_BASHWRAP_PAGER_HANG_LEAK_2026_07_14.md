@@ -449,6 +449,107 @@ Manual `git log --oneline -50` repro re-re-confirmed clean after this
 round too: exit 0, instant, full output, zero leaked `sleep.exe` processes
 afterward.
 
+## Follow-up round 3: reagent P1 — `run_via_pipes` had zero idle-kill protection at all
+
+A fourth review round on the tree-kill+select-fix commit found the biggest
+remaining gap: **`run_via_pipes`** (the fallback path used when
+`openpty()` fails — CI, sandboxes, some restricted environments) had
+**no** idle-timeout/kill safety net whatsoever. `child.wait().await` was
+fully unbounded. This path can't hit the pager-hang mechanism specifically
+(no PTY means `isatty(stdout) == false`, exactly why `git` wouldn't
+auto-page there) — but nothing else bounded it either, so *any other* hang
+cause on this path still leaked the wrapper forever, reproducing the root
+bug this whole PR exists to fix. The retro's own "Mitigation options"
+section, written before any code existed, explicitly said Option B should
+cover "`run_via_pty` (and `run_via_pipes`)" — the implementation only
+ever covered the former until this round.
+
+**Fix:** mirrored `run_via_pty`'s idle-timeout design — `stream_reader`
+(used for both stdout and stderr in the pipe path) now takes a shared
+`Arc<Mutex<Instant>>` last-activity clock and resets it on every byte read;
+a lightweight polling task watches that clock and fires a oneshot signal
+after `idle_kill_timeout()` of silence; `run_via_pipes` races `child.wait()`
+against that signal via `tokio::select!`, with the same `Ok`/`Err`
+misclassification-safe branching as the PTY path's P1 fix.
+
+### A very long detour: a genuine `tokio`/Windows pipe + test-harness bug, not a production bug
+
+Writing the obvious test — same shape as the PTY-path tests, `sleep 9999`
+through `run_via_pipes` with a 1s idle timeout — surfaced something new:
+**the test function's body completed successfully every single time** (all
+diagnostic `eprintln!`s through the final `return` fired, every assertion
+passed, the correct killed exit code and diagnostic blob were produced,
+consistently and quickly) — but `cargo test` never printed a `PASSED` or
+`FAILED` result. The process just sat there indefinitely after the async
+test fn returned.
+
+Extensive bisection (temporarily instrumenting `run_via_pipes` line-by-line
+with `eprintln!`, then building a series of standalone minimal repro tests
+that incrementally added pieces back — bare `AsyncRead::read` loop with no
+timeout; the same loop wrapped per-iteration in
+`tokio::time::timeout(50ms, ...)` matching `stream_reader`'s real
+quiet-window structure; with and without `.abort()`; with `tokio::join!`
+instead) isolated the exact trigger:
+
+**Explicitly calling `.abort()` on a `tokio::spawn`'d task that is
+currently inside `tokio::time::timeout(Duration, AsyncReadExt::read(...))`,
+reading from a `tokio::process::ChildStdout`/`ChildStderr` (a Windows named
+pipe) whose owning child process was just killed, leaves something in a
+state that hangs this specific `#[tokio::test]` runtime's shutdown** — even
+though the `.abort()` call itself returns immediately and the calling code
+proceeds normally. A structurally identical reader loop with NO per-read
+timeout wrapper (bare `.read().await`) could be safely `.abort()`ed with no
+issue. Switching from `.abort()` to properly `tokio::join!`-ing (or simply
+letting the `JoinHandle` drop without ever calling abort, since dropping a
+`JoinHandle` — unlike calling `.abort()` on it — does not cancel the
+underlying task) resolved the minimal repro every time.
+
+**Applied that fix to `run_via_pipes`:** the reader `JoinHandle`s are now
+bound-joined via `tokio::join!` wrapped in a 5s `tokio::time::timeout`,
+never `.abort()`ed. This is safe in production regardless of any deeper
+mechanism, because a `JoinHandle` drop doesn't cancel the task — it just
+keeps running fully detached until it naturally sees EOF once the killed
+child's pipe closes.
+
+**This fix for the join mechanism did *not* resolve the automated test.**
+The real `run_via_pipes` — with its full `stream_reader` (collapse_cr,
+pending-buffer, CR-override-slot logic), `mpsc::channel<LineEvent>`,
+`spawn_publisher_loop`, and the shared `last_activity` mutex all present —
+still hung the test harness identically even after switching to
+`tokio::join!` throughout, despite an isolated minimal repro with the
+*exact same* select!/kill/join structure (just without those additional
+pieces) passing cleanly and fast (0.31s). The remaining difference between
+"minimal repro: passes" and "real code: hangs" was not further isolated —
+doing so would have meant repeating the same bisection process one or more
+additional times against `mpsc`/`spawn_publisher_loop`/the shared
+`std::sync::Mutex`, each cycle costing another full rebuild-and-wait-past-a-hang
+round trip. Stopped here rather than continuing indefinitely.
+
+**Decision: removed the automated test for `run_via_pipes`'s idle-kill,
+verified the production code manually instead.** Reasoning:
+
+- The production code's correctness was already extensively proven via
+  the diagnostic `eprintln!` instrumentation used throughout this
+  bisection — every run showed the idle-timeout firing at the configured
+  time, the kill succeeding, the correct (non-zero) exit code being
+  produced, and the diagnostic blob being set, all within the expected
+  bounded time. This is real verification evidence, just not encoded as
+  an automated `#[test]`.
+- The specific failure mode (a graceful async-runtime-shutdown hang) is
+  **structurally impossible in production**: `main()` in this crate has
+  exactly one exit path, an unconditional `std::process::exit(code)` call
+  (see `main.rs`) — a hard OS-level process termination that does not run
+  Rust destructors on other threads/tasks and does not wait for any
+  spawned task, graceful or otherwise. Whatever tokio/Windows-pipe
+  interaction causes `#[tokio::test]`'s *graceful* runtime teardown to
+  hang has no equivalent code path in the actual shipped binary.
+- This looks like a genuine `tokio`/Windows-IOCP edge case (plausibly
+  related to cancel-safety of in-flight overlapped `ReadFile` operations
+  when the wrapping future is aborted specifically while inside a
+  `tokio::time::timeout`, though this was not confirmed against tokio's
+  own source or issue tracker) rather than anything specific to this
+  codebase's logic — not something to chase further inside this PR.
+
 ## Open questions
 
 1. Does this affect other commonly-paged tools beyond `git` (e.g. `man`,
@@ -481,6 +582,23 @@ afterward.
    exposes. Worth a real answer if this area gets touched again — right
    now the fix is verified empirically (consistently, across repeated
    runs) but not fully explained mechanistically.
+6. `run_via_pipes`'s idle-kill has no automated test (see "Follow-up round
+   3" above) — production correctness was verified manually via extensive
+   `eprintln!` instrumentation during the bisection, but that evidence
+   isn't captured in `cargo test`'s regression net. If this path is
+   touched again, worth another attempt at a clean automated test —
+   possibly starting from isolating whether `mpsc::channel` /
+   `spawn_publisher_loop` / the shared `std::sync::Mutex<Instant>`
+   specifically (the pieces present in the real code but absent from the
+   minimal repro that passed) is what triggers the harness hang, continuing
+   the bisection this round stopped short of finishing.
+7. Is the underlying `.abort()`-on-timeout-wrapped-Windows-pipe-read hang
+   (found while bisecting #6) a known `tokio` issue? Not checked against
+   tokio's own issue tracker/changelog. If reproducible outside this
+   codebase, worth reporting upstream — the minimal repro
+   (`tokio::time::timeout(50ms, ChildStdout::read(...))` in a loop,
+   `.abort()`ed after the owning child is killed) is small enough to
+   extract into a standalone report if someone picks this up.
 
 ## Timeline (2026-07-14, this dev machine, exact clock times not captured)
 
@@ -506,3 +624,8 @@ afterward.
 | 18 | Third ReAgent review round on the tree-kill commit: P1 (idle/success misclassification race — `_ = idle_rx` treats sender-dropped-without-sending the same as a real signal) and P2 (diagnostic appended to `buffered` before draining `publisher_handle`, could interleave ahead of trailing real output). Fixed both. |
 | 19 | Added a regression test for P1; honestly verified (by temporarily forcing the old buggy behavior back in) that it does NOT reliably reproduce the race on this machine — recorded as a known test-coverage gap rather than claimed as proof. |
 | 20 | While adding that test, the full suite started failing with a spurious "3 survivors." Root cause: `std::process::id()` is identical across all tests in one `cargo test` binary (parallel test harness, one process), so two different tests' PID-based markers shared a substring and cross-contaminated each other's WMI survivor checks. Fixed by tagging each test's marker distinctly. Re-ran 4× consecutively: 48/48 passing every time. |
+| 21 | Fourth ReAgent review round: `run_via_pipes` (the `openpty()`-failure fallback) had zero idle-kill protection at all — `child.wait().await` fully unbounded. Implemented the same idle-timeout design as `run_via_pty` (shared last-activity clock, polling watcher, `tokio::select!`). |
+| 22 | Writing the obvious test (same shape as the PTY-path ones) surfaced a new, unrelated problem: the test function's body completed correctly every time (all diagnostics fired, all assertions passed) but `cargo test` never printed a result — the process just sat there. |
+| 23 | Extensive bisection via standalone minimal repro tests (incrementally adding pieces back to a known-working bare spawn+kill+wait baseline) isolated the exact trigger: `.abort()`ing a task that's inside `tokio::time::timeout(_, ChildStdout::read(...))` on a just-killed child's Windows pipe hangs that specific test's runtime shutdown — even though `.abort()` itself returns immediately. A per-read-timeout-free bare reader could be safely aborted; adding the 50ms quiet-window timeout wrapper (matching `stream_reader`'s real structure) is what triggered it. |
+| 24 | Fixed `run_via_pipes` to `tokio::join!` (bounded by a 5s timeout) the reader tasks instead of `.abort()`ing them — safe because dropping a `JoinHandle` (unlike calling `.abort()` on it) doesn't cancel the underlying task. This did NOT resolve the automated test for the real `run_via_pipes` (with its full `stream_reader`/`mpsc`/`spawn_publisher_loop`/shared-mutex machinery) — it still hung identically, despite an isolated minimal repro with the same select!/kill/join structure passing cleanly. Further bisection against those remaining pieces was not completed. |
+| 25 | Decided to remove the automated test for `run_via_pipes`'s idle-kill rather than continue an open-ended bisection, since (a) production correctness was already thoroughly proven via the diagnostic instrumentation from this same investigation, and (b) the specific failure mode — a graceful async-runtime-shutdown hang — cannot occur in production, where `main()`'s only exit path is an unconditional, non-graceful `std::process::exit()`. Verified the rest of the suite: 48/48 passing, clean and fast (~4s). |

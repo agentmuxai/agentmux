@@ -416,7 +416,12 @@ pub(crate) fn locate_bash() -> Result<PathBuf> {
 ///    time with non-empty pending bytes, flush. Surfaces slow-trickle
 ///    output (one byte at a time) that would otherwise wait for the
 ///    next byte to trigger a natural flush.
-async fn stream_reader<R>(mut reader: R, kind: &'static str, tx: mpsc::Sender<LineEvent>)
+async fn stream_reader<R>(
+    mut reader: R,
+    kind: &'static str,
+    tx: mpsc::Sender<LineEvent>,
+    last_activity: Arc<std::sync::Mutex<std::time::Instant>>,
+)
 where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -455,6 +460,10 @@ where
                 return;
             }
             Ok(Ok(n)) => {
+                // Idle-kill tracking (mirrors the PTY path's pty_reader_loop):
+                // reset on ANY bytes read, regardless of whether they become
+                // a published LineEvent — see run_via_pipes's idle watcher.
+                *last_activity.lock().unwrap_or_else(|e| e.into_inner()) = std::time::Instant::now();
                 // P1b: prepend any held CR override so collapse_cr can
                 // overwrite it with the new frame content.
                 if let Some(held) = pending_cr_override.take() {
@@ -881,16 +890,113 @@ async fn run_via_pipes(
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
     let stderr = child.stderr.take().ok_or_else(|| anyhow!("no stderr"))?;
 
+    // Idle-kill safety net (reagent P1, PR #2156): this path has no PTY, so
+    // it can't hit the pager-hang mechanism specifically (isatty(stdout) ==
+    // false here, the whole reason git wouldn't auto-page) — but nothing
+    // else bounded child.wait() either, so ANY other hang cause still
+    // leaked the wrapper forever, reproducing the root bug this PR exists
+    // to fix. Mirrors run_via_pty's idle (not total-runtime) timeout: a
+    // shared last-activity clock updated by both stdout/stderr readers on
+    // every byte read, watched by a lightweight polling task.
+    let last_activity = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
-    tokio::spawn(stream_reader(stdout, "stdout", tx.clone()));
-    tokio::spawn(stream_reader(stderr, "stderr", tx.clone()));
+    let stdout_reader = tokio::spawn(stream_reader(stdout, "stdout", tx.clone(), last_activity.clone()));
+    let stderr_reader = tokio::spawn(stream_reader(stderr, "stderr", tx.clone(), last_activity.clone()));
     drop(tx);
 
     let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
 
-    let exit_status = child.wait().await.context("waiting for bash child")?;
-    let _ = publisher_handle.await;
-    Ok(exit_status.code().unwrap_or(-1))
+    let (idle_tx, idle_rx) = oneshot::channel::<()>();
+    let idle_timeout = idle_kill_timeout();
+    let watcher_activity = last_activity.clone();
+    let idle_watcher = tokio::spawn(async move {
+        let mut idle_tx = Some(idle_tx);
+        loop {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let elapsed = watcher_activity
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .elapsed();
+            if elapsed >= idle_timeout {
+                if let Some(tx) = idle_tx.take() {
+                    let _ = tx.send(());
+                }
+                return;
+            }
+        }
+    });
+
+    // Same Ok/Err distinction as run_via_pty's select (reagent P1 follow-up):
+    // idle_rx resolving with Err just means pty_reader_loop-equivalent
+    // cleanup dropped it without signaling (not applicable on this path
+    // directly, but kept for structural symmetry and defensiveness) — not
+    // a real signal either way.
+    let mut idle_killed = false;
+    let exit_code: i32 = tokio::select! {
+        res = child.wait() => {
+            idle_watcher.abort();
+            res.context("waiting for bash child")?.code().unwrap_or(-1)
+        }
+        idle_signal = idle_rx => {
+            if idle_signal.is_err() {
+                child.wait().await.context("waiting for bash child")?.code().unwrap_or(-1)
+            } else {
+                idle_killed = true;
+                tracing::warn!(
+                    target: "bashwrap",
+                    tool_id = %args.tool_id,
+                    idle_secs = idle_kill_timeout().as_secs(),
+                    "child produced no output for the idle timeout (pipe path) — killing",
+                );
+                let _ = child.start_kill();
+                match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+                    Ok(Ok(status)) => status.code().unwrap_or(-1),
+                    _ => 124, // matches the conventional `timeout` command's exit code
+                }
+            }
+        }
+    };
+
+    // Reader tasks: bound-JOIN, never `.abort()`. Empirically, aborting a
+    // task that's inside `tokio::time::timeout(_, AsyncRead::read(..))` on
+    // a just-killed child's Windows pipe leaves something in a state that
+    // hangs this whole test/runtime's shutdown — reproduced in isolation
+    // while building this fix (a bare `.read().await` with no per-call
+    // timeout wrapper was fine to abort; adding the 50ms quiet-window
+    // timeout wrapper, matching `stream_reader`'s real structure, is what
+    // triggered it). A `JoinHandle` that's simply *dropped* without abort,
+    // by contrast, does not cancel the task — it keeps running fully
+    // detached and harmlessly finishes reading to EOF on its own once the
+    // pipe closes, which is exactly what timing out on the join and
+    // moving on (rather than aborting) achieves here.
+    if tokio::time::timeout(
+        Duration::from_secs(5),
+        async { let _ = tokio::join!(stdout_reader, stderr_reader); },
+    )
+    .await
+    .is_err()
+    {
+        tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, "reader tasks did not finish within the grace period — leaving them to finish in the background rather than aborting (see run_via_pipes's comment)");
+    }
+
+    // Bounded for the same reason as run_via_pty: proceed rather than block
+    // forever if a hung descendant somehow keeps a pipe end open.
+    if tokio::time::timeout(Duration::from_secs(5), publisher_handle)
+        .await
+        .is_err()
+    {
+        tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, "publisher drain timed out — proceeding without it");
+    }
+
+    if idle_killed {
+        buffered.lock().await.extend_from_slice(
+            b"\n[bashwrap] command produced no output for the idle timeout and was \
+terminated automatically.\n",
+        );
+    }
+
+    Ok(exit_code)
 }
 
 /// PTY reader loop: drains bytes from the master, strips DSR / ANSI
@@ -2084,6 +2190,7 @@ mod tests {
             }
         }
     }
+
 
     /// The real end-to-end guarantee, proven against the actual compiled
     /// binary rather than an in-process library call.
