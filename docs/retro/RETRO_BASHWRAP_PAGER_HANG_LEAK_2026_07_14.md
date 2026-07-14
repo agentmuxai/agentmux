@@ -587,6 +587,57 @@ existing tests don't specifically exercise, not new test-requiring
 behavior), manual `git log --oneline -50` repro re-confirmed clean once
 more.
 
+## Follow-up round 5: CI failure — the removed test's replacement needed to be a real integration test
+
+CI's Windows job failed after the round-4 push, in a test that had been
+passing locally through every round: `bashwrap_binary_idle_kill_cleans_up_
+full_process_tree` (from round 2 — the one that spawns the compiled binary
+as a real subprocess). The failure:
+
+```
+expected the real binary at "D:\a\agentmux\agentmux\target\debug\agentmux-bashwrap.exe"
+(derived from test harness path "...\target\debug\deps\agentmux_bashwrap-abbe5fd1a4b7d3cf.exe")
+— build it first with `cargo build -p agentmux-bashwrap`
+```
+
+**Root cause:** that test lived in `bash_wrap.rs`'s own `#[cfg(test)] mod
+tests` — a unit test compiled as part of the `agentmux-bashwrap` bin's own
+test harness, not a genuine Cargo integration test (`tests/*.rs`). Cargo
+only auto-builds a package's plain `[[bin]]` artifact (and sets
+`CARGO_BIN_EXE_<name>`) for integration/bench/example targets that
+reference it — a `cargo test --workspace` run has no reason to also
+produce a plain `target/debug/agentmux-bashwrap.exe` alongside the test
+harness binaries, since nothing in a unit-test-only build graph asks for
+it. The test's own path-derivation workaround (`current_exe()`'s parent's
+parent, documented at the time as the correct fallback since
+`CARGO_BIN_EXE_*` isn't set for embedded unit tests) computed the *right*
+path — but nothing had ever put a file there in a genuinely clean CI
+checkout. It only ever passed locally because dozens of earlier `cargo
+build -p agentmux-bashwrap` invocations during this same investigation's
+manual verification passes had left a plain binary sitting at exactly that
+path — an artifact of this dev machine's build history, not something CI
+starts with.
+
+**Fix:** moved the test to a real integration test target,
+`agentmux-bashwrap/tests/idle_kill_full_process_tree.rs`. `CARGO_BIN_EXE_
+agentmux-bashwrap` is correctly set there (this *is* the case that env var
+mechanism exists for), and referencing it is what makes cargo guarantee
+building the plain bin artifact as a normal part of `cargo test` — no
+manual pre-build step needed, in CI or locally. Verified by deleting the
+leftover `target/debug/agentmux-bashwrap.exe` locally before each of
+several `cargo test` runs (simulating a clean checkout): the binary is
+rebuilt automatically every time, and the test passes consistently (48/48
+across the whole suite: 47 unit tests + 1 integration test).
+
+**Takeaway for next time:** any test that needs to invoke the crate's own
+compiled binary as a subprocess (as opposed to calling its functions
+in-process) belongs in `tests/`, not embedded in `src/`'s own test module
+— this was known in the abstract (the original code comment even correctly
+explained *why* `CARGO_BIN_EXE_*` wasn't set) but the practical
+consequence — that nothing else in the local dev loop would ever expose
+the "binary doesn't exist yet" failure mode until a genuinely clean build —
+wasn't obvious until CI hit it.
+
 ## Open questions
 
 1. Does this affect other commonly-paged tools beyond `git` (e.g. `man`,
@@ -667,3 +718,4 @@ more.
 | 24 | Fixed `run_via_pipes` to `tokio::join!` (bounded by a 5s timeout) the reader tasks instead of `.abort()`ing them — safe because dropping a `JoinHandle` (unlike calling `.abort()` on it) doesn't cancel the underlying task. This did NOT resolve the automated test for the real `run_via_pipes` (with its full `stream_reader`/`mpsc`/`spawn_publisher_loop`/shared-mutex machinery) — it still hung identically, despite an isolated minimal repro with the same select!/kill/join structure passing cleanly. Further bisection against those remaining pieces was not completed. |
 | 25 | Decided to remove the automated test for `run_via_pipes`'s idle-kill rather than continue an open-ended bisection, since (a) production correctness was already thoroughly proven via the diagnostic instrumentation from this same investigation, and (b) the specific failure mode — a graceful async-runtime-shutdown hang — cannot occur in production, where `main()`'s only exit path is an unconditional, non-graceful `std::process::exit()`. Verified the rest of the suite: 48/48 passing, clean and fast (~4s). |
 | 26 | Fifth ReAgent review round: two more P1s, both from not fully carrying the round-2 tree-kill fix everywhere. `run_via_pty`'s `kill_process_tree` call had no timeout (unlike every other bounded step in that function) — a hung `taskkill /T` would reintroduce the unbounded-hang bug this PR fixes. `run_via_pipes`'s idle-kill only called `child.start_kill()`, never `kill_process_tree` — descendants forked by the pipe-path's child could survive, unaddressed. Fixed both: bounded the taskkill call with the same 5s timeout pattern used elsewhere, and added the same (bounded) tree-kill to `run_via_pipes`, ordered before `start_kill()` exactly like the PTY path. Full suite still 48/48, manual repro re-confirmed clean. |
+| 27 | ReAgent approved. CI's Windows job then failed in `bashwrap_binary_idle_kill_cleans_up_full_process_tree` — passing locally through every prior round only because leftover `cargo build` artifacts from this session's many manual verification passes happened to sit at the exact path the test's `current_exe()`-derived fallback expected; a genuinely clean CI checkout never produces a plain `agentmux-bashwrap.exe` for a unit-test-only build graph. Fixed by moving the test to a real integration test target (`agentmux-bashwrap/tests/idle_kill_full_process_tree.rs`), where `CARGO_BIN_EXE_agentmux-bashwrap` is correctly set and referencing it makes cargo guarantee building the plain bin automatically. Verified locally by deleting the leftover binary before each of several `cargo test` runs — rebuilt automatically every time, 48/48 passing consistently (47 unit + 1 integration). |
