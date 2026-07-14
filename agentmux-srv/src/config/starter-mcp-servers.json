@@ -1,0 +1,32 @@
+[
+    {
+        "name": "git",
+        "transport": "stdio",
+        "config": { "command": "uvx", "args": ["mcp-server-git"] }
+    },
+    {
+        "name": "fetch",
+        "transport": "stdio",
+        "config": { "command": "uvx", "args": ["mcp-server-fetch"] }
+    },
+    {
+        "name": "sequential-thinking",
+        "transport": "stdio",
+        "config": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"] }
+    },
+    {
+        "name": "memory",
+        "transport": "stdio",
+        "config": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] }
+    },
+    {
+        "name": "playwright",
+        "transport": "stdio",
+        "config": { "command": "npx", "args": ["@playwright/mcp@latest"] }
+    },
+    {
+        "name": "context7",
+        "transport": "stdio",
+        "config": { "command": "npx", "args": ["-y", "@upstash/context7-mcp"] }
+    }
+]

@@ -31,6 +31,7 @@ mod m0012_dedup_identity_accounts;
 mod m0013_agent_direct_bindings;
 mod m0014_agent_direct_bindings_rerun;
 mod m0015_seed_starter_skills;
+mod m0016_seed_starter_mcp_servers;
 mod runner;
 
 pub use runner::count_pending_migrations;
@@ -122,4 +123,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0013_agent_direct_bindings::M0013AgentDirectBindings,
     &m0014_agent_direct_bindings_rerun::M0014AgentDirectBindingsRerun,
     &m0015_seed_starter_skills::M0015SeedStarterSkills,
+    &m0016_seed_starter_mcp_servers::M0016SeedStarterMcpServers,
 ];
