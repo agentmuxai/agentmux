@@ -66,11 +66,17 @@ still works" states are indistinguishable in the UI.
 
 ### 2.4 Orphaned junction rows
 
-`identity_delete` doesn't cascade `db_agent_identity_links` /
-`db_identity_bindings` rows that reference the deleted `account_id`. They
-persist as dangling references, discovered only as per-spawn WARNs (§2.3).
-Harmless individually, but they mean the system's own picture of "which
-agents use which accounts" contains links to accounts that no longer exist.
+`identity_delete` doesn't cascade `db_agent_identity_links` rows that
+reference the deleted `account_id`. (This report originally also named
+`db_identity_bindings` — that table was retired in migration Phase 4c and no
+longer exists; links are the sole junction on accounts, and a test now pins
+that.) Orphans persist as dangling references, discovered only as per-spawn
+WARNs (§2.3). Subtlety found during remediation: the *current* DDL does carry
+`FOREIGN KEY … ON DELETE CASCADE` with `PRAGMA foreign_keys=ON`, but legacy
+user databases got the links table via forge-era `ALTER TABLE … RENAME`,
+which never retrofits FK clauses — so on real installs the DDL-level cascade
+silently doesn't exist and the orphans are real (proven by a red test against
+a legacy-shaped schema).
 
 ## 3. Severity
 
@@ -85,9 +91,10 @@ same OS user).
 
 ## 4. Remediation options (roughly in dependency order)
 
-1. **Cascade + cleanup at delete time** (smallest, clearly correct):
-   - Delete `db_agent_identity_links`/`db_identity_bindings` rows referencing
-     the account (fixes 2.4).
+1. **Cascade + cleanup at delete time** (smallest, clearly correct) —
+   **implemented, PR #2159**:
+   - Delete `db_agent_identity_links` rows referencing the account, in the
+     same transaction as the account row (fixes 2.4).
    - For `OAuthConfigDir` accounts, delete the config dir (fixes 2.2's
      on-disk half). Best-effort provider-side revocation (running the CLI's
      own `logout` against that dir first) fixes the other half.
