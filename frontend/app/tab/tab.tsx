@@ -273,6 +273,7 @@ function Tab(props: TabProps): JSX.Element {
                         onClick={props.onClose}
                         onMouseDown={handleMouseDownOnClose}
                         title="Close Tab"
+                        draggable={false}
                     >
                         {/* VS Code's "close" codicon, inlined as SVG so we
                             don't pull in the codicons font. Path verbatim
