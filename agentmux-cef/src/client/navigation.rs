@@ -34,16 +34,50 @@ use crate::state::AppState;
 #[cfg(target_os = "linux")]
 const PAINT_GATE_SAFETY_TIMEOUT_MS: i64 = 4000;
 
+/// Monotonic arm counter for the Linux paint gate. Each `on_load_end` call
+/// that (re-)arms a label's gate gets a fresh epoch; its safety-net timeout
+/// task captures that epoch and only acts if it's still current when the
+/// timeout fires (see `reveal_gated_window`). Mirrors the identical
+/// stale-timeout guard in `browser_pane::auth` (`NEXT_EPOCH`/`Entry::epoch`).
+#[cfg(target_os = "linux")]
+static PAINT_GATE_NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Reveal (show + focus the real window, dismiss the native splash) once —
 /// whichever of the real `report_first_paint` IPC signal or the safety-net
 /// timeout fires first wins; the other becomes a no-op via the
-/// `linux_paint_gate_pending` membership check. Must run on the CEF UI thread.
+/// `linux_paint_gate_pending` membership check.
+///
+/// `expected_epoch`: `None` for the real-signal path (always reveal whatever
+/// is currently armed for `label` — a stale signal from a torn-down document
+/// can't fire; CEF cancels pending rAF/timers on navigation). `Some(epoch)`
+/// for the safety-timeout path — reveals only if `label`'s current arm is
+/// still the one this specific timeout was scheduled for; if `on_load_end`
+/// re-armed the gate since (reload/retry mid-startup), this stale timeout is
+/// a no-op instead of revealing the window ahead of the *current*
+/// navigation's real paint (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md,
+/// reagent PR #2151 review).
+///
+/// Must run on the CEF UI thread.
 #[cfg(target_os = "linux")]
-pub(crate) fn reveal_gated_window(state: &Arc<AppState>, label: &str, reason: &'static str) {
+pub(crate) fn reveal_gated_window(
+    state: &Arc<AppState>,
+    label: &str,
+    reason: &'static str,
+    expected_epoch: Option<u64>,
+) {
     let armed_at = {
         let mut pending = state.linux_paint_gate_pending.lock();
-        match pending.remove(label) {
-            Some(armed_at) => armed_at,
+        match pending.get(label) {
+            Some(&(armed_at, epoch)) => {
+                if expected_epoch.is_some_and(|expected| expected != epoch) {
+                    // A newer on_load_end call re-armed this label after this
+                    // timeout was scheduled — the newer arm's own timeout (or
+                    // the real signal) owns the reveal now.
+                    return;
+                }
+                pending.remove(label);
+                armed_at
+            }
             // Already revealed by the other path, or never armed (e.g. a pool
             // window — those don't go through this gate at all).
             None => return,
@@ -76,9 +110,14 @@ pub(crate) fn reveal_gated_window(state: &Arc<AppState>, label: &str, reason: &'
 
 #[cfg(target_os = "linux")]
 wrap_task! {
-    struct PaintGateRevealTask { state: Arc<AppState>, label: String, reason: &'static str }
+    struct PaintGateRevealTask {
+        state: Arc<AppState>,
+        label: String,
+        reason: &'static str,
+        expected_epoch: Option<u64>,
+    }
     impl Task { fn execute(&self) {
-        reveal_gated_window(&self.state, &self.label, self.reason);
+        reveal_gated_window(&self.state, &self.label, self.reason, self.expected_epoch);
     }}
 }
 
@@ -88,7 +127,7 @@ wrap_task! {
 /// `on_load_end` deferred it.
 #[cfg(target_os = "linux")]
 pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
-    let mut task = PaintGateRevealTask::new(state, label, "signal");
+    let mut task = PaintGateRevealTask::new(state, label, "signal", None);
     post_task(ThreadId::UI, Some(&mut task));
 }
 
@@ -247,14 +286,21 @@ impl AgentMuxHandler {
                         let gated = gate_label.is_some();
                         #[cfg(target_os = "linux")]
                         if let Some(label) = gate_label {
+                            // Fresh epoch per arm — see PAINT_GATE_NEXT_EPOCH
+                            // and reveal_gated_window's doc comment. Guards
+                            // against a reload/retry re-arming this same
+                            // label before this timeout fires.
+                            let epoch = PAINT_GATE_NEXT_EPOCH
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             self.state
                                 .linux_paint_gate_pending
                                 .lock()
-                                .insert(label.clone(), std::time::Instant::now());
+                                .insert(label.clone(), (std::time::Instant::now(), epoch));
                             let mut timeout_task = PaintGateRevealTask::new(
                                 self.state.clone(),
                                 label,
                                 "timeout",
+                                Some(epoch),
                             );
                             post_delayed_task(
                                 ThreadId::UI,

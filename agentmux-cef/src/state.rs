@@ -560,11 +560,14 @@ pub struct AppState {
     /// Window labels whose native `window.show()`/focus + splash-ready-file has
     /// been deferred by `on_load_end` pending a real first-paint confirmation
     /// from the frontend (`report_first_paint` IPC command) or a safety-net
-    /// timeout, whichever fires first. Value is when the gate was armed, so
-    /// `reveal_gated_window` can log how long the window actually stayed
-    /// hidden and via which path. Only populated/consumed on Linux; the field
-    /// exists unconditionally to keep `AppState` un-cfg'd.
-    pub linux_paint_gate_pending: Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    /// timeout, whichever fires first. Value is `(armed_at, epoch)` — `epoch`
+    /// guards against a stale safety-net timeout from an earlier `on_load_end`
+    /// call for the same label (e.g. a reload/retry mid-startup re-arms the
+    /// gate) firing at its original, now-too-early deadline and revealing the
+    /// window ahead of the *current* navigation's real paint. Mirrors the
+    /// epoch pattern in `browser_pane::auth`. Only populated/consumed on
+    /// Linux; the field exists unconditionally to keep `AppState` un-cfg'd.
+    pub linux_paint_gate_pending: Mutex<std::collections::HashMap<String, (std::time::Instant, u64)>>,
 
     /// Phase B.5e — host's projection of the launcher's
     /// authoritative `state.instance_registry`. Fed by
