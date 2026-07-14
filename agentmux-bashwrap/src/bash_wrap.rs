@@ -50,7 +50,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 use crate::wps_client::WpsClient;
 
@@ -90,6 +90,29 @@ const FLUSH_BYTES: usize = 4096;
 /// without waiting for the next byte that would have triggered a
 /// natural flush.
 const FLUSH_QUIET_WINDOW: Duration = Duration::from_millis(50);
+
+/// If a wrapped command's PTY produces zero bytes of output for this long,
+/// assume it's blocked waiting for interactive input that will never come
+/// (e.g. `less`/`more` invoked as a pager, since the PTY deliberately makes
+/// the child see `isatty(stdout) == true` and this wrapper never writes to
+/// the PTY again after the startup DSR response) and forcibly kill it
+/// rather than leak this whole process forever. See
+/// docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md.
+///
+/// This is an IDLE timeout, not a total-runtime timeout: a command that's
+/// silent for under this long but runs far longer overall (e.g. a build
+/// with continuous compiler output over several minutes) is unaffected —
+/// only a command producing literally zero bytes for the full window trips
+/// it. Overridable via `AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS`.
+const DEFAULT_IDLE_KILL_TIMEOUT: Duration = Duration::from_secs(600);
+
+fn idle_kill_timeout() -> Duration {
+    std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_IDLE_KILL_TIMEOUT)
+}
 
 /// Wire payload published on the `tool_chunk` event. The tool_use_id
 /// rides in the payload (not the event name) so the frontend opens
@@ -536,6 +559,18 @@ async fn run_via_pty(
     // regardless of how `command` ends (trailing comment, no newline, etc.).
     cmd.arg(format!("{{\n{}\n}} </dev/null", command));
 
+    // Disable pagers. The PTY above deliberately makes the child see
+    // `isatty(stdout) == true` so external tools stay line-buffered (see
+    // the module doc comment) — but that's exactly what `git`
+    // (diff/log/show/branch/...) uses to decide whether to auto-invoke
+    // `core.pager` (`less` by default). We never write to the PTY again
+    // after the startup DSR response below, so a pager waiting for a
+    // keystroke blocks forever and leaks this whole process. `cat` passes
+    // content straight through with no paging. See
+    // docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md.
+    cmd.env("GIT_PAGER", "cat");
+    cmd.env("PAGER", "cat");
+
     // PATH fix-up: bashwrap is a Windows exe, so when MSYS2/Git Bash
     // spawned us it converted PATH to Windows form, which has
     // /c/Windows/system32, /c/Program Files/nodejs, etc. but NOT
@@ -591,6 +626,13 @@ async fn run_via_pty(
         .spawn_command(cmd)
         .with_context(|| format!("PTY spawn of bash at {}", bash.display()))?;
 
+    // Split out a killer before `child` moves into the wait task below, so
+    // an idle-timeout detected on the reader side (a different task) can
+    // still terminate it. See `ChildKiller::clone_killer`'s doc comment —
+    // this is exactly the "send it signals independently from a thread
+    // that may be blocked in `.wait`" case it exists for.
+    let mut killer = child.clone_killer();
+
     let reader = pair.master.try_clone_reader().context("PTY try_clone_reader")?;
 
     // Write the DSR response into the master writer, then hold the
@@ -610,8 +652,9 @@ async fn run_via_pty(
 
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
     let tx_reader = tx.clone();
+    let (idle_tx, idle_rx) = oneshot::channel::<()>();
     tokio::task::spawn_blocking(move || {
-        pty_reader_loop(reader, tx_reader);
+        pty_reader_loop(reader, tx_reader, idle_tx);
     });
     drop(tx);
 
@@ -619,7 +662,7 @@ async fn run_via_pty(
 
     // Move pair AND writer into the wait task — both must outlive
     // child.wait() to satisfy the ConPTY lifetime contract on Windows.
-    let exit_code = tokio::task::spawn_blocking(move || -> Result<i32> {
+    let mut wait_task = tokio::task::spawn_blocking(move || -> Result<i32> {
         let mut child = child;
         let status = child.wait().context("PTY child wait")?;
         let code = status.exit_code() as i32;
@@ -627,13 +670,56 @@ async fn run_via_pty(
         drop(writer);
         drop(pair);
         Ok(code)
-    })
-    .await
-    .context("PTY wait task join")??;
+    });
+
+    let mut idle_killed = false;
+    let exit_code = tokio::select! {
+        res = &mut wait_task => {
+            res.context("PTY wait task join")??
+        }
+        _ = idle_rx => {
+            idle_killed = true;
+            tracing::warn!(
+                target: "bashwrap",
+                tool_id = %args.tool_id,
+                idle_secs = idle_kill_timeout().as_secs(),
+                "child produced no PTY output for the idle timeout — likely \
+                 blocked waiting for interactive input (e.g. a pager); killing",
+            );
+            let _ = killer.kill();
+            // Bounded grace period for the kill to actually land and for
+            // the wait task to finish (which drops writer/pair, releasing
+            // the PTY). If it still doesn't, abandon the wait rather than
+            // block forever — main()'s process::exit() tears down every
+            // thread in this process regardless, once run() returns.
+            match tokio::time::timeout(Duration::from_secs(5), &mut wait_task).await {
+                Ok(Ok(Ok(code))) => code,
+                _ => 124, // matches the conventional `timeout` command's exit code
+            }
+        }
+    };
+
+    if idle_killed {
+        buffered.lock().await.extend_from_slice(
+            b"\n[bashwrap] command produced no output for the idle timeout and was \
+terminated automatically (likely blocked on a pager or other interactive \
+prompt this wrapper can never answer, e.g. `git diff`/`log`/`show` auto- \
+paging output that doesn't fit one screen). Try `git --no-pager <cmd>` or \
+`| cat` on future invocations.\n",
+        );
+    }
 
     // `buffered` (read by the caller for the model blob) is populated
-    // only by the publisher loop, so drain it before returning.
-    let _ = publisher_handle.await;
+    // only by the publisher loop, so drain it before returning. Bounded
+    // for the same reason as the wait task above: if a surviving
+    // grandchild still holds the PTY slave open after the kill, the
+    // reader thread's blocking read may never see EOF.
+    if tokio::time::timeout(Duration::from_secs(5), publisher_handle)
+        .await
+        .is_err()
+    {
+        tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, "publisher drain timed out — proceeding without it");
+    }
     Ok(exit_code)
 }
 
@@ -653,7 +739,14 @@ async fn run_via_pipes(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .kill_on_drop(true)
+        // Defense-in-depth, matching run_via_pty: stdout is a plain pipe
+        // here (isatty == false), so git shouldn't auto-page in this path
+        // at all — but set it anyway in case some tool pages on a
+        // different heuristic. See
+        // docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md.
+        .env("GIT_PAGER", "cat")
+        .env("PAGER", "cat");
     // Windows only: bash.exe is a console-subsystem binary, so spawning it
     // without CREATE_NO_WINDOW pops a new visible (and orphaned-looking)
     // console window for every fallback exec — this path only runs when
@@ -720,6 +813,7 @@ async fn run_via_pipes(
 fn pty_reader_loop(
     reader: Box<dyn std::io::Read + Send>,
     tx: mpsc::Sender<LineEvent>,
+    idle_tx: oneshot::Sender<()>,
 ) {
     use std::sync::mpsc as std_mpsc;
     // PTY collapses stdout + stderr onto one stream — the slave's
@@ -764,9 +858,20 @@ fn pty_reader_loop(
     // it here so throttled spinner frames collapse before becoming separate
     // LineEvents.
     let mut pending_cr_override: Option<Vec<u8>> = None;
+    // Idle-kill tracking: `last_activity` resets on every byte read from
+    // the PTY (regardless of whether it becomes a published LineEvent —
+    // even control-sequence-only output means the child is still doing
+    // something). `idle_tx` fires exactly once, on the first quiet-window
+    // timeout after `idle_kill_timeout()` has elapsed with zero activity.
+    // See the constant's doc comment for why this is idle-based rather
+    // than a total-runtime cap.
+    let idle_timeout = idle_kill_timeout();
+    let mut last_activity = std::time::Instant::now();
+    let mut idle_tx = Some(idle_tx);
     loop {
         match data_rx.recv_timeout(FLUSH_QUIET_WINDOW) {
             Ok(Some(mut chunk)) => {
+                last_activity = std::time::Instant::now();
                 let raw_n = chunk.len();
                 strip_dsr(&mut chunk);
                 // Phase β: strip remaining ANSI control sequences so
@@ -841,6 +946,16 @@ fn pty_reader_loop(
                 return;
             }
             Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                if idle_tx.is_some() && last_activity.elapsed() >= idle_timeout {
+                    // Fires once (idle_tx.take() leaves None behind), even
+                    // though this branch keeps running every quiet-window
+                    // tick after that — the async side kills the child on
+                    // receipt, which will eventually produce real EOF/error
+                    // here and end the loop normally.
+                    if let Some(sender) = idle_tx.take() {
+                        let _ = sender.send(());
+                    }
+                }
                 // P1b: quiet-window expiry.
                 //
                 // If `pending` starts with `\r`, it is a leading-\r spinner
@@ -1548,6 +1663,151 @@ mod tests {
             }
             if let Some(v) = prev_bash {
                 std::env::set_var("BASH", v);
+            }
+        }
+    }
+
+    // ── idle_kill_timeout tests ─────────────────────────────────────────────
+    // RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md: these cover the env-var
+    // override for the idle-kill timeout. The kill/PTY behavior itself isn't
+    // unit-testable without a real PTY (see the retro's verification section
+    // for the manual repro this was checked against instead).
+
+    #[test]
+    fn idle_kill_timeout_defaults_when_unset() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
+        unsafe {
+            std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS");
+        }
+        assert_eq!(idle_kill_timeout(), DEFAULT_IDLE_KILL_TIMEOUT);
+        unsafe {
+            if let Some(v) = prev {
+                std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v);
+            }
+        }
+    }
+
+    #[test]
+    fn idle_kill_timeout_honors_env_override() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
+        unsafe {
+            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "5");
+        }
+        assert_eq!(idle_kill_timeout(), Duration::from_secs(5));
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
+                None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
+            }
+        }
+    }
+
+    #[test]
+    fn idle_kill_timeout_falls_back_on_unparseable_value() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
+        unsafe {
+            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "not-a-number");
+        }
+        assert_eq!(idle_kill_timeout(), DEFAULT_IDLE_KILL_TIMEOUT);
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
+                None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
+            }
+        }
+    }
+
+    /// End-to-end proof that the idle-kill mechanism actually fires: a
+    /// child that produces zero PTY output (here, `sleep 9999` — a clean,
+    /// portable stand-in for "any command silently blocked forever," which
+    /// is exactly the shape of the pager hang this exists to catch — see
+    /// docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md) must be
+    /// killed and `run_via_pty` must return within a bounded time instead
+    /// of hanging. Without the fix, this test would hang until the outer
+    /// `tokio::time::timeout` fires and fails it.
+    #[tokio::test]
+    async fn run_via_pty_kills_idle_child_and_returns_promptly() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
+        unsafe {
+            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "1");
+        }
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let pty_system = native_pty_system();
+        let pair = match pty_system.openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(p) => p,
+            Err(e) => {
+                unsafe {
+                    match prev {
+                        Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
+                        None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
+                    }
+                }
+                eprintln!("skipping: PTY unavailable in this environment: {e}");
+                return;
+            }
+        };
+
+        let args = Args {
+            tool_id: "test-idle-kill".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+        };
+        // `Mutex` in this module scope resolves to `std::sync::Mutex`
+        // (shadowed for `ENV_LOCK` above) — `run_via_pty` needs the async
+        // `tokio::sync::Mutex` its `buffered: Arc<Mutex<Vec<u8>>>` param
+        // expects, so spell it out.
+        let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+        let start = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(20),
+            run_via_pty(&args, "sleep 9999", None, buffered.clone(), &bash, pair),
+        )
+        .await
+        .expect("run_via_pty must not hang past the outer test timeout — idle-kill should have fired well before this")
+        .expect("run_via_pty should return Ok even when it had to kill the child");
+
+        // The exact code is platform/kill-mechanism-specific (portable-pty's
+        // Windows ChildKiller calls TerminateProcess with code 127, but the
+        // wrapping `bash -c` process's own reported code after being killed
+        // is what we actually observe here, not necessarily 127 — verified
+        // empirically as 1 on this Windows dev machine). `124` is only the
+        // fallback sentinel used if the wait task doesn't resolve within
+        // the post-kill grace period at all. What actually matters: it's
+        // never the clean-success `0`, and (checked below) it returns
+        // promptly instead of hanging.
+        assert_ne!(
+            result, 0,
+            "an idle-killed child must not report a clean success exit code"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "should return well within the 1s idle timeout + grace periods, not the 20s outer bound — got {:?}",
+            start.elapsed()
+        );
+
+        let blob = buffered.lock().await;
+        assert!(
+            String::from_utf8_lossy(&blob).contains("terminated automatically"),
+            "model-visible blob should explain why the command was cut short, got: {:?}",
+            String::from_utf8_lossy(&blob)
+        );
+        drop(blob);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
+                None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
             }
         }
     }

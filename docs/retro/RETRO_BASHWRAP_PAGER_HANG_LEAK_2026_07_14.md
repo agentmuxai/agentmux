@@ -148,7 +148,7 @@ Every failing command is either a bare `git diff`/`git log`/`git show`
 ending in one of those — consistent with the pager-hang hypothesis across
 all eleven cross-session samples, not just the one directly reproduced.
 
-## Mitigation options (not yet applied)
+## Mitigation options (implemented — see "Fix implemented + verification" below)
 
 **Option A (targeted, low-risk) — disable git's pager for the PTY child**
 
@@ -188,18 +188,120 @@ and doesn't protect against the next tool that happens to auto-page.
 
 ## Action items
 
-- [ ] Decide on and implement a fix (Option A and/or B) — deferred; this
-  retro was written first per explicit direction this session.
-- [ ] Once fixed, manually verify: run a bashwrap-wrapped `git diff` /
-  `git log` on a diff large enough to normally trigger paging, and confirm
-  the wrapper process exits promptly instead of leaking.
+- [x] Decide on and implement a fix — **both Option A and Option B
+  shipped** (see "Fix implemented + verification" below). Option C
+  (srv-side timeout-based reaping) was not pursued — Option B's in-process
+  idle-kill makes it redundant for the reproduced failure mode.
+- [x] Once fixed, manually verify: run a bashwrap-wrapped `git diff` /
+  `git log` on output large enough to normally trigger paging, and confirm
+  the wrapper process exits promptly instead of leaking. **Done — see
+  below.**
 - [ ] Consider a cleanup pass to kill the currently-leaked processes found
-  in this investigation (12 identified at time of writing) — not done as
-  part of this retro, since killing running processes wasn't in scope for a
-  documentation-only pass.
-- [ ] If Option C is pursued, connect it to the existing WPS "starting"
-  system-chunk mechanism (`agentmux-srv/src/server/mod.rs`) rather than
-  building a second, separate tracking mechanism.
+  in this investigation (still present as of the fix landing — they were
+  created by the OLD, still-deployed binary and are unaffected by a
+  source-level fix until a new portable ships) — not done as part of this
+  pass.
+- [ ] Ship a fresh portable build so the live AgentMux instance on this
+  machine actually starts using the fixed binary — this session's own
+  Bash-tool calls still route through the old deployed
+  `agentmux-bashwrap.exe` until then. This was already independently
+  blocked by `RETRO_CEF_C1083_PARALLEL_BUILD_RACE_2026_07_14.md`.
+- [ ] Option C (srv-side reaping via the WPS "starting" system chunk) is
+  still available as a defense-in-depth layer if Option B's in-process
+  approach ever proves insufficient (e.g. a hang inside bashwrap's own
+  async runtime before the idle-timeout logic can even run) — not pursued
+  now since no evidence points at that failure mode.
+
+## Fix implemented + verification (2026-07-14)
+
+**Option A — disable git's pager.** `run_via_pty` and `run_via_pipes` (for
+consistency, though pipes shouldn't need it since `isatty(stdout)` is false
+there) now set `GIT_PAGER=cat` and `PAGER=cat` on the spawned `bash`
+child's environment.
+
+**Option B — idle-timeout kill + bounded waits.** `run_via_pty` now:
+- Splits a `ChildKiller` off the spawned child before it moves into the
+  `child.wait()` task (`portable_pty::ChildKiller::clone_killer` — its doc
+  comment literally describes this exact "signal it from a thread that may
+  be blocked in `.wait`" use case).
+- `pty_reader_loop` tracks time-since-last-PTY-activity and fires a
+  one-shot signal after `idle_kill_timeout()` (default 600s / 10 min,
+  overridable via `AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS`) of zero bytes
+  read — deliberately an **idle** timeout, not a total-runtime cap, so a
+  build that's silent for under that long but runs far longer overall
+  (e.g. several minutes of continuous compiler output) is unaffected.
+- `run_via_pty` races `child.wait()` against that signal via
+  `tokio::select!`; on idle-timeout it kills the child, gives the wait task
+  a bounded 5s grace period to resolve (releasing the PTY), and falls back
+  to a `124` sentinel exit code only if even that doesn't resolve — the
+  wrapper never blocks unboundedly on this. The publisher drain is
+  similarly bounded to 5s in case a surviving grandchild still holds the
+  PTY slave open. A clear explanation is appended to the model-visible
+  blob so the calling agent understands why the command was cut short.
+
+**Automated tests (all passing, `cargo test -p agentmux-bashwrap` — 46/46,
+up from the pre-fix 42):**
+
+- `idle_kill_timeout_defaults_when_unset`,
+  `idle_kill_timeout_honors_env_override`,
+  `idle_kill_timeout_falls_back_on_unparseable_value` — the env-var
+  override parsing.
+- `run_via_pty_kills_idle_child_and_returns_promptly` — a real end-to-end
+  test: spawns `sleep 9999` (a clean, portable stand-in for "any command
+  silently blocked forever," decoupled from needing an actual `less`/pager
+  to reproduce) through a real PTY with
+  `AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS=1`, and asserts `run_via_pty`
+  returns within a bounded time instead of hanging past a 20s outer test
+  timeout. **First run caught a bug in the test itself, not the fix:** the
+  original assertion `assert_eq!(result, 124, ...)` failed with `left: 1,
+  right: 124` — the killed child actually resolved within the 5s grace
+  period and reported its own real, platform-specific exit code, rather
+  than falling through to the `124` sentinel. Not a defect — `124` is only
+  supposed to fire when even the grace period doesn't resolve — so the
+  assertion was loosened to `assert_ne!(result, 0)` (a killed command must
+  never look like clean success) plus the timing bound, which is what
+  actually matters. Recording this literally since it's exactly the kind
+  of "verification surfaced a smaller issue in the test, not the
+  production code" outcome worth keeping visible.
+
+**Manual repro of the actual reported bug** (not just the synthetic
+`sleep` stand-in): built `target/debug/agentmux-bashwrap.exe` from the
+fixed source and ran it directly —
+
+```
+target/debug/agentmux-bashwrap.exe exec --tool-id=manual-repro-test \
+  --b64-cmd=<base64 of "git log --oneline -50">
+```
+
+in this repo (which has far more than one screen's worth of commits, so
+`git log` would previously auto-invoke `less` on a real terminal). Result:
+**exit code 0, ~1 second elapsed, full 50-line log in the output** — no
+pager invoked, no hang, and no lingering `agentmux-bashwrap.exe` process
+afterward.
+
+**Corroborating live evidence, and an important scope caveat.** While
+verifying, two *more* `agentmux-bashwrap.exe` processes turned up
+(`PID 73288`, `PID 95504`) beyond the twelve originally catalogued — both
+running through the **old, still-deployed** portable binary
+(`...\agentmux-0.53.2+...\runtime\tools\bin\agentmux-bashwrap.exe`), not
+the fixed source in this repo, confirming this session's own tool calls
+still route through the unfixed binary (expected — no new portable has
+shipped yet). Decoding PID 73288's command line showed it wasn't even a
+`git`/pager case — it was an earlier `find / -maxdepth 6 -type d -iname
+"portable-pty-*" ...` from this same session, walking a large portion of
+the filesystem. **Correction:** that process was not actually stuck — a
+`task-notification` arrived confirming it completed normally (exit code 0)
+shortly after this was written, meaning it was legitimately slow (a wide
+filesystem search), not hung. It's kept here as a **real, concrete example
+of the exact false-positive risk Option B's idle-timeout carries**: a
+long-silent-but-still-working command (no matches to print for a long
+stretch) is indistinguishable, from bashwrap's perspective, from a
+genuinely stuck one, and a `find /`-like search that legitimately produces
+zero output for 10+ minutes could in principle trip the idle-kill.
+Mitigated by `AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS` being overridable and by
+the 10-minute default being generous, but worth monitoring in practice
+rather than assuming zero false-positive risk — this specific case simply
+didn't run long enough in complete silence to test that edge directly.
 
 ## Open questions
 
@@ -232,3 +334,8 @@ and doesn't protect against the next tool that happens to auto-page.
 | 5 | Delegated a full investigation of `agentmux-bashwrap`'s exit path and `agentmux-srv`'s (lack of) supervision to a research agent. |
 | 6 | Root cause returned: PTY-driven `isatty(stdout)=true` causes `git` to auto-invoke `less`, which blocks forever with no keystroke source; no timeout anywhere in the call chain; no srv-side supervision reaches bashwrap at all. |
 | 7 | Retro written; fix deferred to a follow-up per explicit direction ("Write a retro first, fix later"). |
+| 8 | Directed to fix all identified issues in the same PR. Implemented Option A (GIT_PAGER/PAGER=cat) and Option B (idle-timeout kill + bounded waits via `ChildKiller::clone_killer`) in `run_via_pty`. |
+| 9 | `cargo build -p agentmux-bashwrap` clean; `cargo test -p agentmux-bashwrap` 42/42 pre-existing tests still pass. |
+| 10 | Added 4 new tests (env-override parsing ×3, end-to-end idle-kill ×1). First run of the end-to-end test failed on an over-specific assertion (expected exit code 124, got 1) — the kill mechanism itself worked correctly; the test's expectation was wrong. Fixed the assertion, re-ran: 46/46 passing. |
+| 11 | Manual repro against the actual reported bug (not the synthetic `sleep` stand-in): built the fixed binary, ran `git log --oneline -50` through it directly — exited in ~1s with full output, no hang, no leak. |
+| 12 | While checking for new leaks, found 2 more bashwrap processes — both traced to the OLD deployed binary (fix not yet live) and one to an unrelated `find /` command from earlier this session, which a subsequent task-notification confirmed had completed normally (not actually stuck) — documented as a real example of the idle-timeout's false-positive risk class rather than a new leak. |
