@@ -550,6 +550,43 @@ verified the production code manually instead.** Reasoning:
   own source or issue tracker) rather than anything specific to this
   codebase's logic — not something to chase further inside this PR.
 
+## Follow-up round 4: reagent P1 ×2 — unbounded taskkill, and pipe-path had no tree-kill
+
+A fifth review round on the `run_via_pipes` idle-kill commit found two more
+real gaps, both direct consequences of not fully carrying the tree-kill
+fix (round 2, above) over to every call site:
+
+- **Unbounded `kill_process_tree` call.** `run_via_pty`'s idle branch
+  awaited `tokio::task::spawn_blocking(move || kill_process_tree(pid))`
+  with no timeout — every *other* blocking step in the same function
+  (`wait_task`, `publisher_handle`, the reader-task join) is bounded to
+  5s, but this one wasn't. `kill_process_tree` shells out synchronously to
+  `taskkill /T /F /PID`, and `taskkill /T` itself hanging is a documented
+  Windows failure mode — so an unresponsive `taskkill` would have
+  reintroduced the exact unbounded hang this whole PR exists to eliminate,
+  directly contradicting the surrounding comment's claim that "the wrapper
+  never blocks unboundedly on this." Fixed by wrapping that same
+  `spawn_blocking` call in a 5s `tokio::time::timeout`, matching every
+  other bounded step.
+- **`run_via_pipes` had no tree-kill at all.** Its idle branch only called
+  `child.start_kill()` — like `ChildKiller::kill()` before the round-2 fix,
+  this terminates only the direct `bash` process, not descendants it
+  forked (a backgrounded `&` child, or a pipeline segment). Those could
+  survive, still attached to the stdout/stderr pipes, leaving the reader
+  tasks waiting for an EOF that never arrives — falling through their own
+  5s join timeout as "abandoned" rather than confirmed dead, silently
+  reproducing the same leak class this PR exists to fix. Fixed by
+  capturing `child.id()` right after spawn and calling the same
+  (bounded) `kill_process_tree()` before `child.start_kill()`, mirroring
+  `run_via_pty`'s tree-kill-first ordering and its documented reasoning
+  exactly.
+
+Verified: `cargo build` clean, full suite **48/48 passing** (unchanged
+count and timing — these were pure hardening fixes to code paths the
+existing tests don't specifically exercise, not new test-requiring
+behavior), manual `git log --oneline -50` repro re-confirmed clean once
+more.
+
 ## Open questions
 
 1. Does this affect other commonly-paged tools beyond `git` (e.g. `man`,
@@ -629,3 +666,4 @@ verified the production code manually instead.** Reasoning:
 | 23 | Extensive bisection via standalone minimal repro tests (incrementally adding pieces back to a known-working bare spawn+kill+wait baseline) isolated the exact trigger: `.abort()`ing a task that's inside `tokio::time::timeout(_, ChildStdout::read(...))` on a just-killed child's Windows pipe hangs that specific test's runtime shutdown — even though `.abort()` itself returns immediately. A per-read-timeout-free bare reader could be safely aborted; adding the 50ms quiet-window timeout wrapper (matching `stream_reader`'s real structure) is what triggered it. |
 | 24 | Fixed `run_via_pipes` to `tokio::join!` (bounded by a 5s timeout) the reader tasks instead of `.abort()`ing them — safe because dropping a `JoinHandle` (unlike calling `.abort()` on it) doesn't cancel the underlying task. This did NOT resolve the automated test for the real `run_via_pipes` (with its full `stream_reader`/`mpsc`/`spawn_publisher_loop`/shared-mutex machinery) — it still hung identically, despite an isolated minimal repro with the same select!/kill/join structure passing cleanly. Further bisection against those remaining pieces was not completed. |
 | 25 | Decided to remove the automated test for `run_via_pipes`'s idle-kill rather than continue an open-ended bisection, since (a) production correctness was already thoroughly proven via the diagnostic instrumentation from this same investigation, and (b) the specific failure mode — a graceful async-runtime-shutdown hang — cannot occur in production, where `main()`'s only exit path is an unconditional, non-graceful `std::process::exit()`. Verified the rest of the suite: 48/48 passing, clean and fast (~4s). |
+| 26 | Fifth ReAgent review round: two more P1s, both from not fully carrying the round-2 tree-kill fix everywhere. `run_via_pty`'s `kill_process_tree` call had no timeout (unlike every other bounded step in that function) — a hung `taskkill /T` would reintroduce the unbounded-hang bug this PR fixes. `run_via_pipes`'s idle-kill only called `child.start_kill()`, never `kill_process_tree` — descendants forked by the pipe-path's child could survive, unaddressed. Fixed both: bounded the taskkill call with the same 5s timeout pattern used elsewhere, and added the same (bounded) tree-kill to `run_via_pipes`, ordered before `start_kill()` exactly like the PTY path. Full suite still 48/48, manual repro re-confirmed clean. |

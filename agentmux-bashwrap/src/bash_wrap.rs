@@ -795,8 +795,16 @@ async fn run_via_pty(
                     // spawn_blocking: kill_process_tree shells out synchronously
                     // (std::process::Command::output()) — running it inline here
                     // would block this tokio worker thread for the taskkill
-                    // round-trip.
-                    let _ = tokio::task::spawn_blocking(move || kill_process_tree(pid)).await;
+                    // round-trip. Bounded (reagent P1, PR #2156): `taskkill /T`
+                    // itself can hang (a documented Windows failure mode —
+                    // unresponsive process enumeration) — without this timeout,
+                    // an unresponsive taskkill reintroduces the exact unbounded
+                    // hang this whole fix exists to eliminate.
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(5),
+                        tokio::task::spawn_blocking(move || kill_process_tree(pid)),
+                    )
+                    .await;
                 }
                 let _ = killer.kill();
                 // Bounded grace period for the kill to actually land and for
@@ -886,6 +894,9 @@ async fn run_via_pipes(
     let mut child = cmd
         .spawn()
         .with_context(|| format!("pipe spawn of bash at {}", bash.display()))?;
+    // Captured before anything else can consume/reap the child — see the
+    // idle-kill branch below for why this matters (reagent P1, PR #2156).
+    let child_pid = child.id();
 
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("no stdout"))?;
     let stderr = child.stderr.take().ok_or_else(|| anyhow!("no stderr"))?;
@@ -949,6 +960,21 @@ async fn run_via_pipes(
                     idle_secs = idle_kill_timeout().as_secs(),
                     "child produced no output for the idle timeout (pipe path) — killing",
                 );
+                // Same tree-kill-first ordering and reasoning as run_via_pty
+                // (reagent P1, PR #2156): child.start_kill() alone only
+                // terminates the direct bash process, not descendants it
+                // forked (a backgrounded `&` child, or a pipeline segment) —
+                // those would otherwise survive, still attached to the
+                // stdout/stderr pipes, leaving the reader tasks waiting for
+                // an EOF that never comes. Bounded: taskkill /T can itself
+                // hang (a documented Windows failure mode).
+                if let Some(pid) = child_pid {
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(5),
+                        tokio::task::spawn_blocking(move || kill_process_tree(pid)),
+                    )
+                    .await;
+                }
                 let _ = child.start_kill();
                 match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
                     Ok(Ok(status)) => status.code().unwrap_or(-1),
