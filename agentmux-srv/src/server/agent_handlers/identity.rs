@@ -406,37 +406,47 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let cmd: CommandDeleteIdentityAccountData = serde_json::from_value(data)
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;
-                // If this account stored its secret in the OS keychain, drop
-                // it too so no orphaned credential survives the DB row.
-                // `keyring` is blocking, so run it via spawn_blocking.
+                // Drop the credential material behind the row BEFORE the row
+                // itself: keychain entry for `SecretRef::Keychain`, on-disk
+                // OAuth token dir for `SecretRef::OAuthConfigDir` (layer 1 of
+                // ANALYSIS_ACCOUNT_DELETE_AUTH_LIFECYCLE_GAP_2026_07_14.md §4).
+                // Best-effort — cleanup trouble never blocks the delete; the
+                // cleanup fn logs every outcome under "identity.delete:".
+                // keyring + fs are blocking, so run via spawn_blocking.
                 // Capture provider before the row is deleted so the logout-
-                // side log line (below) can carry it.
+                // side log lines can carry it.
                 let acct = wstore.identity_get(&cmd.id).ok().flatten();
                 let provider = acct.as_ref().map(|a| a.provider.clone()).unwrap_or_default();
-                if let Some(acct) = &acct {
-                    if matches!(acct.secret_ref, SecretRef::Keychain { .. }) {
-                        let aid = cmd.id.clone();
-                        let res = tokio::task::spawn_blocking(move || {
-                            crate::identity::secret_store::delete(&aid)
-                        })
-                        .await
-                        .unwrap_or_else(|je| Err(format!("join: {je}")));
-                        match res {
-                            // info!, not debug!: the production filter is
-                            // "agentmuxsrv=info,info" (reagent P1, PR #2143).
-                            // "identity.delete:" is `muxlog auth` vocabulary.
-                            Ok(()) => tracing::info!(
-                                account_id = %cmd.id,
-                                provider = %provider,
-                                "identity.delete: keychain secret removed"
-                            ),
-                            Err(e) => tracing::warn!(target: "identity", "keychain delete for {} failed: {e}", cmd.id),
-                        }
-                    }
+                if let Some(acct) = acct {
+                    // Containment root for OAuth dirs: only paths inside
+                    // ~/.agentmux/shared/identities/ are ever removed (the
+                    // legacy ~/.claude migration dir is the user's global
+                    // CLI login — never ours to delete).
+                    let identities_root = agentmux_common::DataPaths::from_env()
+                        .map(|p| p.identities_dir());
+                    let _ = tokio::task::spawn_blocking(move || {
+                        crate::identity::cleanup::cleanup_account_secrets(
+                            &acct,
+                            identities_root.as_deref(),
+                        )
+                    })
+                    .await;
                 }
-                let deleted = wstore
+                let outcome = wstore
                     .identity_delete(&cmd.id)
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;
+                let deleted = outcome.deleted;
+                if outcome.links_cascaded > 0 {
+                    // info!, not debug!: the production filter is
+                    // "agentmuxsrv=info,info" (reagent P1, PR #2143).
+                    // "identity.delete:" is `muxlog auth` vocabulary.
+                    tracing::info!(
+                        account_id = %cmd.id,
+                        provider = %provider,
+                        links = outcome.links_cascaded,
+                        "identity.delete: links cascaded"
+                    );
+                }
                 tracing::info!(
                     account_id = %cmd.id,
                     provider = %provider,

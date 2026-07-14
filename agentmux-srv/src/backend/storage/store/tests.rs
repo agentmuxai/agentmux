@@ -478,10 +478,10 @@
     fn test_identity_delete() {
         let store = v6_test_store();
         store.identity_upsert(&sample_account("id-gh", "github")).unwrap();
-        assert!(store.identity_delete("id-gh").unwrap());
+        assert!(store.identity_delete("id-gh").unwrap().deleted);
         assert!(store.identity_get("id-gh").unwrap().is_none());
         // Second delete is a no-op.
-        assert!(!store.identity_delete("id-gh").unwrap());
+        assert!(!store.identity_delete("id-gh").unwrap().deleted);
     }
 
     #[test]
