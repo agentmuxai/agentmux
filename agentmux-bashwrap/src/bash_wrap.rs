@@ -736,50 +736,88 @@ async fn run_via_pty(
         Ok(code)
     });
 
+    // `idle_rx` resolves for TWO distinct reasons, and they must not be
+    // conflated (reagent P1, PR #2156): either `pty_reader_loop` really
+    // did send the idle-timeout signal (`Ok(())`), OR its `idle_tx` was
+    // simply DROPPED WITHOUT SENDING because the reader hit a normal EOF
+    // and returned — which is exactly what happens on ordinary, fast,
+    // successful command completion. A oneshot receiver's `.await`
+    // resolves (with `Err`) in that drop case too, and `wait_task`
+    // finishing is an independent race on a separate spawn_blocking
+    // thread — under scheduling variance (or blocking-pool contention from
+    // concurrent bashwrap invocations, common per this PR's own retro doc)
+    // the reader's drop can resolve first even for a command that ran to
+    // completion normally. Treating ANY `idle_rx` resolution as "idle
+    // timeout fired" would misclassify and kill perfectly successful fast
+    // commands. Only `Ok(())` is a real signal; `Err` just means "not an
+    // idle timeout, keep waiting on wait_task directly."
     let mut idle_killed = false;
     let exit_code = tokio::select! {
         res = &mut wait_task => {
             res.context("PTY wait task join")??
         }
-        _ = idle_rx => {
-            idle_killed = true;
-            tracing::warn!(
-                target: "bashwrap",
-                tool_id = %args.tool_id,
-                idle_secs = idle_kill_timeout().as_secs(),
-                "child produced no PTY output for the idle timeout — likely \
-                 blocked waiting for interactive input (e.g. a pager); killing",
-            );
-            // Tree-kill FIRST, `killer.kill()` second — order matters.
-            // `taskkill /T` walks descendants by their recorded parent PID,
-            // which only works while the root (bash) is still enumerable;
-            // killing bash first (via killer.kill()) and THEN tree-killing
-            // races taskkill against an already-dead root and can leave
-            // grandchildren behind (verified empirically: an earlier version
-            // of this fix that called killer.kill() first left 1 of 2
-            // backgrounded test children alive — the test below is what
-            // caught it). killer.kill() still runs afterward as a cheap,
-            // harmless belt-and-suspenders in case kill_process_tree itself
-            // didn't fully land (e.g. taskkill unavailable).
-            if let Some(pid) = child_pid {
-                // spawn_blocking: kill_process_tree shells out synchronously
-                // (std::process::Command::output()) — running it inline here
-                // would block this tokio worker thread for the taskkill
-                // round-trip.
-                let _ = tokio::task::spawn_blocking(move || kill_process_tree(pid)).await;
-            }
-            let _ = killer.kill();
-            // Bounded grace period for the kill to actually land and for
-            // the wait task to finish (which drops writer/pair, releasing
-            // the PTY). If it still doesn't, abandon the wait rather than
-            // block forever — main()'s process::exit() tears down every
-            // thread in this process regardless, once run() returns.
-            match tokio::time::timeout(Duration::from_secs(5), &mut wait_task).await {
-                Ok(Ok(Ok(code))) => code,
-                _ => 124, // matches the conventional `timeout` command's exit code
+        idle_signal = idle_rx => {
+            if idle_signal.is_err() {
+                // idle_tx dropped without sending — not a real timeout.
+                // idle_rx is now consumed either way, so just await the
+                // real completion directly instead of re-entering select.
+                wait_task.await.context("PTY wait task join")??
+            } else {
+                idle_killed = true;
+                tracing::warn!(
+                    target: "bashwrap",
+                    tool_id = %args.tool_id,
+                    idle_secs = idle_kill_timeout().as_secs(),
+                    "child produced no PTY output for the idle timeout — likely \
+                     blocked waiting for interactive input (e.g. a pager); killing",
+                );
+                // Tree-kill FIRST, `killer.kill()` second — order matters.
+                // `taskkill /T` walks descendants by their recorded parent PID,
+                // which only works while the root (bash) is still enumerable;
+                // killing bash first (via killer.kill()) and THEN tree-killing
+                // races taskkill against an already-dead root and can leave
+                // grandchildren behind (verified empirically: an earlier version
+                // of this fix that called killer.kill() first left 1 of 2
+                // backgrounded test children alive — the test below is what
+                // caught it). killer.kill() still runs afterward as a cheap,
+                // harmless belt-and-suspenders in case kill_process_tree itself
+                // didn't fully land (e.g. taskkill unavailable).
+                if let Some(pid) = child_pid {
+                    // spawn_blocking: kill_process_tree shells out synchronously
+                    // (std::process::Command::output()) — running it inline here
+                    // would block this tokio worker thread for the taskkill
+                    // round-trip.
+                    let _ = tokio::task::spawn_blocking(move || kill_process_tree(pid)).await;
+                }
+                let _ = killer.kill();
+                // Bounded grace period for the kill to actually land and for
+                // the wait task to finish (which drops writer/pair, releasing
+                // the PTY). If it still doesn't, abandon the wait rather than
+                // block forever — main()'s process::exit() tears down every
+                // thread in this process regardless, once run() returns.
+                match tokio::time::timeout(Duration::from_secs(5), &mut wait_task).await {
+                    Ok(Ok(Ok(code))) => code,
+                    _ => 124, // matches the conventional `timeout` command's exit code
+                }
             }
         }
     };
+
+    // `buffered` (read by the caller for the model blob) is populated
+    // only by the publisher loop, so drain it BEFORE appending the
+    // idle-kill diagnostic (reagent P2, PR #2156) — otherwise genuine
+    // pre-kill output still queued in the channel could flush into
+    // `buffered` after the diagnostic note, interleaving it ahead of
+    // trailing real output instead of strictly after it. Bounded for the
+    // same reason as the wait task above: if a surviving grandchild still
+    // holds the PTY slave open after the kill, the reader thread's
+    // blocking read may never see EOF.
+    if tokio::time::timeout(Duration::from_secs(5), publisher_handle)
+        .await
+        .is_err()
+    {
+        tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, "publisher drain timed out — proceeding without it");
+    }
 
     if idle_killed {
         buffered.lock().await.extend_from_slice(
@@ -791,17 +829,6 @@ paging output that doesn't fit one screen). Try `git --no-pager <cmd>` or \
         );
     }
 
-    // `buffered` (read by the caller for the model blob) is populated
-    // only by the publisher loop, so drain it before returning. Bounded
-    // for the same reason as the wait task above: if a surviving
-    // grandchild still holds the PTY slave open after the kill, the
-    // reader thread's blocking read may never see EOF.
-    if tokio::time::timeout(Duration::from_secs(5), publisher_handle)
-        .await
-        .is_err()
-    {
-        tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, "publisher drain timed out — proceeding without it");
-    }
     Ok(exit_code)
 }
 
@@ -1888,15 +1915,25 @@ mod tests {
 
         // Unique-per-run, but still a valid numeric duration for `sleep`
         // (GNU coreutils sleep accepts fractional seconds and arbitrarily
-        // large values — this test's own PID is a large, safely-unique-
-        // enough integer that won't collide with an unrelated sleep
-        // elsewhere on a shared dev machine). A non-numeric marker string
-        // would make `sleep` error out instantly instead of blocking —
-        // caught by this test's own first run failing with exit code 0
-        // (~0.1s elapsed) instead of the expected kill.
+        // large values). A non-numeric marker string would make `sleep`
+        // error out instantly instead of blocking — caught by this test's
+        // own first run failing with exit code 0 (~0.1s elapsed) instead
+        // of the expected kill.
+        //
+        // The `100` tag (vs. `bashwrap_binary_idle_kill_cleans_up_full_process_tree`'s
+        // `300`) is NOT cosmetic: `std::process::id()` is the SAME across
+        // every test in this binary (they're threads in one process, not
+        // separate processes), and Rust's test harness runs tests in
+        // parallel by default — so a bare `pid.to_string()` marker would
+        // let this test's sleep processes get miscounted as "survivors" by
+        // that other test's WMI substring search (and vice versa) if both
+        // happen to overlap in time. Found this the hard way: the other
+        // test failed with "3 survivors" once this test's marker collided
+        // with its own. The tag makes the two tests' marker strings
+        // non-overlapping substrings of each other.
         let pid = std::process::id();
-        let marker = pid.to_string();
-        let command = format!("sleep {pid}.001 & sleep {pid}.002 & wait");
+        let marker = format!("{pid}100");
+        let command = format!("sleep {marker}.001 & sleep {marker}.002 & wait");
 
         let start = std::time::Instant::now();
         let result = tokio::time::timeout(
@@ -1941,6 +1978,104 @@ mod tests {
         // `bashwrap_binary_idle_kill_cleans_up_full_process_tree` below for
         // why, and for the test that actually proves full-tree cleanup.
         let _ = &marker; // used by the binary-level test below, not here
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
+                None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
+            }
+        }
+    }
+
+    /// Reagent P1 follow-up, PR #2156: `idle_rx` resolves (with `Err`) not
+    /// only when `pty_reader_loop` really signals an idle timeout, but also
+    /// whenever it returns normally (EOF on a fast, successful command) and
+    /// drops the still-unused `idle_tx`. The original `tokio::select! { _ =
+    /// idle_rx => {...} }` treated BOTH cases identically, so a fast
+    /// command completing could race `wait_task` and get spuriously
+    /// killed + tagged "terminated automatically" even though it ran to
+    /// completion normally. Fixed by branching on `idle_signal.is_err()`
+    /// inside that arm instead of ignoring the value.
+    ///
+    /// A single run of a fast command isn't a reliable regression test for
+    /// a race in general, so this runs `echo` 30 times with a very short
+    /// idle timeout to widen the chance of catching it.
+    ///
+    /// Honesty check performed while writing this test: temporarily forced
+    /// the OLD (buggy) unconditional-kill behavior back in and re-ran this
+    /// exact test — it still passed 30/30. On this machine, `wait_task`
+    /// (`child.wait()` resolving) appears to reliably win the race against
+    /// `pty_reader_loop`'s EOF-then-drop for a trivially fast command like
+    /// `echo hello`, so this test does NOT reliably fail on the unfixed
+    /// code and can't be trusted as sole proof the bug is gone. ReAgent's
+    /// code-level analysis of the race is still correct — a oneshot
+    /// receiver genuinely does resolve identically for "sent" and
+    /// "dropped without sending," and the fix (branching on
+    /// `idle_signal.is_err()`) is the structurally correct response
+    /// regardless of whether this specific test can force the window open.
+    /// The scenario ReAgent named as the realistic trigger — blocking
+    /// thread-pool contention from concurrent bashwrap invocations —
+    /// wasn't reproduced here; doing so reliably would need deliberately
+    /// saturating tokio's blocking pool, not attempted given time spent on
+    /// this investigation already. This test is kept as basic coverage of
+    /// the fast-success path (asserts real output, exit 0, no spurious
+    /// diagnostic) — a real regression guard for *some* bugs in this area,
+    /// just not proven to be one for this exact race.
+    #[tokio::test]
+    async fn run_via_pty_does_not_misclassify_fast_success_as_idle_timeout() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
+        unsafe {
+            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "1");
+        }
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+
+        for i in 0..30 {
+            let pty_system = native_pty_system();
+            let pair = match pty_system.openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            }) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("skipping: PTY unavailable in this environment: {e}");
+                    break;
+                }
+            };
+            let args = Args {
+                tool_id: format!("test-fast-success-{i}"),
+                b64_cmd: String::new(),
+                block_id: None,
+            };
+            let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+            let result = tokio::time::timeout(
+                Duration::from_secs(10),
+                run_via_pty(&args, "echo hello", None, buffered.clone(), &bash, pair),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("iteration {i}: run_via_pty must not hang on a trivial fast command"))
+            .unwrap_or_else(|e| panic!("iteration {i}: run_via_pty errored: {e}"));
+
+            assert_eq!(
+                result, 0,
+                "iteration {i}: a fast, genuinely successful `echo` must report clean exit 0, \
+                 not get spuriously classified as idle-killed by the idle_rx/wait_task race"
+            );
+            let blob = String::from_utf8_lossy(&buffered.lock().await).into_owned();
+            assert!(
+                !blob.contains("terminated automatically"),
+                "iteration {i}: fast successful command must not carry the idle-kill \
+                 diagnostic — got blob: {blob:?}"
+            );
+            assert!(
+                blob.contains("hello"),
+                "iteration {i}: expected the command's real output in the blob, got: {blob:?}"
+            );
+        }
 
         unsafe {
             match prev {
@@ -2009,9 +2144,15 @@ mod tests {
             bin.exists(),
             "expected the real binary at {bin:?} (derived from test harness path {harness_exe:?}) — build it first with `cargo build -p agentmux-bashwrap`"
         );
+        // `300` tag: see `run_via_pty_kills_idle_child_and_returns_promptly`'s
+        // comment on why a bare `pid.to_string()` marker isn't safe when
+        // multiple tests in this same process/binary can spawn markered
+        // sleep processes concurrently (Rust's test harness parallelizes
+        // by default) — this tag keeps the two tests' marker substrings
+        // from overlapping.
         let pid = std::process::id();
-        let marker = pid.to_string();
-        let command = format!("sleep {pid}.003 & sleep {pid}.004 & wait");
+        let marker = format!("{pid}300");
+        let command = format!("sleep {marker}.003 & sleep {marker}.004 & wait");
         let b64 = {
             use base64::Engine as _;
             use base64::engine::general_purpose::URL_SAFE_NO_PAD;

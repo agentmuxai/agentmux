@@ -383,6 +383,72 @@ round, 42 before any of this work).
 --oneline -50` through the rebuilt binary — exit 0, instant, full 83-line
 output (50 log lines + the `<exited ...>` wrapper), no hang, no leak.
 
+## Follow-up round 2: reagent P1 (misclassification race) + P2 (ordering) + a self-inflicted test bug
+
+A third ReAgent review round on the tree-kill commit above found two more
+real issues, both in `run_via_pty`'s `tokio::select!` block:
+
+- **P1 — idle/success misclassification race.** The `select!` arm was
+  written `_ = idle_rx => { idle_killed = true; ...kill... }`. A
+  `oneshot::Receiver`'s `.await` resolves for TWO different reasons —
+  the sender explicitly sent (`Ok`), or the sender was simply *dropped
+  without sending* (`Err`) — and the `_` pattern ignored which one
+  happened. `pty_reader_loop` drops its still-unused `idle_tx` whenever it
+  returns via normal EOF (i.e. every ordinary successful command), and
+  that drop races `wait_task`'s independent `child.wait()` completion on a
+  separate thread. Under scheduling variance — ReAgent specifically named
+  blocking-thread-pool contention from concurrent bashwrap invocations,
+  which this retro's own evidence shows are common — a fast, perfectly
+  successful command could have its `idle_rx` branch "win" the race and
+  get spuriously killed, with the false `"terminated automatically"`
+  diagnostic appended to otherwise-normal output. Fixed by branching on
+  `idle_signal.is_err()` inside the arm: `Err` (dropped, not signaled) now
+  falls through to directly `.await` the real `wait_task` instead of
+  treating it as a kill trigger.
+- **P2 — diagnostic ordering.** The idle-kill diagnostic note was appended
+  to `buffered` *before* draining `publisher_handle`, so genuine
+  already-queued pre-kill output could flush in after the diagnostic,
+  interleaving it ahead of trailing real output instead of strictly after.
+  Fixed by moving the publisher drain before the diagnostic append.
+
+**Added a regression test for P1**
+(`run_via_pty_does_not_misclassify_fast_success_as_idle_timeout`): runs a
+trivial `echo hello` 30 times with a 1s idle timeout, asserting every run
+reports exit 0 with no spurious kill diagnostic. **Honesty check, done
+before trusting it:** temporarily forced the old unconditional-kill
+behavior back in and re-ran this exact test — it still passed 30/30. On
+this machine, `wait_task` reliably wins the race against
+`pty_reader_loop`'s EOF-then-drop for a command as fast as `echo hello`, so
+this test does *not* reliably fail on the unfixed code and isn't
+proof by itself that the race is closed. ReAgent's code-level analysis is
+still correct regardless (a oneshot receiver genuinely resolves
+identically for both cases, and the fix is the structurally correct
+response) — the realistic trigger they named (blocking-pool contention
+under concurrent load) wasn't reproduced here; doing so reliably would
+need deliberately saturating tokio's blocking pool, not attempted given
+time already spent on this investigation. Recorded plainly rather than
+overclaiming test coverage that doesn't exist.
+
+**A third, self-inflicted bug found while adding that test — full test
+suite went from passing to failing with `"3 process(es) still matching
+marker"`.** Root cause: `std::process::id()` is the *same* value across
+every test in one `cargo test` binary (they're threads in one process, not
+separate OS processes), and Rust's test harness runs tests in parallel by
+default. Two different tests (`run_via_pty_kills_idle_child_and_returns_promptly`
+and `bashwrap_binary_idle_kill_cleans_up_full_process_tree`) both derived
+their marker from the bare PID, so their `sleep <marker>.NNN` commands
+shared a common substring — a slow-to-clean-up process from one test could
+get miscounted as a "survivor" by the other test's WMI search if they
+happened to overlap in time. Fixed by baking a distinguishing tag into
+each test's marker (`{pid}100` vs `{pid}300`) so their marker substrings
+can no longer overlap. Re-ran the full suite 4× in a row after the fix:
+**48/48 passing every time** (47 after the tree-kill round, 46 after the
+first fix round, 42 before any of this work).
+
+Manual `git log --oneline -50` repro re-re-confirmed clean after this
+round too: exit 0, instant, full output, zero leaked `sleep.exe` processes
+afterward.
+
 ## Open questions
 
 1. Does this affect other commonly-paged tools beyond `git` (e.g. `man`,
@@ -437,3 +503,6 @@ output (50 log lines + the `<exited ...>` wrapper), no hang, no leak.
 | 15 | Second run: "1 survivor" — investigated by manually checking `Win32_Process.ParentProcessId` for a backgrounded `sleep` outside the test, found it pointed at an already-exited PID, seemingly confirming MSYS bash breaks Win32 PID tracking for forked children. Reordered `kill_process_tree` before `killer.kill()` (a real, separate fix for a kill-ordering race) and re-ran: still "1 survivor." |
 | 16 | Found the actual cause by inspecting the surviving process directly rather than trusting the count: the test's own PowerShell query matched *itself* (its `-like '*marker*'` argument literally contains the marker). Fixed the query to exclude `powershell.exe`; confirmed via a marker-free, `sleep.exe`-filtered manual check that zero real orphans existed — the fix had been working the whole time. |
 | 17 | Added a second, stronger test (`bashwrap_binary_idle_kill_cleans_up_full_process_tree`) spawning the real compiled binary as a subprocess rather than calling `run_via_pty` in-process, to properly observe post-exit cleanup. Both tests pass consistently across repeated runs. Full suite: 47/47. Manual `git log` repro re-confirmed clean after all changes. |
+| 18 | Third ReAgent review round on the tree-kill commit: P1 (idle/success misclassification race — `_ = idle_rx` treats sender-dropped-without-sending the same as a real signal) and P2 (diagnostic appended to `buffered` before draining `publisher_handle`, could interleave ahead of trailing real output). Fixed both. |
+| 19 | Added a regression test for P1; honestly verified (by temporarily forcing the old buggy behavior back in) that it does NOT reliably reproduce the race on this machine — recorded as a known test-coverage gap rather than claimed as proof. |
+| 20 | While adding that test, the full suite started failing with a spurious "3 survivors." Root cause: `std::process::id()` is identical across all tests in one `cargo test` binary (parallel test harness, one process), so two different tests' PID-based markers shared a substring and cross-contaminated each other's WMI survivor checks. Fixed by tagging each test's marker distinctly. Re-ran 4× consecutively: 48/48 passing every time. |
