@@ -22,7 +22,7 @@ export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "check
 export type IdentityTab = "accounts" | "assignments";
 
 export interface SecretRef {
-    backend: "env" | "secrets_manager" | "plaintext_dev" | "keychain";
+    backend: "env" | "secrets_manager" | "plaintext_dev" | "keychain" | "oauth_config_dir";
     env_var?: string;
     sm_path?: string;
     sm_json_path?: string;
@@ -32,6 +32,9 @@ export interface SecretRef {
     // specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
     service?: string;
     account?: string;
+    // oauth_config_dir only — the provider CLI's per-account config dir.
+    // Tokens live in that dir (owned/refreshed by the CLI), never here.
+    dir?: string;
 }
 
 export interface AccountContext {
@@ -206,6 +209,8 @@ function secretRefFromBackend(s: IdentityAccount["secret_ref"]): SecretRef {
             return { backend: "plaintext_dev", value: s.plaintext_dev };
         case "keychain":
             return { backend: "keychain", service: s.service, account: s.account };
+        case "oauth_config_dir":
+            return { backend: "oauth_config_dir", dir: s.dir };
     }
 }
 
@@ -227,6 +232,8 @@ function secretRefToBackend(s: SecretRef): IdentityAccount["secret_ref"] {
             return { backend: "plaintext_dev", plaintext_dev: s.value ?? "" };
         case "keychain":
             return { backend: "keychain", service: s.service ?? "", account: s.account ?? "" };
+        case "oauth_config_dir":
+            return { backend: "oauth_config_dir", dir: s.dir ?? "" };
     }
 }
 
@@ -499,3 +506,8 @@ export class IdentityViewModel implements ViewModel {
         this._unsubAccounts = null;
     }
 }
+
+// Test-only hook for the (deliberately un-exported) SecretRef translators —
+// the pattern identity-model.test.ts's header asks for. Not part of the
+// public surface; do not import outside tests.
+export const __internal__ = { secretRefFromBackend, secretRefToBackend };

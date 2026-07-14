@@ -203,22 +203,32 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                 <DetailField label="Kind" value={KIND_LABELS[account.kind]} />
 
                 <div class="identity-detail-section">Secret</div>
-                <DetailField label="Backend" value={account.secret_ref.backend} />
-                <Show when={account.secret_ref.env_var}>
+                {/* `?.` guards throughout: an account whose secret_ref shape the
+                    frontend doesn't know yet must degrade to "unknown", not crash
+                    the pane (live repro 2026-07-14: OAuth accounts crashed here
+                    before `oauth_config_dir` was mapped). */}
+                <DetailField label="Backend" value={account.secret_ref?.backend ?? "unknown"} />
+                <Show when={account.secret_ref?.env_var}>
                     <DetailField label="Env var" value={account.secret_ref.env_var!} />
                 </Show>
-                <Show when={account.secret_ref.sm_path}>
+                <Show when={account.secret_ref?.sm_path}>
                     <DetailField
                         label="Secrets Manager"
                         value={`${account.secret_ref.sm_path}${account.secret_ref.sm_json_path ? ` → ${account.secret_ref.sm_json_path}` : ""}`}
                     />
                 </Show>
-                <Show when={account.secret_ref.backend === "plaintext_dev"}>
+                <Show when={account.secret_ref?.backend === "plaintext_dev"}>
                     <DetailField label="Value" value="••••••••••••" />
                 </Show>
-                <Show when={account.secret_ref.backend === "keychain"}>
+                <Show when={account.secret_ref?.backend === "keychain"}>
                     <DetailField label="Stored in" value="OS keychain" />
                     <DetailField label="Key" value={account.context.masked_tail ?? "••••••••"} />
+                </Show>
+                <Show when={account.secret_ref?.backend === "oauth_config_dir"}>
+                    <DetailField label="Stored in" value="Provider CLI config dir (tokens owned by the CLI)" />
+                    <Show when={account.secret_ref?.dir}>
+                        <DetailField label="Config dir" value={account.secret_ref.dir!} />
+                    </Show>
                 </Show>
 
                 <Show when={account.context.github_username}>
