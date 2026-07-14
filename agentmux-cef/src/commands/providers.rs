@@ -197,7 +197,11 @@ fn detect_cli(name: &str) -> CliDetectionResult {
 // INV-X (SPEC_PROVIDER_ISOLATION): agents MUST run the AgentMux-installed,
 // version-pinned binary; "latest" is never acceptable here because it bypasses
 // the repeatable-install guarantee and could pull in a breaking CLI version.
-const CLAUDE_VERSION: &str = "2.1.185";
+// Keep in sync with agentmux-srv/src/backend/providers.rs `pinned_version`,
+// frontend/app/view/agent/providers/index.ts `pinnedVersion`, and
+// .github/workflows/container-image.yml `claude_version` default — enforced by
+// frontend/app/view/agent/providers/pin-consistency.test.ts.
+const CLAUDE_VERSION: &str = "2.1.198";
 const CODEX_VERSION: &str = "0.116.0";
 const GEMINI_VERSION: &str = "0.32.1";
 
