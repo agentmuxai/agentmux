@@ -3,7 +3,7 @@
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, WorkflowGroup, NameGroup, SubagentDetail, SubagentEvent } from "./swarm-model";
-import { isWorkflowGroup, isNameGroup, groupCacheKey } from "./swarm-model";
+import { isWorkflowGroup, isNameGroup, groupCacheKey, subagentDisplayLabel } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import { callBackendService } from "@/store/wos";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -387,7 +387,11 @@ function SubagentRow({
     parentAgentStatus: "running" | "idle";
 }): JSX.Element {
     const expanded = createMemo(() => model.isExpanded(sub.agent_id));
-    const displayLabel = createMemo(() => sub.display_name || sub.slug || sub.agent_id.substring(0, 7));
+    // See subagentDisplayLabel's doc comment (swarm-model.ts) — slug is a
+    // shared per-batch codename, not a per-subagent identifier, so this
+    // disambiguates same-slug siblings with a short agent_id suffix instead
+    // of assuming slug alone is unique (task #44).
+    const displayLabel = createMemo(() => subagentDisplayLabel(sub));
 
     const handleToggle = () => {
         const wasExpanded = expanded();
@@ -438,8 +442,15 @@ function SubagentDetailPane({ sub, detail }: { sub: ActiveSubagent; detail: Suba
     const events = detail.eventsAtom;
     const status = detail.statusAtom;
 
+    // Same slug-is-not-unique reasoning as SubagentRow's displayLabel (see
+    // subagentDisplayLabel's doc comment in swarm-model.ts) — prefer the
+    // freshest info() read, falling back to the row's own `sub` fields.
     const name = createMemo(() =>
-        info()?.display_name || sub.display_name || info()?.slug || sub.slug || sub.agent_id.substring(0, 7)
+        subagentDisplayLabel({
+            display_name: info()?.display_name ?? sub.display_name,
+            slug: info()?.slug ?? sub.slug,
+            agent_id: sub.agent_id,
+        })
     );
     const modelName = createMemo(() => info()?.model ?? sub.model);
     const eventCount = createMemo(() => info()?.event_count ?? sub.event_count);
