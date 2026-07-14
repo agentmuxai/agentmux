@@ -261,6 +261,13 @@ function Tab(props: TabProps): JSX.Element {
                         ref={editableRef!}
                         class={clsx("name", { focused: isEditable() })}
                         contentEditable={isEditable()}
+                        // Only block native drag while actively renaming — text
+                        // selection/caret placement over the auto-selected name
+                        // must win over pragmatic-dnd's wrapper draggable="true"
+                        // there (reagent P1, PR #2148). Unset otherwise so the
+                        // name area — the tab's largest surface — still starts
+                        // a reorder drag normally.
+                        draggable={isEditable() ? false : undefined}
                         onDblClick={() => handleRenameTab()}
                         onBlur={handleBlur}
                         onKeyDown={handleKeyDown}
