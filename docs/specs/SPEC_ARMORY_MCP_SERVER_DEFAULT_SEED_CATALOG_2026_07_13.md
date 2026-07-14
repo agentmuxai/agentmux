@@ -68,7 +68,7 @@ Because §2 established that global = auto-on-for-everyone, Tier A is deliberate
 | Server | Purpose | Command | Transport | Why safe to auto-enable |
 |---|---|---|---|---|
 | **Git** | Local repo read/search/diff/log operations | `uvx mcp-server-git` | stdio | No creds; operates on whatever repo the agent's cwd is in |
-| **Fetch** | Fetch + convert a web page to markdown | `npx -y @modelcontextprotocol/server-fetch` | stdio | No creds; outbound-only, no stored state |
+| **Fetch** | Fetch + convert a web page to markdown | `uvx mcp-server-fetch` | stdio | No creds; outbound-only, no stored state |
 | **Sequential Thinking** | Structured, revisable step-by-step reasoning scratchpad | `npx -y @modelcontextprotocol/server-sequential-thinking` | stdio | No creds, no I/O outside the process itself |
 | **Memory** | Cross-session knowledge-graph memory | `npx -y @modelcontextprotocol/server-memory` | stdio | No creds; local file-backed state |
 | **Playwright** | Browser automation via accessibility-tree snapshots (Microsoft-official) | `npx @playwright/mcp@latest` | stdio | No creds; downloads a browser binary on first use but needs no secret |

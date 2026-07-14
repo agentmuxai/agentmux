@@ -7,7 +7,7 @@
     {
         "name": "fetch",
         "transport": "stdio",
-        "config": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-fetch"] }
+        "config": { "command": "uvx", "args": ["mcp-server-fetch"] }
     },
     {
         "name": "sequential-thinking",
