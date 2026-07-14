@@ -20,6 +20,7 @@ muxlog srv          # follow the active sidecar log
 muxlog bridge       # startup-handshake trace — debug "Can't reconnect" loops
 muxlog errors       # just the ERROR/WARN lines across host + sidecar
 muxlog swarm        # subagent/swarm lifecycle trace — spawn/name/status, debug duplicate groups
+muxlog auth         # provider auth/identity trace — login, OAuth dir wiring, unlink/logout
 muxlog help         # full usage
 ```
 
@@ -82,6 +83,7 @@ muxlog srv --since 2026-06-15T23:30 cat        # a time window
 | `muxlog errors` | ERROR + WARN across the active host and sidecar |
 | `muxlog bridge` | the startup handshake — `Loading URL`, `Injected IPC …`, `backend-ready`, `window.api`, `Bootstrap failed` — correlated in time, so a reconnect loop is obvious at a glance |
 | `muxlog swarm` | subagent/swarm lifecycle — spawn, `display_name` resolution (`subagent.GenerateName`), status transitions (`reconcile_stale_subagents`' active→abandoned pass), and the `parent_block_id`/`session_id`/`workflow_id` each event carries — filters the sidecar log to `subagent_watcher.rs`'s tracing target so a duplicate-group or stuck-status report is diagnosable from logs alone (srv-side only; there's no host-side subagent logging to combine in) |
+| `muxlog auth` | provider auth / identity lifecycle — the login flow (`auth.start` / `auth.spawn` child start+exit / `auth.cancel`), OAuth config-dir wiring, `auth success (direct-account)` persistence, `CheckCliAuth` + the one-time `claude auth:` credential import, and the logout side (`identity.unlink:` provider unlinks, `identity.delete:` account + keychain removal). Auth events span multiple srv modules, so this filters on the **message** vocabulary rather than a tracing target — pass your own `--grep` to override, or combine `--since`/`--level`/`-i` as usual. Ideal for repeated login/logout stress runs |
 
 ---
 

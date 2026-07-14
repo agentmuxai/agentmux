@@ -409,7 +409,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // If this account stored its secret in the OS keychain, drop
                 // it too so no orphaned credential survives the DB row.
                 // `keyring` is blocking, so run it via spawn_blocking.
-                if let Ok(Some(acct)) = wstore.identity_get(&cmd.id) {
+                // Capture provider before the row is deleted so the logout-
+                // side log line (below) can carry it.
+                let acct = wstore.identity_get(&cmd.id).ok().flatten();
+                let provider = acct.as_ref().map(|a| a.provider.clone()).unwrap_or_default();
+                if let Some(acct) = &acct {
                     if matches!(acct.secret_ref, SecretRef::Keychain { .. }) {
                         let aid = cmd.id.clone();
                         let res = tokio::task::spawn_blocking(move || {
@@ -417,14 +421,28 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         })
                         .await
                         .unwrap_or_else(|je| Err(format!("join: {je}")));
-                        if let Err(e) = res {
-                            tracing::warn!(target: "identity", "keychain delete for {} failed: {e}", cmd.id);
+                        match res {
+                            // info!, not debug!: the production filter is
+                            // "agentmuxsrv=info,info" (reagent P1, PR #2143).
+                            // "identity.delete:" is `muxlog auth` vocabulary.
+                            Ok(()) => tracing::info!(
+                                account_id = %cmd.id,
+                                provider = %provider,
+                                "identity.delete: keychain secret removed"
+                            ),
+                            Err(e) => tracing::warn!(target: "identity", "keychain delete for {} failed: {e}", cmd.id),
                         }
                     }
                 }
                 let deleted = wstore
                     .identity_delete(&cmd.id)
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;
+                tracing::info!(
+                    account_id = %cmd.id,
+                    provider = %provider,
+                    deleted,
+                    "identity.delete: account removed (deleteidentityaccount)"
+                );
                 if deleted {
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: "identityaccounts:changed".to_string(),
@@ -479,6 +497,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let removed = wstore
                     .agent_identity_unlink(&cmd.agent_id, &cmd.provider)
                     .map_err(|e| format!("unlinkagentidentity: {e}"))?;
+                // info!, not debug!: the production filter is
+                // "agentmuxsrv=info,info" (reagent P1, PR #2143).
+                // "identity.unlink:" is `muxlog auth` vocabulary.
+                tracing::info!(
+                    agent_id = %cmd.agent_id,
+                    provider = %cmd.provider,
+                    unlinked = removed,
+                    "identity.unlink: agent-identity link removed (unlinkagentidentity)"
+                );
                 if removed {
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: format!("agentidentities:changed:{}", cmd.agent_id),
