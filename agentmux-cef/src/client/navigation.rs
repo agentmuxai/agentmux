@@ -121,13 +121,45 @@ wrap_task! {
     }}
 }
 
+/// Handle the real `report_first_paint` signal on the UI thread. Two possible
+/// orderings against `on_load_end`, both handled:
+///
+/// - `on_load_end` already armed the gate (the common case) — reveal now.
+/// - `on_load_end` hasn't run yet for this label — CEF's main-frame
+///   load-complete isn't guaranteed to fire after first paint (render-blocking
+///   stylesheets can resolve, and a frame can be presented, before other
+///   load-blocking resources finish). Record the label in
+///   `linux_first_paint_seen` so `on_load_end` reveals immediately when it
+///   does arm, instead of silently dropping this signal and falling through
+///   to the slower safety timeout. Reagent PR #2151 second-round review.
+///
+/// Must run on the CEF UI thread.
+#[cfg(target_os = "linux")]
+pub(crate) fn handle_first_paint_signal(state: &Arc<AppState>, label: &str) {
+    let already_armed = state.linux_paint_gate_pending.lock().contains_key(label);
+    if already_armed {
+        reveal_gated_window(state, label, "signal", None);
+    } else {
+        state.linux_first_paint_seen.lock().insert(label.to_string());
+    }
+}
+
+#[cfg(target_os = "linux")]
+wrap_task! {
+    struct FirstPaintSignalTask { state: Arc<AppState>, label: String }
+    impl Task { fn execute(&self) {
+        handle_first_paint_signal(&self.state, &self.label);
+    }}
+}
+
 /// Called off the UI thread (IPC handler for `report_first_paint`) once the
 /// frontend's double-`requestAnimationFrame` confirms the compositor actually
 /// presented a frame. Posts to the UI thread to reveal the window if
-/// `on_load_end` deferred it.
+/// `on_load_end` already deferred it, or to record the signal for `on_load_end`
+/// to consume if it hasn't run yet (see `handle_first_paint_signal`).
 #[cfg(target_os = "linux")]
 pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
-    let mut task = PaintGateRevealTask::new(state, label, "signal", None);
+    let mut task = FirstPaintSignalTask::new(state, label);
     post_task(ThreadId::UI, Some(&mut task));
 }
 
@@ -286,27 +318,38 @@ impl AgentMuxHandler {
                         let gated = gate_label.is_some();
                         #[cfg(target_os = "linux")]
                         if let Some(label) = gate_label {
+                            // The real paint signal can race ahead of this
+                            // on_load_end call (see handle_first_paint_signal)
+                            // — if it already arrived, reveal immediately
+                            // instead of arming a gate + safety timeout for a
+                            // paint that already happened.
+                            let already_painted =
+                                self.state.linux_first_paint_seen.lock().remove(&label);
                             // Fresh epoch per arm — see PAINT_GATE_NEXT_EPOCH
                             // and reveal_gated_window's doc comment. Guards
                             // against a reload/retry re-arming this same
-                            // label before this timeout fires.
+                            // label before a timeout fires.
                             let epoch = PAINT_GATE_NEXT_EPOCH
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             self.state
                                 .linux_paint_gate_pending
                                 .lock()
                                 .insert(label.clone(), (std::time::Instant::now(), epoch));
-                            let mut timeout_task = PaintGateRevealTask::new(
-                                self.state.clone(),
-                                label,
-                                "timeout",
-                                Some(epoch),
-                            );
-                            post_delayed_task(
-                                ThreadId::UI,
-                                Some(&mut timeout_task),
-                                PAINT_GATE_SAFETY_TIMEOUT_MS,
-                            );
+                            if already_painted {
+                                reveal_gated_window(&self.state, &label, "signal-early", None);
+                            } else {
+                                let mut timeout_task = PaintGateRevealTask::new(
+                                    self.state.clone(),
+                                    label,
+                                    "timeout",
+                                    Some(epoch),
+                                );
+                                post_delayed_task(
+                                    ThreadId::UI,
+                                    Some(&mut timeout_task),
+                                    PAINT_GATE_SAFETY_TIMEOUT_MS,
+                                );
+                            }
                         }
                         #[cfg(target_os = "linux")]
                         if !gated {

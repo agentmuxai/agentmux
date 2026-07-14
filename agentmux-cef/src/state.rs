@@ -569,6 +569,19 @@ pub struct AppState {
     /// Linux; the field exists unconditionally to keep `AppState` un-cfg'd.
     pub linux_paint_gate_pending: Mutex<std::collections::HashMap<String, (std::time::Instant, u64)>>,
 
+    /// Linux startup white-flash fix, second-round race (reagent PR #2151
+    /// review): `report_first_paint` can reach the UI thread before
+    /// `on_load_end` arms `linux_paint_gate_pending` for the same label — CEF's
+    /// main-frame load-complete isn't guaranteed to fire after the frontend's
+    /// first compositor frame (render-blocking stylesheets can resolve, and a
+    /// frame can paint, before other load-blocking resources finish and
+    /// `on_load_end` runs). Labels land here when the signal arrives too
+    /// early; `on_load_end` checks this set before arming so it can reveal
+    /// immediately instead of falling through to the slower safety timeout.
+    /// Only populated/consumed on Linux; unconditional field for the same
+    /// reason as `linux_paint_gate_pending` above.
+    pub linux_first_paint_seen: Mutex<std::collections::HashSet<String>>,
+
     /// Phase B.5e — host's projection of the launcher's
     /// authoritative `state.instance_registry`. Fed by
     /// `Event::WindowInstanceAssigned` /
@@ -1279,6 +1292,7 @@ impl Default for AppState {
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
             linux_paint_gate_pending: Mutex::new(std::collections::HashMap::new()),
+            linux_first_paint_seen: Mutex::new(std::collections::HashSet::new()),
             shadow_backend_window_ids: Mutex::new(HashMap::new()),
             shadow_window_meta: Mutex::new(HashMap::new()),
             shadow_instance_registry: Mutex::new({
