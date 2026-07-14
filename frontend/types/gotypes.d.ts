@@ -320,7 +320,12 @@ declare global {
         | { backend: "plaintext_dev"; plaintext_dev: string }
         // Armory API keys: pointer into the OS keychain. Plaintext is
         // never carried here. See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
-        | { backend: "keychain"; service: string; account: string };
+        | { backend: "keychain"; service: string; account: string }
+        // OAuth credentials as a filesystem pointer: the provider CLI reads
+        // its tokens from this dir at spawn time; agentmux holds only the
+        // path. See SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md and the Rust
+        // SecretRef::OAuthConfigDir variant (storage/identities.rs).
+        | { backend: "oauth_config_dir"; dir: string };
 
     type IdentityAccount = {
         id: string;
