@@ -303,6 +303,86 @@ the 10-minute default being generous, but worth monitoring in practice
 rather than assuming zero false-positive risk — this specific case simply
 didn't run long enough in complete silence to test that edge directly.
 
+## Follow-up: reagent P1 — tree-kill gap, and a real detour investigating it
+
+After the fix above shipped for ReAgent review (PR #2156), a second review
+round flagged a real gap: `killer.kill()` (via `portable_pty::ChildKiller`)
+only terminates the **direct** PTY child — portable-pty's Windows impl is a
+bare `TerminateProcess` on one handle, no job object (confirmed by reading
+its source: `agentmux-bashwrap`'s only tree-aware addition at that point was
+none). A command whose direct child forks further (a pipeline, or `git`
+spawning `less` as a child — exactly the reported bug) could leave the
+grandchild running and still attached to the PTY slave, reproducing the
+leak one process removed instead of eliminating it.
+
+**Fix:** added `kill_process_tree(pid)` — on Windows, `taskkill /T /F /PID
+<pid>` (no new dependency, just `std::process::Command`), called *before*
+`killer.kill()` (ordering matters — killing the root first can break
+`taskkill /T`'s ability to walk its now-dead root's children; verified this
+mattered in practice, see below). Not implemented for Unix — all evidence
+for this bug is Windows-specific, and portable-pty's Unix `ChildKiller`
+already sends `SIGHUP`, which its own doc comment suggests reaches the
+process group (untested; deferred until there's an actual Unix repro).
+
+**Verification took a real, worthwhile detour.** Strengthened the existing
+single-process (`sleep 9999`) test into a multi-process one (`sleep
+<pid>.001 & sleep <pid>.002 & wait`, two backgrounded grandchildren) so it
+would actually exercise the gap ReAgent flagged — the original test
+couldn't have caught this, since a lone leaf process has nothing to leave
+orphaned.
+
+1. **First run:** test failed instantly (~0.1s, exit code 0) — a bug in the
+   test itself, not the fix. `sleep <marker>` used a non-numeric marker
+   string as the duration argument, so `sleep` errored out immediately
+   instead of blocking. Fixed by deriving a valid numeric duration from the
+   test's own PID (`sleep {pid}.001`) instead.
+2. **Second run:** test failed with "1 survivor" — seemingly confirming the
+   gap. Investigated by manually inspecting `Win32_Process.ParentProcessId`
+   for a backgrounded `sleep` outside the test harness, which showed it
+   pointing at a PID that had *already exited* by query time — not
+   `bash.exe`. This looked like proof that Git-for-Windows' MSYS2 bash
+   doesn't preserve a discoverable Win32 parent-child chain for forked
+   (backgrounded/piped) children, which would make `taskkill /T` — or any
+   Win32 PID-tree API — structurally unable to reach them. Reordered
+   `kill_process_tree` before `killer.kill()` (a real, separate fix — killing
+   `bash.exe` first and *then* trying to tree-walk from its now-dead PID is
+   a genuine race) and re-ran: **still** "1 survivor."
+3. **Root cause of the "1 survivor," found by inspecting the actual
+   process, not just its count:** the test's own
+   `count_processes_with_marker` PowerShell helper queries
+   `Win32_Process | Where-Object { $_.CommandLine -like '*<marker>*' }` —
+   but that query's *own invocation argument* contains the marker text, so
+   it matches **itself**. A `ps aux | grep foo` matching-its-own-`grep`
+   bug, not a real orphan. Confirmed by manually filtering to `Name -eq
+   'sleep.exe'` outside the test and finding **zero** matches — the fix had
+   been working correctly the whole time.
+4. Fixed the helper (excluded `powershell.exe` from its own match) and
+   re-ran: passing, consistently, across repeated runs and both the
+   in-process test and a new, stronger binary-level end-to-end test (below).
+
+**Net result:** the earlier "MSYS fork-emulation permanently breaks
+Win32 PID tracking" conclusion doesn't hold up as stated — `taskkill /T`
+does reliably reach these backgrounded children in practice (the
+ordering fix — tree-kill before the direct kill — may be part of why; not
+independently re-isolated from the marker-matching fix since both landed
+before the clean pass). The stale-`ParentProcessId` observation itself was
+real, just not proof of what it seemed to prove. Left un-chased further
+once the empirical result was unambiguous — see Open Questions.
+
+**Added a second, more representative test:**
+`bashwrap_binary_idle_kill_cleans_up_full_process_tree` spawns the actual
+compiled binary as a real subprocess (not an in-process library call —
+the original test calls `run_via_pty` directly inside `cargo test`'s own
+process, which never exits, so it can't observe whatever cleanup depends on
+the *wrapper* process's own exit) with the same two-grandchild scenario,
+waits for it to exit, and confirms zero survivors system-wide afterward.
+Both tests now pass. Full suite: **47/47** (up from 46 after the first fix
+round, 42 before any of this work).
+
+**Manual repro re-confirmed after all the above changes:** `git log
+--oneline -50` through the rebuilt binary — exit 0, instant, full 83-line
+output (50 log lines + the `<exited ...>` wrapper), no hang, no leak.
+
 ## Open questions
 
 1. Does this affect other commonly-paged tools beyond `git` (e.g. `man`,
@@ -322,6 +402,19 @@ didn't run long enough in complete silence to test that edge directly.
    a leaked bashwrap process interfere with a *later* invocation reusing the
    same `--tool-id`, or hold a file lock / working-directory handle that
    blocks something else? Not investigated.
+5. Why did `taskkill /T /F /PID <bash_pid>` succeed at finding and killing
+   the backgrounded `sleep` grandchildren in the passing end-to-end test,
+   given the earlier manual `Win32_Process.ParentProcessId` check showed
+   the same kind of process's recorded parent had already exited by query
+   time? Two candidate explanations were noted but not distinguished: (a)
+   `taskkill` runs promptly after idle-detection, closer to spawn time than
+   the ~2s-later manual check was, so the (short-lived) MSYS fork
+   intermediate may still have been alive/enumerable at that earlier
+   moment; (b) `taskkill /T`'s own tree-walk may use a broader or
+   differently-timed relationship than a single `ParentProcessId` snapshot
+   exposes. Worth a real answer if this area gets touched again — right
+   now the fix is verified empirically (consistently, across repeated
+   runs) but not fully explained mechanistically.
 
 ## Timeline (2026-07-14, this dev machine, exact clock times not captured)
 
@@ -339,3 +432,8 @@ didn't run long enough in complete silence to test that edge directly.
 | 10 | Added 4 new tests (env-override parsing ×3, end-to-end idle-kill ×1). First run of the end-to-end test failed on an over-specific assertion (expected exit code 124, got 1) — the kill mechanism itself worked correctly; the test's expectation was wrong. Fixed the assertion, re-ran: 46/46 passing. |
 | 11 | Manual repro against the actual reported bug (not the synthetic `sleep` stand-in): built the fixed binary, ran `git log --oneline -50` through it directly — exited in ~1s with full output, no hang, no leak. |
 | 12 | While checking for new leaks, found 2 more bashwrap processes — both traced to the OLD deployed binary (fix not yet live) and one to an unrelated `find /` command from earlier this session, which a subsequent task-notification confirmed had completed normally (not actually stuck) — documented as a real example of the idle-timeout's false-positive risk class rather than a new leak. |
+| 13 | PR #2156 renamed from docs-only to the fix PR, changeset added, pushed. ReAgent's re-review flagged a real P1: `killer.kill()` alone only terminates the direct PTY child, not descendants (a pipeline, or `git` spawning `less`). |
+| 14 | Added `kill_process_tree` (Windows `taskkill /T /F /PID`) and strengthened the test to a two-grandchild scenario. First run: test failed instantly (exit 0) — a non-numeric `sleep` duration argument in the test itself, not the fix; fixed. |
+| 15 | Second run: "1 survivor" — investigated by manually checking `Win32_Process.ParentProcessId` for a backgrounded `sleep` outside the test, found it pointed at an already-exited PID, seemingly confirming MSYS bash breaks Win32 PID tracking for forked children. Reordered `kill_process_tree` before `killer.kill()` (a real, separate fix for a kill-ordering race) and re-ran: still "1 survivor." |
+| 16 | Found the actual cause by inspecting the surviving process directly rather than trusting the count: the test's own PowerShell query matched *itself* (its `-like '*marker*'` argument literally contains the marker). Fixed the query to exclude `powershell.exe`; confirmed via a marker-free, `sleep.exe`-filtered manual check that zero real orphans existed — the fix had been working the whole time. |
+| 17 | Added a second, stronger test (`bashwrap_binary_idle_kill_cleans_up_full_process_tree`) spawning the real compiled binary as a subprocess rather than calling `run_via_pty` in-process, to properly observe post-exit cleanup. Both tests pass consistently across repeated runs. Full suite: 47/47. Manual `git log` repro re-confirmed clean after all changes. |

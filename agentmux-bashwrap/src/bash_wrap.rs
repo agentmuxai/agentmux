@@ -114,6 +114,60 @@ fn idle_kill_timeout() -> Duration {
         .unwrap_or(DEFAULT_IDLE_KILL_TIMEOUT)
 }
 
+/// Kill `pid` AND every descendant it spawned, not just the one process.
+/// Supplements `ChildKiller::kill()` (portable-pty's Windows impl is a bare
+/// `TerminateProcess` on a single handle, no job object — see the caller's
+/// comment) — without this, a wrapped command whose direct child forks
+/// further (a pipeline, or `git` spawning `less` as a child) can leave an
+/// orphaned grandchild running and still attached to the PTY slave after
+/// the "kill" (reagent P1, PR #2156).
+///
+/// Windows: `taskkill /T /F /PID <pid>` walks the OS-level parent-PID tree
+/// (independent of shell job control) and force-kills every process in it.
+/// No new dependency needed — this is a plain `std::process::Command`.
+///
+/// Unix: not implemented here. portable-pty's Unix `ChildKiller` sends
+/// SIGHUP (its own doc comment: "we send the SIGHUP signal instead of
+/// trying to kill") to what its source suggests is the child's process
+/// group, which — if the pty child is a session/group leader, the normal
+/// case for an interactive shell — should already reach pipeline
+/// descendants without a supplemental step. All evidence for this bug
+/// (PR #2156 / RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md) is
+/// Windows-specific; adding an unverified Unix code path (which would need
+/// a new `libc` dependency for a process-group `kill(-pid, ...)`) is
+/// deferred until there's an actual repro to design against.
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        match std::process::Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                tracing::info!(target: "bashwrap", pid, "kill_process_tree: taskkill succeeded");
+            }
+            Ok(out) => {
+                // Non-fatal: the direct-handle kill above may have already
+                // won the race (taskkill then reports "not found"), which
+                // is fine — best-effort supplemental cleanup either way.
+                tracing::warn!(
+                    target: "bashwrap",
+                    pid,
+                    stderr = %String::from_utf8_lossy(&out.stderr),
+                    "kill_process_tree: taskkill did not report success"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(target: "bashwrap", pid, error = %e, "kill_process_tree: failed to spawn taskkill");
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid; // no supplemental step on this platform — see doc comment above
+    }
+}
+
 /// Wire payload published on the `tool_chunk` event. The tool_use_id
 /// rides in the payload (not the event name) so the frontend opens
 /// a single per-block subscription on mount and routes by `tool_id`
@@ -631,7 +685,17 @@ async fn run_via_pty(
     // still terminate it. See `ChildKiller::clone_killer`'s doc comment —
     // this is exactly the "send it signals independently from a thread
     // that may be blocked in `.wait`" case it exists for.
+    //
+    // `killer.kill()` alone only terminates THIS ONE process (portable-pty's
+    // Windows impl is a bare `TerminateProcess` on the direct handle, no
+    // job object) — it does not reach descendants bash forked (a pipeline,
+    // or `git` spawning `less` as a child). An orphaned grandchild can
+    // survive the kill, stay attached to the PTY slave, and keep blocking
+    // forever — reproducing this exact leak one process removed instead of
+    // eliminating it (reagent P1, PR #2156). `child_pid` + `kill_process_tree`
+    // below is the supplemental fix: a full tree-kill by PID.
     let mut killer = child.clone_killer();
+    let child_pid = child.process_id();
 
     let reader = pair.master.try_clone_reader().context("PTY try_clone_reader")?;
 
@@ -686,6 +750,24 @@ async fn run_via_pty(
                 "child produced no PTY output for the idle timeout — likely \
                  blocked waiting for interactive input (e.g. a pager); killing",
             );
+            // Tree-kill FIRST, `killer.kill()` second — order matters.
+            // `taskkill /T` walks descendants by their recorded parent PID,
+            // which only works while the root (bash) is still enumerable;
+            // killing bash first (via killer.kill()) and THEN tree-killing
+            // races taskkill against an already-dead root and can leave
+            // grandchildren behind (verified empirically: an earlier version
+            // of this fix that called killer.kill() first left 1 of 2
+            // backgrounded test children alive — the test below is what
+            // caught it). killer.kill() still runs afterward as a cheap,
+            // harmless belt-and-suspenders in case kill_process_tree itself
+            // didn't fully land (e.g. taskkill unavailable).
+            if let Some(pid) = child_pid {
+                // spawn_blocking: kill_process_tree shells out synchronously
+                // (std::process::Command::output()) — running it inline here
+                // would block this tokio worker thread for the taskkill
+                // round-trip.
+                let _ = tokio::task::spawn_blocking(move || kill_process_tree(pid)).await;
+            }
             let _ = killer.kill();
             // Bounded grace period for the kill to actually land and for
             // the wait task to finish (which drops writer/pair, releasing
@@ -1720,13 +1802,49 @@ mod tests {
         }
     }
 
-    /// End-to-end proof that the idle-kill mechanism actually fires: a
-    /// child that produces zero PTY output (here, `sleep 9999` — a clean,
-    /// portable stand-in for "any command silently blocked forever," which
-    /// is exactly the shape of the pager hang this exists to catch — see
-    /// docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md) must be
-    /// killed and `run_via_pty` must return within a bounded time instead
-    /// of hanging. Without the fix, this test would hang until the outer
+    /// Windows-only: counts processes whose command line contains `marker`
+    /// (via WMI `CommandLine`, which — unlike `tasklist`'s image-name-only
+    /// filter — exposes full arguments). Used to prove `kill_process_tree`
+    /// actually reaches descendants, not just the direct PTY child.
+    #[cfg(windows)]
+    fn count_processes_with_marker(marker: &str) -> usize {
+        // Excludes `powershell.exe` itself: the query's own invocation
+        // argument (`-like '*<marker>*'`) literally contains the marker
+        // text, so without this exclusion the query matches its own
+        // process — a `ps aux | grep foo` matching-itself bug that
+        // produced a false "1 survivor" positive while developing this
+        // test (reagent P1 follow-up, PR #2156) before being caught.
+        let ps_cmd = format!(
+            "(Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{}*' -and $_.Name -ne 'powershell.exe' }} | Measure-Object).Count",
+            marker
+        );
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &ps_cmd])
+            .output()
+            .ok()
+            .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<usize>().ok())
+            .unwrap_or(usize::MAX) // parse failure reads as "assume orphans survived" — never a false pass
+    }
+
+    /// End-to-end proof that the idle-kill mechanism actually fires AND
+    /// reaches the whole process tree, not just the direct PTY child.
+    ///
+    /// Uses two backgrounded `sleep` grandchildren (`bash -c '{ sleep
+    /// <marker>1 & sleep <marker>2 & wait; } </dev/null'`) rather than a
+    /// single-process command: killing only the direct `bash` child (what
+    /// `ChildKiller::kill()` alone does — see `kill_process_tree`'s doc
+    /// comment) would leave these two running as orphans, exactly
+    /// reproducing the leak one process removed instead of fixing it
+    /// (reagent P1, PR #2156). The marker values are unique per test run
+    /// (derived from the current PID) so a leftover orphan from a
+    /// *previous* failed run of this same test, or an unrelated `sleep`
+    /// elsewhere on a shared dev machine, can't produce a false pass.
+    ///
+    /// The `sleep <marker>` argument doubles as the zero-PTY-output
+    /// condition this exists to catch (a clean, portable stand-in for "any
+    /// command silently blocked forever," the same shape as the pager hang
+    /// — see docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md).
+    /// Without the fix, this test would hang until the outer
     /// `tokio::time::timeout` fires and fails it.
     #[tokio::test]
     async fn run_via_pty_kills_idle_child_and_returns_promptly() {
@@ -1768,10 +1886,22 @@ mod tests {
         // expects, so spell it out.
         let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
+        // Unique-per-run, but still a valid numeric duration for `sleep`
+        // (GNU coreutils sleep accepts fractional seconds and arbitrarily
+        // large values — this test's own PID is a large, safely-unique-
+        // enough integer that won't collide with an unrelated sleep
+        // elsewhere on a shared dev machine). A non-numeric marker string
+        // would make `sleep` error out instantly instead of blocking —
+        // caught by this test's own first run failing with exit code 0
+        // (~0.1s elapsed) instead of the expected kill.
+        let pid = std::process::id();
+        let marker = pid.to_string();
+        let command = format!("sleep {pid}.001 & sleep {pid}.002 & wait");
+
         let start = std::time::Instant::now();
         let result = tokio::time::timeout(
             Duration::from_secs(20),
-            run_via_pty(&args, "sleep 9999", None, buffered.clone(), &bash, pair),
+            run_via_pty(&args, &command, None, buffered.clone(), &bash, pair),
         )
         .await
         .expect("run_via_pty must not hang past the outer test timeout — idle-kill should have fired well before this")
@@ -1804,11 +1934,124 @@ mod tests {
         );
         drop(blob);
 
+        // NOTE on what this test does NOT prove: calling `run_via_pty`
+        // in-process (as a library function inside `cargo test`'s own
+        // process) returning does not, by itself, guarantee every
+        // descendant is gone yet — see
+        // `bashwrap_binary_idle_kill_cleans_up_full_process_tree` below for
+        // why, and for the test that actually proves full-tree cleanup.
+        let _ = &marker; // used by the binary-level test below, not here
+
         unsafe {
             match prev {
                 Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
                 None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
             }
         }
+    }
+
+    /// The real end-to-end guarantee, proven against the actual compiled
+    /// binary rather than an in-process library call.
+    ///
+    /// Investigating reagent's P1 (PR #2156 — `kill_process_tree`/
+    /// `taskkill /T` alone might not reliably reach every descendant) took
+    /// a real detour worth recording: an early manual check of
+    /// `Win32_Process.ParentProcessId` for a backgrounded `sleep` showed it
+    /// pointing at a PID that had *already exited* by the time it was
+    /// queried (a couple of seconds after spawn) — not `bash.exe` itself.
+    /// That looked like proof that Git-for-Windows' bash (MSYS2) doesn't
+    /// preserve a discoverable Win32 parent-child chain for forked children
+    /// (`&`, `|`, multiple statements), which would make any PID-tree API
+    /// (including `taskkill /T`) structurally unable to reach them. Two
+    /// early versions of *this exact test* then failed with "1 survivor,"
+    /// seeming to confirm it.
+    ///
+    /// That confirmation was wrong. The actual bug was in the test's own
+    /// `count_processes_with_marker` helper: its PowerShell query embeds
+    /// the marker text directly in its own `-like '*<marker>*'` invocation
+    /// argument, so the query matched **itself** — a `ps aux | grep foo`
+    /// matching-its-own-`grep` bug, not a real orphan. Once
+    /// `count_processes_with_marker` excluded `powershell.exe`, this test
+    /// (and the full suite) passed consistently across repeated runs:
+    /// `taskkill /T /F /PID <bash_pid>`, run promptly while `bash.exe` is
+    /// still alive (the ordering fix noted on the `kill_process_tree` call
+    /// site — tree-kill before the direct `ChildKiller::kill()`), *does*
+    /// reliably reach these backgrounded children in practice, despite the
+    /// stale-`ParentProcessId` observation above being real. (Plausible
+    /// reconciliation, not independently re-verified: `taskkill`'s own
+    /// tree-walk runs at a different, earlier moment than the later manual
+    /// check was taken at, and/or walks a broader relationship than a bare
+    /// `ParentProcessId` snapshot exposes — not chased further once the
+    /// empirical result was unambiguous.)
+    ///
+    /// This test proves that full chain: spawn the real binary (not a
+    /// library call — the in-process test above can't observe this, since
+    /// the test runner's own process never exits), let its idle-timeout
+    /// fire, wait for the binary to exit, then confirm no marker-matching
+    /// process survives anywhere on the system.
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn bashwrap_binary_idle_kill_cleans_up_full_process_tree() {
+        // `CARGO_BIN_EXE_*` is only set for separate integration-test
+        // targets (under `tests/`) that depend on a bin as an external
+        // artifact — this test is a unit test compiled as part of the
+        // `agentmux-bashwrap` bin's own test harness, so it isn't set
+        // here. The harness binary itself lives at
+        // `target/<profile>/deps/agentmux_bashwrap-<hash>.exe`; the real
+        // bin is one directory up.
+        let harness_exe = std::env::current_exe().expect("current_exe");
+        let bin = harness_exe
+            .parent() // .../target/debug/deps/
+            .and_then(|p| p.parent()) // .../target/debug/
+            .map(|p| p.join("agentmux-bashwrap.exe"))
+            .expect("derive agentmux-bashwrap.exe path from the test harness's own location");
+        assert!(
+            bin.exists(),
+            "expected the real binary at {bin:?} (derived from test harness path {harness_exe:?}) — build it first with `cargo build -p agentmux-bashwrap`"
+        );
+        let pid = std::process::id();
+        let marker = pid.to_string();
+        let command = format!("sleep {pid}.003 & sleep {pid}.004 & wait");
+        let b64 = {
+            use base64::Engine as _;
+            use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+            URL_SAFE_NO_PAD.encode(command.as_bytes())
+        };
+
+        let start = std::time::Instant::now();
+        let mut child = tokio::process::Command::new(bin)
+            .args(["exec", "--tool-id=test-binary-idle-kill", &format!("--b64-cmd={b64}")])
+            .env("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the real agentmux-bashwrap binary");
+
+        let status = tokio::time::timeout(Duration::from_secs(20), child.wait())
+            .await
+            .expect("the binary must exit within a bounded time, not hang forever")
+            .expect("waiting on the spawned binary");
+
+        assert!(
+            !status.success(),
+            "an idle-killed invocation must not report a clean success exit"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(15),
+            "should exit well within the 1s idle timeout + grace periods, got {:?}",
+            start.elapsed()
+        );
+
+        // The actual proof: once the binary we just waited on has fully
+        // exited, no descendant (both backgrounded sleep grandchildren)
+        // should remain. Short settle delay for WMI query latency after
+        // process exit, not for the kill itself.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let survivors = count_processes_with_marker(&marker);
+        assert_eq!(
+            survivors, 0,
+            "process tree should be fully cleaned up once the wrapper binary \
+             exits — found {survivors} process(es) still matching marker {marker:?}"
+        );
     }
 }
