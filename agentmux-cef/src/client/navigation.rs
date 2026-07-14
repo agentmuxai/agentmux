@@ -17,28 +17,45 @@ use crate::state::AppState;
 /// Linux startup white-flash fix (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md).
 ///
 /// Bound on how long the real window + native splash can stay hidden/up
-/// waiting for the frontend's first-paint signal before we show anyway. Chosen
-/// generously relative to the one-shot `MAX_GATE_MS` (800ms) reveal-gate
-/// pattern in `frontend/app/store/tab-reveal.ts` — this gate covers a coarser
-/// event (compositor's first frame) than that one (post-mount settle), so a
-/// slower budget avoids false-triggering on a merely-slow-but-healthy start.
+/// waiting for the frontend's first-paint signal before we show anyway.
+///
+/// Empirically (2026-07-14, verification run on the dev machine, a
+/// resource-shared sandbox running several concurrent CEF instances) the real
+/// double-rAF signal for the main window landed ~2.08s after `on_load_end`,
+/// and pool-window prewarms (unaffected by this gate, so this is a baseline
+/// reading of the environment's compositor-first-frame latency, not an
+/// artifact of the gate itself) landed 1.36-1.84s out. An earlier 1500ms cap
+/// fired *before* that real signal, silently degrading this fix to "always
+/// show after a fixed 1.5s delay" — strictly better than the original
+/// immediate-show bug, but not the intended "wait for real paint" behavior.
+/// Set well above the observed worst case so the real signal wins in
+/// practice; this only matters as a backstop against a genuinely stalled
+/// renderer (crashed JS, rAF never firing at all).
 #[cfg(target_os = "linux")]
-const PAINT_GATE_SAFETY_TIMEOUT_MS: i64 = 1500;
+const PAINT_GATE_SAFETY_TIMEOUT_MS: i64 = 4000;
 
 /// Reveal (show + focus the real window, dismiss the native splash) once —
 /// whichever of the real `report_first_paint` IPC signal or the safety-net
 /// timeout fires first wins; the other becomes a no-op via the
 /// `linux_paint_gate_pending` membership check. Must run on the CEF UI thread.
 #[cfg(target_os = "linux")]
-pub(crate) fn reveal_gated_window(state: &Arc<AppState>, label: &str) {
-    {
+pub(crate) fn reveal_gated_window(state: &Arc<AppState>, label: &str, reason: &'static str) {
+    let armed_at = {
         let mut pending = state.linux_paint_gate_pending.lock();
-        if !pending.remove(label) {
+        match pending.remove(label) {
+            Some(armed_at) => armed_at,
             // Already revealed by the other path, or never armed (e.g. a pool
             // window — those don't go through this gate at all).
-            return;
+            None => return,
         }
-    }
+    };
+    tracing::info!(
+        target: "startup-paint",
+        label = %label,
+        reason,
+        elapsed_ms = armed_at.elapsed().as_millis() as u64,
+        "[startup-paint] revealing gated window"
+    );
     if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
         if !path.is_empty() {
             let _ = std::fs::write(&path, b"ready");
@@ -59,9 +76,9 @@ pub(crate) fn reveal_gated_window(state: &Arc<AppState>, label: &str) {
 
 #[cfg(target_os = "linux")]
 wrap_task! {
-    struct PaintGateRevealTask { state: Arc<AppState>, label: String }
+    struct PaintGateRevealTask { state: Arc<AppState>, label: String, reason: &'static str }
     impl Task { fn execute(&self) {
-        reveal_gated_window(&self.state, &self.label);
+        reveal_gated_window(&self.state, &self.label, self.reason);
     }}
 }
 
@@ -71,7 +88,7 @@ wrap_task! {
 /// `on_load_end` deferred it.
 #[cfg(target_os = "linux")]
 pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
-    let mut task = PaintGateRevealTask::new(state, label);
+    let mut task = PaintGateRevealTask::new(state, label, "signal");
     post_task(ThreadId::UI, Some(&mut task));
 }
 
@@ -230,9 +247,15 @@ impl AgentMuxHandler {
                         let gated = gate_label.is_some();
                         #[cfg(target_os = "linux")]
                         if let Some(label) = gate_label {
-                            self.state.linux_paint_gate_pending.lock().insert(label.clone());
-                            let mut timeout_task =
-                                PaintGateRevealTask::new(self.state.clone(), label);
+                            self.state
+                                .linux_paint_gate_pending
+                                .lock()
+                                .insert(label.clone(), std::time::Instant::now());
+                            let mut timeout_task = PaintGateRevealTask::new(
+                                self.state.clone(),
+                                label,
+                                "timeout",
+                            );
                             post_delayed_task(
                                 ThreadId::UI,
                                 Some(&mut timeout_task),

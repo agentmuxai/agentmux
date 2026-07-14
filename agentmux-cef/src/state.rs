@@ -560,9 +560,11 @@ pub struct AppState {
     /// Window labels whose native `window.show()`/focus + splash-ready-file has
     /// been deferred by `on_load_end` pending a real first-paint confirmation
     /// from the frontend (`report_first_paint` IPC command) or a safety-net
-    /// timeout, whichever fires first. Only populated/consumed on Linux; the
-    /// field exists unconditionally to keep `AppState` un-cfg'd.
-    pub linux_paint_gate_pending: Mutex<std::collections::HashSet<String>>,
+    /// timeout, whichever fires first. Value is when the gate was armed, so
+    /// `reveal_gated_window` can log how long the window actually stayed
+    /// hidden and via which path. Only populated/consumed on Linux; the field
+    /// exists unconditionally to keep `AppState` un-cfg'd.
+    pub linux_paint_gate_pending: Mutex<std::collections::HashMap<String, std::time::Instant>>,
 
     /// Phase B.5e — host's projection of the launcher's
     /// authoritative `state.instance_registry`. Fed by
@@ -1273,7 +1275,7 @@ impl Default for AppState {
             window_id: Mutex::new(None),
             active_tab_id: Mutex::new(None),
             window_init_status: Mutex::new(String::new()),
-            linux_paint_gate_pending: Mutex::new(std::collections::HashSet::new()),
+            linux_paint_gate_pending: Mutex::new(std::collections::HashMap::new()),
             shadow_backend_window_ids: Mutex::new(HashMap::new()),
             shadow_window_meta: Mutex::new(HashMap::new()),
             shadow_instance_registry: Mutex::new({
