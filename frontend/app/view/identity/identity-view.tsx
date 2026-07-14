@@ -203,22 +203,32 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                 <DetailField label="Kind" value={KIND_LABELS[account.kind]} />
 
                 <div class="identity-detail-section">Secret</div>
-                <DetailField label="Backend" value={account.secret_ref.backend} />
-                <Show when={account.secret_ref.env_var}>
-                    <DetailField label="Env var" value={account.secret_ref.env_var!} />
+                {/* `?.` guards throughout: an account whose secret_ref shape the
+                    frontend doesn't know yet must degrade to "unknown", not crash
+                    the pane (live repro 2026-07-14: OAuth accounts crashed here
+                    before `oauth_config_dir` was mapped). */}
+                <DetailField label="Backend" value={account.secret_ref?.backend ?? "unknown"} />
+                <Show when={account.secret_ref?.env_var}>
+                    <DetailField label="Env var" value={account.secret_ref?.env_var ?? ""} />
                 </Show>
-                <Show when={account.secret_ref.sm_path}>
+                <Show when={account.secret_ref?.sm_path}>
                     <DetailField
                         label="Secrets Manager"
-                        value={`${account.secret_ref.sm_path}${account.secret_ref.sm_json_path ? ` → ${account.secret_ref.sm_json_path}` : ""}`}
+                        value={`${account.secret_ref?.sm_path ?? ""}${account.secret_ref?.sm_json_path ? ` → ${account.secret_ref.sm_json_path}` : ""}`}
                     />
                 </Show>
-                <Show when={account.secret_ref.backend === "plaintext_dev"}>
+                <Show when={account.secret_ref?.backend === "plaintext_dev"}>
                     <DetailField label="Value" value="••••••••••••" />
                 </Show>
-                <Show when={account.secret_ref.backend === "keychain"}>
+                <Show when={account.secret_ref?.backend === "keychain"}>
                     <DetailField label="Stored in" value="OS keychain" />
                     <DetailField label="Key" value={account.context.masked_tail ?? "••••••••"} />
+                </Show>
+                <Show when={account.secret_ref?.backend === "oauth_config_dir"}>
+                    <DetailField label="Stored in" value="Provider CLI config dir (tokens owned by the CLI)" />
+                    <Show when={account.secret_ref?.dir}>
+                        <DetailField label="Config dir" value={account.secret_ref?.dir ?? ""} />
+                    </Show>
                 </Show>
 
                 <Show when={account.context.github_username}>
@@ -259,7 +269,7 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                         Reauth
                     </button>
                 </Show>
-                <Show when={account.status === "unknown" && account.secret_ref.backend === "keychain"}>
+                <Show when={account.status === "unknown" && account.secret_ref?.backend === "keychain"}>
                     <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
                         Validate…
                     </button>
@@ -400,11 +410,11 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     const [provider, setProvider] = createSignal<AccountProvider>(editing()?.provider ?? preset?.provider ?? "github");
     const [kind, setKind] = createSignal<AccountKind>(editing()?.kind ?? preset?.kind ?? "pat");
     const [displayName, setDisplayName] = createSignal(editing()?.display_name ?? "");
-    const [secretBackend, setSecretBackend] = createSignal<SecretRef["backend"]>(editing()?.secret_ref.backend ?? "keychain");
-    const [secretEnvVar, setSecretEnvVar] = createSignal(editing()?.secret_ref.env_var ?? "");
-    const [secretSmPath, setSecretSmPath] = createSignal(editing()?.secret_ref.sm_path ?? "");
-    const [secretSmJsonPath, setSecretSmJsonPath] = createSignal(editing()?.secret_ref.sm_json_path ?? "");
-    const [secretValue, setSecretValue] = createSignal(editing()?.secret_ref.value ?? "");
+    const [secretBackend, setSecretBackend] = createSignal<SecretRef["backend"]>(editing()?.secret_ref?.backend ?? "keychain");
+    const [secretEnvVar, setSecretEnvVar] = createSignal(editing()?.secret_ref?.env_var ?? "");
+    const [secretSmPath, setSecretSmPath] = createSignal(editing()?.secret_ref?.sm_path ?? "");
+    const [secretSmJsonPath, setSecretSmJsonPath] = createSignal(editing()?.secret_ref?.sm_json_path ?? "");
+    const [secretValue, setSecretValue] = createSignal(editing()?.secret_ref?.value ?? "");
     // Context
     const [ghUsername, setGhUsername] = createSignal(editing()?.context.github_username ?? "");
     const [ghScopes, setGhScopes] = createSignal(editing()?.context.github_scopes?.join(", ") ?? "");
@@ -422,7 +432,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     // in the OS keychain and returns only a masked tail + metadata — it is
     // never read back into the UI. Existing keychain accounts render locked
     // (masked) and require Replace to re-enter.
-    const editingIsKeychain = editing()?.secret_ref.backend === "keychain";
+    const editingIsKeychain = editing()?.secret_ref?.backend === "keychain";
     const [keychainKey, setKeychainKey] = createSignal("");
     const [keyBusy, setKeyBusy] = createSignal(false);
     const [keyError, setKeyError] = createSignal<string | null>(null);
@@ -488,8 +498,8 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
             // Preserve the existing keychain pointer (service/account) so a
             // metadata-only Save on a locked account doesn't drop it. New
             // keychain accounts go through the key flow, not this path.
-            secretRef.service = editing()?.secret_ref.service;
-            secretRef.account = editing()?.secret_ref.account;
+            secretRef.service = editing()?.secret_ref?.service;
+            secretRef.account = editing()?.secret_ref?.account;
         }
 
         const context = buildContext();

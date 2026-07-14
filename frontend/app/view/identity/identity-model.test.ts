@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 // shim. Keep them un-exported in the module so callers don't depend on
 // them, but expose for tests via `__internal__`.
 import * as identityModel from "./identity-model";
+import { __internal__ } from "./identity-model";
 import type { Account } from "./identity-model";
 
 // The helpers aren't re-exported; we round-trip through the public API
@@ -70,6 +71,40 @@ describe("identity-model SecretRef field-name translation", () => {
         // Different field name confirms why naked casts between the two
         // shapes are unsafe — caught by reagent in PR #480.
         expect((wireSecret as unknown as { value?: string }).value).toBeUndefined();
+    });
+
+    it("oauth_config_dir: maps to a defined SecretRef (regression: OAuth accounts crashed the Accounts detail modal)", () => {
+        // Live repro 2026-07-14: a Claude OAuth login persists a backend
+        // SecretRef::OAuthConfigDir, which secretRefFromBackend's switch
+        // didn't handle — it fell through and returned `undefined`, so
+        // opening the account in Armory → Accounts threw
+        // "Cannot read properties of undefined (reading 'backend')".
+        const wire = { backend: "oauth_config_dir", dir: "C:\\Users\\x\\.agentmux\\shared\\identities\\abc\\claude" } as const;
+        const fe = __internal__.secretRefFromBackend(wire);
+        expect(fe).toBeDefined();
+        expect(fe.backend).toBe("oauth_config_dir");
+        expect(fe.dir).toBe(wire.dir);
+
+        // Round-trip back to the wire shape.
+        const back = __internal__.secretRefToBackend(fe);
+        expect(back).toEqual(wire);
+    });
+
+    it("every backend SecretRef variant maps to a defined frontend SecretRef", () => {
+        // Exhaustiveness net: if the Rust enum grows another variant and
+        // gotypes/this module lag, the specific new variant can't be listed
+        // here yet — but every *known* variant must at minimum round-trip
+        // to a defined object, and the view additionally guards with `?.`.
+        const wires: Parameters<typeof __internal__.secretRefFromBackend>[0][] = [
+            { backend: "env", env_var: "X" },
+            { backend: "secrets_manager", sm_path: "p" },
+            { backend: "plaintext_dev", plaintext_dev: "v" },
+            { backend: "keychain", service: "s", account: "a" },
+            { backend: "oauth_config_dir", dir: "d" },
+        ];
+        for (const w of wires) {
+            expect(__internal__.secretRefFromBackend(w), `variant ${w.backend}`).toBeDefined();
+        }
     });
 
     it("module exports expected public surface", () => {
