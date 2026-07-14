@@ -268,6 +268,23 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let unlinked = id_store
                     .agent_identity_unlink(&def_id, &req.provider)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
+                // info!, not debug!: the production filter is
+                // "agentmuxsrv=info,info" — debug lines never reach the log
+                // (reagent P1 on PR #2143). Message prefix "identity.unlink:"
+                // is part of the `muxlog auth` vocabulary — keep it stable.
+                // `unlinked == false` (no link row matched) is logged too:
+                // a silent no-op unlink is exactly what an auth stress run
+                // needs to see. Both ids logged: link rows are keyed on
+                // def_id, not the S1 slug (the historical silent-no-op bug
+                // noted above) — a bad slug→def_id resolution is only
+                // visible if the log carries both.
+                tracing::info!(
+                    agent_id = %req.agent_id,
+                    def_id = %def_id,
+                    provider = %req.provider,
+                    unlinked,
+                    "identity.unlink: self-service provider unlink (identity.self.unlink)"
+                );
                 if unlinked {
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: format!("agentidentities:changed:{}", req.agent_id),

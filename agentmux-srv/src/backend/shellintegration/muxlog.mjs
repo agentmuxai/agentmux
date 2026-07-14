@@ -350,6 +350,7 @@ const HELP = `muxlog — AgentMux log viewer
   muxlog errors                      ERROR/WARN across host+srv (active instance)
   muxlog bridge                      startup-handshake trace (debug reconnect loops)
   muxlog swarm                       subagent/swarm lifecycle trace (spawn/name/status, debug duplicate groups)
+  muxlog auth                        provider auth/identity trace (login/OAuth wiring/unlink/account removal)
 
 Options (any position):
   -i <substr>   pick the instance whose log path/branch/version matches <substr>
@@ -391,6 +392,25 @@ function main() {
         opt.target = opt.target || "subagent_watcher";
         const f = resolveFile("srv", opt);
         console.log(`=== swarm trace: ${f} ===`);
+        printLastLines(f, opt.n, opt, true);
+        return;
+    }
+    if (cmd === "auth") {
+        // Provider auth / identity lifecycle trace. Unlike `swarm` (one module
+        // → one tracing target), auth events span several srv modules —
+        // server/identity_handlers.rs (auth.start/spawn/poll/cancel/submit*,
+        // "auth success (direct-account)" persistence, OAuth config-dir
+        // wiring), server/cli_handlers.rs (CheckCliAuth, "claude auth:"
+        // credential seeding), identity/auth_session.rs (cancel_session,
+        // session timeout), identity/resolver.rs ("oauth probe"), and the
+        // logout side in server/app_api/identity.rs + agent_handlers/
+        // identity.rs ("identity.unlink:", "identity.delete:") — so filter on
+        // the MESSAGE vocabulary, not a target (opt.grep matches the message
+        // field only, exactly what we want). A user --grep overrides the
+        // recipe's regex; --target/--level/--since/-n still combine.
+        opt.grep = opt.grep || /\bauth\.\w+|auth success|auth session|cancel_session|claude auth|CheckCliAuth|OAuth config dir|oauth probe|identity_upsert|identity\.(unlink|delete|self\.|account)|account\.oauth|keychain delete/i;
+        const f = resolveFile("srv", opt);
+        console.log(`=== auth trace: ${f} ===`);
         printLastLines(f, opt.n, opt, true);
         return;
     }
