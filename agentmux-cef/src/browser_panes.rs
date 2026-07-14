@@ -722,6 +722,34 @@ impl BrowserPaneManager {
                 }
             }
 
+            // App-owned wrapper HWND (browser_pane::wrapper — see its module
+            // doc and SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md)
+            // sits directly between `pane_hwnd` and its host window and is
+            // kept congruent with it (same origin, same size — its own
+            // `WM_SIZE` handler resizes CEF's child to exactly fill it, see
+            // `wrapper.rs`). `SetWindowRgn` only changes hit-testing for the
+            // HWND it's called on: clipping `pane_hwnd` alone stops IT from
+            // painting/claiming the hole, but Win32 hit-testing for a point
+            // inside that hole then resolves to `pane_hwnd`'s own parent —
+            // the wrapper — which still claims its full, unclipped
+            // rectangle there. The wrapper's window class paints nothing of
+            // its own (`hbrBackground: null`) so the DOM underneath still
+            // shows through visually (matches "renders fine"), but its
+            // `WM_LBUTTONDOWN`/`WM_MOUSEMOVE` fall through to
+            // `DefWindowProcW` unhandled — the input is silently absorbed
+            // there instead of reaching the DOM (matches "hover/click
+            // no-op"). See docs/analysis/ANALYSIS_WINDOWS_PANE_OVERLAY_WRAPPER_HITTEST_GAP_2026_07_13.md.
+            // Every region applied to `pane_hwnd` below must therefore also
+            // be applied to the wrapper, in the same wrapper-local
+            // coordinates (congruent, so no separate coordinate math is
+            // needed). `None` only if the wrapper hasn't been created yet /
+            // already torn down (a real race, not the common case — every
+            // embedded pane creation on Windows creates one unconditionally,
+            // `browser_pane/creation.rs`); degrade gracefully by clipping
+            // just the pane in that case rather than failing the whole call.
+            let wrapper_hwnd = crate::browser_pane::wrapper::peek_wrapper_hwnd(label)
+                .map(|h| h as *mut std::ffi::c_void);
+
             unsafe {
                 // Empty overlay list = restore full visibility (region=NULL).
                 // bRedraw=FALSE (0) — see #1097 fix #5. With bRedraw=TRUE
@@ -756,6 +784,14 @@ impl BrowserPaneManager {
                     // invalidate the entire pane; CEF will paint only
                     // dirty regions on the next pump.
                     InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
+                    // Restore the wrapper's region too — see the wrapper_hwnd
+                    // comment above. Not gated on `applied`/cached separately:
+                    // the wrapper and pane_hwnd always change in lockstep, so
+                    // the pane's own sig is the correct gate for both.
+                    if let Some(wrapper_hwnd) = wrapper_hwnd {
+                        SetWindowRgn(wrapper_hwnd as _, std::ptr::null_mut(), 0);
+                        InvalidateRect(wrapper_hwnd as _, std::ptr::null(), 0);
+                    }
                     // Only record the sig if the region actually applied; on a
                     // (rare) SetWindowRgn failure leave the entry unset so the
                     // next call retries instead of skipping a clip that never
@@ -821,28 +857,44 @@ impl BrowserPaneManager {
                     continue;
                 }
 
-                // Build region in pane-local coords: start with full pane,
-                // subtract every overlay rect that intersects it.
-                let region = CreateRectRgn(0, 0, pane_w, pane_h);
+                // Build a region in pane-local coords: start with full pane,
+                // subtract every overlay rect that intersects it. Factored
+                // into a closure because it must run TWICE — once per
+                // target HWND — since `SetWindowRgn` takes ownership of the
+                // region handle it's given on success, so the same GDI
+                // region object can't be handed to two different windows.
+                // The wrapper is congruent with `pane_hwnd` (same origin,
+                // same size — see the wrapper_hwnd comment above), so the
+                // exact same `pane_w`/`pane_h`/`pane_rect` inputs apply to
+                // both without any extra coordinate math.
+                let build_region = || -> *mut std::ffi::c_void {
+                    let region = CreateRectRgn(0, 0, pane_w, pane_h);
+                    if region.is_null() {
+                        return region;
+                    }
+                    for (ox, oy, ow, oh) in overlay_rects {
+                        // Translate overlay rect (window client coords) →
+                        // pane-local coords by subtracting pane's window pos.
+                        let left = ox - pane_rect.left;
+                        let top = oy - pane_rect.top;
+                        let right = left + ow;
+                        let bottom = top + oh;
+                        // Skip if no intersection with the pane's local bounds.
+                        if right <= 0 || bottom <= 0 || left >= pane_w || top >= pane_h {
+                            continue;
+                        }
+                        let overlay_rgn = CreateRectRgn(left, top, right, bottom);
+                        if !overlay_rgn.is_null() {
+                            CombineRgn(region, region, overlay_rgn, RGN_DIFF);
+                            DeleteObject(overlay_rgn as _);
+                        }
+                    }
+                    region
+                };
+
+                let region = build_region();
                 if region.is_null() {
                     continue;
-                }
-                for (ox, oy, ow, oh) in overlay_rects {
-                    // Translate overlay rect (window client coords) →
-                    // pane-local coords by subtracting pane's window pos.
-                    let left = ox - pane_rect.left;
-                    let top = oy - pane_rect.top;
-                    let right = left + ow;
-                    let bottom = top + oh;
-                    // Skip if no intersection with the pane's local bounds.
-                    if right <= 0 || bottom <= 0 || left >= pane_w || top >= pane_h {
-                        continue;
-                    }
-                    let overlay_rgn = CreateRectRgn(left, top, right, bottom);
-                    if !overlay_rgn.is_null() {
-                        CombineRgn(region, region, overlay_rgn, RGN_DIFF);
-                        DeleteObject(overlay_rgn as _);
-                    }
                 }
                 // SetWindowRgn takes ownership of the region handle on
                 // success; the system frees it when the window is destroyed
@@ -856,6 +908,24 @@ impl BrowserPaneManager {
                 // invalidate the whole pane. CEF dirty-region painting
                 // keeps the actual GPU work proportional to the change.
                 InvalidateRect(pane_hwnd as _, std::ptr::null(), 0);
+                // Same clip on the wrapper — see the wrapper_hwnd comment
+                // above for why this is required, not optional, for
+                // hover/click to reach the DOM inside the punched hole. A
+                // second, independently-created region handle (never the
+                // same handle passed to pane_hwnd above — see the ownership
+                // note). Best-effort: a wrapper-side failure here doesn't
+                // block the pane's own clip from being recorded, matching
+                // the "degrade gracefully" stance for a missing wrapper_hwnd
+                // above.
+                if let Some(wrapper_hwnd) = wrapper_hwnd {
+                    let wrapper_region = build_region();
+                    if !wrapper_region.is_null() {
+                        if SetWindowRgn(wrapper_hwnd as _, wrapper_region as _, 0) == 0 {
+                            DeleteObject(wrapper_region as _);
+                        }
+                        InvalidateRect(wrapper_hwnd as _, std::ptr::null(), 0);
+                    }
+                }
                 // Only record the sig when the region actually applied (matches
                 // the whole-visibility branch); on failure free the orphaned
                 // region and leave the entry unset so the next call retries.
