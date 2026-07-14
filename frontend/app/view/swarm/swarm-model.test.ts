@@ -10,6 +10,7 @@ import {
     mergeSubagentsPreservingIdentity,
     pruneGroupIdentityCache,
     stabilizeGroupIdentity,
+    subagentDisplayLabel,
     type ActiveSubagent,
     type NameGroup,
     type SwarmChild,
@@ -451,5 +452,56 @@ describe("pruneGroupIdentityCache", () => {
         expect(cache.size).toBe(1);
         expect(cache.has("name:block-1:A")).toBe(true);
         expect(cache.has("name:block-1:B")).toBe(false);
+    });
+});
+
+describe("subagentDisplayLabel", () => {
+    it("prefers display_name over everything else", () => {
+        expect(
+            subagentDisplayLabel({ display_name: "Refactor shell module", slug: "cheerful-enchanting-sketch", agent_id: "abc1234def" })
+        ).toBe("Refactor shell module");
+    });
+
+    it("falls back to agent_id short prefix when there is no slug either", () => {
+        expect(subagentDisplayLabel({ display_name: null, slug: "", agent_id: "abc1234def" })).toBe("abc1234");
+    });
+
+    // Regression for task #44's live repro: 17 structurally distinct
+    // agent_ids spawned within ~50ms of one another under one parent all
+    // resolved the identical literal slug "magical-enchanting-diffie" —
+    // confirmed (see subagentDisplayLabel's doc comment) to be a shared
+    // Claude Code per-session/per-batch codename, not a per-subagent unique
+    // value, so a bare `slug` fallback rendered all 17 as visually
+    // identical rows before any per-agent display_name had resolved.
+    it("disambiguates same-slug siblings with a short agent_id suffix instead of returning a bare, non-unique slug", () => {
+        const shared = "magical-enchanting-diffie";
+        // The short-id disambiguator is `agent_id.substring(0, 7)` — pad the
+        // index so it lands within the first 7 characters, otherwise every
+        // id would collide on the same "agent-0" prefix and this test would
+        // fail to exercise the actual disambiguation.
+        const subagents = Array.from({ length: 17 }, (_, i) => ({
+            display_name: null as string | null,
+            slug: shared,
+            agent_id: `${i.toString().padStart(7, "0")}-agent-${"x".repeat(10)}`,
+        }));
+
+        const labels = subagents.map((s) => subagentDisplayLabel(s));
+
+        // Every label still surfaces the shared slug (it's real, useful
+        // context — this batch legitimately shares a codename)...
+        expect(labels.every((l) => l.startsWith(`${shared} · `))).toBe(true);
+        // ...but all 17 labels are nonetheless pairwise distinct, since each
+        // subagent's own agent_id is genuinely unique.
+        expect(new Set(labels).size).toBe(17);
+    });
+
+    it("still includes the short agent_id suffix even when slug looks unique in isolation", () => {
+        // subagentDisplayLabel can't know whether a slug collides with a
+        // sibling's without seeing the whole list, so it always
+        // disambiguates when falling back to slug rather than only on
+        // detected collision — cheap, consistent, and never wrong.
+        expect(subagentDisplayLabel({ display_name: null, slug: "solo-run", agent_id: "zzzz999yyyy" })).toBe(
+            "solo-run · zzzz999"
+        );
     });
 });
