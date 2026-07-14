@@ -251,7 +251,6 @@ function Tab(props: TabProps): JSX.Element {
                     "tab-colored": !!tabColor(),
                 })}
                 style={tabColor() ? ({ "--tab-color": tabColor() } as JSX.CSSProperties) : undefined}
-                draggable={false}
                 onClick={props.onSelect}
                 onContextMenu={handleContextMenu}
                 data-tab-id={props.id}
@@ -262,6 +261,13 @@ function Tab(props: TabProps): JSX.Element {
                         ref={editableRef!}
                         class={clsx("name", { focused: isEditable() })}
                         contentEditable={isEditable()}
+                        // Only block native drag while actively renaming — text
+                        // selection/caret placement over the auto-selected name
+                        // must win over pragmatic-dnd's wrapper draggable="true"
+                        // there (reagent P1, PR #2148). Unset otherwise so the
+                        // name area — the tab's largest surface — still starts
+                        // a reorder drag normally.
+                        draggable={isEditable() ? false : undefined}
                         onDblClick={() => handleRenameTab()}
                         onBlur={handleBlur}
                         onKeyDown={handleKeyDown}
@@ -274,6 +280,7 @@ function Tab(props: TabProps): JSX.Element {
                         onClick={props.onClose}
                         onMouseDown={handleMouseDownOnClose}
                         title="Close Tab"
+                        draggable={false}
                     >
                         {/* VS Code's "close" codicon, inlined as SVG so we
                             don't pull in the codicons font. Path verbatim
